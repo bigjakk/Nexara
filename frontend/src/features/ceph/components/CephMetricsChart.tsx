@@ -37,7 +37,6 @@ function formatTime(ts: string, timeframe: Timeframe): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-
 function formatOps(ops: number): string {
   if (ops >= 1000000) return `${(ops / 1000000).toFixed(1)}M`;
   if (ops >= 1000) return `${(ops / 1000).toFixed(1)}K`;
@@ -93,14 +92,34 @@ function MiniChart({
         <ResponsiveContainer width="100%" height={200}>
           <AreaChart data={data}>
             <defs>
-              <linearGradient id={`ceph-grad-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+              <linearGradient
+                id={`ceph-grad-${dataKey}`}
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
                 <stop offset="5%" stopColor={color} stopOpacity={0.3} />
                 <stop offset="95%" stopColor={color} stopOpacity={0} />
               </linearGradient>
               {secondaryDataKey && secondaryColor && (
-                <linearGradient id={`ceph-grad-${secondaryDataKey}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={secondaryColor} stopOpacity={0.3} />
-                  <stop offset="95%" stopColor={secondaryColor} stopOpacity={0} />
+                <linearGradient
+                  id={`ceph-grad-${secondaryDataKey}`}
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2="1"
+                >
+                  <stop
+                    offset="5%"
+                    stopColor={secondaryColor}
+                    stopOpacity={0.3}
+                  />
+                  <stop
+                    offset="95%"
+                    stopColor={secondaryColor}
+                    stopOpacity={0}
+                  />
                 </linearGradient>
               )}
             </defs>
@@ -110,7 +129,11 @@ function MiniChart({
               tickFormatter={(ts: string) => formatTime(ts, timeframe)}
               tick={{ fontSize: 10 }}
             />
-            <YAxis tickFormatter={formatter} tick={{ fontSize: 10 }} width={60} />
+            <YAxis
+              tickFormatter={formatter}
+              tick={{ fontSize: 10 }}
+              width={60}
+            />
             <Tooltip
               labelFormatter={(label: unknown) => {
                 const d = new Date(String(label));
@@ -165,8 +188,7 @@ export function CephMetricsChart({ clusterId, status }: CephMetricsChartProps) {
     writeOps: m.write_ops_sec,
     readBytes: m.read_bytes_sec,
     writeBytes: m.write_bytes_sec,
-    usedPct:
-      m.bytes_total > 0 ? (m.bytes_used / m.bytes_total) * 100 : 0,
+    usedPct: m.bytes_total > 0 ? (m.bytes_used / m.bytes_total) * 100 : 0,
     osdsUp: m.osds_up,
     osdsTotal: m.osds_total,
   }));
@@ -186,19 +208,25 @@ export function CephMetricsChart({ clusterId, status }: CephMetricsChartProps) {
       {/* Live gauges */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-foreground/60">Read IOPS (Live)</p>
+          <p className="mb-2 text-sm font-medium text-foreground/60">
+            Read IOPS (Live)
+          </p>
           <p className="text-lg font-semibold tabular-nums">
             {status ? formatOps(liveReadOps) : "--"}
           </p>
         </div>
         <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-foreground/60">Write IOPS (Live)</p>
+          <p className="mb-2 text-sm font-medium text-foreground/60">
+            Write IOPS (Live)
+          </p>
           <p className="text-lg font-semibold tabular-nums">
             {status ? formatOps(liveWriteOps) : "--"}
           </p>
         </div>
         <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-foreground/60">Throughput (Live)</p>
+          <p className="mb-2 text-sm font-medium text-foreground/60">
+            Throughput (Live)
+          </p>
           <p className="text-lg font-semibold tabular-nums">
             {status
               ? `R: ${formatBytes(liveReadBytes)}/s  W: ${formatBytes(liveWriteBytes)}/s`
@@ -206,7 +234,9 @@ export function CephMetricsChart({ clusterId, status }: CephMetricsChartProps) {
           </p>
         </div>
         <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-foreground/60">Capacity (Live)</p>
+          <p className="mb-2 text-sm font-medium text-foreground/60">
+            Capacity (Live)
+          </p>
           <MetricMiniBar value={liveCapPct} />
           <p className="mt-1 text-xs text-foreground/60">
             {status
@@ -218,7 +248,9 @@ export function CephMetricsChart({ clusterId, status }: CephMetricsChartProps) {
 
       {/* Time range selector */}
       <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-foreground/60">Historical:</span>
+        <span className="text-sm font-medium text-foreground/60">
+          Historical:
+        </span>
         <div className="flex gap-1">
           {TIMEFRAMES.map((tf) => (
             <Button
@@ -226,7 +258,9 @@ export function CephMetricsChart({ clusterId, status }: CephMetricsChartProps) {
               size="sm"
               variant={timeframe === tf.value ? "default" : "outline"}
               className="h-7 px-2.5 text-xs"
-              onClick={() => { setTimeframe(tf.value); }}
+              onClick={() => {
+                setTimeframe(tf.value);
+              }}
             >
               {tf.label}
             </Button>

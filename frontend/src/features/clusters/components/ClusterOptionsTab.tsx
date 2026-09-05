@@ -8,23 +8,47 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle, Check, CheckCircle2, Copy, Info, Save } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Copy,
+  Info,
+  Save,
+} from "lucide-react";
 import { ApiClientError } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  useClusterOptions, useUpdateClusterOptions,
-  useClusterDescription, useUpdateClusterDescription,
-  useClusterTags, useUpdateClusterTags,
-  useClusterJoinInfo, useCorosyncNodes,
+  useClusterOptions,
+  useUpdateClusterOptions,
+  useClusterDescription,
+  useUpdateClusterDescription,
+  useClusterTags,
+  useUpdateClusterTags,
+  useClusterJoinInfo,
+  useCorosyncNodes,
 } from "../api/cluster-options-queries";
 import type { ClusterOptions } from "../api/cluster-options-queries";
 import {
@@ -49,7 +73,8 @@ function ipv4Network(cidr: string): string | null {
   const nums = octets.map((o) => Number.parseInt(o, 10));
   if (nums.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return null;
   const [a, b, c, d] = nums;
-  if (a === undefined || b === undefined || c === undefined || d === undefined) return null;
+  if (a === undefined || b === undefined || c === undefined || d === undefined)
+    return null;
   const ipNum = ((a << 24) | (b << 16) | (c << 8) | d) >>> 0;
   const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
   const net = (ipNum & mask) >>> 0;
@@ -91,17 +116,31 @@ interface OptionsFormData {
 }
 
 const EMPTY_FORM: OptionsFormData = {
-  console: "", keyboard: "", language: "", email_from: "",
-  http_proxy: "", mac_prefix: "", fencing: "",
+  console: "",
+  keyboard: "",
+  language: "",
+  email_from: "",
+  http_proxy: "",
+  mac_prefix: "",
+  fencing: "",
   max_workers: 0,
-  migration_type: "", migration_network: "",
+  migration_type: "",
+  migration_network: "",
   ha_shutdown_policy: "",
-  crs_ha: "", crs_rebalance_on_start: false,
-  crs_auto_rebalance: false, crs_threshold: "", crs_hold_duration: "",
-  crs_margin: "", crs_method: "",
-  bwlimit_clone: "", bwlimit_migration: "", bwlimit_move: "",
-  bwlimit_restore: "", bwlimit_default: "",
-  next_id_lower: "", next_id_upper: "",
+  crs_ha: "",
+  crs_rebalance_on_start: false,
+  crs_auto_rebalance: false,
+  crs_threshold: "",
+  crs_hold_duration: "",
+  crs_margin: "",
+  crs_method: "",
+  bwlimit_clone: "",
+  bwlimit_migration: "",
+  bwlimit_move: "",
+  bwlimit_restore: "",
+  bwlimit_default: "",
+  next_id_lower: "",
+  next_id_upper: "",
 };
 
 /** Convert a value that may be a string or object to a display string. */
@@ -184,10 +223,18 @@ function buildPropStrings(form: OptionsFormData): {
       ...(form.crs_ha === "dynamic"
         ? {
             "ha-auto-rebalance": form.crs_auto_rebalance ? "1" : "",
-            "ha-auto-rebalance-threshold": form.crs_auto_rebalance ? form.crs_threshold : "",
-            "ha-auto-rebalance-hold-duration": form.crs_auto_rebalance ? form.crs_hold_duration : "",
-            "ha-auto-rebalance-margin": form.crs_auto_rebalance ? form.crs_margin : "",
-            "ha-auto-rebalance-method": form.crs_auto_rebalance ? form.crs_method : "",
+            "ha-auto-rebalance-threshold": form.crs_auto_rebalance
+              ? form.crs_threshold
+              : "",
+            "ha-auto-rebalance-hold-duration": form.crs_auto_rebalance
+              ? form.crs_hold_duration
+              : "",
+            "ha-auto-rebalance-margin": form.crs_auto_rebalance
+              ? form.crs_margin
+              : "",
+            "ha-auto-rebalance-method": form.crs_auto_rebalance
+              ? form.crs_method
+              : "",
           }
         : {}),
     }),
@@ -212,7 +259,10 @@ interface ClusterOptionsTabProps {
 
 function ErrorBanner({ error }: { error: Error }) {
   const message = error.message || "Failed to load data";
-  const isForbidden = message.includes("403") || message.toLowerCase().includes("permission") || message.toLowerCase().includes("forbidden");
+  const isForbidden =
+    message.includes("403") ||
+    message.toLowerCase().includes("permission") ||
+    message.toLowerCase().includes("forbidden");
   return (
     <div className="flex items-center gap-2 rounded-md border border-orange-300 bg-orange-50 p-3 text-sm text-orange-800 dark:border-orange-700 dark:bg-orange-950 dark:text-orange-200">
       <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -225,7 +275,10 @@ function ErrorBanner({ error }: { error: Error }) {
   );
 }
 
-export function ClusterOptionsTab({ clusterId, pveVersion }: ClusterOptionsTabProps) {
+export function ClusterOptionsTab({
+  clusterId,
+  pveVersion,
+}: ClusterOptionsTabProps) {
   const { canManage } = useAuth();
   const optionsQuery = useClusterOptions(clusterId);
   const descQuery = useClusterDescription(clusterId);
@@ -246,7 +299,11 @@ export function ClusterOptionsTab({ clusterId, pveVersion }: ClusterOptionsTabPr
       </TabsList>
 
       <TabsContent value="notes" className="mt-4">
-        <NotesSection descQuery={descQuery} updateDesc={updateDesc} canEdit={canManage("cluster")} />
+        <NotesSection
+          descQuery={descQuery}
+          updateDesc={updateDesc}
+          canEdit={canManage("cluster")}
+        />
       </TabsContent>
 
       <TabsContent value="general" className="mt-4">
@@ -260,7 +317,11 @@ export function ClusterOptionsTab({ clusterId, pveVersion }: ClusterOptionsTabPr
       </TabsContent>
 
       <TabsContent value="tags" className="mt-4">
-        <TagsSection tagsQuery={tagsQuery} updateTags={updateTags} canEdit={canManage("cluster")} />
+        <TagsSection
+          tagsQuery={tagsQuery}
+          updateTags={updateTags}
+          canEdit={canManage("cluster")}
+        />
       </TabsContent>
 
       <TabsContent value="info" className="mt-4 space-y-4">
@@ -274,7 +335,9 @@ export function ClusterOptionsTab({ clusterId, pveVersion }: ClusterOptionsTabPr
 // --- Notes Section ---
 
 function NotesSection({
-  descQuery, updateDesc, canEdit,
+  descQuery,
+  updateDesc,
+  canEdit,
 }: {
   descQuery: ReturnType<typeof useClusterDescription>;
   updateDesc: ReturnType<typeof useUpdateClusterDescription>;
@@ -291,24 +354,35 @@ function NotesSection({
 
   const handleSave = () => {
     updateDesc.mutate(description, {
-      onSuccess: () => { setDirty(false); },
+      onSuccess: () => {
+        setDirty(false);
+      },
     });
   };
 
   return (
     <Card>
-      <CardHeader><CardTitle>Cluster Description / Notes</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle>Cluster Description / Notes</CardTitle>
+      </CardHeader>
       <CardContent className="space-y-4">
         {descQuery.isError && <ErrorBanner error={descQuery.error} />}
         <Textarea
           value={description}
-          onChange={(e) => { setDescription(e.target.value); setDirty(true); }}
+          onChange={(e) => {
+            setDescription(e.target.value);
+            setDirty(true);
+          }}
           placeholder="Enter cluster notes or description (supports markdown)..."
           rows={8}
           disabled={!canEdit || descQuery.isError}
         />
         {canEdit && !descQuery.isError && (
-          <Button onClick={handleSave} disabled={!dirty || updateDesc.isPending} size="sm">
+          <Button
+            onClick={handleSave}
+            disabled={!dirty || updateDesc.isPending}
+            size="sm"
+          >
             <Save className="mr-2 h-4 w-4" />
             {updateDesc.isPending ? "Saving..." : "Save Description"}
           </Button>
@@ -321,7 +395,11 @@ function NotesSection({
 // --- General Options Section (Editable) ---
 
 function GeneralSection({
-  optionsQuery, updateOpts, canEdit, clusterId, pveVersion,
+  optionsQuery,
+  updateOpts,
+  canEdit,
+  clusterId,
+  pveVersion,
 }: {
   optionsQuery: ReturnType<typeof useClusterOptions>;
   updateOpts: ReturnType<typeof useUpdateClusterOptions>;
@@ -329,10 +407,16 @@ function GeneralSection({
   clusterId: string;
   pveVersion: string;
 }) {
-  const crsDynamicSupported = isPVEAtLeast(pveVersion, PVE_FEATURES.CRS_DYNAMIC);
+  const crsDynamicSupported = isPVEAtLeast(
+    pveVersion,
+    PVE_FEATURES.CRS_DYNAMIC,
+  );
   const [form, setForm] = useState<OptionsFormData>({ ...EMPTY_FORM });
   const [dirty, setDirty] = useState(false);
-  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [feedback, setFeedback] = useState<{
+    kind: "success" | "error";
+    message: string;
+  } | null>(null);
   const networksQuery = useNetworkInterfaces(clusterId);
 
   // Unique IPv4 network CIDRs across all node interfaces, used as
@@ -357,10 +441,13 @@ function GeneralSection({
     }
   }, [optionsQuery.data, dirty]);
 
-  const updateField = useCallback(<K extends keyof OptionsFormData>(key: K, value: OptionsFormData[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-    setDirty(true);
-  }, []);
+  const updateField = useCallback(
+    <K extends keyof OptionsFormData>(key: K, value: OptionsFormData[K]) => {
+      setForm((prev) => ({ ...prev, [key]: value }));
+      setDirty(true);
+    },
+    [],
+  );
 
   const handleSave = () => {
     setFeedback(null);
@@ -390,7 +477,8 @@ function GeneralSection({
     diffStr(form.http_proxy, orig.http_proxy, "http_proxy");
     diffStr(form.mac_prefix, orig.mac_prefix, "mac_prefix");
     diffStr(form.fencing, orig.fencing, "fencing");
-    if (form.max_workers !== orig.max_workers) params["max_workers"] = form.max_workers;
+    if (form.max_workers !== orig.max_workers)
+      params["max_workers"] = form.max_workers;
 
     // Property-string fields: rebuild from subfields, compare to original
     // raw value (whitespace + key-order tolerant) so we only PUT when the
@@ -423,8 +511,12 @@ function GeneralSection({
         setFeedback({ kind: "success", message: "Datacenter options saved." });
       },
       onError: (err) => {
-        const msg = err instanceof ApiClientError ? err.body.message
-          : err instanceof Error ? err.message : "Save failed";
+        const msg =
+          err instanceof ApiClientError
+            ? err.body.message
+            : err instanceof Error
+              ? err.message
+              : "Save failed";
         setFeedback({ kind: "error", message: msg });
       },
     });
@@ -433,7 +525,9 @@ function GeneralSection({
   if (optionsQuery.isLoading) {
     return (
       <Card>
-        <CardHeader><CardTitle>Datacenter Options</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Datacenter Options</CardTitle>
+        </CardHeader>
         <CardContent className="space-y-2">
           <Skeleton className="h-8 w-full" />
           <Skeleton className="h-8 w-full" />
@@ -446,8 +540,12 @@ function GeneralSection({
   if (optionsQuery.isError) {
     return (
       <Card>
-        <CardHeader><CardTitle>Datacenter Options</CardTitle></CardHeader>
-        <CardContent><ErrorBanner error={optionsQuery.error} /></CardContent>
+        <CardHeader>
+          <CardTitle>Datacenter Options</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ErrorBanner error={optionsQuery.error} />
+        </CardContent>
       </Card>
     );
   }
@@ -458,7 +556,11 @@ function GeneralSection({
         <div className="flex items-center justify-between">
           <CardTitle>Datacenter Options</CardTitle>
           {canEdit && (
-            <Button onClick={handleSave} disabled={!dirty || updateOpts.isPending} size="sm">
+            <Button
+              onClick={handleSave}
+              disabled={!dirty || updateOpts.isPending}
+              size="sm"
+            >
               <Save className="mr-2 h-4 w-4" />
               {updateOpts.isPending ? "Saving..." : "Save Changes"}
             </Button>
@@ -474,17 +576,27 @@ function GeneralSection({
                 : "mb-4 flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
             }
           >
-            {feedback.kind === "success"
-              ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-              : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
+            {feedback.kind === "success" ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
             <span>{feedback.message}</span>
           </div>
         )}
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="space-y-2">
             <Label className="text-sm font-medium">Console</Label>
-            <Select value={form.console || "__default__"} onValueChange={(v) => { updateField("console", v === "__default__" ? "" : v); }} disabled={!canEdit}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select
+              value={form.console || "__default__"}
+              onValueChange={(v) => {
+                updateField("console", v === "__default__" ? "" : v);
+              }}
+              disabled={!canEdit}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__default__">Default</SelectItem>
                 <SelectItem value="applet">Java Applet (deprecated)</SelectItem>
@@ -497,8 +609,16 @@ function GeneralSection({
 
           <div className="space-y-2">
             <Label className="text-sm font-medium">Keyboard Layout</Label>
-            <Select value={form.keyboard || "__default__"} onValueChange={(v) => { updateField("keyboard", v === "__default__" ? "" : v); }} disabled={!canEdit}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select
+              value={form.keyboard || "__default__"}
+              onValueChange={(v) => {
+                updateField("keyboard", v === "__default__" ? "" : v);
+              }}
+              disabled={!canEdit}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__default__">Default</SelectItem>
                 <SelectItem value="en-us">English (US)</SelectItem>
@@ -524,8 +644,16 @@ function GeneralSection({
 
           <div className="space-y-2">
             <Label className="text-sm font-medium">Language</Label>
-            <Select value={form.language || "__default__"} onValueChange={(v) => { updateField("language", v === "__default__" ? "" : v); }} disabled={!canEdit}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select
+              value={form.language || "__default__"}
+              onValueChange={(v) => {
+                updateField("language", v === "__default__" ? "" : v);
+              }}
+              disabled={!canEdit}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__default__">Default</SelectItem>
                 <SelectItem value="en">English</SelectItem>
@@ -540,14 +668,46 @@ function GeneralSection({
             </Select>
           </div>
 
-          <InputField label="Email From" value={form.email_from} onChange={(v) => { updateField("email_from", v); }} disabled={!canEdit} placeholder="admin@example.com" />
-          <InputField label="HTTP Proxy" value={form.http_proxy} onChange={(v) => { updateField("http_proxy", v); }} disabled={!canEdit} placeholder="http://proxy:3128" />
-          <InputField label="MAC Prefix" value={form.mac_prefix} onChange={(v) => { updateField("mac_prefix", v); }} disabled={!canEdit} placeholder="BC:24:11" />
+          <InputField
+            label="Email From"
+            value={form.email_from}
+            onChange={(v) => {
+              updateField("email_from", v);
+            }}
+            disabled={!canEdit}
+            placeholder="admin@example.com"
+          />
+          <InputField
+            label="HTTP Proxy"
+            value={form.http_proxy}
+            onChange={(v) => {
+              updateField("http_proxy", v);
+            }}
+            disabled={!canEdit}
+            placeholder="http://proxy:3128"
+          />
+          <InputField
+            label="MAC Prefix"
+            value={form.mac_prefix}
+            onChange={(v) => {
+              updateField("mac_prefix", v);
+            }}
+            disabled={!canEdit}
+            placeholder="BC:24:11"
+          />
 
           <div className="space-y-2">
             <Label className="text-sm font-medium">Migration Type</Label>
-            <Select value={form.migration_type || "__default__"} onValueChange={(v) => { updateField("migration_type", v === "__default__" ? "" : v); }} disabled={!canEdit}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select
+              value={form.migration_type || "__default__"}
+              onValueChange={(v) => {
+                updateField("migration_type", v === "__default__" ? "" : v);
+              }}
+              disabled={!canEdit}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__default__">Default (secure)</SelectItem>
                 <SelectItem value="secure">Secure (encrypted)</SelectItem>
@@ -557,10 +717,14 @@ function GeneralSection({
           </div>
 
           <div className="space-y-2">
-            <Label className="text-sm font-medium">Migration Network (CIDR)</Label>
+            <Label className="text-sm font-medium">
+              Migration Network (CIDR)
+            </Label>
             <Input
               value={form.migration_network}
-              onChange={(e) => { updateField("migration_network", e.target.value); }}
+              onChange={(e) => {
+                updateField("migration_network", e.target.value);
+              }}
               disabled={!canEdit}
               placeholder={networkSuggestions[0] ?? "10.10.10.0/24"}
               list="cluster-migration-networks"
@@ -578,7 +742,9 @@ function GeneralSection({
                     key={cidr}
                     type="button"
                     disabled={!canEdit}
-                    onClick={() => { updateField("migration_network", cidr); }}
+                    onClick={() => {
+                      updateField("migration_network", cidr);
+                    }}
                     className="rounded-md border bg-muted px-2 py-0.5 font-mono text-xs hover:bg-muted/70 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {cidr}
@@ -590,8 +756,16 @@ function GeneralSection({
 
           <div className="space-y-2">
             <Label className="text-sm font-medium">Fencing</Label>
-            <Select value={form.fencing || "__default__"} onValueChange={(v) => { updateField("fencing", v === "__default__" ? "" : v); }} disabled={!canEdit}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select
+              value={form.fencing || "__default__"}
+              onValueChange={(v) => {
+                updateField("fencing", v === "__default__" ? "" : v);
+              }}
+              disabled={!canEdit}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__default__">Default (watchdog)</SelectItem>
                 <SelectItem value="watchdog">Watchdog</SelectItem>
@@ -607,11 +781,15 @@ function GeneralSection({
               type="number"
               min={0}
               value={form.max_workers}
-              onChange={(e) => { updateField("max_workers", parseInt(e.target.value, 10) || 0); }}
+              onChange={(e) => {
+                updateField("max_workers", parseInt(e.target.value, 10) || 0);
+              }}
               disabled={!canEdit}
               placeholder="4"
             />
-            <p className="text-xs text-muted-foreground">Max parallel worker processes (0 = auto)</p>
+            <p className="text-xs text-muted-foreground">
+              Max parallel worker processes (0 = auto)
+            </p>
           </div>
         </div>
 
@@ -622,20 +800,39 @@ function GeneralSection({
               <Label className="text-sm font-medium">Shutdown Policy</Label>
               <Select
                 value={form.ha_shutdown_policy || "__default__"}
-                onValueChange={(v) => { updateField("ha_shutdown_policy", v === "__default__" ? "" : v); }}
+                onValueChange={(v) => {
+                  updateField(
+                    "ha_shutdown_policy",
+                    v === "__default__" ? "" : v,
+                  );
+                }}
                 disabled={!canEdit}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__default__">Default (conditional)</SelectItem>
-                  <SelectItem value="freeze">Freeze — pause services on shutdown</SelectItem>
-                  <SelectItem value="failover">Failover — stop and let HA recover</SelectItem>
-                  <SelectItem value="migrate">Migrate — evacuate HA services first</SelectItem>
-                  <SelectItem value="conditional">Conditional — depends on action</SelectItem>
+                  <SelectItem value="__default__">
+                    Default (conditional)
+                  </SelectItem>
+                  <SelectItem value="freeze">
+                    Freeze — pause services on shutdown
+                  </SelectItem>
+                  <SelectItem value="failover">
+                    Failover — stop and let HA recover
+                  </SelectItem>
+                  <SelectItem value="migrate">
+                    Migrate — evacuate HA services first
+                  </SelectItem>
+                  <SelectItem value="conditional">
+                    Conditional — depends on action
+                  </SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                What HA does when a node shuts down or reboots. Set to <code>migrate</code> if you want HA-managed VMs evacuated automatically.
+                What HA does when a node shuts down or reboots. Set to{" "}
+                <code>migrate</code> if you want HA-managed VMs evacuated
+                automatically.
               </p>
             </div>
           </div>
@@ -648,16 +845,26 @@ function GeneralSection({
               <Label className="text-sm font-medium">Scheduler</Label>
               <Select
                 value={form.crs_ha || "__default__"}
-                onValueChange={(v) => { updateField("crs_ha", v === "__default__" ? "" : v); }}
+                onValueChange={(v) => {
+                  updateField("crs_ha", v === "__default__" ? "" : v);
+                }}
                 disabled={!canEdit}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__default__">Default (basic)</SelectItem>
-                  <SelectItem value="basic">Basic — round-robin failover</SelectItem>
-                  <SelectItem value="static">Static — assignment-based</SelectItem>
+                  <SelectItem value="basic">
+                    Basic — round-robin failover
+                  </SelectItem>
+                  <SelectItem value="static">
+                    Static — assignment-based
+                  </SelectItem>
                   {(crsDynamicSupported || form.crs_ha === "dynamic") && (
-                    <SelectItem value="dynamic">Dynamic — live load balancing</SelectItem>
+                    <SelectItem value="dynamic">
+                      Dynamic — live load balancing
+                    </SelectItem>
                   )}
                 </SelectContent>
               </Select>
@@ -669,12 +876,18 @@ function GeneralSection({
             </div>
             <div className="flex items-center justify-between rounded-md border p-3">
               <div>
-                <Label className="text-sm font-medium">Rebalance on Start</Label>
-                <p className="text-xs text-muted-foreground">Re-evaluate placement when the cluster comes online.</p>
+                <Label className="text-sm font-medium">
+                  Rebalance on Start
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Re-evaluate placement when the cluster comes online.
+                </p>
               </div>
               <Switch
                 checked={form.crs_rebalance_on_start}
-                onCheckedChange={(v) => { updateField("crs_rebalance_on_start", v); }}
+                onCheckedChange={(v) => {
+                  updateField("crs_rebalance_on_start", v);
+                }}
                 disabled={!canEdit}
               />
             </div>
@@ -683,33 +896,68 @@ function GeneralSection({
             <div className="mt-4 space-y-4 rounded-md border p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <Label className="text-sm font-medium">Automatic Rebalancing</Label>
+                  <Label className="text-sm font-medium">
+                    Automatic Rebalancing
+                  </Label>
                   <p className="text-xs text-muted-foreground">
-                    Let Proxmox live-migrate HA-managed guests to even out node load. While this is on,
-                    Nexara DRS automatic mode is disabled to avoid conflicting migrations.
+                    Let Proxmox live-migrate HA-managed guests to even out node
+                    load. While this is on, Nexara DRS automatic mode is
+                    disabled to avoid conflicting migrations.
                   </p>
                 </div>
                 <Switch
                   checked={form.crs_auto_rebalance}
-                  onCheckedChange={(v) => { updateField("crs_auto_rebalance", v); }}
+                  onCheckedChange={(v) => {
+                    updateField("crs_auto_rebalance", v);
+                  }}
                   disabled={!canEdit}
                 />
               </div>
               {form.crs_auto_rebalance && (
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <NumField label="Threshold %" value={form.crs_threshold} onChange={(v) => { updateField("crs_threshold", v); }} disabled={!canEdit} placeholder="30" />
-                  <NumField label="Hold (rounds)" value={form.crs_hold_duration} onChange={(v) => { updateField("crs_hold_duration", v); }} disabled={!canEdit} placeholder="3" />
-                  <NumField label="Margin %" value={form.crs_margin} onChange={(v) => { updateField("crs_margin", v); }} disabled={!canEdit} placeholder="10" />
+                  <NumField
+                    label="Threshold %"
+                    value={form.crs_threshold}
+                    onChange={(v) => {
+                      updateField("crs_threshold", v);
+                    }}
+                    disabled={!canEdit}
+                    placeholder="30"
+                  />
+                  <NumField
+                    label="Hold (rounds)"
+                    value={form.crs_hold_duration}
+                    onChange={(v) => {
+                      updateField("crs_hold_duration", v);
+                    }}
+                    disabled={!canEdit}
+                    placeholder="3"
+                  />
+                  <NumField
+                    label="Margin %"
+                    value={form.crs_margin}
+                    onChange={(v) => {
+                      updateField("crs_margin", v);
+                    }}
+                    disabled={!canEdit}
+                    placeholder="10"
+                  />
                   <div className="space-y-2">
                     <Label className="text-sm font-medium">Method</Label>
                     <Select
                       value={form.crs_method || "__default__"}
-                      onValueChange={(v) => { updateField("crs_method", v === "__default__" ? "" : v); }}
+                      onValueChange={(v) => {
+                        updateField("crs_method", v === "__default__" ? "" : v);
+                      }}
                       disabled={!canEdit}
                     >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__default__">Default (bruteforce)</SelectItem>
+                        <SelectItem value="__default__">
+                          Default (bruteforce)
+                        </SelectItem>
                         <SelectItem value="bruteforce">Bruteforce</SelectItem>
                         <SelectItem value="topsis">TOPSIS</SelectItem>
                       </SelectContent>
@@ -723,22 +971,79 @@ function GeneralSection({
 
         {/* Bandwidth Limits */}
         <Section title="Bandwidth Limits (KiB/s)">
-          <p className="text-xs text-muted-foreground mb-3">Per-operation rate limits. Leave blank to use Proxmox defaults; <code>0</code> means unlimited.</p>
+          <p className="text-xs text-muted-foreground mb-3">
+            Per-operation rate limits. Leave blank to use Proxmox defaults;{" "}
+            <code>0</code> means unlimited.
+          </p>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            <NumField label="Default" value={form.bwlimit_default} onChange={(v) => { updateField("bwlimit_default", v); }} disabled={!canEdit} />
-            <NumField label="Clone" value={form.bwlimit_clone} onChange={(v) => { updateField("bwlimit_clone", v); }} disabled={!canEdit} />
-            <NumField label="Migration" value={form.bwlimit_migration} onChange={(v) => { updateField("bwlimit_migration", v); }} disabled={!canEdit} />
-            <NumField label="Move" value={form.bwlimit_move} onChange={(v) => { updateField("bwlimit_move", v); }} disabled={!canEdit} />
-            <NumField label="Restore" value={form.bwlimit_restore} onChange={(v) => { updateField("bwlimit_restore", v); }} disabled={!canEdit} />
+            <NumField
+              label="Default"
+              value={form.bwlimit_default}
+              onChange={(v) => {
+                updateField("bwlimit_default", v);
+              }}
+              disabled={!canEdit}
+            />
+            <NumField
+              label="Clone"
+              value={form.bwlimit_clone}
+              onChange={(v) => {
+                updateField("bwlimit_clone", v);
+              }}
+              disabled={!canEdit}
+            />
+            <NumField
+              label="Migration"
+              value={form.bwlimit_migration}
+              onChange={(v) => {
+                updateField("bwlimit_migration", v);
+              }}
+              disabled={!canEdit}
+            />
+            <NumField
+              label="Move"
+              value={form.bwlimit_move}
+              onChange={(v) => {
+                updateField("bwlimit_move", v);
+              }}
+              disabled={!canEdit}
+            />
+            <NumField
+              label="Restore"
+              value={form.bwlimit_restore}
+              onChange={(v) => {
+                updateField("bwlimit_restore", v);
+              }}
+              disabled={!canEdit}
+            />
           </div>
         </Section>
 
         {/* Next VMID Range */}
         <Section title="Next VMID Range">
-          <p className="text-xs text-muted-foreground mb-3">Inclusive lower / upper bounds used by Proxmox when assigning a new VMID automatically.</p>
+          <p className="text-xs text-muted-foreground mb-3">
+            Inclusive lower / upper bounds used by Proxmox when assigning a new
+            VMID automatically.
+          </p>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <NumField label="Lower" value={form.next_id_lower} onChange={(v) => { updateField("next_id_lower", v); }} disabled={!canEdit} placeholder="100" />
-            <NumField label="Upper" value={form.next_id_upper} onChange={(v) => { updateField("next_id_upper", v); }} disabled={!canEdit} placeholder="1000000" />
+            <NumField
+              label="Lower"
+              value={form.next_id_lower}
+              onChange={(v) => {
+                updateField("next_id_lower", v);
+              }}
+              disabled={!canEdit}
+              placeholder="100"
+            />
+            <NumField
+              label="Upper"
+              value={form.next_id_upper}
+              onChange={(v) => {
+                updateField("next_id_upper", v);
+              }}
+              disabled={!canEdit}
+              placeholder="1000000"
+            />
           </div>
         </Section>
       </CardContent>
@@ -746,7 +1051,13 @@ function GeneralSection({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="mt-6 border-t pt-4">
       <h3 className="mb-3 text-sm font-semibold">{title}</h3>
@@ -755,7 +1066,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function NumField({ label, value, onChange, disabled, placeholder }: {
+function NumField({
+  label,
+  value,
+  onChange,
+  disabled,
+  placeholder,
+}: {
   label: string;
   value: string;
   onChange: (v: string) => void;
@@ -769,7 +1086,9 @@ function NumField({ label, value, onChange, disabled, placeholder }: {
         type="number"
         min={0}
         value={value}
-        onChange={(e) => { onChange(e.target.value); }}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
         disabled={disabled}
         placeholder={placeholder}
       />
@@ -777,7 +1096,13 @@ function NumField({ label, value, onChange, disabled, placeholder }: {
   );
 }
 
-function InputField({ label, value, onChange, disabled, placeholder }: {
+function InputField({
+  label,
+  value,
+  onChange,
+  disabled,
+  placeholder,
+}: {
   label: string;
   value: string;
   onChange: (v: string) => void;
@@ -789,7 +1114,9 @@ function InputField({ label, value, onChange, disabled, placeholder }: {
       <Label className="text-sm font-medium">{label}</Label>
       <Input
         value={value}
-        onChange={(e) => { onChange(e.target.value); }}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
         disabled={disabled}
         placeholder={placeholder}
       />
@@ -800,7 +1127,9 @@ function InputField({ label, value, onChange, disabled, placeholder }: {
 // --- Tags Section ---
 
 function TagsSection({
-  tagsQuery, updateTags, canEdit,
+  tagsQuery,
+  updateTags,
+  canEdit,
 }: {
   tagsQuery: ReturnType<typeof useClusterTags>;
   updateTags: ReturnType<typeof useUpdateClusterTags>;
@@ -827,7 +1156,9 @@ function TagsSection({
 
   return (
     <Card>
-      <CardHeader><CardTitle>Tags Management</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle>Tags Management</CardTitle>
+      </CardHeader>
       <CardContent className="space-y-4">
         {tagsQuery.isError && <ErrorBanner error={tagsQuery.error} />}
         {!tagsQuery.isError && (
@@ -836,33 +1167,54 @@ function TagsSection({
               <Label>Registered Tags (semicolon-separated)</Label>
               <Input
                 value={tagInput}
-                onChange={(e) => { setTagInput(e.target.value); }}
+                onChange={(e) => {
+                  setTagInput(e.target.value);
+                }}
                 placeholder="tag1;tag2;tag3"
                 disabled={!canEdit}
               />
             </div>
             <div className="space-y-2">
               <Label>User Tag Access</Label>
-              <Select value={tagAccess || "__default__"} onValueChange={(v) => { setTagAccess(v === "__default__" ? "" : v); }} disabled={!canEdit}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select
+                value={tagAccess || "__default__"}
+                onValueChange={(v) => {
+                  setTagAccess(v === "__default__" ? "" : v);
+                }}
+                disabled={!canEdit}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__default__">Default (free)</SelectItem>
                   <SelectItem value="free">Free</SelectItem>
                   <SelectItem value="list">List (from registered)</SelectItem>
-                  <SelectItem value="existing">Existing (already used)</SelectItem>
+                  <SelectItem value="existing">
+                    Existing (already used)
+                  </SelectItem>
                   <SelectItem value="none">None (disabled)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             {tagInput && (
               <div className="flex flex-wrap gap-1">
-                {tagInput.split(";").filter(Boolean).map((tag) => (
-                  <Badge key={tag} variant="secondary">{tag.trim()}</Badge>
-                ))}
+                {tagInput
+                  .split(";")
+                  .filter(Boolean)
+                  .map((tag) => (
+                    <Badge key={tag} variant="secondary">
+                      {tag.trim()}
+                    </Badge>
+                  ))}
               </div>
             )}
             {canEdit && (
-              <Button onClick={handleSave} disabled={updateTags.isPending} size="sm">
+              <Button
+                onClick={handleSave}
+                disabled={updateTags.isPending}
+                size="sm"
+              >
                 <Save className="mr-2 h-4 w-4" />
                 {updateTags.isPending ? "Saving..." : "Save Tags"}
               </Button>
@@ -876,7 +1228,9 @@ function TagsSection({
 
 // --- Join Info Section ---
 
-function buildJoinCommand(data: NonNullable<ReturnType<typeof useClusterJoinInfo>["data"]>): string {
+function buildJoinCommand(
+  data: NonNullable<ReturnType<typeof useClusterJoinInfo>["data"]>,
+): string {
   const parts: string[] = [];
   const firstNode = data.nodelist?.[0];
   const peerAddr = firstNode?.pve_addr ?? firstNode?.ring0_addr ?? "";
@@ -898,11 +1252,15 @@ function JoinInfoSection({
   const copyToClipboard = (text: string) => {
     void navigator.clipboard.writeText(text);
     setCopied(true);
-    setTimeout(() => { setCopied(false); }, 2000);
+    setTimeout(() => {
+      setCopied(false);
+    }, 2000);
   };
 
   const data = joinQuery.data;
-  const hasJoinInfo = data != null && (data.fingerprint || (data.nodelist && data.nodelist.length > 0));
+  const hasJoinInfo =
+    data != null &&
+    (data.fingerprint || (data.nodelist && data.nodelist.length > 0));
 
   return (
     <Card>
@@ -923,8 +1281,8 @@ function JoinInfoSection({
                 </DialogHeader>
                 <div className="space-y-4">
                   <p className="text-sm text-muted-foreground">
-                    Use this information to join additional nodes to this cluster.
-                    Run the command below on the node you want to add.
+                    Use this information to join additional nodes to this
+                    cluster. Run the command below on the node you want to add.
                   </p>
 
                   <div className="space-y-2">
@@ -934,12 +1292,19 @@ function JoinInfoSection({
                         {buildJoinCommand(data)}
                       </pre>
                       <Button
+                        aria-label="Copy join command"
                         variant="ghost"
                         size="sm"
                         className="absolute right-2 top-2"
-                        onClick={() => { copyToClipboard(buildJoinCommand(data)); }}
+                        onClick={() => {
+                          copyToClipboard(buildJoinCommand(data));
+                        }}
                       >
-                        {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                        {copied ? (
+                          <Check className="h-4 w-4 text-emerald-500" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
                       </Button>
                     </div>
                   </div>
@@ -951,7 +1316,14 @@ function JoinInfoSection({
                         <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono break-all select-all">
                           {data.fingerprint}
                         </code>
-                        <Button variant="ghost" size="sm" onClick={() => { copyToClipboard(data.fingerprint ?? ""); }}>
+                        <Button
+                          aria-label="Copy fingerprint"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            copyToClipboard(data.fingerprint ?? "");
+                          }}
+                        >
                           <Copy className="h-4 w-4" />
                         </Button>
                       </div>
@@ -960,8 +1332,12 @@ function JoinInfoSection({
 
                   {data.config_digest && (
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">Config Digest</Label>
-                      <code className="block rounded bg-muted px-3 py-2 text-xs font-mono">{data.config_digest}</code>
+                      <Label className="text-sm font-medium">
+                        Config Digest
+                      </Label>
+                      <code className="block rounded bg-muted px-3 py-2 text-xs font-mono">
+                        {data.config_digest}
+                      </code>
                     </div>
                   )}
 
@@ -981,11 +1357,18 @@ function JoinInfoSection({
                         <TableBody>
                           {data.nodelist.map((n) => (
                             <TableRow key={n.name}>
-                              <TableCell className="font-medium">{n.name}</TableCell>
+                              <TableCell className="font-medium">
+                                {n.name}
+                              </TableCell>
                               <TableCell>{n.nodeid}</TableCell>
                               <TableCell>{n.pve_addr}</TableCell>
                               <TableCell>{n.ring0_addr}</TableCell>
-                              <TableCell className="font-mono text-xs max-w-[200px] truncate" title={n.pve_fp}>{n.pve_fp}</TableCell>
+                              <TableCell
+                                className="font-mono text-xs max-w-[200px] truncate"
+                                title={n.pve_fp}
+                              >
+                                {n.pve_fp}
+                              </TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -1005,7 +1388,9 @@ function JoinInfoSection({
           <div className="space-y-3 text-sm">
             {data.fingerprint && (
               <div className="space-y-1">
-                <Label className="text-muted-foreground">Cluster Fingerprint</Label>
+                <Label className="text-muted-foreground">
+                  Cluster Fingerprint
+                </Label>
                 <code className="block rounded bg-muted px-3 py-2 text-xs font-mono break-all select-all">
                   {data.fingerprint}
                 </code>
@@ -1013,10 +1398,16 @@ function JoinInfoSection({
             )}
             {data.nodelist && data.nodelist.length > 0 && (
               <div className="space-y-1">
-                <Label className="text-muted-foreground">Peer Nodes ({data.nodelist.length})</Label>
+                <Label className="text-muted-foreground">
+                  Peer Nodes ({data.nodelist.length})
+                </Label>
                 <div className="flex flex-wrap gap-2">
                   {data.nodelist.map((n) => (
-                    <Badge key={n.name} variant="secondary" className="font-mono text-xs">
+                    <Badge
+                      key={n.name}
+                      variant="secondary"
+                      className="font-mono text-xs"
+                    >
                       {n.name} ({n.pve_addr ?? n.ring0_addr})
                     </Badge>
                   ))}
@@ -1026,7 +1417,9 @@ function JoinInfoSection({
           </div>
         )}
         {!joinQuery.isLoading && !joinQuery.isError && !hasJoinInfo && (
-          <p className="text-sm text-muted-foreground">No join info available. This may be a standalone node.</p>
+          <p className="text-sm text-muted-foreground">
+            No join info available. This may be a standalone node.
+          </p>
         )}
       </CardContent>
     </Card>
@@ -1042,37 +1435,46 @@ function CorosyncNodesSection({
 }) {
   return (
     <Card>
-      <CardHeader><CardTitle>Corosync Nodes</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle>Corosync Nodes</CardTitle>
+      </CardHeader>
       <CardContent>
         {nodesQuery.isLoading && <Skeleton className="h-20 w-full" />}
         {nodesQuery.isError && <ErrorBanner error={nodesQuery.error} />}
-        {!nodesQuery.isLoading && !nodesQuery.isError && nodesQuery.data != null && nodesQuery.data.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Node ID</TableHead>
-                <TableHead>PVE Address</TableHead>
-                <TableHead>Ring 0</TableHead>
-                <TableHead>Votes</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {nodesQuery.data.map((n) => (
-                <TableRow key={n.name}>
-                  <TableCell className="font-medium">{n.name}</TableCell>
-                  <TableCell>{n.nodeid}</TableCell>
-                  <TableCell>{n.pve_addr}</TableCell>
-                  <TableCell>{n.ring0_addr}</TableCell>
-                  <TableCell>{n.quorum_votes}</TableCell>
+        {!nodesQuery.isLoading &&
+          !nodesQuery.isError &&
+          nodesQuery.data != null &&
+          nodesQuery.data.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Node ID</TableHead>
+                  <TableHead>PVE Address</TableHead>
+                  <TableHead>Ring 0</TableHead>
+                  <TableHead>Votes</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-        {!nodesQuery.isLoading && !nodesQuery.isError && (nodesQuery.data == null || nodesQuery.data.length === 0) && (
-          <p className="text-sm text-muted-foreground">No corosync nodes found. This may be a standalone node.</p>
-        )}
+              </TableHeader>
+              <TableBody>
+                {nodesQuery.data.map((n) => (
+                  <TableRow key={n.name}>
+                    <TableCell className="font-medium">{n.name}</TableCell>
+                    <TableCell>{n.nodeid}</TableCell>
+                    <TableCell>{n.pve_addr}</TableCell>
+                    <TableCell>{n.ring0_addr}</TableCell>
+                    <TableCell>{n.quorum_votes}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        {!nodesQuery.isLoading &&
+          !nodesQuery.isError &&
+          (nodesQuery.data == null || nodesQuery.data.length === 0) && (
+            <p className="text-sm text-muted-foreground">
+              No corosync nodes found. This may be a standalone node.
+            </p>
+          )}
       </CardContent>
     </Card>
   );

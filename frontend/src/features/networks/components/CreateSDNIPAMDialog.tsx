@@ -17,10 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, Pencil } from "lucide-react";
-import {
-  useCreateSDNIPAM,
-  useUpdateSDNIPAM,
-} from "../api/network-queries";
+import { useCreateSDNIPAM, useUpdateSDNIPAM } from "../api/network-queries";
 import type { SDNIPAM, CreateSDNIPAMRequest } from "../types/network";
 
 interface CreateSDNIPAMDialogProps {
@@ -77,16 +74,22 @@ export function CreateSDNIPAMDialog({
     if (isEdit) {
       const updateParams: Omit<CreateSDNIPAMRequest, "ipam" | "type"> =
         Object.fromEntries(
-          Object.entries(params).filter(
-            ([k]) => k !== "ipam" && k !== "type",
-          ),
+          Object.entries(params).filter(([k]) => k !== "ipam" && k !== "type"),
         );
       update.mutate(
         { ipam: initialData.ipam, params: updateParams },
-        { onSuccess: () => { setOpen(false); } },
+        {
+          onSuccess: () => {
+            setOpen(false);
+          },
+        },
       );
     } else {
-      create.mutate(params, { onSuccess: () => { setOpen(false); } });
+      create.mutate(params, {
+        onSuccess: () => {
+          setOpen(false);
+        },
+      });
     }
   };
 
@@ -96,7 +99,11 @@ export function CreateSDNIPAMDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {isEdit ? (
-          <Button variant="ghost" size="icon">
+          <Button
+            aria-label={`Edit IPAM ${initialData.ipam}`}
+            variant="ghost"
+            size="icon"
+          >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (
@@ -108,9 +115,7 @@ export function CreateSDNIPAMDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {isEdit ? "Edit IPAM" : "Create SDN IPAM"}
-          </DialogTitle>
+          <DialogTitle>{isEdit ? "Edit IPAM" : "Create SDN IPAM"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -119,7 +124,9 @@ export function CreateSDNIPAMDialog({
               <Input
                 placeholder="myipam"
                 value={ipam}
-                onChange={(e) => { setIpam(e.target.value); }}
+                onChange={(e) => {
+                  setIpam(e.target.value);
+                }}
                 disabled={isEdit}
               />
             </div>
@@ -146,7 +153,9 @@ export function CreateSDNIPAMDialog({
                 <Input
                   placeholder="https://ipam.example.com/api"
                   value={url}
-                  onChange={(e) => { setUrl(e.target.value); }}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                  }}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -156,7 +165,9 @@ export function CreateSDNIPAMDialog({
                     type="password"
                     placeholder="API token"
                     value={token}
-                    onChange={(e) => { setToken(e.target.value); }}
+                    onChange={(e) => {
+                      setToken(e.target.value);
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -165,7 +176,9 @@ export function CreateSDNIPAMDialog({
                     type="number"
                     placeholder="1"
                     value={section}
-                    onChange={(e) => { setSection(e.target.value); }}
+                    onChange={(e) => {
+                      setSection(e.target.value);
+                    }}
                   />
                 </div>
               </div>
@@ -175,7 +188,12 @@ export function CreateSDNIPAMDialog({
             <p className="text-sm text-destructive">{errorMessage}</p>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button

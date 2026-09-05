@@ -1,26 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { filterStorageByContent } from "./storage-filter";
-import type { NodeResponse, StorageResponse } from "@/types/api";
-
-function makeStorage(p: Partial<StorageResponse>): StorageResponse {
-  return {
-    id: p.id ?? "s1",
-    cluster_id: "c1",
-    node_id: p.node_id ?? "n1",
-    storage: p.storage ?? "test-pool",
-    type: p.type ?? "dir",
-    content: p.content ?? "",
-    active: p.active ?? true,
-    enabled: p.enabled ?? true,
-    shared: p.shared ?? false,
-    total: 0,
-    used: 0,
-    avail: 0,
-    last_seen_at: "",
-    created_at: "",
-    updated_at: "",
-  };
-}
+import { makeStorage } from "@/test/storage.fixtures";
+import type { NodeResponse } from "@/types/api";
 
 const node1: NodeResponse = {
   id: "n1",
@@ -59,13 +40,19 @@ const node2: NodeResponse = { ...node1, id: "n2", name: "pve2" };
 
 describe("filterStorageByContent", () => {
   it("returns empty for undefined storage", () => {
-    expect(filterStorageByContent(undefined, "rootdir", [node1], "pve1")).toEqual([]);
+    expect(
+      filterStorageByContent(undefined, "rootdir", [node1], "pve1"),
+    ).toEqual([]);
   });
 
   it("filters out storage without the requested content type", () => {
     const list = [
       makeStorage({ storage: "iso-only", content: "iso,backup" }),
-      makeStorage({ storage: "ct-ok", content: "rootdir,images", shared: true }),
+      makeStorage({
+        storage: "ct-ok",
+        content: "rootdir,images",
+        shared: true,
+      }),
     ];
     const result = filterStorageByContent(list, "rootdir", [node1], "pve1");
     expect(result.map((s) => s.storage)).toEqual(["ct-ok"]);
@@ -73,8 +60,18 @@ describe("filterStorageByContent", () => {
 
   it("filters out inactive or disabled storage", () => {
     const list = [
-      makeStorage({ storage: "off", content: "rootdir", active: false, shared: true }),
-      makeStorage({ storage: "disabled", content: "rootdir", enabled: false, shared: true }),
+      makeStorage({
+        storage: "off",
+        content: "rootdir",
+        active: false,
+        shared: true,
+      }),
+      makeStorage({
+        storage: "disabled",
+        content: "rootdir",
+        enabled: false,
+        shared: true,
+      }),
       makeStorage({ storage: "ok", content: "rootdir", shared: true }),
     ];
     const result = filterStorageByContent(list, "rootdir", [node1], "pve1");
@@ -106,7 +103,12 @@ describe("filterStorageByContent", () => {
         shared: false,
       }),
     ];
-    const result = filterStorageByContent(list, "rootdir", [node1, node2], "pve1");
+    const result = filterStorageByContent(
+      list,
+      "rootdir",
+      [node1, node2],
+      "pve1",
+    );
     expect(result.map((s) => s.storage)).toEqual(["local-lvm"]);
   });
 
@@ -119,17 +121,39 @@ describe("filterStorageByContent", () => {
         shared: true,
       }),
     ];
-    const result = filterStorageByContent(list, "rootdir", [node1, node2], "pve1");
+    const result = filterStorageByContent(
+      list,
+      "rootdir",
+      [node1, node2],
+      "pve1",
+    );
     expect(result.map((s) => s.storage)).toEqual(["shared-nfs"]);
   });
 
   it("dedupes by storage name (one entry per name)", () => {
     // Shared storage typically appears once per node — we should collapse those.
     const list = [
-      makeStorage({ id: "s1", storage: "proxmox-ssd", content: "rootdir", shared: true, node_id: "n1" }),
-      makeStorage({ id: "s2", storage: "proxmox-ssd", content: "rootdir", shared: true, node_id: "n2" }),
+      makeStorage({
+        id: "s1",
+        storage: "proxmox-ssd",
+        content: "rootdir",
+        shared: true,
+        node_id: "n1",
+      }),
+      makeStorage({
+        id: "s2",
+        storage: "proxmox-ssd",
+        content: "rootdir",
+        shared: true,
+        node_id: "n2",
+      }),
     ];
-    const result = filterStorageByContent(list, "rootdir", [node1, node2], "pve1");
+    const result = filterStorageByContent(
+      list,
+      "rootdir",
+      [node1, node2],
+      "pve1",
+    );
     expect(result).toHaveLength(1);
     expect(result[0]?.storage).toBe("proxmox-ssd");
   });
@@ -138,7 +162,12 @@ describe("filterStorageByContent", () => {
     // When the user hasn't picked a node yet, prefer showing too much over too
     // little — an empty dropdown is more confusing than a few wrong entries.
     const list = [
-      makeStorage({ storage: "a", content: "rootdir", node_id: "n2", shared: false }),
+      makeStorage({
+        storage: "a",
+        content: "rootdir",
+        node_id: "n2",
+        shared: false,
+      }),
     ];
     const result = filterStorageByContent(list, "rootdir", [node1, node2], "");
     expect(result.map((s) => s.storage)).toEqual(["a"]);

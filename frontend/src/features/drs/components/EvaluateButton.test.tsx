@@ -14,7 +14,10 @@ function mockEvaluation(response: EvaluateResponse) {
   vi.mocked(useTriggerEvaluation).mockReturnValue({
     mutate: (
       _vars: undefined,
-      opts?: { onSuccess?: (d: EvaluateResponse) => void; onError?: () => void },
+      opts?: {
+        onSuccess?: (d: EvaluateResponse) => void;
+        onError?: () => void;
+      },
     ) => {
       opts?.onSuccess?.(response);
     },
@@ -31,7 +34,8 @@ describe("EvaluateButton native-CRS blocked state", () => {
   it("shows a blocked notice when evaluation is suppressed by native CRS", async () => {
     mockEvaluation({
       blocked: true,
-      block_reason: "Proxmox native CRS auto-rebalance is enabled on this cluster.",
+      block_reason:
+        "Proxmox native CRS auto-rebalance is enabled on this cluster.",
       recommendations: [],
       count: 0,
       node_scores: [],

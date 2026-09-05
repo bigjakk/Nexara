@@ -9,15 +9,12 @@ import {
   Unplug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  MAX_CONSOLE_AUTO_RETRIES,
-  type ConsoleStatus,
-  type ConsoleTab,
-} from "../types/console";
+import { MAX_CONSOLE_AUTO_RETRIES, type ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMAction } from "@/features/vms/api/vm-queries";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
+import { useIdleTabOnUnmount } from "../hooks/useIdleTabOnUnmount";
 import { VNCToolbar } from "./VNCToolbar";
 import {
   buildVncWsUrl,
@@ -34,14 +31,10 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
   const { id: tabId, clusterID, node, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
   const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
   const [rfb, setRfb] = useState<RFB | null>(null);
   const retryCountRef = useRef(0);
-  const retryScheduledRef = useRef(false);
-  const intentionalCloseRef = useRef(false);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Reuses a still-valid scoped token across this tab's reconnect cycle
   // rather than minting — and auditing — one per attempt. Created once via
@@ -64,18 +57,6 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
   // Park dead tabs while the guest is off; auto-resume when it powers on.
   useGuestPowerSync(tab);
 
-  // Store latest callbacks in refs so the effect doesn't depend on them.
-  const resolveAndReconnectRef = useRef(resolveAndReconnect);
-  resolveAndReconnectRef.current = resolveAndReconnect;
-  const tabIdRef = useRef(tabId);
-  tabIdRef.current = tabId;
-
-  const applyStatus = (status: ConsoleStatus) => {
-    updateTabStatus(tabId, status);
-  };
-  const applyStatusRef = useRef(applyStatus);
-  applyStatusRef.current = applyStatus;
-
   const guestType = tab.type === "ct_vnc" ? "lxc" : undefined;
 
   useEffect(() => {
@@ -85,42 +66,54 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     // actually dialling. Any other status is left alone — notably the parked
     // "guest-stopped", which connect() below deliberately declines to reopen.
     if (
-      useConsoleStore.getState().tabs.find((t) => t.id === tabIdRef.current)
-        ?.status === "idle"
+      useConsoleStore.getState().tabs.find((t) => t.id === tabId)?.status ===
+      "idle"
     ) {
-      applyStatusRef.current("connecting");
+      updateTabStatus(tabId, "connecting");
     }
 
-    intentionalCloseRef.current = false;
-    retryScheduledRef.current = false;
+    // Scoped to THIS run of the effect, deliberately not a ref. When the
+    // effect re-runs (manual reconnect, node change) the handlers wired up by
+    // the previous run are still attached to the socket the cleanup is tearing
+    // down, and their close events land a beat later. A component-lifetime ref
+    // was set true by the cleanup and then immediately false again here, so
+    // those stale handlers read their own teardown as a dropped connection and
+    // scheduled a retry — which bumped reconnectKey, re-ran the effect, and
+    // looped forever. A per-run flag stays true for the generation it belongs
+    // to, so a superseded connection can never speak for the tab again.
+    let closed = false;
     let ws: WebSocket | null = null;
-    let stateLog1Timer: ReturnType<typeof setTimeout> | null = null;
-    let stateLog2Timer: ReturnType<typeof setTimeout> | null = null;
+    // Per-run for the same reason `closed` is, though these never actually
+    // leaked: as refs they were correct only because the cleanup reset the
+    // flag and cleared the timer, and the effect body reset the flag again on
+    // entry. As locals the scoping is the language's job, not a reader's.
+    let retryScheduled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const tabIsParked = () =>
-      useConsoleStore.getState().tabs.find((t) => t.id === tabIdRef.current)
-        ?.status === "guest-stopped";
+      useConsoleStore.getState().tabs.find((t) => t.id === tabId)?.status ===
+      "guest-stopped";
 
     // Single funnel for auto-reconnects. Both the RFB disconnect event and
     // ws.onclose fire for one drop — without the dedup flag they each
-    // scheduled a timer (and the second overwrote retryTimerRef, leaking the
+    // scheduled a timer (and the second overwrote retryTimer, leaking the
     // first), producing overlapping reconnect cycles.
     const scheduleRetry = () => {
-      if (intentionalCloseRef.current || retryScheduledRef.current) return;
+      if (closed || retryScheduled) return;
       if (tabIsParked()) return; // guest is off — wait for power-on instead
       if (retryCountRef.current < MAX_CONSOLE_AUTO_RETRIES) {
         const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
         retryCountRef.current++;
-        retryScheduledRef.current = true;
-        applyStatusRef.current("reconnecting");
-        retryTimerRef.current = setTimeout(() => {
-          retryScheduledRef.current = false;
+        retryScheduled = true;
+        updateTabStatus(tabId, "reconnecting");
+        retryTimer = setTimeout(() => {
+          retryScheduled = false;
           // Safe if the tab was closed in the meantime — resolveAndReconnect
           // returns early for an id that is no longer in the store.
-          void resolveAndReconnectRef.current(tabIdRef.current);
+          void resolveAndReconnect(tabId);
         }, delay);
       } else {
-        applyStatusRef.current("disconnected");
+        updateTabStatus(tabId, "disconnected");
       }
     };
 
@@ -148,45 +141,28 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
           ...(vmid !== undefined ? { vmid } : {}),
         });
       } catch (err) {
-        if (intentionalCloseRef.current) return;
+        if (closed) return;
         console.error("[VNCViewer] failed to mint console token", err);
-        applyStatusRef.current("error");
+        updateTabStatus(tabId, "error");
         return;
       }
 
-      if (intentionalCloseRef.current) return;
+      if (closed) return;
 
       const wsUrl = buildVncWsUrl(clusterID, node, vmid, guestType);
-      // The wsUrl is now token-free (token rides in subprotocol). Log it.
-      console.log(
-        "[VNCViewer] opening WS",
-        wsUrl,
-        JSON.stringify({ clusterID, node, vmid, guestType }),
-      );
       ws = new WebSocket(wsUrl, wsAuthProtocols(token));
       ws.binaryType = "arraybuffer";
-      wsRef.current = ws;
 
       const localWs = ws; // narrow non-null binding for closures
 
-      localWs.onopen = () => {
-        console.log("[VNCViewer] WS open, readyState:", localWs.readyState);
-      };
-
-      // Diagnostic: log readyState 1 second and 5 seconds after creation in
-      // case onopen / onerror / onclose never fire (silent failure mode).
-      stateLog1Timer = setTimeout(() => {
-        console.log(
-          "[VNCViewer] WS state @ 1s",
-          "readyState:", localWs.readyState,
-          "(0=connecting, 1=open, 2=closing, 3=closed)",
-        );
-      }, 1000);
-      stateLog2Timer = setTimeout(() => {
-        console.log("[VNCViewer] WS state @ 5s readyState:", localWs.readyState);
-      }, 5000);
-
       localWs.onmessage = (event: MessageEvent) => {
+        // close() is asynchronous, so frames already queued on a superseded
+        // socket still dispatch. Without this a stale generation could reach
+        // the `connected` branch below and build a SECOND RFB into the same
+        // container — overwriting rfbRef, handing VNCToolbar a doomed
+        // instance, and leaking the live Proxmox console session when the
+        // next cleanup disconnects the wrong one.
+        if (closed) return;
         if (typeof event.data === "string") {
           try {
             const msg = JSON.parse(event.data) as {
@@ -197,9 +173,10 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
             };
             if (msg.type === "connected") {
               // Backend proxy is connected to Proxmox — now initialize noVNC RFB.
-              console.log("[VNCViewer] received connected, container:", !!containerRef.current);
               if (!containerRef.current) {
-                console.error("[VNCViewer] containerRef is null at connected time");
+                console.error(
+                  "[VNCViewer] containerRef is null at connected time",
+                );
                 return;
               }
 
@@ -210,24 +187,24 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
                 options["credentials"] = { password: msg.password };
               }
 
-              const rfbInstance = new RFB(containerRef.current, localWs, options);
+              const rfbInstance = new RFB(
+                containerRef.current,
+                localWs,
+                options,
+              );
               rfbInstance.scaleViewport = true;
               rfbInstance.resizeSession = false;
               rfbInstance.focusOnClick = true;
 
               rfbInstance.addEventListener("connect", () => {
-                console.log("[VNCViewer] RFB connect event fired");
-                applyStatusRef.current("connected");
+                updateTabStatus(tabId, "connected");
               });
 
               rfbInstance.addEventListener("disconnect", () => {
-                console.log("[VNCViewer] RFB disconnect event fired");
-                if (intentionalCloseRef.current) {
-                  applyStatusRef.current("disconnected");
-                  rfbRef.current = null;
-                  setRfb(null);
-                  return;
-                }
+                // We closed this one ourselves. Whatever owns the tab now —
+                // a newer connection, or nothing — must not have its rfbRef
+                // cleared or a retry scheduled on its behalf.
+                if (closed) return;
 
                 rfbRef.current = null;
                 setRfb(null);
@@ -235,7 +212,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
               });
 
               rfbInstance.addEventListener("securityfailure", () => {
-                applyStatusRef.current("error");
+                updateTabStatus(tabId, "error");
               });
 
               rfbRef.current = rfbInstance;
@@ -247,9 +224,9 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
                 // Backend confirmed the guest is powered off — park with a
                 // fresh retry budget for when it comes back.
                 retryCountRef.current = 0;
-                applyStatusRef.current("guest-stopped");
+                updateTabStatus(tabId, "guest-stopped");
               } else {
-                applyStatusRef.current("error");
+                updateTabStatus(tabId, "error");
               }
               return;
             }
@@ -259,15 +236,8 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
         }
       };
 
-      localWs.onclose = (event) => {
-        console.log(
-          "[VNCViewer] WS close",
-          "code:", event.code,
-          "reason:", event.reason || "(none)",
-          "wasClean:", event.wasClean,
-          "readyState:", localWs.readyState,
-        );
-        if (intentionalCloseRef.current) return;
+      localWs.onclose = () => {
+        if (closed) return;
         if (!rfbRef.current) {
           // WS closed before RFB was established — auto-reconnect
           scheduleRetry();
@@ -277,11 +247,13 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       localWs.onerror = (event) => {
         console.error(
           "[VNCViewer] WS error event",
-          "type:", event.type,
-          "readyState:", localWs.readyState,
+          "type:",
+          event.type,
+          "readyState:",
+          localWs.readyState,
         );
-        if (!intentionalCloseRef.current && !tabIsParked()) {
-          applyStatusRef.current("error");
+        if (!closed && !tabIsParked()) {
+          updateTabStatus(tabId, "error");
         }
       };
     };
@@ -289,11 +261,8 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     void connect();
 
     return () => {
-      intentionalCloseRef.current = true;
-      clearTimeout(retryTimerRef.current);
-      retryScheduledRef.current = false;
-      if (stateLog1Timer) clearTimeout(stateLog1Timer);
-      if (stateLog2Timer) clearTimeout(stateLog2Timer);
+      closed = true;
+      clearTimeout(retryTimer);
       if (rfbRef.current) {
         rfbRef.current.disconnect();
         rfbRef.current = null;
@@ -301,10 +270,24 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       } else {
         ws?.close();
       }
-      wsRef.current = null;
     };
     // Only re-run when the actual connection parameters change.
-  }, [tabId, tab.type, clusterID, node, vmid, guestType, reconnectKey, activated, mintToken]);
+  }, [
+    tabId,
+    tab.type,
+    clusterID,
+    node,
+    vmid,
+    guestType,
+    reconnectKey,
+    activated,
+    mintToken,
+    updateTabStatus,
+    resolveAndReconnect,
+  ]);
+
+  // Declared after the connect effect on purpose — see the hook.
+  useIdleTabOnUnmount(tabId);
 
   const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
 
@@ -324,11 +307,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
           className="h-full w-full bg-black"
           data-tab-id={tab.id}
         />
-        <ConsoleStateOverlay
-          tab={tab}
-          status={tab.status}
-          onReconnect={handleManualReconnect}
-        />
+        <ConsoleStateOverlay tab={tab} onReconnect={handleManualReconnect} />
       </div>
     </div>
   );
@@ -343,17 +322,16 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
  */
 function ConsoleStateOverlay({
   tab,
-  status,
   onReconnect,
 }: {
   tab: ConsoleTab;
-  status: ConsoleStatus;
   onReconnect: () => void;
 }) {
   const actionMutation = useVMAction();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
+  const status = tab.status;
   if (status === "connected") return null;
 
   const isCt = tab.kind === "ct" || tab.type === "ct_vnc";

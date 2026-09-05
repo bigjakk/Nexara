@@ -19,10 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { Table } from "@tanstack/react-table";
-import {
-  useVMAction,
-  useDestroyVM,
-} from "@/features/vms/api/vm-queries";
+import { useVMAction, useDestroyVM } from "@/features/vms/api/vm-queries";
 import type { InventoryRow } from "../types/inventory";
 import type { ResourceKind } from "@/features/vms/types/vm";
 import { BulkMigrateDialog } from "./BulkMigrateDialog";
@@ -294,4 +291,3 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
     </>
   );
 }
-

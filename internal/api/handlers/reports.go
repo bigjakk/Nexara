@@ -11,11 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/cronspec"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/reports"
 	"github.com/bigjakk/nexara/internal/safeconv"
-	"github.com/bigjakk/nexara/internal/scheduler"
 )
 
 // reportSemaphore limits concurrent report generations.
@@ -237,7 +237,7 @@ func (h *ReportHandler) CreateSchedule(c fiber.Ctx) error {
 
 	var nextRunAt pgtype.Timestamptz
 	if req.Schedule != "" && enabled {
-		next, err := scheduler.NextRunTime(req.Schedule, time.Now())
+		next, err := cronspec.NextRunTime(req.Schedule, time.Now())
 		if err == nil {
 			nextRunAt = pgtype.Timestamptz{Time: next, Valid: true}
 		}
@@ -390,13 +390,24 @@ func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 		}
 	}
 
-	if err := h.validateScheduleRequest(c, name, reportType, clusterID.String(), timeRangeHours, scheduleStr, format, emailEnabled, nil, emailRecipients, parameters); err != nil {
+	// Validate the cron the CALLER supplied, not the effective one. An update
+	// that leaves the schedule alone — the enable/disable toggle sends only
+	// `enabled` — must not be rejected because of an expression already in the
+	// row. A stored expression that can never fire predates this validation,
+	// and disabling it is precisely the action an operator needs to reach.
+	// It stays inert either way: the scheduler writes next_run_at NULL, which
+	// this table's due predicate never matches.
+	suppliedSchedule := ""
+	if req.Schedule != nil {
+		suppliedSchedule = *req.Schedule
+	}
+	if err := h.validateScheduleRequest(c, name, reportType, clusterID.String(), timeRangeHours, suppliedSchedule, format, emailEnabled, nil, emailRecipients, parameters); err != nil {
 		return err
 	}
 
 	var nextRunAt pgtype.Timestamptz
 	if scheduleStr != "" && enabled {
-		next, err := scheduler.NextRunTime(scheduleStr, time.Now())
+		next, err := cronspec.NextRunTime(scheduleStr, time.Now())
 		if err == nil {
 			nextRunAt = pgtype.Timestamptz{Time: next, Valid: true}
 		}
@@ -687,7 +698,7 @@ func (h *ReportHandler) validateScheduleRequest(c fiber.Ctx, name, reportType, c
 		return fiber.NewError(fiber.StatusBadRequest, "time_range_hours must be between 1 and 8760")
 	}
 	if schedule != "" {
-		if err := scheduler.ValidateCron(schedule); err != nil {
+		if err := cronspec.ValidateCron(schedule); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid schedule: %v", err))
 		}
 	}

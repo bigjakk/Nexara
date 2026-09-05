@@ -50,10 +50,9 @@ vi.mock("@/features/dashboard/api/dashboard-queries", () => ({
 
 // Mock useQueries to return empty arrays for node/vm queries
 vi.mock("@tanstack/react-query", async () => {
-  const actual =
-    await vi.importActual<typeof import("@tanstack/react-query")>(
-      "@tanstack/react-query",
-    );
+  const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
+    "@tanstack/react-query",
+  );
   return {
     ...actual,
     useQueries: () => [] as unknown[],

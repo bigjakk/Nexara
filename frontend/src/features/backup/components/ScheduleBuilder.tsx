@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { pad2 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   WEEKDAYS,
@@ -33,10 +34,6 @@ const EVERY_HOURS = [2, 3, 4, 6, 8, 12];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const MINUTES = Array.from({ length: 12 }, (_, i) => i * 5);
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
 
 interface ScheduleBuilderProps {
   /** The PVE calendar string, e.g. "02:00" or "mon,fri 22:30". */
@@ -103,7 +100,9 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
       <div className="flex items-center gap-2">
         <Select
           value={String(spec.hour)}
-          onValueChange={(v) => { update({ hour: Number(v) }); }}
+          onValueChange={(v) => {
+            update({ hour: Number(v) });
+          }}
         >
           <SelectTrigger className="w-20" aria-label="Hour">
             <SelectValue />
@@ -111,7 +110,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
           <SelectContent>
             {HOURS.map((h) => (
               <SelectItem key={h} value={String(h)}>
-                {pad(h)}
+                {pad2(h)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -119,7 +118,9 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
         <span className="text-muted-foreground">:</span>
         <Select
           value={String(spec.minute)}
-          onValueChange={(v) => { update({ minute: Number(v) }); }}
+          onValueChange={(v) => {
+            update({ minute: Number(v) });
+          }}
         >
           <SelectTrigger className="w-20" aria-label="Minute">
             <SelectValue />
@@ -127,7 +128,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
           <SelectContent>
             {minutes.map((m) => (
               <SelectItem key={m} value={String(m)}>
-                {pad(m)}
+                {pad2(m)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -153,7 +154,9 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
               "h-7 px-3 text-xs font-normal",
               spec.frequency === f.value && "font-medium",
             )}
-            onClick={() => { selectFrequency(f.value); }}
+            onClick={() => {
+              selectFrequency(f.value);
+            }}
           >
             {f.label}
           </Button>
@@ -166,7 +169,9 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
             <Label>Every</Label>
             <Select
               value={String(spec.everyHours)}
-              onValueChange={(v) => { update({ everyHours: Number(v) }); }}
+              onValueChange={(v) => {
+                update({ everyHours: Number(v) });
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -185,7 +190,9 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
             <Label>At minute</Label>
             <Select
               value={String(spec.minute)}
-              onValueChange={(v) => { update({ minute: Number(v) }); }}
+              onValueChange={(v) => {
+                update({ minute: Number(v) });
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -193,7 +200,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
               <SelectContent>
                 {minutes.map((m) => (
                   <SelectItem key={m} value={String(m)}>
-                    :{pad(m)}
+                    :{pad2(m)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -219,7 +226,9 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
                     variant={active ? "default" : "outline"}
                     aria-pressed={active}
                     className="h-7 w-12 px-0 text-xs font-normal"
-                    onClick={() => { toggleWeekday(day.value); }}
+                    onClick={() => {
+                      toggleWeekday(day.value);
+                    }}
                   >
                     {day.short}
                   </Button>
@@ -237,7 +246,9 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
             <Label>Day of month</Label>
             <Select
               value={String(spec.dayOfMonth)}
-              onValueChange={(v) => { update({ dayOfMonth: Number(v) }); }}
+              onValueChange={(v) => {
+                update({ dayOfMonth: Number(v) });
+              }}
             >
               <SelectTrigger className="w-28">
                 <SelectValue />
@@ -266,7 +277,9 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
           <Input
             id="schedule-custom"
             value={spec.custom}
-            onChange={(e) => { update({ custom: e.target.value }); }}
+            onChange={(e) => {
+              update({ custom: e.target.value });
+            }}
             placeholder="mon..fri 02:00"
             className="font-mono"
           />

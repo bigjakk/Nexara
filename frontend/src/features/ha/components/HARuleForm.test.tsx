@@ -5,7 +5,11 @@ import { renderWithProviders } from "@/test/test-utils";
 import { HARuleForm } from "./HARuleForm";
 import type { VMResponse, NodeResponse } from "@/types/api";
 
-function makeVM(vmid: number, name: string, type: "qemu" | "lxc" = "qemu"): VMResponse {
+function makeVM(
+  vmid: number,
+  name: string,
+  type: "qemu" | "lxc" = "qemu",
+): VMResponse {
   return {
     id: `vm-${String(vmid)}`,
     cluster_id: "c1",
@@ -66,7 +70,9 @@ describe("HARuleForm", () => {
     expect(screen.getByText(/Nodes & Priorities/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Strict/i)).toBeInTheDocument();
     // Resource-affinity-specific should NOT be present
-    expect(screen.queryByText(/Positive \(keep together\)/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Positive \(keep together\)/i),
+    ).not.toBeInTheDocument();
   });
 
   it("switches to resource-affinity fields when type changes", async () => {
@@ -85,10 +91,14 @@ describe("HARuleForm", () => {
     const [typeTrigger] = screen.getAllByRole("combobox");
     if (!typeTrigger) throw new Error("Type select not rendered");
     await user.click(typeTrigger);
-    await user.click(screen.getByRole("option", { name: /Resource Affinity/i }));
+    await user.click(
+      screen.getByRole("option", { name: /Resource Affinity/i }),
+    );
 
     // Now resource-affinity-specific should appear and node-affinity should disappear
-    expect(screen.getAllByText(/Positive \(keep together\)/i).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/Positive \(keep together\)/i).length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByText(/Nodes & Priorities/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Strict/i)).not.toBeInTheDocument();
   });
@@ -133,7 +143,10 @@ describe("HARuleForm", () => {
     expect(screen.getByText("web-1")).toBeInTheDocument();
     expect(screen.getByText("db-1")).toBeInTheDocument();
 
-    await user.type(screen.getByPlaceholderText(/Search by name or ID/i), "web");
+    await user.type(
+      screen.getByPlaceholderText(/Search by name or ID/i),
+      "web",
+    );
 
     expect(screen.getByText("web-1")).toBeInTheDocument();
     expect(screen.queryByText("db-1")).not.toBeInTheDocument();

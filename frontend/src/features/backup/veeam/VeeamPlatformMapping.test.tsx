@@ -3,10 +3,7 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
 import { VeeamPlatformMapping } from "./VeeamPlatformMapping";
-import type {
-  VeeamPlatform,
-  VeeamInfrastructureGuest,
-} from "../types/backup";
+import type { VeeamPlatform, VeeamInfrastructureGuest } from "../types/backup";
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: { list: vi.fn(), put: vi.fn() },
@@ -19,7 +16,7 @@ const CEPH = "c0000000-0000-4000-8000-000000000001";
 function platform(over: Partial<VeeamPlatform> = {}): VeeamPlatform {
   return {
     platform_id: "01208ee8-47fe-4ea8-8727-5115874da1ad",
-    display_name: "CRJLAB",
+    display_name: "cluster01",
     cluster_id: null,
     cluster_name: "",
     object_count: 18,
@@ -28,13 +25,15 @@ function platform(over: Partial<VeeamPlatform> = {}): VeeamPlatform {
   };
 }
 
-function guest(over: Partial<VeeamInfrastructureGuest> = {}): VeeamInfrastructureGuest {
+function guest(
+  over: Partial<VeeamInfrastructureGuest> = {},
+): VeeamInfrastructureGuest {
   return {
     id: "infra-1",
     veeam_ref: "33de6836-c00c-4d7c-bd37-2bdf37743b47",
     role: "worker",
     name: "veeam13-appliance01",
-    host_name: "hv01.example.lan",
+    host_name: "pve-01.example.com",
     is_disabled: false,
     is_online: false,
     cluster_id: CEPH,
@@ -54,11 +53,17 @@ describe("VeeamPlatformMapping", () => {
 
   it("warns that an unmapped connection is invisible, not merely untidy", () => {
     renderWithProviders(
-      <VeeamPlatformMapping serverId="srv-1" platforms={[platform()]} infrastructure={[]} />,
+      <VeeamPlatformMapping
+        serverId="srv-1"
+        platforms={[platform()]}
+        infrastructure={[]}
+      />,
     );
     // The consequence, not the state. An operator has no other way to learn
     // that these guests are missing from coverage entirely.
-    expect(screen.getByText(/missing from backup coverage/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/missing from backup coverage/i),
+    ).toBeInTheDocument();
   });
 
   it("says nothing when every connection is mapped", () => {
@@ -69,7 +74,9 @@ describe("VeeamPlatformMapping", () => {
         infrastructure={[]}
       />,
     );
-    expect(screen.queryByText(/missing from backup coverage/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/missing from backup coverage/i),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Mapped")).toBeInTheDocument();
   });
 
@@ -110,11 +117,15 @@ describe("VeeamPlatformMapping", () => {
       <VeeamPlatformMapping
         serverId="srv-1"
         platforms={[platform({ cluster_id: CEPH, cluster_name: "Ceph" })]}
-        infrastructure={[guest({ vmid: null, cluster_id: null, cluster_name: "" })]}
+        infrastructure={[
+          guest({ vmid: null, cluster_id: null, cluster_name: "" }),
+        ]}
       />,
     );
     // It is still being counted as an ordinary unprotected VM, which is the
     // noise this whole eligibility model exists to remove.
-    expect(screen.getByText(/no guest on a mapped cluster/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/no guest on a mapped cluster/i),
+    ).toBeInTheDocument();
   });
 });

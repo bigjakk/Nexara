@@ -35,7 +35,9 @@ export function MoveToFolderDialog({
   // Pre-select the current folder when the dialog opens.
   useEffect(() => {
     if (!open) return;
-    const current = foldersQuery.data?.memberships.find((m) => m.vm_id === vmId);
+    const current = foldersQuery.data?.memberships.find(
+      (m) => m.vm_id === vmId,
+    );
     setSelected(current ? current.folder_id : null);
     setError(null);
   }, [open, foldersQuery.data, vmId]);
@@ -81,14 +83,18 @@ export function MoveToFolderDialog({
           <div className="max-h-[300px] space-y-0.5 overflow-y-auto rounded-md border p-1">
             <button
               type="button"
-              onClick={() => { setSelected(null); }}
+              onClick={() => {
+                setSelected(null);
+              }}
               className={`flex w-full items-center rounded px-2 py-1 text-left text-sm transition-colors ${
                 selected === null
                   ? "bg-accent text-accent-foreground"
                   : "hover:bg-accent/50"
               }`}
             >
-              <span className="text-muted-foreground">(Unassigned — Discovered)</span>
+              <span className="text-muted-foreground">
+                (Unassigned — Discovered)
+              </span>
             </button>
             {flat.length === 0 && (
               <p className="px-2 py-2 text-xs text-muted-foreground">
@@ -99,7 +105,9 @@ export function MoveToFolderDialog({
               <button
                 key={folder.id}
                 type="button"
-                onClick={() => { setSelected(folder.id); }}
+                onClick={() => {
+                  setSelected(folder.id);
+                }}
                 className={`flex w-full items-center rounded px-2 py-1 text-left text-sm transition-colors ${
                   selected === folder.id
                     ? "bg-accent text-accent-foreground"
@@ -118,7 +126,9 @@ export function MoveToFolderDialog({
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => { onOpenChange(false); }}
+            onClick={() => {
+              onOpenChange(false);
+            }}
             disabled={assign.isPending}
           >
             Cancel

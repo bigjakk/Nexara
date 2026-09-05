@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { DetailField } from "@/components/DetailField";
 import type { VeeamProbeResult } from "../types/backup";
 
 interface VeeamProbeSummaryProps {
@@ -31,33 +32,23 @@ export function VeeamProbeSummary({ probe }: VeeamProbeSummaryProps) {
       </div>
 
       <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-        <div>
-          <dt className="text-xs text-muted-foreground">Build</dt>
-          <dd className="font-mono">{probe.build_version}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-muted-foreground">API revision</dt>
-          <dd className="font-mono">{probe.api_revision}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-muted-foreground">Platform</dt>
-          <dd>{probe.platform || "-"}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-muted-foreground">Licence</dt>
-          <dd>
-            {probe.license_edition || "-"}
-            {probe.license_type !== "" && ` (${probe.license_type})`}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs text-muted-foreground">Licensed to</dt>
-          <dd>{probe.licensed_to || "-"}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-muted-foreground">Expires</dt>
-          <dd>{formatDate(probe.license_expiration)}</dd>
-        </div>
+        <DetailField label="Build" variant="mono">
+          {probe.build_version}
+        </DetailField>
+        <DetailField label="API revision" variant="mono">
+          {probe.api_revision}
+        </DetailField>
+        <DetailField label="Platform">{probe.platform || "-"}</DetailField>
+        <DetailField label="Licence">
+          {probe.license_edition || "-"}
+          {probe.license_type !== "" && ` (${probe.license_type})`}
+        </DetailField>
+        <DetailField label="Licensed to">
+          {probe.licensed_to || "-"}
+        </DetailField>
+        <DetailField label="Expires">
+          {formatDate(probe.license_expiration)}
+        </DetailField>
       </dl>
 
       <div>

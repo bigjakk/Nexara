@@ -101,7 +101,11 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
           setSubject("");
         },
         onError: (err) => {
-          setError(err instanceof ApiClientError ? err.message : "Failed to grant access");
+          setError(
+            err instanceof ApiClientError
+              ? err.message
+              : "Failed to grant access",
+          );
         },
       },
     );
@@ -109,14 +113,28 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
 
   const handleRevoke = (entry: AccessACLEntry) => {
     setRevokeError("");
-    const kind = entry.type === "group" ? "groups" : entry.type === "token" ? "tokens" : "users";
+    const kind =
+      entry.type === "group"
+        ? "groups"
+        : entry.type === "token"
+          ? "tokens"
+          : "users";
     updateACL.mutate(
-      { path: entry.path, roles: entry.roleid, [kind]: entry.ugid, delete: true },
       {
-        onSettled: () => { setRevokeTarget(null); },
+        path: entry.path,
+        roles: entry.roleid,
+        [kind]: entry.ugid,
+        delete: true,
+      },
+      {
+        onSettled: () => {
+          setRevokeTarget(null);
+        },
         onError: (err) => {
           setRevokeError(
-            err instanceof ApiClientError ? err.message : "Failed to revoke access",
+            err instanceof ApiClientError
+              ? err.message
+              : "Failed to revoke access",
           );
         },
       },
@@ -164,14 +182,16 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                   <Input
                     id="acl-path"
                     value={path}
-                    onChange={(e) => { setPath(e.target.value); }}
+                    onChange={(e) => {
+                      setPath(e.target.value);
+                    }}
                     placeholder="/vms/100"
                     required
                   />
                   <p className="mt-1 text-xs text-muted-foreground">
-                    <code className="font-mono">/</code> covers the whole cluster. Others:{" "}
-                    <code className="font-mono">/vms/100</code>,{" "}
-                    <code className="font-mono">/storage/local</code>,{" "}
+                    <code className="font-mono">/</code> covers the whole
+                    cluster. Others: <code className="font-mono">/vms/100</code>
+                    , <code className="font-mono">/storage/local</code>,{" "}
                     <code className="font-mono">/nodes/pve1</code>.
                   </p>
                 </div>
@@ -214,19 +234,26 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
 
                 <div>
                   <Label htmlFor="acl-subject">
-                    {subjectKind === "user" ? "User" : subjectKind === "group" ? "Group" : "Token"}
+                    {subjectKind === "user"
+                      ? "User"
+                      : subjectKind === "group"
+                        ? "Group"
+                        : "Token"}
                   </Label>
                   {subjectKind === "token" ? (
                     <>
                       <Input
                         id="acl-subject"
                         value={subject}
-                        onChange={(e) => { setSubject(e.target.value); }}
+                        onChange={(e) => {
+                          setSubject(e.target.value);
+                        }}
                         placeholder="user@pve!tokenname"
                         required
                       />
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Full token id, including the <code className="font-mono">!</code>.
+                        Full token id, including the{" "}
+                        <code className="font-mono">!</code>.
                       </p>
                     </>
                   ) : (
@@ -255,7 +282,9 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                   <input
                     type="checkbox"
                     checked={propagate}
-                    onChange={(e) => { setPropagate(e.target.checked); }}
+                    onChange={(e) => {
+                      setPropagate(e.target.checked);
+                    }}
                   />
                   Propagate to child paths
                 </label>
@@ -264,7 +293,12 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
 
                 <Button
                   type="submit"
-                  disabled={!path.trim() || !role || !subject.trim() || updateACL.isPending}
+                  disabled={
+                    !path.trim() ||
+                    !role ||
+                    !subject.trim() ||
+                    updateACL.isPending
+                  }
                 >
                   {updateACL.isPending ? "Granting..." : "Grant"}
                 </Button>
@@ -278,7 +312,13 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
         {revokeError && (
           <div className="mb-3 flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
             <p className="text-sm text-destructive">{revokeError}</p>
-            <Button variant="ghost" size="sm" onClick={() => { setRevokeError(""); }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setRevokeError("");
+              }}
+            >
               Dismiss
             </Button>
           </div>
@@ -287,7 +327,9 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
         {aclQuery.isLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : !aclQuery.data || aclQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No access control entries.</p>
+          <p className="text-sm text-muted-foreground">
+            No access control entries.
+          </p>
         ) : (
           <Table>
             <TableHeader>
@@ -297,17 +339,25 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                 <TableHead>Subject</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Propagate</TableHead>
-                {manageable && <TableHead className="text-right">Actions</TableHead>}
+                {manageable && (
+                  <TableHead className="text-right">Actions</TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {aclQuery.data.map((entry) => (
-                <TableRow key={`${entry.path}|${entry.type}|${entry.ugid}|${entry.roleid}`}>
-                  <TableCell className="font-mono text-xs">{entry.path}</TableCell>
+                <TableRow
+                  key={`${entry.path}|${entry.type}|${entry.ugid}|${entry.roleid}`}
+                >
+                  <TableCell className="font-mono text-xs">
+                    {entry.path}
+                  </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{entry.type}</Badge>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{entry.ugid}</TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {entry.ugid}
+                  </TableCell>
                   <TableCell>{entry.roleid}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {entry.propagate ? "Yes" : "No"}
@@ -318,7 +368,9 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
                         variant="ghost"
                         size="sm"
                         aria-label={`Revoke ${entry.roleid} on ${entry.path}`}
-                        onClick={() => { setRevokeTarget(entry); }}
+                        onClick={() => {
+                          setRevokeTarget(entry);
+                        }}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
@@ -332,7 +384,9 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
 
         <AlertDialog
           open={revokeTarget !== null}
-          onOpenChange={(open) => { if (!open) setRevokeTarget(null); }}
+          onOpenChange={(open) => {
+            if (!open) setRevokeTarget(null);
+          }}
         >
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -340,9 +394,10 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
               <AlertDialogDescription>
                 {revokeTarget && (
                   <>
-                    <code className="font-mono">{revokeTarget.ugid}</code> loses the{" "}
-                    <strong>{revokeTarget.roleid}</strong> role on{" "}
-                    <code className="font-mono">{revokeTarget.path}</code>, immediately.
+                    <code className="font-mono">{revokeTarget.ugid}</code> loses
+                    the <strong>{revokeTarget.roleid}</strong> role on{" "}
+                    <code className="font-mono">{revokeTarget.path}</code>,
+                    immediately.
                   </>
                 )}
               </AlertDialogDescription>

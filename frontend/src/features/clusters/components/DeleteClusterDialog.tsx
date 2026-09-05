@@ -22,7 +22,11 @@ interface DeleteClusterDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function DeleteClusterDialog({ cluster, open, onOpenChange }: DeleteClusterDialogProps) {
+export function DeleteClusterDialog({
+  cluster,
+  open,
+  onOpenChange,
+}: DeleteClusterDialogProps) {
   const [confirmName, setConfirmName] = useState("");
   const [revokeCredentials, setRevokeCredentials] = useState(false);
   const deleteMutation = useDeleteCluster();
@@ -40,7 +44,8 @@ export function DeleteClusterDialog({ cluster, open, onOpenChange }: DeleteClust
   // server rejects it with a 403. Offering a checkbox that turns a working
   // delete into a failed one would be worse than not offering it.
   const canRevoke =
-    cluster.credential_source === "bootstrap" && hasPermission("manage", "cluster");
+    cluster.credential_source === "bootstrap" &&
+    hasPermission("manage", "cluster");
 
   function handleDelete() {
     deleteMutation.mutate(
@@ -68,15 +73,18 @@ export function DeleteClusterDialog({ cluster, open, onOpenChange }: DeleteClust
         <DialogHeader>
           <DialogTitle>Delete Cluster</DialogTitle>
           <DialogDescription>
-            This will permanently remove <CopyableName name={cluster.name} /> and all associated data (nodes, VMs, metrics).
-            Type the cluster name to confirm.
+            This will permanently remove <CopyableName name={cluster.name} />{" "}
+            and all associated data (nodes, VMs, metrics). Type the cluster name
+            to confirm.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <Input
             placeholder={cluster.name}
             value={confirmName}
-            onChange={(e) => { setConfirmName(e.target.value); }}
+            onChange={(e) => {
+              setConfirmName(e.target.value);
+            }}
           />
           {canRevoke && (
             <div className="rounded-lg border border-border p-3 space-y-2">
@@ -85,10 +93,16 @@ export function DeleteClusterDialog({ cluster, open, onOpenChange }: DeleteClust
                   id="revoke-pve-credentials"
                   className="mt-0.5"
                   checked={revokeCredentials}
-                  onCheckedChange={(checked) => { setRevokeCredentials(Boolean(checked)); }}
+                  onCheckedChange={(checked) => {
+                    setRevokeCredentials(Boolean(checked));
+                  }}
                 />
-                <Label htmlFor="revoke-pve-credentials" className="text-sm font-normal leading-snug">
-                  Also delete the Proxmox user and API token Nexara created for this cluster
+                <Label
+                  htmlFor="revoke-pve-credentials"
+                  className="text-sm font-normal leading-snug"
+                >
+                  Also delete the Proxmox user and API token Nexara created for
+                  this cluster
                 </Label>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -103,12 +117,21 @@ export function DeleteClusterDialog({ cluster, open, onOpenChange }: DeleteClust
           )}
           {deleteMutation.isError && (
             <p className="text-sm text-destructive">
-              {deleteMutation.error instanceof Error ? deleteMutation.error.message : "Delete failed"}
+              {deleteMutation.error instanceof Error
+                ? deleteMutation.error.message
+                : "Delete failed"}
             </p>
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => { onOpenChange(false); }}>Cancel</Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              onOpenChange(false);
+            }}
+          >
+            Cancel
+          </Button>
           <Button
             variant="destructive"
             disabled={confirmName !== cluster.name || deleteMutation.isPending}

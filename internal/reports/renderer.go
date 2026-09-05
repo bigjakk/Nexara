@@ -18,10 +18,10 @@ func RenderHTML(data *ReportData) (string, error) {
 	}
 
 	type templateData struct {
-		Title       string
-		ClusterName string
-		GeneratedAt string
-		TimeRange   TimeRange
+		Title        string
+		ClusterName  string
+		GeneratedAt  string
+		TimeRange    TimeRange
 		SectionsHTML template.HTML
 	}
 
@@ -174,4 +174,3 @@ func RenderCSV(data *ReportData) (string, error) {
 
 	return buf.String(), nil
 }
-

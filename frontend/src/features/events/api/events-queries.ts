@@ -80,8 +80,7 @@ export function useAuditActions() {
 export function useAuditUsers() {
   return useQuery({
     queryKey: ["audit-users"],
-    queryFn: () =>
-      apiClient.list<AuditUserRef>("/api/v1/audit-log/users"),
+    queryFn: () => apiClient.list<AuditUserRef>("/api/v1/audit-log/users"),
     staleTime: 300_000,
   });
 }
@@ -141,8 +140,7 @@ export function buildExportUrl(
   const params = new URLSearchParams();
   params.set("format", format);
   if (filters.clusterId) params.set("cluster_id", filters.clusterId);
-  if (filters.resourceType)
-    params.set("resource_type", filters.resourceType);
+  if (filters.resourceType) params.set("resource_type", filters.resourceType);
   if (filters.userId) params.set("user_id", filters.userId);
   if (filters.action) params.set("action", filters.action);
   if (filters.startTime) params.set("start_time", filters.startTime);

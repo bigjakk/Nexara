@@ -80,7 +80,11 @@ export function useSeedMetricsForClusters(
   });
 }
 
-export function useNodeHistoricalMetrics(clusterId: string, nodeId: string, range: TimeRange) {
+export function useNodeHistoricalMetrics(
+  clusterId: string,
+  nodeId: string,
+  range: TimeRange,
+) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeId, "metrics", range],
     queryFn: async () => {
@@ -94,7 +98,11 @@ export function useNodeHistoricalMetrics(clusterId: string, nodeId: string, rang
   });
 }
 
-export function useVMHistoricalMetrics(clusterId: string, vmId: string, range: TimeRange) {
+export function useVMHistoricalMetrics(
+  clusterId: string,
+  vmId: string,
+  range: TimeRange,
+) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vms", vmId, "metrics", range],
     queryFn: async () => {

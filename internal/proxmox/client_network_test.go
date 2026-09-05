@@ -265,7 +265,7 @@ func TestGetNetworkInterfaces_DecodesFullInterface(t *testing.T) {
 	// the richer form are exactly the ones prone to it.
 	body := `{"data":[{
 		"iface":"vmbr0","type":"bridge","active":1,"autostart":1,
-		"cidr":"192.168.90.236/24","gateway":"192.168.90.1",
+		"cidr":"192.0.2.40/24","gateway":"192.0.2.1",
 		"cidr6":"fd00::2/64","gateway6":"fd00::1","netmask6":64,
 		"bridge_ports":"bond0","bridge_vlan_aware":1,"bridge_vids":"2 4 100-200",
 		"mtu":"9000","comments":"uplink"

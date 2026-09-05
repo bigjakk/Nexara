@@ -76,7 +76,10 @@ function getExpirySeconds(option: ExpiryOption): number | undefined {
   return Number(option) * 86400; // days to seconds
 }
 
-function getKeyStatus(key: { is_revoked: boolean; expires_at: string | null }): {
+function getKeyStatus(key: {
+  is_revoked: boolean;
+  expires_at: string | null;
+}): {
   label: string;
   variant: "default" | "secondary" | "destructive";
 } {
@@ -146,7 +149,9 @@ export function APIKeysPage() {
   const handleCopy = () => {
     setCopyError("");
     if (!window.isSecureContext) {
-      setCopyError("Clipboard requires HTTPS. Please select the key above and copy manually (Ctrl+C).");
+      setCopyError(
+        "Clipboard requires HTTPS. Please select the key above and copy manually (Ctrl+C).",
+      );
       return;
     }
     navigator.clipboard.writeText(createdKey).then(
@@ -157,7 +162,9 @@ export function APIKeysPage() {
         }, 2000);
       },
       () => {
-        setCopyError("Copy failed. Please select the key above and copy manually (Ctrl+C).");
+        setCopyError(
+          "Copy failed. Please select the key above and copy manually (Ctrl+C).",
+        );
       },
     );
   };
@@ -422,6 +429,7 @@ export function APIKeysPage() {
                 {createdKey}
               </code>
               <Button
+                aria-label="Copy API key"
                 variant="outline"
                 size="icon"
                 className="shrink-0"

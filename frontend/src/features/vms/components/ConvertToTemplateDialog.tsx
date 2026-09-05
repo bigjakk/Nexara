@@ -74,7 +74,9 @@ export function ConvertToTemplateDialog({
             <TaskProgressBanner
               clusterId={clusterId}
               upid={upid}
-              onComplete={() => { handleClose(); }}
+              onComplete={() => {
+                handleClose();
+              }}
               description={`Convert ${resourceName} to template`}
             />
           </div>
@@ -86,9 +88,10 @@ export function ConvertToTemplateDialog({
                 <div className="text-sm text-amber-700 dark:text-amber-300">
                   <p className="font-medium">This action is irreversible</p>
                   <p className="mt-1">
-                    Converting this {typeLabel} to a template will make it read-only.
-                    It can no longer be started or modified — only cloned to create new {typeLabel}s.
-                    To get a runnable {typeLabel} back, you must clone the template.
+                    Converting this {typeLabel} to a template will make it
+                    read-only. It can no longer be started or modified — only
+                    cloned to create new {typeLabel}s. To get a runnable{" "}
+                    {typeLabel} back, you must clone the template.
                   </p>
                 </div>
               </div>
@@ -101,7 +104,9 @@ export function ConvertToTemplateDialog({
               <Input
                 id="confirm-name"
                 value={confirmText}
-                onChange={(e) => { setConfirmText(e.target.value); }}
+                onChange={(e) => {
+                  setConfirmText(e.target.value);
+                }}
                 placeholder={resourceName}
                 autoComplete="off"
               />
@@ -122,7 +127,9 @@ export function ConvertToTemplateDialog({
                 variant="destructive"
                 disabled={!isConfirmed || convertMutation.isPending}
               >
-                {convertMutation.isPending ? "Converting..." : "Convert to Template"}
+                {convertMutation.isPending
+                  ? "Converting..."
+                  : "Convert to Template"}
               </Button>
             </DialogFooter>
           </form>

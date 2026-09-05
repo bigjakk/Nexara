@@ -20,10 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type { ClusterResponse } from "@/types/api";
 import { useMapVeeamPlatform } from "../api/backup-queries";
-import type {
-  VeeamPlatform,
-  VeeamInfrastructureGuest,
-} from "../types/backup";
+import type { VeeamPlatform, VeeamInfrastructureGuest } from "../types/backup";
 
 /** Sentinel for "not mapped": Radix Select cannot hold an empty-string value. */
 const UNMAPPED = "__unmapped__";
@@ -116,7 +113,11 @@ export function VeeamPlatformMapping({
                             platformId: platform.platform_id,
                             clusterId: v === UNMAPPED ? null : v,
                           },
-                          { onSettled: () => { setPending(null); } },
+                          {
+                            onSettled: () => {
+                              setPending(null);
+                            },
+                          },
                         );
                       }}
                       disabled={pending === platform.platform_id}
@@ -140,7 +141,9 @@ export function VeeamPlatformMapping({
                           claim it must never get wrong.
                         */}
                         {platform.cluster_id !== null &&
-                          !(clusters ?? []).some((c) => c.id === platform.cluster_id) && (
+                          !(clusters ?? []).some(
+                            (c) => c.id === platform.cluster_id,
+                          ) && (
                             <SelectItem value={platform.cluster_id}>
                               {platform.cluster_name || platform.cluster_id}
                             </SelectItem>

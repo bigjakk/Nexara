@@ -18,9 +18,7 @@ export function ScanScheduleCard({ clusterId }: { clusterId: string }) {
   const updateSchedule = useUpdateCVEScanSchedule();
 
   if (isLoading) {
-    return (
-      <div className="h-24 animate-pulse rounded-lg border bg-card" />
-    );
+    return <div className="h-24 animate-pulse rounded-lg border bg-card" />;
   }
 
   const enabled = schedule?.enabled ?? true;
@@ -64,7 +62,9 @@ export function ScanScheduleCard({ clusterId }: { clusterId: string }) {
             />
           </button>
           <span className="text-muted-foreground">
-            {enabled ? "Automatic scanning enabled" : "Automatic scanning disabled"}
+            {enabled
+              ? "Automatic scanning enabled"
+              : "Automatic scanning disabled"}
           </span>
         </label>
 

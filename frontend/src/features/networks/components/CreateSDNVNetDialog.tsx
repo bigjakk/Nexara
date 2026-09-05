@@ -78,15 +78,24 @@ export function CreateSDNVNetDialog({
     if (isolate) params.isolate = 1;
 
     if (isEdit) {
-      const updateParams: Omit<CreateSDNVNetRequest, "vnet"> = Object.fromEntries(
-        Object.entries(params).filter(([k]) => k !== "vnet"),
-      ) as Omit<CreateSDNVNetRequest, "vnet">;
+      const updateParams: Omit<CreateSDNVNetRequest, "vnet"> =
+        Object.fromEntries(
+          Object.entries(params).filter(([k]) => k !== "vnet"),
+        ) as Omit<CreateSDNVNetRequest, "vnet">;
       update.mutate(
         { vnet: initialData.vnet, params: updateParams },
-        { onSuccess: () => { setOpen(false); } },
+        {
+          onSuccess: () => {
+            setOpen(false);
+          },
+        },
       );
     } else {
-      create.mutate(params, { onSuccess: () => { setOpen(false); } });
+      create.mutate(params, {
+        onSuccess: () => {
+          setOpen(false);
+        },
+      });
     }
   };
 
@@ -94,7 +103,11 @@ export function CreateSDNVNetDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {isEdit ? (
-          <Button variant="ghost" size="icon">
+          <Button
+            aria-label={`Edit VNet ${initialData.vnet}`}
+            variant="ghost"
+            size="icon"
+          >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (
@@ -115,7 +128,9 @@ export function CreateSDNVNetDialog({
               <Input
                 placeholder="myvnet"
                 value={vnet}
-                onChange={(e) => { setVnet(e.target.value); }}
+                onChange={(e) => {
+                  setVnet(e.target.value);
+                }}
                 disabled={isEdit}
               />
             </div>
@@ -142,7 +157,9 @@ export function CreateSDNVNetDialog({
                 type="number"
                 placeholder="100"
                 value={tag}
-                onChange={(e) => { setTag(e.target.value); }}
+                onChange={(e) => {
+                  setTag(e.target.value);
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -150,7 +167,9 @@ export function CreateSDNVNetDialog({
               <Input
                 placeholder="My VNet"
                 value={alias}
-                onChange={(e) => { setAlias(e.target.value); }}
+                onChange={(e) => {
+                  setAlias(e.target.value);
+                }}
               />
             </div>
           </div>
@@ -158,7 +177,9 @@ export function CreateSDNVNetDialog({
             <Checkbox
               id="vlanaware"
               checked={vlanaware}
-              onCheckedChange={(checked) => { setVlanaware(checked === true); }}
+              onCheckedChange={(checked) => {
+                setVlanaware(checked === true);
+              }}
             />
             <Label htmlFor="vlanaware">VLAN Aware</Label>
           </div>
@@ -166,7 +187,9 @@ export function CreateSDNVNetDialog({
             <Checkbox
               id="isolate"
               checked={isolate}
-              onCheckedChange={(checked) => { setIsolate(checked === true); }}
+              onCheckedChange={(checked) => {
+                setIsolate(checked === true);
+              }}
             />
             <Label htmlFor="isolate">Isolate Ports</Label>
           </div>
@@ -174,7 +197,12 @@ export function CreateSDNVNetDialog({
             <p className="text-sm text-destructive">{errorMessage}</p>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button

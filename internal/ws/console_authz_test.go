@@ -1,9 +1,7 @@
 package ws
 
 import (
-	"log/slog"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -25,7 +23,7 @@ import (
 //   - Tokens on either path may arrive in `?token=` (legacy) OR in
 //     `Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>`.
 func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := testLogger()
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
 
 	// We only need a Server with the JWT service and logger wired up; the
@@ -115,10 +113,10 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		path       string
-		token      string
-		extra      string // query string fragment appended after token=...
+		name  string
+		path  string
+		token string
+		extra string // query string fragment appended after token=...
 		// useSubprotocol — when true, send the token via Sec-WebSocket-Protocol
 		// instead of as a query param. Both paths should accept the same tokens.
 		useSubprotocol bool

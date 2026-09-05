@@ -147,7 +147,8 @@ export function useEventInvalidation(clusterIds: string[]): void {
           if (
             cid &&
             event.resource_id &&
-            (event.resource_type === "vm" || event.resource_type === "container")
+            (event.resource_type === "vm" ||
+              event.resource_type === "container")
           ) {
             scheduleInvalidation(
               ["clusters", cid, "vms", event.resource_id, "snapshots"],
@@ -158,20 +159,13 @@ export function useEventInvalidation(clusterIds: string[]): void {
 
         case "cve_scan":
           if (cid) {
-            scheduleInvalidation(
-              ["cve-scans", cid],
-              ["security-posture", cid],
-            );
+            scheduleInvalidation(["cve-scans", cid], ["security-posture", cid]);
           }
           break;
 
         case "alert_fired":
         case "alert_state_change":
-          scheduleInvalidation(
-            ["alerts"],
-            ["alert-rules"],
-            ["alert-summary"],
-          );
+          scheduleInvalidation(["alerts"], ["alert-rules"], ["alert-summary"]);
           if (cid) {
             scheduleInvalidation(
               ["cluster-alerts", cid],
@@ -192,9 +186,7 @@ export function useEventInvalidation(clusterIds: string[]): void {
 
         case "ha_change":
           if (cid) {
-            scheduleInvalidation(
-              ["clusters", cid, "ha"],
-            );
+            scheduleInvalidation(["clusters", cid, "ha"]);
           }
           break;
 
@@ -206,25 +198,19 @@ export function useEventInvalidation(clusterIds: string[]): void {
 
         case "pool_change":
           if (cid) {
-            scheduleInvalidation(
-              ["clusters", cid, "pools"],
-            );
+            scheduleInvalidation(["clusters", cid, "pools"]);
           }
           break;
 
         case "replication_change":
           if (cid) {
-            scheduleInvalidation(
-              ["clusters", cid, "replication"],
-            );
+            scheduleInvalidation(["clusters", cid, "replication"]);
           }
           break;
 
         case "acme_change":
           if (cid) {
-            scheduleInvalidation(
-              ["clusters", cid, "acme"],
-            );
+            scheduleInvalidation(["clusters", cid, "acme"]);
           }
           break;
       }

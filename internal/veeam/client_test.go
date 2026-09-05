@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"net/url"
-	"strconv"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -67,6 +68,12 @@ type fakeVBR struct {
 	// tokens — the pathological case a naive retry loop turns into an
 	// unbounded credential spray.
 	rejectAllAPI bool
+	// tokenFailAfter, when > 0, makes the TOKEN endpoint answer
+	// tokenFailStatus once that many grants have already succeeded. Models a
+	// VBR restarting mid-pass: the client holds a token the server no longer
+	// accepts, and the re-grant lands on a server not yet serving the API.
+	tokenFailAfter  int32
+	tokenFailStatus int
 	// expireAfter, when > 0, makes issued tokens stop being accepted after
 	// that many authenticated requests, forcing a 401-refresh-retry.
 	expireAfter int32
@@ -240,6 +247,15 @@ func (f *fakeVBR) serveToken(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(fixture(f.t, "error_bad_credentials.json"))
 		return
 	}
+	if f.tokenFailAfter > 0 && f.tokenGrants.Load() >= f.tokenFailAfter {
+		w.WriteHeader(f.tokenFailStatus)
+		// Body built from the status rather than canned, so it cannot
+		// contradict what was actually sent — the whole point of these tests
+		// is which status the caller believes it saw.
+		fmt.Fprintf(w, `{"errorCode":%q,"message":%q,"status":%d}`,
+			http.StatusText(f.tokenFailStatus), http.StatusText(f.tokenFailStatus), f.tokenFailStatus)
+		return
+	}
 
 	f.tokenGrants.Add(1)
 	f.authedCalls.Store(0)
@@ -367,8 +383,8 @@ func TestProbe_HappyPath(t *testing.T) {
 	if len(res.ProxmoxClusters) != 1 {
 		t.Fatalf("ProxmoxClusters = %+v, want exactly one", res.ProxmoxClusters)
 	}
-	if got := res.ProxmoxClusters[0]; got.Name != "EXAMPLE" || got.VMCount != 14 {
-		t.Errorf("ProxmoxClusters[0] = %+v, want {EXAMPLE 14}", got)
+	if got := res.ProxmoxClusters[0]; got.Name != "cluster01" || got.VMCount != 14 {
+		t.Errorf("ProxmoxClusters[0] = %+v, want {cluster01 14}", got)
 	}
 
 	// Discovery must be the unauthenticated bootstrap, not a probe ladder:

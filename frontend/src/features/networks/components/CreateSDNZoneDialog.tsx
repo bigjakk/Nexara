@@ -72,11 +72,15 @@ export function CreateSDNZoneDialog({
       setReversedns(initialData.reversedns ?? "");
       setDnszone(initialData.dnszone ?? "");
       setController(initialData.controller ?? "");
-      setVrfVxlan(initialData["vrf-vxlan"] ? String(initialData["vrf-vxlan"]) : "");
+      setVrfVxlan(
+        initialData["vrf-vxlan"] ? String(initialData["vrf-vxlan"]) : "",
+      );
       setExitnodes(initialData.exitnodes ?? "");
       setMac(initialData.mac ?? "");
       setAdvertiseSubnets(initialData["advertise-subnets"] === 1);
-      setDisableArpNdSuppression(initialData["disable-arp-nd-suppression"] === 1);
+      setDisableArpNdSuppression(
+        initialData["disable-arp-nd-suppression"] === 1,
+      );
     }
     if (open && !initialData) {
       setZone("");
@@ -122,15 +126,24 @@ export function CreateSDNZoneDialog({
     };
 
     if (isEdit) {
-      const updateParams: Omit<CreateSDNZoneRequest, "zone" | "type"> = Object.fromEntries(
-        Object.entries(params).filter(([k]) => k !== "zone" && k !== "type"),
-      );
+      const updateParams: Omit<CreateSDNZoneRequest, "zone" | "type"> =
+        Object.fromEntries(
+          Object.entries(params).filter(([k]) => k !== "zone" && k !== "type"),
+        );
       update.mutate(
         { zone: initialData.zone, params: updateParams },
-        { onSuccess: () => { setOpen(false); } },
+        {
+          onSuccess: () => {
+            setOpen(false);
+          },
+        },
       );
     } else {
-      create.mutate(params, { onSuccess: () => { setOpen(false); } });
+      create.mutate(params, {
+        onSuccess: () => {
+          setOpen(false);
+        },
+      });
     }
   };
 
@@ -143,7 +156,11 @@ export function CreateSDNZoneDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {isEdit ? (
-          <Button variant="ghost" size="icon">
+          <Button
+            aria-label={`Edit Zone ${initialData.zone}`}
+            variant="ghost"
+            size="icon"
+          >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (
@@ -165,7 +182,9 @@ export function CreateSDNZoneDialog({
               <Input
                 placeholder="myzone"
                 value={zone}
-                onChange={(e) => { setZone(e.target.value); }}
+                onChange={(e) => {
+                  setZone(e.target.value);
+                }}
                 disabled={isEdit}
               />
             </div>
@@ -193,7 +212,9 @@ export function CreateSDNZoneDialog({
               <Input
                 placeholder="vmbr0"
                 value={bridge}
-                onChange={(e) => { setBridge(e.target.value); }}
+                onChange={(e) => {
+                  setBridge(e.target.value);
+                }}
               />
             </div>
           )}
@@ -206,7 +227,9 @@ export function CreateSDNZoneDialog({
                 type="number"
                 placeholder="100"
                 value={tag}
-                onChange={(e) => { setTag(e.target.value); }}
+                onChange={(e) => {
+                  setTag(e.target.value);
+                }}
               />
             </div>
           )}
@@ -218,7 +241,9 @@ export function CreateSDNZoneDialog({
               <Input
                 placeholder="10.0.0.1,10.0.0.2"
                 value={peers}
-                onChange={(e) => { setPeers(e.target.value); }}
+                onChange={(e) => {
+                  setPeers(e.target.value);
+                }}
               />
             </div>
           )}
@@ -232,7 +257,9 @@ export function CreateSDNZoneDialog({
                   <Input
                     placeholder="evpnctl"
                     value={controller}
-                    onChange={(e) => { setController(e.target.value); }}
+                    onChange={(e) => {
+                      setController(e.target.value);
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -241,7 +268,9 @@ export function CreateSDNZoneDialog({
                     type="number"
                     placeholder="10000"
                     value={vrfVxlan}
-                    onChange={(e) => { setVrfVxlan(e.target.value); }}
+                    onChange={(e) => {
+                      setVrfVxlan(e.target.value);
+                    }}
                   />
                 </div>
               </div>
@@ -251,7 +280,9 @@ export function CreateSDNZoneDialog({
                   <Input
                     placeholder="node1,node2"
                     value={exitnodes}
-                    onChange={(e) => { setExitnodes(e.target.value); }}
+                    onChange={(e) => {
+                      setExitnodes(e.target.value);
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -259,7 +290,9 @@ export function CreateSDNZoneDialog({
                   <Input
                     placeholder="auto"
                     value={mac}
-                    onChange={(e) => { setMac(e.target.value); }}
+                    onChange={(e) => {
+                      setMac(e.target.value);
+                    }}
                   />
                 </div>
               </div>
@@ -268,7 +301,9 @@ export function CreateSDNZoneDialog({
                   <Checkbox
                     id="advertise-subnets"
                     checked={advertiseSubnets}
-                    onCheckedChange={(checked) => { setAdvertiseSubnets(checked === true); }}
+                    onCheckedChange={(checked) => {
+                      setAdvertiseSubnets(checked === true);
+                    }}
                   />
                   <Label htmlFor="advertise-subnets" className="cursor-pointer">
                     Advertise Subnets
@@ -278,9 +313,14 @@ export function CreateSDNZoneDialog({
                   <Checkbox
                     id="disable-arp-nd-suppression"
                     checked={disableArpNdSuppression}
-                    onCheckedChange={(checked) => { setDisableArpNdSuppression(checked === true); }}
+                    onCheckedChange={(checked) => {
+                      setDisableArpNdSuppression(checked === true);
+                    }}
                   />
-                  <Label htmlFor="disable-arp-nd-suppression" className="cursor-pointer">
+                  <Label
+                    htmlFor="disable-arp-nd-suppression"
+                    className="cursor-pointer"
+                  >
                     Disable ARP ND Suppression
                   </Label>
                 </div>
@@ -296,7 +336,9 @@ export function CreateSDNZoneDialog({
                 type="number"
                 placeholder="1500"
                 value={mtu}
-                onChange={(e) => { setMtu(e.target.value); }}
+                onChange={(e) => {
+                  setMtu(e.target.value);
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -304,7 +346,9 @@ export function CreateSDNZoneDialog({
               <Input
                 placeholder="node1,node2"
                 value={nodes}
-                onChange={(e) => { setNodes(e.target.value); }}
+                onChange={(e) => {
+                  setNodes(e.target.value);
+                }}
               />
             </div>
           </div>
@@ -316,7 +360,9 @@ export function CreateSDNZoneDialog({
               <Input
                 placeholder="pve-ipam"
                 value={ipam}
-                onChange={(e) => { setIpam(e.target.value); }}
+                onChange={(e) => {
+                  setIpam(e.target.value);
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -324,7 +370,9 @@ export function CreateSDNZoneDialog({
               <Input
                 placeholder="powerdns"
                 value={dns}
-                onChange={(e) => { setDns(e.target.value); }}
+                onChange={(e) => {
+                  setDns(e.target.value);
+                }}
               />
             </div>
           </div>
@@ -334,7 +382,9 @@ export function CreateSDNZoneDialog({
               <Input
                 placeholder="168.192.in-addr.arpa"
                 value={reversedns}
-                onChange={(e) => { setReversedns(e.target.value); }}
+                onChange={(e) => {
+                  setReversedns(e.target.value);
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -342,7 +392,9 @@ export function CreateSDNZoneDialog({
               <Input
                 placeholder="myzone.example.com"
                 value={dnszone}
-                onChange={(e) => { setDnszone(e.target.value); }}
+                onChange={(e) => {
+                  setDnszone(e.target.value);
+                }}
               />
             </div>
           </div>
@@ -351,7 +403,12 @@ export function CreateSDNZoneDialog({
             <p className="text-sm text-destructive">{errorMessage}</p>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button

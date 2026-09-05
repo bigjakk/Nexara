@@ -51,7 +51,12 @@ export function SelfCredentialConfirm({
   const [typed, setTyped] = useState("");
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>This will cut off Nexara&apos;s access</DialogTitle>
@@ -62,8 +67,8 @@ export function SelfCredentialConfirm({
           <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/20">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <p className="text-sm text-amber-800 dark:text-amber-200">
-              After this, the cluster will show as unreachable until you update its
-              credentials in Nexara. You cannot do that from this screen.
+              After this, the cluster will show as unreachable until you update
+              its credentials in Nexara. You cannot do that from this screen.
             </p>
           </div>
 
@@ -73,7 +78,9 @@ export function SelfCredentialConfirm({
             </p>
             <Input
               value={typed}
-              onChange={(e) => { setTyped(e.target.value); }}
+              onChange={(e) => {
+                setTyped(e.target.value);
+              }}
               placeholder={confirmValue}
               aria-label="Confirmation text"
             />

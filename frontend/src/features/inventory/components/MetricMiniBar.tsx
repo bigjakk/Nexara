@@ -23,7 +23,10 @@ export function MetricMiniBar({ value, label }: MetricMiniBarProps) {
     <div className="flex items-center gap-2">
       <div className="h-2 w-16 rounded-full bg-muted">
         <div
-          className={cn("h-full rounded-full transition-all", getBarColor(clamped))}
+          className={cn(
+            "h-full rounded-full transition-all",
+            getBarColor(clamped),
+          )}
           style={{ width: `${String(clamped)}%` }}
         />
       </div>

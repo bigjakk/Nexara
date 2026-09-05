@@ -35,15 +35,15 @@ func TestCompareDebianVersion(t *testing.T) {
 		{"1.10", "1.9", 1},
 		{"1.0-1", "1.0-2", -1},
 		{"1.0-2", "1.0-1", 1},
-		{"1:1.0", "2.0", 1},                   // epoch wins
-		{"2.0", "1:1.0", -1},                  // epoch wins
-		{"1.0~rc1", "1.0", -1},                // tilde sorts before empty
-		{"1.0", "1.0~rc1", 1},                 // tilde sorts before empty
-		{"1.0a", "1.0", 1},                    // letter sorts after empty
-		{"3.1.7-1+deb12u1", "3.1.7-1", 1},     // revision suffix
-		{"2.4.4-1", "2.4.3-1", 1},             // upstream wins over revision
-		{"3.1.10-1", "3.1.9-2", 1},            // numeric: 10 > 9
-		{"0.10", "0.9", 1},                    // numeric segments
+		{"1:1.0", "2.0", 1},                    // epoch wins
+		{"2.0", "1:1.0", -1},                   // epoch wins
+		{"1.0~rc1", "1.0", -1},                 // tilde sorts before empty
+		{"1.0", "1.0~rc1", 1},                  // tilde sorts before empty
+		{"1.0a", "1.0", 1},                     // letter sorts after empty
+		{"3.1.7-1+deb12u1", "3.1.7-1", 1},      // revision suffix
+		{"2.4.4-1", "2.4.3-1", 1},              // upstream wins over revision
+		{"3.1.10-1", "3.1.9-2", 1},             // numeric: 10 > 9
+		{"0.10", "0.9", 1},                     // numeric segments
 		{"1.0-1+deb12u1", "1.0-1+deb12u2", -1}, // revision string compare
 	}
 	for _, c := range cases {

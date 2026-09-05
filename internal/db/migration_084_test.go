@@ -85,7 +85,7 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 		t.Fatalf("seed cluster: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'hv01')`,
+		`INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'pve-01')`,
 		m084Node, m084Cluster); err != nil {
 		t.Fatalf("seed node: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 	// AND, after 084, through (cluster_id, vmid).
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO vms (id, cluster_id, node_id, vmid, name, type)
-		 VALUES ($1, $2, $3, 125, 'docker03', 'qemu')`,
+		 VALUES ($1, $2, $3, 125, 'linux03', 'qemu')`,
 		m084LiveVM, m084Cluster, m084Node); err != nil {
 		t.Fatalf("seed vm: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 		{
 			// Arm 1: the handler recorded details.vmid explicitly.
 			id: uuid.New(), resType: "vm", resID: uuid.New().String(), action: "destroy",
-			details:  `{"node":"HV03","vmid":121,"resource_name":"Veeam13-appliance02"}`,
+			details:  `{"node":"pve-03","vmid":121,"resource_name":"Veeam13-appliance02"}`,
 			cluster:  &m084Cluster,
 			wantVmid: i(121),
 		},
@@ -120,7 +120,7 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 			// Arm 2: no details.vmid, but the UPID's id field carries it. This
 			// is the shape every TrackTask entry had.
 			id: uuid.New(), resType: "vm", resID: uuid.New().String(), action: "start",
-			details:  `{"node":"HV01","upid":"UPID:HV01:001316BE:00B8B463:6A8CE407:qmstart:110:root@pam!nexara:","resource_name":"web01"}`,
+			details:  `{"node":"pve-01","upid":"UPID:pve-01:001316BE:00B8B463:6A8CE407:qmstart:110:root@pam!nexara:","resource_name":"web01"}`,
 			cluster:  &m084Cluster,
 			wantVmid: i(110),
 		},
@@ -128,18 +128,18 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 			// Arm 3: resource_id IS the vmid (what the VM create handler
 			// records), so the UUID join could never have matched it.
 			id: uuid.New(), resType: "vm", resID: "133", action: "create",
-			details: `{"node":"HV02"}`, cluster: &m084Cluster, wantVmid: i(133),
+			details: `{"node":"pve-02"}`, cluster: &m084Cluster, wantVmid: i(133),
 		},
 		{
 			// Arm 4: nothing in the row names the vmid, but resource_id still
 			// resolves through vms — so freeze it now, before the churn.
 			id: uuid.New(), resType: "vm", resID: m084LiveVM.String(), action: "migrate",
-			details: `{"node":"HV01"}`, cluster: &m084Cluster, wantVmid: i(125),
+			details: `{"node":"pve-01"}`, cluster: &m084Cluster, wantVmid: i(125),
 		},
 		{
 			// A node task: the UPID's id field is empty. Must stay NULL, not 0.
-			id: uuid.New(), resType: "node", resID: "HV01", action: "apt_update",
-			details: `{"node":"HV01","upid":"UPID:HV01:0000A1B2:00000001:6A8CE407:aptupdate::root@pam:"}`,
+			id: uuid.New(), resType: "node", resID: "pve-01", action: "apt_update",
+			details: `{"node":"pve-01","upid":"UPID:pve-01:0000A1B2:00000001:6A8CE407:aptupdate::root@pam:"}`,
 			cluster: &m084Cluster, wantVmid: nil,
 		},
 		{
@@ -149,13 +149,13 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 			// check — stamping "destroy OSD 125" as an action on VM 125, which
 			// happens to exist in this fixture.
 			id: uuid.New(), resType: "ceph_osd", resID: "125", action: "osd_destroy",
-			details: `{"node":"HV01","upid":"UPID:HV01:0000A1B2:00000001:6A8CE407:cephdestroyosd:125:root@pam:"}`,
+			details: `{"node":"pve-01","upid":"UPID:pve-01:0000A1B2:00000001:6A8CE407:cephdestroyosd:125:root@pam:"}`,
 			cluster: &m084Cluster, wantVmid: nil,
 		},
 		{
 			// A storage task: the id field is a non-numeric storage name.
 			id: uuid.New(), resType: "storage", resID: "local", action: "backup",
-			details: `{"upid":"UPID:HV01:0000A1B2:00000001:6A8CE407:vzdump:local:root@pam:"}`,
+			details: `{"upid":"UPID:pve-01:0000A1B2:00000001:6A8CE407:vzdump:local:root@pam:"}`,
 			cluster: &m084Cluster, wantVmid: nil,
 		},
 		{
@@ -215,7 +215,7 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO vms (id, cluster_id, node_id, vmid, name, type)
-		 VALUES (gen_random_uuid(), $1, $2, 125, 'docker03', 'qemu')`,
+		 VALUES (gen_random_uuid(), $1, $2, 125, 'linux03', 'qemu')`,
 		m084Cluster, m084Node); err != nil {
 		t.Fatalf("churn re-insert: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 		ResourceID:   uuid.New().String(),
 		Action:       "migration-084-fresh",
 		Details: []byte(
-			`{"upid":"UPID:HV01:001316BE:00B8B463:6A8CE407:qmshutdown:142:root@pam!nexara:","resource_name":"fresh"}`),
+			`{"upid":"UPID:pve-01:001316BE:00B8B463:6A8CE407:qmshutdown:142:root@pam!nexara:","resource_name":"fresh"}`),
 	}); err != nil {
 		t.Fatalf("InsertAuditLog: %v", err)
 	}

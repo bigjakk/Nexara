@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TaskLogSection } from "@/components/TaskLogSection";
 import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
 import {
   parseBwlimit,
@@ -114,7 +115,9 @@ export function MigrateJobDialog({
   // null = untouched (use the disks' current format where the target allows).
   const [diskFormat, setDiskFormat] = useState<string | null>(null);
   // null = follow the per-mode default in `deleteSource` below.
-  const [deleteSourceOverride, setDeleteSourceOverride] = useState<boolean | null>(null);
+  const [deleteSourceOverride, setDeleteSourceOverride] = useState<
+    boolean | null
+  >(null);
   const [targetVmid, setTargetVmid] = useState("");
   const [storageMap, setStorageMap] = useState<Record<string, string>>({});
   const [networkMap, setNetworkMap] = useState<Record<string, string>>({});
@@ -130,7 +133,8 @@ export function MigrateJobDialog({
   const { data: sourceStorage } = useClusterStorage(clusterId);
   const needsStorageList =
     migrationType === "cross-cluster" ||
-    (migrationMode === "storage" || migrationMode === "both");
+    migrationMode === "storage" ||
+    migrationMode === "both";
   const { data: targetStorageList } = useClusterStorage(
     migrationType === "cross-cluster"
       ? targetClusterId
@@ -181,7 +185,12 @@ export function MigrateJobDialog({
   // cloudinit drives); LXC rootfs/mp*. efidisk is intentionally excluded — the
   // backend never moves it.
   const guestDisks = useMemo(() => {
-    const out: { key: string; storage: string; size: string; format: string }[] = [];
+    const out: {
+      key: string;
+      storage: string;
+      size: string;
+      format: string;
+    }[] = [];
     if (!guestConfig) return out;
     const qemuDiskPrefixes = ["scsi", "virtio", "sata", "ide"];
     for (const [key, val] of Object.entries(guestConfig)) {
@@ -283,8 +292,7 @@ export function MigrateJobDialog({
       target_cluster_id:
         migrationType === "intra-cluster" ? clusterId : targetClusterId,
       source_node: currentNode,
-      target_node:
-        effectiveMode === "storage" ? currentNode : targetNode,
+      target_node: effectiveMode === "storage" ? currentNode : targetNode,
       vmid,
       vm_type: vmType,
       migration_type: migrationType,
@@ -296,7 +304,11 @@ export function MigrateJobDialog({
       // Forced off where the control is hidden, so a value left over from a
       // mode the user switched away from cannot ride along unseen.
       delete_source: showDeleteSource && deleteSource,
-      disk_format: resolveDiskFormat(diskFormat, sourceDiskFormat, formatTargetType),
+      disk_format: resolveDiskFormat(
+        diskFormat,
+        sourceDiskFormat,
+        formatTargetType,
+      ),
       target_vmid: targetVmid ? parseInt(targetVmid, 10) : 0,
       target_storage:
         (effectiveMode === "storage" || effectiveMode === "both") &&
@@ -384,25 +396,28 @@ export function MigrateJobDialog({
 
     // Fallback: just pick the first online node if no metrics
     if (bestNode === "") {
-      const firstOnline = availableTargetNodes.find((n) => n.status === "online");
+      const firstOnline = availableTargetNodes.find(
+        (n) => n.status === "online",
+      );
       if (firstOnline) bestNode = firstOnline.name;
     }
 
     if (bestNode !== "") {
       setTargetNode(bestNode);
     }
-  }, [availableTargetNodes, clusterMetrics?.nodeMetrics, targetNode.length, vmCountByNodeId]);
+  }, [
+    availableTargetNodes,
+    clusterMetrics?.nodeMetrics,
+    targetNode.length,
+    vmCountByNodeId,
+  ]);
 
   // Deduplicate storage pools by name
   const uniqueSourceStorage = sourceStorage
-    ? Array.from(
-        new Map(sourceStorage.map((s) => [s.storage, s])).values(),
-      )
+    ? Array.from(new Map(sourceStorage.map((s) => [s.storage, s])).values())
     : [];
   const uniqueTargetStorage = targetStorageList
-    ? Array.from(
-        new Map(targetStorageList.map((s) => [s.storage, s])).values(),
-      )
+    ? Array.from(new Map(targetStorageList.map((s) => [s.storage, s])).values())
     : [];
 
   // Content-compatible, active+enabled storages. Used per-disk (each disk
@@ -442,7 +457,6 @@ export function MigrateJobDialog({
     return targetNode.length > 0;
   })();
 
-
   // A format only makes sense when every disk lands on one known storage, so
   // per-disk targeting (mixed destinations) rules it out — as do containers,
   // whose volumes have no format and whose jobs the API rejects if one is set.
@@ -453,12 +467,15 @@ export function MigrateJobDialog({
   // Guests whose disks are all in the same format can preselect it; mixed or
   // unknown formats fall back to the storage default.
   const sourceDiskFormat =
-    currentDiskFormats.size === 1
-      ? [...currentDiskFormats][0]
-      : undefined;
+    currentDiskFormats.size === 1 ? [...currentDiskFormats][0] : undefined;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) handleClose();
+      }}
+    >
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -577,40 +594,48 @@ export function MigrateJobDialog({
             )}
 
             {/* Target Node (hidden for storage-only mode) */}
-            {!(migrationType === "intra-cluster" && migrationMode === "storage") && (
-            <div className="space-y-2">
-              <Label>Target Node</Label>
-              <Select value={targetNode} onValueChange={setTargetNode}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select target node" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableTargetNodes?.map((n) => {
-                    const live = clusterMetrics?.nodeMetrics.get(n.id);
-                    const cpuLabel = live ? `${String(Math.round(live.cpuPercent))}%` : null;
-                    const memLabel = live ? `${String(Math.round(live.memPercent))}%` : null;
-                    return (
-                      <SelectItem key={n.id} value={n.name}>
-                        <span className="flex items-center gap-2">
-                          {n.name}
-                          {n.status !== "online" && (
-                            <span className="text-muted-foreground">({n.status})</span>
-                          )}
-                          {cpuLabel && memLabel && (
-                            <span className="text-[10px] text-muted-foreground">
-                              CPU {cpuLabel} · Mem {memLabel}
-                            </span>
-                          )}
-                        </span>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-muted-foreground">
-                Auto-selects the least loaded node
-              </p>
-            </div>
+            {!(
+              migrationType === "intra-cluster" && migrationMode === "storage"
+            ) && (
+              <div className="space-y-2">
+                <Label>Target Node</Label>
+                <Select value={targetNode} onValueChange={setTargetNode}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select target node" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableTargetNodes?.map((n) => {
+                      const live = clusterMetrics?.nodeMetrics.get(n.id);
+                      const cpuLabel = live
+                        ? `${String(Math.round(live.cpuPercent))}%`
+                        : null;
+                      const memLabel = live
+                        ? `${String(Math.round(live.memPercent))}%`
+                        : null;
+                      return (
+                        <SelectItem key={n.id} value={n.name}>
+                          <span className="flex items-center gap-2">
+                            {n.name}
+                            {n.status !== "online" && (
+                              <span className="text-muted-foreground">
+                                ({n.status})
+                              </span>
+                            )}
+                            {cpuLabel && memLabel && (
+                              <span className="text-[10px] text-muted-foreground">
+                                CPU {cpuLabel} · Mem {memLabel}
+                              </span>
+                            )}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Auto-selects the least loaded node
+                </p>
+              </div>
             )}
 
             {/* Target Storage (storage/both mode for intra-cluster) */}
@@ -620,8 +645,8 @@ export function MigrateJobDialog({
                 <div className="space-y-2">
                   <Label>Per-Disk Target Storage</Label>
                   <p className="text-[11px] text-muted-foreground">
-                    This guest&apos;s disks span multiple storages. Pick a target
-                    per disk, or leave one on its current storage.
+                    This guest&apos;s disks span multiple storages. Pick a
+                    target per disk, or leave one on its current storage.
                   </p>
                   <div className="space-y-2 rounded-md border p-3">
                     {guestDisks.map((d) => {
@@ -676,7 +701,10 @@ export function MigrateJobDialog({
               ) : (
                 <div className="space-y-2">
                   <Label>Target Storage</Label>
-                  <Select value={targetStorage} onValueChange={setTargetStorage}>
+                  <Select
+                    value={targetStorage}
+                    onValueChange={setTargetStorage}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select target storage" />
                     </SelectTrigger>
@@ -737,10 +765,7 @@ export function MigrateJobDialog({
                           </SelectTrigger>
                           <SelectContent>
                             {uniqueTargetStorage.map((tgt) => (
-                              <SelectItem
-                                key={tgt.storage}
-                                value={tgt.storage}
-                              >
+                              <SelectItem key={tgt.storage} value={tgt.storage}>
                                 {tgt.storage} ({tgt.type})
                               </SelectItem>
                             ))}
@@ -798,7 +823,9 @@ export function MigrateJobDialog({
                 <Input
                   type="number"
                   value={targetVmid}
-                  onChange={(e) => { setTargetVmid(e.target.value); }}
+                  onChange={(e) => {
+                    setTargetVmid(e.target.value);
+                  }}
                   placeholder="Auto"
                 />
               </div>
@@ -806,7 +833,9 @@ export function MigrateJobDialog({
 
             {/* Options */}
             <div className="space-y-3">
-              {!(migrationType === "intra-cluster" && migrationMode === "storage") && (
+              {!(
+                migrationType === "intra-cluster" && migrationMode === "storage"
+              ) && (
                 <div className="flex items-center justify-between">
                   <Label>Live Migration</Label>
                   <Switch checked={online} onCheckedChange={setOnline} />
@@ -826,7 +855,10 @@ export function MigrateJobDialog({
                 deleteSourceLabel="Delete Source After Migration"
                 hideDeleteSource={!showDeleteSource}
                 {...(needsDiskPlacement
-                  ? { keptHint: "Source volumes are kept as unused disks on the guest." }
+                  ? {
+                      keptHint:
+                        "Source volumes are kept as unused disks on the guest.",
+                    }
                   : {})}
               />
             </div>
@@ -923,13 +955,20 @@ function MigrationProgress({
   clusterId,
   onClose,
 }: {
-  job: { status: string; progress: number; upid: string; error_message: string; migration_mode: string; target_storage: string };
+  job: {
+    status: string;
+    progress: number;
+    upid: string;
+    error_message: string;
+    migration_mode: string;
+    target_storage: string;
+  };
   clusterId: string;
   onClose: () => void;
 }) {
   const isActive = job.status === "pending" || job.status === "migrating";
   const hasUpid = job.upid.length > 0;
-  const { data: logLines } = useQuery({
+  const { data: logLines, isLoading: logLoading } = useQuery({
     queryKey: ["migration-log", clusterId, job.upid],
     queryFn: () =>
       apiClient.list<TaskLogLine>(
@@ -943,12 +982,16 @@ function MigrationProgress({
   // "transferred 1.23 GiB in 45s (28.0 MiB/s)" or similar).
   const speedLines = logLines
     ?.map((l) => l.t)
-    .filter((t) => /\b(MiB\/s|GiB\/s|KiB\/s|MB\/s|GB\/s|transferred)\b/i.test(t));
-  const speedLine = speedLines && speedLines.length > 0
-    ? speedLines[speedLines.length - 1]
-    : undefined;
+    .filter((t) =>
+      /\b(MiB\/s|GiB\/s|KiB\/s|MB\/s|GB\/s|transferred)\b/i.test(t),
+    );
+  const speedLine =
+    speedLines && speedLines.length > 0
+      ? speedLines[speedLines.length - 1]
+      : undefined;
 
-  const isStorageMode = job.migration_mode === "storage" || job.migration_mode === "both";
+  const isStorageMode =
+    job.migration_mode === "storage" || job.migration_mode === "both";
 
   function progressLabel(): string {
     if (job.status === "pending") return "Starting migration...";
@@ -968,10 +1011,7 @@ function MigrationProgress({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">Status</span>
-        <Badge
-          variant="outline"
-          className={statusColors[job.status] ?? ""}
-        >
+        <Badge variant="outline" className={statusColors[job.status] ?? ""}>
           {job.status}
         </Badge>
       </div>
@@ -1011,14 +1051,7 @@ function MigrationProgress({
       )}
 
       {/* Task Log (only for real Proxmox UPIDs) */}
-      {logLines && logLines.length > 0 && (
-        <div className="space-y-1">
-          <span className="text-xs font-medium text-muted-foreground">Task Log</span>
-          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-            {logLines.map((line) => line.t).join("\n")}
-          </pre>
-        </div>
-      )}
+      {hasUpid && <TaskLogSection lines={logLines} isLoading={logLoading} />}
 
       <Button variant="outline" onClick={onClose}>
         Close

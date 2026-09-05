@@ -13,7 +13,9 @@ export function ReportsPage() {
   const canManage = hasPermission("manage", "report");
   const canGenerate = hasPermission("generate", "report");
 
-  const [editSchedule, setEditSchedule] = useState<ReportSchedule | undefined>();
+  const [editSchedule, setEditSchedule] = useState<
+    ReportSchedule | undefined
+  >();
   const [editOpen, setEditOpen] = useState(false);
   const [previewRunId, setPreviewRunId] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);

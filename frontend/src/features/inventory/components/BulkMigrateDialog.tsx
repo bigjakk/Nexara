@@ -45,12 +45,7 @@ import type {
 } from "@/features/migrations/types/migration";
 import type { InventoryRow } from "../types/inventory";
 import type { Row } from "@tanstack/react-table";
-import {
-  ArrowLeftRight,
-  CheckCircle2,
-  XCircle,
-  Loader2,
-} from "lucide-react";
+import { ArrowLeftRight, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 
 type WizardStep = "config" | "preflight" | "progress";
 
@@ -91,7 +86,9 @@ export function BulkMigrateDialog({
   // null = untouched (use each disk's current format where the target allows).
   const [diskFormat, setDiskFormat] = useState<string | null>(null);
   // null = follow the per-mode default in `deleteSource` below.
-  const [deleteSourceOverride, setDeleteSourceOverride] = useState<boolean | null>(null);
+  const [deleteSourceOverride, setDeleteSourceOverride] = useState<
+    boolean | null
+  >(null);
   const [storageMap, setStorageMap] = useState<Record<string, string>>({});
   const [networkMap, setNetworkMap] = useState<Record<string, string>>({});
 
@@ -212,9 +209,7 @@ export function BulkMigrateDialog({
     ? Array.from(new Map(sourceStorage.map((s) => [s.storage, s])).values())
     : [];
   const uniqueTargetStorage = targetStorageList
-    ? Array.from(
-        new Map(targetStorageList.map((s) => [s.storage, s])).values(),
-      )
+    ? Array.from(new Map(targetStorageList.map((s) => [s.storage, s])).values())
     : [];
 
   // Filter target storage by content type for selected VM types
@@ -236,10 +231,9 @@ export function BulkMigrateDialog({
   // Containers have no format choice, so a selection containing any CT hides
   // the field rather than sending a format the backend rejects.
   const showFormat = movesStorage && !hasCTs;
-  const formatTargetType =
-    showFormat
-      ? filteredTargetStorage.find((s) => s.storage === targetStorage)?.type
-      : undefined;
+  const formatTargetType = showFormat
+    ? filteredTargetStorage.find((s) => s.storage === targetStorage)?.type
+    : undefined;
 
   // Form validation
   const isFormValid = (() => {
@@ -296,8 +290,7 @@ export function BulkMigrateDialog({
           target_cluster_id:
             migrationType === "intra-cluster" ? r.clusterId : targetClusterId,
           source_node: r.nodeName,
-          target_node:
-            effectiveMode === "storage" ? r.nodeName : targetNode,
+          target_node: effectiveMode === "storage" ? r.nodeName : targetNode,
           vmid: r.vmid ?? 0,
           vm_type: vmType,
           migration_type: migrationType,
@@ -321,7 +314,14 @@ export function BulkMigrateDialog({
 
         const created = await createMutation.mutateAsync(req);
         const report = await checkMutation.mutateAsync(created.id);
-        return { name: r.name, vmid: r.vmid, type: r.type, node: r.nodeName, jobId: created.id, passed: report.passed };
+        return {
+          name: r.name,
+          vmid: r.vmid,
+          type: r.type,
+          node: r.nodeName,
+          jobId: created.id,
+          passed: report.passed,
+        };
       }),
     );
 
@@ -637,9 +637,7 @@ interface ConfigStepProps {
   setStorageMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   networkMap: Record<string, string>;
   setNetworkMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  clusters:
-    | Array<{ id: string; name: string }>
-    | undefined;
+  clusters: Array<{ id: string; name: string }> | undefined;
   clusterId: string;
   availableTargetNodes:
     | Array<{ id: string; name: string; status: string }>
@@ -747,15 +745,11 @@ function ConfigStep({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="live">
-                Live (move to another node)
-              </SelectItem>
+              <SelectItem value="live">Live (move to another node)</SelectItem>
               <SelectItem value="storage">
                 Storage (move disks to another storage)
               </SelectItem>
-              <SelectItem value="both">
-                Both (move VM + move disks)
-              </SelectItem>
+              <SelectItem value="both">Both (move VM + move disks)</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-[11px] text-muted-foreground">
@@ -796,9 +790,7 @@ function ConfigStep({
       )}
 
       {/* Target Node */}
-      {!(
-        migrationType === "intra-cluster" && migrationMode === "storage"
-      ) && (
+      {!(migrationType === "intra-cluster" && migrationMode === "storage") && (
         <div className="space-y-2">
           <Label>Target Node</Label>
           <Select value={targetNode} onValueChange={setTargetNode}>
@@ -968,7 +960,10 @@ function ConfigStep({
           deleteSourceLabel="Delete Source After Migration"
           hideDeleteSource={!showDeleteSource}
           {...(movesStorage
-            ? { keptHint: "Source volumes are kept as unused disks on each guest." }
+            ? {
+                keptHint:
+                  "Source volumes are kept as unused disks on each guest.",
+              }
             : {})}
         />
       </div>
@@ -1046,10 +1041,7 @@ function BulkJobProgress({
         <span className="text-sm font-medium">
           {vmName} ({vmType.toUpperCase()} {String(vmid)})
         </span>
-        <Badge
-          variant="outline"
-          className={statusColors[status] ?? ""}
-        >
+        <Badge variant="outline" className={statusColors[status] ?? ""}>
           {status}
         </Badge>
       </div>

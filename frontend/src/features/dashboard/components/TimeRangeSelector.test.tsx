@@ -6,9 +6,7 @@ import { TimeRangeSelector } from "./TimeRangeSelector";
 
 describe("TimeRangeSelector", () => {
   it("renders all range options", () => {
-    renderWithProviders(
-      <TimeRangeSelector value="live" onChange={() => {}} />,
-    );
+    renderWithProviders(<TimeRangeSelector value="live" onChange={() => {}} />);
     expect(screen.getByTestId("range-live")).toBeInTheDocument();
     expect(screen.getByTestId("range-1h")).toBeInTheDocument();
     expect(screen.getByTestId("range-6h")).toBeInTheDocument();
@@ -17,9 +15,7 @@ describe("TimeRangeSelector", () => {
   });
 
   it("all buttons are enabled", () => {
-    renderWithProviders(
-      <TimeRangeSelector value="live" onChange={() => {}} />,
-    );
+    renderWithProviders(<TimeRangeSelector value="live" onChange={() => {}} />);
     expect(screen.getByTestId("range-live")).not.toBeDisabled();
     expect(screen.getByTestId("range-1h")).not.toBeDisabled();
     expect(screen.getByTestId("range-6h")).not.toBeDisabled();
@@ -28,9 +24,7 @@ describe("TimeRangeSelector", () => {
   });
 
   it("highlights the active range with different styling", () => {
-    renderWithProviders(
-      <TimeRangeSelector value="6h" onChange={() => {}} />,
-    );
+    renderWithProviders(<TimeRangeSelector value="6h" onChange={() => {}} />);
     const btn6h = screen.getByTestId("range-6h");
     const btnLive = screen.getByTestId("range-live");
     // Active (default variant) and inactive (ghost variant) should have different classes
@@ -40,9 +34,7 @@ describe("TimeRangeSelector", () => {
   it("calls onChange when a range is clicked", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    renderWithProviders(
-      <TimeRangeSelector value="live" onChange={onChange} />,
-    );
+    renderWithProviders(<TimeRangeSelector value="live" onChange={onChange} />);
     await user.click(screen.getByTestId("range-24h"));
     expect(onChange).toHaveBeenCalledWith("24h");
   });

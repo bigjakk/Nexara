@@ -7,7 +7,7 @@ import type { VeeamTaskSession } from "../types/backup";
 function task(over: Partial<VeeamTaskSession> = {}): VeeamTaskSession {
   return {
     id: "task-1",
-    name: "ad01.ad.crjlab.net",
+    name: "dc01.example.com",
     state: "Stopped",
     result: "Success",
     result_message: "",
@@ -48,10 +48,10 @@ afterEach(() => {
 describe("VeeamTaskTable", () => {
   it("names which guest failed, and why", async () => {
     stubFetch([
-      task({ id: "t1", name: "docker01.ad.crjlab.net", result: "Success" }),
+      task({ id: "t1", name: "linux01.example.com", result: "Success" }),
       task({
         id: "t2",
-        name: "ad01.ad.crjlab.net",
+        name: "dc01.example.com",
         result: "Failed",
         result_message:
           "Failed to prepare disks for backup: QEMU guest agent is not running",
@@ -126,11 +126,11 @@ describe("VeeamTaskTable", () => {
     stubFetch([
       task({
         id: "t1",
-        name: "ad01.ad.crjlab.net",
+        name: "dc01.example.com",
         vmid: 113,
         cluster_id: "c1",
       }),
-      task({ id: "t2", name: "orphan.ad.crjlab.net" }),
+      task({ id: "t2", name: "orphan.example.com" }),
     ]);
 
     renderWithProviders(
@@ -143,7 +143,7 @@ describe("VeeamTaskTable", () => {
     );
 
     expect(await screen.findByText("113")).toBeInTheDocument();
-    expect(screen.getByText("orphan.ad.crjlab.net")).toBeInTheDocument();
+    expect(screen.getByText("orphan.example.com")).toBeInTheDocument();
   });
 
   // Each call costs a fresh logon against the Veeam server, so a collapsed row

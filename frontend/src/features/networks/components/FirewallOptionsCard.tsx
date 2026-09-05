@@ -44,9 +44,9 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
             <Button
               variant={isEnabled ? "destructive" : "default"}
               size="sm"
-              onClick={() =>
-                { setOpts.mutate({ enable: isEnabled ? 0 : 1 }); }
-              }
+              onClick={() => {
+                setOpts.mutate({ enable: isEnabled ? 0 : 1 });
+              }}
               disabled={setOpts.isPending}
             >
               {isEnabled ? "Disable Firewall" : "Enable Firewall"}
@@ -58,9 +58,9 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
               <Label>Inbound Policy</Label>
               <Select
                 value={opts?.policy_in || "DROP"}
-                onValueChange={(val) =>
-                  { setOpts.mutate({ policy_in: val }); }
-                }
+                onValueChange={(val) => {
+                  setOpts.mutate({ policy_in: val });
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -76,9 +76,9 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
               <Label>Outbound Policy</Label>
               <Select
                 value={opts?.policy_out || "ACCEPT"}
-                onValueChange={(val) =>
-                  { setOpts.mutate({ policy_out: val }); }
-                }
+                onValueChange={(val) => {
+                  setOpts.mutate({ policy_out: val });
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />

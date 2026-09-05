@@ -38,6 +38,8 @@ type Server struct {
 	vmHandler              *handlers.VMHandler
 	containerHandler       *handlers.ContainerHandler
 	storageHandler         *handlers.StorageHandler
+	virtioWinHandler       *handlers.VirtioWinHandler
+	guestToolsHandler      *handlers.GuestToolsHandler
 	vmImportHandler        *handlers.VMImportHandler
 	vmFoldersHandler       *handlers.VMFoldersHandler
 	metricsHandler         *handlers.MetricsHandler
@@ -267,6 +269,8 @@ func (s *Server) registerInventory(d *serverDeps) {
 		s.containerHandler = handlers.NewContainerHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.nodeHandler = handlers.NewNodeHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.storageHandler = handlers.NewStorageHandler(d.queries, d.encryptionKey, d.eventPub)
+		s.virtioWinHandler = handlers.NewVirtioWinHandler(d.queries, d.eventPub, d.app.VirtioWin)
+		s.guestToolsHandler = handlers.NewGuestToolsHandler(d.queries, d.eventPub, d.app.GuestTools)
 		s.vmImportHandler = handlers.NewVMImportHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.cephHandler = handlers.NewCephHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.backupHandler = handlers.NewBackupHandler(d.queries, d.encryptionKey, d.eventPub)
@@ -396,6 +400,20 @@ func (s *Server) Shutdown() error {
 // App returns the underlying Fiber app for testing.
 func (s *Server) App() *fiber.App {
 	return s.app
+}
+
+// SetVeeamSyncTrigger gives the Veeam handler a way to ask the collector for
+// an inventory pass as soon as a server is registered, instead of leaving the
+// operator on empty tables until the next tick.
+//
+// Wired from main after the collector is built, because the API server is
+// constructed first. No-op when the Veeam handler is absent (no encryption
+// key) — registering a server is impossible in that state anyway.
+func (s *Server) SetVeeamSyncTrigger(t handlers.VeeamSyncTrigger) {
+	if s.veeamHandler == nil {
+		return
+	}
+	s.veeamHandler.SetSyncTrigger(t)
 }
 
 // RBACEngine returns the API server's RBAC engine so other components

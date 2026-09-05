@@ -40,17 +40,29 @@ function ageLabel(value: string | null): string {
  * recorded as absent, and a rebuilt host reuses its name. Presenting the two
  * identically would be the single most misleading thing this card could do.
  */
-function MatchBadge({ method }: { method: VeeamGuestProtection["match_method"] }) {
+function MatchBadge({
+  method,
+}: {
+  method: VeeamGuestProtection["match_method"];
+}) {
   switch (method) {
     case "smbios":
       return (
-        <Badge variant="outline" className="text-xs" title="Matched on the guest's SMBIOS UUID">
+        <Badge
+          variant="outline"
+          className="text-xs"
+          title="Matched on the guest's SMBIOS UUID"
+        >
           verified match
         </Badge>
       );
     case "manual":
       return (
-        <Badge variant="outline" className="text-xs" title="An operator mapped this backup to this guest">
+        <Badge
+          variant="outline"
+          className="text-xs"
+          title="An operator mapped this backup to this guest"
+        >
           manual match
         </Badge>
       );
@@ -100,7 +112,10 @@ export function VeeamProtectionCard({
   clusterId: string;
   vmId: string;
 }) {
-  const { data, isLoading, isError, error } = useVeeamGuestProtection(clusterId, vmId);
+  const { data, isLoading, isError, error } = useVeeamGuestProtection(
+    clusterId,
+    vmId,
+  );
 
   if (isLoading) {
     return <Skeleton className="h-32" />;
@@ -181,7 +196,9 @@ export function VeeamProtectionCard({
           </div>
           <div className="flex gap-2">
             <dt className="text-muted-foreground">Size</dt>
-            <dd className="font-mono">{formatBytes(data.restore_point_bytes)}</dd>
+            <dd className="font-mono">
+              {formatBytes(data.restore_point_bytes)}
+            </dd>
           </div>
         </dl>
 
@@ -197,50 +214,51 @@ export function VeeamProtectionCard({
               </p>
             )}
             <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Type</TableHead>
-                  {/*
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Type</TableHead>
+                    {/*
                     No "Backup" column. The collector folds Veeam's listing to
                     one backup object per guest, so the object name is just the
-                    guest's own — a column repeating "docker03" on every row
+                    guest's own — a column repeating "linux03" on every row
                     under a header promising to say which job produced the
                     point. The point's backup id is a bare UUID and no more
                     use. Better to omit it than to imply an answer.
                   */}
-                  <TableHead>Malware</TableHead>
-                  <TableHead className="text-right">Size</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.restore_points.map((point) => (
-                  <TableRow key={point.id}>
-                    <TableCell className="text-sm">
-                      {formatTime(point.creation_time)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {point.point_type || "—"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {point.malware_status === "Clean" || point.malware_status === "" ? (
-                        <span className="text-muted-foreground">
-                          {point.malware_status || "—"}
-                        </span>
-                      ) : (
-                        <MalwareBadge status={point.malware_status} />
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {formatBytes(point.size_bytes)}
-                    </TableCell>
+                    <TableHead>Malware</TableHead>
+                    <TableHead className="text-right">Size</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {data.restore_points.map((point) => (
+                    <TableRow key={point.id}>
+                      <TableCell className="text-sm">
+                        {formatTime(point.creation_time)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">
+                          {point.point_type || "—"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {point.malware_status === "Clean" ||
+                        point.malware_status === "" ? (
+                          <span className="text-muted-foreground">
+                            {point.malware_status || "—"}
+                          </span>
+                        ) : (
+                          <MalwareBadge status={point.malware_status} />
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {formatBytes(point.size_bytes)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

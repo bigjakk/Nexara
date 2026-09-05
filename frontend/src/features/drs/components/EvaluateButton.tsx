@@ -95,7 +95,8 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
   const isBlocked = evaluated && blocked;
   const hasResults = evaluated && results !== null && !blocked;
   const isBalanced = hasResults && imbalance <= threshold;
-  const isImbalancedNoMoves = hasResults && imbalance > threshold && results.length === 0;
+  const isImbalancedNoMoves =
+    hasResults && imbalance > threshold && results.length === 0;
   const isImbalancedWithMoves = hasResults && results.length > 0;
 
   // Sort node scores by score descending for display.
@@ -158,7 +159,8 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
               {isImbalancedWithMoves && (
                 <>
                   <AlertTriangle className="h-4 w-4 text-amber-500" />
-                  {results.length} Recommendation{results.length !== 1 ? "s" : ""}
+                  {results.length} Recommendation
+                  {results.length !== 1 ? "s" : ""}
                 </>
               )}
             </CardTitle>
@@ -172,7 +174,9 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
                     Node Load Scores
                   </span>
                   <Badge
-                    variant={imbalance > threshold ? "destructive" : "secondary"}
+                    variant={
+                      imbalance > threshold ? "destructive" : "secondary"
+                    }
                     className="font-mono text-xs"
                   >
                     Variance: {pct(imbalance)} / Threshold: {pct(threshold)}
@@ -198,18 +202,19 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
             {/* Balanced message */}
             {isBalanced && (
               <p className="text-sm text-muted-foreground">
-                Load variance ({pct(imbalance)}) is within the configured threshold ({pct(threshold)}).
-                No migrations needed.
+                Load variance ({pct(imbalance)}) is within the configured
+                threshold ({pct(threshold)}). No migrations needed.
               </p>
             )}
 
             {/* Imbalanced but no moves help */}
             {isImbalancedNoMoves && (
               <p className="text-sm text-muted-foreground">
-                Load variance ({pct(imbalance)}) exceeds the threshold ({pct(threshold)}),
-                but no single VM migration would improve the balance. This typically happens
-                when nodes have very few VMs or when workloads are too large relative to the
-                load difference — moving any one VM would overshoot and make things worse.
+                Load variance ({pct(imbalance)}) exceeds the threshold (
+                {pct(threshold)}), but no single VM migration would improve the
+                balance. This typically happens when nodes have very few VMs or
+                when workloads are too large relative to the load difference —
+                moving any one VM would overshoot and make things worse.
               </p>
             )}
 
@@ -222,10 +227,10 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
                 {queued && (
                   <p className="text-xs text-muted-foreground">
                     Automatic mode: an evaluation has been queued. The scheduler
-                    re-plans against live cluster state on its next pass (usually
-                    within a minute) and executes what it finds then, so the moves
-                    below are the plan as of now and may differ. Results appear in
-                    DRS history.
+                    re-plans against live cluster state on its next pass
+                    (usually within a minute) and executes what it finds then,
+                    so the moves below are the plan as of now and may differ.
+                    Results appear in DRS history.
                   </p>
                 )}
                 {results.map((rec, i) => (

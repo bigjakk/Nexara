@@ -27,7 +27,9 @@ const statusClass: Record<string, string> = {
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${statusClass[status] ?? "bg-muted text-muted-foreground"}`}>
+    <span
+      className={`rounded px-1.5 py-0.5 text-xs font-medium ${statusClass[status] ?? "bg-muted text-muted-foreground"}`}
+    >
       {status}
     </span>
   );
@@ -41,7 +43,9 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
   const [deleteVm, setDeleteVm] = useState(false);
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading import history…</p>;
+    return (
+      <p className="text-sm text-muted-foreground">Loading import history…</p>
+    );
   }
   if (!jobs || jobs.length === 0) {
     return <p className="text-sm text-muted-foreground">No imports yet.</p>;
@@ -78,14 +82,17 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
           <tbody>
             {jobs.map((job: VMImportJob) => {
               const isOpen = expanded === job.id;
-              const cancellable = job.status === "pending" || job.status === "running";
+              const cancellable =
+                job.status === "pending" || job.status === "running";
               return (
                 <RowGroup
                   key={job.id}
                   job={job}
                   isOpen={isOpen}
                   cancellable={cancellable}
-                  onToggle={() => { setExpanded(isOpen ? null : job.id); }}
+                  onToggle={() => {
+                    setExpanded(isOpen ? null : job.id);
+                  }}
                   onCancel={() => {
                     setDeleteVm(false);
                     setCancelTarget(job);
@@ -110,16 +117,24 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
           <DialogHeader>
             <DialogTitle>Cancel import?</DialogTitle>
             <DialogDescription>
-              This stops the running import task for
-              {" "}
-              {cancelTarget?.name || `VM ${String(cancelTarget?.target_vmid ?? "")}`}.
+              This stops the running import task for{" "}
+              {cancelTarget?.name ||
+                `VM ${String(cancelTarget?.target_vmid ?? "")}`}
+              .
             </DialogDescription>
           </DialogHeader>
           <label className="flex items-start gap-2 text-sm">
-            <Checkbox checked={deleteVm} onCheckedChange={(v) => { setDeleteVm(v === true); }} />
+            <Checkbox
+              checked={deleteVm}
+              onCheckedChange={(v) => {
+                setDeleteVm(v === true);
+              }}
+            />
             <span>
               Also delete the partially created VM
-              {cancelTarget?.target_vmid ? ` (VMID ${String(cancelTarget.target_vmid)})` : ""}
+              {cancelTarget?.target_vmid
+                ? ` (VMID ${String(cancelTarget.target_vmid)})`
+                : ""}
               <span className="block text-xs text-muted-foreground">
                 Leave unchecked to keep the disks created so far for inspection.
               </span>
@@ -159,24 +174,49 @@ interface RowGroupProps {
   onCancel: () => void;
 }
 
-function RowGroup({ job, isOpen, cancellable, onToggle, onCancel }: RowGroupProps) {
+function RowGroup({
+  job,
+  isOpen,
+  cancellable,
+  onToggle,
+  onCancel,
+}: RowGroupProps) {
   return (
     <>
-      <tr className="cursor-pointer border-b border-border last:border-b-0 hover:bg-muted/40" onClick={onToggle}>
+      <tr
+        className="cursor-pointer border-b border-border last:border-b-0 hover:bg-muted/40"
+        onClick={onToggle}
+      >
         <td className="px-2 py-2">
-          <ChevronRight className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+          <ChevronRight
+            className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : ""}`}
+          />
         </td>
-        <td className="px-3 py-2">{job.name || `VM ${String(job.target_vmid)}`}</td>
-        <td className="px-3 py-2 text-muted-foreground">{job.target_node} / {job.target_storage}</td>
-        <td className="px-3 py-2 text-muted-foreground">{job.source_acquisition}</td>
-        <td className="px-3 py-2"><StatusBadge status={job.status} /></td>
-        <td className="px-3 py-2 text-muted-foreground">{new Date(job.created_at).toLocaleString()}</td>
+        <td className="px-3 py-2">
+          {job.name || `VM ${String(job.target_vmid)}`}
+        </td>
+        <td className="px-3 py-2 text-muted-foreground">
+          {job.target_node} / {job.target_storage}
+        </td>
+        <td className="px-3 py-2 text-muted-foreground">
+          {job.source_acquisition}
+        </td>
+        <td className="px-3 py-2">
+          <StatusBadge status={job.status} />
+        </td>
+        <td className="px-3 py-2 text-muted-foreground">
+          {new Date(job.created_at).toLocaleString()}
+        </td>
         <td className="px-3 py-2 text-right">
           {cancellable && (
             <Button
+              aria-label={`Cancel import of ${job.name || `VM ${String(job.target_vmid)}`}`}
               variant="ghost"
               size="sm"
-              onClick={(e) => { e.stopPropagation(); onCancel(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onCancel();
+              }}
             >
               <X className="h-4 w-4" />
             </Button>
@@ -212,7 +252,10 @@ function RowGroup({ job, isOpen, cancellable, onToggle, onCancel }: RowGroupProp
                   <dd>
                     <ul className="list-inside list-disc">
                       {job.warnings.map((w, i) => (
-                        <li key={`${w.type}-${String(i)}`}>{w.type.replace(/-/g, " ")}{w.value ? `: ${w.value}` : ""}</li>
+                        <li key={`${w.type}-${String(i)}`}>
+                          {w.type.replace(/-/g, " ")}
+                          {w.value ? `: ${w.value}` : ""}
+                        </li>
                       ))}
                     </ul>
                   </dd>

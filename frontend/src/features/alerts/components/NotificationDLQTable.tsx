@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -25,12 +25,10 @@ import {
   useDeleteNotificationDLQ,
 } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
+import { formatRelativeTime } from "@/lib/format";
 import type { DLQState, NotificationDLQEntry } from "@/types/api";
 
-const STATE_VARIANTS: Record<
-  DLQState,
-  "default" | "secondary" | "destructive" | "outline"
-> = {
+const STATE_VARIANTS: Record<DLQState, BadgeVariant> = {
   pending: "destructive",
   rate_limited: "secondary",
   retrying: "outline",
@@ -45,15 +43,6 @@ const STATE_LABELS: Record<DLQState, string> = {
   resolved: "Resolved",
   dismissed: "Dismissed",
 };
-
-function formatRelativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  const seconds = Math.floor((Date.now() - then) / 1000);
-  if (seconds < 60) return `${String(seconds)}s ago`;
-  if (seconds < 3600) return `${String(Math.floor(seconds / 60))}m ago`;
-  if (seconds < 86400) return `${String(Math.floor(seconds / 3600))}h ago`;
-  return `${String(Math.floor(seconds / 86400))}d ago`;
-}
 
 export function NotificationDLQTable() {
   const { hasPermission } = useAuth();
@@ -102,28 +91,36 @@ export function NotificationDLQTable() {
           label="Failed"
           count={summary?.pending ?? 0}
           variant="destructive"
-          onClick={() => { setStateFilter("pending"); }}
+          onClick={() => {
+            setStateFilter("pending");
+          }}
           active={stateFilter === "pending"}
         />
         <SummaryTile
           label="Rate-limited"
           count={summary?.rate_limited ?? 0}
           variant="secondary"
-          onClick={() => { setStateFilter("rate_limited"); }}
+          onClick={() => {
+            setStateFilter("rate_limited");
+          }}
           active={stateFilter === "rate_limited"}
         />
         <SummaryTile
           label="Retrying"
           count={summary?.retrying ?? 0}
           variant="outline"
-          onClick={() => { setStateFilter("retrying"); }}
+          onClick={() => {
+            setStateFilter("retrying");
+          }}
           active={stateFilter === "retrying"}
         />
         <SummaryTile
           label="Resolved"
           count={summary?.resolved ?? 0}
           variant="default"
-          onClick={() => { setStateFilter("resolved"); }}
+          onClick={() => {
+            setStateFilter("resolved");
+          }}
           active={stateFilter === "resolved"}
         />
         <SummaryTile
@@ -136,7 +133,9 @@ export function NotificationDLQTable() {
             (summary?.dismissed ?? 0)
           }
           variant="outline"
-          onClick={() => { setStateFilter(""); }}
+          onClick={() => {
+            setStateFilter("");
+          }}
           active={stateFilter === ""}
         />
       </div>
@@ -201,7 +200,7 @@ export function NotificationDLQTable() {
 interface SummaryTileProps {
   label: string;
   count: number;
-  variant: "default" | "secondary" | "destructive" | "outline";
+  variant: BadgeVariant;
   onClick: () => void;
   active: boolean;
 }
@@ -311,7 +310,12 @@ function DLQRow({
                   </Button>
                 </>
               )}
-              <Button variant="ghost" size="sm" onClick={onDelete}>
+              <Button
+                aria-label={`Delete failed notification to ${entry.channel_name} from ${formatRelativeTime(entry.created_at)}`}
+                variant="ghost"
+                size="sm"
+                onClick={onDelete}
+              >
                 <Trash2 className="h-4 w-4 text-destructive" />
               </Button>
             </div>

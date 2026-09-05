@@ -360,6 +360,36 @@ func (q *Queries) DeleteVeeamServer(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deleteVeeamSession = `-- name: DeleteVeeamSession :exec
+DELETE FROM veeam_sessions
+WHERE veeam_server_id = $1 AND veeam_id = $2
+`
+
+type DeleteVeeamSessionParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	VeeamID       uuid.UUID `json:"veeam_id"`
+}
+
+// Drops one session the upstream server no longer has.
+//
+// Only ever called when GET /sessions/{id} ITSELF answered 404. A non-terminal
+// row Veeam has forgotten can never reach a terminal state on its own, and
+// leaving it is what pins a job to "Running" forever — so the mirror drops it.
+//
+// Unlike the sweeps beside it this has NO grace window, because it needs none:
+// a sweep infers absence from a row missing out of a listing, where one
+// non-observation is indistinguishable from a hiccup, while this is VBR
+// answering a direct question about one id. What carries the weight instead is
+// the caller's classification — see veeam.ErrSessionNotFound, which exists
+// precisely so a 404 raised anywhere else on the way cannot reach here.
+//
+// Nothing references veeam_sessions by foreign key; veeam_jobs.last_session_id
+// and veeam_restore_points.session_id carry Veeam's own UUID, not a row id.
+func (q *Queries) DeleteVeeamSession(ctx context.Context, arg DeleteVeeamSessionParams) error {
+	_, err := q.db.Exec(ctx, deleteVeeamSession, arg.VeeamServerID, arg.VeeamID)
+	return err
+}
+
 const deriveVeeamJobPlatforms = `-- name: DeriveVeeamJobPlatforms :exec
 UPDATE veeam_jobs j
 SET platform_id = s.platform_id
@@ -857,33 +887,6 @@ func (q *Queries) GetVeeamJobByVeeamID(ctx context.Context, arg GetVeeamJobByVee
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getVeeamPlatform = `-- name: GetVeeamPlatform :one
-
-SELECT veeam_server_id, platform_id, display_name, cluster_id, last_seen_at, created_at FROM veeam_platforms WHERE veeam_server_id = $1 AND platform_id = $2
-`
-
-type GetVeeamPlatformParams struct {
-	VeeamServerID uuid.UUID `json:"veeam_server_id"`
-	PlatformID    uuid.UUID `json:"platform_id"`
-}
-
-// ---------------------------------------------------------------------------
-// Phase 3: platform mapping and guest correlation.
-// ---------------------------------------------------------------------------
-func (q *Queries) GetVeeamPlatform(ctx context.Context, arg GetVeeamPlatformParams) (VeeamPlatform, error) {
-	row := q.db.QueryRow(ctx, getVeeamPlatform, arg.VeeamServerID, arg.PlatformID)
-	var i VeeamPlatform
-	err := row.Scan(
-		&i.VeeamServerID,
-		&i.PlatformID,
-		&i.DisplayName,
-		&i.ClusterID,
-		&i.LastSeenAt,
-		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1701,6 +1704,7 @@ func (q *Queries) ListVeeamPlatformsByServer(ctx context.Context, veeamServerID 
 }
 
 const listVeeamPlatformsWithCluster = `-- name: ListVeeamPlatformsWithCluster :many
+
 SELECT
     p.veeam_server_id,
     p.platform_id,
@@ -1727,6 +1731,9 @@ type ListVeeamPlatformsWithClusterRow struct {
 	ObjectCount   int64       `json:"object_count"`
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3: platform mapping and guest correlation.
+// ---------------------------------------------------------------------------
 // ListVeeamPlatformsWithCluster feeds the mapping UI: every Proxmox connection
 // the server has been seen protecting, with the Nexara cluster (if any) an
 // operator has attached it to. object_count is what makes an unmapped platform
@@ -1807,55 +1814,6 @@ ORDER BY creation_time DESC
 
 func (q *Queries) ListVeeamRestorePointsByObject(ctx context.Context, backupObjectID uuid.UUID) ([]VeeamRestorePoint, error) {
 	rows, err := q.db.Query(ctx, listVeeamRestorePointsByObject, backupObjectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []VeeamRestorePoint{}
-	for rows.Next() {
-		var i VeeamRestorePoint
-		if err := rows.Scan(
-			&i.ID,
-			&i.VeeamServerID,
-			&i.BackupObjectID,
-			&i.VeeamID,
-			&i.Name,
-			&i.PointType,
-			&i.MalwareStatus,
-			&i.GuestOsFamily,
-			&i.CreationTime,
-			&i.SizeBytes,
-			&i.BackupID,
-			&i.SessionID,
-			&i.BackupFileID,
-			&i.SupportsFlr,
-			&i.LastSeenAt,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listVeeamRestorePointsByServer = `-- name: ListVeeamRestorePointsByServer :many
-SELECT id, veeam_server_id, backup_object_id, veeam_id, name, point_type, malware_status, guest_os_family, creation_time, size_bytes, backup_id, session_id, backup_file_id, supports_flr, last_seen_at, created_at FROM veeam_restore_points
-WHERE veeam_server_id = $1
-ORDER BY creation_time DESC
-LIMIT $2
-`
-
-type ListVeeamRestorePointsByServerParams struct {
-	VeeamServerID uuid.UUID `json:"veeam_server_id"`
-	Limit         int32     `json:"limit"`
-}
-
-func (q *Queries) ListVeeamRestorePointsByServer(ctx context.Context, arg ListVeeamRestorePointsByServerParams) ([]VeeamRestorePoint, error) {
-	rows, err := q.db.Query(ctx, listVeeamRestorePointsByServer, arg.VeeamServerID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -2072,6 +2030,51 @@ func (q *Queries) ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSe
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamUnfinishedSessions = `-- name: ListVeeamUnfinishedSessions :many
+SELECT veeam_id FROM veeam_sessions
+WHERE veeam_server_id = $1
+  AND state <> 'Stopped'
+  AND state <> ''
+ORDER BY creation_time DESC
+LIMIT $2
+`
+
+type ListVeeamUnfinishedSessionsParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	Limit         int32     `json:"limit"`
+}
+
+// The stored runs that have not reached a terminal state, newest first.
+//
+// Deliberately the SAME predicate as the live-run LATERAL in
+// ListVeeamJobsByServer: these are exactly the rows that paint a job
+// "Running", so re-reading precisely this set is what stops one being painted
+// from a row the poll can no longer reach. If that predicate ever changes,
+// this one changes with it.
+//
+// Bounded by the caller. A backlog larger than the limit converges over
+// successive passes, newest first, because a run from ten minutes ago is the
+// one an operator is looking at.
+func (q *Queries) ListVeeamUnfinishedSessions(ctx context.Context, arg ListVeeamUnfinishedSessionsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listVeeamUnfinishedSessions, arg.VeeamServerID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var veeam_id uuid.UUID
+		if err := rows.Scan(&veeam_id); err != nil {
+			return nil, err
+		}
+		items = append(items, veeam_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

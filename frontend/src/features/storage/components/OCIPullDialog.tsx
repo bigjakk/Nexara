@@ -104,9 +104,10 @@ export function OCIPullDialog({ clusterId, storageId }: OCIPullDialogProps) {
               Tech preview (Proxmox VE 9.1+)
             </p>
             <p className="mt-1 text-muted-foreground">
-              The node must have <code className="rounded bg-muted px-1">skopeo</code> installed.
-              OCI layers are squashed on container create; in-place updates are not
-              supported — re-create the container to apply image changes.
+              The node must have{" "}
+              <code className="rounded bg-muted px-1">skopeo</code> installed.
+              OCI layers are squashed on container create; in-place updates are
+              not supported — re-create the container to apply image changes.
             </p>
           </div>
 
@@ -152,8 +153,8 @@ export function OCIPullDialog({ clusterId, storageId }: OCIPullDialogProps) {
               spellCheck={false}
             />
             <p className="text-xs text-muted-foreground">
-              Server appends <code>.tar</code>. Leave blank to let Proxmox derive it
-              from the reference.
+              Server appends <code>.tar</code>. Leave blank to let Proxmox
+              derive it from the reference.
             </p>
             {filename !== "" && !filenameValid && (
               <p className="text-xs text-destructive">
@@ -169,7 +170,13 @@ export function OCIPullDialog({ clusterId, storageId }: OCIPullDialogProps) {
               description={`Pull ${referenceTrimmed}`}
               onComplete={() => {
                 void queryClient.invalidateQueries({
-                  queryKey: ["clusters", clusterId, "storage", storageId, "content"],
+                  queryKey: [
+                    "clusters",
+                    clusterId,
+                    "storage",
+                    storageId,
+                    "content",
+                  ],
                 });
                 setTaskUpid(null);
                 setOpen(false);

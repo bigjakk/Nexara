@@ -109,14 +109,10 @@ export function MigrateWizard() {
 
   // Deduplicate storage pools by name
   const uniqueSourceStorage = sourceStorage
-    ? Array.from(
-        new Map(sourceStorage.map((s) => [s.storage, s])).values(),
-      )
+    ? Array.from(new Map(sourceStorage.map((s) => [s.storage, s])).values())
     : [];
   const uniqueTargetStorage = targetStorage
-    ? Array.from(
-        new Map(targetStorage.map((s) => [s.storage, s])).values(),
-      )
+    ? Array.from(new Map(targetStorage.map((s) => [s.storage, s])).values())
     : [];
 
   function resetForm() {
@@ -141,9 +137,7 @@ export function MigrateWizard() {
     const req: CreateMigrationRequest = {
       source_cluster_id: sourceClusterId,
       target_cluster_id:
-        migrationType === "intra-cluster"
-          ? sourceClusterId
-          : targetClusterId,
+        migrationType === "intra-cluster" ? sourceClusterId : targetClusterId,
       source_node: sourceNode,
       target_node: targetNode,
       vmid: parseInt(vmid, 10),
@@ -209,11 +203,17 @@ export function MigrateWizard() {
       }
     }
     if (bestNode === "") {
-      const firstOnline = availableTargetNodes.find((n) => n.status === "online");
+      const firstOnline = availableTargetNodes.find(
+        (n) => n.status === "online",
+      );
       if (firstOnline) bestNode = firstOnline.name;
     }
     if (bestNode !== "") setTargetNode(bestNode);
-  }, [availableTargetNodes, targetClusterMetrics?.nodeMetrics, targetNode.length]);
+  }, [
+    availableTargetNodes,
+    targetClusterMetrics?.nodeMetrics,
+    targetNode.length,
+  ]);
 
   const { value: bwlimitKib, invalid: bwlimitInvalid } = parseBwlimit(bwlimit);
 
@@ -225,7 +225,6 @@ export function MigrateWizard() {
     (migrationType === "intra-cluster"
       ? targetNode.length > 0
       : targetClusterId.length > 0);
-
 
   return (
     <Dialog
@@ -410,14 +409,20 @@ export function MigrateWizard() {
                   <SelectContent>
                     {availableTargetNodes?.map((n) => {
                       const live = targetClusterMetrics?.nodeMetrics.get(n.id);
-                      const cpuLabel = live ? `${String(Math.round(live.cpuPercent))}%` : null;
-                      const memLabel = live ? `${String(Math.round(live.memPercent))}%` : null;
+                      const cpuLabel = live
+                        ? `${String(Math.round(live.cpuPercent))}%`
+                        : null;
+                      const memLabel = live
+                        ? `${String(Math.round(live.memPercent))}%`
+                        : null;
                       return (
                         <SelectItem key={n.id} value={n.name}>
                           <span className="flex items-center gap-2">
                             {n.name}
                             {n.status !== "online" && (
-                              <span className="text-muted-foreground">({n.status})</span>
+                              <span className="text-muted-foreground">
+                                ({n.status})
+                              </span>
                             )}
                             {cpuLabel && memLabel && (
                               <span className="text-[10px] text-muted-foreground">
@@ -463,10 +468,7 @@ export function MigrateWizard() {
                           </SelectTrigger>
                           <SelectContent>
                             {uniqueTargetStorage.map((tgt) => (
-                              <SelectItem
-                                key={tgt.storage}
-                                value={tgt.storage}
-                              >
+                              <SelectItem key={tgt.storage} value={tgt.storage}>
                                 {tgt.storage} ({tgt.type})
                               </SelectItem>
                             ))}

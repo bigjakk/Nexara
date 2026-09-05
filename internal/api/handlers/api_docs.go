@@ -157,6 +157,32 @@ var endpointMeta = map[string]APIEndpoint{
 	// manage, not view: discovery makes a node dial a caller-supplied address.
 	"GET /api/v1/clusters/:cluster_id/scan/iscsi": {Description: "Discover iSCSI targets on a portal", Permission: "manage:storage", Group: "Storage"},
 
+	// ── Guest Tools ───────────────────────────────────────────────────
+	// A dedicated resource rather than execute:vm: running an installer inside
+	// a guest OS is worth granting, auditing and withholding on its own.
+	"GET /api/v1/clusters/:cluster_id/guest-tools/config":                 {Description: "Get the cluster's Windows guest tools update policy", Permission: "view:guest_tools", Group: "Guest Tools"},
+	"PUT /api/v1/clusters/:cluster_id/guest-tools/config":                 {Description: "Update the cluster's Windows guest tools update policy", Permission: "manage:guest_tools", Group: "Guest Tools"},
+	"GET /api/v1/clusters/:cluster_id/guest-tools/guests":                 {Description: "List Windows guests with installed guest tools versions and update state", Permission: "view:guest_tools", Group: "Guest Tools"},
+	"PUT /api/v1/clusters/:cluster_id/guest-tools/guests/:vmid/policy":    {Description: "Pin a version or exclude a guest from guest tools updates", Permission: "manage:guest_tools", Group: "Guest Tools"},
+	"POST /api/v1/clusters/:cluster_id/guest-tools/guests/:vmid/detect":   {Description: "Probe a guest for its installed guest tools version", Permission: "view:guest_tools", Group: "Guest Tools"},
+	"POST /api/v1/clusters/:cluster_id/guest-tools/guests/:vmid/update":   {Description: "Stage a guest tools update for next boot, or run it now", Permission: "execute:guest_tools", Group: "Guest Tools"},
+	"DELETE /api/v1/clusters/:cluster_id/guest-tools/guests/:vmid/update": {Description: "Cancel a staged guest tools update", Permission: "execute:guest_tools", Group: "Guest Tools"},
+
+	// ── virtio-win ────────────────────────────────────────────────────
+	// Gated on storage permissions rather than a resource of their own: the
+	// effect is a node fetching a URL into a storage, which is what
+	// manage:storage already authorises on POST .../storage/:id/download-url.
+	// The source override is the exception: one write repoints every cluster's
+	// downloads, so it wants manage:settings, not a per-cluster permission.
+	"GET /api/v1/virtio-win/releases":                       {Description: "List known upstream virtio-win releases", Permission: "view:storage", Group: "virtio-win"},
+	"GET /api/v1/virtio-win/mirror":                         {Description: "Get the instance-wide virtio-win download source", Permission: "view:storage", Group: "virtio-win"},
+	"PUT /api/v1/virtio-win/mirror":                         {Description: "Point virtio-win downloads at a mirror, for air-gapped installs", Permission: "manage:settings", Group: "virtio-win"},
+	"GET /api/v1/clusters/:cluster_id/virtio-win/config":    {Description: "Get the cluster's virtio-win auto-download policy", Permission: "view:storage", Group: "virtio-win"},
+	"PUT /api/v1/clusters/:cluster_id/virtio-win/config":    {Description: "Update the cluster's virtio-win auto-download policy", Permission: "manage:storage", Group: "virtio-win"},
+	"POST /api/v1/clusters/:cluster_id/virtio-win/check":    {Description: "Run the cluster's virtio-win check now, off-schedule", Permission: "manage:storage", Group: "virtio-win"},
+	"POST /api/v1/clusters/:cluster_id/virtio-win/download": {Description: "Download a virtio-win ISO to the configured storage now", Permission: "manage:storage", Group: "virtio-win"},
+	"GET /api/v1/clusters/:cluster_id/virtio-win/downloads": {Description: "List virtio-win download history for the cluster", Permission: "view:storage", Group: "virtio-win"},
+
 	// ── Backup (PBS) ──────────────────────────────────────────────────
 	"GET /api/v1/pbs-servers":                    {Description: "List PBS servers", Permission: "view:pbs", Group: "Backup"},
 	"POST /api/v1/pbs-servers":                   {Description: "Add a PBS server", Permission: "manage:pbs", Group: "Backup"},

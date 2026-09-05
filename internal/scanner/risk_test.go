@@ -55,11 +55,11 @@ func TestComputeRiskScore(t *testing.T) {
 
 func TestComputeRiskScoreClamps(t *testing.T) {
 	cases := []struct {
-		name      string
-		cvss      float32
-		epss      float32
-		kev       bool
-		max, min  float32
+		name     string
+		cvss     float32
+		epss     float32
+		kev      bool
+		max, min float32
 	}{
 		{"negative cvss", -5, 0.5, false, 1.0, 0},
 		{"oversized cvss", 99, 0.5, false, 10, 4},

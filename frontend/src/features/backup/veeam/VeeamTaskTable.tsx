@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { formatBytes } from "@/lib/format";
 import { useVeeamSessionTasks } from "../api/backup-queries";
+import { resultVariant } from "./veeam-format";
 
 interface VeeamTaskTableProps {
   serverId: string;
@@ -16,21 +17,6 @@ interface VeeamTaskTableProps {
    * all" are different facts that render identically without this.
    */
   running: boolean;
-}
-
-function resultVariant(
-  result: string,
-): "default" | "secondary" | "destructive" | "outline" {
-  switch (result) {
-    case "Success":
-      return "default";
-    case "Warning":
-      return "outline";
-    case "Failed":
-      return "destructive";
-    default:
-      return "secondary";
-  }
 }
 
 function formatTime(value: string | null): string {

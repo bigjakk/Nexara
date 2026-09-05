@@ -1159,6 +1159,49 @@ type NodePCIDevice struct {
 // VMConfig represents the full configuration of a QEMU VM from GET /nodes/{node}/qemu/{vmid}/config.
 type VMConfig map[string]interface{}
 
+// VolumeFilename extracts the basename from a Proxmox volid such as
+// "local:iso/virtio-win-0.1.302.iso", or "local:virtio-win-0.1.302.iso" on a
+// storage that spells its volids without the content directory.
+func VolumeFilename(volid string) string {
+	if idx := strings.LastIndex(volid, "/"); idx >= 0 {
+		return volid[idx+1:]
+	}
+	if idx := strings.Index(volid, ":"); idx >= 0 {
+		return volid[idx+1:]
+	}
+	return volid
+}
+
+// CDROMDrive is one CD-ROM drive read out of a guest's config.
+type CDROMDrive struct {
+	Key   string // config key the drive is spelled under, e.g. "ide2"
+	Volid string // mounted volume, or "" for a drive holding no media
+}
+
+// CDROMDrives returns the guest's CD-ROM drives, ordered by config key.
+//
+// A drive entry reads "<volid>,media=cdrom[,...]", and an empty one spells its
+// volid "none" — reported here as "" so callers test one thing rather than two.
+// The order is fixed because ranging a map picks an arbitrary drive on a guest
+// with more than one, which is exactly the shape that makes such a bug rare in
+// testing and reproducible in production.
+func (c VMConfig) CDROMDrives() []CDROMDrive {
+	drives := make([]CDROMDrive, 0, len(c))
+	for key, raw := range c {
+		value, ok := raw.(string)
+		if !ok || !strings.Contains(value, "media=cdrom") {
+			continue
+		}
+		volid, _, _ := strings.Cut(value, ",")
+		if volid == "none" {
+			volid = ""
+		}
+		drives = append(drives, CDROMDrive{Key: key, Volid: volid})
+	}
+	sort.Slice(drives, func(i, j int) bool { return drives[i].Key < drives[j].Key })
+	return drives
+}
+
 // TargetEndpoint describes a remote Proxmox API endpoint for cross-cluster migration.
 type TargetEndpoint struct {
 	Host        string `json:"host"`
@@ -1215,6 +1258,23 @@ type GuestIPAddress struct {
 	IPAddress     string `json:"ip-address"`
 	IPAddressType string `json:"ip-address-type"`
 	Prefix        int    `json:"prefix"`
+}
+
+// GuestExecStatus is the result of polling a guest-agent exec by PID.
+//
+// Exited is the field to branch on: a process that has not exited yet returns
+// with ExitCode unset, and treating that as exit code 0 would read every
+// in-flight command as an immediate success.
+type GuestExecStatus struct {
+	// FlexBool, not bool: Proxmox's schema declares these boolean but the guest
+	// agent sends 0/1 on the wire, which fails a plain bool decode outright.
+	Exited       FlexBool `json:"exited"`
+	ExitCode     FlexInt  `json:"exitcode"`
+	Signal       FlexInt  `json:"signal,omitempty"`
+	OutData      string   `json:"out-data,omitempty"`
+	ErrData      string   `json:"err-data,omitempty"`
+	OutTruncated FlexBool `json:"out-truncated,omitempty"`
+	ErrTruncated FlexBool `json:"err-truncated,omitempty"`
 }
 
 // GuestNetworkInterface represents a network interface reported by the QEMU guest agent.

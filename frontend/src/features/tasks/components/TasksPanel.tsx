@@ -1,75 +1,54 @@
-import { useState, type ReactNode } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  Activity,
-  Monitor,
-} from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DataTableHeadCells } from "@/components/DataTableHeadCells";
+import { DataTableCells } from "@/components/DataTableCells";
+import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { TaskLogSection } from "@/components/TaskLogSection";
+import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
+import type { SortDirection } from "@/hooks/useTableSort";
+import { formatDateTime } from "@/lib/format";
+import { displayProgress } from "@/components/layout/task-status";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useTaskStatus, useTaskLog } from "@/features/vms/api/vm-queries";
-import { isOkExit } from "@/components/layout/task-status";
 import { useTaskLogStore } from "@/stores/task-log-store";
-import { selectClass, statusFilters } from "../lib/task-filters";
+import { PAGE_SIZE, selectClass, statusFilters } from "../lib/task-filters";
+import {
+  deriveDisplayStatus,
+  useTaskSort,
+  type TaskCellCtx,
+  type TaskSortKey,
+} from "../lib/task-columns";
+import { TASK_COLUMNS } from "../lib/task-column-defs";
 import { useTasks, type TaskRecord } from "../api/tasks-queries";
 
-const PAGE_SIZE = 50;
-
-type DisplayStatus = "running" | "ok" | "failed";
+export type TaskLayout = ColumnLayout<TaskRecord, TaskSortKey, TaskCellCtx>;
 
 /**
- * Resolve the display status. The reconciled task_history status is
- * authoritative once terminal (preserves the d86b7df fix); only a row the
- * server still reports as running is refined by the live poll, so it flips to
- * done before the next reconcile tick.
+ * The `<thead>`. Rendered from the same layout the body cells use, so adding or
+ * renaming a column is a single edit in task-column-defs.tsx.
  */
-function deriveDisplayStatus(
-  task: TaskRecord,
-  live: { status: string; exit_status: string } | undefined,
-): DisplayStatus {
-  switch (task.status) {
-    case "completed":
-      return "ok";
-    case "failed":
-      return "failed";
-    case "stopped":
-      return isOkExit(task.exit_status) ? "ok" : "failed";
-    case "running":
-      if (live && live.status === "stopped") {
-        return isOkExit(live.exit_status) ? "ok" : "failed";
-      }
-      return "running";
-    default:
-      return isOkExit(task.exit_status) ? "ok" : "failed";
-  }
-}
-
-function StatusIcon({ status }: { status: DisplayStatus }) {
-  if (status === "running")
-    return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />;
-  if (status === "ok")
-    return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
-  return <XCircle className="h-3.5 w-3.5 text-red-500" />;
-}
-
-const STATUS_BADGE: Record<DisplayStatus, string> = {
-  running: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  ok: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  failed: "bg-red-500/15 text-red-600 dark:text-red-400",
-};
-const STATUS_LABEL: Record<DisplayStatus, string> = {
-  running: "Running",
-  ok: "Completed",
-  failed: "Failed",
-};
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString();
+function TaskTableHeader({
+  layout,
+  directionFor,
+  onSort,
+}: {
+  layout: TaskLayout;
+  directionFor: (key: TaskSortKey) => SortDirection | null;
+  onSort: (key: TaskSortKey) => void;
+}) {
+  return (
+    <thead>
+      <tr className="border-b bg-muted/50">
+        <DataTableHeadCells
+          layout={layout}
+          directionFor={directionFor}
+          onSort={onSort}
+        />
+      </tr>
+    </thead>
+  );
 }
 
 function formatDuration(start: string, end: string | null): string {
@@ -82,21 +61,24 @@ function formatDuration(start: string, end: string | null): string {
   return `${String(Math.floor(sec / 3600))}h ${String(Math.floor((sec % 3600) / 60))}m`;
 }
 
-export function TaskRow({
+function TaskRow({
   task,
   clusterName,
   vmName,
   expanded,
   onToggle,
+  layout,
 }: {
   task: TaskRecord;
   clusterName: string;
-  /** When provided (folder/VM-scoped views), an extra VM column is rendered
-   * between Description and Node — the parent table must add a matching
-   * header cell. */
+  /** Rendered by the `vm` column, which only the folder-scoped layout
+   * includes. */
   vmName?: ReactNode;
   expanded: boolean;
   onToggle: () => void;
+  /** The parent's layout — the SAME instance its header row uses, so a
+   * dragged column moves the heading and these cells together. */
+  layout: TaskLayout;
 }) {
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
   const isRunning = task.status === "running";
@@ -109,7 +91,7 @@ export function TaskRow({
   );
 
   const display = deriveDisplayStatus(task, live);
-  const progress = display === "running" ? live?.progress : undefined;
+  const progress = displayProgress(display, task.progress, live?.progress);
   const exitText = task.exit_status || live?.exit_status || "";
 
   const { data: logLines, isLoading: logLoading } = useTaskLog(
@@ -124,54 +106,21 @@ export function TaskRow({
         className="cursor-pointer border-b hover:bg-muted/20"
         onClick={onToggle}
       >
-        <td className="px-4 py-2 whitespace-nowrap text-muted-foreground">
-          <div className="flex items-center gap-1.5">
-            <ChevronDown
-              className={`h-3 w-3 text-muted-foreground transition-transform ${expanded ? "" : "-rotate-90"}`}
-            />
-            <StatusIcon status={display} />
-            {formatTime(task.started_at)}
-          </div>
-        </td>
-        <td className="px-4 py-2">{clusterName}</td>
-        <td className="px-4 py-2 font-mono text-xs">{task.task_type || "—"}</td>
-        <td className="px-4 py-2">
-          <div className="flex items-center gap-2">
-            {task.source === "proxmox" && (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-orange-600 dark:text-orange-400">
-                <Monitor className="h-2.5 w-2.5" />
-                PVE
-              </span>
-            )}
-            <span>{task.description || task.upid}</span>
-            {display === "running" && progress != null && (
-              <div className="flex items-center gap-1.5">
-                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-blue-500 transition-all duration-500"
-                    style={{ width: `${String(Math.round(progress * 100))}%` }}
-                  />
-                </div>
-                <span className="text-[10px] tabular-nums text-blue-500">
-                  {Math.round(progress * 100)}%
-                </span>
-              </div>
-            )}
-          </div>
-        </td>
-        {vmName !== undefined && <td className="px-4 py-2">{vmName}</td>}
-        <td className="px-4 py-2 text-muted-foreground">{task.node || "—"}</td>
-        <td className="px-4 py-2">
-          <span
-            className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[display]}`}
-          >
-            {STATUS_LABEL[display]}
-          </span>
-        </td>
+        <DataTableCells
+          row={task}
+          layout={layout}
+          ctx={{
+            clusterName,
+            vmName,
+            display,
+            progress,
+            expanded,
+          }}
+        />
       </tr>
       {expanded && (
         <tr className="border-b bg-muted/10">
-          <td colSpan={vmName !== undefined ? 7 : 6} className="px-4 py-3">
+          <td colSpan={layout.columns.length} className="px-4 py-3">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               <span className="text-muted-foreground">Description</span>
               <span>{task.description || "—"}</span>
@@ -186,13 +135,13 @@ export function TaskRow({
               <span className="font-mono">{task.task_type || "—"}</span>
 
               <span className="text-muted-foreground">Started</span>
-              <span>{formatTime(task.started_at)}</span>
+              <span>{formatDateTime(task.started_at)}</span>
 
               <span className="text-muted-foreground">
                 {task.finished_at ? "Finished" : "Elapsed"}
               </span>
               <span>
-                {task.finished_at ? `${formatTime(task.finished_at)} ` : ""}
+                {task.finished_at ? `${formatDateTime(task.finished_at)} ` : ""}
                 <span className="text-muted-foreground">
                   ({formatDuration(task.started_at, task.finished_at)})
                 </span>
@@ -229,31 +178,180 @@ export function TaskRow({
               </Button>
             </div>
 
-            {/* Task log output */}
-            <div className="mt-2 border-t pt-2">
-              <span className="text-xs font-medium text-muted-foreground">
-                Log
-              </span>
-              {logLoading && (
-                <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Loading log…
-                </div>
-              )}
-              {logLines && logLines.length > 0 && (
-                <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-                  {logLines.map((line) => line.t).join("\n")}
-                </pre>
-              )}
-              {logLines && logLines.length === 0 && (
-                <div className="mt-1 text-xs text-muted-foreground">
-                  No log output.
-                </div>
-              )}
-            </div>
+            <TaskLogSection lines={logLines} isLoading={logLoading} />
           </td>
         </tr>
       )}
+    </>
+  );
+}
+
+/** The status dropdown both task views carry. Resetting to page 0 is the
+ *  caller's job — it owns the page state. */
+export function TaskStatusFilter({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      className={selectClass}
+      value={value}
+      onChange={(e) => {
+        onChange(e.target.value);
+      }}
+    >
+      {statusFilters.map((s) => (
+        <option key={s.value || "all"} value={s.value}>
+          {s.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * The task-history table itself: loading, error, rows, empty state and pager.
+ *
+ * Both task views render this one. What differs between them sits above it —
+ * the Events page adds a cluster filter, the folder tab guards on how many VMs
+ * the folder holds — so each owns its query and its filter chrome and hands
+ * the page of results here. `expandedId` lives here because both views want
+ * exactly one row open at a time and neither reads it.
+ */
+export function TaskHistoryTable({
+  layout,
+  directionFor,
+  onSort,
+  items,
+  total,
+  page,
+  onPageChange,
+  isLoading,
+  error,
+  clusterName,
+  vmName,
+  emptyMessage,
+}: {
+  layout: TaskLayout;
+  directionFor: (key: TaskSortKey) => SortDirection | null;
+  onSort: (key: TaskSortKey) => void;
+  items: TaskRecord[];
+  total: number;
+  page: number;
+  onPageChange: (page: number) => void;
+  isLoading: boolean;
+  error: Error | null;
+  clusterName: (task: TaskRecord) => string;
+  /** The `vm` cell's content, for the layout that includes that column. */
+  vmName?: (task: TaskRecord) => ReactNode;
+  emptyMessage: string;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Snap back when a refetch (WS invalidation / 60s poll) shrinks the result
+  // below the current page — otherwise a stale page index strands an empty
+  // table. Safe against transient zeros: placeholderData in useTasks keeps the
+  // previous `total` while the next page loads.
+  //
+  // Not while the fetch is failing, though — placeholder data is NOT applied in
+  // the error state, so `total` really does collapse to 0 there. Clamping on
+  // that would throw the operator back to page 1 and swap the error message for
+  // page 1's cached rows before they could read it.
+  useEffect(() => {
+    if (!error && page > totalPages - 1) onPageChange(totalPages - 1);
+  }, [error, page, totalPages, onPageChange]);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
+  }
+  if (error) {
+    return <p className="text-destructive">{error.message}</p>;
+  }
+
+  return (
+    <>
+      <div className="overflow-x-auto rounded-md border">
+        <table
+          className="table-fixed text-sm"
+          style={{ width: layout.totalWidth }}
+        >
+          <TaskTableHeader
+            layout={layout}
+            directionFor={directionFor}
+            onSort={onSort}
+          />
+          <tbody>
+            {items.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                clusterName={clusterName(task)}
+                layout={layout}
+                vmName={vmName?.(task)}
+                expanded={expandedId === task.id}
+                onToggle={() => {
+                  setExpandedId(expandedId === task.id ? null : task.id);
+                }}
+              />
+            ))}
+            {items.length === 0 && (
+              <tr>
+                <td
+                  colSpan={layout.columns.length}
+                  className="px-4 py-8 text-center text-muted-foreground"
+                >
+                  {emptyMessage}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          {String(total)} task{total === 1 ? "" : "s"}
+        </p>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <Button
+              aria-label="Previous page"
+              variant="outline"
+              size="sm"
+              disabled={page === 0}
+              onClick={() => {
+                onPageChange(Math.max(0, page - 1));
+              }}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm">
+              Page {page + 1} of {totalPages}
+            </span>
+            <Button
+              aria-label="Next page"
+              variant="outline"
+              size="sm"
+              disabled={page + 1 >= totalPages}
+              onClick={() => {
+                onPageChange(page + 1);
+              }}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+      </div>
     </>
   );
 }
@@ -264,7 +362,11 @@ export function TasksPanel() {
   const [page, setPage] = useState(0);
   const [clusterFilter, setClusterFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const { sort, toggle, directionFor } = useTaskSort(() => {
+    setPage(0);
+  });
+  const layout = useColumnLayout("tasks", TASK_COLUMNS);
 
   const { data: clusters } = useClusters();
   const { data, isLoading, error } = useTasks({
@@ -272,6 +374,8 @@ export function TasksPanel() {
     offset: page * PAGE_SIZE,
     clusterId: clusterFilter || undefined,
     status: statusFilter || undefined,
+    sort: sort.key,
+    order: sort.direction,
   });
 
   const clusterName = (id: string): string => {
@@ -279,12 +383,10 @@ export function TasksPanel() {
     return match?.name ?? id.slice(0, 8);
   };
 
-  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
-
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <select
           className={selectClass}
           value={clusterFilter}
@@ -301,106 +403,31 @@ export function TasksPanel() {
           ))}
         </select>
 
-        <select
-          className={selectClass}
+        <TaskStatusFilter
           value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
+          onChange={(v) => {
+            setStatusFilter(v);
             setPage(0);
           }}
-        >
-          {statusFilters.map((s) => (
-            <option key={s.value || "all"} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+        />
+
+        <span className="flex-1" />
+        <ResetColumnsButton layout={layout} />
       </div>
 
-      {/* Table */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full" />
-          ))}
-        </div>
-      ) : error ? (
-        <p className="text-destructive">{error.message}</p>
-      ) : (
-        <>
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-2 text-left font-medium">Started</th>
-                  <th className="px-4 py-2 text-left font-medium">Cluster</th>
-                  <th className="px-4 py-2 text-left font-medium">Type</th>
-                  <th className="px-4 py-2 text-left font-medium">
-                    Description
-                  </th>
-                  <th className="px-4 py-2 text-left font-medium">Node</th>
-                  <th className="px-4 py-2 text-left font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data?.items.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    clusterName={clusterName(task.cluster_id)}
-                    expanded={expandedId === task.id}
-                    onToggle={() => {
-                      setExpandedId(expandedId === task.id ? null : task.id);
-                    }}
-                  />
-                ))}
-                {data?.items.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      className="px-4 py-8 text-center text-muted-foreground"
-                    >
-                      No tasks found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {data ? `${String(data.total)} total tasks` : ""}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page === 0}
-                onClick={() => {
-                  setPage((p) => Math.max(0, p - 1));
-                }}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="text-sm">
-                Page {page + 1} of {Math.max(1, totalPages)}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page + 1 >= totalPages}
-                onClick={() => {
-                  setPage((p) => p + 1);
-                }}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </>
-      )}
+      <TaskHistoryTable
+        layout={layout}
+        directionFor={directionFor}
+        onSort={toggle}
+        items={data?.items ?? []}
+        total={data?.total ?? 0}
+        page={page}
+        onPageChange={setPage}
+        isLoading={isLoading}
+        error={error}
+        clusterName={(task) => clusterName(task.cluster_id)}
+        emptyMessage="No tasks found."
+      />
     </div>
   );
 }

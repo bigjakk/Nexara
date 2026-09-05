@@ -48,6 +48,38 @@ function compare(a: SortValue, b: SortValue, direction: SortDirection): number {
 export const byId = (row: { id: string }) => row.id;
 
 /**
+ * The sort state on its own: which column, which direction, and the toggle
+ * that cycles them.
+ *
+ * Split out of useTableSort for the server-sorted tables, which need exactly
+ * this and none of the ordering below it — there the order is a query parameter
+ * over the whole filtered set (see useTaskSort). `onChange` fires after every
+ * toggle; those callers use it to reset pagination.
+ */
+export function useSortState<K extends string>(
+  initial: SortState<K> | null,
+  onChange?: () => void,
+) {
+  const [sort, setSort] = useState<SortState<K> | null>(initial);
+
+  function toggle(key: K) {
+    setSort((prev) =>
+      prev !== null && prev.key === key
+        ? { key, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: "asc" },
+    );
+    onChange?.();
+  }
+
+  /** The active direction for `key`, or null when another column is sorted. */
+  function directionFor(key: K): SortDirection | null {
+    return sort !== null && sort.key === key ? sort.direction : null;
+  }
+
+  return { sort, toggle, directionFor };
+}
+
+/**
  * Client-side column sorting for the hand-rolled `<Table>`s.
  *
  * These tables render `rows.map(...)` directly and carry expandable detail
@@ -65,7 +97,7 @@ export function useTableSort<T, K extends string>(
   rowKey: (row: T) => string,
   initial: SortState<K> | null = null,
 ) {
-  const [sort, setSort] = useState<SortState<K> | null>(initial);
+  const { sort, toggle, directionFor } = useSortState<K>(initial);
 
   const sortedRows = useMemo(() => {
     if (sort === null) return rows;
@@ -87,19 +119,6 @@ export function useTableSort<T, K extends string>(
       return rowKey(a).localeCompare(rowKey(b));
     });
   }, [rows, sort, accessors, rowKey]);
-
-  function toggle(key: K) {
-    setSort((prev) =>
-      prev !== null && prev.key === key
-        ? { key, direction: prev.direction === "asc" ? "desc" : "asc" }
-        : { key, direction: "asc" },
-    );
-  }
-
-  /** The active direction for `key`, or null when another column is sorted. */
-  function directionFor(key: K): SortDirection | null {
-    return sort !== null && sort.key === key ? sort.direction : null;
-  }
 
   return { rows: sortedRows, sort, toggle, directionFor };
 }

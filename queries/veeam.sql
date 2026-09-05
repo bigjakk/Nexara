@@ -311,12 +311,6 @@ SELECT * FROM veeam_restore_points
 WHERE backup_object_id = $1
 ORDER BY creation_time DESC;
 
--- name: ListVeeamRestorePointsByServer :many
-SELECT * FROM veeam_restore_points
-WHERE veeam_server_id = $1
-ORDER BY creation_time DESC
-LIMIT $2;
-
 -- name: PruneVeeamRestorePoints :exec
 -- Prunes on last_seen_at, NEVER on creation_time: a restore point Veeam still
 -- holds must not disappear from Nexara because it is old, or every RPO and
@@ -377,6 +371,44 @@ WHERE veeam_server_id = $1
 ORDER BY creation_time DESC
 LIMIT 1;
 
+-- name: ListVeeamUnfinishedSessions :many
+-- The stored runs that have not reached a terminal state, newest first.
+--
+-- Deliberately the SAME predicate as the live-run LATERAL in
+-- ListVeeamJobsByServer: these are exactly the rows that paint a job
+-- "Running", so re-reading precisely this set is what stops one being painted
+-- from a row the poll can no longer reach. If that predicate ever changes,
+-- this one changes with it.
+--
+-- Bounded by the caller. A backlog larger than the limit converges over
+-- successive passes, newest first, because a run from ten minutes ago is the
+-- one an operator is looking at.
+SELECT veeam_id FROM veeam_sessions
+WHERE veeam_server_id = $1
+  AND state <> 'Stopped'
+  AND state <> ''
+ORDER BY creation_time DESC
+LIMIT $2;
+
+-- name: DeleteVeeamSession :exec
+-- Drops one session the upstream server no longer has.
+--
+-- Only ever called when GET /sessions/{id} ITSELF answered 404. A non-terminal
+-- row Veeam has forgotten can never reach a terminal state on its own, and
+-- leaving it is what pins a job to "Running" forever — so the mirror drops it.
+--
+-- Unlike the sweeps beside it this has NO grace window, because it needs none:
+-- a sweep infers absence from a row missing out of a listing, where one
+-- non-observation is indistinguishable from a hiccup, while this is VBR
+-- answering a direct question about one id. What carries the weight instead is
+-- the caller's classification — see veeam.ErrSessionNotFound, which exists
+-- precisely so a 404 raised anywhere else on the way cannot reach here.
+--
+-- Nothing references veeam_sessions by foreign key; veeam_jobs.last_session_id
+-- and veeam_restore_points.session_id carry Veeam's own UUID, not a row id.
+DELETE FROM veeam_sessions
+WHERE veeam_server_id = $1 AND veeam_id = $2;
+
 -- name: ListVeeamSessionsByServer :many
 -- Scoped in SQL, not in Go, because of the LIMIT: filtering after the limit
 -- would take the newest N rows server-wide and then discard the ones the
@@ -407,9 +439,6 @@ WHERE veeam_server_id = $1 AND creation_time < $2;
 -- ---------------------------------------------------------------------------
 -- Phase 3: platform mapping and guest correlation.
 -- ---------------------------------------------------------------------------
-
--- name: GetVeeamPlatform :one
-SELECT * FROM veeam_platforms WHERE veeam_server_id = $1 AND platform_id = $2;
 
 -- ListVeeamPlatformsWithCluster feeds the mapping UI: every Proxmox connection
 -- the server has been seen protecting, with the Nexara cluster (if any) an

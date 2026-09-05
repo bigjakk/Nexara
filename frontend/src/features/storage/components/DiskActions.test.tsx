@@ -9,9 +9,8 @@ const moveState = vi.hoisted(() => ({
 }));
 
 vi.mock("@/features/vms/api/vm-queries", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("@/features/vms/api/vm-queries")
-  >();
+  const actual =
+    await importOriginal<typeof import("@/features/vms/api/vm-queries")>();
   return {
     ...actual,
     useMoveDisk: () => ({
@@ -20,7 +19,9 @@ vi.mock("@/features/vms/api/vm-queries", async (importOriginal) => {
         opts?: { onSuccess?: (data: { upid: string }) => void },
       ) => {
         moveState.vars = vars;
-        opts?.onSuccess?.({ upid: "UPID:pve1:0001:0002:0003:qmmove:100:root@pam:" });
+        opts?.onSuccess?.({
+          upid: "UPID:pve1:0001:0002:0003:qmmove:100:root@pam:",
+        });
       },
       isPending: false,
       isError: false,
@@ -85,7 +86,9 @@ describe("MoveDiskDialog", () => {
       "nfs-store",
     );
     // Sending no format would let PVE fall back to the storage default.
-    expect(screen.getByLabelText<HTMLSelectElement>("Format").value).toBe("raw");
+    expect(screen.getByLabelText<HTMLSelectElement>("Format").value).toBe(
+      "raw",
+    );
     await user.click(screen.getByRole("button", { name: "Move Disk" }));
     expect(moveState.vars).toMatchObject({ format: "raw" });
   });

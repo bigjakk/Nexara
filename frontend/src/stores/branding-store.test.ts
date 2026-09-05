@@ -204,9 +204,7 @@ describe("branding-store — loadFromBranding", () => {
 
   it("parses a JSON-encoded favicon URL from branding.favicon_url key", () => {
     useBrandingStore.getState().loadFromBranding({
-      "branding.favicon_url": JSON.stringify(
-        "https://example.com/favicon.ico",
-      ),
+      "branding.favicon_url": JSON.stringify("https://example.com/favicon.ico"),
     });
     expect(useBrandingStore.getState().faviconUrl).toBe(
       "https://example.com/favicon.ico",
@@ -215,9 +213,7 @@ describe("branding-store — loadFromBranding", () => {
 
   it("injects favicon DOM element when branding.favicon_url is provided", () => {
     useBrandingStore.getState().loadFromBranding({
-      "branding.favicon_url": JSON.stringify(
-        "https://example.com/favicon.ico",
-      ),
+      "branding.favicon_url": JSON.stringify("https://example.com/favicon.ico"),
     });
     const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     expect(link).not.toBeNull();

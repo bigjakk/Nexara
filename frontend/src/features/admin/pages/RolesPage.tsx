@@ -76,7 +76,11 @@ export function RolesPage() {
           description: formDescription,
           permission_ids: selectedPermIds,
         },
-        { onSuccess: () => { setEditRole(null); } },
+        {
+          onSuccess: () => {
+            setEditRole(null);
+          },
+        },
       );
     } else {
       createRole.mutate(
@@ -85,7 +89,11 @@ export function RolesPage() {
           description: formDescription,
           permission_ids: selectedPermIds,
         },
-        { onSuccess: () => { setIsCreateOpen(false); } },
+        {
+          onSuccess: () => {
+            setIsCreateOpen(false);
+          },
+        },
       );
     }
   };
@@ -120,128 +128,134 @@ export function RolesPage() {
           </Button>
         </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Description</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead className="w-24">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {roles?.map((role) => (
-            <TableRow key={role.id}>
-              <TableCell className="font-medium">{role.name}</TableCell>
-              <TableCell className="text-muted-foreground">
-                {role.description}
-              </TableCell>
-              <TableCell>
-                <Badge variant={role.is_builtin ? "default" : "outline"}>
-                  {role.is_builtin ? "Built-in" : "Custom"}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                {!role.is_builtin && (
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => { openEdit(role); }}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => {
-                        if (
-                          confirm(`Delete role "${role.name}"?`)
-                        ) {
-                          deleteRole.mutate(role.id);
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                )}
-              </TableCell>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Description</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead className="w-24">Actions</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {roles?.map((role) => (
+              <TableRow key={role.id}>
+                <TableCell className="font-medium">{role.name}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {role.description}
+                </TableCell>
+                <TableCell>
+                  <Badge variant={role.is_builtin ? "default" : "outline"}>
+                    {role.is_builtin ? "Built-in" : "Custom"}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  {!role.is_builtin && (
+                    <div className="flex items-center gap-1">
+                      <Button
+                        aria-label={`Edit ${role.name}`}
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          openEdit(role);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        aria-label={`Delete ${role.name}`}
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => {
+                          if (confirm(`Delete role "${role.name}"?`)) {
+                            deleteRole.mutate(role.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
 
-      <Dialog
-        open={dialogOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            setIsCreateOpen(false);
-            setEditRole(null);
-          }
-        }}
-      >
-        <DialogContent className="max-w-[90vw] w-fit max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {editRole ? `Edit Role: ${editRole.name}` : "Create Role"}
-            </DialogTitle>
-          </DialogHeader>
+        <Dialog
+          open={dialogOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              setIsCreateOpen(false);
+              setEditRole(null);
+            }
+          }}
+        >
+          <DialogContent className="max-w-[90vw] w-fit max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                {editRole ? `Edit Role: ${editRole.name}` : "Create Role"}
+              </DialogTitle>
+            </DialogHeader>
 
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="role-name">Name</Label>
-              <Input
-                id="role-name"
-                value={formName}
-                onChange={(e) => { setFormName(e.target.value); }}
-                placeholder="e.g. Network Admin"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="role-desc">Description</Label>
-              <Input
-                id="role-desc"
-                value={formDescription}
-                onChange={(e) => { setFormDescription(e.target.value); }}
-                placeholder="What this role can do"
-              />
-            </div>
-
-            {allPermissions && (
+            <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Permissions</Label>
-                <PermissionMatrix
-                  permissions={allPermissions}
-                  selected={selectedPermIds}
-                  onChange={setSelectedPermIds}
+                <Label htmlFor="role-name">Name</Label>
+                <Input
+                  id="role-name"
+                  value={formName}
+                  onChange={(e) => {
+                    setFormName(e.target.value);
+                  }}
+                  placeholder="e.g. Network Admin"
                 />
               </div>
-            )}
-          </div>
+              <div className="space-y-2">
+                <Label htmlFor="role-desc">Description</Label>
+                <Input
+                  id="role-desc"
+                  value={formDescription}
+                  onChange={(e) => {
+                    setFormDescription(e.target.value);
+                  }}
+                  placeholder="What this role can do"
+                />
+              </div>
 
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsCreateOpen(false);
-                setEditRole(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={
-                !formName || createRole.isPending || updateRole.isPending
-              }
-            >
-              {editRole ? "Save Changes" : "Create Role"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {allPermissions && (
+                <div className="space-y-2">
+                  <Label>Permissions</Label>
+                  <PermissionMatrix
+                    permissions={allPermissions}
+                    selected={selectedPermIds}
+                    onChange={setSelectedPermIds}
+                  />
+                </div>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsCreateOpen(false);
+                  setEditRole(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSave}
+                disabled={
+                  !formName || createRole.isPending || updateRole.isPending
+                }
+              >
+                {editRole ? "Save Changes" : "Create Role"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

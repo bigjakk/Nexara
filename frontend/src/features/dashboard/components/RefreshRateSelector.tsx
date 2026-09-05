@@ -21,7 +21,8 @@ export function RefreshRateSelector() {
   const setRefreshInterval = useMetricStore((s) => s.setRefreshInterval);
 
   const currentLabel =
-    options.find((o) => o.value === refreshInterval)?.label ?? `${String(refreshInterval / 1000)}s`;
+    options.find((o) => o.value === refreshInterval)?.label ??
+    `${String(refreshInterval / 1000)}s`;
 
   return (
     <DropdownMenu>
@@ -39,7 +40,9 @@ export function RefreshRateSelector() {
       <DropdownMenuContent align="end">
         <DropdownMenuRadioGroup
           value={String(refreshInterval)}
-          onValueChange={(v) => { setRefreshInterval(Number(v)); }}
+          onValueChange={(v) => {
+            setRefreshInterval(Number(v));
+          }}
         >
           {options.map((opt) => (
             <DropdownMenuRadioItem

@@ -12,7 +12,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ShieldAlert, ShieldCheck, RefreshCw, AlertTriangle } from "lucide-react";
+import {
+  ShieldAlert,
+  ShieldCheck,
+  RefreshCw,
+  AlertTriangle,
+} from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import {
   privateAddressWarningFromError,
@@ -41,14 +46,20 @@ interface EditClusterDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDialogProps) {
+export function EditClusterDialog({
+  cluster,
+  open,
+  onOpenChange,
+}: EditClusterDialogProps) {
   const [name, setName] = useState(cluster.name);
   const [apiUrl, setApiUrl] = useState(cluster.api_url);
   const [tokenId, setTokenId] = useState(cluster.token_id);
   const [tokenSecret, setTokenSecret] = useState("");
 
   // Fingerprint state
-  const [fingerprint, setFingerprint] = useState<FingerprintResponse | null>(null);
+  const [fingerprint, setFingerprint] = useState<FingerprintResponse | null>(
+    null,
+  );
   const [fingerprintAccepted, setFingerprintAccepted] = useState(false);
   const [fetchingFingerprint, setFetchingFingerprint] = useState(false);
   const [fingerprintError, setFingerprintError] = useState<string | null>(null);
@@ -56,8 +67,9 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
   // SSRF policy gate.
   const [privateWarning, setPrivateWarning] =
     useState<PrivateAddressDetails | null>(null);
-  const [privateWarningSource, setPrivateWarningSource] =
-    useState<"fetch" | "update" | null>(null);
+  const [privateWarningSource, setPrivateWarningSource] = useState<
+    "fetch" | "update" | null
+  >(null);
   const [allowPrivate, setAllowPrivate] = useState(false);
 
   const updateMutation = useUpdateCluster();
@@ -85,9 +97,8 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
 
   // The server's refusal, once it arrives. Re-submitting with the
   // acknowledgement is the only way past it, for every caller.
-  const [sshResetConfirm, setSshResetConfirm] = useState<ConfirmRequired | null>(
-    null,
-  );
+  const [sshResetConfirm, setSshResetConfirm] =
+    useState<ConfirmRequired | null>(null);
 
   // Radix only calls the Dialog's onOpenChange for its OWN close affordances
   // (Escape, overlay, the built-in X). The footer Cancel calls onOpenChange
@@ -134,7 +145,9 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
         setPrivateWarningSource("fetch");
       } else {
         setFingerprintError(
-          err instanceof Error ? err.message : "Failed to fetch TLS certificate",
+          err instanceof Error
+            ? err.message
+            : "Failed to fetch TLS certificate",
         );
       }
     } finally {
@@ -213,7 +226,11 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
           }
           // The dialog only ever edits this one cluster, so the target is
           // fixed and a late-settling mutation cannot land on another.
-          const confirm = confirmRequiredFromError(err, [SSH_TRUST_RESET], cluster.id);
+          const confirm = confirmRequiredFromError(
+            err,
+            [SSH_TRUST_RESET],
+            cluster.id,
+          );
           if (confirm != null) {
             setSshResetConfirm(confirm);
             return;
@@ -230,16 +247,20 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
   }
 
   const connectivityData = updateMutation.data?.connectivity;
-  const showConnectivityWarning = connectivityData != null && !connectivityData.reachable;
+  const showConnectivityWarning =
+    connectivityData != null && !connectivityData.reachable;
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => {
-      onOpenChange(nextOpen);
-      if (!nextOpen) {
-        resetFingerprintState();
-        updateMutation.reset();
-      }
-    }}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) {
+          resetFingerprintState();
+          updateMutation.reset();
+        }
+      }}
+    >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit Cluster</DialogTitle>
@@ -250,11 +271,25 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="edit-name">Name</Label>
-            <Input id="edit-name" value={name} onChange={(e) => { setName(e.target.value); }} required />
+            <Input
+              id="edit-name"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+              }}
+              required
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-url">API URL</Label>
-            <Input id="edit-url" value={apiUrl} onChange={(e) => { setApiUrl(e.target.value); }} required />
+            <Input
+              id="edit-url"
+              value={apiUrl}
+              onChange={(e) => {
+                setApiUrl(e.target.value);
+              }}
+              required
+            />
             {addressChanged && (
               <p className="text-xs text-muted-foreground">
                 This cluster is moving to a new address, so it needs the token
@@ -285,7 +320,14 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
           )}
           <div className="space-y-2">
             <Label htmlFor="edit-token">Token ID</Label>
-            <Input id="edit-token" value={tokenId} onChange={(e) => { setTokenId(e.target.value); }} required />
+            <Input
+              id="edit-token"
+              value={tokenId}
+              onChange={(e) => {
+                setTokenId(e.target.value);
+              }}
+              required
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-secret">
@@ -297,8 +339,14 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
               id="edit-secret"
               type="password"
               value={tokenSecret}
-              onChange={(e) => { setTokenSecret(e.target.value); }}
-              placeholder={addressChanged ? "Re-enter the token secret for the new address" : "Unchanged"}
+              onChange={(e) => {
+                setTokenSecret(e.target.value);
+              }}
+              placeholder={
+                addressChanged
+                  ? "Re-enter the token secret for the new address"
+                  : "Unchanged"
+              }
               required={addressChanged}
             />
           </div>
@@ -314,14 +362,18 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
                 onClick={handleFetchFingerprint}
                 disabled={fetchingFingerprint || !apiUrl}
               >
-                <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${fetchingFingerprint ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`mr-1.5 h-3.5 w-3.5 ${fetchingFingerprint ? "animate-spin" : ""}`}
+                />
                 {fetchingFingerprint ? "Fetching..." : "Re-fetch Certificate"}
               </Button>
             </div>
 
             {cluster.tls_fingerprint && !fingerprint && (
               <div className="rounded-md bg-muted p-3">
-                <p className="text-xs text-muted-foreground mb-1">Current SHA-256 Fingerprint</p>
+                <p className="text-xs text-muted-foreground mb-1">
+                  Current SHA-256 Fingerprint
+                </p>
                 <code className="text-xs font-mono break-all select-all">
                   {cluster.tls_fingerprint}
                 </code>
@@ -338,33 +390,43 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
                   <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 space-y-3">
                     <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
                       <ShieldAlert className="h-5 w-5 shrink-0" />
-                      <span className="font-medium">Self-Signed Certificate</span>
+                      <span className="font-medium">
+                        Self-Signed Certificate
+                      </span>
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      The server at <strong>{apiUrl}</strong> uses a self-signed certificate.
-                      Verify this fingerprint matches your Proxmox host before accepting.
+                      The server at <strong>{apiUrl}</strong> uses a self-signed
+                      certificate. Verify this fingerprint matches your Proxmox
+                      host before accepting.
                     </p>
                     <div className="rounded-md bg-muted p-3">
-                      <p className="text-xs text-muted-foreground mb-1">New SHA-256 Fingerprint</p>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        New SHA-256 Fingerprint
+                      </p>
                       <code className="text-xs font-mono break-all select-all">
                         {fingerprint.fingerprint}
                       </code>
                     </div>
-                    {cluster.tls_fingerprint && fingerprint.fingerprint !== cluster.tls_fingerprint && (
-                      <div className="rounded-md border border-orange-500/50 bg-orange-500/10 p-2">
-                        <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">
-                          This fingerprint differs from the currently stored fingerprint. The server certificate has changed.
-                        </p>
-                      </div>
-                    )}
+                    {cluster.tls_fingerprint &&
+                      fingerprint.fingerprint !== cluster.tls_fingerprint && (
+                        <div className="rounded-md border border-orange-500/50 bg-orange-500/10 p-2">
+                          <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">
+                            This fingerprint differs from the currently stored
+                            fingerprint. The server certificate has changed.
+                          </p>
+                        </div>
+                      )}
                     <div className="flex items-center gap-2">
                       <Checkbox
                         id="accept-fingerprint"
                         checked={fingerprintAccepted}
-                        onCheckedChange={(checked) => { setFingerprintAccepted(Boolean(checked)); }}
+                        onCheckedChange={(checked) => {
+                          setFingerprintAccepted(Boolean(checked));
+                        }}
                       />
                       <Label htmlFor="accept-fingerprint" className="text-sm">
-                        I have verified this fingerprint and trust this certificate
+                        I have verified this fingerprint and trust this
+                        certificate
                       </Label>
                     </div>
                   </div>
@@ -375,13 +437,15 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
                       <span className="font-medium">Trusted Certificate</span>
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">
-                      The server at <strong>{apiUrl}</strong> has a valid certificate signed by a trusted CA.
+                      The server at <strong>{apiUrl}</strong> has a valid
+                      certificate signed by a trusted CA.
                     </p>
-                    {cluster.tls_fingerprint && fingerprint.fingerprint !== cluster.tls_fingerprint && (
-                      <p className="text-sm text-muted-foreground mt-2">
-                        The fingerprint will be updated on save.
-                      </p>
-                    )}
+                    {cluster.tls_fingerprint &&
+                      fingerprint.fingerprint !== cluster.tls_fingerprint && (
+                        <p className="text-sm text-muted-foreground mt-2">
+                          The fingerprint will be updated on save.
+                        </p>
+                      )}
                   </div>
                 )}
               </>
@@ -416,18 +480,24 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
             />
           )}
 
-          {privateWarning == null && sshResetConfirm == null && updateMutation.isError && (
-            <p className="text-sm text-destructive">
-              {updateMutation.error instanceof Error ? updateMutation.error.message : "Update failed"}
-            </p>
-          )}
+          {privateWarning == null &&
+            sshResetConfirm == null &&
+            updateMutation.isError && (
+              <p className="text-sm text-destructive">
+                {updateMutation.error instanceof Error
+                  ? updateMutation.error.message
+                  : "Update failed"}
+              </p>
+            )}
 
           {showConnectivityWarning && (
             <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-500 shrink-0" />
                 <div>
-                  <p className="text-sm font-medium text-amber-600 dark:text-amber-500">Connectivity Issue</p>
+                  <p className="text-sm font-medium text-amber-600 dark:text-amber-500">
+                    Connectivity Issue
+                  </p>
                   <p className="text-sm text-muted-foreground">
                     {connectivityData.message}
                   </p>
@@ -437,10 +507,23 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
           )}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => { onOpenChange(false); }}>Cancel</Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                onOpenChange(false);
+              }}
+            >
+              Cancel
+            </Button>
             <Button
               type="submit"
-              disabled={updateMutation.isPending || (fingerprint != null && fingerprint.self_signed && !fingerprintAccepted)}
+              disabled={
+                updateMutation.isPending ||
+                (fingerprint != null &&
+                  fingerprint.self_signed &&
+                  !fingerprintAccepted)
+              }
             >
               {updateMutation.isPending ? "Saving..." : "Save"}
             </Button>

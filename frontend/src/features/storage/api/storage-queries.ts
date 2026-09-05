@@ -20,9 +20,7 @@ export function useClusterStorage(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "storage"],
     queryFn: () =>
-      apiClient.list<StorageResponse>(
-        `/api/v1/clusters/${clusterId}/storage`,
-      ),
+      apiClient.list<StorageResponse>(`/api/v1/clusters/${clusterId}/storage`),
     enabled: clusterId.length > 0,
     staleTime: 30_000,
     refetchInterval: 60_000,
@@ -52,14 +50,23 @@ interface UploadParams {
   onProgress?: (percent: number) => void;
 }
 
-async function uploadFile({ clusterId, storageId, content, file, onProgress }: UploadParams): Promise<StorageActionResponse> {
+async function uploadFile({
+  clusterId,
+  storageId,
+  content,
+  file,
+  onProgress,
+}: UploadParams): Promise<StorageActionResponse> {
   // Resolve a fresh access token via the cookie-backed refresh path before
   // opening the XHR. XHR authorization must be set before send() and is too
   // late to refresh once a 401 lands.
   const token = await getValidAccessToken();
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/v1/clusters/${clusterId}/storage/${storageId}/upload`);
+    xhr.open(
+      "POST",
+      `/api/v1/clusters/${clusterId}/storage/${storageId}/upload`,
+    );
     xhr.withCredentials = true;
 
     if (token) {
@@ -82,7 +89,9 @@ async function uploadFile({ clusterId, storageId, content, file, onProgress }: U
       } else {
         try {
           const err = JSON.parse(xhr.responseText) as { message?: string };
-          reject(new Error(err.message ?? `Upload failed (${String(xhr.status)})`));
+          reject(
+            new Error(err.message ?? `Upload failed (${String(xhr.status)})`),
+          );
         } catch {
           reject(new Error(`Upload failed (${String(xhr.status)})`));
         }

@@ -29,7 +29,10 @@ function apiError(status: number, body: ApiError) {
 async function openToCredentialStep(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /add cluster/i }));
   await user.type(screen.getByLabelText(/cluster name/i), "Prod");
-  await user.type(screen.getByLabelText(/api url/i), "https://pve.example.com:8006");
+  await user.type(
+    screen.getByLabelText(/api url/i),
+    "https://pve.example.com:8006",
+  );
   await user.click(screen.getByRole("button", { name: /^connect$/i }));
   await screen.findByText(/trusted certificate/i);
 }
@@ -55,7 +58,9 @@ describe("AddClusterDialog", () => {
     await openToCredentialStep(user);
 
     expect(screen.getByLabelText(/proxmox password/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/api token secret/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/api token secret/i),
+    ).not.toBeInTheDocument();
   });
 
   it("swaps to the paste-a-token fields when that mode is chosen", async () => {
@@ -66,7 +71,9 @@ describe("AddClusterDialog", () => {
     await user.click(screen.getByRole("tab", { name: /i have a token/i }));
 
     expect(screen.getByLabelText(/api token secret/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/proxmox password/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/proxmox password/i),
+    ).not.toBeInTheDocument();
   });
 
   it("gates the password behind a confirmation when the page is not on HTTPS", async () => {
@@ -95,9 +102,13 @@ describe("AddClusterDialog", () => {
     expect(screen.queryByLabelText(/one-time code/i)).not.toBeInTheDocument();
 
     mockedPost.mockImplementation((path: string) => {
-      if (path.endsWith("/fetch-fingerprint")) return Promise.resolve(TRUSTED_CERT);
+      if (path.endsWith("/fetch-fingerprint"))
+        return Promise.resolve(TRUSTED_CERT);
       return Promise.reject(
-        apiError(422, { error: "tfa_required", message: "root@pam has two-factor authentication enabled." }),
+        apiError(422, {
+          error: "tfa_required",
+          message: "root@pam has two-factor authentication enabled.",
+        }),
       );
     });
 
@@ -115,11 +126,13 @@ describe("AddClusterDialog", () => {
     await openToCredentialStep(user);
 
     mockedPost.mockImplementation((path: string) => {
-      if (path.endsWith("/fetch-fingerprint")) return Promise.resolve(TRUSTED_CERT);
+      if (path.endsWith("/fetch-fingerprint"))
+        return Promise.resolve(TRUSTED_CERT);
       return Promise.reject(
         apiError(409, {
           error: "token_exists",
-          message: "The API token nexara@pve!nexara already exists on this cluster.",
+          message:
+            "The API token nexara@pve!nexara already exists on this cluster.",
         }),
       );
     });
@@ -127,8 +140,12 @@ describe("AddClusterDialog", () => {
     await user.type(screen.getByLabelText(/proxmox password/i), "hunter2");
     await user.click(screen.getByRole("button", { name: /create token/i }));
 
-    expect(await screen.findByText(/already exists on this cluster/i)).toBeInTheDocument();
-    expect(screen.getByText(/will not quietly create a second one/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/already exists on this cluster/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/will not quietly create a second one/i),
+    ).toBeInTheDocument();
   });
 
   it("reports what was created on the cluster, without ever showing a secret", async () => {
@@ -137,7 +154,8 @@ describe("AddClusterDialog", () => {
     await openToCredentialStep(user);
 
     mockedPost.mockImplementation((path: string) => {
-      if (path.endsWith("/fetch-fingerprint")) return Promise.resolve(TRUSTED_CERT);
+      if (path.endsWith("/fetch-fingerprint"))
+        return Promise.resolve(TRUSTED_CERT);
       return Promise.resolve({
         cluster: { id: "c1", name: "Prod", credential_source: "bootstrap" },
         connectivity: { reachable: true, message: "ok" },
@@ -147,7 +165,11 @@ describe("AddClusterDialog", () => {
             { step: "user", status: "created", detail: "nexara@pve" },
             { step: "acl", status: "created", detail: "Administrator on /" },
             { step: "token", status: "created", detail: "nexara@pve!nexara" },
-            { step: "verify", status: "verified", detail: "authenticated with the new token" },
+            {
+              step: "verify",
+              status: "verified",
+              detail: "authenticated with the new token",
+            },
           ],
         },
       });
@@ -178,7 +200,8 @@ describe("AddClusterDialog", () => {
     await openToCredentialStep(user);
 
     mockedPost.mockImplementation((path: string) => {
-      if (path.endsWith("/fetch-fingerprint")) return Promise.resolve(TRUSTED_CERT);
+      if (path.endsWith("/fetch-fingerprint"))
+        return Promise.resolve(TRUSTED_CERT);
       return Promise.resolve({
         cluster: { id: "c1", name: "Prod", credential_source: "bootstrap" },
         connectivity: { reachable: true, message: "ok" },
@@ -197,7 +220,10 @@ describe("AddClusterDialog", () => {
     await user.click(screen.getByRole("button", { name: /done/i }));
     await user.click(screen.getByRole("button", { name: /add cluster/i }));
     await user.type(screen.getByLabelText(/cluster name/i), "Again");
-    await user.type(screen.getByLabelText(/api url/i), "https://pve.example.com:8006");
+    await user.type(
+      screen.getByLabelText(/api url/i),
+      "https://pve.example.com:8006",
+    );
     await user.click(screen.getByRole("button", { name: /^connect$/i }));
     await screen.findByText(/trusted certificate/i);
 
@@ -216,11 +242,20 @@ describe("AddClusterDialog", () => {
 
     const password = screen.getByLabelText(/proxmox password/i);
     expect(password).toHaveAttribute("autocomplete", "new-password");
-    expect(screen.getByLabelText(/proxmox username/i)).toHaveAttribute("autocomplete", "off");
+    expect(screen.getByLabelText(/proxmox username/i)).toHaveAttribute(
+      "autocomplete",
+      "off",
+    );
 
     await user.click(screen.getByRole("tab", { name: /i have a token/i }));
-    expect(screen.getByLabelText(/api token secret/i)).toHaveAttribute("autocomplete", "new-password");
-    expect(screen.getByLabelText(/api token id/i)).toHaveAttribute("autocomplete", "off");
+    expect(screen.getByLabelText(/api token secret/i)).toHaveAttribute(
+      "autocomplete",
+      "new-password",
+    );
+    expect(screen.getByLabelText(/api token id/i)).toHaveAttribute(
+      "autocomplete",
+      "off",
+    );
   });
 
   it("clears a failed submit when the operator switches credential mode", async () => {
@@ -229,15 +264,21 @@ describe("AddClusterDialog", () => {
     await openToCredentialStep(user);
 
     mockedPost.mockImplementation((path: string) => {
-      if (path.endsWith("/fetch-fingerprint")) return Promise.resolve(TRUSTED_CERT);
+      if (path.endsWith("/fetch-fingerprint"))
+        return Promise.resolve(TRUSTED_CERT);
       return Promise.reject(
-        apiError(422, { error: "bootstrap_auth_failed", message: "Proxmox rejected that username or password." }),
+        apiError(422, {
+          error: "bootstrap_auth_failed",
+          message: "Proxmox rejected that username or password.",
+        }),
       );
     });
 
     await user.type(screen.getByLabelText(/proxmox password/i), "wrong");
     await user.click(screen.getByRole("button", { name: /create token/i }));
-    expect(await screen.findByText(/rejected that username or password/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/rejected that username or password/i),
+    ).toBeInTheDocument();
 
     // Both bootstrapError and the mutation's own error render, so clearing one
     // is not enough — the message would reappear from the other element.

@@ -116,7 +116,9 @@ export function OIDCCallbackPage() {
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="w-full max-w-md space-y-4 text-center">
           <XCircle className="mx-auto h-12 w-12 text-destructive" />
-          <h1 className="text-xl font-semibold">{t("ssoAuthenticationFailed")}</h1>
+          <h1 className="text-xl font-semibold">
+            {t("ssoAuthenticationFailed")}
+          </h1>
           <p className="text-muted-foreground">{error}</p>
           <a
             href="/login"
@@ -197,9 +199,7 @@ export function OIDCCallbackPage() {
                   (useRecoveryCode ? !recoveryCode : totpCode.length !== 6)
                 }
               >
-                {verifying && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
+                {verifying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {t("verify")}
               </Button>
               <Button

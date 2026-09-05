@@ -3,7 +3,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -11,9 +10,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChevronDown, ChevronRight, Ghost } from "lucide-react";
-import { formatBytes } from "@/lib/format";
-import { SortableTableHead } from "@/components/SortableTableHead";
-import { byId, useTableSort, type SortAccessors } from "@/hooks/useTableSort";
+import { formatBytes, formatDateTime } from "@/lib/format";
+import { byId } from "@/hooks/useTableSort";
+import type { ColumnDef } from "@/hooks/useColumnLayout";
+import { useDataTable } from "@/hooks/useDataTable";
+import { DataTableHeadRow } from "@/components/DataTableHeadCells";
+import { DataTableCells } from "@/components/DataTableCells";
+import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useMapVeeamBackupObject } from "../api/backup-queries";
 import type { VeeamOrphanedObject } from "../types/backup";
 
@@ -24,23 +27,86 @@ function toEpoch(value: string | null): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-type OrphanSortKey = "name" | "cluster" | "points" | "size" | "newest";
+type OrphanSortKey =
+  | "expand"
+  | "name"
+  | "cluster"
+  | "points"
+  | "size"
+  | "newest";
 
-/** Each accessor sorts on what its cell SHOWS, not on the underlying field. */
-const ORPHAN_SORT: SortAccessors<VeeamOrphanedObject, OrphanSortKey> = {
-  name: (object) => object.name,
-  // The cell falls back to the platform name, so the column must too.
-  cluster: (object) => object.cluster_name || object.platform_name || null,
-  points: (object) => object.restore_points_count,
-  size: (object) => object.restore_point_bytes,
-  newest: (object) => toEpoch(object.latest_restore_point),
-};
-
-function formatTime(value: string | null): string {
-  if (value == null || value === "") return "Never";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "Unknown" : parsed.toLocaleString();
+/** Which row is open, for the chevron cell. */
+interface OrphanCtx {
+  expandedId: string | null;
 }
+
+/** Each column sorts on what its cell SHOWS, not on the underlying field. */
+const COLUMNS: ColumnDef<VeeamOrphanedObject, OrphanSortKey, OrphanCtx>[] = [
+  {
+    key: "expand",
+    label: "",
+    width: 40,
+    fixed: true,
+    cell: (object, ctx) =>
+      ctx.expandedId === object.id ? (
+        <ChevronDown className="h-4 w-4" />
+      ) : (
+        <ChevronRight className="h-4 w-4" />
+      ),
+  },
+  {
+    key: "name",
+    label: "Name",
+    width: 220,
+    sortValue: (object) => object.name,
+    cell: (object) => <span className="font-medium">{object.name}</span>,
+  },
+  {
+    key: "cluster",
+    label: "Cluster",
+    width: 180,
+    // The cell falls back to the platform name, so the column must too.
+    sortValue: (object) => object.cluster_name || object.platform_name || null,
+    cell: (object) => (
+      <span className="text-sm">
+        {object.cluster_name || object.platform_name}
+      </span>
+    ),
+  },
+  {
+    key: "points",
+    label: "Restore points",
+    width: 140,
+    align: "right",
+    sortValue: (object) => object.restore_points_count,
+    cell: (object) => (
+      <span className="font-mono text-sm">{object.restore_points_count}</span>
+    ),
+  },
+  {
+    key: "size",
+    label: "Size",
+    width: 120,
+    align: "right",
+    sortValue: (object) => object.restore_point_bytes,
+    cell: (object) => (
+      <span className="font-mono text-sm">
+        {formatBytes(object.restore_point_bytes)}
+      </span>
+    ),
+  },
+  {
+    key: "newest",
+    label: "Newest point",
+    width: 190,
+    sortValue: (object) => toEpoch(object.latest_restore_point),
+    cell: (object) => (
+      <span className="text-sm">
+        {formatDateTime(object.latest_restore_point, "Never")}
+      </span>
+    ),
+  },
+];
 
 /**
  * Backup objects whose Veeam platform IS mapped to a cluster but which match
@@ -64,10 +130,11 @@ export function VeeamOrphanTable({
   objects: VeeamOrphanedObject[];
 }) {
   const {
+    layout,
     rows: sortedObjects,
     toggle: toggleSort,
     directionFor,
-  } = useTableSort(objects, ORPHAN_SORT, byId);
+  } = useDataTable("veeam-orphans", COLUMNS, objects, byId);
 
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -99,53 +166,16 @@ export function VeeamOrphanTable({
       </div>
 
       <div className="rounded-md border">
-        <Table>
+        <div className="flex justify-end px-2 pt-2">
+          <ResetColumnsButton layout={layout} />
+        </div>
+        <Table className="table-fixed" style={{ width: layout.totalWidth }}>
           <TableHeader>
-            <TableRow>
-              <TableHead className="w-8" />
-              <SortableTableHead
-                direction={directionFor("name")}
-                onSort={() => {
-                  toggleSort("name");
-                }}
-              >
-                Name
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("cluster")}
-                onSort={() => {
-                  toggleSort("cluster");
-                }}
-              >
-                Cluster
-              </SortableTableHead>
-              <SortableTableHead
-                align="right"
-                direction={directionFor("points")}
-                onSort={() => {
-                  toggleSort("points");
-                }}
-              >
-                Restore points
-              </SortableTableHead>
-              <SortableTableHead
-                align="right"
-                direction={directionFor("size")}
-                onSort={() => {
-                  toggleSort("size");
-                }}
-              >
-                Size
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("newest")}
-                onSort={() => {
-                  toggleSort("newest");
-                }}
-              >
-                Newest point
-              </SortableTableHead>
-            </TableRow>
+            <DataTableHeadRow
+              layout={layout}
+              directionFor={directionFor}
+              onSort={toggleSort}
+            />
           </TableHeader>
           <TableBody>
             {sortedObjects.map((object) => {
@@ -158,30 +188,18 @@ export function VeeamOrphanTable({
                       setExpanded(isOpen ? null : object.id);
                     }}
                   >
-                    <TableCell>
-                      {isOpen ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </TableCell>
-                    <TableCell className="font-medium">{object.name}</TableCell>
-                    <TableCell className="text-sm">
-                      {object.cluster_name || object.platform_name}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {object.restore_points_count}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {formatBytes(object.restore_point_bytes)}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {formatTime(object.latest_restore_point)}
-                    </TableCell>
+                    <DataTableCells
+                      row={object}
+                      layout={layout}
+                      ctx={{ expandedId: expanded }}
+                    />
                   </TableRow>
                   {isOpen && (
                     <TableRow>
-                      <TableCell colSpan={6} className="bg-muted/30">
+                      <TableCell
+                        colSpan={layout.columns.length}
+                        className="bg-muted/30"
+                      >
                         <OrphanDetail serverId={serverId} object={object} />
                       </TableCell>
                     </TableRow>
@@ -236,7 +254,7 @@ function OrphanDetail({
         </div>
         <div className="flex gap-2">
           <dt className="text-muted-foreground">Last seen</dt>
-          <dd>{formatTime(object.last_seen_at)}</dd>
+          <dd>{formatDateTime(object.last_seen_at, "Never")}</dd>
         </div>
         {object.last_run_failed && (
           <div className="flex gap-2">

@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/netguard"
 	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/safeconv"
@@ -48,7 +48,11 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, r
 		logger = slog.Default()
 	}
 
-	httpClient := newScannerHTTPClient(120 * time.Second)
+	// One client for the whole Engine, shared by all three feed clients below.
+	// Each of their constructors would otherwise build its own when handed a
+	// nil, so three feeds refreshing on their TTLs would hold three connection
+	// pools and pay three TLS handshakes for what is one outbound role.
+	httpClient := netguard.NewHTTPClient(120 * time.Second)
 	e := &Engine{
 		queries:       queries,
 		encryptionKey: encryptionKey,
@@ -111,9 +115,9 @@ func (e *Engine) RunScanWithID(ctx context.Context, clusterID, scanID uuid.UUID)
 	})
 
 	_ = e.queries.UpdateCVEScanCounts(ctx, db.UpdateCVEScanCountsParams{
-		ID:           scanID,
-		ScannedNodes: 0,
-		TotalVulns:   0,
+		ID:            scanID,
+		ScannedNodes:  0,
+		TotalVulns:    0,
 		CriticalCount: 0,
 		HighCount:     0,
 		MediumCount:   0,
@@ -406,28 +410,7 @@ func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmo
 			"cluster_id", clusterID, "error", err)
 	}
 
-	cluster, err := e.queries.GetCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
-	}
-
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, e.encryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt token: %w", err)
-	}
-
-	client, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        120 * time.Second,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create client: %w", err)
-	}
-
-	return client, nil
+	return proxmox.NewClientForCluster(ctx, e.queries, e.encryptionKey, clusterID, 120*time.Second)
 }
 
 func (e *Engine) failScan(ctx context.Context, scanID uuid.UUID, errMsg string) {

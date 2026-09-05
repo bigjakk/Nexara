@@ -66,7 +66,9 @@ export function ResizeDiskDialog({
             <Input
               id="resize-size"
               value={size}
-              onChange={(e) => { setSize(e.target.value); }}
+              onChange={(e) => {
+                setSize(e.target.value);
+              }}
               placeholder="+10G"
             />
           </div>
@@ -189,7 +191,8 @@ export function MoveDiskDialog({
               {currentFormat && (
                 <>
                   {" "}
-                  as <span className="font-mono font-medium">{currentFormat}</span>
+                  as{" "}
+                  <span className="font-mono font-medium">{currentFormat}</span>
                 </>
               )}
             </p>
@@ -200,7 +203,9 @@ export function MoveDiskDialog({
               id="target-storage"
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
               value={targetStorage}
-              onChange={(e) => { setTargetStorage(e.target.value); }}
+              onChange={(e) => {
+                setTargetStorage(e.target.value);
+              }}
             >
               <option value="">Select storage...</option>
               {filteredOptions.map((s) => (
@@ -227,7 +232,9 @@ export function MoveDiskDialog({
           />
           <Button
             onClick={handleMove}
-            disabled={!targetStorage || bwlimitInvalid || moveMutation.isPending}
+            disabled={
+              !targetStorage || bwlimitInvalid || moveMutation.isPending
+            }
             className="w-full"
           >
             {moveMutation.isPending ? "Moving disk..." : "Move Disk"}

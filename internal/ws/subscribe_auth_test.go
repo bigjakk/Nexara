@@ -16,10 +16,10 @@ import (
 // extract a partial UUID that the permission check would then succeed on.
 func TestChannelClusterID(t *testing.T) {
 	cases := []struct {
-		name      string
-		channel   string
-		wantID    string
-		wantOK    bool
+		name    string
+		channel string
+		wantID  string
+		wantOK  bool
 	}{
 		{
 			name:    "valid cluster metrics channel",

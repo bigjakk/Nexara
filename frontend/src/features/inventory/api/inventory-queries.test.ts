@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildInventoryRows } from "./inventory-queries";
-import type {
-  ClusterResponse,
-  NodeResponse,
-  VMResponse,
-} from "@/types/api";
+import type { ClusterResponse, NodeResponse, VMResponse } from "@/types/api";
 import type { AggregatedMetrics, VmLiveMetric } from "@/types/ws";
 
 function cluster(id: string, name: string): ClusterResponse {
@@ -118,7 +114,7 @@ describe("buildInventoryRows", () => {
       [
         {
           cluster: good,
-          nodes: [node("n1", "c1", "hv01")],
+          nodes: [node("n1", "c1", "pve-01")],
           vms: [vm("v1", "c1", "n1", 100)],
           errored: false,
         },
@@ -129,7 +125,7 @@ describe("buildInventoryRows", () => {
 
     expect(failedClusterIds).toEqual(["c2"]);
     expect(rows.map((r) => r.key)).toEqual(["c1:vm:v1", "c1:node:n1"]);
-    expect(rows[0]?.nodeName).toBe("hv01");
+    expect(rows[0]?.nodeName).toBe("pve-01");
   });
 
   it("still renders a cluster whose refetch errored but has cached data", () => {
@@ -138,7 +134,7 @@ describe("buildInventoryRows", () => {
       [
         {
           cluster: c,
-          nodes: [node("n1", "c1", "hv01")],
+          nodes: [node("n1", "c1", "pve-01")],
           vms: [vm("v1", "c1", "n1", 100)],
           errored: true,
         },
@@ -179,7 +175,7 @@ describe("buildInventoryRows", () => {
       [
         {
           cluster: c,
-          nodes: [node("n1", "c1", "hv01")],
+          nodes: [node("n1", "c1", "pve-01")],
           vms: [vm("v1", "c1", "n1", 100)],
           errored: false,
         },

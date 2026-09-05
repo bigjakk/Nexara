@@ -36,7 +36,10 @@ interface MetricState {
 }
 
 interface MetricActions {
-  processMetricMessage: (clusterId: string, payload: ClusterMetricSummary) => void;
+  processMetricMessage: (
+    clusterId: string,
+    payload: ClusterMetricSummary,
+  ) => void;
   setRefreshInterval: (ms: number) => void;
   clearCluster: (clusterId: string) => void;
   clearAll: () => void;

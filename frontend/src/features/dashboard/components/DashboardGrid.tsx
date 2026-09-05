@@ -50,12 +50,12 @@ export function DashboardGrid({
   editMode,
   children,
 }: DashboardGridProps) {
-  const [currentLayouts, setCurrentLayouts] = useState<LayoutItem[]>(
-    () => preset.layouts.map((l) => ({ ...l })),
+  const [currentLayouts, setCurrentLayouts] = useState<LayoutItem[]>(() =>
+    preset.layouts.map((l) => ({ ...l })),
   );
-  const [activeWidgetIds, setActiveWidgetIds] = useState<string[]>(
-    () => [...preset.widgetIds],
-  );
+  const [activeWidgetIds, setActiveWidgetIds] = useState<string[]>(() => [
+    ...preset.widgetIds,
+  ]);
 
   // Sync internal state when preset changes from parent (e.g. reset, preset switch)
   useEffect(() => {
@@ -63,7 +63,9 @@ export function DashboardGrid({
     setActiveWidgetIds([...preset.widgetIds]);
   }, [preset]);
 
-  const { width, containerRef } = useContainerWidth({ measureBeforeMount: true });
+  const { width, containerRef } = useContainerWidth({
+    measureBeforeMount: true,
+  });
 
   const handleLayoutChange = useCallback(
     (layout: Layout) => {
@@ -141,7 +143,10 @@ export function DashboardGrid({
   }, [defaultPreset, onReset]);
 
   const availableWidgets = useMemo(
-    () => getAllAvailableWidgets(clusters).filter((w) => !activeWidgetIds.includes(w.id)),
+    () =>
+      getAllAvailableWidgets(clusters).filter(
+        (w) => !activeWidgetIds.includes(w.id),
+      ),
     [activeWidgetIds, clusters],
   );
 
@@ -161,7 +166,10 @@ export function DashboardGrid({
                 Add Widget
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64 max-h-80 overflow-y-auto">
+            <DropdownMenuContent
+              align="start"
+              className="w-64 max-h-80 overflow-y-auto"
+            >
               <DropdownMenuLabel>Available Widgets</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {availableWidgets.map((w) => (
@@ -250,12 +258,11 @@ function WidgetOverlay({
     <Card className="absolute inset-x-0 top-0 z-10 flex h-8 items-center justify-between rounded-b-none border-b bg-muted/80 px-2 backdrop-blur-xs">
       <CardHeader className="flex flex-row items-center gap-1 p-0">
         <GripVertical className="widget-drag-handle h-4 w-4 cursor-grab text-muted-foreground" />
-        <CardTitle className="text-xs font-medium">
-          {label}
-        </CardTitle>
+        <CardTitle className="text-xs font-medium">{label}</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         <button
+          aria-label={`Remove ${label}`}
           onClick={onRemove}
           className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
         >

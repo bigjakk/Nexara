@@ -19,7 +19,7 @@ func sessionBody(state string) string {
 	return `{
 		"id": "` + testSessionID + `",
 		"jobId": "` + testJobID + `",
-		"name": "Onsite_Daily_Win",
+		"name": "Daily-Backup-Win",
 		"sessionType": "PlatformBackupJob",
 		"platformName": "Proxmox",
 		"platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
@@ -323,7 +323,6 @@ func TestSessionLogs_EmptyIsNotAnError(t *testing.T) {
 	}
 }
 
-
 // The per-guest breakdown, and the two things about it that are easy to get
 // wrong: it is the PLAIN endpoint (unlike /jobs and /proxies, whose Proxmox
 // rows live only under /states), and its rows carry a platformId of their own.
@@ -332,7 +331,7 @@ func TestTaskSessions_DecodesPerGuestOutcomes(t *testing.T) {
 	f.setList("/api/v1/sessions/"+testSessionID+"/taskSessions", []string{`{
 		"id": "7b1c2d3e-4f50-4a61-b273-8495a6b7c8d9",
 		"type": "Backup",
-		"name": "ad01.ad.crjlab.net",
+		"name": "dc01.example.com",
 		"sessionType": "EndpointBackup",
 		"sessionId": "` + testSessionID + `",
 		"platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
@@ -347,7 +346,7 @@ func TestTaskSessions_DecodesPerGuestOutcomes(t *testing.T) {
 	}`, `{
 		"id": "8c2d3e4f-5061-4b72-c384-95a6b7c8d9e0",
 		"type": "Backup",
-		"name": "docker01.ad.crjlab.net",
+		"name": "linux01.example.com",
 		"sessionType": "EndpointBackup",
 		"sessionId": "` + testSessionID + `",
 		"platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
@@ -367,7 +366,7 @@ func TestTaskSessions_DecodesPerGuestOutcomes(t *testing.T) {
 	}
 
 	failed := tasks[0]
-	if failed.Name != "ad01.ad.crjlab.net" {
+	if failed.Name != "dc01.example.com" {
 		t.Errorf("name = %q", failed.Name)
 	}
 	// The guest's OWN result, which is the whole point: the run reports one

@@ -32,9 +32,11 @@ export function AlertsTable() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const { hasPermission } = useAuth();
 
-  const filters: { state?: string | undefined; severity?: string | undefined } = {};
+  const filters: { state?: string | undefined; severity?: string | undefined } =
+    {};
   if (stateFilter && stateFilter !== "all") filters.state = stateFilter;
-  if (severityFilter && severityFilter !== "all") filters.severity = severityFilter;
+  if (severityFilter && severityFilter !== "all")
+    filters.severity = severityFilter;
 
   const { data: alerts, isLoading } = useAlerts(filters);
 
@@ -94,14 +96,20 @@ export function AlertsTable() {
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={canAcknowledge ? 8 : 7} className="text-center text-muted-foreground py-8">
+                <TableCell
+                  colSpan={canAcknowledge ? 8 : 7}
+                  className="text-center text-muted-foreground py-8"
+                >
                   Loading...
                 </TableCell>
               </TableRow>
             )}
             {!isLoading && (!alerts || alerts.length === 0) && (
               <TableRow>
-                <TableCell colSpan={canAcknowledge ? 8 : 7} className="text-center text-muted-foreground py-8">
+                <TableCell
+                  colSpan={canAcknowledge ? 8 : 7}
+                  className="text-center text-muted-foreground py-8"
+                >
                   No alerts found
                 </TableCell>
               </TableRow>
@@ -115,8 +123,12 @@ export function AlertsTable() {
                   setExpandedId(expandedId === alert.id ? null : alert.id);
                 }}
                 canAcknowledge={canAcknowledge}
-                onAcknowledge={() => { ackMutation.mutate(alert.id); }}
-                onResolve={() => { resolveMutation.mutate(alert.id); }}
+                onAcknowledge={() => {
+                  ackMutation.mutate(alert.id);
+                }}
+                onResolve={() => {
+                  resolveMutation.mutate(alert.id);
+                }}
                 formatDate={formatDate}
               />
             ))}
@@ -146,10 +158,7 @@ export function AlertRow({
 }) {
   return (
     <>
-      <TableRow
-        className="cursor-pointer hover:bg-muted/50"
-        onClick={onToggle}
-      >
+      <TableRow className="cursor-pointer hover:bg-muted/50" onClick={onToggle}>
         <TableCell>
           {expanded ? (
             <ChevronDown className="h-4 w-4" />
@@ -172,7 +181,11 @@ export function AlertRow({
           {formatDate(alert.fired_at ?? alert.pending_at)}
         </TableCell>
         {canAcknowledge && (
-          <TableCell onClick={(e) => { e.stopPropagation(); }}>
+          <TableCell
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
             <div className="flex gap-1">
               {alert.state === "firing" && (
                 <Button
@@ -201,7 +214,10 @@ export function AlertRow({
 
       {expanded && (
         <TableRow>
-          <TableCell colSpan={canAcknowledge ? 8 : 7} className="bg-muted/30 p-4">
+          <TableCell
+            colSpan={canAcknowledge ? 8 : 7}
+            className="bg-muted/30 p-4"
+          >
             <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm md:grid-cols-4">
               <div>
                 <span className="text-muted-foreground">Alert ID:</span>{" "}

@@ -23,14 +23,26 @@ function makeRfb() {
  */
 const KEYBOARD: Record<string, [string, string]> = {
   Backquote: ["`", "~"],
-  Digit1: ["1", "!"], Digit2: ["2", "@"], Digit3: ["3", "#"],
-  Digit4: ["4", "$"], Digit5: ["5", "%"], Digit6: ["6", "^"],
-  Digit7: ["7", "&"], Digit8: ["8", "*"], Digit9: ["9", "("],
+  Digit1: ["1", "!"],
+  Digit2: ["2", "@"],
+  Digit3: ["3", "#"],
+  Digit4: ["4", "$"],
+  Digit5: ["5", "%"],
+  Digit6: ["6", "^"],
+  Digit7: ["7", "&"],
+  Digit8: ["8", "*"],
+  Digit9: ["9", "("],
   Digit0: ["0", ")"],
-  Minus: ["-", "_"], Equal: ["=", "+"],
-  BracketLeft: ["[", "{"], BracketRight: ["]", "}"], Backslash: ["\\", "|"],
-  Semicolon: [";", ":"], Quote: ["'", '"'],
-  Comma: [",", "<"], Period: [".", ">"], Slash: ["/", "?"],
+  Minus: ["-", "_"],
+  Equal: ["=", "+"],
+  BracketLeft: ["[", "{"],
+  BracketRight: ["]", "}"],
+  Backslash: ["\\", "|"],
+  Semicolon: [";", ":"],
+  Quote: ["'", '"'],
+  Comma: [",", "<"],
+  Period: [".", ">"],
+  Slash: ["/", "?"],
   Space: [" ", " "],
 };
 for (let i = 0; i < 26; i++) {
@@ -64,8 +76,14 @@ function replayAsServer(calls: SendKeyCall[]): string {
       continue;
     }
     if (!down) continue; // emit on key-down only
-    if (keysym === 0xff0d) { out += "\n"; continue; }
-    if (keysym === 0xff09) { out += "\t"; continue; }
+    if (keysym === 0xff0d) {
+      out += "\n";
+      continue;
+    }
+    if (keysym === 0xff09) {
+      out += "\t";
+      continue;
+    }
 
     const ch = String.fromCodePoint(keysym);
     const key = code ?? CODE_OF.get(ch);
@@ -134,7 +152,8 @@ describe("typeTextIntoVnc", () => {
   // Regression: "@" arrived as "2" and "&" as "7", turning
   // "ceph-osd@1 && ..." into "ceph-osd21 77 ...".
   it("round-trips a shell command containing @ and &&", () => {
-    const cmd = "systemctl reset-failed ceph-osd@1 && systemctl start ceph-osd@1";
+    const cmd =
+      "systemctl reset-failed ceph-osd@1 && systemctl start ceph-osd@1";
     const { rfb, calls } = makeRfb();
     typeTextIntoVnc(rfb, cmd);
 

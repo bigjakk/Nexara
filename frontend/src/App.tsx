@@ -175,61 +175,109 @@ const router = createBrowserRouter([
           },
           {
             path: "clusters",
-            element: <LazyPage><ClustersListPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <ClustersListPage />
+              </LazyPage>
+            ),
           },
           {
             path: "clusters/:clusterId",
-            element: <LazyPage><ClusterDetailPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <ClusterDetailPage />
+              </LazyPage>
+            ),
           },
           {
             path: "clusters/:clusterId/nodes/:nodeId",
-            element: <LazyPage><NodeDetailPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <NodeDetailPage />
+              </LazyPage>
+            ),
           },
           {
             path: "clusters/:clusterId/folders/:folderId",
             element: (
               <RequirePermission action="view" resource="vm_folder">
-                <LazyPage><FolderDetailPage /></LazyPage>
+                <LazyPage>
+                  <FolderDetailPage />
+                </LazyPage>
               </RequirePermission>
             ),
           },
           {
             path: "inventory",
-            element: <LazyPage><InventoryPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <InventoryPage />
+              </LazyPage>
+            ),
           },
           {
             path: "inventory/:kind/:clusterId/:vmId",
-            element: <LazyPage><VMDetailPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <VMDetailPage />
+              </LazyPage>
+            ),
           },
           {
             path: "storage",
-            element: <LazyPage><StoragePage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <StoragePage />
+              </LazyPage>
+            ),
           },
           {
             path: "storage/:clusterId/:storageId",
-            element: <LazyPage><StorageDetailPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <StorageDetailPage />
+              </LazyPage>
+            ),
           },
           {
             path: "backup",
-            element: <LazyPage><BackupDashboardPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <BackupDashboardPage />
+              </LazyPage>
+            ),
           },
           {
             path: "snapshots",
-            element: <LazyPage><SnapshotsPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <SnapshotsPage />
+              </LazyPage>
+            ),
           },
           {
             path: "events",
-            element: <LazyPage><EventsPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <EventsPage />
+              </LazyPage>
+            ),
           },
           {
             path: "console",
-            element: <LazyPage><ConsolePage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <ConsolePage />
+              </LazyPage>
+            ),
           },
           {
             path: "admin/users",
             element: (
               <RequirePermission action="manage" resource="user">
-                <LazyPage><UsersPage /></LazyPage>
+                <LazyPage>
+                  <UsersPage />
+                </LazyPage>
               </RequirePermission>
             ),
           },
@@ -237,7 +285,9 @@ const router = createBrowserRouter([
             path: "admin/roles",
             element: (
               <RequirePermission action="manage" resource="role">
-                <LazyPage><RolesPage /></LazyPage>
+                <LazyPage>
+                  <RolesPage />
+                </LazyPage>
               </RequirePermission>
             ),
           },
@@ -245,7 +295,9 @@ const router = createBrowserRouter([
             path: "admin/ldap",
             element: (
               <RequirePermission action="manage" resource="user">
-                <LazyPage><LDAPPage /></LazyPage>
+                <LazyPage>
+                  <LDAPPage />
+                </LazyPage>
               </RequirePermission>
             ),
           },
@@ -253,35 +305,53 @@ const router = createBrowserRouter([
             path: "admin/oidc",
             element: (
               <RequirePermission action="manage" resource="user">
-                <LazyPage><OIDCPage /></LazyPage>
+                <LazyPage>
+                  <OIDCPage />
+                </LazyPage>
               </RequirePermission>
             ),
           },
           {
             path: "admin/branding",
-            element: <LazyPage><BrandingPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <BrandingPage />
+              </LazyPage>
+            ),
           },
           {
             path: "alerts",
             element: (
               <RequirePermission action="view" resource="alert">
-                <LazyPage><AlertsPage /></LazyPage>
+                <LazyPage>
+                  <AlertsPage />
+                </LazyPage>
               </RequirePermission>
             ),
           },
           {
             path: "reports",
-            element: <LazyPage><ReportsPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <ReportsPage />
+              </LazyPage>
+            ),
           },
           {
             path: "topology",
-            element: <LazyPage><TopologyPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <TopologyPage />
+              </LazyPage>
+            ),
           },
           {
             path: "security",
             element: (
               <RequirePermission action="view" resource="cve_scan">
-                <LazyPage><SecurityDashboardPage /></LazyPage>
+                <LazyPage>
+                  <SecurityDashboardPage />
+                </LazyPage>
               </RequirePermission>
             ),
           },
@@ -289,29 +359,51 @@ const router = createBrowserRouter([
             path: "imports",
             element: (
               <RequirePermission action="view" resource="vm_import">
-                <LazyPage><ImportsPage /></LazyPage>
+                <LazyPage>
+                  <ImportsPage />
+                </LazyPage>
               </RequirePermission>
             ),
           },
           {
             path: "settings/profile",
-            element: <LazyPage><ProfilePage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <ProfilePage />
+              </LazyPage>
+            ),
           },
           {
             path: "settings/security",
-            element: <LazyPage><SecurityPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <SecurityPage />
+              </LazyPage>
+            ),
           },
           {
             path: "settings/api-keys",
-            element: <LazyPage><APIKeysPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <APIKeysPage />
+              </LazyPage>
+            ),
           },
           {
             path: "settings/api-docs",
-            element: <LazyPage><APIDocsPage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <APIDocsPage />
+              </LazyPage>
+            ),
           },
           {
             path: "settings/appearance",
-            element: <LazyPage><AppearancePage /></LazyPage>,
+            element: (
+              <LazyPage>
+                <AppearancePage />
+              </LazyPage>
+            ),
           },
         ],
       },

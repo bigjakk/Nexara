@@ -26,8 +26,7 @@ export interface AuditLogEntry {
 export function useRecentActivity() {
   return useQuery({
     queryKey: ["recent-activity"],
-    queryFn: () =>
-      apiClient.list<AuditLogEntry>("/api/v1/audit-log/recent"),
+    queryFn: () => apiClient.list<AuditLogEntry>("/api/v1/audit-log/recent"),
     refetchInterval: 120_000,
   });
 }

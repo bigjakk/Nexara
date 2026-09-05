@@ -27,9 +27,9 @@ const testCacheEncryptionKey = "0123456789abcdef0123456789abcdef0123456789abcdef
 // fakeQueries lets the cache talk to in-memory cluster/pbs rows whose
 // api_url points at a httptest backend.
 type fakeQueries struct {
-	mu          sync.Mutex
-	clusters    map[uuid.UUID]db.Cluster
-	pbsServers  map[uuid.UUID]db.PbsServer
+	mu           sync.Mutex
+	clusters     map[uuid.UUID]db.Cluster
+	pbsServers   map[uuid.UUID]db.PbsServer
 	clusterCalls int32
 	pbsCalls     int32
 }

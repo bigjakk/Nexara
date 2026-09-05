@@ -32,9 +32,7 @@ import {
 import { useNodeBridges } from "@/features/clusters/api/cluster-queries";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
-import {
-  parseBwlimit,
-} from "@/features/storage/lib/disk-move";
+import { parseBwlimit } from "@/features/storage/lib/disk-move";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { parseKVString, buildKVString } from "../lib/vm-config-parsers";
 import { parseCTNet, buildCTNet, emptyCTNet } from "../lib/ct-net";
@@ -211,9 +209,7 @@ function Section({ title, children, defaultOpen = true }: SectionProps) {
           {title}
         </CardTitle>
       </CardHeader>
-      {open && (
-        <CardContent className="px-3 pb-3 pt-0">{children}</CardContent>
-      )}
+      {open && <CardContent className="px-3 pb-3 pt-0">{children}</CardContent>}
     </Card>
   );
 }
@@ -296,7 +292,8 @@ function MoveVolumeDialog({
         <div className="space-y-4">
           {currentStorage && (
             <p className="text-sm text-muted-foreground">
-              Current storage: <span className="font-mono font-medium">{currentStorage}</span>
+              Current storage:{" "}
+              <span className="font-mono font-medium">{currentStorage}</span>
             </p>
           )}
           <div className="space-y-2">
@@ -330,7 +327,9 @@ function MoveVolumeDialog({
           />
           <Button
             onClick={handleMove}
-            disabled={!targetStorage || bwlimitInvalid || moveMutation.isPending}
+            disabled={
+              !targetStorage || bwlimitInvalid || moveMutation.isPending
+            }
             className="w-full"
           >
             {moveMutation.isPending ? "Moving..." : "Move Volume"}
@@ -481,13 +480,24 @@ function MountPointRow({
           <span className="font-mono">{mp.volume}</span>
         </div>
         <div>
-          <span className="text-muted-foreground">Size:</span>{" "}
-          {mp.size || "--"}
+          <span className="text-muted-foreground">Size:</span> {mp.size || "--"}
         </div>
         <div className="flex gap-2">
-          {mp.backup && <Badge variant="secondary" className="text-[10px]">backup</Badge>}
-          {mp.ro && <Badge variant="secondary" className="text-[10px]">ro</Badge>}
-          {mp.quota && <Badge variant="secondary" className="text-[10px]">quota</Badge>}
+          {mp.backup && (
+            <Badge variant="secondary" className="text-[10px]">
+              backup
+            </Badge>
+          )}
+          {mp.ro && (
+            <Badge variant="secondary" className="text-[10px]">
+              ro
+            </Badge>
+          )}
+          {mp.quota && (
+            <Badge variant="secondary" className="text-[10px]">
+              quota
+            </Badge>
+          )}
         </div>
       </div>
       <div className="flex items-end gap-2 pt-1">
@@ -509,7 +519,11 @@ function MountPointRow({
               onClick={() => {
                 resizeMutation.mutate(
                   { clusterId, ctId, disk: deviceKey, size: resizeSize.trim() },
-                  { onSuccess: () => { setResizeSize(""); } },
+                  {
+                    onSuccess: () => {
+                      setResizeSize("");
+                    },
+                  },
                 );
               }}
             >
@@ -713,7 +727,11 @@ export function ContainerResourcesPanel({
   ctStatus,
   nodeName,
 }: ContainerResourcesPanelProps) {
-  const { data: config, isLoading, error } = useContainerConfig(clusterId, ctId);
+  const {
+    data: config,
+    isLoading,
+    error,
+  } = useContainerConfig(clusterId, ctId);
   const setConfigMutation = useSetResourceConfig();
   const { data: bridges } = useNodeBridges(clusterId, nodeName);
   const { data: storageList } = useClusterStorage(clusterId);
@@ -723,7 +741,8 @@ export function ContainerResourcesPanel({
     return storageList
       .filter((s) => {
         if (!s.enabled || !s.active) return false;
-        if (!s.content.includes("rootdir") && !s.content.includes("images")) return false;
+        if (!s.content.includes("rootdir") && !s.content.includes("images"))
+          return false;
         if (seen.has(s.storage)) return false;
         seen.add(s.storage);
         return true;
@@ -748,9 +767,17 @@ export function ContainerResourcesPanel({
   const [onboot, setOnboot] = useState(false);
   const [protection, setProtection] = useState(false);
   const [cmode, setCmode] = useState("tty");
-  const [startup, setStartup] = useState<StartupOrder>({ order: "", up: "", down: "" });
+  const [startup, setStartup] = useState<StartupOrder>({
+    order: "",
+    up: "",
+    down: "",
+  });
   const [features, setFeatures] = useState<CTFeatures>({
-    nesting: false, fuse: false, keyctl: false, mknod: false, mount: "",
+    nesting: false,
+    fuse: false,
+    keyctl: false,
+    mknod: false,
+    mount: "",
   });
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
@@ -759,7 +786,9 @@ export function ContainerResourcesPanel({
   const [nics, setNics] = useState<Map<string, CTNetEdit>>(new Map());
 
   // Pending new NICs to add
-  const [pendingNics, setPendingNics] = useState<Map<string, CTNetEdit>>(new Map());
+  const [pendingNics, setPendingNics] = useState<Map<string, CTNetEdit>>(
+    new Map(),
+  );
 
   // NICs to delete
   const [deleteNics, setDeleteNics] = useState<Set<string>>(new Set());
@@ -855,9 +884,24 @@ export function ContainerResourcesPanel({
     }
     return f;
   }, [
-    cores, cpulimit, cpuunits, memory, swap, hostname, nameserver,
-    searchdomain, onboot, protection, cmode, startup, features,
-    description, tags, nics, pendingNics, deleteNics,
+    cores,
+    cpulimit,
+    cpuunits,
+    memory,
+    swap,
+    hostname,
+    nameserver,
+    searchdomain,
+    onboot,
+    protection,
+    cmode,
+    startup,
+    features,
+    description,
+    tags,
+    nics,
+    pendingNics,
+    deleteNics,
   ]);
 
   // Detect changes
@@ -1083,7 +1127,12 @@ export function ContainerResourcesPanel({
 
       {/* Root Filesystem */}
       <Section title="Root Filesystem">
-        <RootFSRow config={config} clusterId={clusterId} ctId={ctId} storageOptions={storageOptions} />
+        <RootFSRow
+          config={config}
+          clusterId={clusterId}
+          ctId={ctId}
+          storageOptions={storageOptions}
+        />
       </Section>
 
       {/* Mount Points */}

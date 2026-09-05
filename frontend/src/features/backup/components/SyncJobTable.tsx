@@ -76,6 +76,7 @@ export function SyncJobTable({ jobs, pbsId }: SyncJobTableProps) {
               </TableCell>
               <TableCell>
                 <Button
+                  aria-label={`Run sync job ${job.job_id}`}
                   variant="ghost"
                   size="sm"
                   onClick={() => {

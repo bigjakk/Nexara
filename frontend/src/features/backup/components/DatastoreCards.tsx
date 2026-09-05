@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { PBSDatastoreStatus } from "../types/backup";
 import { formatBytes } from "@/lib/format";
 
-
 interface DatastoreCardsProps {
   datastores: PBSDatastoreStatus[];
 }

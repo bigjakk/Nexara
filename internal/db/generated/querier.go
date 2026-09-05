@@ -54,6 +54,7 @@ type Querier interface {
 	// and survives to be serviced by the following tick instead of being cleared
 	// without ever being acted on.
 	ClearDRSEvalRequest(ctx context.Context, arg ClearDRSEvalRequestParams) error
+	ClearGuestToolsCDROMRestore(ctx context.Context, arg ClearGuestToolsCDROMRestoreParams) error
 	// ClearJobCleanupPending is self-guarding: the flag only clears when no
 	// job-level marker and no node-level record still holds state, so a release
 	// racing a concurrent record-write cannot retire the job from the sweep
@@ -63,6 +64,13 @@ type Querier interface {
 	ClearJobCleanupPending(ctx context.Context, id uuid.UUID) error
 	ClearJobNativeCRSPaused(ctx context.Context, id uuid.UUID) error
 	ClearTOTPSecret(ctx context.Context, id uuid.UUID) error
+	// ClearVirtioWinStableFlag reasserts the flag after a catalog refresh, so the
+	// partial index on is_stable only ever matches the row the source just named.
+	//
+	// Passing '' clears EVERY row, which is the answer when the source could not
+	// name a stable version at all — a mirror has no stable-virtio/ redirect to
+	// copy. No version string is empty, so the <> holds nothing back.
+	ClearVirtioWinStableFlag(ctx context.Context, version string) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
 	// Terminal transitions set cleanup_pending: the job may still hold cluster
 	// state (DRS pause, native CRS pause, disabled HA rules, stopped passthrough
@@ -150,6 +158,7 @@ type Querier interface {
 	// (a dry-run or a preview endpoint).
 	CountClustersSharingBootstrapUser(ctx context.Context, arg CountClustersSharingBootstrapUserParams) (int64, error)
 	CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (CountCompletedNodesRow, error)
+	CountGuestToolsInFlightForCluster(ctx context.Context, clusterID uuid.UUID) (int64, error)
 	CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error)
 	CountNotificationDLQByState(ctx context.Context) (CountNotificationDLQByStateRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
@@ -176,6 +185,7 @@ type Querier interface {
 	// refusal-to-prune guard to a presentation concern that has no business
 	// influencing it.
 	CountVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) (int64, error)
+	CountVirtioWinDownloadsByCluster(ctx context.Context, clusterID uuid.UUID) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)
 	CreateFirewallTemplate(ctx context.Context, arg CreateFirewallTemplateParams) (FirewallTemplate, error)
@@ -232,11 +242,21 @@ type Querier interface {
 	// but it must be a non-nil empty slice. pgx encodes a nil slice as SQL NULL,
 	// and NOT (x = ANY(NULL)) is NULL, so a nil list silently deletes nothing.
 	DeleteGuestSnapshotsNotInSet(ctx context.Context, arg DeleteGuestSnapshotsNotInSetParams) (int64, error)
+	// DeleteGuestToolsStateForVanishedGuests drops rows for guests that no longer
+	// exist in the cluster.
+	//
+	// @vmids must be a non-nil, possibly-empty slice: pgx encodes a nil slice as
+	// SQL NULL, and `NOT (x = ANY(NULL))` is NULL rather than true, so a nil list
+	// silently deletes nothing instead of everything.
+	DeleteGuestToolsStateForVanishedGuests(ctx context.Context, arg DeleteGuestToolsStateForVanishedGuestsParams) error
 	DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error
 	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error
 	DeleteNotificationChannel(ctx context.Context, id uuid.UUID) error
 	DeleteNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error
+	// DeleteOldVirtioWinDownloads trims finished history, keeping the table bounded
+	// without touching anything still in flight.
+	DeleteOldVirtioWinDownloads(ctx context.Context, finishedAt pgtype.Timestamptz) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
 	DeleteRecoveryCode(ctx context.Context, id uuid.UUID) error
 	DeleteReportRun(ctx context.Context, id uuid.UUID) error
@@ -335,10 +355,41 @@ type Querier interface {
 	// the resources payload was well-formed before treating it as authoritative.
 	DeleteVMsAbsentFromCluster(ctx context.Context, arg DeleteVMsAbsentFromClusterParams) (int64, error)
 	DeleteVeeamServer(ctx context.Context, id uuid.UUID) error
+	// Drops one session the upstream server no longer has.
+	//
+	// Only ever called when GET /sessions/{id} ITSELF answered 404. A non-terminal
+	// row Veeam has forgotten can never reach a terminal state on its own, and
+	// leaving it is what pins a job to "Running" forever — so the mirror drops it.
+	//
+	// Unlike the sweeps beside it this has NO grace window, because it needs none:
+	// a sweep infers absence from a row missing out of a listing, where one
+	// non-observation is indistinguishable from a hiccup, while this is VBR
+	// answering a direct question about one id. What carries the weight instead is
+	// the caller's classification — see veeam.ErrSessionNotFound, which exists
+	// precisely so a 404 raised anywhere else on the way cannot reach here.
+	//
+	// Nothing references veeam_sessions by foreign key; veeam_jobs.last_session_id
+	// and veeam_restore_points.session_id carry Veeam's own UUID, not a row id.
+	DeleteVeeamSession(ctx context.Context, arg DeleteVeeamSessionParams) error
 	// Job states carry no platformId; sessions are the only bridge. STICKY by
 	// construction — the WHERE clause only touches rows that have none yet, so a
 	// pruned session cannot un-attribute a job that was already resolved.
 	DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uuid.UUID) error
+	// DisableScheduledTaskForBadSchedule parks a task whose cron can never fire.
+	//
+	// Leaving it enabled is the busy loop: this table's due predicate counts NULL
+	// next_run_at as "due now", and a cron that never comes round has no other
+	// value to write — so the row would be claimed, RUN, and re-queued on every
+	// tick, repeating whatever action it carries. Disabling makes it inert while
+	// last_error says why, and next_run_at NULL means that fixing the expression
+	// and re-enabling runs it once, promptly, instead of waiting for a slot the
+	// old expression never had.
+	//
+	// last_status is a parameter rather than a literal 'failed' because it
+	// describes the RUN, not the schedule: a task can execute perfectly and still
+	// have an expression that can never come round again, and recording that run
+	// as a failure would send the operator looking for a problem in the wrong half.
+	DisableScheduledTaskForBadSchedule(ctx context.Context, arg DisableScheduledTaskForBadScheduleParams) error
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) (int64, error)
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) (int64, error)
@@ -352,6 +403,10 @@ type Querier interface {
 	// sit 'pending' with no task to reconcile against forever.
 	FailStalePendingVMImportJobs(ctx context.Context) error
 	FailVMImportJob(ctx context.Context, arg FailVMImportJobParams) error
+	// FinishGuestToolsUpdate records a terminal outcome and clears the borrowed
+	// CD-ROM bookkeeping, which the reconciler has restored by this point.
+	FinishGuestToolsUpdate(ctx context.Context, arg FinishGuestToolsUpdateParams) error
+	FinishVirtioWinDownload(ctx context.Context, arg FinishVirtioWinDownloadParams) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKeyByHashRow, error)
 	GetAPIKeyByID(ctx context.Context, id uuid.UUID) (ApiKey, error)
 	GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHistory, error)
@@ -444,6 +499,9 @@ type Querier interface {
 	GetEnabledOIDCConfig(ctx context.Context) (OidcConfig, error)
 	GetExternalFeedCache(ctx context.Context, source string) (ExternalFeedCache, error)
 	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
+	GetGuestToolsConfig(ctx context.Context, clusterID uuid.UUID) (GuestToolsConfig, error)
+	GetGuestToolsPolicy(ctx context.Context, arg GetGuestToolsPolicyParams) (GuestToolsPolicy, error)
+	GetGuestToolsState(ctx context.Context, arg GetGuestToolsStateParams) (GuestToolsState, error)
 	// GetGuestVeeamMalware is the vm-scoped counterpart of
 	// GetClusterVeeamMalwareStats.
 	GetGuestVeeamMalware(ctx context.Context, arg GetGuestVeeamMalwareParams) (GetGuestVeeamMalwareRow, error)
@@ -519,6 +577,7 @@ type Querier interface {
 	// transaction share now(), and updated_at alone would degenerate back to heap
 	// order. Matches the dedup ordering in 000075.
 	GetSetting(ctx context.Context, arg GetSettingParams) (Setting, error)
+	GetStableVirtioWinRelease(ctx context.Context) (VirtioWinRelease, error)
 	GetStoragePool(ctx context.Context, id uuid.UUID) (StoragePool, error)
 	GetTaskByUpid(ctx context.Context, upid string) (TaskHistory, error)
 	GetTaskSyncState(ctx context.Context, clusterID uuid.UUID) (int64, error)
@@ -565,10 +624,6 @@ type Querier interface {
 	// unattributable job is global-only — the same fail-closed posture the read
 	// endpoints take.
 	GetVeeamJobByVeeamID(ctx context.Context, arg GetVeeamJobByVeeamIDParams) (VeeamJob, error)
-	// ---------------------------------------------------------------------------
-	// Phase 3: platform mapping and guest correlation.
-	// ---------------------------------------------------------------------------
-	GetVeeamPlatform(ctx context.Context, arg GetVeeamPlatformParams) (VeeamPlatform, error)
 	GetVeeamRepositoryMetrics(ctx context.Context, arg GetVeeamRepositoryMetricsParams) ([]GetVeeamRepositoryMetricsRow, error)
 	// GetVeeamRepositoryUsageStats reports the fullest repository across every
 	// Veeam server.
@@ -592,6 +647,8 @@ type Querier interface {
 	// which is an explicit "first sync" the caller handles — and it is served
 	// straight off idx_veeam_sessions_server_time.
 	GetVeeamSessionWatermark(ctx context.Context, veeamServerID uuid.UUID) (time.Time, error)
+	GetVirtioWinConfig(ctx context.Context, clusterID uuid.UUID) (VirtioWinConfig, error)
+	GetVirtioWinRelease(ctx context.Context, version string) (VirtioWinRelease, error)
 	HasClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	HasRunningJobForCluster(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	IncrementJobCleanupAttempts(ctx context.Context, id uuid.UUID) (int32, error)
@@ -659,14 +716,20 @@ type Querier interface {
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	InsertVMImportJob(ctx context.Context, arg InsertVMImportJobParams) (VmImportJob, error)
 	InsertVeeamRepositoryMetric(ctx context.Context, arg InsertVeeamRepositoryMetricParams) error
+	// InsertVirtioWinDownload records the intent to fetch, before the node is asked
+	// to. status and upid are left to their column defaults ('pending' and empty):
+	// the row exists precisely because the download has not started yet.
+	InsertVirtioWinDownload(ctx context.Context, arg InsertVirtioWinDownloadParams) (VirtioWinDownload, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ListAPIKeysByUserRow, error)
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
 	ListActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) ([]AlertHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
+	ListActiveGuestToolsConfigs(ctx context.Context) ([]GuestToolsConfig, error)
 	ListActiveMaintenanceWindows(ctx context.Context) ([]MaintenanceWindow, error)
 	ListActivePBSServers(ctx context.Context) ([]PbsServer, error)
 	ListActiveVMImportJobs(ctx context.Context) ([]VmImportJob, error)
 	ListActiveVeeamServers(ctx context.Context) ([]VeeamServer, error)
+	ListActiveVirtioWinDownloads(ctx context.Context) ([]VirtioWinDownload, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	ListAlertHistoryByCluster(ctx context.Context, arg ListAlertHistoryByClusterParams) ([]AlertHistory, error)
 	// ListAlertHistoryFiltered backs the Alerts history page. cluster_id is the
@@ -696,7 +759,6 @@ type Querier interface {
 	// churn (or gone) still render; vm_id/vm_name/vm_status are NULL then and the
 	// frontend disables the guest link. Unknown ages (snap_time = 0) sort last.
 	ListAllGuestSnapshots(ctx context.Context) ([]ListAllGuestSnapshotsRow, error)
-	ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHistory, error)
 	ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error)
 	// ListAuditLogAdvanced backs the audit log page and the CSV/JSON/syslog export:
 	// the optional cluster/type/user/action/source/time filters plus offset
@@ -740,6 +802,11 @@ type Querier interface {
 	ListDistinctAuditActions(ctx context.Context) ([]string, error)
 	ListDistinctAuditUsers(ctx context.Context) ([]ListDistinctAuditUsersRow, error)
 	ListDueReportSchedules(ctx context.Context) ([]ReportSchedule, error)
+	// ListDueVirtioWinConfigs returns the opted-in clusters whose next check has
+	// come round. NULL is "due now": that is what a fresh row, a just-enabled
+	// cluster, and a pre-000100 row upgraded in place all carry, so each gets one
+	// check promptly and a schedule from then on.
+	ListDueVirtioWinConfigs(ctx context.Context) ([]VirtioWinConfig, error)
 	ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error)
 	ListEnabledCVEScanSchedules(ctx context.Context) ([]CveScanSchedule, error)
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
@@ -771,6 +838,22 @@ type Querier interface {
 	// cluster's rows, oldest dated first (unknown ages last), with the guest
 	// name rejoined live (NULL when the guest is gone from inventory).
 	ListGuestSnapshotsForReport(ctx context.Context, clusterID uuid.UUID) ([]ListGuestSnapshotsForReportRow, error)
+	// ListGuestToolsFleet is the cluster-wide view: every Windows guest Nexara
+	// knows about, with whatever has been observed and whatever policy applies.
+	//
+	// Driven from vms rather than from guest_tools_state so a guest that has never
+	// been probed still appears — "we have never looked at this one" is exactly
+	// what an operator needs to see. Windows detection matches the frontend's rule
+	// (os-classify.ts): config_ostype prefixed win/w2k plus the two odd ones, or an
+	// agent that self-reports mswindows.
+	ListGuestToolsFleet(ctx context.Context, clusterID uuid.UUID) ([]ListGuestToolsFleetRow, error)
+	ListGuestToolsInFlight(ctx context.Context) ([]GuestToolsState, error)
+	// ListGuestToolsPendingCDROMRestore finds guests whose update has finished but
+	// whose borrowed drive was never put back, because the restore failed at the
+	// time. Retried on later passes so a transient Proxmox error does not strand
+	// the ISO on the guest permanently.
+	ListGuestToolsPendingCDROMRestore(ctx context.Context) ([]GuestToolsState, error)
+	ListGuestToolsPolicies(ctx context.Context, clusterID uuid.UUID) ([]GuestToolsPolicy, error)
 	// Guests whose HA resource state is "error" (needs manual intervention).
 	ListHAErrorGuests(ctx context.Context) ([]ListHAErrorGuestsRow, error)
 	// Guests paused by a storage I/O error (Proxmox signals this via the guest lock).
@@ -806,6 +889,13 @@ type Querier interface {
 	ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeNetworkInterface, error)
 	ListNodePCIDevicesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodePciDevice, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
+	// ListNodesWithStorage returns the online nodes that actually carry a given
+	// storage, so a download is dispatched somewhere it can succeed.
+	//
+	// download-url is node-scoped even though the ISO lands on the storage, and a
+	// storage restricted to a subset of nodes (any local directory pool) fails on
+	// the rest. Picking "any online node" is only correct for shared storage.
+	ListNodesWithStorage(ctx context.Context, arg ListNodesWithStorageParams) ([]string, error)
 	// Active clusters that have lost quorum.
 	ListNonQuorateClusters(ctx context.Context) ([]uuid.UUID, error)
 	ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error)
@@ -822,6 +912,10 @@ type Querier interface {
 	ListPBSSyncJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsSyncJob, error)
 	ListPBSVerifyJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsVerifyJob, error)
 	ListPermissions(ctx context.Context) ([]Permission, error)
+	// ListPinnedVirtioWinVersions returns every version any cluster has pinned.
+	// The prune keep-set is built from this plus the newest release, so a pin held
+	// by one cluster protects that ISO on every cluster.
+	ListPinnedVirtioWinVersions(ctx context.Context) ([]string, error)
 	// ListRecentAuditLogEnriched backs the dashboard activity feed. It takes the
 	// caller's view:audit scope (see the accessible_cluster_ids note on
 	// ListAuditLogAdvanced) rather than trimming afterwards: LIMIT 50 applied
@@ -872,8 +966,6 @@ type Querier interface {
 	ListStorageNearFull(ctx context.Context) ([]ListStorageNearFullRow, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
-	ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams) ([]TaskHistory, error)
-	ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHistoryByClusterParams) ([]TaskHistory, error)
 	// ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status +
 	// vmids filters with offset pagination. Mirrors ListAuditLogAdvanced. NULL
 	// narg = no filter on that column. vmids matches the guest VMID parsed from
@@ -881,7 +973,33 @@ type Querier interface {
 	// accessible_cluster_ids carries the caller's view:task RBAC scope: NULL means
 	// global access (no restriction); an array restricts rows — and the Total the
 	// count query feeds into pagination — to those clusters ('{}' matches nothing).
-	ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]TaskHistory, error)
+	//
+	// sort_by/sort_dir drive server-side column sorting. The table is paginated at
+	// 50 rows out of a history that runs to thousands, so the ordering has to be
+	// applied to the whole filtered set — sorting the delivered page client-side
+	// would only ever reshuffle the 50 rows already on screen. Both are validated
+	// against a whitelist in the handler before they reach here; an unrecognised
+	// value simply matches no CASE branch and falls through to the default order.
+	//
+	// Sort keys order on the value the CELL RENDERS, not the raw column:
+	//   * blank text ('' node / task_type) sorts as absent, because the cell shows
+	//     an em dash for it;
+	//   * description falls back to the UPID, exactly as the cell does;
+	//   * cluster and vm sort by the joined NAME — the cell shows a name, and
+	//     ordering it by UUID or VMID would look arbitrary to the operator;
+	//   * status sorts by displayed severity (see sort_status), not alphabetically,
+	//     because 'stopped' renders as Completed or Failed depending on exit_status;
+	//   * progress sorts on the displayed fraction (see sort_progress).
+	//
+	// Both LEFT JOINs are non-multiplying: clusters.id is a primary key and vms
+	// carries UNIQUE (cluster_id, vmid), so neither can fan a task row out into
+	// several. That is load-bearing — CountTaskHistoryFiltered does not join, and
+	// a duplicated row here would make Items and Total disagree.
+	// Only task_history's own columns are returned. cluster_name/vm_label/
+	// sort_status/sort_progress/sort_text exist to be ordered on, and Postgres
+	// keeps them visible to ORDER BY as columns of `ranked` without carrying them
+	// into the result — which keeps the generated row struct the shape of the table.
+	ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]ListTaskHistoryFilteredRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
@@ -985,6 +1103,9 @@ type Querier interface {
 	// typically returns, on every page load.
 	ListVeeamOrphanedObjects(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamOrphanedObjectsRow, error)
 	ListVeeamPlatformsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamPlatform, error)
+	// ---------------------------------------------------------------------------
+	// Phase 3: platform mapping and guest correlation.
+	// ---------------------------------------------------------------------------
 	// ListVeeamPlatformsWithCluster feeds the mapping UI: every Proxmox connection
 	// the server has been seen protecting, with the Nexara cluster (if any) an
 	// operator has attached it to. object_count is what makes an unmapped platform
@@ -992,7 +1113,6 @@ type Querier interface {
 	ListVeeamPlatformsWithCluster(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamPlatformsWithClusterRow, error)
 	ListVeeamRepositoriesByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamRepository, error)
 	ListVeeamRestorePointsByObject(ctx context.Context, backupObjectID uuid.UUID) ([]VeeamRestorePoint, error)
-	ListVeeamRestorePointsByServer(ctx context.Context, arg ListVeeamRestorePointsByServerParams) ([]VeeamRestorePoint, error)
 	// ListVeeamRestorePointsForGuest is the guest's recovery history across every
 	// backup it appears in, newest first.
 	ListVeeamRestorePointsForGuest(ctx context.Context, arg ListVeeamRestorePointsForGuestParams) ([]ListVeeamRestorePointsForGuestRow, error)
@@ -1008,6 +1128,20 @@ type Querier interface {
 	// global-only. pgx sends a nil slice as NULL and a non-nil empty slice as
 	// '{}', and that distinction is what makes both cases work.
 	ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSessionsByServerParams) ([]VeeamSession, error)
+	// The stored runs that have not reached a terminal state, newest first.
+	//
+	// Deliberately the SAME predicate as the live-run LATERAL in
+	// ListVeeamJobsByServer: these are exactly the rows that paint a job
+	// "Running", so re-reading precisely this set is what stops one being painted
+	// from a row the poll can no longer reach. If that predicate ever changes,
+	// this one changes with it.
+	//
+	// Bounded by the caller. A backlog larger than the limit converges over
+	// successive passes, newest first, because a run from ten minutes ago is the
+	// one an operator is looking at.
+	ListVeeamUnfinishedSessions(ctx context.Context, arg ListVeeamUnfinishedSessionsParams) ([]uuid.UUID, error)
+	ListVirtioWinDownloadsByCluster(ctx context.Context, arg ListVirtioWinDownloadsByClusterParams) ([]VirtioWinDownload, error)
+	ListVirtioWinReleases(ctx context.Context) ([]VirtioWinRelease, error)
 	ListVulnsBySSVCInScan(ctx context.Context, arg ListVulnsBySSVCInScanParams) ([]ListVulnsBySSVCInScanRow, error)
 	MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
@@ -1025,6 +1159,10 @@ type Querier interface {
 	// been an operator's doing, and clearing it would resurrect the false alert it
 	// exists to suppress.
 	MarkVeeamSessionStopped(ctx context.Context, arg MarkVeeamSessionStoppedParams) (int64, error)
+	// MarkVirtioWinConfigChecked records the outcome and arms the next check in one
+	// statement. Splitting them would let a crash between the two leave a row whose
+	// next_check_at is still in the past, i.e. one that re-checks on every tick.
+	MarkVirtioWinConfigChecked(ctx context.Context, arg MarkVirtioWinConfigCheckedParams) error
 	MoveVMFolder(ctx context.Context, arg MoveVMFolderParams) (VmFolder, error)
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	// Prunes on last_seen_at, NEVER on creation_time: a restore point Veeam still
@@ -1095,6 +1233,10 @@ type Querier interface {
 	RevokeSession(ctx context.Context, id uuid.UUID) error
 	RevokeUserRole(ctx context.Context, arg RevokeUserRoleParams) error
 	SetDRSEnabled(ctx context.Context, arg SetDRSEnabledParams) error
+	// SetGuestToolsStage moves the staging state machine and records what the
+	// guest's CD-ROM looked like before we borrowed it.
+	SetGuestToolsStage(ctx context.Context, arg SetGuestToolsStageParams) error
+	SetGuestToolsUptime(ctx context.Context, arg SetGuestToolsUptimeParams) error
 	SetJobDRSWasEnabled(ctx context.Context, arg SetJobDRSWasEnabledParams) error
 	SetJobDisabledHARules(ctx context.Context, arg SetJobDisabledHARulesParams) error
 	SetJobNativeCRSPaused(ctx context.Context, arg SetJobNativeCRSPausedParams) error
@@ -1162,6 +1304,11 @@ type Querier interface {
 	//
 	// What this exists for is the watermark: see the column comment in 000094.
 	SetVeeamSessionsSyncedAt(ctx context.Context, id uuid.UUID) error
+	// SetVirtioWinDownloadUPID records the Proxmox task once the node has accepted
+	// it. The row is inserted BEFORE the download-url call so the partial unique
+	// index on unfinished (cluster, storage, version) can reject a concurrent
+	// duplicate; the UPID only exists after that call returns.
+	SetVirtioWinDownloadUPID(ctx context.Context, arg SetVirtioWinDownloadUPIDParams) error
 	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) (int64, error)
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
@@ -1252,6 +1399,19 @@ type Querier interface {
 	// low-confidence name tier with nothing to indicate why.
 	UpsertGuestSmbios(ctx context.Context, arg UpsertGuestSmbiosParams) error
 	UpsertGuestSnapshot(ctx context.Context, arg UpsertGuestSnapshotParams) (GuestSnapshot, error)
+	//
+	// snapshot_before follows the omit-vs-assert idiom from UpsertDRSConfig. It is
+	// the rollback for a driver swap that can leave a guest unbootable, so an
+	// absent key preserves the stored value rather than reading as false: a client
+	// that predates the field must not be able to disarm it, and a stale browser
+	// tab saving an unrelated change must not either.
+	UpsertGuestToolsConfig(ctx context.Context, arg UpsertGuestToolsConfigParams) (GuestToolsConfig, error)
+	UpsertGuestToolsDetection(ctx context.Context, arg UpsertGuestToolsDetectionParams) error
+	//
+	// excluded uses the same omit-vs-assert guard, for the same reason in reverse:
+	// an exclusion is the operator saying "never touch this guest", and no client
+	// that simply does not know about the field should be able to clear it.
+	UpsertGuestToolsPolicy(ctx context.Context, arg UpsertGuestToolsPolicyParams) (GuestToolsPolicy, error)
 	UpsertKEVEntry(ctx context.Context, arg UpsertKEVEntryParams) error
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
 	UpsertNodeDisk(ctx context.Context, arg UpsertNodeDiskParams) (NodeDisk, error)
@@ -1317,6 +1477,35 @@ type Querier interface {
 	// handler that started or stopped the job and must survive every later poll
 	// of that session.
 	UpsertVeeamSession(ctx context.Context, arg UpsertVeeamSessionParams) error
+	//
+	// prune_enabled follows the omit-vs-assert idiom from UpsertDRSConfig: it is a
+	// destructive opt-in, so an absent key preserves the stored value rather than
+	// reading as false. A client that predates the field cannot arm it, and a stale
+	// browser tab saving an unrelated storage change cannot disarm it.
+	//
+	// next_check_at is decided here rather than by the caller so that a save and a
+	// scheduler tick cannot interleave into a lost update. Three outcomes, in the
+	// order the CASE tests them:
+	//
+	//   NULL ("due now") when the cluster has just been switched on, or when the
+	//   storage or pinned version changed while it was on. The operator has just
+	//   stated what they want held; waiting until 03:00 to act on it reads as the
+	//   save not having worked.
+	//
+	//   The caller's freshly computed time when only the schedule or its zone
+	//   changed. Recomputing is the whole point of that edit, and it must not
+	//   trigger a check as a side effect.
+	//
+	//   Otherwise unchanged, so that saving an unrelated field (prune, node) does
+	//   not reset the cycle. A row that keeps being saved every few minutes would
+	//   otherwise never reach its own next check.
+	//
+	// The NULL passthrough ahead of the schedule branch keeps a check that is
+	// already due, due. Enabling and then setting the schedule is two saves, and
+	// without it the second would push the first one's pending check out to 03:00
+	// — so the sync the operator just asked for would silently not happen.
+	UpsertVirtioWinConfig(ctx context.Context, arg UpsertVirtioWinConfigParams) (VirtioWinConfig, error)
+	UpsertVirtioWinRelease(ctx context.Context, arg UpsertVirtioWinReleaseParams) error
 }
 
 var _ Querier = (*Queries)(nil)

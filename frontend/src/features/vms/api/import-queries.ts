@@ -89,8 +89,17 @@ export function useQueryURLMetadata() {
 export function useStartImport() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ clusterId, body }: { clusterId: string; body: StartImportRequest }) =>
-      apiClient.post<VMImportJob>(`/api/v1/clusters/${clusterId}/vm-imports`, body),
+    mutationFn: ({
+      clusterId,
+      body,
+    }: {
+      clusterId: string;
+      body: StartImportRequest;
+    }) =>
+      apiClient.post<VMImportJob>(
+        `/api/v1/clusters/${clusterId}/vm-imports`,
+        body,
+      ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "vm-imports"],
@@ -143,7 +152,13 @@ export function useCancelImport() {
 export function useRegisterEsxiSource() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ clusterId, body }: { clusterId: string; body: EsxiSourceRequest }) =>
+    mutationFn: ({
+      clusterId,
+      body,
+    }: {
+      clusterId: string;
+      body: EsxiSourceRequest;
+    }) =>
       apiClient.post<{ status: string; storage: string }>(
         `/api/v1/clusters/${clusterId}/vm-import-sources/esxi`,
         body,
@@ -162,7 +177,13 @@ export function useRegisterEsxiSource() {
 export function useDeleteImportSource() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ clusterId, storage }: { clusterId: string; storage: string }) =>
+    mutationFn: ({
+      clusterId,
+      storage,
+    }: {
+      clusterId: string;
+      storage: string;
+    }) =>
       apiClient.delete<{ status: string; storage: string }>(
         `/api/v1/clusters/${clusterId}/vm-import-sources/${encodeURIComponent(storage)}`,
       ),
@@ -180,7 +201,13 @@ export function useDeleteImportSource() {
 export function useEnableImportContent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ clusterId, storage }: { clusterId: string; storage: string }) =>
+    mutationFn: ({
+      clusterId,
+      storage,
+    }: {
+      clusterId: string;
+      storage: string;
+    }) =>
       apiClient.post<{ status: string; storage: string; content: string }>(
         `/api/v1/clusters/${clusterId}/vm-import-sources/enable-content`,
         { storage },

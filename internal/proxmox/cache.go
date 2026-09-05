@@ -35,13 +35,19 @@ const CacheChannel = "nexara:cache:invalidate"
 // from drifting indefinitely from authoritative state.
 const cacheTTL = 10 * time.Minute
 
-// cachedClientTimeout is the http.Client.Timeout used by every cached
+// CachedClientTimeout is the http.Client.Timeout used by every cached
 // PVE/PBS client. The per-call ctx deadline is the primary cancellation
 // signal in this codebase; this is a safety floor for callers that
 // neglected to set one. Generous enough to cover routine API calls
 // (storage migration polls, rolling-update upgrades) without being so
 // long that a wedged peer holds a pool slot indefinitely.
-const cachedClientTimeout = 5 * time.Minute
+//
+// Exported because it is the real per-call bound for anything reaching Proxmox
+// through the cache, which is every scheduler-driven engine. Callers that time
+// their own work out against it must say so in terms of this constant rather
+// than a copied number: guesttools' staging ceiling was once derived from the
+// 60s fallback timeout instead, which made it three times too small.
+const CachedClientTimeout = 5 * time.Minute
 
 // CacheKind identifies which sub-cache an invalidation message targets.
 type CacheKind string
@@ -64,6 +70,42 @@ type invalidateMessage struct {
 type CacheQueries interface {
 	GetCluster(ctx context.Context, id uuid.UUID) (db.Cluster, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (db.PbsServer, error)
+}
+
+// NewClientForCluster builds a client from a cluster's stored credentials:
+// read the row, decrypt the token secret, construct the client.
+//
+// This is the uncached path. Callers holding a ClientCache should prefer
+// ClientCache.Get, which layers a TTL and singleflight over the same build —
+// NewClientForCluster is what they fall back to when the cache is unset or a
+// lookup fails, and it is the whole of what the engines used to hand-roll.
+func NewClientForCluster(ctx context.Context, q CacheQueries, encryptionKey string, clusterID uuid.UUID, timeout time.Duration) (*Client, error) {
+	cluster, err := q.GetCluster(ctx, clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
+	}
+	return newClientForClusterRow(cluster, encryptionKey, timeout)
+}
+
+// newClientForClusterRow is NewClientForCluster's second half, split out so
+// ClientCache.Get can reuse it while keeping the db.Cluster row it needs for
+// the credential signature.
+func newClientForClusterRow(cluster db.Cluster, encryptionKey string, timeout time.Duration) (*Client, error) {
+	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt cluster %s credentials: %w", cluster.ID, err)
+	}
+	client, err := NewClient(ClientConfig{
+		BaseURL:        cluster.ApiUrl,
+		TokenID:        cluster.TokenID,
+		TokenSecret:    tokenSecret,
+		TLSFingerprint: cluster.TlsFingerprint,
+		Timeout:        timeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create proxmox client for cluster %s: %w", cluster.ID, err)
+	}
+	return client, nil
 }
 
 // pveEntry is a cached PVE client with the credential signature we built
@@ -205,19 +247,9 @@ func (c *ClientCache) Get(ctx context.Context, clusterID uuid.UUID) (*Client, er
 		if err != nil {
 			return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
 		}
-		tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, c.encKey)
+		client, err := newClientForClusterRow(cluster, c.encKey, CachedClientTimeout)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt cluster %s credentials: %w", clusterID, err)
-		}
-		client, err := NewClient(ClientConfig{
-			BaseURL:        cluster.ApiUrl,
-			TokenID:        cluster.TokenID,
-			TokenSecret:    tokenSecret,
-			TLSFingerprint: cluster.TlsFingerprint,
-			Timeout:        cachedClientTimeout,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create proxmox client for cluster %s: %w", clusterID, err)
+			return nil, err
 		}
 
 		newEntry := &pveEntry{
@@ -280,7 +312,7 @@ func (c *ClientCache) GetPBS(ctx context.Context, pbsID uuid.UUID) (*PBSClient, 
 			TokenID:        server.TokenID,
 			TokenSecret:    tokenSecret,
 			TLSFingerprint: server.TlsFingerprint,
-			Timeout:        cachedClientTimeout,
+			Timeout:        CachedClientTimeout,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("create pbs client for server %s: %w", pbsID, err)

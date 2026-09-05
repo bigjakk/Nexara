@@ -69,18 +69,18 @@ type License struct {
 // the Proxmox cluster name as Veeam knows it — a human-readable correlation
 // signal, and the only place a cluster label appears anywhere in the API.
 type LicenseWorkload struct {
-	PlatformType string  `json:"platformType"`
-	Name         string  `json:"name"`
-	DisplayName  string  `json:"displayName"`
-	HostName     string  `json:"hostName"`
-	Type         string  `json:"type"`
-	InstanceID   string  `json:"instanceId"`
+	PlatformType  string  `json:"platformType"`
+	Name          string  `json:"name"`
+	DisplayName   string  `json:"displayName"`
+	HostName      string  `json:"hostName"`
+	Type          string  `json:"type"`
+	InstanceID    string  `json:"instanceId"`
 	UsedInstances float64 `json:"usedInstancesNumber"`
 }
 
 // ProxmoxCluster is one Proxmox connection as the license reports it.
 type ProxmoxCluster struct {
-	// Name is the Veeam-side hostName, e.g. "CRJLAB". Not a platformId —
+	// Name is the Veeam-side hostName, e.g. "cluster01". Not a platformId —
 	// that only appears on sessions, restore points and backup objects, so
 	// Phase 1 cannot resolve one yet.
 	Name string `json:"name"`

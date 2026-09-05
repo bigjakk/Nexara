@@ -51,10 +51,9 @@ describe("RequirePermission", () => {
     expect(screen.queryByText("protected content")).not.toBeInTheDocument();
     expect(screen.getByText("Access denied")).toBeInTheDocument();
     expect(screen.getByText("manage:user")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /back to dashboard/i })).toHaveAttribute(
-      "href",
-      "/",
-    );
+    expect(
+      screen.getByRole("link", { name: /back to dashboard/i }),
+    ).toHaveAttribute("href", "/");
   });
 
   it("admin role bypasses the granular check (legacy fallback)", () => {

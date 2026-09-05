@@ -1,8 +1,4 @@
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type {
   PBSServer,
@@ -60,9 +56,7 @@ export function usePBSDatastores(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "datastores"],
     queryFn: () =>
-      apiClient.list<PBSDatastore>(
-        `/api/v1/pbs-servers/${pbsId}/datastores`,
-      ),
+      apiClient.list<PBSDatastore>(`/api/v1/pbs-servers/${pbsId}/datastores`),
     enabled: pbsId.length > 0,
   });
 }
@@ -112,9 +106,7 @@ export function usePBSSyncJobs(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "sync-jobs"],
     queryFn: () =>
-      apiClient.list<PBSSyncJob>(
-        `/api/v1/pbs-servers/${pbsId}/sync-jobs`,
-      ),
+      apiClient.list<PBSSyncJob>(`/api/v1/pbs-servers/${pbsId}/sync-jobs`),
     enabled: pbsId.length > 0,
   });
 }
@@ -125,9 +117,7 @@ export function usePBSVerifyJobs(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "verify-jobs"],
     queryFn: () =>
-      apiClient.list<PBSVerifyJob>(
-        `/api/v1/pbs-servers/${pbsId}/verify-jobs`,
-      ),
+      apiClient.list<PBSVerifyJob>(`/api/v1/pbs-servers/${pbsId}/verify-jobs`),
     enabled: pbsId.length > 0,
   });
 }
@@ -138,9 +128,7 @@ export function usePBSTasks(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "tasks"],
     queryFn: () =>
-      apiClient.list<PBSTask>(
-        `/api/v1/pbs-servers/${pbsId}/tasks?limit=50`,
-      ),
+      apiClient.list<PBSTask>(`/api/v1/pbs-servers/${pbsId}/tasks?limit=50`),
     enabled: pbsId.length > 0,
     refetchInterval: 120_000, // WS pbs_change events handle real-time; this is a fallback
   });
@@ -420,9 +408,7 @@ export function useBackupJobs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "backup-jobs"],
     queryFn: () =>
-      apiClient.list<BackupJob>(
-        `/api/v1/clusters/${clusterId}/backup-jobs`,
-      ),
+      apiClient.list<BackupJob>(`/api/v1/clusters/${clusterId}/backup-jobs`),
     enabled: clusterId.length > 0,
   });
 }
@@ -479,13 +465,7 @@ export function useDeleteBackupJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      clusterId,
-      jobId,
-    }: {
-      clusterId: string;
-      jobId: string;
-    }) =>
+    mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.delete<{ status: string }>(
         `/api/v1/clusters/${clusterId}/backup-jobs/${encodeURIComponent(jobId)}`,
       ),
@@ -501,13 +481,7 @@ export function useRunBackupJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      clusterId,
-      jobId,
-    }: {
-      clusterId: string;
-      jobId: string;
-    }) =>
+    mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.post<{ upid: string }>(
         `/api/v1/clusters/${clusterId}/backup-jobs/${encodeURIComponent(jobId)}/run`,
       ),
@@ -786,7 +760,9 @@ export function useMapVeeamPlatform(serverId: string) {
       void queryClient.invalidateQueries({ queryKey: ["backup-coverage"] });
       // A platform mapping changes protection for every guest on the cluster
       // at once, so every VM detail card is now wrong.
-      void queryClient.invalidateQueries({ queryKey: ["veeam-guest-protection"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["veeam-guest-protection"],
+      });
     },
   });
 }
@@ -846,7 +822,9 @@ export function useMapVeeamBackupObject(serverId: string) {
       // starts showing the backup. Without this it would go on saying there
       // is none until the five-minute staleTime expired, and read exactly
       // like a mapping that had silently failed.
-      void queryClient.invalidateQueries({ queryKey: ["veeam-guest-protection"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["veeam-guest-protection"],
+      });
     },
   });
 }
@@ -892,7 +870,9 @@ function useVeeamControlInvalidation() {
   const queryClient = useQueryClient();
   return () => {
     void queryClient.invalidateQueries({ queryKey: ["veeam-servers"] });
-    void queryClient.invalidateQueries({ queryKey: ["veeam-guest-protection"] });
+    void queryClient.invalidateQueries({
+      queryKey: ["veeam-guest-protection"],
+    });
   };
 }
 
@@ -929,7 +909,13 @@ export function useStopVeeamJob(serverId: string) {
 export function useSetVeeamJobEnabled(serverId: string) {
   const invalidate = useVeeamControlInvalidation();
   return useMutation({
-    mutationFn: ({ jobVeeamId, enabled }: { jobVeeamId: string; enabled: boolean }) =>
+    mutationFn: ({
+      jobVeeamId,
+      enabled,
+    }: {
+      jobVeeamId: string;
+      enabled: boolean;
+    }) =>
       apiClient.post<{ enabled: boolean }>(
         `/api/v1/veeam-servers/${serverId}/jobs/${jobVeeamId}/${enabled ? "enable" : "disable"}`,
       ),

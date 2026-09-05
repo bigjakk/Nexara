@@ -15,7 +15,7 @@ import (
 func TestGetImportMetadata_StripsStoragePrefix(t *testing.T) {
 	var gotVolume string
 	srv := newTestServer(t, map[string]http.HandlerFunc{
-		"/api2/json/nodes/pve1/storage/synology/import-metadata": func(w http.ResponseWriter, r *http.Request) {
+		"/api2/json/nodes/pve1/storage/nas/import-metadata": func(w http.ResponseWriter, r *http.Request) {
 			gotVolume = r.URL.Query().Get("volume")
 			jsonResponse(w, map[string]any{"type": "vm", "source": "import/x.ova"})
 		},
@@ -24,7 +24,7 @@ func TestGetImportMetadata_StripsStoragePrefix(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	// Caller passes the full volid, exactly as the content listing returns it.
-	if _, err := c.GetImportMetadata(context.Background(), "pve1", "synology", "synology:import/x.ova"); err != nil {
+	if _, err := c.GetImportMetadata(context.Background(), "pve1", "nas", "nas:import/x.ova"); err != nil {
 		t.Fatalf("GetImportMetadata: %v", err)
 	}
 	if gotVolume != "import/x.ova" {
@@ -32,7 +32,7 @@ func TestGetImportMetadata_StripsStoragePrefix(t *testing.T) {
 	}
 
 	// An already-relative volname must pass through unchanged.
-	if _, err := c.GetImportMetadata(context.Background(), "pve1", "synology", "import/x.ova"); err != nil {
+	if _, err := c.GetImportMetadata(context.Background(), "pve1", "nas", "import/x.ova"); err != nil {
 		t.Fatalf("GetImportMetadata (relative): %v", err)
 	}
 	if gotVolume != "import/x.ova" {
@@ -286,16 +286,16 @@ func TestBuildImportCreateParams_RemapsPvscsiDisksToSata(t *testing.T) {
 			"boot":   json.RawMessage(`"order=scsi0"`),
 		},
 		Disks: map[string]json.RawMessage{
-			"scsi0": json.RawMessage(`{"volid":"synology:import/win.ova/win-disk1.vmdk"}`),
-			"scsi1": json.RawMessage(`{"volid":"synology:import/win.ova/win-disk2.vmdk"}`),
+			"scsi0": json.RawMessage(`{"volid":"nas:import/win.ova/win-disk1.vmdk"}`),
+			"scsi1": json.RawMessage(`{"volid":"nas:import/win.ova/win-disk2.vmdk"}`),
 		},
 	}
 	p := BuildImportCreateParams(meta, ImportCreateOptions{VMID: 104, TargetStorage: "ceph"})
 
-	if p.Extra["sata0"] != "ceph:0,import-from=synology:import/win.ova/win-disk1.vmdk" {
+	if p.Extra["sata0"] != "ceph:0,import-from=nas:import/win.ova/win-disk1.vmdk" {
 		t.Errorf("sata0 = %q", p.Extra["sata0"])
 	}
-	if p.Extra["sata1"] != "ceph:0,import-from=synology:import/win.ova/win-disk2.vmdk" {
+	if p.Extra["sata1"] != "ceph:0,import-from=nas:import/win.ova/win-disk2.vmdk" {
 		t.Errorf("sata1 = %q", p.Extra["sata1"])
 	}
 	if _, ok := p.Extra["scsi0"]; ok {
@@ -323,7 +323,7 @@ func TestBuildImportCreateParams_SynthesisesEfidiskForOVMF(t *testing.T) {
 			"ostype": json.RawMessage(`"win11"`),
 		},
 		Disks: map[string]json.RawMessage{
-			"scsi0": json.RawMessage(`{"volid":"synology:import/win.ova/win-disk1.vmdk"}`),
+			"scsi0": json.RawMessage(`{"volid":"nas:import/win.ova/win-disk1.vmdk"}`),
 		},
 	}
 	p := BuildImportCreateParams(ovmf, ImportCreateOptions{VMID: 104, TargetStorage: "ceph"})
@@ -339,7 +339,7 @@ func TestBuildImportCreateParams_SynthesisesEfidiskForOVMF(t *testing.T) {
 			"bios": json.RawMessage(`"seabios"`),
 		},
 		Disks: map[string]json.RawMessage{
-			"scsi0": json.RawMessage(`{"volid":"synology:import/lin.ova/lin-disk1.vmdk"}`),
+			"scsi0": json.RawMessage(`{"volid":"nas:import/lin.ova/lin-disk1.vmdk"}`),
 		},
 	}
 	ps := BuildImportCreateParams(seabios, ImportCreateOptions{VMID: 105, TargetStorage: "ceph"})

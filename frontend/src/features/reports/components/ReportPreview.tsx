@@ -12,7 +12,11 @@ interface ReportPreviewProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function ReportPreview({ runId, open, onOpenChange }: ReportPreviewProps) {
+export function ReportPreview({
+  runId,
+  open,
+  onOpenChange,
+}: ReportPreviewProps) {
   const { data: html, isLoading } = useReportRunHTML(open ? runId : "");
 
   return (
@@ -23,7 +27,9 @@ export function ReportPreview({ runId, open, onOpenChange }: ReportPreviewProps)
         </DialogHeader>
         <div className="flex-1 overflow-auto">
           {isLoading ? (
-            <div className="py-8 text-center text-muted-foreground">Loading report...</div>
+            <div className="py-8 text-center text-muted-foreground">
+              Loading report...
+            </div>
           ) : html ? (
             <iframe
               srcDoc={html}
@@ -32,7 +38,9 @@ export function ReportPreview({ runId, open, onOpenChange }: ReportPreviewProps)
               sandbox="allow-same-origin"
             />
           ) : (
-            <div className="py-8 text-center text-muted-foreground">No report data available.</div>
+            <div className="py-8 text-center text-muted-foreground">
+              No report data available.
+            </div>
           )}
         </div>
       </DialogContent>

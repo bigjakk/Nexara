@@ -378,6 +378,56 @@ type GuestSnapshot struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
+type GuestToolsConfig struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	// disabled = nothing; report = detect installed versions only, no writes to any guest; staged = also stage updates for guests that are behind
+	Mode string `json:"mode"`
+	// Pinned upstream version; empty means follow the cluster's virtio-win ISO target, which in turn may follow upstream stable
+	TargetVersion string `json:"target_version"`
+	// Take a snapshot before staging an update. The full guest-tools bundle replaces storage and network drivers, and a bad viostor can leave a guest unbootable — this is the rollback
+	SnapshotBefore bool `json:"snapshot_before"`
+	// Cap on guests staged per pass. Swapping boot-disk drivers across a whole fleet at once turns one bad release into an outage
+	MaxConcurrent int32     `json:"max_concurrent"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type GuestToolsPolicy struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+	// Never stage an update for this guest. Excluded guests stay visible in the fleet view rather than being filtered out — an exclusion nobody can see is one nobody can audit
+	Excluded      bool   `json:"excluded"`
+	TargetVersion string `json:"target_version"`
+	// Free text for why this guest is excluded or pinned, so the reason outlives the person who set it
+	Note      string    `json:"note"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type GuestToolsState struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+	// DisplayVersion reported by the guest for the virtio-win installer, e.g. "0.1.285" — the ISO-filename form, without upstream's release suffix
+	InstalledVersion string             `json:"installed_version"`
+	AgentVersion     string             `json:"agent_version"`
+	AgentRunning     bool               `json:"agent_running"`
+	DetectedAt       pgtype.Timestamptz `json:"detected_at"`
+	// idle -> staging -> staged -> running -> succeeded|failed. staged means the scheduled task is registered in the guest and will fire at next boot; running means it was also started on demand
+	Stage         string             `json:"stage"`
+	StagedVersion string             `json:"staged_version"`
+	StagedAt      pgtype.Timestamptz `json:"staged_at"`
+	// CD-ROM device the ISO was attached to, and its previous value, so the guest's original media is restored once the update finishes. Empty when no drive had to be borrowed
+	PriorCdromKey   string `json:"prior_cdrom_key"`
+	PriorCdromValue string `json:"prior_cdrom_value"`
+	// Guest uptime at the last poll. A drop means the guest rebooted, which is how a staged (boot-triggered) install is noticed without anything in the guest reporting in
+	LastUptime   int64              `json:"last_uptime"`
+	LastError    string             `json:"last_error"`
+	LastResultAt pgtype.Timestamptz `json:"last_result_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+	// Installer returned 3010: the update is installed but a driver that was in use is only replaced at the guest's next restart. Not an error, and not fully finished either
+	RebootRequired bool `json:"reboot_required"`
+}
+
 type KevCache struct {
 	CveID             string      `json:"cve_id"`
 	DateAdded         pgtype.Date `json:"date_added"`
@@ -1009,7 +1059,7 @@ type VeeamInfrastructure struct {
 	Role     string    `json:"role"`
 	// The name Veeam knows the machine by, which is the ONLY key available for matching it to a guest: the proxy model carries no smbios uuid and no vmid. For the backup server this is the managedServers FQDN — serverInfo.name is the short form and matches no guest
 	Name string `json:"name"`
-	// The Proxmox node a worker was deployed to ("hv01.example.lan"), or the literal "This server" for a proxy role the VBR server fills itself. Informational: Veeam's node naming does not reliably match Nexara's, so it is not used to resolve the guest
+	// The Proxmox node a worker was deployed to ("pve-01.example.com"), or the literal "This server" for a proxy role the VBR server fills itself. Informational: Veeam's node naming does not reliably match Nexara's, so it is not used to resolve the guest
 	HostName   string `json:"host_name"`
 	IsDisabled bool   `json:"is_disabled"`
 	// Workers are normally OFFLINE between runs — Veeam powers them on for a job and off again — so false is the healthy steady state here, not a fault to surface
@@ -1188,6 +1238,57 @@ type VeeamSession struct {
 	CreatedAt       time.Time `json:"created_at"`
 	// Set when Nexara asked this session to stop, via POST /jobs/{id}/stop or /sessions/{id}/stop. Suppresses veeam_job_failed: Veeam reports a cancelled run as result "Failed" with isCanceled false and an empty log, so this flag is the only thing that can tell the two apart. A stop made from the Veeam console remains indistinguishable, which is why the alert copy reads "failed or cancelled"
 	NexaraStopped bool `json:"nexara_stopped"`
+}
+
+type VirtioWinConfig struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Enabled   bool      `json:"enabled"`
+	Storage   string    `json:"storage"`
+	// Node that performs the download; empty means pick any online node in the cluster. The ISO lands on the storage, not the node, but download-url is a node-scoped call
+	Node string `json:"node"`
+	// Pinned upstream version; empty means follow whatever upstream marks stable
+	TargetVersion string `json:"target_version"`
+	// Opt-in. When set, versions that are neither pinned nor newest are deleted from the target storage after a successful download. Off by default: an ISO this did not download may still be in use
+	PruneEnabled bool               `json:"prune_enabled"`
+	LastCheckAt  pgtype.Timestamptz `json:"last_check_at"`
+	LastError    string             `json:"last_error"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+	// Cron expression (min hour dom month dow); empty means every 6 hours from the last check
+	CheckSchedule string `json:"check_schedule"`
+	// IANA zone the cron expression is evaluated in; empty means server time
+	CheckTimezone string `json:"check_timezone"`
+	// When the next check is due; NULL means due now
+	NextCheckAt pgtype.Timestamptz `json:"next_check_at"`
+}
+
+type VirtioWinDownload struct {
+	ID        uuid.UUID `json:"id"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Node      string    `json:"node"`
+	Storage   string    `json:"storage"`
+	Version   string    `json:"version"`
+	Filename  string    `json:"filename"`
+	Status    string    `json:"status"`
+	// Proxmox task UPID returned by download-url; empty only while the dispatch itself failed before Proxmox accepted the task
+	Upid        string             `json:"upid"`
+	Error       string             `json:"error"`
+	TriggeredBy string             `json:"triggered_by"`
+	StartedAt   time.Time          `json:"started_at"`
+	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
+}
+
+type VirtioWinRelease struct {
+	// Upstream directory version including the release suffix, e.g. "0.1.302-1"
+	Version string `json:"version"`
+	// Version as it appears in the ISO filename, i.e. version without the release suffix ("0.1.302")
+	IsoVersion  string `json:"iso_version"`
+	IsoFilename string `json:"iso_filename"`
+	IsoUrl      string `json:"iso_url"`
+	IsoSize     int64  `json:"iso_size"`
+	// True for the single version the upstream stable-virtio/ redirect currently points at
+	IsStable     bool      `json:"is_stable"`
+	DiscoveredAt time.Time `json:"discovered_at"`
 }
 
 type Vm struct {

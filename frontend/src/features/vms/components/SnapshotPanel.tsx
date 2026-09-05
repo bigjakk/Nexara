@@ -81,7 +81,10 @@ export function SnapshotPanel({
   }
 
   // Build tree from flat list using parent field
-  function buildTree(snaps: Snapshot[]): { roots: Snapshot[]; childrenMap: Map<string, Snapshot[]> } {
+  function buildTree(snaps: Snapshot[]): {
+    roots: Snapshot[];
+    childrenMap: Map<string, Snapshot[]>;
+  } {
     const childrenMap = new Map<string, Snapshot[]>();
     const roots: Snapshot[] = [];
     for (const snap of snaps) {
@@ -146,30 +149,33 @@ export function SnapshotPanel({
         </p>
       )}
 
-      {!isLoading && snapshots && snapshots.length > 0 && (() => {
-        const { roots, childrenMap } = buildTree(snapshots);
-        return (
-          <div className="space-y-1">
-            {roots.map((snap) => (
-              <SnapshotNode
-                key={snap.name}
-                snap={snap}
-                depth={0}
-                childrenMap={childrenMap}
-                confirmDelete={confirmDelete}
-                confirmRollback={confirmRollback}
-                onConfirmDelete={setConfirmDelete}
-                onConfirmRollback={setConfirmRollback}
-                onDelete={handleDelete}
-                onRollback={handleRollback}
-                deletePending={deleteMutation.isPending}
-                rollbackPending={rollbackMutation.isPending}
-                formatDate={formatDate}
-              />
-            ))}
-          </div>
-        );
-      })()}
+      {!isLoading &&
+        snapshots &&
+        snapshots.length > 0 &&
+        (() => {
+          const { roots, childrenMap } = buildTree(snapshots);
+          return (
+            <div className="space-y-1">
+              {roots.map((snap) => (
+                <SnapshotNode
+                  key={snap.name}
+                  snap={snap}
+                  depth={0}
+                  childrenMap={childrenMap}
+                  confirmDelete={confirmDelete}
+                  confirmRollback={confirmRollback}
+                  onConfirmDelete={setConfirmDelete}
+                  onConfirmRollback={setConfirmRollback}
+                  onDelete={handleDelete}
+                  onRollback={handleRollback}
+                  deletePending={deleteMutation.isPending}
+                  rollbackPending={rollbackMutation.isPending}
+                  formatDate={formatDate}
+                />
+              ))}
+            </div>
+          );
+        })()}
     </div>
   );
 }
@@ -216,9 +222,7 @@ function SnapshotNode({
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
         <span className="font-medium">{snap.name}</span>
-        <span className="text-muted-foreground">
-          {snap.description || ""}
-        </span>
+        <span className="text-muted-foreground">{snap.description || ""}</span>
         <span className="text-muted-foreground">
           {formatDate(snap.snap_time)}
         </span>

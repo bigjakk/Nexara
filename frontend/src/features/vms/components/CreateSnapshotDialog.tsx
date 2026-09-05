@@ -195,7 +195,11 @@ export function CreateSnapshotDialog({
             />
             {taskFailed && (
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={handleTryAgain}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleTryAgain}
+                >
                   Try Again
                 </Button>
                 <Button type="button" onClick={handleClose}>

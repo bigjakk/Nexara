@@ -91,6 +91,8 @@ describe("DeleteClusterDialog", () => {
         onOpenChange={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: /delete cluster/i })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /delete cluster/i }),
+    ).toBeDisabled();
   });
 });

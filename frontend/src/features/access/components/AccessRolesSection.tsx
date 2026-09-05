@@ -57,7 +57,9 @@ interface Props {
  * privileges, so this stays correct as Proxmox adds new ones across releases.
  * Falls back to the union of all roles if Administrator is somehow absent.
  */
-function usePrivilegeCatalogue(roles: AccessRole[] | undefined): Record<string, string[]> {
+function usePrivilegeCatalogue(
+  roles: AccessRole[] | undefined,
+): Record<string, string[]> {
   return useMemo(() => {
     if (!roles || roles.length === 0) return {};
     const admin = roles.find((r) => r.roleid === "Administrator");
@@ -85,7 +87,11 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
   const deleteRole = useDeleteAccessRole(clusterId);
 
   const catalogue = usePrivilegeCatalogue(rolesQuery.data);
-  const [editing, setEditing] = useState<{ roleid: string; privs: string[]; isNew: boolean } | null>(null);
+  const [editing, setEditing] = useState<{
+    roleid: string;
+    privs: string[];
+    isNew: boolean;
+  } | null>(null);
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
@@ -96,14 +102,24 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
     setError("");
     const privs = editing.privs.join(",");
     const onError = (err: unknown) => {
-      setError(err instanceof ApiClientError ? err.message : "Failed to save role");
+      setError(
+        err instanceof ApiClientError ? err.message : "Failed to save role",
+      );
     };
-    const onSuccess = () => { setEditing(null); };
+    const onSuccess = () => {
+      setEditing(null);
+    };
 
     if (editing.isNew) {
-      createRole.mutate({ roleid: editing.roleid.trim(), privs }, { onSuccess, onError });
+      createRole.mutate(
+        { roleid: editing.roleid.trim(), privs },
+        { onSuccess, onError },
+      );
     } else {
-      updateRole.mutate({ roleid: editing.roleid, privs }, { onSuccess, onError });
+      updateRole.mutate(
+        { roleid: editing.roleid, privs },
+        { onSuccess, onError },
+      );
     }
   };
 
@@ -114,15 +130,19 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
           <CardTitle>Roles</CardTitle>
           {!capabilities.loading && !capabilities.canModifyRoles && (
             <p className="mt-1 text-xs text-muted-foreground">
-              Read-only: Nexara&apos;s token lacks <code className="font-mono">Sys.Modify</code> on{" "}
-              <code className="font-mono">/access</code>, which Proxmox requires to manage roles.
+              Read-only: Nexara&apos;s token lacks{" "}
+              <code className="font-mono">Sys.Modify</code> on{" "}
+              <code className="font-mono">/access</code>, which Proxmox requires
+              to manage roles.
             </p>
           )}
         </div>
         {manageable && (
           <Button
             size="sm"
-            onClick={() => { setEditing({ roleid: "", privs: [], isNew: true }); }}
+            onClick={() => {
+              setEditing({ roleid: "", privs: [], isNew: true });
+            }}
           >
             <Plus className="mr-2 h-4 w-4" />
             Create Role
@@ -141,12 +161,16 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
               <TableRow>
                 <TableHead>Role</TableHead>
                 <TableHead>Privileges</TableHead>
-                {manageable && <TableHead className="text-right">Actions</TableHead>}
+                {manageable && (
+                  <TableHead className="text-right">Actions</TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {rolesQuery.data.map((role) => {
-                const count = role.privs ? role.privs.split(",").filter(Boolean).length : 0;
+                const count = role.privs
+                  ? role.privs.split(",").filter(Boolean).length
+                  : 0;
                 return (
                   <TableRow key={role.roleid}>
                     <TableCell className="font-medium">
@@ -168,7 +192,9 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                         {/* Built-in roles are immutable in Proxmox — offering
                             the controls would only produce a confusing 403. */}
                         {role.special ? (
-                          <span className="text-xs text-muted-foreground">Immutable</span>
+                          <span className="text-xs text-muted-foreground">
+                            Immutable
+                          </span>
                         ) : (
                           <>
                             <Button
@@ -177,7 +203,9 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                               onClick={() => {
                                 setEditing({
                                   roleid: role.roleid,
-                                  privs: role.privs ? role.privs.split(",").filter(Boolean) : [],
+                                  privs: role.privs
+                                    ? role.privs.split(",").filter(Boolean)
+                                    : [],
                                   isNew: false,
                                 });
                               }}
@@ -188,7 +216,9 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                               variant="ghost"
                               size="sm"
                               aria-label={`Delete ${role.roleid}`}
-                              onClick={() => { setDeleteTarget(role.roleid); }}
+                              onClick={() => {
+                                setDeleteTarget(role.roleid);
+                              }}
                             >
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
@@ -215,9 +245,12 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
           >
             <DialogContent className="max-w-2xl">
               <DialogHeader>
-                <DialogTitle>{editing.isNew ? "Create Role" : `Edit ${editing.roleid}`}</DialogTitle>
+                <DialogTitle>
+                  {editing.isNew ? "Create Role" : `Edit ${editing.roleid}`}
+                </DialogTitle>
                 <DialogDescription>
-                  Privileges are read from this cluster, so the list matches its Proxmox version.
+                  Privileges are read from this cluster, so the list matches its
+                  Proxmox version.
                 </DialogDescription>
               </DialogHeader>
 
@@ -228,7 +261,9 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                     <Input
                       id="role-id"
                       value={editing.roleid}
-                      onChange={(e) => { setEditing({ ...editing, roleid: e.target.value }); }}
+                      onChange={(e) => {
+                        setEditing({ ...editing, roleid: e.target.value });
+                      }}
                       required
                     />
                   </div>
@@ -237,10 +272,15 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                 <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
                   {Object.entries(catalogue).map(([category, privs]) => (
                     <div key={category}>
-                      <p className="mb-1 text-xs font-semibold text-muted-foreground">{category}</p>
+                      <p className="mb-1 text-xs font-semibold text-muted-foreground">
+                        {category}
+                      </p>
                       <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
                         {privs.map((priv) => (
-                          <label key={priv} className="flex items-center gap-2 text-xs">
+                          <label
+                            key={priv}
+                            className="flex items-center gap-2 text-xs"
+                          >
                             <input
                               type="checkbox"
                               checked={editing.privs.includes(priv)}
@@ -266,7 +306,8 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                   {editing.privs.length === 0 && !editing.isNew && (
                     <span className="text-destructive">
                       {" "}
-                      — saving with none selected removes every privilege from this role.
+                      — saving with none selected removes every privilege from
+                      this role.
                     </span>
                   )}
                 </p>
@@ -291,7 +332,9 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                       updateRole.isPending
                     }
                   >
-                    {createRole.isPending || updateRole.isPending ? "Saving..." : "Save"}
+                    {createRole.isPending || updateRole.isPending
+                      ? "Saving..."
+                      : "Save"}
                   </Button>
                 </div>
               </div>
@@ -301,14 +344,16 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
 
         <AlertDialog
           open={deleteTarget !== null}
-          onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+          onOpenChange={(open) => {
+            if (!open) setDeleteTarget(null);
+          }}
         >
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete role {deleteTarget}?</AlertDialogTitle>
               <AlertDialogDescription>
-                Any user or token holding this role loses the permissions it grants,
-                immediately. This cannot be undone.
+                Any user or token holding this role loses the permissions it
+                grants, immediately. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -320,7 +365,9 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                   e.preventDefault();
                   if (!deleteTarget) return;
                   deleteRole.mutate(deleteTarget, {
-                    onSettled: () => { setDeleteTarget(null); },
+                    onSettled: () => {
+                      setDeleteTarget(null);
+                    },
                   });
                 }}
               >

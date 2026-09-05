@@ -68,7 +68,13 @@ interface PoolGroupProps {
   clusterId: string;
 }
 
-function PoolGroup({ groupKey, label, icon, pools, clusterId }: PoolGroupProps) {
+function PoolGroup({
+  groupKey,
+  label,
+  icon,
+  pools,
+  clusterId,
+}: PoolGroupProps) {
   const { expandedNodes, toggleNode } = useSidebarStore();
   const isExpanded = expandedNodes.has(groupKey);
 
@@ -76,6 +82,8 @@ function PoolGroup({ groupKey, label, icon, pools, clusterId }: PoolGroupProps) 
     <div className="border-l border-border pl-3 ml-3">
       <div className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors">
         <button
+          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${icon === "node" ? `node ${label}` : label}`}
+          aria-expanded={isExpanded}
           onClick={(e) => {
             e.stopPropagation();
             toggleNode(groupKey);
@@ -90,6 +98,7 @@ function PoolGroup({ groupKey, label, icon, pools, clusterId }: PoolGroupProps) 
           />
         </button>
         <button
+          aria-expanded={isExpanded}
           onClick={() => {
             toggleNode(groupKey);
           }}
@@ -185,6 +194,8 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
             )}
           >
             <button
+              aria-label={`${isExpanded ? "Collapse" : "Expand"} cluster ${cluster.name}`}
+              aria-expanded={isExpanded}
               onClick={() => {
                 toggleNode(clusterKey);
               }}
@@ -209,7 +220,11 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-40">
-          <ContextMenuItem onClick={() => { setAddStorageOpen(true); }}>
+          <ContextMenuItem
+            onClick={() => {
+              setAddStorageOpen(true);
+            }}
+          >
             <Plus className="mr-2 h-3.5 w-3.5" />
             Add storage
           </ContextMenuItem>
@@ -236,7 +251,8 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
           {sortedNodeIds.map((nodeId) => {
             const nodePools = byNode.get(nodeId);
             if (!nodePools || nodePools.length === 0) return null;
-            const nodeName = nodes?.find((n) => n.id === nodeId)?.name ?? nodeId;
+            const nodeName =
+              nodes?.find((n) => n.id === nodeId)?.name ?? nodeId;
             return (
               <PoolGroup
                 key={nodeId}

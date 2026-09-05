@@ -6,9 +6,27 @@ import { TopConsumers } from "./TopConsumers";
 import type { TopConsumer } from "@/types/ws";
 
 const consumers: TopConsumer[] = [
-  { vmId: "aaaa-1111", cpuPercent: 80, memPercent: 50, memUsed: 2e9, memTotal: 4e9 },
-  { vmId: "bbbb-2222", cpuPercent: 40, memPercent: 90, memUsed: 3.6e9, memTotal: 4e9 },
-  { vmId: "cccc-3333", cpuPercent: 60, memPercent: 30, memUsed: 1.2e9, memTotal: 4e9 },
+  {
+    vmId: "aaaa-1111",
+    cpuPercent: 80,
+    memPercent: 50,
+    memUsed: 2e9,
+    memTotal: 4e9,
+  },
+  {
+    vmId: "bbbb-2222",
+    cpuPercent: 40,
+    memPercent: 90,
+    memUsed: 3.6e9,
+    memTotal: 4e9,
+  },
+  {
+    vmId: "cccc-3333",
+    cpuPercent: 60,
+    memPercent: 30,
+    memUsed: 1.2e9,
+    memTotal: 4e9,
+  },
 ];
 
 const vmNames = new Map<string, string>([
@@ -19,7 +37,9 @@ const vmNames = new Map<string, string>([
 
 describe("TopConsumers", () => {
   it("renders consumers sorted by CPU by default", () => {
-    renderWithProviders(<TopConsumers consumers={consumers} vmNames={vmNames} />);
+    renderWithProviders(
+      <TopConsumers consumers={consumers} vmNames={vmNames} />,
+    );
     const list = screen.getByTestId("consumer-list");
     const items = list.querySelectorAll(".space-y-1");
     // First item should be web-01 (80% CPU), then cache-01 (60%), then db-01 (40%)
@@ -30,7 +50,9 @@ describe("TopConsumers", () => {
 
   it("sorts by memory when memory button clicked", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<TopConsumers consumers={consumers} vmNames={vmNames} />);
+    renderWithProviders(
+      <TopConsumers consumers={consumers} vmNames={vmNames} />,
+    );
 
     await user.click(screen.getByTestId("sort-memory"));
 
@@ -44,11 +66,15 @@ describe("TopConsumers", () => {
 
   it("shows empty state when no consumers", () => {
     renderWithProviders(<TopConsumers consumers={[]} vmNames={new Map()} />);
-    expect(screen.getByTestId("empty-consumers")).toHaveTextContent("No VMs running");
+    expect(screen.getByTestId("empty-consumers")).toHaveTextContent(
+      "No VMs running",
+    );
   });
 
   it("limits display to provided consumers", () => {
-    renderWithProviders(<TopConsumers consumers={consumers} vmNames={vmNames} />);
+    renderWithProviders(
+      <TopConsumers consumers={consumers} vmNames={vmNames} />,
+    );
     const list = screen.getByTestId("consumer-list");
     const items = list.querySelectorAll(".space-y-1");
     expect(items).toHaveLength(3);

@@ -104,9 +104,7 @@ describe("StatsOverview", () => {
 
     expect(screen.getByText("12.5%")).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument();
-    expect(
-      screen.getByText("32.0 GB of 64.0 GB used"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("32.0 GB of 64.0 GB used")).toBeInTheDocument();
   });
 
   it("shows skeletons when loading", () => {

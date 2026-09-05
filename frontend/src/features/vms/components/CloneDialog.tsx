@@ -11,7 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useClusterNodes, useClusterStorage } from "@/features/clusters/api/cluster-queries";
+import {
+  useClusterNodes,
+  useClusterStorage,
+} from "@/features/clusters/api/cluster-queries";
 import { useCloneVM, useClusterVMIDs } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
@@ -40,10 +43,15 @@ export function CloneDialog({
 
   // Deduplicate storage names (same pool may appear on multiple nodes)
   const storageOptions = storageList
-    ? [...new Set(storageList
-        .filter((s) => s.active && s.enabled && s.content.includes("images"))
-        .map((s) => s.storage))]
-        .sort()
+    ? [
+        ...new Set(
+          storageList
+            .filter(
+              (s) => s.active && s.enabled && s.content.includes("images"),
+            )
+            .map((s) => s.storage),
+        ),
+      ].sort()
     : [];
 
   // Find the first available VMID starting from 100
@@ -122,7 +130,9 @@ export function CloneDialog({
             <TaskProgressBanner
               clusterId={clusterId}
               upid={upid}
-              onComplete={() => { handleClose(); }}
+              onComplete={() => {
+                handleClose();
+              }}
               description={`Clone ${sourceName}`}
             />
           </div>
@@ -136,7 +146,9 @@ export function CloneDialog({
                   type="number"
                   min={1}
                   value={newId}
-                  onChange={(e) => { setNewId(e.target.value); }}
+                  onChange={(e) => {
+                    setNewId(e.target.value);
+                  }}
                   placeholder="e.g. 200"
                   required
                 />
@@ -151,7 +163,9 @@ export function CloneDialog({
                 <Input
                   id="clone-name"
                   value={name}
-                  onChange={(e) => { setName(e.target.value); }}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                  }}
                   placeholder="Optional"
                 />
               </div>
@@ -160,7 +174,9 @@ export function CloneDialog({
                 <select
                   id="clone-target"
                   value={target}
-                  onChange={(e) => { setTarget(e.target.value); }}
+                  onChange={(e) => {
+                    setTarget(e.target.value);
+                  }}
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <option value="">Same node</option>
@@ -177,7 +193,9 @@ export function CloneDialog({
                   <select
                     id="clone-storage"
                     value={storage}
-                    onChange={(e) => { setStorage(e.target.value); }}
+                    onChange={(e) => {
+                      setStorage(e.target.value);
+                    }}
                     className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                   >
                     <option value="">Same as source</option>
@@ -195,7 +213,9 @@ export function CloneDialog({
               <Checkbox
                 id="clone-full"
                 checked={full}
-                onCheckedChange={(checked) => { setFull(Boolean(checked)); }}
+                onCheckedChange={(checked) => {
+                  setFull(Boolean(checked));
+                }}
               />
               <Label htmlFor="clone-full" className="text-sm">
                 Full clone (independent copy)

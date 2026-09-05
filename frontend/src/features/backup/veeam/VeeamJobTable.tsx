@@ -1,17 +1,22 @@
-import { Fragment, useState } from "react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Fragment } from "react";
+import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { formatBytes } from "@/lib/format";
-import { SortableTableHead } from "@/components/SortableTableHead";
-import { byId, useTableSort, type SortAccessors } from "@/hooks/useTableSort";
+import { formatBytes, formatDateTime } from "@/lib/format";
+import { byId } from "@/hooks/useTableSort";
+import type { ColumnDef } from "@/hooks/useColumnLayout";
+import { useDataTable } from "@/hooks/useDataTable";
+import { DataTableFrame } from "@/components/DataTableFrame";
+import { DataTableHeadRow } from "@/components/DataTableHeadCells";
+import { DataTableCells } from "@/components/DataTableCells";
+import { DetailField } from "@/components/DetailField";
+import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
+import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
+import {
+  bottleneckLabel,
+  processingRateLabel,
+  resultVariant,
+} from "./veeam-format";
 import { VeeamJobActions } from "./VeeamJobActions";
 import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamJob } from "../types/backup";
@@ -20,8 +25,6 @@ interface VeeamJobTableProps {
   jobs: VeeamJob[];
   /** The server these jobs belong to. Job control posts against it. */
   serverId: string;
-  /** Identifies which server these rows belong to, so expansion state resets. */
-  scopeKey?: string;
 }
 
 /**
@@ -34,21 +37,6 @@ interface VeeamJobTableProps {
  */
 function resultLabel(result: string): string {
   return result === "Failed" ? "Failed or cancelled" : result;
-}
-
-function resultVariant(
-  result: string,
-): "default" | "secondary" | "destructive" | "outline" {
-  switch (result) {
-    case "Success":
-      return "default";
-    case "Warning":
-      return "outline";
-    case "Failed":
-      return "destructive";
-    default:
-      return "secondary";
-  }
 }
 
 /**
@@ -70,21 +58,22 @@ function toEpoch(value: string | null): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function formatTime(value: string | null): string {
-  if (value == null || value === "") return "Never";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
-}
-
 type JobSortKey =
+  | "expand"
   | "name"
   | "status"
   | "result"
   | "lastRun"
   | "nextRun"
   | "repository"
-  | "guests";
+  | "guests"
+  | "actions";
+
+/** What the chevron and action cells need beyond the job row itself. */
+interface JobCtx {
+  serverId: string;
+  expanded: Set<string>;
+}
 
 /**
  * Domain order for the two badge columns, not alphabetical.
@@ -108,44 +97,135 @@ const JOB_RESULT_RANK: Record<string, number> = {
   Success: 2,
 };
 
-/** Each accessor sorts on what its cell SHOWS, not on the underlying field. */
-const JOB_SORT: SortAccessors<VeeamJob, JobSortKey> = {
-  name: (job) => job.name,
-  status: (job) => {
-    if (isRunning(job)) return JOB_STATUS_RANK["Running"] ?? 0;
-    if (job.status === "") return null;
-    return JOB_STATUS_RANK[job.status] ?? 99;
+/** Each column sorts on what its cell SHOWS, not on the underlying field. */
+const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
+  expandColumn("expand"),
+  {
+    key: "name",
+    label: "Job",
+    width: 220,
+    sortValue: (job) => job.name,
+    cell: (job) => <span className="font-medium">{job.name}</span>,
   },
-  result: (job) =>
-    job.last_result === ""
-      ? null
-      : (JOB_RESULT_RANK[resultLabel(job.last_result)] ?? 99),
-  lastRun: (job) => toEpoch(job.last_run),
-  nextRun: (job) => toEpoch(job.next_run),
-  repository: (job) => job.repository_name || null,
-  guests: (job) => job.objects_count,
-};
+  {
+    key: "status",
+    label: "Status",
+    width: 170,
+    sortValue: (job) => {
+      if (isRunning(job)) return JOB_STATUS_RANK["Running"] ?? 0;
+      if (job.status === "") return null;
+      return JOB_STATUS_RANK[job.status] ?? 99;
+    },
+    cell: (job) => {
+      // Whether progress_percent describes THIS run. It is written by the same
+      // pass that writes status, so it is only trustworthy when status agrees
+      // a run is in flight.
+      const measured = job.status === "Running";
+      if (!isRunning(job)) {
+        return <Badge variant="secondary">{job.status || "-"}</Badge>;
+      }
+      return (
+        <div className="flex items-center gap-2">
+          <Badge variant="default">Running</Badge>
+          {/* The bar renders ONLY when Veeam itself reports the job as
+              running, because progress_percent is refreshed by the same
+              inventory pass that sets status. For a run derived from a live
+              session that number is the PREVIOUS run's — normally 100 — so
+              drawing it would show a backup that started seconds ago as
+              finished. A badge with no bar says "running, progress not
+              measured yet", which is the truth. */}
+          {measured && (
+            <div
+              data-testid="job-progress"
+              className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted"
+            >
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{
+                  width: `${String(Math.min(Math.max(job.progress_percent, 0), 100))}%`,
+                }}
+              />
+            </div>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    key: "result",
+    label: "Last Result",
+    width: 170,
+    sortValue: (job) =>
+      job.last_result === ""
+        ? null
+        : (JOB_RESULT_RANK[resultLabel(job.last_result)] ?? 99),
+    cell: (job) =>
+      job.last_result === "" ? (
+        <span className="text-muted-foreground">-</span>
+      ) : (
+        <Badge variant={resultVariant(job.last_result)}>
+          {resultLabel(job.last_result)}
+        </Badge>
+      ),
+  },
+  {
+    key: "lastRun",
+    label: "Last Run",
+    width: 180,
+    sortValue: (job) => toEpoch(job.last_run),
+    cell: (job) => (
+      <span className="text-sm">{formatDateTime(job.last_run, "Never")}</span>
+    ),
+  },
+  {
+    key: "nextRun",
+    label: "Next Run",
+    width: 180,
+    sortValue: (job) => toEpoch(job.next_run),
+    cell: (job) => (
+      <span className="text-sm">{formatDateTime(job.next_run, "Never")}</span>
+    ),
+  },
+  {
+    key: "repository",
+    label: "Repository",
+    width: 180,
+    sortValue: (job) => job.repository_name || null,
+    cell: (job) => (
+      <span className="text-sm">{job.repository_name || "-"}</span>
+    ),
+  },
+  {
+    key: "guests",
+    label: "Guests",
+    width: 90,
+    align: "right",
+    sortValue: (job) => job.objects_count,
+    cell: (job) => job.objects_count,
+  },
+  {
+    key: "actions",
+    label: "Actions",
+    width: 230,
+    align: "right",
+    fixed: true,
+    // The action components render their mutation errors and notices inline
+    // beside the buttons; truncating this cell would clip the only feedback a
+    // failed start/stop ever gives.
+    wrap: true,
+    cell: (job, ctx) => <VeeamJobActions serverId={ctx.serverId} job={job} />,
+  },
+];
 
-export function VeeamJobTable({
-  jobs,
-  serverId,
-  scopeKey = "",
-}: VeeamJobTableProps) {
+export function VeeamJobTable({ jobs, serverId }: VeeamJobTableProps) {
   const {
+    layout,
     rows: sortedJobs,
     toggle: toggleSort,
     directionFor,
-  } = useTableSort(jobs, JOB_SORT, byId);
+  } = useDataTable("veeam-jobs", COLUMNS, jobs, byId);
 
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  // Row ids are server-scoped, so switching servers must not carry a stale
-  // expansion set forward — it only grows, and rows silently re-expand on
-  // return.
-  const [expandedFor, setExpandedFor] = useState(scopeKey);
-  if (expandedFor !== scopeKey) {
-    setExpandedFor(scopeKey);
-    setExpanded(new Set());
-  }
+  const { expanded, toggle: toggleExpand } = useExpandedRows(serverId);
 
   if (jobs.length === 0) {
     return (
@@ -155,279 +235,100 @@ export function VeeamJobTable({
     );
   }
 
-  function toggle(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  const cellCtx: JobCtx = { serverId, expanded };
 
   return (
     <div className="rounded-md border">
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-8" />
-              <SortableTableHead
-                direction={directionFor("name")}
-                onSort={() => {
-                  toggleSort("name");
-                }}
-              >
-                Job
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("status")}
-                onSort={() => {
-                  toggleSort("status");
-                }}
-              >
-                Status
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("result")}
-                onSort={() => {
-                  toggleSort("result");
-                }}
-              >
-                Last Result
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("lastRun")}
-                onSort={() => {
-                  toggleSort("lastRun");
-                }}
-              >
-                Last Run
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("nextRun")}
-                onSort={() => {
-                  toggleSort("nextRun");
-                }}
-              >
-                Next Run
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("repository")}
-                onSort={() => {
-                  toggleSort("repository");
-                }}
-              >
-                Repository
-              </SortableTableHead>
-              <SortableTableHead
-                align="right"
-                direction={directionFor("guests")}
-                onSort={() => {
-                  toggleSort("guests");
-                }}
-              >
-                Guests
-              </SortableTableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedJobs.map((job) => {
-              const isExpanded = expanded.has(job.id);
-              const running = isRunning(job);
-              // Whether progress_percent describes THIS run. It is written by
-              // the same pass that writes status, so it is only trustworthy
-              // when status agrees a run is in flight.
-              const measured = job.status === "Running";
-
-              return (
-                <Fragment key={job.id}>
-                  <TableRow
-                    className="cursor-pointer"
-                    onClick={() => {
-                      toggle(job.id);
-                    }}
-                  >
-                    <TableCell className="px-2">
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </TableCell>
-                    <TableCell className="font-medium">{job.name}</TableCell>
-                    <TableCell>
-                      {running ? (
-                        <div className="flex items-center gap-2">
-                          <Badge variant="default">Running</Badge>
-                          {/* The bar renders ONLY when Veeam itself reports
-                              the job as running, because progress_percent is
-                              refreshed by the same inventory pass that sets
-                              status. For a run derived from a live session
-                              that number is the PREVIOUS run's — normally 100
-                              — so drawing it would show a backup that started
-                              seconds ago as finished. A badge with no bar says
-                              "running, progress not measured yet", which is
-                              the truth. */}
-                          {measured && (
-                            <div
-                              data-testid="job-progress"
-                              className="h-1.5 w-16 overflow-hidden rounded-full bg-muted"
-                            >
-                              <div
-                                className="h-full rounded-full bg-primary transition-all"
-                                style={{
-                                  width: `${String(Math.min(Math.max(job.progress_percent, 0), 100))}%`,
-                                }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <Badge variant="secondary">{job.status || "-"}</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {job.last_result === "" ? (
-                        <span className="text-muted-foreground">-</span>
-                      ) : (
-                        <Badge variant={resultVariant(job.last_result)}>
-                          {resultLabel(job.last_result)}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {formatTime(job.last_run)}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {formatTime(job.next_run)}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {job.repository_name || "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {job.objects_count}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <VeeamJobActions serverId={serverId} job={job} />
-                    </TableCell>
-                  </TableRow>
-
-                  {isExpanded && (
-                    <TableRow>
-                      <TableCell colSpan={9} className="bg-muted/30">
-                        <div className="space-y-3 px-2 py-3">
-                          {job.description !== "" && (
-                            <p className="text-sm text-muted-foreground">
-                              {job.description}
-                            </p>
-                          )}
-                          <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Bottleneck
-                              </dt>
-                              <dd>
-                                {job.bottleneck === "" ||
-                                job.bottleneck === "NotDefined"
-                                  ? "—"
-                                  : job.bottleneck}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Duration
-                              </dt>
-                              <dd className="font-mono">
-                                {job.duration || "—"}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Processing rate
-                              </dt>
-                              <dd className="font-mono">
-                                {job.processing_rate === "" ||
-                                job.processing_rate === "N/A"
-                                  ? "—"
-                                  : job.processing_rate}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Schedule
-                              </dt>
-                              <dd>{job.next_run_policy || "—"}</dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Processed
-                              </dt>
-                              <dd className="font-mono">
-                                {formatBytes(job.processed_size)}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Read
-                              </dt>
-                              <dd className="font-mono">
-                                {formatBytes(job.read_size)}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Transferred
-                              </dt>
-                              <dd className="font-mono">
-                                {formatBytes(job.transferred_size)}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Job type
-                              </dt>
-                              <dd>{job.job_type}</dd>
-                            </div>
-                          </dl>
-                          {/* Which guests the job's latest run processed, and
-                              which failed — the question a job-level "Failed"
-                              raises and cannot answer.
-
-                              The live run when there is one, else the last one
-                              Veeam reported. running_session_id is preferred
-                              because last_session_id is refreshed by the
-                              inventory pass and is stale for a job started
-                              since it. */}
-                          <VeeamTaskTable
-                            serverId={serverId}
-                            sessionVeeamId={
-                              job.running_session_id || job.last_session_id
-                            }
-                            enabled={isExpanded}
-                            running={job.running_session_id !== ""}
-                          />
-
-                          {job.last_result === "Failed" && (
-                            <p className="text-xs text-muted-foreground">
-                              Veeam records a job stopped through its API the
-                              same way it records a genuine failure — same
-                              result, no cancellation flag, empty log — so
-                              Nexara cannot tell the two apart. Stops made from
-                              Nexara are the exception: those are recorded, and
-                              the failed-job alert skips them.
-                            </p>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
+      <div className="flex justify-end px-2 pt-2">
+        <ResetColumnsButton layout={layout} />
       </div>
+      <DataTableFrame layout={layout}>
+        <TableHeader>
+          <DataTableHeadRow
+            layout={layout}
+            directionFor={directionFor}
+            onSort={toggleSort}
+          />
+        </TableHeader>
+        <TableBody>
+          {sortedJobs.map((job) => {
+            const isExpanded = expanded.has(job.id);
+
+            return (
+              <Fragment key={job.id}>
+                <TableRow
+                  className="cursor-pointer"
+                  onClick={() => {
+                    toggleExpand(job.id);
+                  }}
+                >
+                  <DataTableCells row={job} layout={layout} ctx={cellCtx} />
+                </TableRow>
+
+                {isExpanded && (
+                  <ExpandedDetailRow colSpan={layout.columns.length}>
+                    {job.description !== "" && (
+                      <p className="text-sm text-muted-foreground">
+                        {job.description}
+                      </p>
+                    )}
+                    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                      <DetailField label="Bottleneck">
+                        {bottleneckLabel(job.bottleneck)}
+                      </DetailField>
+                      <DetailField label="Duration" variant="mono">
+                        {job.duration || "—"}
+                      </DetailField>
+                      <DetailField label="Processing rate" variant="mono">
+                        {processingRateLabel(job.processing_rate)}
+                      </DetailField>
+                      <DetailField label="Schedule">
+                        {job.next_run_policy || "—"}
+                      </DetailField>
+                      <DetailField label="Processed" variant="mono">
+                        {formatBytes(job.processed_size)}
+                      </DetailField>
+                      <DetailField label="Read" variant="mono">
+                        {formatBytes(job.read_size)}
+                      </DetailField>
+                      <DetailField label="Transferred" variant="mono">
+                        {formatBytes(job.transferred_size)}
+                      </DetailField>
+                      <DetailField label="Job type">{job.job_type}</DetailField>
+                    </dl>
+                    {/* Which guests the job's latest run processed, and
+                        which failed — the question a job-level "Failed" raises
+                        and cannot answer.
+
+                        The live run when there is one, else the last one Veeam
+                        reported. running_session_id is preferred because
+                        last_session_id is refreshed by the inventory pass and
+                        is stale for a job started since it. */}
+                    <VeeamTaskTable
+                      serverId={serverId}
+                      sessionVeeamId={
+                        job.running_session_id || job.last_session_id
+                      }
+                      enabled={isExpanded}
+                      running={job.running_session_id !== ""}
+                    />
+
+                    {job.last_result === "Failed" && (
+                      <p className="text-xs text-muted-foreground">
+                        Veeam records a job stopped through its API the same way
+                        it records a genuine failure — same result, no
+                        cancellation flag, empty log — so Nexara cannot tell the
+                        two apart. Stops made from Nexara are the exception:
+                        those are recorded, and the failed-job alert skips them.
+                      </p>
+                    )}
+                  </ExpandedDetailRow>
+                )}
+              </Fragment>
+            );
+          })}
+        </TableBody>
+      </DataTableFrame>
     </div>
   );
 }

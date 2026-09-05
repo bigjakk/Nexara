@@ -27,7 +27,8 @@ export const ClusterNode = memo(function ClusterNode({ data }: NodeProps) {
           className="h-2.5 w-2.5 shrink-0 rounded-full"
           style={{
             backgroundColor: statusColor,
-            boxShadow: d.status === "online" ? `0 0 8px ${statusColor}` : undefined,
+            boxShadow:
+              d.status === "online" ? `0 0 8px ${statusColor}` : undefined,
           }}
         />
         <span className="text-sm font-semibold tracking-tight">{d.label}</span>
@@ -38,10 +39,18 @@ export const ClusterNode = memo(function ClusterNode({ data }: NodeProps) {
         )}
       </div>
       <div className="mt-1.5 flex gap-3 text-xs text-muted-foreground">
-        <span>{d.nodeCount} node{d.nodeCount !== 1 ? "s" : ""}</span>
-        <span>{d.vmCount} guest{d.vmCount !== 1 ? "s" : ""}</span>
+        <span>
+          {d.nodeCount} node{d.nodeCount !== 1 ? "s" : ""}
+        </span>
+        <span>
+          {d.vmCount} guest{d.vmCount !== 1 ? "s" : ""}
+        </span>
       </div>
-      <Handle type="source" position={Position.Bottom} className="h-2! w-2! bg-primary!" />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="h-2! w-2! bg-primary!"
+      />
     </div>
   );
 });

@@ -6,13 +6,27 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, RefreshCw, Trash2, ShieldCheck, ShieldOff } from "lucide-react";
@@ -20,10 +34,16 @@ import { useAuth } from "@/hooks/useAuth";
 import { Textarea } from "@/components/ui/textarea";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import {
-  useACMEAccounts, useACMEPlugins, useACMEChallengeSchema,
-  useCreateACMEPlugin, useDeleteACMEPlugin,
-  useNodeCertificates, useOrderNodeCertificate, useRenewNodeCertificate,
-  useNodeACMEConfig, useSetNodeACMEConfig,
+  useACMEAccounts,
+  useACMEPlugins,
+  useACMEChallengeSchema,
+  useCreateACMEPlugin,
+  useDeleteACMEPlugin,
+  useNodeCertificates,
+  useOrderNodeCertificate,
+  useRenewNodeCertificate,
+  useNodeACMEConfig,
+  useSetNodeACMEConfig,
 } from "@/features/acme/api/acme-queries";
 import type { ACMEChallengeSchema } from "@/features/acme/api/acme-queries";
 import { useClusterNodes } from "../api/cluster-queries";
@@ -65,11 +85,16 @@ function AccountsTab({ clusterId }: { clusterId: string }) {
       </CardHeader>
       <CardContent>
         <p className="mb-4 text-sm text-muted-foreground">
-          ACME accounts must be created directly in the Proxmox web UI (Datacenter &gt; ACME). Proxmox restricts account registration to interactive root@pam sessions.
+          ACME accounts must be created directly in the Proxmox web UI
+          (Datacenter &gt; ACME). Proxmox restricts account registration to
+          interactive root@pam sessions.
         </p>
-        {accountsQuery.isLoading ? <Skeleton className="h-20 w-full" /> :
-         !accountsQuery.data || accountsQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No ACME accounts configured.</p>
+        {accountsQuery.isLoading ? (
+          <Skeleton className="h-20 w-full" />
+        ) : !accountsQuery.data || accountsQuery.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No ACME accounts configured.
+          </p>
         ) : (
           <Table>
             <TableHeader>
@@ -85,8 +110,23 @@ function AccountsTab({ clusterId }: { clusterId: string }) {
                 return (
                   <TableRow key={name}>
                     <TableCell className="font-medium">{name}</TableCell>
-                    <TableCell className="text-xs max-w-[250px] truncate">{acc.directory ?? "—"}</TableCell>
-                    <TableCell className="text-xs">{typeof acc.account === "object" && acc.account !== null ? (() => { const c = (acc.account as Record<string, unknown>)["contact"]; return typeof c === "string" ? c : Array.isArray(c) ? c.join(", ") : "—"; })() : "—"}</TableCell>
+                    <TableCell className="text-xs max-w-[250px] truncate">
+                      {acc.directory ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {typeof acc.account === "object" && acc.account !== null
+                        ? (() => {
+                            const c = (acc.account as Record<string, unknown>)[
+                              "contact"
+                            ];
+                            return typeof c === "string"
+                              ? c
+                              : Array.isArray(c)
+                                ? c.join(", ")
+                                : "—";
+                          })()
+                        : "—"}
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -114,19 +154,32 @@ function PluginsTab({ clusterId }: { clusterId: string }) {
         {canManage("certificate") && (
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
-              <Button size="sm"><Plus className="mr-1 h-4 w-4" />Add Plugin</Button>
+              <Button size="sm">
+                <Plus className="mr-1 h-4 w-4" />
+                Add Plugin
+              </Button>
             </DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>Add ACME Plugin</DialogTitle></DialogHeader>
-              <CreatePluginForm clusterId={clusterId} onSuccess={() => { setCreateOpen(false); }} />
+              <DialogHeader>
+                <DialogTitle>Add ACME Plugin</DialogTitle>
+              </DialogHeader>
+              <CreatePluginForm
+                clusterId={clusterId}
+                onSuccess={() => {
+                  setCreateOpen(false);
+                }}
+              />
             </DialogContent>
           </Dialog>
         )}
       </CardHeader>
       <CardContent>
-        {pluginsQuery.isLoading ? <Skeleton className="h-20 w-full" /> :
-         !pluginsQuery.data || pluginsQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No ACME plugins configured.</p>
+        {pluginsQuery.isLoading ? (
+          <Skeleton className="h-20 w-full" />
+        ) : !pluginsQuery.data || pluginsQuery.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No ACME plugins configured.
+          </p>
         ) : (
           <Table>
             <TableHeader>
@@ -135,19 +188,35 @@ function PluginsTab({ clusterId }: { clusterId: string }) {
                 <TableHead>Type</TableHead>
                 <TableHead>API</TableHead>
                 <TableHead>Data</TableHead>
-                {canManage("certificate") && <TableHead className="text-right">Actions</TableHead>}
+                {canManage("certificate") && (
+                  <TableHead className="text-right">Actions</TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {pluginsQuery.data.map((p) => (
                 <TableRow key={p.plugin}>
                   <TableCell className="font-medium">{p.plugin}</TableCell>
-                  <TableCell><Badge variant="outline">{p.type}</Badge></TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{p.type}</Badge>
+                  </TableCell>
                   <TableCell className="text-xs">{p.api ?? "—"}</TableCell>
-                  <TableCell className="text-xs max-w-[200px] truncate" title={p.data ?? ""}>{p.data ?? "—"}</TableCell>
+                  <TableCell
+                    className="text-xs max-w-[200px] truncate"
+                    title={p.data ?? ""}
+                  >
+                    {p.data ?? "—"}
+                  </TableCell>
                   {canManage("certificate") && (
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => { setDeleteConfirm(p.plugin); }}>
+                      <Button
+                        aria-label={`Delete plugin ${p.plugin}`}
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setDeleteConfirm(p.plugin);
+                        }}
+                      >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </TableCell>
@@ -158,21 +227,44 @@ function PluginsTab({ clusterId }: { clusterId: string }) {
           </Table>
         )}
 
-        <Dialog open={deleteConfirm !== null} onOpenChange={(v) => { if (!v) setDeleteConfirm(null); }}>
+        <Dialog
+          open={deleteConfirm !== null}
+          onOpenChange={(v) => {
+            if (!v) setDeleteConfirm(null);
+          }}
+        >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Delete Plugin</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete plugin &quot;{deleteConfirm}&quot;?
+                Are you sure you want to delete plugin &quot;{deleteConfirm}
+                &quot;?
               </DialogDescription>
             </DialogHeader>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => { setDeleteConfirm(null); }}>Cancel</Button>
-              <Button variant="destructive" onClick={() => {
-                if (deleteConfirm) {
-                  deletePlugin.mutate(deleteConfirm, { onSuccess: () => { setDeleteConfirm(null); } });
-                }
-              }} disabled={deletePlugin.isPending}>Delete</Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDeleteConfirm(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  if (deleteConfirm) {
+                    deletePlugin.mutate(deleteConfirm, {
+                      onSuccess: () => {
+                        setDeleteConfirm(null);
+                      },
+                    });
+                  }
+                }}
+                disabled={deletePlugin.isPending}
+              >
+                Delete
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -181,7 +273,9 @@ function PluginsTab({ clusterId }: { clusterId: string }) {
   );
 }
 
-function getSchemaDataFields(schema: ACMEChallengeSchema): Array<{ key: string; description: string }> {
+function getSchemaDataFields(
+  schema: ACMEChallengeSchema,
+): Array<{ key: string; description: string }> {
   const fields: Array<{ key: string; description: string }> = [];
   const schemaFields = schema.schema?.fields;
   if (!schemaFields) return fields;
@@ -194,7 +288,13 @@ function getSchemaDataFields(schema: ACMEChallengeSchema): Array<{ key: string; 
   return fields;
 }
 
-function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSuccess: () => void }) {
+function CreatePluginForm({
+  clusterId,
+  onSuccess,
+}: {
+  clusterId: string;
+  onSuccess: () => void;
+}) {
   const createPlugin = useCreateACMEPlugin(clusterId);
   const schemaQuery = useACMEChallengeSchema(clusterId);
 
@@ -204,7 +304,9 @@ function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSucce
   const [dataFields, setDataFields] = useState<Record<string, string>>({});
   const [validationDelay, setValidationDelay] = useState("30");
 
-  const dnsSchemas = (schemaQuery.data ?? []).filter((s) => s.type === "dns").sort((a, b) => a.name.localeCompare(b.name));
+  const dnsSchemas = (schemaQuery.data ?? [])
+    .filter((s) => s.type === "dns")
+    .sort((a, b) => a.name.localeCompare(b.name));
   const selectedSchema = dnsSchemas.find((s) => s.id === api);
   const fields = selectedSchema ? getSchemaDataFields(selectedSchema) : [];
 
@@ -235,22 +337,43 @@ function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSucce
         type,
         ...(api ? { api } : {}),
         ...(dataStr ? { data: dataStr } : {}),
-        ...(type === "dns" && !isNaN(delay) && delay !== 30 ? { "validation-delay": delay } : {}),
+        ...(type === "dns" && !isNaN(delay) && delay !== 30
+          ? { "validation-delay": delay }
+          : {}),
       },
       { onSuccess },
     );
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 max-h-[calc(85vh-6rem)] overflow-y-auto pr-1">
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-4 max-h-[calc(85vh-6rem)] overflow-y-auto pr-1"
+    >
       <div className="space-y-2">
         <Label>Plugin ID</Label>
-        <Input value={id} onChange={(e) => { setId(e.target.value); }} placeholder="myplugin" required />
+        <Input
+          value={id}
+          onChange={(e) => {
+            setId(e.target.value);
+          }}
+          placeholder="myplugin"
+          required
+        />
       </div>
       <div className="space-y-2">
         <Label>Validation Type</Label>
-        <Select value={type} onValueChange={(v) => { setType(v); setApi(""); setDataFields({}); }}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
+        <Select
+          value={type}
+          onValueChange={(v) => {
+            setType(v);
+            setApi("");
+            setDataFields({});
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="standalone">Standalone (HTTP)</SelectItem>
             <SelectItem value="dns">DNS</SelectItem>
@@ -262,14 +385,18 @@ function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSucce
         <>
           <div className="space-y-2">
             <Label>DNS API Plugin</Label>
-            {schemaQuery.isLoading ? <Skeleton className="h-9 w-full" /> : (
+            {schemaQuery.isLoading ? (
+              <Skeleton className="h-9 w-full" />
+            ) : (
               <Select value={api} onValueChange={handleApiChange}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select DNS provider..." />
                 </SelectTrigger>
                 <SelectContent className="max-h-[300px]">
                   {dnsSchemas.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -278,16 +405,22 @@ function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSucce
 
           {api && fields.length > 0 && (
             <div className="space-y-3 rounded-md border p-3">
-              <p className="text-sm font-medium">{selectedSchema?.schema?.name ?? selectedSchema?.name ?? api}</p>
+              <p className="text-sm font-medium">
+                {selectedSchema?.schema?.name ?? selectedSchema?.name ?? api}
+              </p>
               {selectedSchema?.schema?.description && (
-                <p className="text-xs text-muted-foreground">{selectedSchema.schema.description}</p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedSchema.schema.description}
+                </p>
               )}
               {fields.map((f) => (
                 <div key={f.key} className="space-y-1">
                   <Label className="text-xs">{f.key}</Label>
                   <Input
                     value={dataFields[f.key] ?? ""}
-                    onChange={(e) => { handleFieldChange(f.key, e.target.value); }}
+                    onChange={(e) => {
+                      handleFieldChange(f.key, e.target.value);
+                    }}
                     placeholder={f.description}
                   />
                 </div>
@@ -299,7 +432,9 @@ function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSucce
             <div className="space-y-2">
               <Label>API Credentials (KEY=VALUE, one per line)</Label>
               <Textarea
-                value={Object.entries(dataFields).map(([k, v]) => `${k}=${v}`).join("\n")}
+                value={Object.entries(dataFields)
+                  .map(([k, v]) => `${k}=${v}`)
+                  .join("\n")}
                 onChange={(e) => {
                   const parsed: Record<string, string> = {};
                   for (const line of e.target.value.split("\n")) {
@@ -323,9 +458,13 @@ function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSucce
               min={0}
               max={172800}
               value={validationDelay}
-              onChange={(e) => { setValidationDelay(e.target.value); }}
+              onChange={(e) => {
+                setValidationDelay(e.target.value);
+              }}
             />
-            <p className="text-xs text-muted-foreground">Time to wait for DNS propagation before validation (default 30)</p>
+            <p className="text-xs text-muted-foreground">
+              Time to wait for DNS propagation before validation (default 30)
+            </p>
           </div>
         </>
       )}
@@ -337,7 +476,10 @@ function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSucce
         <p className="text-sm text-emerald-600">Plugin created successfully.</p>
       )}
 
-      <Button type="submit" disabled={!id || (type === "dns" && !api) || createPlugin.isPending}>
+      <Button
+        type="submit"
+        disabled={!id || (type === "dns" && !api) || createPlugin.isPending}
+      >
         {createPlugin.isPending ? "Creating..." : "Create"}
       </Button>
     </form>
@@ -346,7 +488,11 @@ function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSucce
 
 // --- Certificates Tab ---
 
-function parseDomainEntry(val: string): { domain: string; plugin: string; alias: string } {
+function parseDomainEntry(val: string): {
+  domain: string;
+  plugin: string;
+  alias: string;
+} {
   const parts: Record<string, string> = {};
   for (const seg of val.split(",")) {
     const idx = seg.indexOf("=");
@@ -356,10 +502,18 @@ function parseDomainEntry(val: string): { domain: string; plugin: string; alias:
       parts["domain"] = seg;
     }
   }
-  return { domain: parts["domain"] ?? "", plugin: parts["plugin"] ?? "", alias: parts["alias"] ?? "" };
+  return {
+    domain: parts["domain"] ?? "",
+    plugin: parts["plugin"] ?? "",
+    alias: parts["alias"] ?? "",
+  };
 }
 
-function buildDomainEntry(domain: string, plugin: string, alias: string): string {
+function buildDomainEntry(
+  domain: string,
+  plugin: string,
+  alias: string,
+): string {
   let entry = `domain=${domain}`;
   if (plugin) entry += `,plugin=${plugin}`;
   if (alias) entry += `,alias=${alias}`;
@@ -389,7 +543,14 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
   const [editIndex, setEditIndex] = useState<number | null>(null);
 
   const acmeConfig = acmeConfigQuery.data;
-  const domainKeys = ["acmedomain0", "acmedomain1", "acmedomain2", "acmedomain3", "acmedomain4", "acmedomain5"] as const;
+  const domainKeys = [
+    "acmedomain0",
+    "acmedomain1",
+    "acmedomain2",
+    "acmedomain3",
+    "acmedomain4",
+    "acmedomain5",
+  ] as const;
   const configuredDomains = domainKeys
     .map((k, i) => ({ index: i, key: k, value: acmeConfig?.[k] ?? "" }))
     .filter((d) => d.value.length > 0);
@@ -422,7 +583,11 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
     const account = acmeConfig?.acme ?? "account=default";
     setAcmeConfig.mutate(
       { node: certNode, config: { acme: account, [key]: entry } },
-      { onSuccess: () => { setDomainDialogOpen(false); } },
+      {
+        onSuccess: () => {
+          setDomainDialogOpen(false);
+        },
+      },
     );
   };
 
@@ -448,7 +613,9 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
             </SelectTrigger>
             <SelectContent>
               {nodesQuery.data.map((n) => (
-                <SelectItem key={n.name} value={n.name}>{n.name}</SelectItem>
+                <SelectItem key={n.name} value={n.name}>
+                  {n.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -461,18 +628,23 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
           <CardTitle className="text-base">ACME Domain Configuration</CardTitle>
           {canManage("certificate") && configuredDomains.length < 6 && (
             <Button size="sm" variant="outline" onClick={openAddDomain}>
-              <Plus className="mr-1 h-4 w-4" />Add Domain
+              <Plus className="mr-1 h-4 w-4" />
+              Add Domain
             </Button>
           )}
         </CardHeader>
         <CardContent>
           {acmeConfig?.acme && (
-            <p className="mb-3 text-xs text-muted-foreground">Account: {acmeConfig.acme}</p>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Account: {acmeConfig.acme}
+            </p>
           )}
-          {acmeConfigQuery.isLoading ? <Skeleton className="h-16 w-full" /> :
-           configuredDomains.length === 0 ? (
+          {acmeConfigQuery.isLoading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : configuredDomains.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No ACME domains configured. Add a domain before ordering certificates.
+              No ACME domains configured. Add a domain before ordering
+              certificates.
             </p>
           ) : (
             <Table>
@@ -481,7 +653,9 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
                   <TableHead>Domain</TableHead>
                   <TableHead>Plugin</TableHead>
                   <TableHead>Alias</TableHead>
-                  {canManage("certificate") && <TableHead className="text-right">Actions</TableHead>}
+                  {canManage("certificate") && (
+                    <TableHead className="text-right">Actions</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -489,12 +663,24 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
                   const parsed = parseDomainEntry(d.value);
                   return (
                     <TableRow key={d.key}>
-                      <TableCell className="font-medium text-xs">{parsed.domain}</TableCell>
-                      <TableCell className="text-xs">{parsed.plugin || "standalone"}</TableCell>
-                      <TableCell className="text-xs">{parsed.alias || "—"}</TableCell>
+                      <TableCell className="font-medium text-xs">
+                        {parsed.domain}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {parsed.plugin || "standalone"}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {parsed.alias || "—"}
+                      </TableCell>
                       {canManage("certificate") && (
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" onClick={() => { openEditDomain(d.index, d.value); }}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              openEditDomain(d.index, d.value);
+                            }}
+                          >
                             Edit
                           </Button>
                         </TableCell>
@@ -506,7 +692,9 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
             </Table>
           )}
           {setAcmeConfig.isError && (
-            <p className="mt-2 text-sm text-destructive">{setAcmeConfig.error.message}</p>
+            <p className="mt-2 text-sm text-destructive">
+              {setAcmeConfig.error.message}
+            </p>
           )}
         </CardContent>
       </Card>
@@ -515,50 +703,99 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
       <Dialog open={domainDialogOpen} onOpenChange={setDomainDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editIndex !== null && configuredDomains.some((d) => d.index === editIndex) ? "Edit Domain" : "Add ACME Domain"}</DialogTitle>
+            <DialogTitle>
+              {editIndex !== null &&
+              configuredDomains.some((d) => d.index === editIndex)
+                ? "Edit Domain"
+                : "Add ACME Domain"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Domain</Label>
-              <Input value={editDomain} onChange={(e) => { setEditDomain(e.target.value); }} placeholder="node1.example.com" />
+              <Input
+                value={editDomain}
+                onChange={(e) => {
+                  setEditDomain(e.target.value);
+                }}
+                placeholder="node1.example.com"
+              />
             </div>
             <div className="space-y-2">
               <Label>Challenge Plugin (optional for standalone HTTP)</Label>
-              <Select value={editPlugin || "__standalone__"} onValueChange={(v) => { setEditPlugin(v === "__standalone__" ? "" : v); }}>
+              <Select
+                value={editPlugin || "__standalone__"}
+                onValueChange={(v) => {
+                  setEditPlugin(v === "__standalone__" ? "" : v);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__standalone__">Standalone (HTTP-01)</SelectItem>
-                  {(pluginsQuery.data ?? []).filter((p) => p.type === "dns").map((p) => (
-                    <SelectItem key={p.plugin} value={p.plugin}>{p.plugin}</SelectItem>
-                  ))}
+                  <SelectItem value="__standalone__">
+                    Standalone (HTTP-01)
+                  </SelectItem>
+                  {(pluginsQuery.data ?? [])
+                    .filter((p) => p.type === "dns")
+                    .map((p) => (
+                      <SelectItem key={p.plugin} value={p.plugin}>
+                        {p.plugin}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label>DNS Alias (optional)</Label>
-              <Input value={editAlias} onChange={(e) => { setEditAlias(e.target.value); }} placeholder="acme-verify.example.com" />
-              <p className="text-xs text-muted-foreground">For CNAME-based DNS-01 challenge delegation</p>
+              <Input
+                value={editAlias}
+                onChange={(e) => {
+                  setEditAlias(e.target.value);
+                }}
+                placeholder="acme-verify.example.com"
+              />
+              <p className="text-xs text-muted-foreground">
+                For CNAME-based DNS-01 challenge delegation
+              </p>
             </div>
             <div className="space-y-2">
               <Label>ACME Account</Label>
               <Select
                 value={acmeConfig?.acme?.replace("account=", "") ?? "default"}
-                onValueChange={() => { /* account is set on save */ }}
+                onValueChange={() => {
+                  /* account is set on save */
+                }}
                 disabled
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {(accountsQuery.data ?? []).map((a) => (
-                    <SelectItem key={a.name ?? "default"} value={a.name ?? "default"}>{a.name ?? "default"}</SelectItem>
+                    <SelectItem
+                      key={a.name ?? "default"}
+                      value={a.name ?? "default"}
+                    >
+                      {a.name ?? "default"}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => { setDomainDialogOpen(false); }}>Cancel</Button>
-              <Button onClick={saveDomain} disabled={!editDomain || setAcmeConfig.isPending}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDomainDialogOpen(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={saveDomain}
+                disabled={!editDomain || setAcmeConfig.isPending}
+              >
                 {setAcmeConfig.isPending ? "Saving..." : "Save"}
               </Button>
             </div>
@@ -572,27 +809,55 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
           <CardTitle className="text-base">Certificates</CardTitle>
           {canManage("certificate") && certNode && (
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => {
-                  orderCert.mutate({ node: certNode }, {
-                    onSuccess: (data) => {
-                      setFocusedTask({ clusterId, upid: data.upid, description: `Order ACME certificate — ${certNode}` });
-                      setPanelOpen(true);
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  orderCert.mutate(
+                    { node: certNode },
+                    {
+                      onSuccess: (data) => {
+                        setFocusedTask({
+                          clusterId,
+                          upid: data.upid,
+                          description: `Order ACME certificate — ${certNode}`,
+                        });
+                        setPanelOpen(true);
+                      },
                     },
-                  });
+                  );
                 }}
-                disabled={orderCert.isPending || !hasDomains} title={hasDomains ? "Order new certificate via ACME" : "Configure ACME domains first"}>
+                disabled={orderCert.isPending || !hasDomains}
+                title={
+                  hasDomains
+                    ? "Order new certificate via ACME"
+                    : "Configure ACME domains first"
+                }
+              >
                 <ShieldCheck className="mr-1 h-4 w-4" />
                 {orderCert.isPending ? "Ordering..." : "Order Certificate"}
               </Button>
-              <Button size="sm" variant="outline" onClick={() => {
-                  renewCert.mutate({ node: certNode, force: true }, {
-                    onSuccess: (data) => {
-                      setFocusedTask({ clusterId, upid: data.upid, description: `Renew ACME certificate — ${certNode}` });
-                      setPanelOpen(true);
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  renewCert.mutate(
+                    { node: certNode, force: true },
+                    {
+                      onSuccess: (data) => {
+                        setFocusedTask({
+                          clusterId,
+                          upid: data.upid,
+                          description: `Renew ACME certificate — ${certNode}`,
+                        });
+                        setPanelOpen(true);
+                      },
                     },
-                  });
+                  );
                 }}
-                disabled={renewCert.isPending} title="Renew existing certificate (force)">
+                disabled={renewCert.isPending}
+                title="Renew existing certificate (force)"
+              >
                 <RefreshCw className="mr-1 h-4 w-4" />
                 {renewCert.isPending ? "Renewing..." : "Renew"}
               </Button>
@@ -606,9 +871,12 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
             </p>
           )}
 
-          {certsQuery.isLoading ? <Skeleton className="h-20 w-full" /> :
-           !certsQuery.data || certsQuery.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No certificates found on this node.</p>
+          {certsQuery.isLoading ? (
+            <Skeleton className="h-20 w-full" />
+          ) : !certsQuery.data || certsQuery.data.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No certificates found on this node.
+            </p>
           ) : (
             <Table>
               <TableHeader>
@@ -625,20 +893,40 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
               <TableBody>
                 {certsQuery.data.map((cert) => (
                   <TableRow key={cert.filename}>
-                    <TableCell className="font-medium text-xs">{cert.filename}</TableCell>
-                    <TableCell className="text-xs">{cert.subject ?? "—"}</TableCell>
-                    <TableCell className="text-xs max-w-[200px] truncate" title={cert.issuer ?? ""}>{cert.issuer ?? "—"}</TableCell>
-                    <TableCell className="text-xs max-w-[200px] truncate" title={cert.san ?? ""}>{cert.san ?? "—"}</TableCell>
-                    <TableCell className="text-xs">{formatDate(cert.notbefore)}</TableCell>
-                    <TableCell className="text-xs">{formatDate(cert.notafter)}</TableCell>
+                    <TableCell className="font-medium text-xs">
+                      {cert.filename}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {cert.subject ?? "—"}
+                    </TableCell>
+                    <TableCell
+                      className="text-xs max-w-[200px] truncate"
+                      title={cert.issuer ?? ""}
+                    >
+                      {cert.issuer ?? "—"}
+                    </TableCell>
+                    <TableCell
+                      className="text-xs max-w-[200px] truncate"
+                      title={cert.san ?? ""}
+                    >
+                      {cert.san ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {formatDate(cert.notbefore)}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {formatDate(cert.notafter)}
+                    </TableCell>
                     <TableCell>
                       {isExpiringSoon(cert.notafter) ? (
                         <Badge variant="destructive" className="gap-1">
-                          <ShieldOff className="h-3 w-3" />Expiring
+                          <ShieldOff className="h-3 w-3" />
+                          Expiring
                         </Badge>
                       ) : (
                         <Badge variant="default" className="gap-1">
-                          <ShieldCheck className="h-3 w-3" />Valid
+                          <ShieldCheck className="h-3 w-3" />
+                          Valid
                         </Badge>
                       )}
                     </TableCell>

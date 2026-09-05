@@ -28,16 +28,14 @@ export function OSIcon({ ostype, configOstype, className }: OSIconProps) {
   // If the guest-agent reported value is unknown (e.g. "home-assistant"),
   // fall back to the Proxmox config ostype for the family classification.
   const family =
-    guestFamily === "unknown" && configOstype ? classifyOS(configOstype) : guestFamily;
+    guestFamily === "unknown" && configOstype
+      ? classifyOS(configOstype)
+      : guestFamily;
   const baseClass = cn("h-4 w-4 shrink-0", className);
 
   if (distro) {
     return (
-      <svg
-        viewBox="0 0 24 24"
-        aria-label={distro.title}
-        className={baseClass}
-      >
+      <svg viewBox="0 0 24 24" aria-label={distro.title} className={baseClass}>
         <path d={distro.path} fill={`#${distro.hex}`} />
       </svg>
     );
@@ -45,11 +43,7 @@ export function OSIcon({ ostype, configOstype, className }: OSIconProps) {
 
   if (family === "windows") {
     return (
-      <svg
-        viewBox="0 0 24 24"
-        aria-label="Windows"
-        className={baseClass}
-      >
+      <svg viewBox="0 0 24 24" aria-label="Windows" className={baseClass}>
         <path
           fill="#0078d4"
           d="M3 5.5L11 4.3v7.2H3V5.5zM12 4.2L21 3v8.5h-9V4.2zM3 12.5h8v7.2L3 18.5v-6zM12 12.5h9V21l-9-1.3v-7.2z"
@@ -62,11 +56,7 @@ export function OSIcon({ ostype, configOstype, className }: OSIconProps) {
     // Generic Tux fallback for Linux VMs whose distro we couldn't pin down
     // (e.g. Proxmox config says "l26" with no guest agent running).
     return (
-      <svg
-        viewBox="0 0 24 24"
-        aria-label="Linux"
-        className={baseClass}
-      >
+      <svg viewBox="0 0 24 24" aria-label="Linux" className={baseClass}>
         <ellipse cx="9" cy="20.4" rx="2.6" ry="1.1" fill="#f7c52d" />
         <ellipse cx="15" cy="20.4" rx="2.6" ry="1.1" fill="#f7c52d" />
         <path

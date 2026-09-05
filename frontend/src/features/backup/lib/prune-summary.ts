@@ -120,7 +120,10 @@ export function summarizePrune(
 
   const runs = active
     .filter((j) => j["last-run-endtime"] != null)
-    .map((j) => ({ at: j["last-run-endtime"] ?? 0, state: j["last-run-state"] }))
+    .map((j) => ({
+      at: j["last-run-endtime"] ?? 0,
+      state: j["last-run-state"],
+    }))
     .sort((a, b) => b.at - a.at);
   const failed = active.find(
     (j) => !!j["last-run-state"] && j["last-run-state"] !== "OK",

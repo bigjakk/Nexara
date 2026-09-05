@@ -12,7 +12,7 @@ func TestNodeMaintenanceCommand(t *testing.T) {
 }
 
 func TestNodeMaintenanceNameRe(t *testing.T) {
-	valid := []string{"pve1", "pve-01", "node.example", "HV01", "a_b"}
+	valid := []string{"pve1", "pve-01", "node.example", "PVE-01", "a_b"}
 	for _, n := range valid {
 		if !nodeMaintenanceNameRe.MatchString(n) {
 			t.Errorf("expected %q to be accepted", n)

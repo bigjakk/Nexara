@@ -50,7 +50,13 @@ export function UploadDialog({
     setProgress(0);
     setTaskUpid(null);
     uploadMutation.mutate(
-      { clusterId, storageId, content: contentType, file: selectedFile, onProgress },
+      {
+        clusterId,
+        storageId,
+        content: contentType,
+        file: selectedFile,
+        onProgress,
+      },
       {
         onSuccess: (data) => {
           setProgress(null);
@@ -86,13 +92,16 @@ export function UploadDialog({
   const isBusy = uploadMutation.isPending || taskUpid !== null;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => {
-      if (!v && isBusy) return; // prevent closing during upload/copy
-      setOpen(v);
-      if (!v) {
-        handleReset();
-      }
-    }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v && isBusy) return; // prevent closing during upload/copy
+        setOpen(v);
+        if (!v) {
+          handleReset();
+        }
+      }}
+    >
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
           <Upload className="mr-2 h-4 w-4" />
@@ -111,7 +120,9 @@ export function UploadDialog({
                 <Button
                   size="sm"
                   variant={contentType === "iso" ? "default" : "outline"}
-                  onClick={() => { setContentType("iso"); }}
+                  onClick={() => {
+                    setContentType("iso");
+                  }}
                   disabled={isBusy}
                 >
                   ISO Image
@@ -121,7 +132,9 @@ export function UploadDialog({
                 <Button
                   size="sm"
                   variant={contentType === "vztmpl" ? "default" : "outline"}
-                  onClick={() => { setContentType("vztmpl"); }}
+                  onClick={() => {
+                    setContentType("vztmpl");
+                  }}
                   disabled={isBusy}
                 >
                   CT Template
@@ -135,14 +148,19 @@ export function UploadDialog({
               id="upload-file"
               ref={fileInputRef}
               type="file"
-              accept={contentType === "iso" ? ".iso,.img" : ".tar.gz,.tar.xz,.tar.zst"}
-              onChange={(e) => { setSelectedFile(e.target.files?.[0] ?? null); }}
+              accept={
+                contentType === "iso" ? ".iso,.img" : ".tar.gz,.tar.xz,.tar.zst"
+              }
+              onChange={(e) => {
+                setSelectedFile(e.target.files?.[0] ?? null);
+              }}
               disabled={isBusy}
             />
           </div>
           {selectedFile && !isBusy && (
             <p className="text-xs text-muted-foreground">
-              {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)} MB)
+              {selectedFile.name} (
+              {(selectedFile.size / 1024 / 1024).toFixed(1)} MB)
             </p>
           )}
 

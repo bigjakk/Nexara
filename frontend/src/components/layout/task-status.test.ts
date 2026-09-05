@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 
-import { deriveTaskStatus, isOkExit, parseDetails } from "./task-status";
+import {
+  deriveTaskStatus,
+  displayProgress,
+  isOkExit,
+  parseDetails,
+} from "./task-status";
 
 describe("isOkExit", () => {
   it("treats empty, OK, and WARNINGS as success", () => {
@@ -63,23 +68,31 @@ describe("deriveTaskStatus precedence", () => {
   it("uses the live poll as a fallback when there is no server status", () => {
     // ingested external task with no task_history row
     expect(
-      deriveTaskStatus({}, { upid: "UPID:x" }, { status: "stopped", exitStatus: "OK" }),
+      deriveTaskStatus(
+        {},
+        { upid: "UPID:x" },
+        { status: "stopped", exitStatus: "OK" },
+      ),
     ).toBe("ok");
     expect(
-      deriveTaskStatus({}, { upid: "UPID:x" }, { status: "running", exitStatus: "" }),
+      deriveTaskStatus(
+        {},
+        { upid: "UPID:x" },
+        { status: "running", exitStatus: "" },
+      ),
     ).toBe("running");
   });
 
   it("falls back to server task_status when not polling", () => {
-    expect(deriveTaskStatus({ task_status: "running" }, noDetails, undefined)).toBe(
-      "running",
-    );
+    expect(
+      deriveTaskStatus({ task_status: "running" }, noDetails, undefined),
+    ).toBe("running");
     expect(
       deriveTaskStatus({ task_status: "completed" }, noDetails, undefined),
     ).toBe("ok");
-    expect(deriveTaskStatus({ task_status: "failed" }, noDetails, undefined)).toBe(
-      "failed",
-    );
+    expect(
+      deriveTaskStatus({ task_status: "failed" }, noDetails, undefined),
+    ).toBe("failed");
   });
 
   it("classifies a raw 'stopped' status by exit status", () => {
@@ -100,9 +113,9 @@ describe("deriveTaskStatus precedence", () => {
   });
 
   it("falls back to external details.status for ingested tasks", () => {
-    expect(deriveTaskStatus({}, { upid: "UPID:x", status: "OK" }, undefined)).toBe(
-      "ok",
-    );
+    expect(
+      deriveTaskStatus({}, { upid: "UPID:x", status: "OK" }, undefined),
+    ).toBe("ok");
     expect(
       deriveTaskStatus({}, { upid: "UPID:x", status: "err: 1" }, undefined),
     ).toBe("failed");
@@ -124,5 +137,34 @@ describe("parseDetails", () => {
   it("returns {} for invalid or non-object JSON", () => {
     expect(parseDetails("not json")).toEqual({});
     expect(parseDetails("123")).toEqual({});
+  });
+});
+
+describe("displayProgress", () => {
+  it("shows a finished task as full whatever it stored", () => {
+    // Proxmox reports no progress for most task types, so "completed" and
+    // "completed at 0%" would otherwise be the same row.
+    expect(displayProgress("ok", null, undefined)).toBe(1);
+    expect(displayProgress("ok", 0.4, undefined)).toBe(1);
+  });
+
+  it("keeps the fraction a failed task reached", () => {
+    expect(displayProgress("failed", 0.34, undefined)).toBe(0.34);
+  });
+
+  it("reports unknown rather than zero when nothing was ever reported", () => {
+    expect(displayProgress("failed", null, undefined)).toBeNull();
+    expect(displayProgress("running", null, undefined)).toBeNull();
+  });
+
+  it("prefers the live poll over the stored fraction while running", () => {
+    expect(displayProgress("running", 0.2, 0.62)).toBe(0.62);
+    expect(displayProgress("running", 0.2, undefined)).toBe(0.2);
+  });
+
+  it("treats a live zero as a real reading, not a missing one", () => {
+    // ?? not ||: a task genuinely at 0% must not fall through to the stored
+    // value, which is the older number.
+    expect(displayProgress("running", 0.5, 0)).toBe(0);
   });
 });

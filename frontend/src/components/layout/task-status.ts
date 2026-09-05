@@ -88,3 +88,46 @@ export function deriveTaskStatus(
   }
   return "none";
 }
+
+/** A task status that has something to draw — `deriveTaskStatus` minus the
+ *  "not a task at all" case. */
+export type DisplayStatus = Exclude<DerivedTaskStatus, "none">;
+
+/**
+ * What each outcome is called on screen.
+ *
+ * One map, because two places say these words about the same task and their
+ * agreement is load-bearing: the Tasks tables' Status badge, and the progress
+ * cell's `completedLabel`, which exists precisely BECAUSE the Tasks tables
+ * already say "Completed" next door and must not say it twice. Two spellings
+ * of that string could drift apart without a single test noticing.
+ */
+export const STATUS_LABEL: Record<DisplayStatus, string> = {
+  running: "Running",
+  ok: "Completed",
+  failed: "Failed",
+};
+
+/**
+ * The fraction a progress cell draws, or null when there is none to draw.
+ *
+ * A finished task shows a full bar whatever it stored: Proxmox reports no
+ * progress for most task types, so "completed" and "completed at 0%" are the
+ * same row and only one of them is true. A failed task keeps the fraction it
+ * reached, which is the useful part of a failed migration. Null means Proxmox
+ * never reported one — the cell says so rather than drawing 0%, which would
+ * read as "made no progress" instead of "we don't know".
+ *
+ * Mirrored by sort_progress in queries/tasks.sql, which orders the whole task
+ * history on the same rule; the SQL cannot see `live`, so a running row's
+ * ordering can trail its readout by up to one reconcile tick.
+ */
+export function displayProgress(
+  display: DisplayStatus,
+  stored: number | null,
+  live: number | undefined,
+): number | null {
+  if (display === "ok") return 1;
+  if (display === "running") return live ?? stored;
+  return stored;
+}

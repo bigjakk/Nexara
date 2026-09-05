@@ -134,6 +134,7 @@ export function ChannelsTable() {
                       editEnabled={ch.enabled}
                     />
                     <Button
+                      aria-label={`Delete ${ch.name}`}
                       variant="ghost"
                       size="sm"
                       onClick={() => {

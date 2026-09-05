@@ -50,7 +50,7 @@ var proxmoxTaskMap = map[string]taskMapping{
 	"imgcopy":  {ResourceType: "storage", Action: "image_copy"},
 
 	// Network / service management
-	"srvreload":       {ResourceType: "node", Action: "service_reload"},
+	"srvreload":        {ResourceType: "node", Action: "service_reload"},
 	"reloadnetworkall": {ResourceType: "network", Action: "reload"},
 
 	// ACME / certificates

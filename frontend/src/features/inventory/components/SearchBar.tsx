@@ -19,6 +19,7 @@ function SearchHelp() {
     <Popover>
       <PopoverTrigger asChild>
         <button
+          aria-label="Search syntax help"
           type="button"
           className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
         >
@@ -135,6 +136,7 @@ export function SearchBar({ onQueryChange }: SearchBarProps) {
         />
         {value ? (
           <button
+            aria-label="Clear search"
             type="button"
             onClick={handleClear}
             className="absolute right-8 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"

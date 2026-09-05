@@ -21,10 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
-import {
-  useAppliances,
-  useDownloadAppliance,
-} from "../api/storage-queries";
+import { useAppliances, useDownloadAppliance } from "../api/storage-queries";
 import type { ApplianceTemplate } from "../types/storage";
 
 interface ApplianceBrowserDialogProps {
@@ -135,15 +132,20 @@ export function ApplianceBrowserDialog({
               <Input
                 placeholder="Search by name, OS, or description…"
                 value={search}
-                onChange={(e) => { setSearch(e.target.value); }}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                }}
                 className="pl-8"
                 disabled={isBusy}
               />
             </div>
             <Button
+              aria-label="Refresh appliance list"
               size="sm"
               variant="outline"
-              onClick={() => { void appliancesQuery.refetch(); }}
+              onClick={() => {
+                void appliancesQuery.refetch();
+              }}
               disabled={appliancesQuery.isFetching}
             >
               <RefreshCw
@@ -159,7 +161,9 @@ export function ApplianceBrowserDialog({
                   key={s}
                   size="sm"
                   variant={section === s ? "default" : "outline"}
-                  onClick={() => { setSection(s); }}
+                  onClick={() => {
+                    setSection(s);
+                  }}
                   disabled={isBusy}
                   className="h-6 px-2 text-xs"
                 >
@@ -176,7 +180,13 @@ export function ApplianceBrowserDialog({
               description={`Download ${activeTemplate}`}
               onComplete={() => {
                 void queryClient.invalidateQueries({
-                  queryKey: ["clusters", clusterId, "storage", storageId, "content"],
+                  queryKey: [
+                    "clusters",
+                    clusterId,
+                    "storage",
+                    storageId,
+                    "content",
+                  ],
                 });
                 setTaskUpid(null);
                 setActiveTemplate("");
@@ -184,7 +194,10 @@ export function ApplianceBrowserDialog({
             />
           )}
 
-          <div className="overflow-y-auto rounded-md border" style={{ maxHeight: "55vh" }}>
+          <div
+            className="overflow-y-auto rounded-md border"
+            style={{ maxHeight: "55vh" }}
+          >
             {appliancesQuery.isLoading ? (
               <div className="space-y-1 p-2">
                 <Skeleton className="h-8 w-full" />
@@ -215,12 +228,19 @@ export function ApplianceBrowserDialog({
                   {filtered.map((a) => (
                     <TableRow key={a.template}>
                       <TableCell className="font-medium">{a.os}</TableCell>
-                      <TableCell className="font-mono text-xs">{a.version}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {a.version}
+                      </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-xs">{a.section}</Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {a.section}
+                        </Badge>
                       </TableCell>
                       <TableCell className="max-w-md">
-                        <p className="truncate text-xs" title={a.description || a.headline}>
+                        <p
+                          className="truncate text-xs"
+                          title={a.description || a.headline}
+                        >
                           {a.headline || a.description || a.template}
                         </p>
                       </TableCell>
@@ -228,10 +248,13 @@ export function ApplianceBrowserDialog({
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => { handleDownload(a); }}
+                          onClick={() => {
+                            handleDownload(a);
+                          }}
                           disabled={isBusy}
                         >
-                          {downloadMutation.isPending && activeTemplate === a.template
+                          {downloadMutation.isPending &&
+                          activeTemplate === a.template
                             ? "…"
                             : "Download"}
                         </Button>

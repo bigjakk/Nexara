@@ -162,7 +162,10 @@ describe("console-store", () => {
 
     it("parks the tab as guest-stopped when the guest is powered off", async () => {
       const id = addVmTab();
-      mockedGet.mockResolvedValueOnce({ node_id: "node-uuid-1", status: "stopped" });
+      mockedGet.mockResolvedValueOnce({
+        node_id: "node-uuid-1",
+        status: "stopped",
+      });
 
       await useConsoleStore.getState().resolveAndReconnect(id);
 
@@ -175,7 +178,10 @@ describe("console-store", () => {
 
     it("reconnects to the new node after a migration (guest running)", async () => {
       const id = addVmTab();
-      mockedGet.mockResolvedValueOnce({ node_id: "node-uuid-2", status: "running" });
+      mockedGet.mockResolvedValueOnce({
+        node_id: "node-uuid-2",
+        status: "running",
+      });
       mockedList.mockResolvedValueOnce([
         { id: "node-uuid-1", name: "n1" },
         { id: "node-uuid-2", name: "n2" },
@@ -191,7 +197,10 @@ describe("console-store", () => {
 
     it("reconnects on the same node when the guest is running and unmoved", async () => {
       const id = addVmTab();
-      mockedGet.mockResolvedValueOnce({ node_id: "node-uuid-1", status: "running" });
+      mockedGet.mockResolvedValueOnce({
+        node_id: "node-uuid-1",
+        status: "running",
+      });
       mockedList.mockResolvedValueOnce([{ id: "node-uuid-1", name: "n1" }]);
 
       await useConsoleStore.getState().resolveAndReconnect(id);

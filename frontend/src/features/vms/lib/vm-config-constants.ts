@@ -198,10 +198,31 @@ function windowsDefaults(overrides?: Partial<OSDefaults>): OSDefaults {
 
 export const osDefaults: Record<string, OSDefaults> = {
   // Linux
-  l26: { diskBus: "scsi", netModel: "virtio", scsihw: "virtio-scsi-single", bios: "seabios", machineBase: "pc", tpm: false, efiDisk: false },
-  l24: { diskBus: "ide", netModel: "e1000", scsihw: "virtio-scsi-single", bios: "seabios", machineBase: "pc", tpm: false, efiDisk: false },
+  l26: {
+    diskBus: "scsi",
+    netModel: "virtio",
+    scsihw: "virtio-scsi-single",
+    bios: "seabios",
+    machineBase: "pc",
+    tpm: false,
+    efiDisk: false,
+  },
+  l24: {
+    diskBus: "ide",
+    netModel: "e1000",
+    scsihw: "virtio-scsi-single",
+    bios: "seabios",
+    machineBase: "pc",
+    tpm: false,
+    efiDisk: false,
+  },
   // Windows 11/2022/2025 — q35 + UEFI + TPM
-  win11: windowsDefaults({ machineBase: "q35", bios: "ovmf", tpm: true, efiDisk: true }),
+  win11: windowsDefaults({
+    machineBase: "q35",
+    bios: "ovmf",
+    tpm: true,
+    efiDisk: true,
+  }),
   // Windows 10 and older modern Windows
   win10: windowsDefaults(),
   win8: windowsDefaults(),
@@ -213,13 +234,34 @@ export const osDefaults: Record<string, OSDefaults> = {
   wxp: windowsDefaults({ netModel: "rtl8139", scsihw: "" }),
   w2k: windowsDefaults({ netModel: "rtl8139", scsihw: "" }),
   // Other
-  solaris: { diskBus: "ide", netModel: "e1000", scsihw: "virtio-scsi-single", bios: "seabios", machineBase: "pc", tpm: false, efiDisk: false },
-  other: { diskBus: "ide", netModel: "e1000", scsihw: "virtio-scsi-single", bios: "seabios", machineBase: "pc", tpm: false, efiDisk: false },
+  solaris: {
+    diskBus: "ide",
+    netModel: "e1000",
+    scsihw: "virtio-scsi-single",
+    bios: "seabios",
+    machineBase: "pc",
+    tpm: false,
+    efiDisk: false,
+  },
+  other: {
+    diskBus: "ide",
+    netModel: "e1000",
+    scsihw: "virtio-scsi-single",
+    bios: "seabios",
+    machineBase: "pc",
+    tpm: false,
+    efiDisk: false,
+  },
 };
 
 /** Returns true if the given ostype is any Windows variant. */
 export function isWindowsOS(ostype: string): boolean {
-  return ostype.startsWith("win") || ostype.startsWith("w2k") || ostype === "wxp" || ostype === "wvista";
+  return (
+    ostype.startsWith("win") ||
+    ostype.startsWith("w2k") ||
+    ostype === "wxp" ||
+    ostype === "wvista"
+  );
 }
 
 /** Fields that require a VM restart to take effect when changed on a running VM. */

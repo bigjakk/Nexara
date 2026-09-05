@@ -21,7 +21,7 @@ credentials. UUIDs were deliberately kept so cross-file references stay intact �
 `jobs_states.json` `sessionId` still resolves into `sessions_list.json`, and
 `backupobjects_list.json` `backupId` still resolves into `backups_list.json`.
 
-Substitutions applied: `*.ad.<internal>.net` → `*.example.lan`, user → `jdoe`,
+Substitutions applied: `*.ad.<internal>.net` → `*.example.com`, user → `jdoe`,
 org → `EXAMPLE`/`ExampleOrg`, repositories → `repo-nas-01` / `example-bucket`,
 object-store endpoint → `s3.object-store.example.com`.
 
@@ -76,8 +76,8 @@ committed unused rather than left in a scratch directory to rot.
 - Workers report `isOnline: false` in the capture, and that is the **healthy**
   steady state — Veeam powers an appliance on for a job and off afterwards.
 - The backup server's identity for guest matching is `managedServers.name`,
-  the FQDN. `serverInfo.name` is the short form ("Veeam01" against a guest
-  named `Veeam01.ad.example.lan`) and matches nothing.
+  the FQDN. `serverInfo.name` is the short form ("vbr01" against a guest
+  named `vbr01.example.com`) and matches nothing.
 - `backupobjects_list.json` has duplicate `name` values AND **duplicate `id`
   values**: 27 Proxmox rows carry only 18 distinct ids. `id` is the **guest's**
   identity within Veeam and `backupId` is what differs, so the collector folds

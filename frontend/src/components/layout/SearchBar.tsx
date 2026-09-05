@@ -2,21 +2,57 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
-  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
 } from "@/components/ui/command";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useGlobalSearch, type SearchResult } from "@/features/search/api/search-queries";
+import {
+  useGlobalSearch,
+  type SearchResult,
+} from "@/features/search/api/search-queries";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import { useAuth } from "@/hooks/useAuth";
 import { useThemeStore } from "@/stores/theme-store";
 import { StatusIcon } from "@/components/StatusIcon";
-import { useCreateResourceStore, type CreateKind } from "@/stores/create-resource-store";
 import {
-  Monitor, Server, HardDrive, Database, Search, Layers,
-  Settings, Shield, Network, Repeat, Award, BarChart3,
-  Bell, FileText, Map, Eye, Users, Key, Lock, Palette,
-  Tag, Cpu, Globe, Container, TerminalSquare, Sun, Moon,
-  MonitorCog, Plus, Upload,
+  useCreateResourceStore,
+  type CreateKind,
+} from "@/stores/create-resource-store";
+import {
+  Monitor,
+  Server,
+  HardDrive,
+  Database,
+  Search,
+  Layers,
+  Settings,
+  Shield,
+  Network,
+  Repeat,
+  Award,
+  BarChart3,
+  Bell,
+  FileText,
+  Map,
+  Eye,
+  Users,
+  Key,
+  Lock,
+  Palette,
+  Tag,
+  Cpu,
+  Globe,
+  Container,
+  TerminalSquare,
+  Sun,
+  Moon,
+  MonitorCog,
+  Plus,
+  Upload,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -40,37 +76,230 @@ interface PageEntry {
 }
 
 const GLOBAL_PAGES: PageEntry[] = [
-  { keywords: ["dashboard", "home", "overview"], label: "Dashboard", description: "Main dashboard", icon: <BarChart3 className="h-4 w-4" />, path: "/", pinned: true },
-  { keywords: ["inventory", "vms", "containers", "virtual machines"], label: "Inventory", description: "All VMs & containers", icon: <Monitor className="h-4 w-4" />, path: "/inventory", pinned: true },
-  { keywords: ["storage", "disk", "volumes"], label: "Storage", description: "Storage pools", icon: <HardDrive className="h-4 w-4" />, path: "/storage", pinned: true },
-  { keywords: ["backup", "restore", "pbs"], label: "Backup", description: "Backup dashboard", icon: <FileText className="h-4 w-4" />, path: "/backup", pinned: true },
-  { keywords: ["topology", "map", "infrastructure", "diagram"], label: "Topology", description: "Infrastructure map", icon: <Map className="h-4 w-4" />, path: "/topology", pinned: true },
-  { keywords: ["alerts", "notifications", "rules", "channels"], label: "Alerts", description: "Alert rules & history", icon: <Bell className="h-4 w-4" />, path: "/alerts", requiredPermission: "view:alert", pinned: true },
-  { keywords: ["reports", "schedule", "generate"], label: "Reports", description: "Report schedules", icon: <FileText className="h-4 w-4" />, path: "/reports", requiredPermission: "view:report" },
-  { keywords: ["events", "audit", "log", "syslog"], label: "Events", description: "Event log", icon: <Eye className="h-4 w-4" />, path: "/events", requiredPermission: "view:audit", pinned: true },
-  { keywords: ["security", "cve", "vulnerability", "scanning", "rolling", "update"], label: "Security", description: "CVE scanning & rolling updates", icon: <Shield className="h-4 w-4" />, path: "/security", requiredPermission: "view:cve_scan", pinned: true },
-  { keywords: ["users", "admin", "accounts", "rbac"], label: "Admin: Users", description: "User management", icon: <Users className="h-4 w-4" />, path: "/admin/users", requiredPermission: "manage:user" },
-  { keywords: ["roles", "permissions", "rbac", "admin"], label: "Admin: Roles", description: "Role management", icon: <Key className="h-4 w-4" />, path: "/admin/roles", requiredPermission: "manage:user" },
-  { keywords: ["ldap", "active directory", "ad", "admin"], label: "Admin: LDAP", description: "LDAP/AD configuration", icon: <Globe className="h-4 w-4" />, path: "/admin/ldap", requiredPermission: "manage:user" },
-  { keywords: ["oidc", "sso", "oauth", "admin"], label: "Admin: OIDC/SSO", description: "OIDC provider configuration", icon: <Lock className="h-4 w-4" />, path: "/admin/oidc", requiredPermission: "manage:user" },
-  { keywords: ["branding", "logo", "title", "admin"], label: "Admin: Branding", description: "App branding & logo", icon: <Palette className="h-4 w-4" />, path: "/admin/branding", requiredPermission: "manage:user" },
-  { keywords: ["appearance", "theme", "dark", "light", "accent", "color"], label: "Settings: Appearance", description: "Theme & display preferences", icon: <Palette className="h-4 w-4" />, path: "/settings/appearance" },
-  { keywords: ["security", "totp", "2fa", "two factor", "mfa"], label: "Settings: Security", description: "Two-factor authentication", icon: <Shield className="h-4 w-4" />, path: "/settings/security" },
+  {
+    keywords: ["dashboard", "home", "overview"],
+    label: "Dashboard",
+    description: "Main dashboard",
+    icon: <BarChart3 className="h-4 w-4" />,
+    path: "/",
+    pinned: true,
+  },
+  {
+    keywords: ["inventory", "vms", "containers", "virtual machines"],
+    label: "Inventory",
+    description: "All VMs & containers",
+    icon: <Monitor className="h-4 w-4" />,
+    path: "/inventory",
+    pinned: true,
+  },
+  {
+    keywords: ["storage", "disk", "volumes"],
+    label: "Storage",
+    description: "Storage pools",
+    icon: <HardDrive className="h-4 w-4" />,
+    path: "/storage",
+    pinned: true,
+  },
+  {
+    keywords: ["backup", "restore", "pbs"],
+    label: "Backup",
+    description: "Backup dashboard",
+    icon: <FileText className="h-4 w-4" />,
+    path: "/backup",
+    pinned: true,
+  },
+  {
+    keywords: ["topology", "map", "infrastructure", "diagram"],
+    label: "Topology",
+    description: "Infrastructure map",
+    icon: <Map className="h-4 w-4" />,
+    path: "/topology",
+    pinned: true,
+  },
+  {
+    keywords: ["alerts", "notifications", "rules", "channels"],
+    label: "Alerts",
+    description: "Alert rules & history",
+    icon: <Bell className="h-4 w-4" />,
+    path: "/alerts",
+    requiredPermission: "view:alert",
+    pinned: true,
+  },
+  {
+    keywords: ["reports", "schedule", "generate"],
+    label: "Reports",
+    description: "Report schedules",
+    icon: <FileText className="h-4 w-4" />,
+    path: "/reports",
+    requiredPermission: "view:report",
+  },
+  {
+    keywords: ["events", "audit", "log", "syslog"],
+    label: "Events",
+    description: "Event log",
+    icon: <Eye className="h-4 w-4" />,
+    path: "/events",
+    requiredPermission: "view:audit",
+    pinned: true,
+  },
+  {
+    keywords: [
+      "security",
+      "cve",
+      "vulnerability",
+      "scanning",
+      "rolling",
+      "update",
+    ],
+    label: "Security",
+    description: "CVE scanning & rolling updates",
+    icon: <Shield className="h-4 w-4" />,
+    path: "/security",
+    requiredPermission: "view:cve_scan",
+    pinned: true,
+  },
+  {
+    keywords: ["users", "admin", "accounts", "rbac"],
+    label: "Admin: Users",
+    description: "User management",
+    icon: <Users className="h-4 w-4" />,
+    path: "/admin/users",
+    requiredPermission: "manage:user",
+  },
+  {
+    keywords: ["roles", "permissions", "rbac", "admin"],
+    label: "Admin: Roles",
+    description: "Role management",
+    icon: <Key className="h-4 w-4" />,
+    path: "/admin/roles",
+    requiredPermission: "manage:user",
+  },
+  {
+    keywords: ["ldap", "active directory", "ad", "admin"],
+    label: "Admin: LDAP",
+    description: "LDAP/AD configuration",
+    icon: <Globe className="h-4 w-4" />,
+    path: "/admin/ldap",
+    requiredPermission: "manage:user",
+  },
+  {
+    keywords: ["oidc", "sso", "oauth", "admin"],
+    label: "Admin: OIDC/SSO",
+    description: "OIDC provider configuration",
+    icon: <Lock className="h-4 w-4" />,
+    path: "/admin/oidc",
+    requiredPermission: "manage:user",
+  },
+  {
+    keywords: ["branding", "logo", "title", "admin"],
+    label: "Admin: Branding",
+    description: "App branding & logo",
+    icon: <Palette className="h-4 w-4" />,
+    path: "/admin/branding",
+    requiredPermission: "manage:user",
+  },
+  {
+    keywords: ["appearance", "theme", "dark", "light", "accent", "color"],
+    label: "Settings: Appearance",
+    description: "Theme & display preferences",
+    icon: <Palette className="h-4 w-4" />,
+    path: "/settings/appearance",
+  },
+  {
+    keywords: ["security", "totp", "2fa", "two factor", "mfa"],
+    label: "Settings: Security",
+    description: "Two-factor authentication",
+    icon: <Shield className="h-4 w-4" />,
+    path: "/settings/security",
+  },
 ];
 
 /** Per-cluster pages — one entry generated per cluster */
 const CLUSTER_PAGES: PageEntry[] = [
-  { keywords: ["drs", "scheduler", "resource", "balancing", "affinity"], label: "DRS", description: "Dynamic resource scheduler", icon: <Cpu className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=drs" },
-  { keywords: ["firewall", "rules", "aliases", "ipset", "security group"], label: "Firewall", description: "Cluster firewall rules", icon: <Shield className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=firewall" },
-  { keywords: ["ceph", "osd", "pool", "monitor", "rados"], label: "Ceph", description: "Ceph storage cluster", icon: <Database className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=ceph" },
-  { keywords: ["network", "vnet", "sdn", "bridge", "vlan"], label: "Networks", description: "Cluster networking", icon: <Network className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=networks" },
-  { keywords: ["options", "datacenter", "notes", "description", "settings", "config"], label: "Options", description: "Datacenter options & notes", icon: <Settings className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=options" },
-  { keywords: ["ha", "high availability", "failover", "fencing"], label: "HA", description: "High availability", icon: <Repeat className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=ha" },
-  { keywords: ["pool", "resource pool"], label: "Pools", description: "Resource pools", icon: <Layers className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=pools" },
-  { keywords: ["replication", "zfs", "sync", "replicate"], label: "Replication", description: "ZFS replication jobs", icon: <Repeat className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=replication" },
-  { keywords: ["certificate", "acme", "letsencrypt", "ssl", "tls"], label: "Certificates", description: "ACME certificates", icon: <Award className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=certificates" },
-  { keywords: ["metric", "influxdb", "graphite", "metrics server"], label: "Metric Servers", description: "External metric targets", icon: <BarChart3 className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=metric-servers" },
-  { keywords: ["tags", "tag", "label", "registered"], label: "Tags", description: "Tag management", icon: <Tag className="h-4 w-4" />, clusterPath: "/clusters/{id}?tab=options" },
+  {
+    keywords: ["drs", "scheduler", "resource", "balancing", "affinity"],
+    label: "DRS",
+    description: "Dynamic resource scheduler",
+    icon: <Cpu className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=drs",
+  },
+  {
+    keywords: ["firewall", "rules", "aliases", "ipset", "security group"],
+    label: "Firewall",
+    description: "Cluster firewall rules",
+    icon: <Shield className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=firewall",
+  },
+  {
+    keywords: ["ceph", "osd", "pool", "monitor", "rados"],
+    label: "Ceph",
+    description: "Ceph storage cluster",
+    icon: <Database className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=ceph",
+  },
+  {
+    keywords: ["network", "vnet", "sdn", "bridge", "vlan"],
+    label: "Networks",
+    description: "Cluster networking",
+    icon: <Network className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=networks",
+  },
+  {
+    keywords: [
+      "options",
+      "datacenter",
+      "notes",
+      "description",
+      "settings",
+      "config",
+    ],
+    label: "Options",
+    description: "Datacenter options & notes",
+    icon: <Settings className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=options",
+  },
+  {
+    keywords: ["ha", "high availability", "failover", "fencing"],
+    label: "HA",
+    description: "High availability",
+    icon: <Repeat className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=ha",
+  },
+  {
+    keywords: ["pool", "resource pool"],
+    label: "Pools",
+    description: "Resource pools",
+    icon: <Layers className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=pools",
+  },
+  {
+    keywords: ["replication", "zfs", "sync", "replicate"],
+    label: "Replication",
+    description: "ZFS replication jobs",
+    icon: <Repeat className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=replication",
+  },
+  {
+    keywords: ["certificate", "acme", "letsencrypt", "ssl", "tls"],
+    label: "Certificates",
+    description: "ACME certificates",
+    icon: <Award className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=certificates",
+  },
+  {
+    keywords: ["metric", "influxdb", "graphite", "metrics server"],
+    label: "Metric Servers",
+    description: "External metric targets",
+    icon: <BarChart3 className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=metric-servers",
+  },
+  {
+    keywords: ["tags", "tag", "label", "registered"],
+    label: "Tags",
+    description: "Tag management",
+    icon: <Tag className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=options",
+  },
 ];
 
 interface PageMatch {
@@ -149,7 +378,9 @@ export function SearchBar() {
       }
     };
     document.addEventListener("keydown", handler);
-    return () => { document.removeEventListener("keydown", handler); };
+    return () => {
+      document.removeEventListener("keydown", handler);
+    };
   }, []);
 
   const handleOpenChange = useCallback((next: boolean) => {
@@ -211,25 +442,95 @@ export function SearchBar() {
     perform: () => void;
   }
 
-  const actions = useMemo<ActionEntry[]>(
-    () => {
-      const list: ActionEntry[] = [
-        { id: "create-vm", label: "Create virtual machine…", description: "New QEMU guest", keywords: ["create", "new", "vm", "virtual machine", "qemu"], icon: <Plus className="h-4 w-4" />, chipClass: "bg-emerald-500/10 text-emerald-500", perform: () => { startCreate("vm"); } },
-        { id: "create-ct", label: "Create container…", description: "New LXC guest", keywords: ["create", "new", "ct", "container", "lxc"], icon: <Container className="h-4 w-4" />, chipClass: "bg-sky-500/10 text-sky-500", perform: () => { startCreate("ct"); } },
-      ];
-      if (can("manage:vm_import")) {
-        list.push({ id: "import-vm", label: "Import virtual machine…", description: "From OVA/OVF or ESXi", keywords: ["import", "ova", "ovf", "esxi", "vmware", "migrate"], icon: <Upload className="h-4 w-4" />, chipClass: "bg-violet-500/10 text-violet-500", perform: () => { startCreate("import"); } });
-      }
-      list.push(
-        { id: "console", label: "Open console", description: "Terminal & VNC sessions", keywords: ["console", "terminal", "shell", "vnc", "xterm"], icon: <TerminalSquare className="h-4 w-4" />, chipClass: "bg-violet-500/10 text-violet-500", perform: () => { goTo("/console"); } },
-        { id: "theme-dark", label: "Theme: dark", description: "Switch to dark mode", keywords: ["theme", "dark", "mode", "appearance"], icon: <Moon className="h-4 w-4" />, chipClass: "bg-amber-500/10 text-amber-500", perform: () => { setThemeMode("dark"); close(); } },
-        { id: "theme-light", label: "Theme: light", description: "Switch to light mode", keywords: ["theme", "light", "mode", "appearance"], icon: <Sun className="h-4 w-4" />, chipClass: "bg-amber-500/10 text-amber-500", perform: () => { setThemeMode("light"); close(); } },
-        { id: "theme-system", label: "Theme: system", description: "Follow the OS preference", keywords: ["theme", "system", "auto", "mode", "appearance"], icon: <MonitorCog className="h-4 w-4" />, chipClass: "bg-amber-500/10 text-amber-500", perform: () => { setThemeMode("system"); close(); } },
-      );
-      return list;
-    },
-    [startCreate, goTo, setThemeMode, close, can],
-  );
+  const actions = useMemo<ActionEntry[]>(() => {
+    const list: ActionEntry[] = [
+      {
+        id: "create-vm",
+        label: "Create virtual machine…",
+        description: "New QEMU guest",
+        keywords: ["create", "new", "vm", "virtual machine", "qemu"],
+        icon: <Plus className="h-4 w-4" />,
+        chipClass: "bg-emerald-500/10 text-emerald-500",
+        perform: () => {
+          startCreate("vm");
+        },
+      },
+      {
+        id: "create-ct",
+        label: "Create container…",
+        description: "New LXC guest",
+        keywords: ["create", "new", "ct", "container", "lxc"],
+        icon: <Container className="h-4 w-4" />,
+        chipClass: "bg-sky-500/10 text-sky-500",
+        perform: () => {
+          startCreate("ct");
+        },
+      },
+    ];
+    if (can("manage:vm_import")) {
+      list.push({
+        id: "import-vm",
+        label: "Import virtual machine…",
+        description: "From OVA/OVF or ESXi",
+        keywords: ["import", "ova", "ovf", "esxi", "vmware", "migrate"],
+        icon: <Upload className="h-4 w-4" />,
+        chipClass: "bg-violet-500/10 text-violet-500",
+        perform: () => {
+          startCreate("import");
+        },
+      });
+    }
+    list.push(
+      {
+        id: "console",
+        label: "Open console",
+        description: "Terminal & VNC sessions",
+        keywords: ["console", "terminal", "shell", "vnc", "xterm"],
+        icon: <TerminalSquare className="h-4 w-4" />,
+        chipClass: "bg-violet-500/10 text-violet-500",
+        perform: () => {
+          goTo("/console");
+        },
+      },
+      {
+        id: "theme-dark",
+        label: "Theme: dark",
+        description: "Switch to dark mode",
+        keywords: ["theme", "dark", "mode", "appearance"],
+        icon: <Moon className="h-4 w-4" />,
+        chipClass: "bg-amber-500/10 text-amber-500",
+        perform: () => {
+          setThemeMode("dark");
+          close();
+        },
+      },
+      {
+        id: "theme-light",
+        label: "Theme: light",
+        description: "Switch to light mode",
+        keywords: ["theme", "light", "mode", "appearance"],
+        icon: <Sun className="h-4 w-4" />,
+        chipClass: "bg-amber-500/10 text-amber-500",
+        perform: () => {
+          setThemeMode("light");
+          close();
+        },
+      },
+      {
+        id: "theme-system",
+        label: "Theme: system",
+        description: "Follow the OS preference",
+        keywords: ["theme", "system", "auto", "mode", "appearance"],
+        icon: <MonitorCog className="h-4 w-4" />,
+        chipClass: "bg-amber-500/10 text-amber-500",
+        perform: () => {
+          setThemeMode("system");
+          close();
+        },
+      },
+    );
+    return list;
+  }, [startCreate, goTo, setThemeMode, close, can]);
 
   const q = query.toLowerCase();
 
@@ -251,7 +552,10 @@ export function SearchBar() {
 
     for (const page of GLOBAL_PAGES) {
       if (!can(page.requiredPermission)) continue;
-      if (page.keywords.some((kw) => kw.includes(q)) || page.label.toLowerCase().includes(q)) {
+      if (
+        page.keywords.some((kw) => kw.includes(q)) ||
+        page.label.toLowerCase().includes(q)
+      ) {
         matches.push({
           label: page.label,
           description: page.description,
@@ -263,7 +567,10 @@ export function SearchBar() {
 
     const clusterList = clusters ?? [];
     for (const page of CLUSTER_PAGES) {
-      if (page.keywords.some((kw) => kw.includes(q)) || page.label.toLowerCase().includes(q)) {
+      if (
+        page.keywords.some((kw) => kw.includes(q)) ||
+        page.label.toLowerCase().includes(q)
+      ) {
         for (const cluster of clusterList) {
           matches.push({
             label: page.label,
@@ -287,36 +594,49 @@ export function SearchBar() {
   const clusterMatches = useMemo(() => {
     const list = clusters ?? [];
     if (q.length >= 2) return [];
-    return list.filter((c) => q.length === 0 || c.name.toLowerCase().includes(q));
+    return list.filter(
+      (c) => q.length === 0 || c.name.toLowerCase().includes(q),
+    );
   }, [clusters, q]);
 
-  const handleSelect = useCallback((result: SearchResult) => {
-    close();
-    switch (result.type) {
-      case "vm":
-      case "ct":
-        void navigate(`/inventory/${result.type}/${result.cluster_id}/${result.id}`);
-        break;
-      case "node":
-        void navigate(`/clusters/${result.cluster_id}/nodes/${result.id}`);
-        break;
-      case "storage":
-        void navigate(`/storage?cluster=${result.cluster_id}`);
-        break;
-      default:
-        void navigate(`/clusters/${result.cluster_id}`);
-        break;
-    }
-  }, [close, navigate]);
+  const handleSelect = useCallback(
+    (result: SearchResult) => {
+      close();
+      switch (result.type) {
+        case "vm":
+        case "ct":
+          void navigate(
+            `/inventory/${result.type}/${result.cluster_id}/${result.id}`,
+          );
+          break;
+        case "node":
+          void navigate(`/clusters/${result.cluster_id}/nodes/${result.id}`);
+          break;
+        case "storage":
+          void navigate(`/storage?cluster=${result.cluster_id}`);
+          break;
+        default:
+          void navigate(`/clusters/${result.cluster_id}`);
+          break;
+      }
+    },
+    [close, navigate],
+  );
 
   const getIcon = (type: string) => {
     switch (type) {
-      case "vm": return <Monitor className="h-4 w-4" />;
-      case "ct": return <Database className="h-4 w-4" />;
-      case "node": return <Server className="h-4 w-4" />;
-      case "storage": return <HardDrive className="h-4 w-4" />;
-      case "cluster": return <Layers className="h-4 w-4" />;
-      default: return null;
+      case "vm":
+        return <Monitor className="h-4 w-4" />;
+      case "ct":
+        return <Database className="h-4 w-4" />;
+      case "node":
+        return <Server className="h-4 w-4" />;
+      case "storage":
+        return <HardDrive className="h-4 w-4" />;
+      case "cluster":
+        return <Layers className="h-4 w-4" />;
+      default:
+        return null;
     }
   };
 
@@ -329,16 +649,23 @@ export function SearchBar() {
   };
 
   const hasResults =
-    grouped.vms.length > 0 || grouped.nodes.length > 0 || grouped.storage.length > 0 ||
-    grouped.clusters.length > 0 || pageMatches.length > 0 || actionMatches.length > 0 ||
-    clusterMatches.length > 0 || q.length < 2;
+    grouped.vms.length > 0 ||
+    grouped.nodes.length > 0 ||
+    grouped.storage.length > 0 ||
+    grouped.clusters.length > 0 ||
+    pageMatches.length > 0 ||
+    actionMatches.length > 0 ||
+    clusterMatches.length > 0 ||
+    q.length < 2;
 
   const inPicker = view !== "root";
 
   return (
     <>
       <button
-        onClick={() => { setOpen(true); }}
+        onClick={() => {
+          setOpen(true);
+        }}
         className="flex h-9 w-full max-w-64 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
       >
         <Search className="h-4 w-4" />
@@ -372,15 +699,32 @@ export function SearchBar() {
             />
             <CommandList className="max-h-[min(420px,60vh)]">
               {inPicker ? (
-                <CommandGroup heading={view === "create-vm" ? "Create VM — choose cluster" : view === "create-import" ? "Import VM — choose cluster" : "Create CT — choose cluster"}>
+                <CommandGroup
+                  heading={
+                    view === "create-vm"
+                      ? "Create VM — choose cluster"
+                      : view === "create-import"
+                        ? "Import VM — choose cluster"
+                        : "Create CT — choose cluster"
+                  }
+                >
                   {(clusters ?? [])
-                    .filter((c) => q.length === 0 || c.name.toLowerCase().includes(q))
+                    .filter(
+                      (c) => q.length === 0 || c.name.toLowerCase().includes(q),
+                    )
                     .map((c) => (
-                      <CommandItem key={c.id} onSelect={() => { pickCreateCluster(c.id); }}>
+                      <CommandItem
+                        key={c.id}
+                        onSelect={() => {
+                          pickCreateCluster(c.id);
+                        }}
+                      >
                         <StatusIcon status={c.status} className="mr-2" />
                         <span className="flex-1">{c.name}</span>
                         {c.pve_version !== "" && (
-                          <span className="text-xs text-muted-foreground">PVE {c.pve_version}</span>
+                          <span className="text-xs text-muted-foreground">
+                            PVE {c.pve_version}
+                          </span>
                         )}
                       </CommandItem>
                     ))}
@@ -389,7 +733,9 @@ export function SearchBar() {
                 <>
                   {!hasResults && (
                     <CommandEmpty>
-                      {searchQuery.isLoading ? "Searching…" : "No results found."}
+                      {searchQuery.isLoading
+                        ? "Searching…"
+                        : "No results found."}
                     </CommandEmpty>
                   )}
                   {actionMatches.length > 0 && (
@@ -399,7 +745,9 @@ export function SearchBar() {
                           <IconChip className={a.chipClass}>{a.icon}</IconChip>
                           <span className="flex-1">
                             {a.label}
-                            <span className="ml-2 text-xs text-muted-foreground">{a.description}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {a.description}
+                            </span>
                           </span>
                         </CommandItem>
                       ))}
@@ -422,11 +770,24 @@ export function SearchBar() {
                           }}
                           onAction={close}
                         >
-                          <CommandItem onSelect={() => { handleSelect(r); }}>
-                            <StatusIcon status={r.status ?? "unknown"} className="mr-2" />
+                          <CommandItem
+                            onSelect={() => {
+                              handleSelect(r);
+                            }}
+                          >
+                            <StatusIcon
+                              status={r.status ?? "unknown"}
+                              className="mr-2"
+                            />
                             <IconChip>{getIcon(r.type)}</IconChip>
-                            <span className="flex-1">{r.name}{r.vmid ? ` (${String(r.vmid)})` : ""}</span>
-                            <span className="text-xs text-muted-foreground">{r.cluster_name}{r.node ? ` / ${r.node}` : ""}</span>
+                            <span className="flex-1">
+                              {r.name}
+                              {r.vmid ? ` (${String(r.vmid)})` : ""}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {r.cluster_name}
+                              {r.node ? ` / ${r.node}` : ""}
+                            </span>
                           </CommandItem>
                         </VMContextMenu>
                       ))}
@@ -435,11 +796,21 @@ export function SearchBar() {
                   {grouped.nodes.length > 0 && (
                     <CommandGroup heading="Nodes">
                       {grouped.nodes.map((r) => (
-                        <CommandItem key={`${r.cluster_id}-${r.id}`} onSelect={() => { handleSelect(r); }}>
-                          <StatusIcon status={r.status ?? "unknown"} className="mr-2" />
+                        <CommandItem
+                          key={`${r.cluster_id}-${r.id}`}
+                          onSelect={() => {
+                            handleSelect(r);
+                          }}
+                        >
+                          <StatusIcon
+                            status={r.status ?? "unknown"}
+                            className="mr-2"
+                          />
                           <IconChip>{getIcon(r.type)}</IconChip>
                           <span className="flex-1">{r.name}</span>
-                          <span className="text-xs text-muted-foreground">{r.cluster_name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {r.cluster_name}
+                          </span>
                         </CommandItem>
                       ))}
                     </CommandGroup>
@@ -447,30 +818,56 @@ export function SearchBar() {
                   {grouped.storage.length > 0 && (
                     <CommandGroup heading="Storage">
                       {grouped.storage.map((r) => (
-                        <CommandItem key={`${r.cluster_id}-${r.id}`} onSelect={() => { handleSelect(r); }}>
+                        <CommandItem
+                          key={`${r.cluster_id}-${r.id}`}
+                          onSelect={() => {
+                            handleSelect(r);
+                          }}
+                        >
                           <IconChip>{getIcon(r.type)}</IconChip>
                           <span className="flex-1">{r.name}</span>
-                          <span className="text-xs text-muted-foreground">{r.cluster_name}{r.node ? ` / ${r.node}` : ""}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {r.cluster_name}
+                            {r.node ? ` / ${r.node}` : ""}
+                          </span>
                         </CommandItem>
                       ))}
                     </CommandGroup>
                   )}
-                  {(grouped.clusters.length > 0 || clusterMatches.length > 0) && (
+                  {(grouped.clusters.length > 0 ||
+                    clusterMatches.length > 0) && (
                     <CommandGroup heading="Clusters">
                       {grouped.clusters.map((r) => (
-                        <CommandItem key={`cluster-${r.cluster_id}`} onSelect={() => { handleSelect(r); }}>
-                          <StatusIcon status={r.status ?? "unknown"} className="mr-2" />
+                        <CommandItem
+                          key={`cluster-${r.cluster_id}`}
+                          onSelect={() => {
+                            handleSelect(r);
+                          }}
+                        >
+                          <StatusIcon
+                            status={r.status ?? "unknown"}
+                            className="mr-2"
+                          />
                           <IconChip>{getIcon(r.type)}</IconChip>
                           <span className="flex-1">{r.name}</span>
                         </CommandItem>
                       ))}
                       {clusterMatches.map((c) => (
-                        <CommandItem key={`cl-${c.id}`} onSelect={() => { goTo(`/clusters/${c.id}`); }}>
+                        <CommandItem
+                          key={`cl-${c.id}`}
+                          onSelect={() => {
+                            goTo(`/clusters/${c.id}`);
+                          }}
+                        >
                           <StatusIcon status={c.status} className="mr-2" />
-                          <IconChip><Layers className="h-4 w-4" /></IconChip>
+                          <IconChip>
+                            <Layers className="h-4 w-4" />
+                          </IconChip>
                           <span className="flex-1">{c.name}</span>
                           {c.pve_version !== "" && (
-                            <span className="text-xs text-muted-foreground">PVE {c.pve_version}</span>
+                            <span className="text-xs text-muted-foreground">
+                              PVE {c.pve_version}
+                            </span>
                           )}
                         </CommandItem>
                       ))}
@@ -479,11 +876,18 @@ export function SearchBar() {
                   {q.length < 2 && pinnedPages.length > 0 && (
                     <CommandGroup heading="Go to">
                       {pinnedPages.map((p) => (
-                        <CommandItem key={p.path} onSelect={() => { goTo(p.path ?? "/"); }}>
+                        <CommandItem
+                          key={p.path}
+                          onSelect={() => {
+                            goTo(p.path ?? "/");
+                          }}
+                        >
                           <IconChip>{p.icon}</IconChip>
                           <span className="flex-1">
                             {p.label}
-                            <span className="ml-2 text-xs text-muted-foreground">{p.description}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {p.description}
+                            </span>
                           </span>
                         </CommandItem>
                       ))}
@@ -492,14 +896,23 @@ export function SearchBar() {
                   {pageMatches.length > 0 && (
                     <CommandGroup heading="Pages & Settings">
                       {pageMatches.map((p) => (
-                        <CommandItem key={p.path} onSelect={() => { goTo(p.path); }}>
+                        <CommandItem
+                          key={p.path}
+                          onSelect={() => {
+                            goTo(p.path);
+                          }}
+                        >
                           <IconChip>{p.icon}</IconChip>
                           <span className="flex-1">
                             {p.label}
-                            <span className="ml-2 text-xs text-muted-foreground">{p.description}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {p.description}
+                            </span>
                           </span>
                           {p.clusterName && (
-                            <span className="text-xs text-muted-foreground">{p.clusterName}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {p.clusterName}
+                            </span>
                           )}
                         </CommandItem>
                       ))}
@@ -509,13 +922,24 @@ export function SearchBar() {
               )}
             </CommandList>
             <div className="hidden items-center gap-3 border-t px-3 py-2 text-[11px] text-muted-foreground sm:flex">
-              <span className="flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> navigate</span>
-              <span className="flex items-center gap-1"><Kbd>↵</Kbd> select</span>
-              {inPicker && <span className="flex items-center gap-1"><Kbd>⌫</Kbd> back</span>}
+              <span className="flex items-center gap-1">
+                <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd> navigate
+              </span>
+              <span className="flex items-center gap-1">
+                <Kbd>↵</Kbd> select
+              </span>
+              {inPicker && (
+                <span className="flex items-center gap-1">
+                  <Kbd>⌫</Kbd> back
+                </span>
+              )}
               {!inPicker && grouped.vms.length > 0 && (
                 <span>right-click a guest for actions</span>
               )}
-              <span className="ml-auto flex items-center gap-1"><Kbd>esc</Kbd> close</span>
+              <span className="ml-auto flex items-center gap-1">
+                <Kbd>esc</Kbd> close
+              </span>
             </div>
           </Command>
         </DialogContent>

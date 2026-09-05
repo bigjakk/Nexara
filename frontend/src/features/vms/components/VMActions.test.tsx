@@ -26,9 +26,7 @@ describe("VMActions", () => {
   });
 
   it("shows start for stopped VM", () => {
-    renderWithProviders(
-      <VMActions {...defaultProps} status="stopped" />,
-    );
+    renderWithProviders(<VMActions {...defaultProps} status="stopped" />);
     expect(screen.getByRole("button", { name: /start/i })).toBeEnabled();
     expect(screen.queryByRole("button", { name: /shutdown/i })).toBeNull();
   });
@@ -44,17 +42,19 @@ describe("VMActions", () => {
     const { unmount } = renderWithProviders(
       <VMActions {...defaultProps} kind="ct" />,
     );
-    expect(screen.getByRole("button", { name: /migrate/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /migrate/i }),
+    ).toBeInTheDocument();
     unmount();
 
     renderWithProviders(<VMActions {...defaultProps} kind="vm" />);
-    expect(screen.getByRole("button", { name: /migrate/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /migrate/i }),
+    ).toBeInTheDocument();
   });
 
   it("shows snapshot button when onSnapshot is provided", () => {
-    renderWithProviders(
-      <VMActions {...defaultProps} onSnapshot={vi.fn()} />,
-    );
+    renderWithProviders(<VMActions {...defaultProps} onSnapshot={vi.fn()} />);
     expect(screen.getByRole("button", { name: /snapshot/i })).toBeEnabled();
   });
 

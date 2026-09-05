@@ -36,9 +36,9 @@ export function AccessRealmsSection({ clusterId }: { clusterId: string }) {
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
             Realms are read-only here. Editing them needs the{" "}
-            <code className="font-mono">Realm.Allocate</code> privilege, which only the
-            Administrator role carries — manage them in the Proxmox UI under{" "}
-            <em>Datacenter → Permissions → Realms</em>.
+            <code className="font-mono">Realm.Allocate</code> privilege, which
+            only the Administrator role carries — manage them in the Proxmox UI
+            under <em>Datacenter → Permissions → Realms</em>.
           </p>
         </div>
 
@@ -62,14 +62,22 @@ export function AccessRealmsSection({ clusterId }: { clusterId: string }) {
                   <TableCell className="font-medium">
                     <span className="flex items-center gap-2">
                       {domain.realm}
-                      {domain.default && <Badge variant="secondary">Default</Badge>}
+                      {domain.default && (
+                        <Badge variant="secondary">Default</Badge>
+                      )}
                     </span>
                   </TableCell>
                   <TableCell>
-                    <code className="font-mono text-xs">{domain.type || "—"}</code>
+                    <code className="font-mono text-xs">
+                      {domain.type || "—"}
+                    </code>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{domain.tfa || "—"}</TableCell>
-                  <TableCell className="text-muted-foreground">{domain.comment || "—"}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {domain.tfa || "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {domain.comment || "—"}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

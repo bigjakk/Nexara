@@ -1,9 +1,12 @@
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import type { ClusterResponse } from "@/types/api";
 
 const statusConfig: Record<
   ClusterResponse["status"],
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
+  {
+    label: string;
+    variant: BadgeVariant;
+  }
 > = {
   online: { label: "Online", variant: "default" },
   degraded: { label: "Degraded", variant: "outline" },

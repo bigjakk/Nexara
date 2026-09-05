@@ -6,7 +6,11 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
   useCreateHAResource,
@@ -72,9 +76,15 @@ export function HAResourceForm(props: Props) {
       setSID(props.resource.sid);
       setState(props.resource.state);
       setGroup(props.resource.group);
-      setMaxRestart(props.resource.max_restart != null ? String(props.resource.max_restart) : "1");
+      setMaxRestart(
+        props.resource.max_restart != null
+          ? String(props.resource.max_restart)
+          : "1",
+      );
       setMaxRelocate(String(props.resource.max_relocate));
-      setFailback(props.resource.failback == null ? true : props.resource.failback === 1);
+      setFailback(
+        props.resource.failback == null ? true : props.resource.failback === 1,
+      );
       setComment(props.resource.comment ?? "");
     }
   }, [props]);
@@ -91,8 +101,12 @@ export function HAResourceForm(props: Props) {
           sid,
           state,
           ...(groupValue ? { group: groupValue } : {}),
-          ...(Number.isFinite(maxRestartNum) ? { max_restart: maxRestartNum } : {}),
-          ...(Number.isFinite(maxRelocateNum) ? { max_relocate: maxRelocateNum } : {}),
+          ...(Number.isFinite(maxRestartNum)
+            ? { max_restart: maxRestartNum }
+            : {}),
+          ...(Number.isFinite(maxRelocateNum)
+            ? { max_relocate: maxRelocateNum }
+            : {}),
           failback: failback ? 1 : 0,
           ...(comment ? { comment } : {}),
         },
@@ -104,8 +118,12 @@ export function HAResourceForm(props: Props) {
           sid: props.resource.sid,
           state,
           group: groupValue,
-          ...(Number.isFinite(maxRestartNum) ? { max_restart: maxRestartNum } : {}),
-          ...(Number.isFinite(maxRelocateNum) ? { max_relocate: maxRelocateNum } : {}),
+          ...(Number.isFinite(maxRestartNum)
+            ? { max_restart: maxRestartNum }
+            : {}),
+          ...(Number.isFinite(maxRelocateNum)
+            ? { max_relocate: maxRelocateNum }
+            : {}),
           failback: failback ? 1 : 0,
           comment,
         },
@@ -114,7 +132,8 @@ export function HAResourceForm(props: Props) {
     }
   };
 
-  const isPending = props.mode === "create" ? createMut.isPending : updateMut.isPending;
+  const isPending =
+    props.mode === "create" ? createMut.isPending : updateMut.isPending;
   const mutError = props.mode === "create" ? createMut.error : updateMut.error;
   const groups = groupsQuery.data ?? [];
 
@@ -156,7 +175,9 @@ export function HAResourceForm(props: Props) {
           </SelectTrigger>
           <SelectContent>
             {HA_STATES.map((s) => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -164,14 +185,19 @@ export function HAResourceForm(props: Props) {
 
       <div className="space-y-2">
         <Label>Group</Label>
-        <Select value={group === "" ? "__none__" : group} onValueChange={setGroup}>
+        <Select
+          value={group === "" ? "__none__" : group}
+          onValueChange={setGroup}
+        >
           <SelectTrigger>
             <SelectValue placeholder="— None —" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__none__">— None —</SelectItem>
             {groups.map((g) => (
-              <SelectItem key={g.group} value={g.group}>{g.group}</SelectItem>
+              <SelectItem key={g.group} value={g.group}>
+                {g.group}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -186,7 +212,9 @@ export function HAResourceForm(props: Props) {
             min="0"
             max="10"
             value={maxRestart}
-            onChange={(e) => { setMaxRestart(e.target.value); }}
+            onChange={(e) => {
+              setMaxRestart(e.target.value);
+            }}
           />
         </div>
         <div className="space-y-2">
@@ -197,17 +225,27 @@ export function HAResourceForm(props: Props) {
             min="0"
             max="10"
             value={maxRelocate}
-            onChange={(e) => { setMaxRelocate(e.target.value); }}
+            onChange={(e) => {
+              setMaxRelocate(e.target.value);
+            }}
           />
         </div>
       </div>
 
       <div className="flex items-center justify-between rounded-md border p-3">
         <div>
-          <Label htmlFor="failback" className="cursor-pointer">Failback</Label>
-          <p className="text-xs text-muted-foreground">Move back to higher-priority node when available.</p>
+          <Label htmlFor="failback" className="cursor-pointer">
+            Failback
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Move back to higher-priority node when available.
+          </p>
         </div>
-        <Switch id="failback" checked={failback} onCheckedChange={setFailback} />
+        <Switch
+          id="failback"
+          checked={failback}
+          onCheckedChange={setFailback}
+        />
       </div>
 
       <div className="space-y-2">
@@ -215,7 +253,9 @@ export function HAResourceForm(props: Props) {
         <Textarea
           id="comment"
           value={comment}
-          onChange={(e) => { setComment(e.target.value); }}
+          onChange={(e) => {
+            setComment(e.target.value);
+          }}
           rows={2}
         />
       </div>
@@ -227,7 +267,10 @@ export function HAResourceForm(props: Props) {
         </div>
       )}
 
-      <Button type="submit" disabled={isPending || (props.mode === "create" && !sid)}>
+      <Button
+        type="submit"
+        disabled={isPending || (props.mode === "create" && !sid)}
+      >
         {isPending ? "Saving..." : props.mode === "create" ? "Create" : "Save"}
       </Button>
     </form>

@@ -18,7 +18,9 @@ package netguard
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"syscall"
+	"time"
 )
 
 // cloudMetadataIPv4 is the universally-blocked IMDS address used by
@@ -81,4 +83,48 @@ func DialControlSSRFGuard(_ string, address string, _ syscall.RawConn) error {
 		return fmt.Errorf("blocked SSRF target: %s", ip)
 	}
 	return nil
+}
+
+// NewHTTPClient builds an *http.Client for fetching from a fixed external
+// upstream (a security feed, an upstream release index). Two properties matter
+// beyond the timeout:
+//
+//   - Redirects are NOT followed. CheckRedirect returns ErrUseLastResponse, so
+//     the caller sees the 3xx itself. For a feed that is a fail-closed signal —
+//     the one host we expect to talk to should not be bouncing us elsewhere.
+//     For a caller that reads the redirect deliberately (virtio-win's
+//     stable-virtio/ pointer is a 301 naming the current version) it is the
+//     only way to see the Location header at all.
+//   - The dial-control hook re-checks the resolved IP at TCP-connect time and
+//     refuses the always-blocked classes, closing the DNS-rebinding window
+//     between validation and connection.
+//
+// The transport is built fresh rather than reusing http.DefaultTransport so the
+// dial guard applies only to these outbound fetches, not to the whole binary.
+// Share one client per long-lived caller: each re-fetch otherwise discards the
+// keep-alive connection and pays a fresh TLS handshake.
+func NewHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   DialControlSSRFGuard,
+	}
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          16,
+		MaxIdleConnsPerHost:   4,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }

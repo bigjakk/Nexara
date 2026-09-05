@@ -58,10 +58,7 @@ export function useBranding() {
 export function useUpsertSetting() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      key,
-      ...payload
-    }: UpsertSettingPayload & { key: string }) =>
+    mutationFn: ({ key, ...payload }: UpsertSettingPayload & { key: string }) =>
       apiClient.put<SettingResponse>(
         `/api/v1/settings/${encodeURIComponent(key)}`,
         payload,

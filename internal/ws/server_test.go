@@ -4,36 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"net"
 	"net/http"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	gorillaws "github.com/gorilla/websocket"
 	"github.com/google/uuid"
+	gorillaws "github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/auth"
 )
 
 type testEnv struct {
-	server      *Server
 	redisClient *redis.Client
 	jwtSvc      *auth.JWTService
 	port        int
 }
 
-func setupIntegration(t *testing.T) (*testEnv, func()) {
+func setupIntegration(t *testing.T) *testEnv {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
 
 	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := testLogger()
 
 	hub := NewHub(logger, 0)
 	hub.Run()
@@ -54,53 +50,35 @@ func setupIntegration(t *testing.T) (*testEnv, func()) {
 	sub := NewRedisSubscriber(redisClient, hub, logger)
 	go sub.Run(ctx)
 
-	// Find a free port and start the server.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-
-	go func() {
-		_ = server.Listen(port)
-	}()
-
-	// Wait for server to be ready.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, dialErr := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
-		if dialErr == nil {
-			conn.Close()
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	cleanup := func() {
+	// Registered before the server starts, not after: startTestServer fatals
+	// when the server never becomes reachable, and the hub goroutine and the
+	// Redis subscriber still need tearing down on that path. Order inside
+	// matters — the server stops accepting before the hub it publishes into
+	// goes away, and Shutdown on an app that never listened is a no-op.
+	t.Cleanup(func() {
 		cancel()
 		server.Shutdown()
 		hub.Stop()
 		redisClient.Close()
-	}
+	})
+
+	port := startTestServer(t, server)
 
 	return &testEnv{
-		server:      server,
 		redisClient: redisClient,
 		jwtSvc:      jwtSvc,
 		port:        port,
-	}, cleanup
+	}
 }
 
-func (e *testEnv) generateToken(t *testing.T) string {
+// mintHubToken issues a token for a fresh user. Per remediation 2.7, the /ws
+// upgrade requires a hub-scoped token; the long-lived access token is rejected,
+// so tests that open the hub path mint one (≤60s TTL) the way the SPA does.
+func mintHubToken(t *testing.T, jwtSvc *auth.JWTService) string {
 	t.Helper()
-	userID := uuid.New()
-	// Per remediation 2.7, /ws upgrade requires a hub-scoped token; the
-	// long-lived access token is rejected. Tests that exercise the hub
-	// path mint a hub token (≤60s TTL) the same way the SPA does.
-	token, _, err := e.jwtSvc.GenerateWSHubToken(userID, "test@example.com", "admin", 60*time.Second)
+	token, _, err := jwtSvc.GenerateWSHubToken(uuid.New(), "test@example.com", "admin", 60*time.Second)
 	if err != nil {
-		t.Fatalf("generate token: %v", err)
+		t.Fatalf("generate hub token: %v", err)
 	}
 	return token
 }
@@ -161,8 +139,7 @@ func writeMsg(t *testing.T, conn *gorillaws.Conn, msg IncomingMessage) {
 }
 
 func TestIntegrationHealthz(t *testing.T) {
-	env, cleanup := setupIntegration(t)
-	defer cleanup()
+	env := setupIntegration(t)
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", env.port)
 	resp, err := http.Get(url) //nolint:gosec // test
@@ -177,10 +154,9 @@ func TestIntegrationHealthz(t *testing.T) {
 }
 
 func TestIntegrationWSConnectAndWelcome(t *testing.T) {
-	env, cleanup := setupIntegration(t)
-	defer cleanup()
+	env := setupIntegration(t)
 
-	token := env.generateToken(t)
+	token := mintHubToken(t, env.jwtSvc)
 	conn := env.dialWS(t, token)
 	defer conn.Close()
 
@@ -195,10 +171,9 @@ func TestIntegrationWSConnectAndWelcome(t *testing.T) {
 // instead of the URL. Server echoes `nexara.token` back, browser opens the
 // connection cleanly.
 func TestIntegrationWSConnectViaSubprotocol(t *testing.T) {
-	env, cleanup := setupIntegration(t)
-	defer cleanup()
+	env := setupIntegration(t)
 
-	token := env.generateToken(t)
+	token := mintHubToken(t, env.jwtSvc)
 	conn := env.dialWSSubprotocol(t, token)
 	defer conn.Close()
 
@@ -212,8 +187,7 @@ func TestIntegrationWSConnectViaSubprotocol(t *testing.T) {
 // (the kind the API uses for Authorization: Bearer) is REJECTED on the
 // /ws upgrade. Per remediation 2.7, only hub-scoped tokens are accepted.
 func TestIntegrationWSAccessTokenRejected(t *testing.T) {
-	env, cleanup := setupIntegration(t)
-	defer cleanup()
+	env := setupIntegration(t)
 
 	userID := uuid.New()
 	accessToken, _, err := env.jwtSvc.GenerateAccessToken(userID, "test@example.com", "admin")
@@ -232,8 +206,7 @@ func TestIntegrationWSAccessTokenRejected(t *testing.T) {
 }
 
 func TestIntegrationWSNoToken(t *testing.T) {
-	env, cleanup := setupIntegration(t)
-	defer cleanup()
+	env := setupIntegration(t)
 
 	url := fmt.Sprintf("ws://127.0.0.1:%d/ws", env.port)
 	_, resp, err := gorillaws.DefaultDialer.Dial(url, nil)
@@ -246,10 +219,9 @@ func TestIntegrationWSNoToken(t *testing.T) {
 }
 
 func TestIntegrationSubscribeAndReceive(t *testing.T) {
-	env, cleanup := setupIntegration(t)
-	defer cleanup()
+	env := setupIntegration(t)
 
-	token := env.generateToken(t)
+	token := mintHubToken(t, env.jwtSvc)
 	conn := env.dialWS(t, token)
 	defer conn.Close()
 
@@ -292,10 +264,9 @@ func TestIntegrationSubscribeAndReceive(t *testing.T) {
 }
 
 func TestIntegrationPingPong(t *testing.T) {
-	env, cleanup := setupIntegration(t)
-	defer cleanup()
+	env := setupIntegration(t)
 
-	token := env.generateToken(t)
+	token := mintHubToken(t, env.jwtSvc)
 	conn := env.dialWS(t, token)
 	defer conn.Close()
 

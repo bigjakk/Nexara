@@ -17,10 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, Pencil } from "lucide-react";
-import {
-  useCreateSDNDNS,
-  useUpdateSDNDNS,
-} from "../api/network-queries";
+import { useCreateSDNDNS, useUpdateSDNDNS } from "../api/network-queries";
 import type { SDNDNS, CreateSDNDNSRequest } from "../types/network";
 
 interface CreateSDNDNSDialogProps {
@@ -71,16 +68,22 @@ export function CreateSDNDNSDialog({
     if (isEdit) {
       const updateParams: Omit<CreateSDNDNSRequest, "dns" | "type"> =
         Object.fromEntries(
-          Object.entries(params).filter(
-            ([k]) => k !== "dns" && k !== "type",
-          ),
+          Object.entries(params).filter(([k]) => k !== "dns" && k !== "type"),
         );
       update.mutate(
         { dns: initialData.dns, params: updateParams },
-        { onSuccess: () => { setOpen(false); } },
+        {
+          onSuccess: () => {
+            setOpen(false);
+          },
+        },
       );
     } else {
-      create.mutate(params, { onSuccess: () => { setOpen(false); } });
+      create.mutate(params, {
+        onSuccess: () => {
+          setOpen(false);
+        },
+      });
     }
   };
 
@@ -88,7 +91,11 @@ export function CreateSDNDNSDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {isEdit ? (
-          <Button variant="ghost" size="icon">
+          <Button
+            aria-label={`Edit DNS ${initialData.dns}`}
+            variant="ghost"
+            size="icon"
+          >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (
@@ -111,7 +118,9 @@ export function CreateSDNDNSDialog({
               <Input
                 placeholder="mydns"
                 value={dns}
-                onChange={(e) => { setDns(e.target.value); }}
+                onChange={(e) => {
+                  setDns(e.target.value);
+                }}
                 disabled={isEdit}
               />
             </div>
@@ -136,7 +145,9 @@ export function CreateSDNDNSDialog({
             <Input
               placeholder="https://dns.example.com/api"
               value={url}
-              onChange={(e) => { setUrl(e.target.value); }}
+              onChange={(e) => {
+                setUrl(e.target.value);
+              }}
             />
           </div>
           <div className="space-y-2">
@@ -145,14 +156,21 @@ export function CreateSDNDNSDialog({
               type="password"
               placeholder="API key"
               value={key}
-              onChange={(e) => { setKey(e.target.value); }}
+              onChange={(e) => {
+                setKey(e.target.value);
+              }}
             />
           </div>
           {errorMessage && (
             <p className="text-sm text-destructive">{errorMessage}</p>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button

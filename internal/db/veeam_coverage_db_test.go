@@ -2,11 +2,9 @@ package db
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -50,9 +48,7 @@ func TestVeeamCoverageQueries(t *testing.T) {
 	purge()
 	defer purge()
 
-	if err := env.Migrate.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
-	}
+	migrateUp(t, env.Migrate)
 
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO clusters (id, name, api_url, token_id, token_secret_encrypted)
@@ -61,7 +57,7 @@ func TestVeeamCoverageQueries(t *testing.T) {
 		t.Fatalf("seed cluster: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'hv01')`, vcNode, vcCluster); err != nil {
+		`INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'pve-01')`, vcNode, vcCluster); err != nil {
 		t.Fatalf("seed node: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
@@ -71,7 +67,7 @@ func TestVeeamCoverageQueries(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO veeam_platforms (veeam_server_id, platform_id, display_name, cluster_id)
-		 VALUES ($1, $2, 'CRJLAB', $3), ($1, $4, 'OTHER', NULL)`,
+		 VALUES ($1, $2, 'cluster01', $3), ($1, $4, 'OTHER', NULL)`,
 		vcServer, vcPlatform, vcCluster, vcUnmapped); err != nil {
 		t.Fatalf("seed platforms: %v", err)
 	}

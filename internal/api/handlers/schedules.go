@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/cronspec"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
-	"github.com/bigjakk/nexara/internal/scheduler"
 )
 
 // ScheduleHandler handles scheduled task CRUD endpoints.
@@ -115,18 +115,17 @@ func (h *ScheduleHandler) Create(c fiber.Ctx) error {
 	if !validScheduleActions[req.Action] {
 		return fiber.NewError(fiber.StatusBadRequest, "action must be one of: snapshot, reboot")
 	}
-	if err := scheduler.ValidateCron(req.Schedule); err != nil {
+	// One call, so the next run stored is the one the validation computed.
+	// It matters on this table: an invalid next_run_at reads as "due now", so
+	// a schedule that can never fire would be claimed and run on every tick.
+	nextRun, err := cronspec.NextValidRun(req.Schedule, time.Now())
+	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
+	nextRunAt := pgtype.Timestamptz{Time: nextRun, Valid: true}
 
 	if req.Params == nil {
 		req.Params = json.RawMessage(`{}`)
-	}
-
-	nextRun, cronErr := scheduler.NextRunTime(req.Schedule, time.Now())
-	var nextRunAt pgtype.Timestamptz
-	if cronErr == nil && !nextRun.IsZero() {
-		nextRunAt = pgtype.Timestamptz{Time: nextRun, Valid: true}
 	}
 
 	task, err := h.queries.InsertScheduledTask(c.Context(), db.InsertScheduledTaskParams{
@@ -198,7 +197,7 @@ func (h *ScheduleHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	if err := scheduler.ValidateCron(req.Schedule); err != nil {
+	if err := cronspec.ValidateCron(req.Schedule); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 

@@ -52,39 +52,39 @@ func TestPlanDoesNotMigratePinnedWorkload(t *testing.T) {
 	}
 }
 
-// TestPlanRespectsAntiAffinityWithPinnedPartner reproduces the docker01/docker02
-// incident: vm 122 (docker02) has PCI passthrough so it is pinned to HV01, and
-// vm 119 (docker01) has a negative-affinity (anti-affinity) rule against it.
-// HV01 is the least-loaded node, so the planner is tempted to migrate 119 onto
-// it — but HV01 hosts 119's pinned anti-affinity partner, which Proxmox HA would
-// reject (exit code 2). The planner must skip HV01 and rebalance some other way.
+// TestPlanRespectsAntiAffinityWithPinnedPartner reproduces a real incident:
+// vm 122 has PCI passthrough so it is pinned to pve-01, and vm 119 has a
+// negative-affinity (anti-affinity) rule against it. pve-01 is the least-loaded
+// node, so the planner is tempted to migrate 119 onto it — but pve-01 hosts
+// 119's pinned anti-affinity partner, which Proxmox HA would reject (exit code
+// 2). The planner must skip pve-01 and rebalance some other way.
 //
 // Regression guard: the bug was that pinned VMs were filtered out before
-// planning, so the anti-affinity check couldn't see vm 122 on HV01 and allowed
+// planning, so the anti-affinity check couldn't see vm 122 on pve-01 and allowed
 // the illegal move.
 func TestPlanRespectsAntiAffinityWithPinnedPartner(t *testing.T) {
 	weights := DefaultWeights()
 
 	nodeEntries := map[string]proxmox.NodeListEntry{
-		"HV01": {Node: "HV01", Status: "online", MaxCPU: 8, MaxMem: 16e9},
-		"HV02": {Node: "HV02", Status: "online", MaxCPU: 8, MaxMem: 16e9},
-		"HV03": {Node: "HV03", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+		"pve-01": {Node: "pve-01", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+		"pve-02": {Node: "pve-02", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+		"pve-03": {Node: "pve-03", Status: "online", MaxCPU: 8, MaxMem: 16e9},
 	}
 
 	nodeWorkloads := map[string][]Workload{
-		// HV01: only the pinned passthrough VM — least loaded, so the most
+		// pve-01: only the pinned passthrough VM — least loaded, so the most
 		// tempting migration target.
-		"HV01": {
-			{VMID: 122, Type: "qemu", Node: "HV01", CPUUsage: 0.1, CPUs: 2, Mem: 1e9, MaxMem: 4e9, Pinned: true},
+		"pve-01": {
+			{VMID: 122, Type: "qemu", Node: "pve-01", CPUUsage: 0.1, CPUs: 2, Mem: 1e9, MaxMem: 4e9, Pinned: true},
 		},
-		// HV02: the hot node. 119 is the biggest workload (tried first), with a
+		// pve-02: the hot node. 119 is the biggest workload (tried first), with a
 		// movable bystander to absorb the rebalance.
-		"HV02": {
-			{VMID: 119, Type: "qemu", Node: "HV02", CPUUsage: 0.6, CPUs: 8, Mem: 11e9, MaxMem: 12e9},
-			{VMID: 200, Type: "qemu", Node: "HV02", CPUUsage: 0.4, CPUs: 4, Mem: 4e9, MaxMem: 8e9},
+		"pve-02": {
+			{VMID: 119, Type: "qemu", Node: "pve-02", CPUUsage: 0.6, CPUs: 8, Mem: 11e9, MaxMem: 12e9},
+			{VMID: 200, Type: "qemu", Node: "pve-02", CPUUsage: 0.4, CPUs: 4, Mem: 4e9, MaxMem: 8e9},
 		},
-		"HV03": {
-			{VMID: 203, Type: "qemu", Node: "HV03", CPUUsage: 0.3, CPUs: 4, Mem: 5e9, MaxMem: 8e9},
+		"pve-03": {
+			{VMID: 203, Type: "qemu", Node: "pve-03", CPUUsage: 0.3, CPUs: 4, Mem: 5e9, MaxMem: 8e9},
 		},
 	}
 
@@ -110,8 +110,8 @@ func TestPlanRespectsAntiAffinityWithPinnedPartner(t *testing.T) {
 		if r.VMID == 122 {
 			t.Errorf("pinned VM 122 must never be migrated, got %+v", r)
 		}
-		if r.VMID == 119 && r.TargetNode == "HV01" {
-			t.Errorf("anti-affinity violated: vm 119 recommended onto HV01 where its pinned partner 122 lives: %+v", r)
+		if r.VMID == 119 && r.TargetNode == "pve-01" {
+			t.Errorf("anti-affinity violated: vm 119 recommended onto pve-01 where its pinned partner 122 lives: %+v", r)
 		}
 	}
 }

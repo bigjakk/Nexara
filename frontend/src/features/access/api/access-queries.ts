@@ -128,10 +128,18 @@ export type AccessPermissions = Record<string, Record<string, boolean>>;
 const errorsHandledLocally = { onError: () => undefined };
 
 const base = (clusterId: string) => `/api/v1/clusters/${clusterId}/access`;
-const key = (clusterId: string, ...rest: string[]) => ["clusters", clusterId, "access", ...rest];
+const key = (clusterId: string, ...rest: string[]) => [
+  "clusters",
+  clusterId,
+  "access",
+  ...rest,
+];
 
 /** Invalidates every access query for a cluster. */
-function invalidateAccess(qc: ReturnType<typeof useQueryClient>, clusterId: string) {
+function invalidateAccess(
+  qc: ReturnType<typeof useQueryClient>,
+  clusterId: string,
+) {
   void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "access"] });
 }
 
@@ -148,7 +156,10 @@ export function useAccessUsers(clusterId: string) {
 export function useAccessUser(clusterId: string, userid: string) {
   return useQuery({
     queryKey: key(clusterId, "users", userid),
-    queryFn: () => apiClient.get<AccessUserDetail>(`${base(clusterId)}/users/${encodeURIComponent(userid)}`),
+    queryFn: () =>
+      apiClient.get<AccessUserDetail>(
+        `${base(clusterId)}/users/${encodeURIComponent(userid)}`,
+      ),
     enabled: clusterId.length > 0 && userid.length > 0,
   });
 }
@@ -168,18 +179,32 @@ export interface CreateAccessUserInput {
 export function useCreateAccessUser(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: CreateAccessUserInput) => apiClient.post(`${base(clusterId)}/users`, data),
+    mutationFn: (data: CreateAccessUserInput) =>
+      apiClient.post(`${base(clusterId)}/users`, data),
     ...errorsHandledLocally,
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
 export function useUpdateAccessUser(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ userid, ...data }: { userid: string } & Omit<CreateAccessUserInput, "userid" | "password">) =>
-      apiClient.put(`${base(clusterId)}/users/${encodeURIComponent(userid)}`, data),
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    mutationFn: ({
+      userid,
+      ...data
+    }: { userid: string } & Omit<
+      CreateAccessUserInput,
+      "userid" | "password"
+    >) =>
+      apiClient.put(
+        `${base(clusterId)}/users/${encodeURIComponent(userid)}`,
+        data,
+      ),
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
@@ -187,9 +212,13 @@ export function useDeleteAccessUser(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ userid, force }: { userid: string; force?: boolean }) =>
-      apiClient.delete(`${base(clusterId)}/users/${encodeURIComponent(userid)}${force ? "?force=true" : ""}`),
+      apiClient.delete(
+        `${base(clusterId)}/users/${encodeURIComponent(userid)}${force ? "?force=true" : ""}`,
+      ),
     ...errorsHandledLocally,
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
@@ -198,7 +227,10 @@ export function useDeleteAccessUser(clusterId: string) {
 export function useAccessTokens(clusterId: string, userid: string) {
   return useQuery({
     queryKey: key(clusterId, "users", userid, "tokens"),
-    queryFn: () => apiClient.list<AccessToken>(`${base(clusterId)}/users/${encodeURIComponent(userid)}/tokens`),
+    queryFn: () =>
+      apiClient.list<AccessToken>(
+        `${base(clusterId)}/users/${encodeURIComponent(userid)}/tokens`,
+      ),
     enabled: clusterId.length > 0 && userid.length > 0,
   });
 }
@@ -206,41 +238,75 @@ export function useAccessTokens(clusterId: string, userid: string) {
 export function useCreateAccessToken(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ userid, tokenid, ...data }: { userid: string; tokenid: string; comment?: string; expire?: number; privsep?: boolean }) =>
+    mutationFn: ({
+      userid,
+      tokenid,
+      ...data
+    }: {
+      userid: string;
+      tokenid: string;
+      comment?: string;
+      expire?: number;
+      privsep?: boolean;
+    }) =>
       apiClient.post<AccessTokenCreated>(
         `${base(clusterId)}/users/${encodeURIComponent(userid)}/tokens/${encodeURIComponent(tokenid)}`,
         data,
       ),
     ...errorsHandledLocally,
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
 export function useUpdateAccessToken(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ userid, tokenid, force, ...data }: {
-      userid: string; tokenid: string; force?: boolean;
-      comment?: string; expire?: number; privsep?: boolean; regenerate?: boolean;
+    mutationFn: ({
+      userid,
+      tokenid,
+      force,
+      ...data
+    }: {
+      userid: string;
+      tokenid: string;
+      force?: boolean;
+      comment?: string;
+      expire?: number;
+      privsep?: boolean;
+      regenerate?: boolean;
     }) =>
       apiClient.put<AccessTokenCreated>(
         `${base(clusterId)}/users/${encodeURIComponent(userid)}/tokens/${encodeURIComponent(tokenid)}${force ? "?force=true" : ""}`,
         data,
       ),
     ...errorsHandledLocally,
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
 export function useDeleteAccessToken(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ userid, tokenid, force }: { userid: string; tokenid: string; force?: boolean }) =>
+    mutationFn: ({
+      userid,
+      tokenid,
+      force,
+    }: {
+      userid: string;
+      tokenid: string;
+      force?: boolean;
+    }) =>
       apiClient.delete(
         `${base(clusterId)}/users/${encodeURIComponent(userid)}/tokens/${encodeURIComponent(tokenid)}${force ? "?force=true" : ""}`,
       ),
     ...errorsHandledLocally,
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
@@ -257,7 +323,10 @@ export function useAccessGroups(clusterId: string) {
 export function useAccessGroup(clusterId: string, groupid: string) {
   return useQuery({
     queryKey: key(clusterId, "groups", groupid),
-    queryFn: () => apiClient.get<AccessGroupDetail>(`${base(clusterId)}/groups/${encodeURIComponent(groupid)}`),
+    queryFn: () =>
+      apiClient.get<AccessGroupDetail>(
+        `${base(clusterId)}/groups/${encodeURIComponent(groupid)}`,
+      ),
     enabled: clusterId.length > 0 && groupid.length > 0,
   });
 }
@@ -265,9 +334,12 @@ export function useAccessGroup(clusterId: string, groupid: string) {
 export function useCreateAccessGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { groupid: string; comment?: string }) => apiClient.post(`${base(clusterId)}/groups`, data),
+    mutationFn: (data: { groupid: string; comment?: string }) =>
+      apiClient.post(`${base(clusterId)}/groups`, data),
     ...errorsHandledLocally,
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
@@ -275,17 +347,27 @@ export function useUpdateAccessGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ groupid, comment }: { groupid: string; comment: string }) =>
-      apiClient.put(`${base(clusterId)}/groups/${encodeURIComponent(groupid)}`, { comment }),
+      apiClient.put(
+        `${base(clusterId)}/groups/${encodeURIComponent(groupid)}`,
+        { comment },
+      ),
     ...errorsHandledLocally,
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
 export function useDeleteAccessGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (groupid: string) => apiClient.delete(`${base(clusterId)}/groups/${encodeURIComponent(groupid)}`),
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    mutationFn: (groupid: string) =>
+      apiClient.delete(
+        `${base(clusterId)}/groups/${encodeURIComponent(groupid)}`,
+      ),
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
@@ -302,9 +384,12 @@ export function useAccessRoles(clusterId: string) {
 export function useCreateAccessRole(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { roleid: string; privs: string }) => apiClient.post(`${base(clusterId)}/roles`, data),
+    mutationFn: (data: { roleid: string; privs: string }) =>
+      apiClient.post(`${base(clusterId)}/roles`, data),
     ...errorsHandledLocally,
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
@@ -314,17 +399,26 @@ export function useUpdateAccessRole(clusterId: string) {
     // privs is always sent: the API rejects an omitted value rather than
     // treating it as "clear", because clearing strips every privilege.
     mutationFn: ({ roleid, privs }: { roleid: string; privs: string }) =>
-      apiClient.put(`${base(clusterId)}/roles/${encodeURIComponent(roleid)}`, { privs }),
+      apiClient.put(`${base(clusterId)}/roles/${encodeURIComponent(roleid)}`, {
+        privs,
+      }),
     ...errorsHandledLocally,
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
 export function useDeleteAccessRole(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (roleid: string) => apiClient.delete(`${base(clusterId)}/roles/${encodeURIComponent(roleid)}`),
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    mutationFn: (roleid: string) =>
+      apiClient.delete(
+        `${base(clusterId)}/roles/${encodeURIComponent(roleid)}`,
+      ),
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
@@ -358,9 +452,12 @@ export interface UpdateACLInput {
 export function useUpdateAccessACL(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: UpdateACLInput) => apiClient.put(`${base(clusterId)}/acl`, data),
+    mutationFn: (data: UpdateACLInput) =>
+      apiClient.put(`${base(clusterId)}/acl`, data),
     ...errorsHandledLocally,
-    onSuccess: () => { invalidateAccess(qc, clusterId); },
+    onSuccess: () => {
+      invalidateAccess(qc, clusterId);
+    },
   });
 }
 
@@ -385,7 +482,8 @@ export function useAccessDomains(clusterId: string) {
 export function useAccessPermissions(clusterId: string) {
   return useQuery({
     queryKey: key(clusterId, "permissions"),
-    queryFn: () => apiClient.get<AccessPermissions>(`${base(clusterId)}/permissions`),
+    queryFn: () =>
+      apiClient.get<AccessPermissions>(`${base(clusterId)}/permissions`),
     enabled: clusterId.length > 0,
     staleTime: 5 * 60_000,
   });

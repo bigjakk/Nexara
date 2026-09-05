@@ -17,10 +17,7 @@ export function useClusterMetrics(
 
   const handleMessage = useCallback(
     (payload: unknown) => {
-      processMetricMessage(
-        clusterId,
-        payload as ClusterMetricSummary,
-      );
+      processMetricMessage(clusterId, payload as ClusterMetricSummary);
     },
     [clusterId, processMetricMessage],
   );

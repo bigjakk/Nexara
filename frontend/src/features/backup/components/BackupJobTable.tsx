@@ -9,7 +9,14 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Pencil, Trash2, Play, Loader2, ChevronRight, ChevronDown } from "lucide-react";
+import {
+  Pencil,
+  Trash2,
+  Play,
+  Loader2,
+  ChevronRight,
+  ChevronDown,
+} from "lucide-react";
 import type { BackupJob } from "../types/backup";
 import { useDeleteBackupJob, useRunBackupJob } from "../api/backup-queries";
 import { describeSchedule } from "../lib/schedule";
@@ -119,9 +126,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                     <TableCell className="text-sm">
                       {job.storage ?? "-"}
                     </TableCell>
-                    <TableCell className="text-sm">
-                      {job.mode ?? "-"}
-                    </TableCell>
+                    <TableCell className="text-sm">{job.mode ?? "-"}</TableCell>
                     <TableCell>
                       {isEnabled ? (
                         <Badge variant="default" className="bg-emerald-600">
@@ -196,15 +201,11 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                       <TableCell colSpan={8} className="bg-muted/30 px-8 py-4">
                         <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm md:grid-cols-4">
                           <div>
-                            <span className="text-muted-foreground">
-                              Type:
-                            </span>{" "}
+                            <span className="text-muted-foreground">Type:</span>{" "}
                             {job.type}
                           </div>
                           <div>
-                            <span className="text-muted-foreground">
-                              Node:
-                            </span>{" "}
+                            <span className="text-muted-foreground">Node:</span>{" "}
                             {job.node ?? "All"}
                           </div>
                           <div>
@@ -220,9 +221,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                             {job.compress ?? "-"}
                           </div>
                           <div>
-                            <span className="text-muted-foreground">
-                              Mail:
-                            </span>{" "}
+                            <span className="text-muted-foreground">Mail:</span>{" "}
                             {job.mailto ?? "-"}
                           </div>
                           <div className="col-span-2">

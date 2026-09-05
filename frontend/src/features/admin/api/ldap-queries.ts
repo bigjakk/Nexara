@@ -66,8 +66,7 @@ export function useUpdateLDAPConfig() {
 export function useDeleteLDAPConfig() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiClient.delete(`/api/v1/ldap/configs/${id}`),
+    mutationFn: (id: string) => apiClient.delete(`/api/v1/ldap/configs/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["ldap", "configs"] });
     },

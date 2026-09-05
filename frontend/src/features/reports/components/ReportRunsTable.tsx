@@ -7,7 +7,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Eye, Download } from "lucide-react";
 import { useReportRuns } from "../api/report-queries";
 import { getValidAccessToken } from "@/lib/api-client";
@@ -23,7 +23,7 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
   snapshot_inventory: "Snapshot Inventory",
 };
 
-const STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   completed: "default",
   running: "outline",
   pending: "secondary",
@@ -37,9 +37,23 @@ interface ReportRunsTableProps {
 export function ReportRunsTable({ onPreview }: ReportRunsTableProps) {
   const { data: runs, isLoading, error } = useReportRuns();
 
-  if (isLoading) return <div className="py-8 text-center text-muted-foreground">Loading...</div>;
-  if (error) return <div className="py-8 text-center text-destructive">Failed to load report history: {error instanceof Error ? error.message : "Unknown error"}</div>;
-  if (!runs?.length) return <div className="py-8 text-center text-muted-foreground">No report runs yet.</div>;
+  if (isLoading)
+    return (
+      <div className="py-8 text-center text-muted-foreground">Loading...</div>
+    );
+  if (error)
+    return (
+      <div className="py-8 text-center text-destructive">
+        Failed to load report history:{" "}
+        {error instanceof Error ? error.message : "Unknown error"}
+      </div>
+    );
+  if (!runs?.length)
+    return (
+      <div className="py-8 text-center text-muted-foreground">
+        No report runs yet.
+      </div>
+    );
 
   const handleDownloadCSV = async (run: ReportRun) => {
     const token = (await getValidAccessToken()) ?? "";
@@ -79,7 +93,9 @@ export function ReportRunsTable({ onPreview }: ReportRunsTableProps) {
                 {run.status}
               </Badge>
               {run.error_message ? (
-                <span className="ml-2 text-xs text-destructive">{run.error_message}</span>
+                <span className="ml-2 text-xs text-destructive">
+                  {run.error_message}
+                </span>
               ) : null}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
@@ -89,7 +105,9 @@ export function ReportRunsTable({ onPreview }: ReportRunsTableProps) {
               {run.started_at ? new Date(run.started_at).toLocaleString() : "-"}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {run.completed_at ? new Date(run.completed_at).toLocaleString() : "-"}
+              {run.completed_at
+                ? new Date(run.completed_at).toLocaleString()
+                : "-"}
             </TableCell>
             <TableCell>{run.time_range_hours}h</TableCell>
             <TableCell>
@@ -106,7 +124,9 @@ export function ReportRunsTable({ onPreview }: ReportRunsTableProps) {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => { void handleDownloadCSV(run); }}
+                    onClick={() => {
+                      void handleDownloadCSV(run);
+                    }}
                     title="Download CSV"
                   >
                     <Download className="h-4 w-4" />

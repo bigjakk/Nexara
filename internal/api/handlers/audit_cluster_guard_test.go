@@ -82,14 +82,15 @@ var auditClusterExempt = map[string]string{
 	"ldap.go.Sync":                  "LDAP sync is install-global",
 	"oidc.go.Callback":              "OIDC login callback is an auth event; no cluster in scope",
 	"settings.go.auditSettingWrite": "settings are install-global",
+	"virtio_win.go.SetMirror":       "the virtio-win download source is one instance-wide setting row, gated on global manage:settings",
 	"audit.go.UpdateSyslogConfig":   "syslog forwarding is an install-global setting",
 	"audit.go.TestSyslog":           "syslog forwarding is an install-global setting",
 
 	// Resources whose tables have no cluster_id column at all.
-	"alerts.go.CreateChannel":    "notification_channels has no cluster_id column",
-	"alerts.go.UpdateChannel":    "notification_channels has no cluster_id column",
-	"alerts.go.DeleteChannel":    "notification_channels has no cluster_id column",
-	"alerts.go.TestChannel":      "notification_channels has no cluster_id column",
+	"alerts.go.CreateChannel": "notification_channels has no cluster_id column",
+	"alerts.go.UpdateChannel": "notification_channels has no cluster_id column",
+	"alerts.go.DeleteChannel": "notification_channels has no cluster_id column",
+	"alerts.go.TestChannel":   "notification_channels has no cluster_id column",
 	// A Veeam server can protect several Proxmox clusters at once, so
 	// veeam_servers has no cluster_id column and naming any one cluster would
 	// be wrong rather than merely incomplete. Every route on the registry is
@@ -150,20 +151,16 @@ func nullClusterInsert(lit *ast.CompositeLit) bool {
 	return true // omitted entirely — the zero pgtype.UUID is SQL NULL
 }
 
-// auditParamsType returns the params type name if lit is one of the audit
-// insert structs, qualified or not.
-func auditParamsType(lit *ast.CompositeLit) string {
+// isAuditParams reports whether lit is one of the audit insert structs,
+// qualified or not.
+func isAuditParams(lit *ast.CompositeLit) bool {
 	switch t := lit.Type.(type) {
 	case *ast.SelectorExpr:
-		if auditInsertParams[t.Sel.Name] {
-			return t.Sel.Name
-		}
+		return auditInsertParams[t.Sel.Name]
 	case *ast.Ident:
-		if auditInsertParams[t.Name] {
-			return t.Name
-		}
+		return auditInsertParams[t.Name]
 	}
-	return ""
+	return false
 }
 
 // nullClusterArg reports whether expr is a pgtype.UUID composite literal that
@@ -286,7 +283,7 @@ func TestGuard_AuditCallsCarryResourceCluster(t *testing.T) {
 					pos = node.Pos()
 
 				case *ast.CompositeLit:
-					if auditParamsType(node) == "" || !nullClusterInsert(node) {
+					if !isAuditParams(node) || !nullClusterInsert(node) {
 						return true
 					}
 					pos = node.Pos()

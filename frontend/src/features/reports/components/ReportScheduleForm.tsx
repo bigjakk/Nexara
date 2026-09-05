@@ -71,7 +71,8 @@ export function ReportScheduleForm({
     enabled: open,
   });
 
-  const emailChannels = channels?.filter((c) => c.channel_type === "email") ?? [];
+  const emailChannels =
+    channels?.filter((c) => c.channel_type === "email") ?? [];
   const isEditing = !!editSchedule;
 
   useEffect(() => {
@@ -116,11 +117,17 @@ export function ReportScheduleForm({
     if (isEditing) {
       updateSchedule.mutate(
         { id: editSchedule.id, ...data },
-        { onSuccess: () => { setOpen(false); } },
+        {
+          onSuccess: () => {
+            setOpen(false);
+          },
+        },
       );
     } else {
       createSchedule.mutate(data, {
-        onSuccess: () => { setOpen(false); },
+        onSuccess: () => {
+          setOpen(false);
+        },
       });
     }
   };
@@ -137,17 +144,27 @@ export function ReportScheduleForm({
       <div className="space-y-4 pt-4">
         <div className="space-y-2">
           <Label>Name</Label>
-          <Input value={name} onChange={(e) => { setName(e.target.value); }} placeholder="Weekly CPU Report" />
+          <Input
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+            }}
+            placeholder="Weekly CPU Report"
+          />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Report Type</Label>
             <Select value={reportType} onValueChange={setReportType}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 {REPORT_TYPES.map((t) => (
-                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  <SelectItem key={t.value} value={t.value}>
+                    {t.label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -156,10 +173,14 @@ export function ReportScheduleForm({
           <div className="space-y-2">
             <Label>Cluster</Label>
             <Select value={clusterId} onValueChange={setClusterId}>
-              <SelectTrigger><SelectValue placeholder="Select cluster" /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Select cluster" />
+              </SelectTrigger>
               <SelectContent>
                 {clusters?.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -169,12 +190,26 @@ export function ReportScheduleForm({
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Cron Schedule</Label>
-            <Input value={schedule} onChange={(e) => { setSchedule(e.target.value); }} placeholder="0 8 * * 1 (Mon 8am)" />
+            <Input
+              value={schedule}
+              onChange={(e) => {
+                setSchedule(e.target.value);
+              }}
+              placeholder="0 8 * * 1 (Mon 8am)"
+            />
           </div>
 
           <div className="space-y-2">
             <Label>Time Range (hours)</Label>
-            <Input type="number" min={1} max={8760} value={timeRangeHours} onChange={(e) => { setTimeRangeHours(Number(e.target.value)); }} />
+            <Input
+              type="number"
+              min={1}
+              max={8760}
+              value={timeRangeHours}
+              onChange={(e) => {
+                setTimeRangeHours(Number(e.target.value));
+              }}
+            />
           </div>
         </div>
 
@@ -182,7 +217,9 @@ export function ReportScheduleForm({
           <div className="space-y-2">
             <Label>Format</Label>
             <Select value={format} onValueChange={setFormat}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="html">HTML</SelectItem>
                 <SelectItem value="csv">CSV</SelectItem>
@@ -191,22 +228,34 @@ export function ReportScheduleForm({
           </div>
 
           <div className="flex items-center gap-2 pt-6">
-            <Switch checked={enabled} onCheckedChange={setEnabled} id="schedule-enabled" />
+            <Switch
+              checked={enabled}
+              onCheckedChange={setEnabled}
+              id="schedule-enabled"
+            />
             <Label htmlFor="schedule-enabled">Enabled</Label>
           </div>
         </div>
 
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Switch checked={emailEnabled} onCheckedChange={setEmailEnabled} id="email-enabled" />
+            <Switch
+              checked={emailEnabled}
+              onCheckedChange={setEmailEnabled}
+              id="email-enabled"
+            />
             <Label htmlFor="email-enabled">Email delivery</Label>
           </div>
           {emailEnabled && (
             <Select value={emailChannelId} onValueChange={setEmailChannelId}>
-              <SelectTrigger><SelectValue placeholder="Select email channel" /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Select email channel" />
+              </SelectTrigger>
               <SelectContent>
                 {emailChannels.map((ch) => (
-                  <SelectItem key={ch.id} value={ch.id}>{ch.name}</SelectItem>
+                  <SelectItem key={ch.id} value={ch.id}>
+                    {ch.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -218,7 +267,11 @@ export function ReportScheduleForm({
           disabled={!name || !clusterId || isPending}
           className="w-full"
         >
-          {isPending ? "Saving..." : isEditing ? "Update Schedule" : "Create Schedule"}
+          {isPending
+            ? "Saving..."
+            : isEditing
+              ? "Update Schedule"
+              : "Create Schedule"}
         </Button>
       </div>
     </DialogContent>

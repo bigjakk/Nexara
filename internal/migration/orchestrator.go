@@ -60,11 +60,11 @@ func (o *Orchestrator) SetProxmoxCache(cache *proxmox.ClientCache) {
 
 // migrationContext holds resolved metadata used for task tracking and audit logging.
 type migrationContext struct {
-	job       db.MigrationJob
-	vmDBID    string // VM's database UUID (for audit log resource linking)
-	vmName    string // Human-readable VM name
-	vmLabel   string // e.g. "VM 100 (my-vm)" or "CT 200 (my-ct)"
-	userID    uuid.UUID
+	job     db.MigrationJob
+	vmDBID  string // VM's database UUID (for audit log resource linking)
+	vmName  string // Human-readable VM name
+	vmLabel string // e.g. "VM 100 (my-vm)" or "CT 200 (my-ct)"
+	userID  uuid.UUID
 }
 
 // clientForCluster creates a Proxmox client from stored cluster credentials.

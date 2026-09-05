@@ -126,6 +126,12 @@ func (o settingOwner) String() string {
 // fails if a new global key appears in either map.
 var reservedGlobalSettings = map[string]settingOwner{
 	syslogSettingKey: {Endpoint: "/api/v1/audit-log/syslog-config", Action: "manage", Resource: "audit"},
+	// Not a secret — nothing authenticates to the mirror — but its own endpoint
+	// validates the URL (scheme, credentials, SSRF address policy, and the two
+	// explicit confirmations for a private address and for plain http). Left
+	// unreserved, a manage:settings holder could write an unvalidated value
+	// through the generic PUT and every Proxmox node would fetch from it.
+	virtioWinMirrorSettingKey: {Endpoint: "/api/v1/virtio-win/mirror", Action: "manage", Resource: "settings"},
 }
 
 // reservedSettingOwner returns the endpoint that owns key under scope; ok is

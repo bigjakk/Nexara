@@ -74,7 +74,10 @@ type adminAPIKeyResponse struct {
 
 // --- Helpers ---
 
-// tsPtr returns a pointer to an RFC3339 string for a nullable timestamp, or nil if null.
+// tsPtr returns a pointer to an RFC3339Nano string for a nullable timestamp, or
+// nil if null. Nano, not plain RFC3339: it keeps the sub-second precision the
+// column stores, and every non-null timestamp the API emits should agree on
+// that — a started/finished pair formatted two ways reads as a wrong duration.
 func tsPtr(ts pgtype.Timestamptz) *string {
 	if !ts.Valid {
 		return nil

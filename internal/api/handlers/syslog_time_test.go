@@ -15,12 +15,12 @@ import (
 // behind UTC, and journalctl answers "-- No entries --" — indistinguishable
 // from a node with no logs.
 //
-// HV01 on the dev cluster runs America/Los_Angeles, so this is the ordinary
-// case, not a corner one.
+// Any node in a zone behind UTC hits this, so it is the ordinary case, not a
+// corner one.
 func TestNormalizeSyslogTime_RendersInNodeLocalTime(t *testing.T) {
-	const pacific = -7 * time.Hour
+	const nodeOffset = -7 * time.Hour
 
-	got, err := normalizeSyslogTime("since", "1h", pacific)
+	got, err := normalizeSyslogTime("since", "1h", nodeOffset)
 	if err != nil {
 		t.Fatalf("normalizeSyslogTime: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestNormalizeSyslogTime_RendersInNodeLocalTime(t *testing.T) {
 	}
 
 	// Read back in the node's zone, the value must be ~1h in the node's past.
-	instant := parsed.Add(-pacific)
+	instant := parsed.Add(-nodeOffset)
 	delta := time.Since(instant)
 	if delta < 55*time.Minute || delta > 65*time.Minute {
 		t.Errorf("`1h` on a UTC-7 node resolved to %v ago in real terms, want ~1h.\n"+

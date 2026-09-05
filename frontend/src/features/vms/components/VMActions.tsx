@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Camera, Copy, ArrowRightLeft, Trash2, FileBox, Rocket } from "lucide-react";
+import {
+  Camera,
+  Copy,
+  ArrowRightLeft,
+  Trash2,
+  FileBox,
+  Rocket,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,7 +54,6 @@ interface VMActionsProps {
   onDestroy: () => void;
   onConvertToTemplate?: () => void;
 }
-
 
 export function VMActions({
   clusterId,
@@ -99,10 +105,13 @@ export function VMActions({
           kind === "ct" ? "containers" : "vms",
           resourceId,
         ];
-        queryClient.setQueryData(queryKey, (old: Record<string, unknown> | undefined) => {
-          if (!old) return old;
-          return { ...old, status: newStatus };
-        });
+        queryClient.setQueryData(
+          queryKey,
+          (old: Record<string, unknown> | undefined) => {
+            if (!old) return old;
+            return { ...old, status: newStatus };
+          },
+        );
       }
     }
     setActiveUpid(null);
@@ -131,7 +140,9 @@ export function VMActions({
             size="sm"
             className="gap-1.5"
             disabled={isPending}
-            onClick={() => { handleClick(config); }}
+            onClick={() => {
+              handleClick(config);
+            }}
           >
             {config.icon}
             {config.label}
@@ -236,7 +247,9 @@ export function VMActions({
       {/* Confirmation dialog */}
       <Dialog
         open={confirmAction !== null}
-        onOpenChange={(open) => { if (!open) setConfirmAction(null); }}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
       >
         <DialogContent>
           <DialogHeader>
@@ -249,7 +262,9 @@ export function VMActions({
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => { setConfirmAction(null); }}
+              onClick={() => {
+                setConfirmAction(null);
+              }}
             >
               Cancel
             </Button>

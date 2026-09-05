@@ -156,8 +156,8 @@ func TestValidateISCSIPortal(t *testing.T) {
 	}{
 		{"bare host", "192.168.5.2", false},
 		{"host with port", "192.168.5.2:3260", false},
-		{"hostname", "truenas.lan", false},
-		{"hostname with port", "truenas.lan:3260", false},
+		{"hostname", "nas.example.com", false},
+		{"hostname with port", "nas.example.com:3260", false},
 		{"ipv6 bracketed", "[fd00::1]:3260", false},
 
 		{"empty", "", true},

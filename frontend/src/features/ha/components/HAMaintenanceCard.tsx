@@ -44,7 +44,10 @@ interface HAMaintenanceCardProps {
  * Cluster-wide HA maintenance controls (Arm / Disarm HA) — a Proxmox VE 9.2+
  * feature. Renders nothing on older clusters or without manage:ha.
  */
-export function HAMaintenanceCard({ clusterId, pveVersion }: HAMaintenanceCardProps) {
+export function HAMaintenanceCard({
+  clusterId,
+  pveVersion,
+}: HAMaintenanceCardProps) {
   const { canManage } = useAuth();
   const armHA = useArmHA(clusterId);
   const disarmHA = useDisarmHA(clusterId);
@@ -62,7 +65,9 @@ export function HAMaintenanceCard({ clusterId, pveVersion }: HAMaintenanceCardPr
   const handleDisarm = () => {
     setError(null);
     disarmHA.mutate(resourceMode, {
-      onSuccess: () => { setDisarmOpen(false); },
+      onSuccess: () => {
+        setDisarmOpen(false);
+      },
       onError: handleError,
     });
   };
@@ -76,8 +81,9 @@ export function HAMaintenanceCard({ clusterId, pveVersion }: HAMaintenanceCardPr
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
-          Disarm the HA stack cluster-wide before planned maintenance so controlled
-          reboots aren&apos;t treated as failures (no fencing). Re-arm when done.
+          Disarm the HA stack cluster-wide before planned maintenance so
+          controlled reboots aren&apos;t treated as failures (no fencing).
+          Re-arm when done.
         </p>
         {error && (
           <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 p-2 text-xs text-destructive">
@@ -105,20 +111,28 @@ export function HAMaintenanceCard({ clusterId, pveVersion }: HAMaintenanceCardPr
               </DialogHeader>
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Releases all HA watchdogs across the cluster so planned actions
-                  won&apos;t trigger fencing or recovery. Re-arm HA when maintenance is
-                  complete.
+                  Releases all HA watchdogs across the cluster so planned
+                  actions won&apos;t trigger fencing or recovery. Re-arm HA when
+                  maintenance is complete.
                 </p>
                 <div className="space-y-2">
                   <Label>Resource mode</Label>
                   <Select
                     value={resourceMode}
-                    onValueChange={(v) => { setResourceMode(v as ResourceMode); }}
+                    onValueChange={(v) => {
+                      setResourceMode(v as ResourceMode);
+                    }}
                   >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="freeze">Freeze — lock services in place</SelectItem>
-                      <SelectItem value="ignore">Ignore — suspend HA tracking (manage manually)</SelectItem>
+                      <SelectItem value="freeze">
+                        Freeze — lock services in place
+                      </SelectItem>
+                      <SelectItem value="ignore">
+                        Ignore — suspend HA tracking (manage manually)
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -127,7 +141,10 @@ export function HAMaintenanceCard({ clusterId, pveVersion }: HAMaintenanceCardPr
               <DialogFooter>
                 <Button
                   variant="outline"
-                  onClick={() => { setDisarmOpen(false); setError(null); }}
+                  onClick={() => {
+                    setDisarmOpen(false);
+                    setError(null);
+                  }}
                 >
                   Cancel
                 </Button>
@@ -149,8 +166,8 @@ export function HAMaintenanceCard({ clusterId, pveVersion }: HAMaintenanceCardPr
               <AlertDialogHeader>
                 <AlertDialogTitle>Re-arm HA?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Restores automatic HA fencing and recovery cluster-wide. Resources
-                  return to their previous state and node placement.
+                  Restores automatic HA fencing and recovery cluster-wide.
+                  Resources return to their previous state and node placement.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

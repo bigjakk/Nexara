@@ -49,9 +49,18 @@ interface BackupPanelProps {
   kind: "vm" | "ct";
 }
 
-export function BackupPanel({ vmid, clusterId, nodeName, kind }: BackupPanelProps) {
+export function BackupPanel({
+  vmid,
+  clusterId,
+  nodeName,
+  kind,
+}: BackupPanelProps) {
   const backupId = String(vmid);
-  const { data: snapshots, isLoading, error } = usePBSSnapshotsByBackupID(backupId);
+  const {
+    data: snapshots,
+    isLoading,
+    error,
+  } = usePBSSnapshotsByBackupID(backupId);
   const [backupDialogOpen, setBackupDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PBSSnapshot | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -113,7 +122,9 @@ export function BackupPanel({ vmid, clusterId, nodeName, kind }: BackupPanelProp
         <Button
           size="sm"
           className="gap-1.5"
-          onClick={() => { setBackupDialogOpen(true); }}
+          onClick={() => {
+            setBackupDialogOpen(true);
+          }}
         >
           <Play className="h-4 w-4" />
           Backup Now
@@ -135,7 +146,9 @@ export function BackupPanel({ vmid, clusterId, nodeName, kind }: BackupPanelProp
           <div className="flex items-center gap-4 rounded-lg border p-4">
             <div>
               <p className="text-xs text-muted-foreground">Total Backups</p>
-              <p className="text-lg font-semibold">{String(snapshots.length)}</p>
+              <p className="text-lg font-semibold">
+                {String(snapshots.length)}
+              </p>
             </div>
             {latest && (
               <>
@@ -232,7 +245,9 @@ export function BackupPanel({ vmid, clusterId, nodeName, kind }: BackupPanelProp
                           variant="ghost"
                           size="sm"
                           title="Delete backup"
-                          onClick={() => { setDeleteTarget(snap); }}
+                          onClick={() => {
+                            setDeleteTarget(snap);
+                          }}
                           disabled={snap.protected}
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
@@ -274,7 +289,8 @@ export function BackupPanel({ vmid, clusterId, nodeName, kind }: BackupPanelProp
               <DialogDescription>
                 Are you sure you want to delete the backup from{" "}
                 <strong>{formatUnixTime(deleteTarget.backup_time)}</strong> on{" "}
-                <strong>{deleteTarget.datastore}</strong>? This cannot be undone.
+                <strong>{deleteTarget.datastore}</strong>? This cannot be
+                undone.
               </DialogDescription>
             </DialogHeader>
             {deleteError && (
@@ -331,7 +347,10 @@ function BackupNowDialog({
   const [backupUpid, setBackupUpid] = useState<string | null>(null);
 
   const storageQuery = useClusterStorage(clusterId);
-  const allStorage = useMemo(() => storageQuery.data ?? [], [storageQuery.data]);
+  const allStorage = useMemo(
+    () => storageQuery.data ?? [],
+    [storageQuery.data],
+  );
 
   // Deduplicate shared storage, only show backup-capable storage
   // Sort: PBS first (recommended), then others
@@ -420,7 +439,12 @@ function BackupNowDialog({
               />
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => { handleClose(false); }}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  handleClose(false);
+                }}
+              >
                 Close
               </Button>
             </DialogFooter>
@@ -433,35 +457,42 @@ function BackupNowDialog({
                 <select
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                   value={effectiveStorage}
-                  onChange={(e) => { setStorage(e.target.value); }}
+                  onChange={(e) => {
+                    setStorage(e.target.value);
+                  }}
                 >
                   {backupStorage.length === 0 && (
                     <option value="">No backup storage available</option>
                   )}
                   {backupStorage.map((s) => (
                     <option key={s.storage} value={s.storage}>
-                      {s.storage} ({s.type}){s.type === "pbs" ? " - Recommended" : ""}
+                      {s.storage} ({s.type})
+                      {s.type === "pbs" ? " - Recommended" : ""}
                     </option>
                   ))}
                 </select>
-                {backupStorage.some((s) => s.type === "pbs") && effectiveStorage && (
+                {backupStorage.some((s) => s.type === "pbs") &&
+                  effectiveStorage &&
                   (() => {
-                    const selected = backupStorage.find((s) => s.storage === effectiveStorage);
+                    const selected = backupStorage.find(
+                      (s) => s.storage === effectiveStorage,
+                    );
                     if (selected?.type === "pbs") {
                       return (
                         <p className="flex items-center gap-1 text-xs text-emerald-600">
                           <Star className="h-3 w-3" />
-                          PBS storage provides deduplication and incremental backups.
+                          PBS storage provides deduplication and incremental
+                          backups.
                         </p>
                       );
                     }
                     return (
                       <p className="text-xs text-muted-foreground">
-                        A PBS storage is available. Consider using it for deduplication and incremental backups.
+                        A PBS storage is available. Consider using it for
+                        deduplication and incremental backups.
                       </p>
                     );
-                  })()
-                )}
+                  })()}
               </div>
 
               <div className="space-y-2">
@@ -469,7 +500,9 @@ function BackupNowDialog({
                 <select
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                   value={mode}
-                  onChange={(e) => { setMode(e.target.value); }}
+                  onChange={(e) => {
+                    setMode(e.target.value);
+                  }}
                 >
                   <option value="snapshot">Snapshot</option>
                   <option value="suspend">Suspend</option>
@@ -482,7 +515,9 @@ function BackupNowDialog({
                 <select
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                   value={compress}
-                  onChange={(e) => { setCompress(e.target.value); }}
+                  onChange={(e) => {
+                    setCompress(e.target.value);
+                  }}
                 >
                   <option value="zstd">ZSTD (recommended)</option>
                   <option value="lzo">LZO</option>
@@ -491,24 +526,22 @@ function BackupNowDialog({
                 </select>
               </div>
 
-              {error && (
-                <p className="text-sm text-destructive">{error}</p>
-              )}
+              {error && <p className="text-sm text-destructive">{error}</p>}
             </div>
 
             <DialogFooter>
               <Button
                 variant="outline"
-                onClick={() => { handleClose(false); }}
+                onClick={() => {
+                  handleClose(false);
+                }}
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleBackup}
                 disabled={
-                  triggerBackup.isPending ||
-                  !effectiveStorage ||
-                  !nodeName
+                  triggerBackup.isPending || !effectiveStorage || !nodeName
                 }
               >
                 {triggerBackup.isPending ? (

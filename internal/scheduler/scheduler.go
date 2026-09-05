@@ -11,15 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/auth"
-	"github.com/bigjakk/nexara/internal/crypto"
+	"github.com/bigjakk/nexara/internal/cronspec"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/guesttools"
 	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/reports"
 	"github.com/bigjakk/nexara/internal/rolling"
 	"github.com/bigjakk/nexara/internal/scanner"
+	"github.com/bigjakk/nexara/internal/virtiowin"
 )
 
 // Scheduler runs due scheduled tasks.
@@ -34,6 +36,8 @@ type Scheduler struct {
 	alertEngine   *notifications.Engine
 	reportGen     *reports.Generator
 	rollingOrch   *rolling.Orchestrator
+	virtioWin     *virtiowin.Engine
+	guestTools    *guesttools.Engine
 	eventPub      *events.Publisher
 	cache         *proxmox.ClientCache // nil-safe; passed through to sub-engines
 	drsLastEval   map[uuid.UUID]time.Time
@@ -56,6 +60,8 @@ type Deps struct {
 	AlertEngine *notifications.Engine
 	ReportGen   *reports.Generator
 	RollingOrch *rolling.Orchestrator
+	VirtioWin   *virtiowin.Engine
+	GuestTools  *guesttools.Engine
 }
 
 // New creates a Scheduler over the shared engines in d.
@@ -75,6 +81,8 @@ func New(d Deps) *Scheduler {
 		alertEngine:   d.AlertEngine,
 		reportGen:     d.ReportGen,
 		rollingOrch:   d.RollingOrch,
+		virtioWin:     d.VirtioWin,
+		guestTools:    d.GuestTools,
 		eventPub:      d.EventPub,
 		cache:         d.Cache,
 		drsLastEval:   make(map[uuid.UUID]time.Time),
@@ -321,6 +329,143 @@ func (s *Scheduler) RunKEVRefresh(ctx context.Context) {
 	s.logger.Info("KEV refresh complete", "entries", written)
 }
 
+// virtioWinHistoryRetention bounds how long finished virtio-win download rows
+// are kept. Downloads are infrequent (one per release per cluster), so this is
+// generous enough to stay a useful audit trail.
+const virtioWinHistoryRetention = 90 * 24 * time.Hour
+
+// RunVirtioWinCheck refreshes the upstream virtio-win catalog and brings every
+// cluster whose check has come due in line with its target version.
+//
+// One upstream fetch serves every cluster: the catalog is global, and only the
+// per-cluster reconciliation against storage is fanned out. Downloads are
+// dispatched, not awaited — download-url returns a UPID and RunVirtioWinReconcile
+// follows it, so an 837 MiB transfer never holds this tick open.
+//
+// The tick itself is now a cheap minutely poll rather than a six-hourly sweep:
+// each cluster carries its own next_check_at, so an operator can aim the check
+// — and the ~840 MiB fetch it dispatches — at a maintenance window. When
+// nothing is due this costs one indexed query and returns.
+func (s *Scheduler) RunVirtioWinCheck(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("virtio-win check panicked", "panic", r)
+		}
+	}()
+	// Deferred, so retention covers the early returns below too: at the tail
+	// it ran only on a tick that found work, and the tick that finds nothing
+	// due is exactly the one a switched-off cluster produces forever.
+	defer s.virtioWin.TrimHistory(ctx, virtioWinHistoryRetention)
+
+	// Check who wants this BEFORE touching the network. Refreshing
+	// unconditionally would make every install — air-gapped ones included —
+	// reach out to fedorapeople.org for a feature nobody enabled. No cluster
+	// due, no outbound request.
+	configs, err := s.queries.ListDueVirtioWinConfigs(ctx)
+	if err != nil {
+		s.logger.Warn("virtio-win: list due configs failed", "error", err)
+		return
+	}
+	if len(configs) == 0 {
+		return
+	}
+
+	latest, err := s.virtioWin.RefreshCatalog(ctx)
+	if err != nil {
+		// Keep going: a cluster may still be behind on a version already in the
+		// catalog, and that is worth acting on even when upstream is unreachable.
+		s.logger.Warn("virtio-win: upstream catalog refresh failed", "error", err)
+	} else {
+		s.logger.Debug("virtio-win: catalog refreshed", "latest", latest.Version, "stable", latest.IsStable)
+	}
+	for _, cfg := range configs {
+		download, syncErr := s.virtioWin.SyncCluster(ctx, cfg)
+		// Unconditional, and before the logging: this is what arms the next
+		// check. Skipping it on any path leaves next_check_at in the past, and
+		// the cluster is then re-synced every single minute.
+		s.virtioWin.MarkChecked(ctx, cfg, syncErr)
+		switch {
+		case syncErr != nil:
+			s.logger.Warn("virtio-win: cluster sync failed",
+				"cluster_id", cfg.ClusterID, "storage", cfg.Storage, "error", syncErr)
+		case download != nil:
+			s.logger.Info("virtio-win: download dispatched",
+				"cluster_id", cfg.ClusterID, "storage", cfg.Storage,
+				"version", download.Version, "node", download.Node, "upid", download.Upid)
+			s.trackTask(ctx, virtioWinDownloadTask(*download))
+		}
+	}
+}
+
+// RunGuestToolsPass detects installed guest tools across every cluster with the
+// feature on, and stages updates for guests that are behind.
+//
+// Hourly rather than minutely: this reaches into every running Windows guest
+// with a registry read, and nothing about a driver version changes on a shorter
+// timescale than an operator installing something.
+func (s *Scheduler) RunGuestToolsPass(ctx context.Context) {
+	s.tick(ctx, "guest tools pass panicked", "guest tools: pass failed", s.guestTools.RunPass)
+}
+
+// RunGuestToolsReconcile advances guests with an update in flight.
+//
+// Separate from the pass, and far more frequent, because a staged install fires
+// on the guest's own reboot — which Nexara neither triggers nor observes. The
+// only way to learn the outcome is to keep checking for the result file the
+// in-guest updater leaves behind.
+func (s *Scheduler) RunGuestToolsReconcile(ctx context.Context) {
+	s.tick(ctx, "guest tools reconcile panicked", "guest tools: reconcile failed", s.guestTools.Reconcile)
+}
+
+// RunVirtioWinReconcile advances in-flight virtio-win downloads by polling the
+// Proxmox tasks they became. Separate from the check tick because the check is
+// a 6-hourly upstream poll while a download needs following minute by minute —
+// and because the transfer outlives any in-process watcher.
+func (s *Scheduler) RunVirtioWinReconcile(ctx context.Context) {
+	s.tick(ctx, "virtio-win reconcile panicked", "virtio-win: reconcile failed", s.virtioWin.Reconcile)
+}
+
+// tick runs one engine pass, isolating the scheduler from it: a panic is
+// logged instead of taking the process down, and a returned error is a warning
+// rather than a reason to stop ticking.
+//
+// No nil check on the engine: internal/app builds every one of them whenever
+// Queries is set, and the binary exits before that if it cannot reach the
+// database — so a nil here is unreachable, and pretending otherwise made the
+// guards read as a defence the unguarded call sites did not have.
+func (s *Scheduler) tick(ctx context.Context, panicMsg, failMsg string, run func(context.Context) error) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error(panicMsg, "panic", r)
+		}
+	}()
+	if err := run(ctx); err != nil {
+		s.logger.Warn(failMsg, "error", err)
+	}
+}
+
+// virtioWinDownloadTask describes a dispatched virtio-win download.
+func virtioWinDownloadTask(row db.VirtioWinDownload) trackTaskParams {
+	return trackTaskParams{
+		ClusterID:    row.ClusterID,
+		Node:         row.Node,
+		ResourceType: "storage",
+		ResourceID:   row.Storage,
+		Action:       "virtio_win_download",
+		UPID:         row.Upid,
+		TaskType:     "download",
+		Description:  "Download virtio-win " + row.Version + " to " + row.Storage,
+		Source:       slog.String("download_id", row.ID.String()),
+		Details: map[string]string{
+			"upid":     row.Upid,
+			"node":     row.Node,
+			"storage":  row.Storage,
+			"version":  row.Version,
+			"filename": row.Filename,
+		},
+	}
+}
+
 // RunReportRetention deletes scheduled-report runs older than 90 days. The
 // retention SQL was defined alongside the report generator but never invoked
 // — without this tick, scheduled-report rows accumulate forever. On-demand
@@ -471,16 +616,34 @@ func (s *Scheduler) executeTask(ctx context.Context, client *proxmox.Client, tas
 			"task_id", task.ID, "action", task.Action)
 	}
 
-	nextRun, cronErr := NextRunTime(task.Schedule, now)
+	s.finishTaskRun(ctx, task, now, status, errMsg)
+}
+
+// finishTaskRun records how a run ended and arms the next one.
+//
+// now is when the run STARTED, not when it finished, so a long run does not
+// push its own next occurrence out by its duration.
+//
+// When the cron can no longer yield a future run there is no safe value to
+// write: a NULL next_run_at reads as "due now" in this table's due predicate,
+// which would claim and RE-RUN this task — the reboot or snapshot it carries —
+// on every tick. Park it instead, with the reason on the row. status/errMsg
+// ride along: the run that just finished has its own outcome, independent of
+// the schedule being unusable. A snapshot that succeeded must not be recorded
+// as failed just because the task is being parked, and a run that DID fail
+// must not have its reason replaced by the schedule message — last_error is
+// the only field the operator sees.
+func (s *Scheduler) finishTaskRun(ctx context.Context, task db.ScheduledTask, now time.Time, status, errMsg string) {
+	nextRun, cronErr := cronspec.NextRunTime(task.Schedule, now)
 	if cronErr != nil {
-		s.logger.Error("failed to compute next run time",
-			"task_id", task.ID, "error", cronErr)
+		s.parkUnschedulableTask(ctx, task, cronErr, status, errMsg)
+		return
 	}
 
 	if err := s.queries.UpdateTaskLastRun(ctx, db.UpdateTaskLastRunParams{
 		ID:         task.ID,
 		LastRunAt:  pgtype.Timestamptz{Time: now, Valid: true},
-		NextRunAt:  pgtype.Timestamptz{Time: nextRun, Valid: cronErr == nil},
+		NextRunAt:  pgtype.Timestamptz{Time: nextRun, Valid: true},
 		LastStatus: pgtype.Text{String: status, Valid: true},
 		LastError:  pgtype.Text{String: errMsg, Valid: errMsg != ""},
 	}); err != nil {
@@ -518,8 +681,8 @@ func (s *Scheduler) executeSnapshot(ctx context.Context, client *proxmox.Client,
 	if err != nil {
 		return err
 	}
-	s.trackTask(ctx, task, upid, "scheduled_snapshot",
-		fmt.Sprintf("Scheduled snapshot %s — %s %s", snapName, task.ResourceType, task.ResourceID))
+	s.trackTask(ctx, scheduledTask(task, upid, "scheduled_snapshot",
+		fmt.Sprintf("Scheduled snapshot %s — %s %s", snapName, task.ResourceType, task.ResourceID)))
 	return nil
 }
 
@@ -538,63 +701,99 @@ func (s *Scheduler) executeReboot(ctx context.Context, client *proxmox.Client, t
 	if err != nil {
 		return err
 	}
-	s.trackTask(ctx, task, upid, "scheduled_reboot",
-		fmt.Sprintf("Scheduled reboot — %s %s", task.ResourceType, task.ResourceID))
+	s.trackTask(ctx, scheduledTask(task, upid, "scheduled_reboot",
+		fmt.Sprintf("Scheduled reboot — %s %s", task.ResourceType, task.ResourceID)))
 	return nil
 }
 
-// trackTask records a UPID-producing scheduled action the same way the DRS
-// executor records its migrations: a task_history row (status running — the
-// collector reconciler owns the running→done flip), a task_created event,
-// and an audit entry attributed to the system user. Previously the UPID was
-// discarded, so the action was invisible until the collector re-ingested it
-// as an external "proxmox" task mis-attributed to the API token user.
+// trackTaskParams is one UPID-producing action the scheduler dispatched on its
+// own behalf. Built by scheduledTask and virtioWinDownloadTask so the recording
+// below happens once, whatever produced the UPID.
+type trackTaskParams struct {
+	ClusterID    uuid.UUID
+	Node         string
+	ResourceType string
+	ResourceID   string
+	Action       string
+	UPID         string
+	TaskType     string
+	Description  string
+	Details      map[string]string
+	// Source identifies the row that dispatched this in the warnings below —
+	// task_id for a schedule, download_id for a download — so each keeps the
+	// key every other log line about that row already uses.
+	Source slog.Attr
+}
+
+// scheduledTask describes a UPID a scheduled_tasks row produced.
+func scheduledTask(task db.ScheduledTask, upid, taskType, description string) trackTaskParams {
+	return trackTaskParams{
+		ClusterID:    task.ClusterID,
+		Node:         task.Node,
+		ResourceType: task.ResourceType,
+		ResourceID:   task.ResourceID,
+		Action:       taskType,
+		UPID:         upid,
+		TaskType:     taskType,
+		Description:  description,
+		Source:       slog.String("task_id", task.ID.String()),
+		Details: map[string]string{
+			"upid":        upid,
+			"schedule_id": task.ID.String(),
+			"node":        task.Node,
+		},
+	}
+}
+
+// trackTask records a UPID the scheduler produced the same way the DRS executor
+// records its migrations: a task_history row (status running — the collector
+// reconciler owns the running→done flip) and an audit entry attributed to the
+// system user, each followed by the event that makes it visible live —
+// task_created and audit_entry. Previously the UPID was discarded, so the
+// action was invisible until the collector re-ingested it as an external
+// "proxmox" task mis-attributed to the API token user.
 //
 // If the task_history insert fails, the event and audit row are skipped on
 // purpose: an audit row containing the UPID would make the external-task
 // ingest dedup skip it, and the task would then never appear anywhere. With
 // nothing recorded, the next collector tick ingests it as external — a
 // degraded but visible fallback.
-func (s *Scheduler) trackTask(ctx context.Context, task db.ScheduledTask, upid, taskType, description string) {
-	if upid == "" {
+func (s *Scheduler) trackTask(ctx context.Context, p trackTaskParams) {
+	if p.UPID == "" {
 		return
 	}
 	if _, err := s.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
-		ClusterID:   task.ClusterID,
+		ClusterID:   p.ClusterID,
 		UserID:      auth.SystemUserID,
-		Upid:        upid,
-		Description: description,
+		Upid:        p.UPID,
+		Description: p.Description,
 		Status:      "running",
-		Node:        task.Node,
-		TaskType:    taskType,
+		Node:        p.Node,
+		TaskType:    p.TaskType,
 	}); err != nil {
-		s.logger.Warn("failed to insert task history for scheduled task",
-			"task_id", task.ID, "upid", upid, "error", err)
+		s.logger.Warn("failed to insert task history for a scheduler-dispatched task",
+			p.Source, "action", p.Action, "upid", p.UPID, "error", err)
 		return
 	}
 
-	details, _ := json.Marshal(map[string]string{
-		"upid":        upid,
-		"schedule_id": task.ID.String(),
-		"node":        task.Node,
-	})
+	details, _ := json.Marshal(p.Details)
 	if err := s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: task.ClusterID, Valid: true},
+		ClusterID:    pgtype.UUID{Bytes: p.ClusterID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
-		ResourceType: task.ResourceType,
-		ResourceID:   task.ResourceID,
-		Action:       taskType,
+		ResourceType: p.ResourceType,
+		ResourceID:   p.ResourceID,
+		Action:       p.Action,
 		Details:      details,
 	}); err != nil {
-		s.logger.Warn("failed to insert audit log for scheduled task",
-			"task_id", task.ID, "upid", upid, "error", err)
+		s.logger.Warn("failed to insert audit log for a scheduler-dispatched task",
+			p.Source, "action", p.Action, "upid", p.UPID, "error", err)
 	}
 
 	if s.eventPub != nil {
-		s.eventPub.ClusterEvent(ctx, task.ClusterID.String(),
-			events.KindTaskCreated, "task", upid, taskType)
-		s.eventPub.ClusterEvent(ctx, task.ClusterID.String(),
-			events.KindAuditEntry, task.ResourceType, task.ResourceID, taskType)
+		s.eventPub.ClusterEvent(ctx, p.ClusterID.String(),
+			events.KindTaskCreated, "task", p.UPID, p.Action)
+		s.eventPub.ClusterEvent(ctx, p.ClusterID.String(),
+			events.KindAuditEntry, p.ResourceType, p.ResourceID, p.Action)
 	}
 }
 
@@ -611,41 +810,52 @@ func (s *Scheduler) createClient(ctx context.Context, clusterID uuid.UUID) (*pro
 			"cluster_id", clusterID, "error", err)
 	}
 
-	cluster, err := s.queries.GetCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
-	}
-
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, s.encryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt token: %w", err)
-	}
-
-	client, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        60 * time.Second,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create client: %w", err)
-	}
-
-	return client, nil
+	return proxmox.NewClientForCluster(ctx, s.queries, s.encryptionKey, clusterID, 60*time.Second)
 }
 
+// markFailed records a run that never reached an engine — the Proxmox client
+// could not be built, so nothing was dispatched. The run still finished, and
+// finishTaskRun still has to arm the next one.
 func (s *Scheduler) markFailed(ctx context.Context, task db.ScheduledTask, errMsg string) {
-	now := time.Now()
-	nextRun, _ := NextRunTime(task.Schedule, now)
+	s.finishTaskRun(ctx, task, time.Now(), "failed", errMsg)
+}
 
-	_ = s.queries.UpdateTaskLastRun(ctx, db.UpdateTaskLastRunParams{
+// parkUnschedulableTask disables a task whose cron cannot yield a future run,
+// recording why on the row.
+//
+// Disabling is the only value that breaks the loop here. scheduled_tasks
+// matches `next_run_at IS NULL OR next_run_at <= now()`, so neither NULL nor
+// the zero time robfig returns for an unsatisfiable expression is inert — both
+// mean due now. The API rejects such an expression on write, so reaching this
+// is a row from before that check existed, or one edited by hand.
+// runStatus and runErr describe the run that just finished; they are recorded
+// as-is rather than being replaced by the schedule problem, because the two are
+// independent. A snapshot can be taken perfectly by a task whose expression can
+// never come round again — writing 'failed' there sends the operator looking
+// for a problem in the wrong half — and a run that genuinely failed must keep
+// its own reason, since last_error is the only field that surfaces either.
+func (s *Scheduler) parkUnschedulableTask(
+	ctx context.Context,
+	task db.ScheduledTask,
+	cronErr error,
+	runStatus string,
+	runErr string,
+) {
+	s.logger.Error("scheduled task disabled: its schedule can never fire",
+		"task_id", task.ID, "action", task.Action, "schedule", task.Schedule,
+		"error", cronErr, "run_status", runStatus, "run_error", runErr)
+	msg := "disabled: " + cronErr.Error()
+	if runErr != "" {
+		msg = runErr + "; " + msg
+	}
+	if err := s.queries.DisableScheduledTaskForBadSchedule(ctx, db.DisableScheduledTaskForBadScheduleParams{
 		ID:         task.ID,
-		LastRunAt:  pgtype.Timestamptz{Time: now, Valid: true},
-		NextRunAt:  pgtype.Timestamptz{Time: nextRun, Valid: true},
-		LastStatus: pgtype.Text{String: "failed", Valid: true},
-		LastError:  pgtype.Text{String: errMsg, Valid: true},
-	})
+		LastStatus: pgtype.Text{String: runStatus, Valid: runStatus != ""},
+		LastError:  pgtype.Text{String: msg, Valid: true},
+	}); err != nil {
+		s.logger.Error("failed to disable task with an unusable schedule",
+			"task_id", task.ID, "error", err)
+	}
 }
 
 // RunAlertEvaluation evaluates all enabled alert rules against current metrics.
@@ -762,7 +972,15 @@ func (s *Scheduler) generateScheduledReport(ctx context.Context, sched db.Report
 
 func (s *Scheduler) updateScheduleNextRun(ctx context.Context, sched db.ReportSchedule) {
 	now := time.Now()
-	nextRun, err := NextRunTime(sched.Schedule, now)
+	nextRun, err := cronspec.NextRunTime(sched.Schedule, now)
+	if err != nil {
+		// Unlike scheduled_tasks, this table's due predicate is a bare
+		// `next_run_at <= now()`, so NULL is genuinely inert and leaving the
+		// row enabled with no next run is a safe stop rather than a loop. Say
+		// so loudly all the same: from the UI it just stops generating.
+		s.logger.Error("report schedule will not run again: its schedule can never fire",
+			"schedule_id", sched.ID, "schedule", sched.Schedule, "error", err)
+	}
 	next := pgtype.Timestamptz{Time: nextRun, Valid: err == nil}
 
 	if uErr := s.queries.UpdateReportScheduleLastRun(ctx, db.UpdateReportScheduleLastRunParams{

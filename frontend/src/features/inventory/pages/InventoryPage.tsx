@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertCircle, AlertTriangle, Loader2, Package, Rocket } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  Loader2,
+  Package,
+  Rocket,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/EmptyState";
@@ -36,7 +42,9 @@ export function InventoryPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">{t("inventory")}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {t("inventory")}
+          </h1>
           <p className="text-sm text-muted-foreground">
             {t("browseAllResources")}
           </p>
@@ -63,8 +71,11 @@ export function InventoryPage() {
         </div>
       )}
 
-      {!isLoading && !error && rows.length === 0 && failedClusterIds.length === 0 && (
-        hasClusters ? (
+      {!isLoading &&
+        !error &&
+        rows.length === 0 &&
+        failedClusterIds.length === 0 &&
+        (hasClusters ? (
           <EmptyState
             icon={Package}
             title={t("noResources")}
@@ -77,8 +88,7 @@ export function InventoryPage() {
             description={td("addClusterToGetStarted")}
             action={<AddClusterDialog />}
           />
-        )
-      )}
+        ))}
 
       {!isLoading && !error && rows.length > 0 && (
         <Tabs defaultValue="resources">
@@ -105,24 +115,40 @@ export function InventoryPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/50">
-                      <th className="px-4 py-2 text-left font-medium">{tc("type")}</th>
-                      <th className="px-4 py-2 text-left font-medium">{tc("name")}</th>
+                      <th className="px-4 py-2 text-left font-medium">
+                        {tc("type")}
+                      </th>
+                      <th className="px-4 py-2 text-left font-medium">
+                        {tc("name")}
+                      </th>
                       <th className="px-4 py-2 text-left font-medium">VMID</th>
-                      <th className="px-4 py-2 text-left font-medium">{t("cluster", { ns: "audit" })}</th>
-                      <th className="px-4 py-2 text-left font-medium">{t("node")}</th>
-                      <th className="px-4 py-2 text-right font-medium">{tc("actions")}</th>
+                      <th className="px-4 py-2 text-left font-medium">
+                        {t("cluster", { ns: "audit" })}
+                      </th>
+                      <th className="px-4 py-2 text-left font-medium">
+                        {t("node")}
+                      </th>
+                      <th className="px-4 py-2 text-right font-medium">
+                        {tc("actions")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {templateRows.map((row) => (
                       <tr key={row.key} className="border-b last:border-b-0">
-                        <td className="px-4 py-2 uppercase text-muted-foreground">{row.type}</td>
+                        <td className="px-4 py-2 uppercase text-muted-foreground">
+                          {row.type}
+                        </td>
                         <td className="px-4 py-2 font-medium">{row.name}</td>
                         <td className="px-4 py-2 text-muted-foreground">
                           {row.vmid !== null ? String(row.vmid) : "--"}
                         </td>
-                        <td className="px-4 py-2 text-muted-foreground">{row.clusterName}</td>
-                        <td className="px-4 py-2 text-muted-foreground">{row.nodeName}</td>
+                        <td className="px-4 py-2 text-muted-foreground">
+                          {row.clusterName}
+                        </td>
+                        <td className="px-4 py-2 text-muted-foreground">
+                          {row.nodeName}
+                        </td>
                         <td className="px-4 py-2 text-right">
                           <Button
                             size="sm"
@@ -154,7 +180,9 @@ export function InventoryPage() {
       {deployTarget && (
         <DeployTemplateDialog
           open={true}
-          onOpenChange={(open) => { if (!open) setDeployTarget(null); }}
+          onOpenChange={(open) => {
+            if (!open) setDeployTarget(null);
+          }}
           clusterId={deployTarget.clusterId}
           vmId={deployTarget.vmId}
           kind={deployTarget.kind}

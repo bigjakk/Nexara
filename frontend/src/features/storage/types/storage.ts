@@ -29,7 +29,13 @@ export interface DownloadURLRequest {
   content: "iso" | "vztmpl" | "import";
   filename: string;
   checksum?: string;
-  checksum_algorithm?: "md5" | "sha1" | "sha224" | "sha256" | "sha384" | "sha512";
+  checksum_algorithm?:
+    | "md5"
+    | "sha1"
+    | "sha224"
+    | "sha256"
+    | "sha384"
+    | "sha512";
   decompression_algorithm?: "gz" | "lzo" | "zst" | "bz2";
   verify_certificates?: boolean;
 }
@@ -255,75 +261,171 @@ export function storageSupportsFormatChoice(type: string | undefined): boolean {
 /** Type-specific fields for each storage type */
 export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
   dir: [
-    { key: "path", label: "Directory Path", required: true, placeholder: "/mnt/storage" },
+    {
+      key: "path",
+      label: "Directory Path",
+      required: true,
+      placeholder: "/mnt/storage",
+    },
     { key: "mkdir", label: "Create Directory", type: "checkbox" },
     { key: "is_mountpoint", label: "Is Mountpoint", type: "checkbox" },
-    { key: "preallocation", label: "Preallocation", type: "select", options: [
-      { value: "", label: "Default" }, { value: "off", label: "Off" },
-      { value: "metadata", label: "Metadata" }, { value: "falloc", label: "Falloc" },
-      { value: "full", label: "Full" },
-    ]},
+    {
+      key: "preallocation",
+      label: "Preallocation",
+      type: "select",
+      options: [
+        { value: "", label: "Default" },
+        { value: "off", label: "Off" },
+        { value: "metadata", label: "Metadata" },
+        { value: "falloc", label: "Falloc" },
+        { value: "full", label: "Full" },
+      ],
+    },
   ],
   btrfs: [
-    { key: "path", label: "Directory Path", required: true, placeholder: "/mnt/btrfs" },
+    {
+      key: "path",
+      label: "Directory Path",
+      required: true,
+      placeholder: "/mnt/btrfs",
+    },
     { key: "mkdir", label: "Create Directory", type: "checkbox" },
   ],
   nfs: [
-    { key: "server", label: "Server", required: true, placeholder: "192.168.1.100" },
-    { key: "export", label: "Export Path", required: true, placeholder: "/export/share" },
+    {
+      key: "server",
+      label: "Server",
+      required: true,
+      placeholder: "192.168.1.100",
+    },
+    {
+      key: "export",
+      label: "Export Path",
+      required: true,
+      placeholder: "/export/share",
+    },
     { key: "options", label: "NFS Options", placeholder: "vers=4.2" },
-    { key: "preallocation", label: "Preallocation", type: "select", options: [
-      { value: "", label: "Default" }, { value: "off", label: "Off" },
-      { value: "metadata", label: "Metadata" }, { value: "falloc", label: "Falloc" },
-      { value: "full", label: "Full" },
-    ]},
+    {
+      key: "preallocation",
+      label: "Preallocation",
+      type: "select",
+      options: [
+        { value: "", label: "Default" },
+        { value: "off", label: "Off" },
+        { value: "metadata", label: "Metadata" },
+        { value: "falloc", label: "Falloc" },
+        { value: "full", label: "Full" },
+      ],
+    },
   ],
   cifs: [
-    { key: "server", label: "Server", required: true, placeholder: "192.168.1.100" },
-    { key: "share", label: "Share Name", required: true, placeholder: "backups" },
+    {
+      key: "server",
+      label: "Server",
+      required: true,
+      placeholder: "192.168.1.100",
+    },
+    {
+      key: "share",
+      label: "Share Name",
+      required: true,
+      placeholder: "backups",
+    },
     { key: "username", label: "Username", placeholder: "admin" },
     { key: "password", label: "Password", type: "password" },
     { key: "domain", label: "Domain" },
-    { key: "smbversion", label: "SMB Version", type: "select", options: [
-      { value: "", label: "Default" }, { value: "2.0", label: "2.0" },
-      { value: "2.1", label: "2.1" }, { value: "3", label: "3.0" },
-      { value: "3.0", label: "3.0 (strict)" }, { value: "3.11", label: "3.11" },
-    ]},
+    {
+      key: "smbversion",
+      label: "SMB Version",
+      type: "select",
+      options: [
+        { value: "", label: "Default" },
+        { value: "2.0", label: "2.0" },
+        { value: "2.1", label: "2.1" },
+        { value: "3", label: "3.0" },
+        { value: "3.0", label: "3.0 (strict)" },
+        { value: "3.11", label: "3.11" },
+      ],
+    },
   ],
   lvm: [
-    { key: "vgname", label: "Volume Group", required: true, placeholder: "pve" },
+    {
+      key: "vgname",
+      label: "Volume Group",
+      required: true,
+      placeholder: "pve",
+    },
     { key: "base", label: "Base Volume" },
     { key: "saferemove", label: "Safe Remove", type: "checkbox" },
   ],
   lvmthin: [
-    { key: "vgname", label: "Volume Group", required: true, placeholder: "pve" },
-    { key: "thinpool", label: "Thin Pool", required: true, placeholder: "data" },
+    {
+      key: "vgname",
+      label: "Volume Group",
+      required: true,
+      placeholder: "pve",
+    },
+    {
+      key: "thinpool",
+      label: "Thin Pool",
+      required: true,
+      placeholder: "data",
+    },
   ],
   zfspool: [
-    { key: "pool", label: "ZFS Pool", required: true, placeholder: "rpool/data" },
+    {
+      key: "pool",
+      label: "ZFS Pool",
+      required: true,
+      placeholder: "rpool/data",
+    },
     { key: "blocksize", label: "Block Size", placeholder: "8k" },
     { key: "sparse", label: "Sparse Volumes", type: "checkbox" },
   ],
   // Both iSCSI plugins declare portal and target `fixed => 1` upstream — they
   // identify the backend, so Proxmox only accepts them at creation.
   iscsi: [
-    { key: "portal", label: "Portal (IP/Host)", required: true, placeholder: "192.168.1.100", fixed: true },
     {
-      key: "target", label: "Target IQN", required: true,
+      key: "portal",
+      label: "Portal (IP/Host)",
+      required: true,
+      placeholder: "192.168.1.100",
+      fixed: true,
+    },
+    {
+      key: "target",
+      label: "Target IQN",
+      required: true,
       placeholder: "iqn.2024-01.com.example:target",
-      scan: "iscsi", scanFrom: "portal", fixed: true,
+      scan: "iscsi",
+      scanFrom: "portal",
+      fixed: true,
     },
   ],
   iscsidirect: [
-    { key: "portal", label: "Portal (IP/Host)", required: true, placeholder: "192.168.1.100", fixed: true },
     {
-      key: "target", label: "Target IQN", required: true,
+      key: "portal",
+      label: "Portal (IP/Host)",
+      required: true,
+      placeholder: "192.168.1.100",
+      fixed: true,
+    },
+    {
+      key: "target",
+      label: "Target IQN",
+      required: true,
       placeholder: "iqn.2024-01.com.example:target",
-      scan: "iscsi", scanFrom: "portal", fixed: true,
+      scan: "iscsi",
+      scanFrom: "portal",
+      fixed: true,
     },
   ],
   rbd: [
-    { key: "monhost", label: "Monitor Hosts", placeholder: "10.0.0.1,10.0.0.2" },
+    {
+      key: "monhost",
+      label: "Monitor Hosts",
+      placeholder: "10.0.0.1,10.0.0.2",
+    },
     { key: "pool", label: "Ceph Pool", placeholder: "rbd" },
     { key: "username", label: "Ceph User", placeholder: "admin" },
     { key: "krbd", label: "Use Kernel RBD", type: "checkbox" },
@@ -331,7 +433,11 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
     { key: "namespace", label: "Namespace" },
   ],
   cephfs: [
-    { key: "monhost", label: "Monitor Hosts", placeholder: "10.0.0.1,10.0.0.2" },
+    {
+      key: "monhost",
+      label: "Monitor Hosts",
+      placeholder: "10.0.0.1,10.0.0.2",
+    },
     { key: "path", label: "Mount Path", placeholder: "/" },
     { key: "username", label: "Ceph User", placeholder: "admin" },
     { key: "fuse", label: "Use FUSE", type: "checkbox" },
@@ -339,20 +445,56 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
     { key: "fs-name", label: "FS Name" },
   ],
   glusterfs: [
-    { key: "server", label: "Primary Server", required: true, placeholder: "192.168.1.100" },
+    {
+      key: "server",
+      label: "Primary Server",
+      required: true,
+      placeholder: "192.168.1.100",
+    },
     { key: "server2", label: "Backup Server", placeholder: "192.168.1.101" },
     { key: "volume", label: "Volume Name", required: true, placeholder: "gv0" },
-    { key: "transport", label: "Transport", type: "select", options: [
-      { value: "", label: "Default (tcp)" }, { value: "tcp", label: "TCP" },
-      { value: "rdma", label: "RDMA" }, { value: "unix", label: "Unix" },
-    ]},
+    {
+      key: "transport",
+      label: "Transport",
+      type: "select",
+      options: [
+        { value: "", label: "Default (tcp)" },
+        { value: "tcp", label: "TCP" },
+        { value: "rdma", label: "RDMA" },
+        { value: "unix", label: "Unix" },
+      ],
+    },
   ],
   pbs: [
-    { key: "server", label: "Server", required: true, placeholder: "pbs.example.com" },
-    { key: "datastore", label: "Datastore", required: true, placeholder: "main" },
-    { key: "username", label: "Username", required: true, placeholder: "backup@pbs!token" },
-    { key: "password", label: "Password / API Token", required: true, type: "password" },
-    { key: "fingerprint", label: "TLS Fingerprint", placeholder: "AA:BB:CC:..." },
+    {
+      key: "server",
+      label: "Server",
+      required: true,
+      placeholder: "pbs.example.com",
+    },
+    {
+      key: "datastore",
+      label: "Datastore",
+      required: true,
+      placeholder: "main",
+    },
+    {
+      key: "username",
+      label: "Username",
+      required: true,
+      placeholder: "backup@pbs!token",
+    },
+    {
+      key: "password",
+      label: "Password / API Token",
+      required: true,
+      type: "password",
+    },
+    {
+      key: "fingerprint",
+      label: "TLS Fingerprint",
+      placeholder: "AA:BB:CC:...",
+    },
     { key: "encryption-key", label: "Encryption Key" },
   ],
 };

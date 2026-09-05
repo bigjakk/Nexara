@@ -5,6 +5,7 @@ import {
   getGuestStatusColor,
 } from "./topology-transform";
 import type { TopologyInput, TopologyFilters } from "./topology-transform";
+import { makeStorage as baseStorage } from "@/test/storage.fixtures";
 import type {
   ClusterResponse,
   NodeResponse,
@@ -12,7 +13,9 @@ import type {
   StorageResponse,
 } from "@/types/api";
 
-function makeCluster(overrides: Partial<ClusterResponse> = {}): ClusterResponse {
+function makeCluster(
+  overrides: Partial<ClusterResponse> = {},
+): ClusterResponse {
   return {
     id: "c1",
     name: "test-cluster",
@@ -92,17 +95,19 @@ function makeVM(overrides: Partial<VMResponse> = {}): VMResponse {
   };
 }
 
-function makeStorage(overrides: Partial<StorageResponse> = {}): StorageResponse {
-  return {
-    id: "s1",
-    cluster_id: "c1",
-    node_id: "n1",
+/**
+ * A populated LVM-thin pool. Topology renders capacity, so the shared
+ * factory's zeroed defaults would draw every node as empty — but the field
+ * LIST still comes from there, so a new StorageResponse field lands in one
+ * place instead of three.
+ */
+function makeStorage(
+  overrides: Partial<StorageResponse> = {},
+): StorageResponse {
+  return baseStorage({
     storage: "local-lvm",
     type: "lvmthin",
     content: "images,rootdir",
-    active: true,
-    enabled: true,
-    shared: false,
     total: 500000000000,
     used: 250000000000,
     avail: 250000000000,
@@ -110,7 +115,7 @@ function makeStorage(overrides: Partial<StorageResponse> = {}): StorageResponse 
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
     ...overrides,
-  };
+  });
 }
 
 function makeInput(overrides: Partial<TopologyInput> = {}): TopologyInput {
@@ -187,8 +192,14 @@ describe("buildTopologyGraph", () => {
         ["c1", [makeNode()]],
         ["c2", [makeNode({ id: "n2", cluster_id: "c2", name: "pve-node-2" })]],
       ]),
-      vmsByCluster: new Map([["c1", []], ["c2", []]]),
-      storageByCluster: new Map([["c1", []], ["c2", []]]),
+      vmsByCluster: new Map([
+        ["c1", []],
+        ["c2", []],
+      ]),
+      storageByCluster: new Map([
+        ["c1", []],
+        ["c2", []],
+      ]),
     });
 
     const graph = buildTopologyGraph(input, {
@@ -208,8 +219,18 @@ describe("buildTopologyGraph", () => {
         [
           "c1",
           [
-            makeStorage({ id: "s1", storage: "ceph-pool", shared: true, node_id: "n1" }),
-            makeStorage({ id: "s2", storage: "ceph-pool", shared: true, node_id: "n2" }),
+            makeStorage({
+              id: "s1",
+              storage: "ceph-pool",
+              shared: true,
+              node_id: "n1",
+            }),
+            makeStorage({
+              id: "s2",
+              storage: "ceph-pool",
+              shared: true,
+              node_id: "n2",
+            }),
           ],
         ],
       ]),
@@ -223,10 +244,7 @@ describe("buildTopologyGraph", () => {
   it("connects shared storage to cluster, not host", () => {
     const input = makeInput({
       storageByCluster: new Map([
-        [
-          "c1",
-          [makeStorage({ storage: "ceph-pool", shared: true })],
-        ],
+        ["c1", [makeStorage({ storage: "ceph-pool", shared: true })]],
       ]),
     });
 

@@ -32,6 +32,7 @@ import (
 //   - connect-src ws: wss': the floating console (xterm) and noVNC open
 //     same-origin WebSockets; ws: covers the dev (http) origin.
 //   - worker-src/img-src blob': noVNC/xterm renderers and canvas-to-blob.
+//
 // Handlers that serve downloadable HTML (reports, settings export) set their
 // own stricter CSP via c.Set after this middleware, which overrides it.
 const contentSecurityPolicy = "default-src 'self'; " +

@@ -140,7 +140,11 @@ export function useCreateNotificationChannel() {
       channel_type: string;
       config: Record<string, unknown>;
       enabled?: boolean;
-    }) => apiClient.post<NotificationChannel>("/api/v1/notification-channels", data),
+    }) =>
+      apiClient.post<NotificationChannel>(
+        "/api/v1/notification-channels",
+        data,
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["notification-channels"] });
     },

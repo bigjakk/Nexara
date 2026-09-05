@@ -23,7 +23,10 @@ export interface ReplicationJob {
 export function useReplicationJobs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "replication"],
-    queryFn: () => apiClient.list<ReplicationJob>(`/api/v1/clusters/${clusterId}/replication`),
+    queryFn: () =>
+      apiClient.list<ReplicationJob>(
+        `/api/v1/clusters/${clusterId}/replication`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -31,18 +34,44 @@ export function useReplicationJobs(clusterId: string) {
 export function useCreateReplicationJob(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { id: string; type: string; target: string; schedule?: string; rate?: string; comment?: string }) =>
-      apiClient.post(`/api/v1/clusters/${clusterId}/replication`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "replication"] }); },
+    mutationFn: (data: {
+      id: string;
+      type: string;
+      target: string;
+      schedule?: string;
+      rate?: string;
+      comment?: string;
+    }) => apiClient.post(`/api/v1/clusters/${clusterId}/replication`, data),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "replication"],
+      });
+    },
   });
 }
 
 export function useUpdateReplicationJob(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; schedule?: string; rate?: string; comment?: string; disable?: number }) =>
-      apiClient.put(`/api/v1/clusters/${clusterId}/replication/${encodeURIComponent(id)}`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "replication"] }); },
+    mutationFn: ({
+      id,
+      ...data
+    }: {
+      id: string;
+      schedule?: string;
+      rate?: string;
+      comment?: string;
+      disable?: number;
+    }) =>
+      apiClient.put(
+        `/api/v1/clusters/${clusterId}/replication/${encodeURIComponent(id)}`,
+        data,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "replication"],
+      });
+    },
   });
 }
 
@@ -50,8 +79,14 @@ export function useDeleteReplicationJob(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.delete(`/api/v1/clusters/${clusterId}/replication/${encodeURIComponent(id)}`),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "replication"] }); },
+      apiClient.delete(
+        `/api/v1/clusters/${clusterId}/replication/${encodeURIComponent(id)}`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "replication"],
+      });
+    },
   });
 }
 
@@ -59,7 +94,13 @@ export function useTriggerReplication(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, node }: { id: string; node: string }) =>
-      apiClient.post<{ upid: string }>(`/api/v1/clusters/${clusterId}/replication/${encodeURIComponent(id)}/trigger?node=${encodeURIComponent(node)}`),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "replication"] }); },
+      apiClient.post<{ upid: string }>(
+        `/api/v1/clusters/${clusterId}/replication/${encodeURIComponent(id)}/trigger?node=${encodeURIComponent(node)}`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "replication"],
+      });
+    },
   });
 }

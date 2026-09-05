@@ -120,7 +120,11 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
     );
   };
 
-  const handleTaskComplete = (upid: string, clusterId: string, vmid: number) => {
+  const handleTaskComplete = (
+    upid: string,
+    clusterId: string,
+    vmid: number,
+  ) => {
     // Success or failure, resync the guest so the row reflects Proxmox truth
     // (a failed delete keeps the row; a successful one drops it).
     resyncMutation.mutate({ clusterId, vmid });

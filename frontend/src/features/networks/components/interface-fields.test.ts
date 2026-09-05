@@ -13,7 +13,13 @@ import {
 import type { NetworkInterface } from "../types/network";
 
 function iface(overrides: Partial<NetworkInterface> = {}): NetworkInterface {
-  return { iface: "vmbr0", type: "bridge", active: 1, autostart: 1, ...overrides };
+  return {
+    iface: "vmbr0",
+    type: "bridge",
+    active: 1,
+    autostart: 1,
+    ...overrides,
+  };
 }
 
 describe("fieldsForType", () => {
@@ -73,15 +79,19 @@ describe("clearedSettings", () => {
   it("names a field the operator emptied", () => {
     const existing = iface({ cidr: "10.0.0.2/24", gateway: "10.0.0.1" });
     // Gateway removed, CIDR kept.
-    expect(clearedSettings(existing, { cidr: "10.0.0.2/24" }, "bridge")).toEqual([
-      "gateway",
-    ]);
+    expect(
+      clearedSettings(existing, { cidr: "10.0.0.2/24" }, "bridge"),
+    ).toEqual(["gateway"]);
   });
 
   it("returns nothing when every value is still present", () => {
     const existing = iface({ cidr: "10.0.0.2/24", gateway: "10.0.0.1" });
     expect(
-      clearedSettings(existing, { cidr: "10.0.0.2/24", gateway: "10.0.0.1" }, "bridge"),
+      clearedSettings(
+        existing,
+        { cidr: "10.0.0.2/24", gateway: "10.0.0.1" },
+        "bridge",
+      ),
     ).toEqual([]);
   });
 
@@ -93,8 +103,14 @@ describe("clearedSettings", () => {
   it("ignores settings the type has no control for", () => {
     // A bond carries no bridge_ports control, so editing it must not try to
     // clear a value the form never showed.
-    const existing = iface({ type: "bond", bridge_ports: "eno1", slaves: "eno1 eno2" });
-    expect(clearedSettings(existing, { slaves: "eno1 eno2" }, "bond")).toEqual([]);
+    const existing = iface({
+      type: "bond",
+      bridge_ports: "eno1",
+      slaves: "eno1 eno2",
+    });
+    expect(clearedSettings(existing, { slaves: "eno1 eno2" }, "bond")).toEqual(
+      [],
+    );
   });
 
   it("never clears address/netmask, which the form has no control for", () => {
@@ -102,15 +118,19 @@ describe("clearedSettings", () => {
     // edits cidr only, so listing them would put them in `delete` on every
     // single edit and rely on Proxmox re-deriving them.
     const existing = iface({
-      cidr: "192.168.90.236/24",
-      address: "192.168.90.236",
+      cidr: "192.0.2.40/24",
+      address: "192.0.2.40",
       netmask: "255.255.255.0",
       address6: "fd00::2",
       netmask6: "64",
     });
     // Only the comment changed; the CIDR is resubmitted unchanged.
     expect(
-      clearedSettings(existing, { cidr: "192.168.90.236/24", comments: "x" }, "bridge"),
+      clearedSettings(
+        existing,
+        { cidr: "192.0.2.40/24", comments: "x" },
+        "bridge",
+      ),
     ).toEqual([]);
   });
 

@@ -10,7 +10,8 @@ export const SNAPSHOT_NAME_RULES =
 export function snapshotNameError(name: string): string | null {
   if (name.length === 0) return null;
   if (/\s/.test(name)) return "Snapshot names cannot contain spaces.";
-  if (!/^[A-Za-z]/.test(name)) return "Snapshot names must start with a letter.";
+  if (!/^[A-Za-z]/.test(name))
+    return "Snapshot names must start with a letter.";
   if (/[^A-Za-z0-9_-]/.test(name))
     return "Only letters, numbers, '-' and '_' are allowed.";
   if (name.length < 2) return "Snapshot names need at least 2 characters.";

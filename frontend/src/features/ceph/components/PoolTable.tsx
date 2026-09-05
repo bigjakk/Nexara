@@ -11,7 +11,6 @@ interface PoolTableProps {
   clusterId: string;
 }
 
-
 export function PoolTable({ pools, clusterId }: PoolTableProps) {
   const [deletePool, setDeletePool] = useState<string | null>(null);
 
@@ -65,6 +64,7 @@ export function PoolTable({ pools, clusterId }: PoolTableProps) {
                 </td>
                 <td className="px-4 py-2 text-center">
                   <Button
+                    aria-label={`Delete pool ${pool.pool_name}`}
                     variant="ghost"
                     size="sm"
                     onClick={() => {

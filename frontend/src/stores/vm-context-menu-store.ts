@@ -12,7 +12,17 @@ export interface VMContextTarget {
   template?: boolean;
 }
 
-type OpenDialog = "snapshot" | "clone" | "clone-to-template" | "deploy" | "migrate" | "destroy" | "convert-to-template" | "confirm-action" | "move-to-folder" | null;
+type OpenDialog =
+  | "snapshot"
+  | "clone"
+  | "clone-to-template"
+  | "deploy"
+  | "migrate"
+  | "destroy"
+  | "convert-to-template"
+  | "confirm-action"
+  | "move-to-folder"
+  | null;
 
 interface VMContextMenuState {
   target: VMContextTarget | null;
@@ -29,29 +39,56 @@ interface VMContextMenuActions {
   openMigrate: (target: VMContextTarget) => void;
   openDestroy: (target: VMContextTarget) => void;
   openConvertToTemplate: (target: VMContextTarget) => void;
-  openConfirmAction: (target: VMContextTarget, action: string, label: string) => void;
+  openConfirmAction: (
+    target: VMContextTarget,
+    action: string,
+    label: string,
+  ) => void;
   openMoveToFolder: (target: VMContextTarget) => void;
   closeDialog: () => void;
 }
 
-export const useVMContextMenuStore = create<VMContextMenuState & VMContextMenuActions>()(
-  (set) => ({
-    target: null,
-    openDialog: null,
-    confirmAction: null,
-    confirmActionLabel: null,
+export const useVMContextMenuStore = create<
+  VMContextMenuState & VMContextMenuActions
+>()((set) => ({
+  target: null,
+  openDialog: null,
+  confirmAction: null,
+  confirmActionLabel: null,
 
-    openSnapshot: (target) => { set({ target, openDialog: "snapshot" }); },
-    openClone: (target) => { set({ target, openDialog: "clone" }); },
-    openCloneToTemplate: (target) => { set({ target, openDialog: "clone-to-template" }); },
-    openDeploy: (target) => { set({ target, openDialog: "deploy" }); },
-    openMigrate: (target) => { set({ target, openDialog: "migrate" }); },
-    openDestroy: (target) => { set({ target, openDialog: "destroy" }); },
-    openConvertToTemplate: (target) => { set({ target, openDialog: "convert-to-template" }); },
-    openConfirmAction: (target, action, label) => {
-      set({ target, openDialog: "confirm-action", confirmAction: action, confirmActionLabel: label });
-    },
-    openMoveToFolder: (target) => { set({ target, openDialog: "move-to-folder" }); },
-    closeDialog: () => { set({ openDialog: null, confirmAction: null, confirmActionLabel: null }); },
-  }),
-);
+  openSnapshot: (target) => {
+    set({ target, openDialog: "snapshot" });
+  },
+  openClone: (target) => {
+    set({ target, openDialog: "clone" });
+  },
+  openCloneToTemplate: (target) => {
+    set({ target, openDialog: "clone-to-template" });
+  },
+  openDeploy: (target) => {
+    set({ target, openDialog: "deploy" });
+  },
+  openMigrate: (target) => {
+    set({ target, openDialog: "migrate" });
+  },
+  openDestroy: (target) => {
+    set({ target, openDialog: "destroy" });
+  },
+  openConvertToTemplate: (target) => {
+    set({ target, openDialog: "convert-to-template" });
+  },
+  openConfirmAction: (target, action, label) => {
+    set({
+      target,
+      openDialog: "confirm-action",
+      confirmAction: action,
+      confirmActionLabel: label,
+    });
+  },
+  openMoveToFolder: (target) => {
+    set({ target, openDialog: "move-to-folder" });
+  },
+  closeDialog: () => {
+    set({ openDialog: null, confirmAction: null, confirmActionLabel: null });
+  },
+}));

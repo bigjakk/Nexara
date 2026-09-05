@@ -33,7 +33,9 @@ export function VMContextDialogs() {
     <>
       <CreateSnapshotDialog
         open={openDialog === "snapshot"}
-        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
         clusterId={target.clusterId}
         resourceId={target.resourceId}
         kind={target.kind}
@@ -42,7 +44,9 @@ export function VMContextDialogs() {
 
       <CloneDialog
         open={openDialog === "clone"}
-        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
         clusterId={target.clusterId}
         resourceId={target.resourceId}
         kind={target.kind}
@@ -51,7 +55,9 @@ export function VMContextDialogs() {
 
       <MigrateJobDialog
         open={openDialog === "migrate"}
-        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
         clusterId={target.clusterId}
         resourceId={target.resourceId}
         vmid={target.vmid}
@@ -63,7 +69,9 @@ export function VMContextDialogs() {
 
       <DestroyDialog
         open={openDialog === "destroy"}
-        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
         clusterId={target.clusterId}
         resourceId={target.resourceId}
         kind={target.kind}
@@ -72,7 +80,9 @@ export function VMContextDialogs() {
 
       <CloneToTemplateDialog
         open={openDialog === "clone-to-template"}
-        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
         clusterId={target.clusterId}
         resourceId={target.resourceId}
         kind={target.kind}
@@ -81,7 +91,9 @@ export function VMContextDialogs() {
 
       <DeployTemplateDialog
         open={openDialog === "deploy"}
-        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
         clusterId={target.clusterId}
         vmId={target.resourceId}
         kind={target.kind}
@@ -90,7 +102,9 @@ export function VMContextDialogs() {
 
       <ConvertToTemplateDialog
         open={openDialog === "convert-to-template"}
-        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
         clusterId={target.clusterId}
         resourceId={target.resourceId}
         kind={target.kind}
@@ -99,7 +113,9 @@ export function VMContextDialogs() {
 
       <MoveToFolderDialog
         open={openDialog === "move-to-folder"}
-        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
         clusterId={target.clusterId}
         vmId={target.resourceId}
         vmName={target.name}
@@ -107,7 +123,9 @@ export function VMContextDialogs() {
 
       <Dialog
         open={openDialog === "confirm-action"}
-        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
       >
         <DialogContent>
           <DialogHeader>

@@ -194,7 +194,20 @@ func main() {
 	srv.RegisterFrontend(distFS)
 
 	// ---- Collector goroutine ----
-	go runCollector(ctx, cfg, application, logger.With("component", "collector"))
+	// Built here rather than inside runCollector so the API handler and the
+	// collector loop can share it without a cross-goroutine write to the
+	// handler: this runs before srv starts serving.
+	//
+	// LIMITATION: process-local. The inventory loop that reads this trigger is
+	// leader-gated (see runWithLeaderRetry below), so it only shortens the wait
+	// when the replica that served POST /veeam-servers is also the collector
+	// leader. On a multi-replica deployment a registration handled by any other
+	// replica falls back to the next tick, exactly as before — no worse, but no
+	// better. Making it cross-instance needs a real transport (Redis pub/sub, or
+	// the leader polling for servers with last_sync_at IS NULL).
+	veeamTrigger := collector.NewInventoryTrigger()
+	srv.SetVeeamSyncTrigger(veeamTrigger)
+	go runCollector(ctx, cfg, application, veeamTrigger, logger.With("component", "collector"))
 
 	// ---- Scheduler goroutine ----
 	go runScheduler(ctx, cfg, application, logger.With("component", "scheduler"))
@@ -431,7 +444,7 @@ func runWithLeaderRetry(ctx context.Context, pool *pgxpool.Pool, role string, lo
 
 // runCollector runs the metric collection loop. Uses leader election so only
 // one instance across the Swarm cluster runs the collector at any time.
-func runCollector(ctx context.Context, cfg *config.Config, application *app.App, logger *slog.Logger) {
+func runCollector(ctx context.Context, cfg *config.Config, application *app.App, veeamTrigger *collector.InventoryTrigger, logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("collector panic", "error", r)
@@ -588,14 +601,19 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 						logger.Error("veeam inventory loop panicked", "panic", r)
 					}
 				}()
-				// One pass immediately, so a freshly added server shows data
-				// without waiting out a full interval.
+				// One pass immediately, so servers registered before this
+				// process started show data without waiting out a full
+				// interval. A server added while we are already running is
+				// covered by the trigger below, not by this.
 				veeamSyncer.SyncInventory(ctx)
 				ticker := time.NewTicker(veeamInterval)
 				defer ticker.Stop()
 				for {
 					select {
 					case <-ticker.C:
+						veeamSyncer.SyncInventory(ctx)
+					case <-veeamTrigger.C():
+						// POST /veeam-servers asking not to wait out the tick.
 						veeamSyncer.SyncInventory(ctx)
 					case <-ctx.Done():
 						return
@@ -670,20 +688,66 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		AlertEngine:   application.AlertEngine,
 		ReportGen:     application.ReportGen,
 		RollingOrch:   application.RollingOrch,
+		VirtioWin:     application.VirtioWin,
+		GuestTools:    application.GuestTools,
 	})
 
 	runWithLeaderRetry(ctx, application.Pool, "scheduler", logger, func(ctx context.Context) {
-		logger.Info("scheduler started",
-			"task_interval", "60s",
-			"drs_interval", "60s",
-			"cve_interval", "6h",
-			"kev_interval", "1h",
-			"alert_interval", "60s",
-			"report_interval", "60s",
-			"report_retention_interval", "24h",
-			"task_retention_interval", "1h",
-			"rolling_update_interval", "15s",
-		)
+		// One row per engine: the name its in-flight guard logs, how often it
+		// ticks, and what it runs. This replaced four lists that had to be
+		// edited together — a constructor, an initial-pass call, a ticker and a
+		// select arm — plus a hand-written startup log beside them. The log is
+		// derived from these rows now, which is what stops it drifting: it had
+		// gone to naming eleven intervals for fourteen engines, silently
+		// missing all three reconcile loops.
+		engines := []struct {
+			name  string
+			every time.Duration
+			run   func(context.Context)
+			// note annotates the startup log where the interval alone is
+			// misleading.
+			note string
+		}{
+			{name: "scheduled_tasks", every: 60 * time.Second, run: sched.Run},
+			{name: "drs", every: 60 * time.Second, run: sched.RunDRS},
+			{name: "cve_scanning", every: 6 * time.Hour, run: sched.RunCVEScanning},
+			{name: "kev_refresh", every: 1 * time.Hour, run: sched.RunKEVRefresh},
+			{name: "alert_evaluation", every: 60 * time.Second, run: sched.RunAlertEvaluation},
+			{name: "report_generation", every: 60 * time.Second, run: sched.RunReportGeneration},
+			{name: "report_retention", every: 24 * time.Hour, run: sched.RunReportRetention},
+			{name: "task_retention", every: 1 * time.Hour, run: sched.RunTaskRetention},
+			{name: "rolling_updates", every: 15 * time.Second, run: sched.RunRollingUpdates},
+			{name: "vm_import_reconcile", every: 15 * time.Second, run: sched.RunVMImportReconcile},
+
+			// Minutely, but not a minutely upstream fetch: each cluster carries
+			// its own next_check_at (default six-hourly, or a cron an operator
+			// aimed at a maintenance window), so a tick with nothing due is one
+			// indexed query. The poll has to be this fine-grained for "daily at
+			// 03:00" to mean 03:00.
+			{
+				name: "virtio_win_check", every: 1 * time.Minute, run: sched.RunVirtioWinCheck,
+				note: "per-cluster schedule, default 6h",
+			},
+			// The reconcile half runs on its own faster tick: an 837 MiB fetch
+			// needs following minute by minute, not once every six hours.
+			{name: "virtio_win_reconcile", every: 30 * time.Second, run: sched.RunVirtioWinReconcile},
+			// Detection reaches into every running Windows guest, so it runs on
+			// a human timescale rather than a machine one.
+			{name: "guest_tools_pass", every: 1 * time.Hour, run: sched.RunGuestToolsPass},
+			// The reconcile half is frequent: a staged install fires on the
+			// guest's own reboot, which nothing here triggers or observes.
+			{name: "guest_tools_reconcile", every: 60 * time.Second, run: sched.RunGuestToolsReconcile},
+		}
+
+		intervals := make([]any, 0, 2*len(engines))
+		for _, e := range engines {
+			interval := e.every.String()
+			if e.note != "" {
+				interval += " (" + e.note + ")"
+			}
+			intervals = append(intervals, e.name+"_interval", interval)
+		}
+		logger.Info("scheduler started", intervals...)
 
 		// Clean up stale DRS history entries from previous interrupted runs.
 		if err := queries.CleanupStaleDRSHistory(ctx); err != nil {
@@ -710,85 +774,27 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			}
 		}
 
-		runTasks := engine("scheduled_tasks", sched.Run)
-		runDRS := engine("drs", sched.RunDRS)
-		runKEV := engine("kev_refresh", sched.RunKEVRefresh)
-		runCVE := engine("cve_scanning", sched.RunCVEScanning)
-		runAlerts := engine("alert_evaluation", sched.RunAlertEvaluation)
-		runReports := engine("report_generation", sched.RunReportGeneration)
-		runReportRetention := engine("report_retention", sched.RunReportRetention)
-		runTaskRetention := engine("task_retention", sched.RunTaskRetention)
-		runRolling := engine("rolling_updates", sched.RunRollingUpdates)
-		runImports := engine("vm_import_reconcile", sched.RunVMImportReconcile)
-
-		// Run initial checks immediately.
-		runTasks()
-		runDRS()
-		runKEV()
-		runCVE()
-		runAlerts()
-		runReports()
-		runReportRetention()
-		runTaskRetention()
-		runRolling()
-		runImports()
-
-		taskTicker := time.NewTicker(60 * time.Second)
-		defer taskTicker.Stop()
-
-		drsTicker := time.NewTicker(60 * time.Second)
-		defer drsTicker.Stop()
-
-		cveTicker := time.NewTicker(6 * time.Hour)
-		defer cveTicker.Stop()
-
-		kevTicker := time.NewTicker(1 * time.Hour)
-		defer kevTicker.Stop()
-
-		alertTicker := time.NewTicker(60 * time.Second)
-		defer alertTicker.Stop()
-
-		reportTicker := time.NewTicker(60 * time.Second)
-		defer reportTicker.Stop()
-
-		reportRetentionTicker := time.NewTicker(24 * time.Hour)
-		defer reportRetentionTicker.Stop()
-
-		taskRetentionTicker := time.NewTicker(1 * time.Hour)
-		defer taskRetentionTicker.Stop()
-
-		rollingTicker := time.NewTicker(15 * time.Second)
-		defer rollingTicker.Stop()
-
-		importTicker := time.NewTicker(15 * time.Second)
-		defer importTicker.Stop()
-
-		for {
-			select {
-			case <-taskTicker.C:
-				runTasks()
-			case <-drsTicker.C:
-				runDRS()
-			case <-cveTicker.C:
-				runCVE()
-			case <-kevTicker.C:
-				runKEV()
-			case <-alertTicker.C:
-				runAlerts()
-			case <-reportTicker.C:
-				runReports()
-			case <-reportRetentionTicker.C:
-				runReportRetention()
-			case <-taskRetentionTicker.C:
-				runTaskRetention()
-			case <-rollingTicker.C:
-				runRolling()
-			case <-importTicker.C:
-				runImports()
-			case <-ctx.Done():
-				logger.Info("scheduler stopped")
-				return
-			}
+		for _, e := range engines {
+			run := engine(e.name, e.run)
+			run() // initial pass, before the first tick comes round
+			go func() {
+				ticker := time.NewTicker(e.every)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						run()
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
 		}
+
+		// ctx is leadership-scoped (see runWithLeaderRetry), so this returns
+		// both on shutdown and when the heartbeat loses the role — and every
+		// engine goroutine above is watching the same ctx.
+		<-ctx.Done()
+		logger.Info("scheduler stopped")
 	})
 }

@@ -81,7 +81,7 @@ func TestIsLockedError(t *testing.T) {
 		},
 		{
 			name: "wrapped as the orchestrator wraps it",
-			err:  fmt.Errorf("migrate VM 106 on HV02: %w", &APIError{StatusCode: 500, Message: `{"data":null,"message":"VM is locked (migrate)\n"}`}),
+			err:  fmt.Errorf("migrate VM 106 on pve-02: %w", &APIError{StatusCode: 500, Message: `{"data":null,"message":"VM is locked (migrate)\n"}`}),
 			want: true,
 		},
 		{

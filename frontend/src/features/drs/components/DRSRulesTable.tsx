@@ -62,11 +62,15 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
 
     if (deleteTarget.source === "ha" && deleteTarget.ha_rule_name) {
       deleteHARule.mutate(deleteTarget.ha_rule_name, {
-        onSuccess: () => { setDeleteTarget(null); },
+        onSuccess: () => {
+          setDeleteTarget(null);
+        },
       });
     } else {
       deleteManualRule.mutate(deleteTarget.id, {
-        onSuccess: () => { setDeleteTarget(null); },
+        onSuccess: () => {
+          setDeleteTarget(null);
+        },
       });
     }
   };
@@ -99,7 +103,9 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
               </TableRow>
             ) : (
               allRules.map((rule, idx) => (
-                <TableRow key={rule.id || `ha-${rule.ha_rule_name ?? String(idx)}`}>
+                <TableRow
+                  key={rule.id || `ha-${rule.ha_rule_name ?? String(idx)}`}
+                >
                   <TableCell>
                     <Badge
                       variant={
@@ -123,9 +129,7 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
                   </TableCell>
                   <TableCell>
                     <Badge
-                      variant={
-                        rule.source === "ha" ? "outline" : "default"
-                      }
+                      variant={rule.source === "ha" ? "outline" : "default"}
                     >
                       {rule.source === "ha" ? "HA" : "Manual"}
                     </Badge>
@@ -137,9 +141,12 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
                   </TableCell>
                   <TableCell>
                     <Button
+                      aria-label={`Delete ${rule.rule_type} rule for ${rule.ha_rule_name ?? (rule.vm_ids ?? []).join(", ")}`}
                       variant="ghost"
                       size="icon"
-                      onClick={() => { setDeleteTarget(rule); }}
+                      onClick={() => {
+                        setDeleteTarget(rule);
+                      }}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -153,7 +160,9 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
 
       <Dialog
         open={deleteTarget !== null}
-        onOpenChange={() => { setDeleteTarget(null); }}
+        onOpenChange={() => {
+          setDeleteTarget(null);
+        }}
       >
         <DialogContent>
           <DialogHeader>
@@ -165,7 +174,12 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setDeleteTarget(null); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteTarget(null);
+              }}
+            >
               Cancel
             </Button>
             <Button

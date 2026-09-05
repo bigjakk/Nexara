@@ -29,9 +29,12 @@ const mockVM: VMResponse = {
   updated_at: "2024-01-01T00:00:00Z",
 };
 
+// What useVM serves for the current test; renderPage sets it.
+let mockCurrentVM: VMResponse = mockVM;
+
 vi.mock("../api/vm-queries", () => ({
   useVM: () => ({
-    data: mockVM,
+    data: mockCurrentVM,
     isLoading: false,
     error: null,
   }),
@@ -205,7 +208,8 @@ vi.mock("@/features/storage/api/storage-queries", () => ({
   }),
 }));
 
-function renderPage(kind: string = "vm") {
+function renderPage(kind: string = "vm", vm: Partial<VMResponse> = {}) {
+  mockCurrentVM = { ...mockVM, ...vm };
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
@@ -227,6 +231,7 @@ function renderPage(kind: string = "vm") {
 describe("VMDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCurrentVM = mockVM;
   });
 
   it("renders VM name and status", () => {
@@ -250,7 +255,37 @@ describe("VMDetailPage", () => {
 
   it("shows action buttons for running VM", () => {
     renderPage();
-    expect(screen.getByRole("button", { name: /shutdown/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Clone$/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /shutdown/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Clone$/i }),
+    ).toBeInTheDocument();
   });
+
+  // Guest tools are a Windows-only concept, and this page is the one place the
+  // guest's OS is classified — VMGuestToolsCard trusts the gate rather than
+  // re-deriving it. Drop the gate and every Linux VM's page fires a
+  // cluster-wide guest-tools request, and 403s it without view:guest_tools.
+  it("hides the Guest Tools tab for a non-Windows guest", () => {
+    renderPage();
+    expect(
+      screen.queryByRole("tab", { name: /guest tools/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  // Both limbs of the OR, because either alone is enough to make a guest
+  // Windows: config_ostype is the authoritative Proxmox setting, and the
+  // agent-reported ostype covers guests whose config never named an OS.
+  // Stopped so the Overview guest-agent panel — the one other guest-tools
+  // reader — stays unmounted and no query fires.
+  it.each([{ config_ostype: "win11" }, { ostype: "mswindows" }])(
+    "shows the Guest Tools tab for a Windows guest (%o)",
+    (os) => {
+      renderPage("vm", { ...os, status: "stopped" });
+      expect(
+        screen.getByRole("tab", { name: /guest tools/i }),
+      ).toBeInTheDocument();
+    },
+  );
 });

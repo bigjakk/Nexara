@@ -127,7 +127,8 @@ export function DeployTemplateDialog({
         <DialogHeader>
           <DialogTitle>Deploy Template</DialogTitle>
           <DialogDescription>
-            Clone &ldquo;{templateName}&rdquo; to create a new {kind === "ct" ? "container" : "VM"}.
+            Clone &ldquo;{templateName}&rdquo; to create a new{" "}
+            {kind === "ct" ? "container" : "VM"}.
           </DialogDescription>
         </DialogHeader>
 
@@ -153,7 +154,9 @@ export function DeployTemplateDialog({
                   type="number"
                   min={100}
                   value={newId}
-                  onChange={(e) => { setNewId(e.target.value); }}
+                  onChange={(e) => {
+                    setNewId(e.target.value);
+                  }}
                   required
                 />
                 {isDuplicate && (
@@ -167,7 +170,9 @@ export function DeployTemplateDialog({
                 <Input
                   id="deploy-name"
                   value={newName}
-                  onChange={(e) => { setNewName(e.target.value); }}
+                  onChange={(e) => {
+                    setNewName(e.target.value);
+                  }}
                   required
                 />
               </div>
@@ -179,12 +184,16 @@ export function DeployTemplateDialog({
                 <select
                   id="deploy-node"
                   value={targetNode}
-                  onChange={(e) => { setTargetNode(e.target.value); }}
+                  onChange={(e) => {
+                    setTargetNode(e.target.value);
+                  }}
                   className={selectClass}
                 >
                   <option value="">Same node</option>
                   {nodes.map((n) => (
-                    <option key={n.id} value={n.name}>{n.name}</option>
+                    <option key={n.id} value={n.name}>
+                      {n.name}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -195,12 +204,16 @@ export function DeployTemplateDialog({
               <select
                 id="deploy-storage"
                 value={storage}
-                onChange={(e) => { setStorage(e.target.value); }}
+                onChange={(e) => {
+                  setStorage(e.target.value);
+                }}
                 className={selectClass}
               >
                 <option value="">Default (same as template)</option>
                 {diskStorages?.map((s) => (
-                  <option key={s.id} value={s.storage}>{s.storage} ({s.type})</option>
+                  <option key={s.id} value={s.storage}>
+                    {s.storage} ({s.type})
+                  </option>
                 ))}
               </select>
             </div>
@@ -209,7 +222,9 @@ export function DeployTemplateDialog({
               <Checkbox
                 id="deploy-full"
                 checked={fullClone}
-                onCheckedChange={(checked) => { setFullClone(Boolean(checked)); }}
+                onCheckedChange={(checked) => {
+                  setFullClone(Boolean(checked));
+                }}
               />
               <Label htmlFor="deploy-full" className="text-sm">
                 Full Clone (independent copy)
@@ -226,11 +241,16 @@ export function DeployTemplateDialog({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => { onOpenChange(false); }}
+                onClick={() => {
+                  onOpenChange(false);
+                }}
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={cloneMutation.isPending || isDuplicate}>
+              <Button
+                type="submit"
+                disabled={cloneMutation.isPending || isDuplicate}
+              >
                 {cloneMutation.isPending ? "Deploying..." : "Deploy"}
               </Button>
             </DialogFooter>

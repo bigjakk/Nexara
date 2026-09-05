@@ -15,7 +15,11 @@ const mockedList = vi.mocked(apiClient.list);
 const STORE = "Test-Backup-Datastore";
 
 /** The datastore's own config, as PBS >= 2.2 reports it: no prune keys at all. */
-const configWithoutPrune = { name: STORE, path: "/mnt/backup", "gc-schedule": "daily" };
+const configWithoutPrune = {
+  name: STORE,
+  path: "/mnt/backup",
+  "gc-schedule": "daily",
+};
 
 function job(over: Partial<PBSPruneJob> = {}): PBSPruneJob {
   return { id: "j1", store: STORE, schedule: "daily", ...over };
@@ -29,7 +33,12 @@ describe("DatastoreConfigCard", () => {
   it("renders the prune job's schedule, retention and runs", async () => {
     mockedGet.mockResolvedValue(configWithoutPrune);
     mockedList.mockResolvedValue([
-      job({ "keep-daily": 14, "last-run-endtime": 1787683680, "last-run-state": "OK", "next-run": 1787727600 }),
+      job({
+        "keep-daily": 14,
+        "last-run-endtime": 1787683680,
+        "last-run-state": "OK",
+        "next-run": 1787727600,
+      }),
     ]);
 
     renderWithProviders(<DatastoreConfigCard pbsId="pbs-1" store={STORE} />);

@@ -1,5 +1,11 @@
 import { useState, useCallback } from "react";
-import { ArrowRightLeft, Loader2, CheckCircle2, XCircle, Circle } from "lucide-react";
+import {
+  ArrowRightLeft,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Circle,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -45,7 +51,11 @@ async function resolveVolidToDiskKey(
       `/api/v1/clusters/${clusterId}/vms/${vmUuid}/config`,
     );
     for (const [key, val] of Object.entries(config)) {
-      if (DISK_KEY_RE.test(key) && typeof val === "string" && val.includes(volid)) {
+      if (
+        DISK_KEY_RE.test(key) &&
+        typeof val === "string" &&
+        val.includes(volid)
+      ) {
         return key;
       }
     }
@@ -78,10 +88,12 @@ export function BulkMoveDialog({
   const contentQuery = useStorageContent(clusterId, storageId);
 
   const imageItems = (contentQuery.data ?? []).filter(
-    (item: StorageContentItem) => item.content === "images" && item.vmid != null,
+    (item: StorageContentItem) =>
+      item.content === "images" && item.vmid != null,
   );
 
-  const vmCount = new Set(imageItems.map((i: StorageContentItem) => i.vmid)).size;
+  const vmCount = new Set(imageItems.map((i: StorageContentItem) => i.vmid))
+    .size;
 
   const handleEvacuate = useCallback(async () => {
     if (!targetStorage || imageItems.length === 0) return;
@@ -93,7 +105,9 @@ export function BulkMoveDialog({
     // (an empty-array default would be a dead store).
     let vmList: VMListEntry[];
     try {
-      vmList = await apiClient.list<VMListEntry>(`/api/v1/clusters/${clusterId}/vms`);
+      vmList = await apiClient.list<VMListEntry>(
+        `/api/v1/clusters/${clusterId}/vms`,
+      );
     } catch {
       setRunning(false);
       setBuildingJobs(false);
@@ -116,9 +130,18 @@ export function BulkMoveDialog({
         });
         continue;
       }
-      const diskKey = await resolveVolidToDiskKey(clusterId, vmUuid, item.volid);
+      const diskKey = await resolveVolidToDiskKey(
+        clusterId,
+        vmUuid,
+        item.volid,
+      );
       if (diskKey) {
-        newJobs.push({ vmid: item.vmid, diskKey, volid: item.volid, status: "pending" });
+        newJobs.push({
+          vmid: item.vmid,
+          diskKey,
+          volid: item.volid,
+          status: "pending",
+        });
       } else {
         newJobs.push({
           vmid: item.vmid,
@@ -155,7 +178,6 @@ export function BulkMoveDialog({
 
         newJobs[i] = { ...job, status: "completed", upid: resp.upid };
         setJobs([...newJobs]);
-
       } catch (err) {
         newJobs[i] = {
           ...job,
@@ -173,7 +195,12 @@ export function BulkMoveDialog({
   const failedCount = jobs.filter((j) => j.status === "failed").length;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!running) setOpen(v); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!running) setOpen(v);
+      }}
+    >
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="gap-1.5">
           <ArrowRightLeft className="h-3.5 w-3.5" />
@@ -186,14 +213,22 @@ export function BulkMoveDialog({
         </DialogHeader>
 
         <p className="text-sm text-muted-foreground">
-          Move all VM disk images off <strong>{storageName}</strong> to another storage pool.
+          Move all VM disk images off <strong>{storageName}</strong> to another
+          storage pool.
           {imageItems.length > 0 && (
-            <> Found <strong>{imageItems.length}</strong> disk{imageItems.length !== 1 ? "s" : ""} across <strong>{vmCount}</strong> VM{vmCount !== 1 ? "s" : ""}.</>
+            <>
+              {" "}
+              Found <strong>{imageItems.length}</strong> disk
+              {imageItems.length !== 1 ? "s" : ""} across{" "}
+              <strong>{vmCount}</strong> VM{vmCount !== 1 ? "s" : ""}.
+            </>
           )}
         </p>
 
         {imageItems.length === 0 && (
-          <p className="text-sm text-muted-foreground">No VM disk images found on this storage.</p>
+          <p className="text-sm text-muted-foreground">
+            No VM disk images found on this storage.
+          </p>
         )}
 
         {imageItems.length > 0 && (
@@ -204,12 +239,16 @@ export function BulkMoveDialog({
                 id="bulk-target-storage"
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 value={targetStorage}
-                onChange={(e) => { setTargetStorage(e.target.value); }}
+                onChange={(e) => {
+                  setTargetStorage(e.target.value);
+                }}
                 disabled={running}
               >
                 <option value="">Select target...</option>
                 {targetOptions.map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
                 ))}
               </select>
             </div>
@@ -219,24 +258,38 @@ export function BulkMoveDialog({
                 type="checkbox"
                 id="bulk-delete-original"
                 checked={deleteOriginal}
-                onChange={(e) => { setDeleteOriginal(e.target.checked); }}
+                onChange={(e) => {
+                  setDeleteOriginal(e.target.checked);
+                }}
                 disabled={running}
                 className="h-4 w-4 rounded border-gray-300"
               />
-              <Label htmlFor="bulk-delete-original">Delete originals after move completes</Label>
+              <Label htmlFor="bulk-delete-original">
+                Delete originals after move completes
+              </Label>
             </div>
 
             {jobs.length > 0 && (
               <div className="max-h-48 space-y-1 overflow-y-auto rounded border p-2">
                 {jobs.map((job, idx) => (
                   <div key={idx} className="flex items-center gap-2 text-xs">
-                    {job.status === "pending" && <Circle className="h-3 w-3 text-muted-foreground" />}
-                    {job.status === "running" && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
-                    {job.status === "completed" && <CheckCircle2 className="h-3 w-3 text-emerald-500" />}
-                    {job.status === "failed" && <XCircle className="h-3 w-3 text-red-500" />}
+                    {job.status === "pending" && (
+                      <Circle className="h-3 w-3 text-muted-foreground" />
+                    )}
+                    {job.status === "running" && (
+                      <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                    )}
+                    {job.status === "completed" && (
+                      <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                    )}
+                    {job.status === "failed" && (
+                      <XCircle className="h-3 w-3 text-red-500" />
+                    )}
                     <span className="font-mono">VM {job.vmid}</span>
                     <span className="text-muted-foreground">{job.diskKey}</span>
-                    {job.error && <span className="truncate text-red-500">{job.error}</span>}
+                    {job.error && (
+                      <span className="truncate text-red-500">{job.error}</span>
+                    )}
                   </div>
                 ))}
                 {!running && jobs.length > 0 && (
@@ -248,14 +301,24 @@ export function BulkMoveDialog({
             )}
 
             <Button
-              onClick={() => { void handleEvacuate(); }}
-              disabled={!targetStorage || running || (jobs.length > 0 && !running)}
+              onClick={() => {
+                void handleEvacuate();
+              }}
+              disabled={
+                !targetStorage || running || (jobs.length > 0 && !running)
+              }
               className="w-full"
             >
               {buildingJobs ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Resolving disks...</>
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Resolving
+                  disks...
+                </>
               ) : running ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Evacuating...</>
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />{" "}
+                  Evacuating...
+                </>
               ) : jobs.length > 0 ? (
                 "Evacuation Complete"
               ) : (

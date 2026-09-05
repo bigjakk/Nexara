@@ -405,7 +405,7 @@ leaves provenance intact.
 
 ### Nodes
 
-> `:node` is the Proxmox node *name* (e.g. `HV01`); `:node_id` is Nexara's own
+> `:node` is the Proxmox node *name* (e.g. `pve-01`); `:node_id` is Nexara's own
 > node UUID, as returned in the `id` field of `GET /clusters/:id/nodes`. They
 > are not interchangeable — a route taking `:node_id` rejects a node name with
 > `400 Invalid node ID`.
@@ -634,6 +634,91 @@ Import VMs from ESXi/vCenter sources, OVA/OVF appliances, or disk images. Reads 
 | GET | `/clusters/:id/vm-imports/:id` | Get import job status |
 | POST | `/clusters/:id/vm-imports/:id/cancel` | Cancel an import (optionally deleting the partially created VM) |
 
+### Windows Guest Tools
+
+Tracks the virtio-win drivers and QEMU guest agent installed inside Windows
+guests, and stages updates to them. Reads need `view:guest_tools`, policy
+changes `manage:guest_tools`, and staging or cancelling an update
+`execute:guest_tools`.
+
+Nothing here runs the installer through `guest-exec`: installing the tools
+restarts QEMU-GA, which is the very channel the install would be driven through,
+so a direct run kills its own session mid-install. Instead a script is written
+into the guest and registered as a scheduled task running as SYSTEM, which
+executes detached — at the next boot, or immediately on request — leaving a
+result file Nexara reads back. That is both the workaround and the natural
+implementation of "update on reboot".
+
+Cluster `mode` is `disabled` (default), `report` (detect only, never write into a
+guest) or `staged` (detect and stage updates). Per-guest state moves
+`idle → staging → staged → running → succeeded` or `failed`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/clusters/:id/guest-tools/config` | Get the cluster's Windows guest tools update policy |
+| PUT | `/clusters/:id/guest-tools/config` | Update the cluster's Windows guest tools update policy |
+| GET | `/clusters/:id/guest-tools/guests` | List Windows guests with installed guest tools versions and update state |
+| POST | `/clusters/:id/guest-tools/guests/:vmid/detect` | Probe a guest for its installed guest tools version |
+| PUT | `/clusters/:id/guest-tools/guests/:vmid/policy` | Pin a version or exclude a guest from guest tools updates |
+| POST | `/clusters/:id/guest-tools/guests/:vmid/update` | Stage a guest tools update for next boot, or run it now |
+| DELETE | `/clusters/:id/guest-tools/guests/:vmid/update` | Cancel a staged guest tools update |
+
+### virtio-win ISOs
+
+Acquires the ISO an update installs from. Gated on the **storage** grants
+(`view:storage` / `manage:storage`) rather than the guest-tools ones, because
+downloading writes into a Proxmox storage.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/virtio-win/releases` | List known upstream virtio-win releases |
+| GET | `/virtio-win/mirror` | Get the instance-wide download source |
+| PUT | `/virtio-win/mirror` | Point downloads at a mirror, for air-gapped installs (`manage:settings`) |
+| GET | `/clusters/:id/virtio-win/config` | Get the cluster's virtio-win auto-download policy |
+| PUT | `/clusters/:id/virtio-win/config` | Update the cluster's virtio-win auto-download policy |
+| GET | `/clusters/:id/virtio-win/downloads` | List virtio-win download history for the cluster |
+| POST | `/clusters/:id/virtio-win/check` | Run the cluster's check now, off-schedule |
+| POST | `/clusters/:id/virtio-win/download` | Download a virtio-win ISO to the configured storage now |
+
+The release catalogue is global — every cluster sees the same upstream list.
+Upstream publishes **no ISO checksum** (its `CHECKSUM` file covers only the
+RPMs), so a downloaded ISO is not hash-verified — which is why the source base
+URL should be HTTPS. Downloads are dispatched asynchronously and reconciled from
+their UPID, so a pass survives a Nexara restart.
+
+**Check schedule.** The config carries `check_schedule` (a five-field cron
+expression; empty means every six hours, counted from the last check) and
+`check_timezone` (an IANA zone; empty means the server's own). `next_check_at`
+is when the next one is due — `null` reads as *due now*, which is what a
+just-enabled cluster and a config upgraded in place both carry.
+
+Rejected on write rather than stored: an unparseable expression, an unknown
+zone, and an expression that parses but never comes round (`0 3 31 4 *` —
+April 31, and the Feb 30 / Sep 31 variants). The last is not pedantry: the cron
+library range-checks each field on its own, accepts the date, and then answers
+"next occurrence" with the zero time — which as a `next_check_at` is
+permanently in the past, i.e. due on every tick forever.
+
+`POST .../check` refreshes the catalogue from the source and reconciles the
+cluster's storage, downloading only if the target ISO is missing; it records the
+outcome exactly as the scheduler does, so the next check moves to its next slot.
+It answers `{"config": …}`, plus `"download"` when one was dispatched.
+
+**Download source.** `PUT /virtio-win/mirror` takes `{"base_url": …}` and
+replaces `fedorapeople.org` for both discovery and the URL handed to the node.
+It is instance-wide — the catalogue it fills is global — which is why writing it
+needs `manage:settings` rather than `manage:storage`; reading it needs only
+`view:storage`. The mirror is expected to mirror the upstream layout, so that
+`<base>/archive-virtio/virtio-win-<version>/` holds each ISO.
+
+Two shapes need an explicit confirmation, each returned as a `422` the caller
+re-submits with a flag: `insecure_source_confirm_required` for a plain-HTTP base
+(`allow_insecure: true`), and `private_address_confirm_required` for one
+resolving to a private or loopback address (`allow_private_address: true`) — the
+normal case for an internal mirror. Cloud-metadata and other never-routable
+addresses are a `400` and cannot be confirmed through. The key is reserved
+against the generic settings endpoints, so it cannot be written unvalidated.
+
 ### Resource Pools
 
 | Method | Path | Description |
@@ -714,7 +799,7 @@ update its credentials.
 | GET | `/clusters/:id/ceph/rules` | List CRUSH rules |
 | POST | `/clusters/:id/ceph/pools` | Create Ceph pool |
 | DELETE | `/clusters/:id/ceph/pools/:name` | Delete Ceph pool |
-| GET | `/clusters/:id/ceph/osds/:osd_id/preflight?action=` | Assess the redundancy impact of an OSD action |
+| GET | `/clusters/:id/ceph/osds/:osd_id/preflight?action=` | Redundancy verdict for a proposed OSD action (`out` by default), cross-referencing OSD counts against pool `size`/`min_size`. A pool-config read failure does not block it — the gap is flagged instead |
 | POST | `/clusters/:id/ceph/osds/:osd_id/in` | Mark OSD in |
 | POST | `/clusters/:id/ceph/osds/:osd_id/out` | Mark OSD out |
 | POST | `/clusters/:id/ceph/osds/:osd_id/start` | Start OSD daemon |
@@ -911,6 +996,7 @@ update its credentials.
 | GET | `/pbs-servers/:id/tasks/:upid` | Get PBS task status |
 | GET | `/pbs-servers/:id/tasks/:upid/log` | Get PBS task log |
 | GET | `/pbs-servers/:id/metrics` | Get datastore metrics |
+| GET | `/pbs-servers/:id/prune-jobs` | List prune jobs, optionally narrowed with `?store=`. Retention is reported from prune jobs, not `datastore.cfg` alone |
 
 ### Backup & Restore
 
@@ -944,6 +1030,82 @@ selection untouched.
 
 The `schedule` field is a Proxmox **systemd calendar event** (`02:00`,
 `mon,fri 22:30`, `*/6:00`, `*-*-01 04:00`), not a cron expression.
+
+### Veeam Backup & Replication
+
+A **second backup provider alongside PBS**, not a replacement. Requires VBR
+**13.1+** with an Enterprise Plus licence, reachable on its REST API port (9419
+by default — the API root, not the console URL).
+
+Reads need `view:veeam`, writes `manage:veeam`, removing a server
+`delete:veeam`, and job control `execute:veeam` — a separate grant, held by the
+built-in Admin and Operator roles and mirrored onto any custom role that already
+held `manage:backup`.
+
+Authentication differs enough from PBS that the two are modelled separately: VBR
+uses an OAuth2 password grant against a single admin account (often
+`DOMAIN\user`, where the backslash is significant), negotiates an
+`x-api-version` per server, and identifies work with plain UUIDs rather than
+UPIDs. One Veeam server can also protect *several* Proxmox clusters, where a PBS
+server maps to at most one.
+
+Because every call spends a real domain logon, two dedicated rate limits apply:
+**10/min per IP** shared by create, update and test, and a separate **30/min per
+IP** for job control and session logs.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/veeam-servers/` | Register a Veeam Backup & Replication server (VBR 13.1+). Connects and records the negotiated API revision, product version and licence edition; a failed connection is a failed create |
+| GET | `/veeam-servers/` | List registered Veeam Backup & Replication servers |
+| GET | `/veeam-servers/:id` | Get Veeam server details |
+| PUT | `/veeam-servers/:id` | Update a Veeam server. Changing the URL, credentials or TLS handling re-tests the connection; renaming or disabling does not |
+| DELETE | `/veeam-servers/:id` | Remove a Veeam server and its stored credential |
+| POST | `/veeam-servers/:id/test` | Test the stored connection and report version, licence edition and covered Proxmox clusters. Persists nothing |
+| GET | `/veeam-servers/:id/platforms` | List the Veeam platforms (Proxmox connections) this server protects, and the Nexara cluster each is mapped to |
+| PUT | `/veeam-servers/:id/platforms/:platform_id` | Map a Veeam platform to a Nexara cluster. Every cluster-scoped Veeam permission resolves through this mapping, so the write needs global manage:veeam |
+| GET | `/veeam-servers/:id/repositories` | List Veeam backup repositories with capacity. Global scope — one repository holds every cluster's backups |
+| GET | `/veeam-servers/:id/repositories/:repository_id/metrics` | Repository capacity over time. `?range=` accepts `24h`, `7d`, `30d` or `90d` (default `7d`) |
+| GET | `/veeam-servers/:id/jobs` | List Veeam Proxmox backup jobs with their last result and progress |
+| POST | `/veeam-servers/:id/jobs/:job_id/start` | Start a Veeam backup job. Async — the returned session is a starting state, not a result. A job with no objects to process returns started=false and creates no run |
+| POST | `/veeam-servers/:id/jobs/:job_id/stop` | Stop a Veeam job's running session. Recorded as Nexara-initiated so veeam_job_failed does not fire for it — Veeam itself records a cancelled run as "Failed" |
+| POST | `/veeam-servers/:id/jobs/:job_id/enable` | Put a Veeam job back on its schedule |
+| POST | `/veeam-servers/:id/jobs/:job_id/disable` | Take a Veeam job off its schedule. Protection stops accruing while existing restore points remain, and Veeam raises no alarm about it |
+| GET | `/veeam-servers/:id/sessions` | List recent Veeam Proxmox backup runs |
+| GET | `/veeam-servers/:id/sessions/:session_id/tasks` | Per-guest breakdown of one run: which guests it processed and which failed, linked to their Nexara guest where the name resolves unambiguously. Empty while a run is still in flight — Veeam reports task rows only as tasks finish |
+| GET | `/veeam-servers/:id/sessions/:session_id/logs` | Read a session's log, live from Veeam. Empty is the NORMAL result for a stopped run — Veeam keeps no records for a killed session |
+| POST | `/veeam-servers/:id/sessions/:session_id/stop` | Stop one running Veeam session. Recorded as Nexara-initiated, as for the job stop |
+| GET | `/veeam-servers/:id/backup-objects` | List backed-up guests. One row per (guest x backup), so a guest covered by several jobs appears more than once |
+| GET | `/veeam-servers/:id/backup-objects/:object_id/restore-points` | List a backup object's restore points, with malware status and file-level-restore availability |
+| PUT | `/veeam-servers/:id/backup-objects/:object_id/guest` | Pin a backup object to a guest by VMID, overriding automatic correlation |
+| GET | `/veeam-servers/:id/orphaned-objects` | List backup objects whose platform is mapped but which match no guest on it — restore points held for machines that no longer exist in the form that was backed up |
+| GET | `/veeam-servers/:id/infrastructure` | List Veeam's own guests on the cluster — worker appliances and the VBR server. Coverage excludes these |
+| GET | `/clusters/:id/vms/:vm_id/veeam` | Per-guest Veeam protection: correlated backup object, restore points, malware verdict, and the job protecting it |
+
+**Map platforms before expecting data.** Everything Veeam returns carries a
+`platformId` identifying one Proxmox connection — the only cluster discriminator
+the REST API exposes. `cluster_id` stays `NULL` until an operator confirms the
+mapping, and rows hanging off an unmapped platform cannot be attributed to a
+cluster, so they require *global* `view:veeam` rather than a cluster-scoped
+grant. Until a platform is mapped, its jobs and backup objects do not appear on
+the cluster pages.
+
+**Correlation is on the SMBIOS UUID, not the name.** Veeam's backup-object
+`objectId` *is* the guest's `smbios1` UUID, which makes the match deterministic
+and is what makes the orphan listing possible at all — a name match would
+silently report a rebuilt guest as protected by a backup of the machine it
+replaced. Manual pins (`PUT …/backup-objects/:object_id/guest`) are exempt from
+re-correlation and survive collector churn and renames, but are invalidated if
+the pinned VMID comes to belong to a different machine.
+
+**Changing a server's base URL requires re-entering the password.** A stored
+credential is only ever sent to the address it was saved for; the refusal is
+audited as `veeam_server_credential_redirect_refused`.
+
+Four inventory-backed alert metrics come with it: `veeam_rpo_hours` (cluster and
+VM scope; cluster reports the worst guest), `veeam_malware_status` (Clean 0,
+Informative 1, Suspicious 2, Infected 3), `veeam_repo_used_percent` (**global**
+scope only — one repository holds every cluster's backups) and
+`veeam_job_failed` (cluster scope only, excluding runs Nexara itself stopped).
 
 ### Migrations (Cross-Cluster)
 

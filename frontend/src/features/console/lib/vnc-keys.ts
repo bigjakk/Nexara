@@ -100,7 +100,7 @@ export function typeTextIntoVnc(rfb: RFB, text: string): string[] {
 
     const shift = US_LAYOUT.get(ch)?.shift ?? false;
     if (shift) rfb.sendKey(XK_SHIFT_L, "ShiftLeft", true);
-    rfb.sendKey(keysym, code, true);  // key down
+    rfb.sendKey(keysym, code, true); // key down
     rfb.sendKey(keysym, code, false); // key up
     if (shift) rfb.sendKey(XK_SHIFT_L, "ShiftLeft", false);
   }

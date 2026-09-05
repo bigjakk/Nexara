@@ -39,7 +39,13 @@ import {
 import type { TimeRange } from "@/types/api";
 import type { AggregatedMetrics } from "@/types/ws";
 
-function ConnectionDot({ status, t }: { status: string; t: (key: string) => string }) {
+function ConnectionDot({
+  status,
+  t,
+}: {
+  status: string;
+  t: (key: string) => string;
+}) {
   const isConnected = status === "connected";
   return (
     <span
@@ -71,7 +77,9 @@ export function DashboardPage() {
   );
 
   const clusters = useMemo<ClusterInfo[]>(
-    () => data?.clusters.map((s) => ({ id: s.cluster.id, name: s.cluster.name })) ?? [],
+    () =>
+      data?.clusters.map((s) => ({ id: s.cluster.id, name: s.cluster.name })) ??
+      [],
     [data?.clusters],
   );
 
@@ -104,7 +112,9 @@ export function DashboardPage() {
   const layoutQuery = useSetting("dashboard.layout", "user");
   const presetsQuery = useSetting("dashboard.presets", "user");
 
-  const [activePreset, setActivePreset] = useState<DashboardPreset | null>(null);
+  const [activePreset, setActivePreset] = useState<DashboardPreset | null>(
+    null,
+  );
   const [initializedFromBackend, setInitializedFromBackend] = useState(false);
 
   // Load layout from backend on first load only — not on subsequent query refreshes
@@ -150,7 +160,12 @@ export function DashboardPage() {
       setActivePreset(computedDefaultPreset);
       setInitializedFromBackend(true);
     }
-  }, [layoutQuery.data?.value, clusters, computedDefaultPreset, initializedFromBackend]);
+  }, [
+    layoutQuery.data?.value,
+    clusters,
+    computedDefaultPreset,
+    initializedFromBackend,
+  ]);
 
   // Effective preset — fallback to computed default
   const effectivePreset = activePreset ?? computedDefaultPreset;
@@ -250,7 +265,9 @@ export function DashboardPage() {
 
       // For per-cluster widgets, look up the cluster
       const summary = clusterId ? clusterMap.get(clusterId) : undefined;
-      const clusterLiveMetrics = clusterId ? liveMetrics.get(clusterId) : undefined;
+      const clusterLiveMetrics = clusterId
+        ? liveMetrics.get(clusterId)
+        : undefined;
 
       switch (type) {
         case "stats-overview":
@@ -363,7 +380,9 @@ export function DashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">{t("dashboard")}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {t("dashboard")}
+          </h1>
           <ConnectionDot status={status} t={t} />
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -445,7 +464,6 @@ export function DashboardPage() {
           )}
         </>
       )}
-
     </div>
   );
 }
@@ -482,10 +500,26 @@ function ClusterChart({
   }, [isLive, liveHistory, seedData, historicalQuery.data]);
 
   const chartConfigs = {
-    cpu: { titleKey: "cpuUsage", dataKey: "cpuPercent" as const, color: "#38bdf8" },
-    memory: { titleKey: "memoryUsage", dataKey: "memPercent" as const, color: "#a78bfa" },
-    disk: { titleKey: "diskIoRead", dataKey: "diskReadBps" as const, color: "#f59e0b" },
-    network: { titleKey: "networkIn", dataKey: "netInBps" as const, color: "#10b981" },
+    cpu: {
+      titleKey: "cpuUsage",
+      dataKey: "cpuPercent" as const,
+      color: "#38bdf8",
+    },
+    memory: {
+      titleKey: "memoryUsage",
+      dataKey: "memPercent" as const,
+      color: "#a78bfa",
+    },
+    disk: {
+      titleKey: "diskIoRead",
+      dataKey: "diskReadBps" as const,
+      color: "#f59e0b",
+    },
+    network: {
+      titleKey: "networkIn",
+      dataKey: "netInBps" as const,
+      color: "#10b981",
+    },
   };
 
   const config = chartConfigs[chartType];

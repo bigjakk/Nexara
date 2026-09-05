@@ -244,7 +244,7 @@ func (h *VMHandler) PerformAction(c fiber.Ctx) error {
 }
 
 // guestActionDesc builds a concise task description for a guest (VM/CT) action,
-// e.g. "clone zorin (103)". Shared by the VM and container handlers.
+// e.g. "clone linux11 (103)". Shared by the VM and container handlers.
 func guestActionDesc(action string, vm db.Vm) string {
 	if vm.Name != "" {
 		return action + " " + vm.Name + " (" + strconv.Itoa(int(vm.Vmid)) + ")"
@@ -1950,14 +1950,10 @@ func (h *VMHandler) ListNodeISOs(c fiber.Ctx) error {
 			if item.Content != "iso" {
 				continue
 			}
-			name := item.Volid
-			if idx := strings.LastIndex(item.Volid, "/"); idx >= 0 {
-				name = item.Volid[idx+1:]
-			}
 			isos = append(isos, isoResponse{
 				Volid:   item.Volid,
 				Storage: pool.Storage,
-				Name:    name,
+				Name:    proxmox.VolumeFilename(item.Volid),
 				Size:    item.Size,
 				CTime:   item.CTime,
 			})

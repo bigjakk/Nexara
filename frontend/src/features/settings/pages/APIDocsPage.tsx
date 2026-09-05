@@ -27,7 +27,8 @@ const METHOD_COLORS: Record<string, string> = {
   POST: "text-blue-600 border-blue-300 dark:text-blue-400 dark:border-blue-700",
   PUT: "text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-700",
   DELETE: "text-red-600 border-red-300 dark:text-red-400 dark:border-red-700",
-  PATCH: "text-purple-600 border-purple-300 dark:text-purple-400 dark:border-purple-700",
+  PATCH:
+    "text-purple-600 border-purple-300 dark:text-purple-400 dark:border-purple-700",
 };
 
 function getMethodColor(method: string): string {

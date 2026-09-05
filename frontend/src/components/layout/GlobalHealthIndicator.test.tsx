@@ -167,7 +167,7 @@ describe("GlobalHealthIndicator", () => {
   it("mutes an alert type, hiding all issues of that type", async () => {
     setClusters([
       makeCluster("c1", {
-        name: "CRJLAB",
+        name: "cluster01",
         issues: [
           {
             type: "task_failed",

@@ -158,9 +158,7 @@ describe("DashboardPage", () => {
     });
 
     renderWithProviders(<DashboardPage />);
-    expect(
-      screen.getByText("Prod Cluster — CPU Usage"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Prod Cluster — CPU Usage")).toBeInTheDocument();
   });
 
   it("renders time range selector with all buttons enabled", () => {

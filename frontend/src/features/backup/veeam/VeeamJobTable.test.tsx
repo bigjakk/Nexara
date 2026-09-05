@@ -4,64 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { VeeamJobTable } from "./VeeamJobTable";
 import { VeeamSessionTable } from "./VeeamSessionTable";
-import type { VeeamJob, VeeamSession } from "../types/backup";
-
-function job(over: Partial<VeeamJob> = {}): VeeamJob {
-  return {
-    id: "job-1",
-    veeam_id: "3953c24f-bbe6-41fc-ae2f-a34e25bfd614",
-    name: "Onsite_Daily",
-    job_type: "ProxmoxBackupJob",
-    workload: "Vm",
-    description: "",
-    status: "Stopped",
-    last_result: "Success",
-    last_run: "2026-08-26T22:00:29Z",
-    next_run: "2026-08-27T22:00:00Z",
-    next_run_policy: "8/27/2026 10:00 PM",
-    repository_name: "repo-nas-01",
-    objects_count: 3,
-    progress_percent: 100,
-    bottleneck: "Source",
-    duration: "00:18:27",
-    processing_rate: "268 MB",
-    processed_size: 1046898278400,
-    read_size: 274600034304,
-    transferred_size: 8739400042,
-    cluster_id: null,
-    last_seen_at: "2026-08-26T23:00:00Z",
-    running_session_id: "",
-    running_session_state: "",
-    last_session_id: "",
-    ...over,
-  };
-}
-
-function session(over: Partial<VeeamSession> = {}): VeeamSession {
-  return {
-    id: "sess-1",
-    veeam_id: "20ff3c43-65c0-414d-ae03-10cf59fd2faa",
-    name: "Onsite_Daily",
-    state: "Stopped",
-    result: "Success",
-    result_message: "Success",
-    algorithm: "Increment",
-    bottleneck: "Source",
-    duration: "00:10:00",
-    processing_rate: "33.3 MB",
-    processed_size: 96636764160,
-    read_size: 13931380736,
-    transferred_size: 2628327455,
-    progress_percent: 100,
-    creation_time: "2026-08-26T19:56:00Z",
-    end_time: "2026-08-26T20:06:01Z",
-    initiated_by: "SYSTEM",
-    nexara_initiated: false,
-    nexara_stopped: false,
-    cluster_id: null,
-    ...over,
-  };
-}
+import { job, session } from "./veeam.fixtures";
 
 // The expanded session row reads the run's log live from the Veeam server.
 // Answered with an empty listing here: that is the shape a stopped run really
@@ -84,7 +27,7 @@ describe("VeeamJobTable", () => {
   it("shows job state and result without expanding", () => {
     renderWithProviders(<VeeamJobTable serverId="srv-1" jobs={[job()]} />);
 
-    expect(screen.getByText("Onsite_Daily")).toBeInTheDocument();
+    expect(screen.getByText("Daily-Backup")).toBeInTheDocument();
     expect(screen.getByText("Success")).toBeInTheDocument();
     expect(screen.getByText("repo-nas-01")).toBeInTheDocument();
   });
@@ -109,7 +52,7 @@ describe("VeeamJobTable", () => {
     renderWithProviders(<VeeamJobTable serverId="srv-1" jobs={[job()]} />);
 
     expect(screen.queryByText("00:18:27")).not.toBeInTheDocument();
-    await user.click(screen.getByText("Onsite_Daily"));
+    await user.click(screen.getByText("Daily-Backup"));
 
     expect(screen.getByText("00:18:27")).toBeInTheDocument();
     expect(screen.getByText("268 MB")).toBeInTheDocument();
@@ -127,7 +70,7 @@ describe("VeeamJobTable", () => {
         jobs={[job({ bottleneck: "NotDefined", processing_rate: "N/A" })]}
       />,
     );
-    await user.click(screen.getByText("Onsite_Daily"));
+    await user.click(screen.getByText("Daily-Backup"));
 
     expect(screen.queryByText("NotDefined")).not.toBeInTheDocument();
     expect(screen.queryByText("N/A")).not.toBeInTheDocument();
@@ -182,6 +125,39 @@ describe("VeeamJobTable", () => {
     renderWithProviders(<VeeamJobTable serverId="srv-1" jobs={[]} />);
     expect(screen.getByText(/No Proxmox backup jobs/i)).toBeInTheDocument();
   });
+
+  // The expansion Set is keyed by row id, and row ids belong to one server.
+  // Switching servers keeps this component mounted whenever the new server's
+  // jobs are already cached, so without the reset the Set only ever grows and
+  // a row expanded on server A silently reopens on the return trip.
+  it("forgets which rows were expanded when the server changes", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(
+      <VeeamJobTable serverId="srv-1" jobs={[job()]} />,
+    );
+    await user.click(screen.getByText("Daily-Backup"));
+    expect(screen.getByText("00:18:27")).toBeInTheDocument();
+
+    // Server B, whose one job happens to carry the same row id.
+    rerender(<VeeamJobTable serverId="srv-2" jobs={[job()]} />);
+    expect(screen.queryByText("00:18:27")).not.toBeInTheDocument();
+  });
+
+  // The reset sits above the empty-state return for this reason: a server with
+  // no jobs still renders, and if it bailed out before recording the switch,
+  // expandedFor would still name A when A came back.
+  it("forgets them across a server that has no jobs at all", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(
+      <VeeamJobTable serverId="srv-1" jobs={[job()]} />,
+    );
+    await user.click(screen.getByText("Daily-Backup"));
+    expect(screen.getByText("00:18:27")).toBeInTheDocument();
+
+    rerender(<VeeamJobTable serverId="srv-2" jobs={[]} />);
+    rerender(<VeeamJobTable serverId="srv-1" jobs={[job()]} />);
+    expect(screen.queryByText("00:18:27")).not.toBeInTheDocument();
+  });
 });
 
 describe("VeeamSessionTable", () => {
@@ -235,7 +211,7 @@ describe("VeeamSessionTable", () => {
         sessions={[session({ result: "Failed" })]}
       />,
     );
-    await user.click(screen.getByText("Onsite_Daily"));
+    await user.click(screen.getByText("Daily-Backup"));
     expect(
       screen.getByText(/same way it records a genuine failure/i),
     ).toBeInTheDocument();

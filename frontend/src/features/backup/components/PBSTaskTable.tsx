@@ -10,12 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  ChevronRight,
-  ChevronDown,
-  ChevronLeft,
-  Search,
-} from "lucide-react";
+import { ChevronRight, ChevronDown, ChevronLeft, Search } from "lucide-react";
 import type { PBSTask } from "../types/backup";
 import { usePBSTaskLog } from "../api/backup-queries";
 
@@ -39,9 +34,7 @@ function TaskLogPanel({ pbsId, upid }: { pbsId: string; upid: string }) {
   const { data: entries, isLoading } = usePBSTaskLog(pbsId, upid);
 
   if (isLoading) {
-    return (
-      <p className="py-2 text-xs text-muted-foreground">Loading log...</p>
-    );
+    return <p className="py-2 text-xs text-muted-foreground">Loading log...</p>;
   }
 
   if (!entries || entries.length === 0) {
@@ -102,14 +95,42 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
     return result;
   }, [tasks, typeFilter, statusFilter, search]);
 
-  // Pagination
+  // A page number only means something against the list it was chosen for:
+  // page 6 of ten pages of tasks is not page 6 of the three that survive a
+  // search. Filtering therefore sends the operator back to the first page,
+  // rather than dropping them at an arbitrary offset into the new results.
+  //
+  // The trigger is the filters, deliberately NOT `filtered` itself: that is
+  // rebuilt whenever `tasks` is refetched, so keying off it would move the
+  // operator on a background timer they cannot see — a worse version of the
+  // bug this is fixing, not a fix for it.
+  //
+  // Adjusted during render rather than from an effect. React discards this
+  // render and re-invokes the component before reconciling children, so the
+  // stale offset never reaches the DOM; an effect would commit it and need a
+  // second pass to correct it. Same shape as useExpandedRows — though there a
+  // stale value is inert and the render phase only saves a commit, whereas
+  // here it would slice the wrong rows.
+  const [pageFor, setPageFor] = useState({ typeFilter, statusFilter, search });
+  if (
+    pageFor.typeFilter !== typeFilter ||
+    pageFor.statusFilter !== statusFilter ||
+    pageFor.search !== search
+  ) {
+    setPageFor({ typeFilter, statusFilter, search });
+    setPage(0);
+  }
+
+  // Pagination. safePage covers the other way the page can fall out of range:
+  // a poll returning fewer tasks shrinks totalPages with no filter change. The
+  // pager buttons below step from safePage, not from page, so a clamped page
+  // still advances by one rather than appearing stuck.
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
-  const paged = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
-
-  // Reset page when filters change
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useMemo(() => { setPage(0); }, [typeFilter, statusFilter, search]);
+  const paged = filtered.slice(
+    safePage * PAGE_SIZE,
+    (safePage + 1) * PAGE_SIZE,
+  );
 
   if (tasks.length === 0) {
     return (
@@ -140,24 +161,32 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
           <Input
             placeholder="Search tasks..."
             value={search}
-            onChange={(e) => { setSearch(e.target.value); }}
+            onChange={(e) => {
+              setSearch(e.target.value);
+            }}
             className="pl-8 h-9"
           />
         </div>
         <select
           className="rounded-md border bg-background px-3 py-2 text-sm h-9"
           value={typeFilter}
-          onChange={(e) => { setTypeFilter(e.target.value); }}
+          onChange={(e) => {
+            setTypeFilter(e.target.value);
+          }}
         >
           <option value="all">All Types</option>
           {taskTypes.map((t) => (
-            <option key={t} value={t}>{t}</option>
+            <option key={t} value={t}>
+              {t}
+            </option>
           ))}
         </select>
         <select
           className="rounded-md border bg-background px-3 py-2 text-sm h-9"
           value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value); }}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+          }}
         >
           <option value="all">All Statuses</option>
           <option value="running">Running</option>
@@ -184,7 +213,10 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
           <TableBody>
             {paged.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell
+                  colSpan={6}
+                  className="py-8 text-center text-sm text-muted-foreground"
+                >
                   No matching tasks.
                 </TableCell>
               </TableRow>
@@ -291,18 +323,24 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
           </span>
           <div className="flex gap-1">
             <Button
+              aria-label="Previous page"
               variant="outline"
               size="sm"
               disabled={safePage === 0}
-              onClick={() => { setPage(safePage - 1); }}
+              onClick={() => {
+                setPage(safePage - 1);
+              }}
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <Button
+              aria-label="Next page"
               variant="outline"
               size="sm"
               disabled={safePage >= totalPages - 1}
-              onClick={() => { setPage(safePage + 1); }}
+              onClick={() => {
+                setPage(safePage + 1);
+              }}
             >
               <ChevronRight className="h-4 w-4" />
             </Button>

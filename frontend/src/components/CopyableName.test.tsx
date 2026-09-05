@@ -90,7 +90,10 @@ describe("CopyableName", () => {
     fireEvent.click(chip);
 
     await waitFor(() => {
-      expect(chip).toHaveAttribute("title", expect.stringContaining("Copy failed"));
+      expect(chip).toHaveAttribute(
+        "title",
+        expect.stringContaining("Copy failed"),
+      );
     });
   });
 });

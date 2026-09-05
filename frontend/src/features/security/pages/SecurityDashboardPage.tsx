@@ -83,8 +83,7 @@ export function SecurityDashboardPage() {
   // CVE scanning hooks
   const { data: posture, isLoading: postureLoading } =
     useSecurityPosture(activeClusterId);
-  const { data: scans, isLoading: scansLoading } =
-    useCVEScans(activeClusterId);
+  const { data: scans, isLoading: scansLoading } = useCVEScans(activeClusterId);
   const triggerScan = useTriggerScan();
 
   // Rolling update hooks
@@ -171,8 +170,12 @@ export function SecurityDashboardPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="vulnerabilities">{t("vulnerabilityScanning")}</TabsTrigger>
-          <TabsTrigger value="rolling-updates">{t("rollingUpdates")}</TabsTrigger>
+          <TabsTrigger value="vulnerabilities">
+            {t("vulnerabilityScanning")}
+          </TabsTrigger>
+          <TabsTrigger value="rolling-updates">
+            {t("rollingUpdates")}
+          </TabsTrigger>
         </TabsList>
 
         {/* Vulnerability Scanning Tab */}
@@ -200,7 +203,9 @@ export function SecurityDashboardPage() {
             <>
               <SecurityPostureCard
                 posture={posture}
-                onShowKEV={(scanId) => { setKEVDialogScanId(scanId); }}
+                onShowKEV={(scanId) => {
+                  setKEVDialogScanId(scanId);
+                }}
               />
               <SSVCHistogram
                 actCount={posture.act_count}
@@ -218,7 +223,9 @@ export function SecurityDashboardPage() {
             <VulnerabilityTable
               clusterId={activeClusterId}
               scanId={selectedScanId}
-              onBack={() => { setSelectedScanId(null); }}
+              onBack={() => {
+                setSelectedScanId(null);
+              }}
             />
           ) : (
             <div className="space-y-3">
@@ -250,7 +257,8 @@ export function SecurityDashboardPage() {
             <div className="space-y-2">
               <h3 className="text-sm font-semibold">SSH Credentials</h3>
               <p className="text-xs text-muted-foreground">
-                Configure SSH access for automated <code>apt dist-upgrade</code> on nodes.
+                Configure SSH access for automated <code>apt dist-upgrade</code>{" "}
+                on nodes.
               </p>
               <SSHCredentialsForm clusterId={activeClusterId} />
             </div>

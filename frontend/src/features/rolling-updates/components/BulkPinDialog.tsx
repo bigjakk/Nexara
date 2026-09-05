@@ -31,7 +31,11 @@ type ScanState =
   | { kind: "idle" }
   | { kind: "scanning" }
   | { kind: "pending"; fingerprint: string; host: string; port: number }
-  | { kind: "mismatch"; expectedFingerprint: string; presentedFingerprint: string }
+  | {
+      kind: "mismatch";
+      expectedFingerprint: string;
+      presentedFingerprint: string;
+    }
   | { kind: "already_pinned"; fingerprint?: string }
   | { kind: "error"; message: string };
 
@@ -52,9 +56,9 @@ export function BulkPinDialog({
 }: BulkPinDialogProps) {
   const qc = useQueryClient();
   const [rows, setRows] = useState<NodeRow[]>([]);
-  const [phase, setPhase] = useState<"scanning" | "review" | "pinning" | "done">(
-    "scanning",
-  );
+  const [phase, setPhase] = useState<
+    "scanning" | "review" | "pinning" | "done"
+  >("scanning");
   // Cross-closure cancellation: stored in a ref so the async IIFE below
   // can observe re-renders / unmount without ESLint flagging the read as
   // "always falsy" (which it would for a plain `let`).
@@ -91,7 +95,10 @@ export function BulkPinDialog({
                 return {
                   ...row,
                   state: result.fingerprint
-                    ? { kind: "already_pinned", fingerprint: result.fingerprint }
+                    ? {
+                        kind: "already_pinned",
+                        fingerprint: result.fingerprint,
+                      }
                     : { kind: "already_pinned" },
                   selected: false,
                 };
@@ -153,7 +160,9 @@ export function BulkPinDialog({
 
   const toggleRow = (idx: number) => {
     setRows((prev) =>
-      prev.map((row, i) => (i === idx ? { ...row, selected: !row.selected } : row)),
+      prev.map((row, i) =>
+        i === idx ? { ...row, selected: !row.selected } : row,
+      ),
     );
   };
 
@@ -161,7 +170,8 @@ export function BulkPinDialog({
     (r) => r.state.kind === "pending" || r.state.kind === "mismatch",
   ).length;
   const checkedCount = rows.filter(
-    (r) => r.selected && (r.state.kind === "pending" || r.state.kind === "mismatch"),
+    (r) =>
+      r.selected && (r.state.kind === "pending" || r.state.kind === "mismatch"),
   ).length;
 
   const handlePinAll = () => {
@@ -225,7 +235,9 @@ export function BulkPinDialog({
     }
     switch (row.state.kind) {
       case "scanning":
-        return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
+        return (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        );
       case "already_pinned":
         return <ShieldCheck className="h-4 w-4 text-emerald-500" />;
       case "pending":
@@ -334,10 +346,7 @@ export function BulkPinDialog({
               >
                 Cancel
               </Button>
-              <Button
-                onClick={handlePinAll}
-                disabled={checkedCount === 0}
-              >
+              <Button onClick={handlePinAll} disabled={checkedCount === 0}>
                 Trust &amp; Pin{" "}
                 {checkedCount > 0
                   ? `${String(checkedCount)} of ${String(selectableCount)}`

@@ -18,7 +18,10 @@ class MockWebSocket {
   onerror: (() => void) | null = null;
   sentMessages: string[] = [];
 
-  constructor(public url: string, public protocols?: string | string[]) {
+  constructor(
+    public url: string,
+    public protocols?: string | string[],
+  ) {
     MockWebSocket.instances.push(this);
   }
 
@@ -63,7 +66,9 @@ async function flushPromises(): Promise<void> {
 }
 
 describe("websocket-store", () => {
-  let mintSpy: import("vitest").MockInstance<typeof consoleQueries.mintWSHubToken>;
+  let mintSpy: import("vitest").MockInstance<
+    typeof consoleQueries.mintWSHubToken
+  >;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -150,7 +155,9 @@ describe("websocket-store", () => {
     const listener = vi.fn();
     useWebSocketStore.getState().subscribe("cluster:abc:metrics", listener);
 
-    expect(useWebSocketStore.getState().listeners.has("cluster:abc:metrics")).toBe(true);
+    expect(
+      useWebSocketStore.getState().listeners.has("cluster:abc:metrics"),
+    ).toBe(true);
     expect(ws.sentMessages.some((m) => m.includes('"subscribe"'))).toBe(true);
   });
 
@@ -164,7 +171,9 @@ describe("websocket-store", () => {
     useWebSocketStore.getState().subscribe("cluster:abc:metrics", listener);
     useWebSocketStore.getState().unsubscribe("cluster:abc:metrics", listener);
 
-    expect(useWebSocketStore.getState().listeners.has("cluster:abc:metrics")).toBe(false);
+    expect(
+      useWebSocketStore.getState().listeners.has("cluster:abc:metrics"),
+    ).toBe(false);
     expect(ws.sentMessages.some((m) => m.includes('"unsubscribe"'))).toBe(true);
   });
 
@@ -217,7 +226,9 @@ describe("websocket-store", () => {
     // Simulate welcome (reconnect scenario)
     ws.simulateMessage({ type: "welcome", message: "connected" });
 
-    expect(ws.sentMessages.some((m) => m.includes("cluster:abc:metrics"))).toBe(true);
+    expect(ws.sentMessages.some((m) => m.includes("cluster:abc:metrics"))).toBe(
+      true,
+    );
   });
 
   it("attempts reconnect with backoff on close", async () => {
@@ -266,8 +277,8 @@ describe("websocket-store", () => {
     // 1's mint finally resolves it must notice it was superseded and bail
     // instead of opening a duplicate socket whose callbacks fight the
     // live connection's state.
-    let resolveFirst: (v: { token: string; expires_in: number }) => void =
-      () => undefined;
+    let resolveFirst: (v: { token: string; expires_in: number }) => void = () =>
+      undefined;
     mintSpy.mockImplementationOnce(
       () =>
         new Promise((resolve) => {

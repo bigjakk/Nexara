@@ -84,7 +84,10 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
   const isMaximized = windowMode === "maximized";
   const [scaleMode, setScaleMode] = useState<"scale" | "resize">("scale");
   const [pasteOpen, setPasteOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<{ action: VMAction; label: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{
+    action: VMAction;
+    label: string;
+  } | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
   const [isoPickerOpen, setIsoPickerOpen] = useState(false);
   const pasteRef = useRef<HTMLTextAreaElement>(null);
@@ -92,11 +95,7 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
   const hasResource = tab.resourceId !== undefined && tab.kind !== undefined;
   const vmKind = tab.kind ?? "vm";
 
-  const { data: vmData } = useVM(
-    tab.clusterID,
-    tab.resourceId ?? "",
-    vmKind,
-  );
+  const { data: vmData } = useVM(tab.clusterID, tab.resourceId ?? "", vmKind);
   const vmStatus = vmData?.status.toLowerCase() ?? "";
 
   const isVM = tab.kind === "vm" || tab.type === "vm_vnc";
@@ -114,7 +113,7 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
     return "";
   })();
   const hasISO = cdromValue.length > 0 && !cdromValue.startsWith("none,");
-  const currentISO = hasISO ? cdromValue.split(",")[0] ?? null : null;
+  const currentISO = hasISO ? (cdromValue.split(",")[0] ?? null) : null;
   const mountISO = useMountISO();
 
   const actionMutation = useVMAction();
@@ -150,7 +149,11 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
     setConfirmAction(null);
   }
 
-  function handlePowerAction(action: VMAction, label: string, needsConfirm: boolean) {
+  function handlePowerAction(
+    action: VMAction,
+    label: string,
+    needsConfirm: boolean,
+  ) {
     if (needsConfirm) {
       setConfirmAction({ action, label });
     } else {
@@ -219,7 +222,11 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
       {hasResource && visibleActions.length > 0 && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs"
+            >
               <Power className="h-3.5 w-3.5" />
               Power
               <ChevronDown className="h-3 w-3" />
@@ -229,7 +236,13 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
             {visibleActions.map((config) => (
               <DropdownMenuItem
                 key={config.action}
-                onClick={() => { handlePowerAction(config.action, config.label, config.needsConfirm); }}
+                onClick={() => {
+                  handlePowerAction(
+                    config.action,
+                    config.label,
+                    config.needsConfirm,
+                  );
+                }}
               >
                 <span className="mr-2">{config.icon}</span>
                 {config.label}
@@ -244,14 +257,22 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
         <>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs"
+              >
                 <Disc className="h-3.5 w-3.5" />
                 Media
                 <ChevronDown className="h-3 w-3" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => { setIsoPickerOpen(true); }}>
+              <DropdownMenuItem
+                onClick={() => {
+                  setIsoPickerOpen(true);
+                }}
+              >
                 Mount ISO...
               </DropdownMenuItem>
               {hasISO && (
@@ -271,7 +292,10 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
                     Eject CD-ROM
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+                  <DropdownMenuItem
+                    disabled
+                    className="text-xs text-muted-foreground"
+                  >
                     Current: {currentISO}
                   </DropdownMenuItem>
                 </>
@@ -300,29 +324,53 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
-          <DropdownMenuItem onClick={() => { rfb?.sendCtrlAltDel(); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              rfb?.sendCtrlAltDel();
+            }}
+          >
             Ctrl+Alt+Del
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
             <DropdownMenuItem
               key={`f${String(n)}`}
-              onClick={() => { if (rfb) sendKeyCombo(rfb, [XK.Control_L, XK.Alt_L, XK.F1 + n - 1]); }}
+              onClick={() => {
+                if (rfb)
+                  sendKeyCombo(rfb, [XK.Control_L, XK.Alt_L, XK.F1 + n - 1]);
+              }}
             >
               Ctrl+Alt+F{String(n)}
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => { if (rfb) sendKeyCombo(rfb, [XK.Alt_L, XK.Tab]); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              if (rfb) sendKeyCombo(rfb, [XK.Alt_L, XK.Tab]);
+            }}
+          >
             Alt+Tab
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { if (rfb) sendKeyCombo(rfb, [XK.Alt_L, XK.F4]); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              if (rfb) sendKeyCombo(rfb, [XK.Alt_L, XK.F4]);
+            }}
+          >
             Alt+F4
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { if (rfb) rfb.sendKey(XK.Print, null, true); rfb?.sendKey(XK.Print, null, false); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              if (rfb) rfb.sendKey(XK.Print, null, true);
+              rfb?.sendKey(XK.Print, null, false);
+            }}
+          >
             Print Screen
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { if (rfb) sendKeyCombo(rfb, [XK.Alt_L, XK.Sys_Req]); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              if (rfb) sendKeyCombo(rfb, [XK.Alt_L, XK.Sys_Req]);
+            }}
+          >
             SysRq
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -334,7 +382,9 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
         size="sm"
         title="Paste text into console"
         className="h-7 px-2"
-        onClick={() => { setPasteOpen(true); }}
+        onClick={() => {
+          setPasteOpen(true);
+        }}
       >
         <ClipboardPaste className="h-3.5 w-3.5" />
       </Button>
@@ -370,7 +420,11 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
         variant="ghost"
         size="sm"
         onClick={handleScaleToggle}
-        title={scaleMode === "scale" ? "Switch to resize mode" : "Switch to scale mode"}
+        title={
+          scaleMode === "scale"
+            ? "Switch to resize mode"
+            : "Switch to scale mode"
+        }
         className="h-7 gap-1 px-2 text-xs"
       >
         {scaleMode === "scale" ? (
@@ -387,7 +441,9 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
         size="sm"
         title="Connection info"
         className="ml-auto h-7 px-2"
-        onClick={() => { setInfoOpen(true); }}
+        onClick={() => {
+          setInfoOpen(true);
+        }}
       >
         <Info className="h-3.5 w-3.5" />
       </Button>
@@ -400,7 +456,8 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Paste your text below, then click Send to type it into the console.
+              Paste your text below, then click Send to type it into the
+              console.
             </p>
             <textarea
               ref={pasteRef}
@@ -409,7 +466,13 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
               autoFocus
             />
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => { setPasteOpen(false); }}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setPasteOpen(false);
+                }}
+              >
                 Cancel
               </Button>
               <Button size="sm" onClick={handleSendPaste}>
@@ -421,23 +484,36 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
       </Dialog>
 
       {/* Confirm dangerous action dialog */}
-      <Dialog open={confirmAction !== null} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+      <Dialog
+        open={confirmAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+      >
         <DialogContent className="max-w-xs">
           <DialogHeader>
             <DialogTitle>Confirm {confirmAction?.label}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Are you sure you want to {confirmAction?.label.toLowerCase()} this {vmKind === "ct" ? "container" : "VM"}?
+            Are you sure you want to {confirmAction?.label.toLowerCase()} this{" "}
+            {vmKind === "ct" ? "container" : "VM"}?
           </p>
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost" size="sm" onClick={() => { setConfirmAction(null); }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setConfirmAction(null);
+              }}
+            >
               Cancel
             </Button>
             <Button
               variant="destructive"
               size="sm"
               onClick={() => {
-                if (confirmAction) executeAction(confirmAction.action, confirmAction.label);
+                if (confirmAction)
+                  executeAction(confirmAction.action, confirmAction.label);
               }}
             >
               {confirmAction?.label}

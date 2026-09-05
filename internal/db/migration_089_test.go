@@ -2,11 +2,9 @@ package db
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
 	"github.com/google/uuid"
 
 	gen "github.com/bigjakk/nexara/internal/db/generated"
@@ -53,9 +51,7 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 	purge()
 	defer purge()
 
-	if err := env.Migrate.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
-	}
+	migrateUp(t, env.Migrate)
 
 	seedCluster := func(id uuid.UUID, name string) {
 		t.Helper()
@@ -69,7 +65,7 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 	seedCluster(m089ClusterB, "migration-089-b")
 
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'hv01')`,
+		`INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'pve-01')`,
 		m089Node, m089ClusterA); err != nil {
 		t.Fatalf("seed node: %v", err)
 	}
@@ -81,7 +77,7 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO veeam_platforms (veeam_server_id, platform_id, display_name, cluster_id)
-		 VALUES ($1, $2, 'CRJLAB', $3)`,
+		 VALUES ($1, $2, 'cluster01', $3)`,
 		m089Server, m089Platform, m089ClusterA); err != nil {
 		t.Fatalf("seed veeam platform: %v", err)
 	}
@@ -125,7 +121,7 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 	seedGuest(103, "app", "qemu", m089ClusterA) // …with its twin
 	seedSmbios(103, "", m089ClusterA)
 	seedGuest(104, "ct01", "lxc", m089ClusterA) // a container sharing a name
-	seedGuest(105, "docker03", "qemu", m089ClusterA)
+	seedGuest(105, "linux03", "qemu", m089ClusterA)
 	seedSmbios(105, uuidRebuilt, m089ClusterA) // rebuilt: NEW uuid, same name
 	// Never scanned — no guest_smbios row at all. This is every guest on a
 	// cluster whose platform was mapped moments ago, before the SMBIOS pass
@@ -170,7 +166,7 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 		// machine's backup under the old uuid; the live guest carries a new
 		// one. A name match would report the replacement as protected by a
 		// backup of the machine it replaced.
-		{key: "orphan-rebuilt", smbios: uuidGone, name: "docker03", platform: &m089Platform},
+		{key: "orphan-rebuilt", smbios: uuidGone, name: "linux03", platform: &m089Platform},
 		// Right uuid, but its platform belongs to a cluster nobody mapped.
 		{key: "unmapped-platform", smbios: uuidDB01, name: "db01", platform: ptrUUID(uuid.New())},
 		// A job that has never run has no platform at all.
@@ -380,9 +376,7 @@ func TestVeeamPlatform_AutoMapsOnDiscoveryOnly(t *testing.T) {
 	purge()
 	defer purge()
 
-	if err := env.Migrate.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
-	}
+	migrateUp(t, env.Migrate)
 
 	// Any cluster left active by another test would make this install
 	// multi-cluster and the convenience would correctly decline to fire, so
@@ -418,7 +412,7 @@ func TestVeeamPlatform_AutoMapsOnDiscoveryOnly(t *testing.T) {
 		if err := q.UpsertVeeamPlatform(ctx, gen.UpsertVeeamPlatformParams{
 			VeeamServerID: m089SoloServer,
 			PlatformID:    m089SoloPlat,
-			DisplayName:   "CRJLAB",
+			DisplayName:   "cluster01",
 		}); err != nil {
 			t.Fatalf("UpsertVeeamPlatform: %v", err)
 		}

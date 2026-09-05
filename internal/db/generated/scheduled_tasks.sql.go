@@ -95,6 +95,42 @@ func (q *Queries) DeleteScheduledTask(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const disableScheduledTaskForBadSchedule = `-- name: DisableScheduledTaskForBadSchedule :exec
+UPDATE scheduled_tasks
+SET enabled     = false,
+    last_run_at = now(),
+    next_run_at = NULL,
+    last_status = $2,
+    last_error  = $3,
+    updated_at  = now()
+WHERE id = $1
+`
+
+type DisableScheduledTaskForBadScheduleParams struct {
+	ID         uuid.UUID   `json:"id"`
+	LastStatus pgtype.Text `json:"last_status"`
+	LastError  pgtype.Text `json:"last_error"`
+}
+
+// DisableScheduledTaskForBadSchedule parks a task whose cron can never fire.
+//
+// Leaving it enabled is the busy loop: this table's due predicate counts NULL
+// next_run_at as "due now", and a cron that never comes round has no other
+// value to write — so the row would be claimed, RUN, and re-queued on every
+// tick, repeating whatever action it carries. Disabling makes it inert while
+// last_error says why, and next_run_at NULL means that fixing the expression
+// and re-enabling runs it once, promptly, instead of waiting for a slot the
+// old expression never had.
+//
+// last_status is a parameter rather than a literal 'failed' because it
+// describes the RUN, not the schedule: a task can execute perfectly and still
+// have an expression that can never come round again, and recording that run
+// as a failure would send the operator looking for a problem in the wrong half.
+func (q *Queries) DisableScheduledTaskForBadSchedule(ctx context.Context, arg DisableScheduledTaskForBadScheduleParams) error {
+	_, err := q.db.Exec(ctx, disableScheduledTaskForBadSchedule, arg.ID, arg.LastStatus, arg.LastError)
+	return err
+}
+
 const getScheduledTask = `-- name: GetScheduledTask :one
 SELECT id, cluster_id, resource_type, resource_id, node, action, schedule, params, enabled, last_run_at, next_run_at, last_status, last_error, created_at, updated_at FROM scheduled_tasks WHERE id = $1
 `

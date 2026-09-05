@@ -21,10 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useCreateStorage } from "../api/storage-queries";
 import { ISCSITargetField, NodeRestrictionField } from "./StorageFormFields";
-import type {
-  StorageType,
-  StorageContentType,
-} from "../types/storage";
+import type { StorageType, StorageContentType } from "../types/storage";
 import {
   STORAGE_TYPE_LABELS,
   STORAGE_TYPE_FIELDS,
@@ -68,7 +65,9 @@ export function AddStorageDialog({
   const [storageType, setStorageType] = useState<StorageType>("dir");
   const [storageName, setStorageName] = useState("");
   const [params, setParams] = useState<Record<string, string>>({});
-  const [selectedContent, setSelectedContent] = useState<Set<StorageContentType>>(new Set());
+  const [selectedContent, setSelectedContent] = useState<
+    Set<StorageContentType>
+  >(new Set());
   const [nodes, setNodes] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [useLuns, setUseLuns] = useState(true);
@@ -168,7 +167,9 @@ export function AddStorageDialog({
           setOpen(false);
         },
         onError: (err) => {
-          setError(err instanceof Error ? err.message : "Failed to create storage");
+          setError(
+            err instanceof Error ? err.message : "Failed to create storage",
+          );
         },
       },
     );
@@ -209,7 +210,9 @@ export function AddStorageDialog({
             <Input
               id="storage-name"
               value={storageName}
-              onChange={(e) => { setStorageName(e.target.value.replace(/[^a-zA-Z0-9_-]/g, "")); }}
+              onChange={(e) => {
+                setStorageName(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""));
+              }}
               placeholder="my-storage"
               autoFocus
             />
@@ -223,7 +226,9 @@ export function AddStorageDialog({
             <Label>Type</Label>
             <Select
               value={storageType}
-              onValueChange={(v) => { handleTypeChange(v as StorageType); }}
+              onValueChange={(v) => {
+                handleTypeChange(v as StorageType);
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -243,7 +248,9 @@ export function AddStorageDialog({
             <div key={field.key} className="space-y-1.5">
               <Label htmlFor={`field-${field.key}`}>
                 {field.label}
-                {field.required && <span className="ml-1 text-destructive">*</span>}
+                {field.required && (
+                  <span className="ml-1 text-destructive">*</span>
+                )}
               </Label>
               {field.scan === "iscsi" ? (
                 <ISCSITargetField
@@ -251,13 +258,17 @@ export function AddStorageDialog({
                   clusterId={clusterId}
                   portal={params[field.scanFrom ?? "portal"] ?? ""}
                   value={params[field.key] ?? ""}
-                  onChange={(v) => { handleParamChange(field.key, v); }}
+                  onChange={(v) => {
+                    handleParamChange(field.key, v);
+                  }}
                   placeholder={field.placeholder}
                 />
               ) : field.type === "select" && field.options ? (
                 <Select
                   value={params[field.key] ?? ""}
-                  onValueChange={(v) => { handleParamChange(field.key, v); }}
+                  onValueChange={(v) => {
+                    handleParamChange(field.key, v);
+                  }}
                 >
                   <SelectTrigger id={`field-${field.key}`}>
                     <SelectValue placeholder="Select..." />
@@ -279,16 +290,27 @@ export function AddStorageDialog({
                       handleParamChange(field.key, checked ? "1" : "0");
                     }}
                   />
-                  <Label htmlFor={`field-${field.key}`} className="text-sm font-normal">
+                  <Label
+                    htmlFor={`field-${field.key}`}
+                    className="text-sm font-normal"
+                  >
                     {field.help ?? "Enable"}
                   </Label>
                 </div>
               ) : (
                 <Input
                   id={`field-${field.key}`}
-                  type={field.type === "password" ? "password" : field.type === "number" ? "number" : "text"}
+                  type={
+                    field.type === "password"
+                      ? "password"
+                      : field.type === "number"
+                        ? "number"
+                        : "text"
+                  }
                   value={params[field.key] ?? ""}
-                  onChange={(e) => { handleParamChange(field.key, e.target.value); }}
+                  onChange={(e) => {
+                    handleParamChange(field.key, e.target.value);
+                  }}
                   placeholder={field.placeholder}
                 />
               )}
@@ -302,15 +324,17 @@ export function AddStorageDialog({
                 <Checkbox
                   id="storage-luns"
                   checked={useLuns}
-                  onCheckedChange={(checked) => { setUseLuns(checked === true); }}
+                  onCheckedChange={(checked) => {
+                    setUseLuns(checked === true);
+                  }}
                 />
                 <Label htmlFor="storage-luns" className="text-sm font-normal">
                   Use LUNs directly
                 </Label>
               </div>
               <p className="text-xs text-muted-foreground">
-                Attach the target&apos;s LUNs to guests as disks. Turn off to use the target
-                only as a base for LVM on top of it.
+                Attach the target&apos;s LUNs to guests as disks. Turn off to
+                use the target only as a base for LVM on top of it.
               </p>
             </div>
           ) : (
@@ -322,9 +346,13 @@ export function AddStorageDialog({
                 ).map((ct) => (
                   <Badge
                     key={ct.value}
-                    variant={selectedContent.has(ct.value) ? "default" : "outline"}
+                    variant={
+                      selectedContent.has(ct.value) ? "default" : "outline"
+                    }
                     className="cursor-pointer select-none"
-                    onClick={() => { toggleContent(ct.value); }}
+                    onClick={() => {
+                      toggleContent(ct.value);
+                    }}
                   >
                     {ct.label}
                   </Badge>
@@ -353,27 +381,30 @@ export function AddStorageDialog({
               <Checkbox
                 id="storage-enabled"
                 checked={enabled}
-                onCheckedChange={(checked) => { setEnabled(checked === true); }}
+                onCheckedChange={(checked) => {
+                  setEnabled(checked === true);
+                }}
               />
               <Label htmlFor="storage-enabled" className="text-sm font-normal">
                 Enable
               </Label>
             </div>
             <p className="text-xs text-muted-foreground">
-              Disabled storage stays configured but is not mounted or used by any node.
+              Disabled storage stays configured but is not mounted or used by
+              any node.
             </p>
           </div>
 
           {/* Error */}
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
 
           {/* Submit */}
           <div className="flex justify-end gap-2 pt-2">
             <Button
               variant="outline"
-              onClick={() => { setOpen(false); }}
+              onClick={() => {
+                setOpen(false);
+              }}
               disabled={createMutation.isPending}
             >
               Cancel

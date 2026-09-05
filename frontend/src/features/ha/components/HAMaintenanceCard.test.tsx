@@ -35,9 +35,15 @@ describe("HAMaintenanceCard", () => {
   });
 
   it("shows arm/disarm controls on PVE 9.2+ with manage:ha", () => {
-    renderWithProviders(<HAMaintenanceCard clusterId="c1" pveVersion="9.2.0" />);
-    expect(screen.getByRole("button", { name: /Disarm HA/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Re-arm HA/i })).toBeInTheDocument();
+    renderWithProviders(
+      <HAMaintenanceCard clusterId="c1" pveVersion="9.2.0" />,
+    );
+    expect(
+      screen.getByRole("button", { name: /Disarm HA/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Re-arm HA/i }),
+    ).toBeInTheDocument();
   });
 
   it("renders nothing without manage:ha permission", () => {

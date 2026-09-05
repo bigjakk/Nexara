@@ -1,5 +1,14 @@
 import { Fragment, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  KeyRound,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 
 import {
   AlertDialog,
@@ -77,7 +86,13 @@ function errorMessage(err: unknown, fallback: string): string {
  * failed delete showed nothing at all — and then surfaced, misattributed, the
  * next time the operator opened the create form.
  */
-function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+function ErrorBanner({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}) {
   return (
     <div className="mb-3 flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
       <div className="flex items-start gap-2">
@@ -109,7 +124,10 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
   const [deleteTarget, setDeleteTarget] = useState<AccessUser | null>(null);
   const [editTarget, setEditTarget] = useState<string | null>(null);
   // Set when the server refuses because the target is Nexara's own credential.
-  const [selfConflict, setSelfConflict] = useState<{ message: string; userid: string } | null>(null);
+  const [selfConflict, setSelfConflict] = useState<{
+    message: string;
+    userid: string;
+  } | null>(null);
 
   const manageable = canManage("access") && capabilities.canModifyUsers;
   const columns = manageable ? 6 : 5;
@@ -135,7 +153,9 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
           setCreateOpen(false);
           resetCreate();
         },
-        onError: (err) => { setCreateError(errorMessage(err, "Failed to create user")); },
+        onError: (err) => {
+          setCreateError(errorMessage(err, "Failed to create user"));
+        },
       },
     );
   };
@@ -196,7 +216,9 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                   <Input
                     id="access-userid"
                     value={userid}
-                    onChange={(e) => { setUserid(e.target.value); }}
+                    onChange={(e) => {
+                      setUserid(e.target.value);
+                    }}
                     placeholder="automation@pve"
                     required
                   />
@@ -209,7 +231,9 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                   <Input
                     id="access-comment"
                     value={comment}
-                    onChange={(e) => { setComment(e.target.value); }}
+                    onChange={(e) => {
+                      setComment(e.target.value);
+                    }}
                   />
                 </div>
                 <div>
@@ -218,15 +242,23 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                     id="access-password"
                     type="password"
                     value={password}
-                    onChange={(e) => { setPassword(e.target.value); }}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                    }}
                     autoComplete="new-password"
                   />
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Leave empty for a token-only account that cannot log in interactively.
+                    Leave empty for a token-only account that cannot log in
+                    interactively.
                   </p>
                 </div>
-                {createError && <p className="text-sm text-destructive">{createError}</p>}
-                <Button type="submit" disabled={!userid.trim() || createUser.isPending}>
+                {createError && (
+                  <p className="text-sm text-destructive">{createError}</p>
+                )}
+                <Button
+                  type="submit"
+                  disabled={!userid.trim() || createUser.isPending}
+                >
                   {createUser.isPending ? "Creating..." : "Create"}
                 </Button>
               </form>
@@ -237,13 +269,20 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
 
       <CardContent>
         {sectionError && (
-          <ErrorBanner message={sectionError} onDismiss={() => { setSectionError(""); }} />
+          <ErrorBanner
+            message={sectionError}
+            onDismiss={() => {
+              setSectionError("");
+            }}
+          />
         )}
 
         {usersQuery.isLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : !usersQuery.data || usersQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No Proxmox users found.</p>
+          <p className="text-sm text-muted-foreground">
+            No Proxmox users found.
+          </p>
         ) : (
           <Table>
             <TableHeader>
@@ -253,7 +292,9 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                 <TableHead>Status</TableHead>
                 <TableHead>Groups</TableHead>
                 <TableHead>Comment</TableHead>
-                {manageable && <TableHead className="text-right">Actions</TableHead>}
+                {manageable && (
+                  <TableHead className="text-right">Actions</TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -263,19 +304,35 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
                   <Fragment key={user.userid}>
                     <TableRow
                       className="cursor-pointer"
-                      onClick={() => { setExpanded(isOpen ? null : user.userid); }}
+                      onClick={() => {
+                        setExpanded(isOpen ? null : user.userid);
+                      }}
                     >
                       <TableCell>
-                        {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        {isOpen ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
                       </TableCell>
-                      <TableCell className="font-mono text-xs">{user.userid}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {user.userid}
+                      </TableCell>
                       <TableCell>
-                        <Badge variant={user.enable === false ? "secondary" : "default"}>
+                        <Badge
+                          variant={
+                            user.enable === false ? "secondary" : "default"
+                          }
+                        >
                           {user.enable === false ? "Disabled" : "Enabled"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{user.groups || "—"}</TableCell>
-                      <TableCell className="text-muted-foreground">{user.comment || "—"}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {user.groups || "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {user.comment || "—"}
+                      </TableCell>
                       {manageable && (
                         <TableCell className="text-right">
                           <Button
@@ -326,15 +383,20 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
             less destructive group and role deletes already do. */}
         <AlertDialog
           open={deleteTarget !== null}
-          onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+          onOpenChange={(open) => {
+            if (!open) setDeleteTarget(null);
+          }}
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete {deleteTarget?.userid}?</AlertDialogTitle>
+              <AlertDialogTitle>
+                Delete {deleteTarget?.userid}?
+              </AlertDialogTitle>
               <AlertDialogDescription>
-                This removes the Proxmox user and every API token it owns. Anything
-                authenticating with one of those tokens loses access immediately, and the
-                secrets cannot be recovered. This cannot be undone.
+                This removes the Proxmox user and every API token it owns.
+                Anything authenticating with one of those tokens loses access
+                immediately, and the secrets cannot be recovered. This cannot be
+                undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -357,7 +419,9 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
           <EditUserDialog
             clusterId={clusterId}
             userid={editTarget}
-            onClose={() => { setEditTarget(null); }}
+            onClose={() => {
+              setEditTarget(null);
+            }}
             onSelfConflict={(message, uid) => {
               setEditTarget(null);
               setSelfConflict({ message, userid: uid });
@@ -371,8 +435,12 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
             confirmValue={selfConflict.userid}
             actionLabel="Delete User"
             pending={deleteUser.isPending}
-            onCancel={() => { setSelfConflict(null); }}
-            onConfirm={() => { handleDelete(selfConflict.userid, true); }}
+            onCancel={() => {
+              setSelfConflict(null);
+            }}
+            onConfirm={() => {
+              handleDelete(selfConflict.userid, true);
+            }}
           />
         )}
       </CardContent>
@@ -408,9 +476,11 @@ function UserTokens({
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   const [regenTarget, setRegenTarget] = useState<string | null>(null);
   // Carries the full "user@realm!name" so the confirm matches what is shown.
-  const [selfConflict, setSelfConflict] = useState<
-    { message: string; tokenid: string; action: "revoke" | "regenerate" } | null
-  >(null);
+  const [selfConflict, setSelfConflict] = useState<{
+    message: string;
+    tokenid: string;
+    action: "revoke" | "regenerate";
+  } | null>(null);
 
   const fullTokenId = (tokenid: string) => `${userid}!${tokenid}`;
 
@@ -431,7 +501,9 @@ function UserTokens({
           setTokenComment("");
           setPrivsep(true);
         },
-        onError: (err) => { setError(errorMessage(err, "Failed to create token")); },
+        onError: (err) => {
+          setError(errorMessage(err, "Failed to create token"));
+        },
       },
     );
   };
@@ -448,7 +520,11 @@ function UserTokens({
         onError: (err) => {
           setRevokeTarget(null);
           if (err instanceof ApiClientError && err.status === 409) {
-            setSelfConflict({ message: err.message, tokenid, action: "revoke" });
+            setSelfConflict({
+              message: err.message,
+              tokenid,
+              action: "revoke",
+            });
             return;
           }
           setSelfConflict(null);
@@ -471,7 +547,11 @@ function UserTokens({
         onError: (err) => {
           setRegenTarget(null);
           if (err instanceof ApiClientError && err.status === 409) {
-            setSelfConflict({ message: err.message, tokenid, action: "regenerate" });
+            setSelfConflict({
+              message: err.message,
+              tokenid,
+              action: "regenerate",
+            });
             return;
           }
           setSelfConflict(null);
@@ -491,7 +571,9 @@ function UserTokens({
       {tokensQuery.isLoading ? (
         <Skeleton className="h-12 w-full" />
       ) : !tokensQuery.data || tokensQuery.data.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No API tokens for this user.</p>
+        <p className="text-sm text-muted-foreground">
+          No API tokens for this user.
+        </p>
       ) : (
         <Table>
           <TableHeader>
@@ -500,27 +582,37 @@ function UserTokens({
               <TableHead>Privilege Separation</TableHead>
               <TableHead>Expires</TableHead>
               <TableHead>Comment</TableHead>
-              {manageable && <TableHead className="text-right">Actions</TableHead>}
+              {manageable && (
+                <TableHead className="text-right">Actions</TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {tokensQuery.data.map((token) => (
               <TableRow key={token.tokenid}>
-                <TableCell className="font-mono text-xs">{fullTokenId(token.tokenid)}</TableCell>
+                <TableCell className="font-mono text-xs">
+                  {fullTokenId(token.tokenid)}
+                </TableCell>
                 <TableCell>
                   <Badge variant={token.privsep ? "default" : "destructive"}>
                     {token.privsep ? "Separated" : "Full user privileges"}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-muted-foreground">{expiryLabel(token.expire)}</TableCell>
-                <TableCell className="text-muted-foreground">{token.comment || "—"}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {expiryLabel(token.expire)}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {token.comment || "—"}
+                </TableCell>
                 {manageable && (
                   <TableCell className="text-right">
                     <Button
                       variant="ghost"
                       size="sm"
                       aria-label={`Regenerate ${token.tokenid}`}
-                      onClick={() => { setRegenTarget(token.tokenid); }}
+                      onClick={() => {
+                        setRegenTarget(token.tokenid);
+                      }}
                     >
                       <RefreshCw className="h-4 w-4" />
                     </Button>
@@ -528,7 +620,9 @@ function UserTokens({
                       variant="ghost"
                       size="sm"
                       aria-label={`Revoke ${token.tokenid}`}
-                      onClick={() => { setRevokeTarget(token.tokenid); }}
+                      onClick={() => {
+                        setRevokeTarget(token.tokenid);
+                      }}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -541,7 +635,10 @@ function UserTokens({
       )}
 
       {manageable && (
-        <form onSubmit={handleCreate} className="flex flex-wrap items-end gap-2 pt-1">
+        <form
+          onSubmit={handleCreate}
+          className="flex flex-wrap items-end gap-2 pt-1"
+        >
           <div className="min-w-40">
             <Label htmlFor={`token-name-${userid}`} className="text-xs">
               New token name
@@ -549,7 +646,9 @@ function UserTokens({
             <Input
               id={`token-name-${userid}`}
               value={tokenName}
-              onChange={(e) => { setTokenName(e.target.value); }}
+              onChange={(e) => {
+                setTokenName(e.target.value);
+              }}
               placeholder="automation"
               className="h-8"
             />
@@ -561,7 +660,9 @@ function UserTokens({
             <Input
               id={`token-comment-${userid}`}
               value={tokenComment}
-              onChange={(e) => { setTokenComment(e.target.value); }}
+              onChange={(e) => {
+                setTokenComment(e.target.value);
+              }}
               className="h-8"
             />
           </div>
@@ -569,28 +670,46 @@ function UserTokens({
             <input
               type="checkbox"
               checked={privsep}
-              onChange={(e) => { setPrivsep(e.target.checked); }}
+              onChange={(e) => {
+                setPrivsep(e.target.checked);
+              }}
             />
             Privilege separation
           </label>
-          <Button type="submit" size="sm" disabled={!tokenName.trim() || createToken.isPending}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!tokenName.trim() || createToken.isPending}
+          >
             {createToken.isPending ? "Creating..." : "Create Token"}
           </Button>
         </form>
       )}
 
-      {error && <ErrorBanner message={error} onDismiss={() => { setError(""); }} />}
+      {error && (
+        <ErrorBanner
+          message={error}
+          onDismiss={() => {
+            setError("");
+          }}
+        />
+      )}
 
       <AlertDialog
         open={revokeTarget !== null}
-        onOpenChange={(open) => { if (!open) setRevokeTarget(null); }}
+        onOpenChange={(open) => {
+          if (!open) setRevokeTarget(null);
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke {revokeTarget && fullTokenId(revokeTarget)}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Revoke {revokeTarget && fullTokenId(revokeTarget)}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Anything authenticating with this token loses access immediately. The secret
-              cannot be recovered — a replacement has to be created and distributed.
+              Anything authenticating with this token loses access immediately.
+              The secret cannot be recovered — a replacement has to be created
+              and distributed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -611,14 +730,19 @@ function UserTokens({
 
       <AlertDialog
         open={regenTarget !== null}
-        onOpenChange={(open) => { if (!open) setRegenTarget(null); }}
+        onOpenChange={(open) => {
+          if (!open) setRegenTarget(null);
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Regenerate {regenTarget && fullTokenId(regenTarget)}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Regenerate {regenTarget && fullTokenId(regenTarget)}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              A new secret is issued and the current one stops working immediately. The new
-              secret is shown once and cannot be retrieved afterwards.
+              A new secret is issued and the current one stops working
+              immediately. The new secret is shown once and cannot be retrieved
+              afterwards.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -640,7 +764,9 @@ function UserTokens({
         <TokenSecretDialog
           fullTokenId={minted["full-tokenid"]}
           secret={minted.value}
-          onClose={() => { setMinted(null); }}
+          onClose={() => {
+            setMinted(null);
+          }}
         />
       )}
 
@@ -651,11 +777,18 @@ function UserTokens({
           // way, so asking for the bare suffix would both mismatch what is on
           // screen and reduce the confirmation to a few characters.
           confirmValue={fullTokenId(selfConflict.tokenid)}
-          actionLabel={selfConflict.action === "revoke" ? "Revoke Token" : "Regenerate Token"}
+          actionLabel={
+            selfConflict.action === "revoke"
+              ? "Revoke Token"
+              : "Regenerate Token"
+          }
           pending={deleteToken.isPending || updateToken.isPending}
-          onCancel={() => { setSelfConflict(null); }}
+          onCancel={() => {
+            setSelfConflict(null);
+          }}
           onConfirm={() => {
-            if (selfConflict.action === "revoke") handleRevoke(selfConflict.tokenid, true);
+            if (selfConflict.action === "revoke")
+              handleRevoke(selfConflict.tokenid, true);
             else handleRegenerate(selfConflict.tokenid, true);
           }}
         />
@@ -704,7 +837,12 @@ function EditUserDialog({
     e.preventDefault();
     setError("");
     updateUser.mutate(
-      { userid, comment: currentComment, email: currentEmail, enable: currentEnable },
+      {
+        userid,
+        comment: currentComment,
+        email: currentEmail,
+        enable: currentEnable,
+      },
       {
         onSuccess: onClose,
         onError: (err) => {
@@ -719,7 +857,12 @@ function EditUserDialog({
   };
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Edit {userid}</DialogTitle>
@@ -733,7 +876,9 @@ function EditUserDialog({
               <Input
                 id="edit-comment"
                 value={currentComment}
-                onChange={(e) => { setComment(e.target.value); }}
+                onChange={(e) => {
+                  setComment(e.target.value);
+                }}
               />
             </div>
             <div>
@@ -742,20 +887,25 @@ function EditUserDialog({
                 id="edit-email"
                 type="email"
                 value={currentEmail}
-                onChange={(e) => { setEmail(e.target.value); }}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                }}
               />
             </div>
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={currentEnable}
-                onChange={(e) => { setEnable(e.target.checked); }}
+                onChange={(e) => {
+                  setEnable(e.target.checked);
+                }}
               />
               Account enabled
             </label>
             {(userQuery.data?.groups?.length ?? 0) > 0 && (
               <p className="text-xs text-muted-foreground">
-                Groups: {userQuery.data?.groups?.join(", ")} — edit these in the Proxmox UI.
+                Groups: {userQuery.data?.groups?.join(", ")} — edit these in the
+                Proxmox UI.
               </p>
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}

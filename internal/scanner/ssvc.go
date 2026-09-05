@@ -27,11 +27,11 @@ const (
 )
 
 const (
-	ssvcActEPSSThreshold     float32 = 0.5
-	ssvcActCVSSThreshold     float32 = 7.0
-	ssvcAttendEPSSThreshold  float32 = 0.1
-	ssvcAttendCVSSThreshold  float32 = 9.0
-	ssvcTrackStarCVSSThresh  float32 = 7.0
+	ssvcActEPSSThreshold    float32 = 0.5
+	ssvcActCVSSThreshold    float32 = 7.0
+	ssvcAttendEPSSThreshold float32 = 0.1
+	ssvcAttendCVSSThreshold float32 = 9.0
+	ssvcTrackStarCVSSThresh float32 = 7.0
 )
 
 // classifySSVC returns the SSVC action label for a vulnerability.

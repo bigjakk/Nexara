@@ -211,7 +211,9 @@ export function AlertRuleForm() {
             <Input
               id="name"
               value={name}
-              onChange={(e) => { setName(e.target.value); }}
+              onChange={(e) => {
+                setName(e.target.value);
+              }}
               placeholder="High CPU Usage"
               required
             />
@@ -222,7 +224,9 @@ export function AlertRuleForm() {
             <Input
               id="description"
               value={description}
-              onChange={(e) => { setDescription(e.target.value); }}
+              onChange={(e) => {
+                setDescription(e.target.value);
+              }}
               placeholder="Alert when CPU exceeds threshold"
             />
           </div>
@@ -321,36 +325,38 @@ export function AlertRuleForm() {
                 type="number"
                 step="any"
                 value={threshold}
-                onChange={(e) => { setThreshold(e.target.value); }}
+                onChange={(e) => {
+                  setThreshold(e.target.value);
+                }}
                 required
               />
             </div>
           </div>
 
           {scopeType !== "global" && (
-          <div className="space-y-2">
-            <Label htmlFor="cluster">Cluster</Label>
-            <Select
-              value={clusterId}
-              onValueChange={(v) => {
-                setClusterId(v);
-                // Nodes are per-cluster; a leftover pick would belong to the
-                // old one, which the backend rejects.
-                setNodeId("");
-              }}
-            >
-              <SelectTrigger id="cluster">
-                <SelectValue placeholder="Select cluster" />
-              </SelectTrigger>
-              <SelectContent>
-                {clusters?.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="space-y-2">
+              <Label htmlFor="cluster">Cluster</Label>
+              <Select
+                value={clusterId}
+                onValueChange={(v) => {
+                  setClusterId(v);
+                  // Nodes are per-cluster; a leftover pick would belong to the
+                  // old one, which the backend rejects.
+                  setNodeId("");
+                }}
+              >
+                <SelectTrigger id="cluster">
+                  <SelectValue placeholder="Select cluster" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clusters?.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           )}
 
           {scopeType === "node" && (
@@ -385,11 +391,14 @@ export function AlertRuleForm() {
                   Could not load this cluster&apos;s nodes.
                 </p>
               )}
-              {!nodesError && !nodesLoading && clusterId && nodes?.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  This cluster has no nodes.
-                </p>
-              )}
+              {!nodesError &&
+                !nodesLoading &&
+                clusterId &&
+                nodes?.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    This cluster has no nodes.
+                  </p>
+                )}
             </div>
           )}
 
@@ -401,7 +410,9 @@ export function AlertRuleForm() {
                 type="number"
                 min="1"
                 value={vmVmid}
-                onChange={(e) => { setVmVmid(e.target.value); }}
+                onChange={(e) => {
+                  setVmVmid(e.target.value);
+                }}
                 placeholder="100"
               />
               <p className="text-xs text-muted-foreground">
@@ -417,7 +428,9 @@ export function AlertRuleForm() {
                 id="duration"
                 type="number"
                 value={durationSeconds}
-                onChange={(e) => { setDurationSeconds(e.target.value); }}
+                onChange={(e) => {
+                  setDurationSeconds(e.target.value);
+                }}
               />
               <p className="text-xs text-muted-foreground">
                 How long condition must persist
@@ -430,7 +443,9 @@ export function AlertRuleForm() {
                 id="cooldown"
                 type="number"
                 value={cooldownSeconds}
-                onChange={(e) => { setCooldownSeconds(e.target.value); }}
+                onChange={(e) => {
+                  setCooldownSeconds(e.target.value);
+                }}
               />
               <p className="text-xs text-muted-foreground">
                 Suppress re-fire within window
@@ -443,13 +458,18 @@ export function AlertRuleForm() {
             onChange={setEscalationChain}
           />
 
-          <TemplateEditor value={messageTemplate} onChange={setMessageTemplate} />
+          <TemplateEditor
+            value={messageTemplate}
+            onChange={setMessageTemplate}
+          />
 
           <div className="flex justify-end gap-2 pt-2">
             <Button
               type="button"
               variant="outline"
-              onClick={() => { setOpen(false); }}
+              onClick={() => {
+                setOpen(false);
+              }}
             >
               Cancel
             </Button>

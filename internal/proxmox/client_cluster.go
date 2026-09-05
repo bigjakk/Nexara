@@ -46,6 +46,7 @@ func (c *Client) GetClusterResources(ctx context.Context, resourceType string) (
 	}
 	return resources, nil
 }
+
 // GetVersion returns the Proxmox VE release info from GET /version.
 // Used to feature-gate version-dependent UI (OCI image support requires 9.1+).
 func (c *Client) GetVersion(ctx context.Context) (*Version, error) {

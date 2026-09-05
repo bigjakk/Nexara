@@ -24,7 +24,14 @@ export interface ActionConfig {
   showWhen: (status: string, kind: ResourceKind) => boolean;
 }
 
-export type ManagementAction = "snapshot" | "clone" | "clone-to-template" | "deploy" | "migrate" | "convert-to-template" | "destroy";
+export type ManagementAction =
+  | "snapshot"
+  | "clone"
+  | "clone-to-template"
+  | "deploy"
+  | "migrate"
+  | "convert-to-template"
+  | "destroy";
 
 export interface ManagementActionConfig {
   action: ManagementAction;

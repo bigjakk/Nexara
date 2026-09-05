@@ -41,7 +41,12 @@ export function CreateResourceDialogs() {
 
   return (
     <>
-      <Dialog open={showPicker} onOpenChange={(o) => { if (!o) cancelPending(); }}>
+      <Dialog
+        open={showPicker}
+        onOpenChange={(o) => {
+          if (!o) cancelPending();
+        }}
+      >
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Select Cluster</DialogTitle>
@@ -54,7 +59,9 @@ export function CreateResourceDialogs() {
                   key={cluster.id}
                   variant="outline"
                   className="w-full justify-start"
-                  onClick={() => { pickCluster(cluster.id); }}
+                  onClick={() => {
+                    pickCluster(cluster.id);
+                  }}
                 >
                   {cluster.name}
                 </Button>
@@ -66,17 +73,23 @@ export function CreateResourceDialogs() {
 
       <CreateVMDialog
         open={dialog === "vm"}
-        onOpenChange={(o) => { if (!o) close(); }}
+        onOpenChange={(o) => {
+          if (!o) close();
+        }}
         clusterId={clusterId}
       />
       <CreateCTDialog
         open={dialog === "ct"}
-        onOpenChange={(o) => { if (!o) close(); }}
+        onOpenChange={(o) => {
+          if (!o) close();
+        }}
         clusterId={clusterId}
       />
       <ImportVMDialog
         open={dialog === "import"}
-        onOpenChange={(o) => { if (!o) close(); }}
+        onOpenChange={(o) => {
+          if (!o) close();
+        }}
         clusterId={clusterId}
       />
     </>

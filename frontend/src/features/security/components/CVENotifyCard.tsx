@@ -130,8 +130,8 @@ export function CVENotifyCard({ clusterId }: { clusterId: string }) {
                 className="h-4 w-4 rounded border"
               />
               <span>
-                <span className="font-semibold text-orange-500">Attend</span>{" "}
-                — moderate likelihood (EPSS≥0.1) or critical CVSS
+                <span className="font-semibold text-orange-500">Attend</span> —
+                moderate likelihood (EPSS≥0.1) or critical CVSS
               </span>
             </label>
           </div>
@@ -158,7 +158,9 @@ export function CVENotifyCard({ clusterId }: { clusterId: string }) {
                     <input
                       type="checkbox"
                       checked={channelIDs.includes(ch.id)}
-                      onChange={() => { toggleChannel(ch.id); }}
+                      onChange={() => {
+                        toggleChannel(ch.id);
+                      }}
                       className="h-4 w-4 rounded border"
                     />
                     <span>{ch.name}</span>

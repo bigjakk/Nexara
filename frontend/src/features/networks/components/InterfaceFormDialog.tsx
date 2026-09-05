@@ -163,13 +163,21 @@ export function InterfaceFormDialog({
       if (cleared.length > 0) req.delete = cleared;
       update.mutate(
         { iface: existing.iface, params: req },
-        { onSuccess: () => { onOpenChange(false); } },
+        {
+          onSuccess: () => {
+            onOpenChange(false);
+          },
+        },
       );
       return;
     }
 
     const req: CreateNetworkInterfaceRequest = { iface, type, ...options };
-    create.mutate(req, { onSuccess: () => { onOpenChange(false); } });
+    create.mutate(req, {
+      onSuccess: () => {
+        onOpenChange(false);
+      },
+    });
   };
 
   return (
@@ -190,7 +198,9 @@ export function InterfaceFormDialog({
               placeholder={namePlaceholder(type)}
               value={iface}
               disabled={isEdit}
-              onChange={(e) => { setIface(e.target.value); }}
+              onChange={(e) => {
+                setIface(e.target.value);
+              }}
             />
           </Field>
 
@@ -219,28 +229,36 @@ export function InterfaceFormDialog({
                 <Input
                   placeholder="e.g. 10.0.0.2/24"
                   value={form.cidr ?? ""}
-                  onChange={(e) => { set("cidr")(e.target.value); }}
+                  onChange={(e) => {
+                    set("cidr")(e.target.value);
+                  }}
                 />
               </Field>
               <Field label="Gateway (IPv4)">
                 <Input
                   placeholder="e.g. 10.0.0.1"
                   value={form.gateway ?? ""}
-                  onChange={(e) => { set("gateway")(e.target.value); }}
+                  onChange={(e) => {
+                    set("gateway")(e.target.value);
+                  }}
                 />
               </Field>
               <Field label="IPv6/CIDR">
                 <Input
                   placeholder="e.g. fd00::2/64"
                   value={form.cidr6 ?? ""}
-                  onChange={(e) => { set("cidr6")(e.target.value); }}
+                  onChange={(e) => {
+                    set("cidr6")(e.target.value);
+                  }}
                 />
               </Field>
               <Field label="Gateway (IPv6)">
                 <Input
                   placeholder="e.g. fd00::1"
                   value={form.gateway6 ?? ""}
-                  onChange={(e) => { set("gateway6")(e.target.value); }}
+                  onChange={(e) => {
+                    set("gateway6")(e.target.value);
+                  }}
                 />
               </Field>
             </>
@@ -255,7 +273,9 @@ export function InterfaceFormDialog({
               <Input
                 placeholder="e.g. eno1"
                 value={form.bridge_ports ?? ""}
-                onChange={(e) => { set("bridge_ports")(e.target.value); }}
+                onChange={(e) => {
+                  set("bridge_ports")(e.target.value);
+                }}
               />
             </Field>
           )}
@@ -265,7 +285,9 @@ export function InterfaceFormDialog({
               <Input
                 placeholder="e.g. eno1 eno2"
                 value={form.slaves ?? ""}
-                onChange={(e) => { set("slaves")(e.target.value); }}
+                onChange={(e) => {
+                  set("slaves")(e.target.value);
+                }}
               />
             </Field>
           )}
@@ -275,7 +297,9 @@ export function InterfaceFormDialog({
               <Input
                 placeholder="e.g. eno1 eno2"
                 value={form.ovs_bonds ?? ""}
-                onChange={(e) => { set("ovs_bonds")(e.target.value); }}
+                onChange={(e) => {
+                  set("ovs_bonds")(e.target.value);
+                }}
               />
             </Field>
           )}
@@ -349,7 +373,9 @@ export function InterfaceFormDialog({
                   placeholder="e.g. eno1"
                   value={form["bond-primary"] ?? ""}
                   disabled={!supportsBondPrimary(bondMode)}
-                  onChange={(e) => { set("bond-primary")(e.target.value); }}
+                  onChange={(e) => {
+                    set("bond-primary")(e.target.value);
+                  }}
                 />
               </Field>
             </>
@@ -377,18 +403,25 @@ export function InterfaceFormDialog({
                 <Input
                   placeholder="e.g. vmbr1"
                   value={form.ovs_bridge ?? ""}
-                  onChange={(e) => { set("ovs_bridge")(e.target.value); }}
+                  onChange={(e) => {
+                    set("ovs_bridge")(e.target.value);
+                  }}
                 />
               )}
             </Field>
           )}
 
           {fields.ovsPorts && (
-            <Field label="Bridge ports" hint="Space-separated, e.g. “eno1 eno2”">
+            <Field
+              label="Bridge ports"
+              hint="Space-separated, e.g. “eno1 eno2”"
+            >
               <Input
                 placeholder="e.g. eno1"
                 value={form.ovs_ports ?? ""}
-                onChange={(e) => { set("ovs_ports")(e.target.value); }}
+                onChange={(e) => {
+                  set("ovs_ports")(e.target.value);
+                }}
               />
             </Field>
           )}
@@ -399,7 +432,9 @@ export function InterfaceFormDialog({
                 inputMode="numeric"
                 placeholder="e.g. 100"
                 value={form.ovs_tag ?? ""}
-                onChange={(e) => { set("ovs_tag")(e.target.value); }}
+                onChange={(e) => {
+                  set("ovs_tag")(e.target.value);
+                }}
               />
             </Field>
           )}
@@ -409,7 +444,9 @@ export function InterfaceFormDialog({
               <Input
                 placeholder="e.g. tag=100"
                 value={form.ovs_options ?? ""}
-                onChange={(e) => { set("ovs_options")(e.target.value); }}
+                onChange={(e) => {
+                  set("ovs_options")(e.target.value);
+                }}
               />
             </Field>
           )}
@@ -422,7 +459,9 @@ export function InterfaceFormDialog({
               <Input
                 placeholder="e.g. eno1"
                 value={form["vlan-raw-device"] ?? ""}
-                onChange={(e) => { set("vlan-raw-device")(e.target.value); }}
+                onChange={(e) => {
+                  set("vlan-raw-device")(e.target.value);
+                }}
               />
             </Field>
           )}
@@ -433,7 +472,9 @@ export function InterfaceFormDialog({
                 inputMode="numeric"
                 placeholder="e.g. 100"
                 value={form["vlan-id"] ?? ""}
-                onChange={(e) => { set("vlan-id")(e.target.value); }}
+                onChange={(e) => {
+                  set("vlan-id")(e.target.value);
+                }}
               />
             </Field>
           )}
@@ -441,7 +482,9 @@ export function InterfaceFormDialog({
           <Field label="Comment">
             <Input
               value={form.comments ?? ""}
-              onChange={(e) => { set("comments")(e.target.value); }}
+              onChange={(e) => {
+                set("comments")(e.target.value);
+              }}
             />
           </Field>
 
@@ -452,7 +495,9 @@ export function InterfaceFormDialog({
                 <Checkbox
                   id="iface-autostart"
                   checked={autostart}
-                  onCheckedChange={(v) => { setAutostart(v === true); }}
+                  onCheckedChange={(v) => {
+                    setAutostart(v === true);
+                  }}
                 />
                 <Label htmlFor="iface-autostart">Autostart</Label>
               </div>
@@ -462,7 +507,9 @@ export function InterfaceFormDialog({
                 <Checkbox
                   id="iface-vlan-aware"
                   checked={vlanAware}
-                  onCheckedChange={(v) => { setVlanAware(v === true); }}
+                  onCheckedChange={(v) => {
+                    setVlanAware(v === true);
+                  }}
                 />
                 <Label htmlFor="iface-vlan-aware">VLAN aware</Label>
               </div>
@@ -474,7 +521,9 @@ export function InterfaceFormDialog({
             <button
               type="button"
               className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-              onClick={() => { setShowAdvanced((v) => !v); }}
+              onClick={() => {
+                setShowAdvanced((v) => !v);
+              }}
             >
               {showAdvanced ? "Hide advanced" : "Show advanced"}
             </button>
@@ -487,7 +536,9 @@ export function InterfaceFormDialog({
                   inputMode="numeric"
                   placeholder="1500"
                   value={form.mtu ?? ""}
-                  onChange={(e) => { set("mtu")(e.target.value); }}
+                  onChange={(e) => {
+                    set("mtu")(e.target.value);
+                  }}
                 />
               </Field>
               {fields.vlanAware && vlanAware && (
@@ -495,7 +546,9 @@ export function InterfaceFormDialog({
                   <Input
                     placeholder="2 4 100-200"
                     value={form.bridge_vids ?? ""}
-                    onChange={(e) => { set("bridge_vids")(e.target.value); }}
+                    onChange={(e) => {
+                      set("bridge_vids")(e.target.value);
+                    }}
                   />
                 </Field>
               )}
@@ -513,7 +566,12 @@ export function InterfaceFormDialog({
         </p>
 
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => { onOpenChange(false); }}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              onOpenChange(false);
+            }}
+          >
             Cancel
           </Button>
           <Button

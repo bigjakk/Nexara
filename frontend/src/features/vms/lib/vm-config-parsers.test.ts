@@ -41,7 +41,8 @@ describe("parseKVString / buildKVString", () => {
 
 describe("parseNet0 / buildNet0", () => {
   it("parses full net0 string with MAC", () => {
-    const raw = "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,firewall=1,tag=100,rate=10,mtu=1500,queues=4";
+    const raw =
+      "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,firewall=1,tag=100,rate=10,mtu=1500,queues=4";
     const parsed = parseNet0(raw);
     expect(parsed.model).toBe("virtio");
     expect(parsed.mac).toBe("AA:BB:CC:DD:EE:FF");
@@ -81,7 +82,18 @@ describe("parseNet0 / buildNet0", () => {
   });
 
   it("builds with only model", () => {
-    expect(buildNet0({ model: "virtio", mac: "", bridge: "", firewall: false, vlanTag: "", rateLimit: "", mtu: "", multiqueue: "" })).toBe("virtio");
+    expect(
+      buildNet0({
+        model: "virtio",
+        mac: "",
+        bridge: "",
+        firewall: false,
+        vlanTag: "",
+        rateLimit: "",
+        mtu: "",
+        multiqueue: "",
+      }),
+    ).toBe("virtio");
   });
 });
 
@@ -109,11 +121,15 @@ describe("parseAgent / buildAgent", () => {
   });
 
   it("builds enabled with fstrim", () => {
-    expect(buildAgent({ enabled: true, fstrimClonedDisks: true })).toBe("enabled=1,fstrim_cloned_disks=1");
+    expect(buildAgent({ enabled: true, fstrimClonedDisks: true })).toBe(
+      "enabled=1,fstrim_cloned_disks=1",
+    );
   });
 
   it("builds enabled without fstrim", () => {
-    expect(buildAgent({ enabled: true, fstrimClonedDisks: false })).toBe("enabled=1");
+    expect(buildAgent({ enabled: true, fstrimClonedDisks: false })).toBe(
+      "enabled=1",
+    );
   });
 
   it("builds disabled", () => {
@@ -145,7 +161,11 @@ describe("parseVGA / buildVGA", () => {
 
 describe("parseBootOrder / buildBootOrder", () => {
   it("parses boot order", () => {
-    expect(parseBootOrder("order=scsi0;ide2;net0")).toEqual(["scsi0", "ide2", "net0"]);
+    expect(parseBootOrder("order=scsi0;ide2;net0")).toEqual([
+      "scsi0",
+      "ide2",
+      "net0",
+    ]);
   });
 
   it("handles empty string", () => {
@@ -167,7 +187,9 @@ describe("parseBootOrder / buildBootOrder", () => {
 
 describe("parseDisk", () => {
   it("parses full disk string", () => {
-    const d = parseDisk("local-lvm:vm-100-disk-0,size=32G,format=qcow2,cache=none,discard=on,ssd=1,iothread=1");
+    const d = parseDisk(
+      "local-lvm:vm-100-disk-0,size=32G,format=qcow2,cache=none,discard=on,ssd=1,iothread=1",
+    );
     expect(d.storage).toBe("local-lvm");
     expect(d.volume).toBe("local-lvm:vm-100-disk-0");
     expect(d.size).toBe("32G");
@@ -181,11 +203,15 @@ describe("parseDisk", () => {
   it("derives the format from the volume extension when format= is absent", () => {
     // How Proxmox actually writes file-based disks — the extension is the only
     // record of the image format.
-    expect(parseDisk("synology:121/vm-121-disk-0.qcow2,size=81G").format).toBe(
+    expect(parseDisk("nas:121/vm-121-disk-0.qcow2,size=81G").format).toBe(
       "qcow2",
     );
-    expect(parseDisk("local:100/vm-100-disk-0.raw,size=32G").format).toBe("raw");
-    expect(parseDisk("nfs:100/vm-100-disk-1.vmdk,size=10G").format).toBe("vmdk");
+    expect(parseDisk("local:100/vm-100-disk-0.raw,size=32G").format).toBe(
+      "raw",
+    );
+    expect(parseDisk("nfs:100/vm-100-disk-1.vmdk,size=10G").format).toBe(
+      "vmdk",
+    );
   });
 
   it("reports no format for block-backed volumes", () => {

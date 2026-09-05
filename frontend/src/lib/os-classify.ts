@@ -1,4 +1,11 @@
-export type OSFamily = "windows" | "linux" | "bsd" | "macos" | "solaris" | "other" | "unknown";
+export type OSFamily =
+  | "windows"
+  | "linux"
+  | "bsd"
+  | "macos"
+  | "solaris"
+  | "other"
+  | "unknown";
 
 // Distro IDs that the QEMU guest agent or Proxmox LXC config can report.
 // Sourced from /etc/os-release `ID=` values across major distros plus the
@@ -85,7 +92,12 @@ export function classifyOS(ostype: string): OSFamily {
   if (v.startsWith("l24") || v.startsWith("l26")) return "linux";
   if (v === "solaris") return "solaris";
   if (v === "macos" || v === "darwin" || v === "mac os x") return "macos";
-  if (v === "freebsd" || v === "openbsd" || v === "netbsd" || v === "dragonfly") {
+  if (
+    v === "freebsd" ||
+    v === "openbsd" ||
+    v === "netbsd" ||
+    v === "dragonfly"
+  ) {
     return "bsd";
   }
   if (linuxIDs.has(v)) return "linux";

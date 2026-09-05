@@ -5,7 +5,13 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { ArrowLeft, FolderOpen, FolderPlus, Pencil, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  FolderOpen,
+  FolderPlus,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -202,7 +208,13 @@ export function FolderDetailPage() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
-          <Button variant="ghost" size="sm" asChild className="-ml-2 mt-1.5">
+          <Button
+            aria-label="Back"
+            variant="ghost"
+            size="sm"
+            asChild
+            className="-ml-2 mt-1.5"
+          >
             <Link to={backPath}>
               <ArrowLeft className="h-4 w-4" />
             </Link>

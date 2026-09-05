@@ -60,7 +60,8 @@ export interface CorosyncNode {
 export function useClusterOptions(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "options"],
-    queryFn: () => apiClient.get<ClusterOptions>(`/api/v1/clusters/${clusterId}/options`),
+    queryFn: () =>
+      apiClient.get<ClusterOptions>(`/api/v1/clusters/${clusterId}/options`),
     enabled: clusterId.length > 0,
   });
 }
@@ -69,9 +70,14 @@ export function useUpdateClusterOptions(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: Partial<ClusterOptions>) =>
-      apiClient.put<{ status: string }>(`/api/v1/clusters/${clusterId}/options`, data),
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/options`,
+        data,
+      ),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "options"] });
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "options"],
+      });
     },
   });
 }
@@ -79,7 +85,10 @@ export function useUpdateClusterOptions(clusterId: string) {
 export function useClusterDescription(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "description"],
-    queryFn: () => apiClient.get<{ description: string }>(`/api/v1/clusters/${clusterId}/description`),
+    queryFn: () =>
+      apiClient.get<{ description: string }>(
+        `/api/v1/clusters/${clusterId}/description`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -88,10 +97,17 @@ export function useUpdateClusterDescription(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (description: string) =>
-      apiClient.put<{ status: string }>(`/api/v1/clusters/${clusterId}/description`, { description }),
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/description`,
+        { description },
+      ),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "description"] });
-      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "options"] });
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "description"],
+      });
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "options"],
+      });
     },
   });
 }
@@ -99,7 +115,8 @@ export function useUpdateClusterDescription(clusterId: string) {
 export function useClusterTags(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "tags"],
-    queryFn: () => apiClient.get<TagsResponse>(`/api/v1/clusters/${clusterId}/tags`),
+    queryFn: () =>
+      apiClient.get<TagsResponse>(`/api/v1/clusters/${clusterId}/tags`),
     enabled: clusterId.length > 0,
   });
 }
@@ -107,8 +124,15 @@ export function useClusterTags(clusterId: string) {
 export function useUpdateClusterTags(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { registered_tags?: string; user_tag_access?: string; tag_style?: string }) =>
-      apiClient.put<{ status: string }>(`/api/v1/clusters/${clusterId}/tags`, data),
+    mutationFn: (data: {
+      registered_tags?: string;
+      user_tag_access?: string;
+      tag_style?: string;
+    }) =>
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/tags`,
+        data,
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "tags"] });
     },
@@ -118,7 +142,8 @@ export function useUpdateClusterTags(clusterId: string) {
 export function useClusterConfig(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "config"],
-    queryFn: () => apiClient.get<ClusterConfig>(`/api/v1/clusters/${clusterId}/config`),
+    queryFn: () =>
+      apiClient.get<ClusterConfig>(`/api/v1/clusters/${clusterId}/config`),
     enabled: clusterId.length > 0,
   });
 }
@@ -126,7 +151,10 @@ export function useClusterConfig(clusterId: string) {
 export function useClusterJoinInfo(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "config", "join"],
-    queryFn: () => apiClient.get<ClusterJoinInfo>(`/api/v1/clusters/${clusterId}/config/join`),
+    queryFn: () =>
+      apiClient.get<ClusterJoinInfo>(
+        `/api/v1/clusters/${clusterId}/config/join`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -134,7 +162,10 @@ export function useClusterJoinInfo(clusterId: string) {
 export function useCorosyncNodes(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "config", "nodes"],
-    queryFn: () => apiClient.list<CorosyncNode>(`/api/v1/clusters/${clusterId}/config/nodes`),
+    queryFn: () =>
+      apiClient.list<CorosyncNode>(
+        `/api/v1/clusters/${clusterId}/config/nodes`,
+      ),
     enabled: clusterId.length > 0,
   });
 }

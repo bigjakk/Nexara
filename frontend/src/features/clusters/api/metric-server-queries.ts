@@ -17,7 +17,10 @@ export interface MetricServerConfig {
 export function useMetricServers(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "metric-servers"],
-    queryFn: () => apiClient.list<MetricServerConfig>(`/api/v1/clusters/${clusterId}/metric-servers`),
+    queryFn: () =>
+      apiClient.list<MetricServerConfig>(
+        `/api/v1/clusters/${clusterId}/metric-servers`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -25,9 +28,18 @@ export function useMetricServers(clusterId: string) {
 export function useCreateMetricServer(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { id: string; type: string; server: string; port: number; [key: string]: unknown }) =>
-      apiClient.post(`/api/v1/clusters/${clusterId}/metric-servers`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "metric-servers"] }); },
+    mutationFn: (data: {
+      id: string;
+      type: string;
+      server: string;
+      port: number;
+      [key: string]: unknown;
+    }) => apiClient.post(`/api/v1/clusters/${clusterId}/metric-servers`, data),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "metric-servers"],
+      });
+    },
   });
 }
 
@@ -35,8 +47,15 @@ export function useUpdateMetricServer(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string; [key: string]: unknown }) =>
-      apiClient.put(`/api/v1/clusters/${clusterId}/metric-servers/${encodeURIComponent(id)}`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "metric-servers"] }); },
+      apiClient.put(
+        `/api/v1/clusters/${clusterId}/metric-servers/${encodeURIComponent(id)}`,
+        data,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "metric-servers"],
+      });
+    },
   });
 }
 
@@ -44,7 +63,13 @@ export function useDeleteMetricServer(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.delete(`/api/v1/clusters/${clusterId}/metric-servers/${encodeURIComponent(id)}`),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "metric-servers"] }); },
+      apiClient.delete(
+        `/api/v1/clusters/${clusterId}/metric-servers/${encodeURIComponent(id)}`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "metric-servers"],
+      });
+    },
   });
 }

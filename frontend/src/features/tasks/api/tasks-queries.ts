@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import type { SortDirection } from "@/hooks/useTableSort";
+import type { TaskSortKey } from "../lib/task-columns";
 
 /** A row from the reconciled task_history table (server-authoritative status). */
 export interface TaskRecord {
@@ -29,6 +31,13 @@ interface TaskListParams {
   offset: number;
   clusterId?: string | undefined;
   status?: string | undefined;
+  /** Server-side ordering. See TaskSortKey in ../lib/task-columns — the server
+   * rejects anything off its whitelist with a 400, so these are not free-form.
+   * Sorting is server-side because the table pages 50 rows out of a history
+   * that runs to thousands; ordering the delivered page would only reshuffle
+   * what is already on screen. */
+  sort: TaskSortKey;
+  order: SortDirection;
   /** Server-side guest filter (task_history.vmid). Never pass an empty array —
    * the server treats an absent param as "no filter"; gate with `enabled`. */
   vmids?: number[] | undefined;
@@ -46,14 +55,14 @@ export function useTasks({
   offset,
   clusterId,
   status,
+  sort,
+  order,
   vmids,
   enabled,
 }: TaskListParams) {
   // Sorted so semantically-equal sets share a cache entry.
   const vmidsKey =
-    vmids && vmids.length > 0
-      ? [...vmids].sort((a, b) => a - b).join(",")
-      : "";
+    vmids && vmids.length > 0 ? [...vmids].sort((a, b) => a - b).join(",") : "";
 
   const params = new URLSearchParams();
   params.set("limit", String(limit));
@@ -61,9 +70,20 @@ export function useTasks({
   if (clusterId) params.set("cluster_id", clusterId);
   if (status) params.set("status", status);
   if (vmidsKey) params.set("vmids", vmidsKey);
+  params.set("sort", sort);
+  params.set("order", order);
 
   return useQuery({
-    queryKey: ["tasks", limit, offset, clusterId, status, vmidsKey],
+    queryKey: [
+      "tasks",
+      limit,
+      offset,
+      clusterId,
+      status,
+      sort,
+      order,
+      vmidsKey,
+    ],
     queryFn: () =>
       apiClient.page<TaskRecord>(`/api/v1/tasks?${params.toString()}`),
     enabled: enabled ?? true,

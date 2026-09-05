@@ -82,9 +82,7 @@ describe("i18n configuration", () => {
   });
 
   it("supportedLanguages includes English", () => {
-    const english = supportedLanguages.find(
-      (l) => (l.code as string) === "en",
-    );
+    const english = supportedLanguages.find((l) => (l.code as string) === "en");
     expect(english).toBeDefined();
     expect(english?.name).toBe("English");
     expect(english?.nativeName).toBe("English");

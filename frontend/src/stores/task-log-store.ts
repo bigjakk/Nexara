@@ -28,8 +28,10 @@ function loadPersistedState(): Pick<TaskLogState, "panelOpen" | "panelHeight"> {
       if (parsed && typeof parsed === "object" && "panelOpen" in parsed) {
         const obj = parsed as Record<string, unknown>;
         return {
-          panelOpen: typeof obj["panelOpen"] === "boolean" ? obj["panelOpen"] : false,
-          panelHeight: typeof obj["panelHeight"] === "number" ? obj["panelHeight"] : 200,
+          panelOpen:
+            typeof obj["panelOpen"] === "boolean" ? obj["panelOpen"] : false,
+          panelHeight:
+            typeof obj["panelHeight"] === "number" ? obj["panelHeight"] : 200,
         };
       }
     }

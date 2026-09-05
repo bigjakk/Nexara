@@ -22,7 +22,6 @@ interface StorageContentTableProps {
   storageId: string;
 }
 
-
 function formatDate(unixTs: number): string {
   if (unixTs === 0) return "-";
   return new Date(unixTs * 1000).toLocaleString();
@@ -53,7 +52,10 @@ export function StorageContentTable({
   const [deletingVolid, setDeletingVolid] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState<{ done: number; failed: number } | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{
+    done: number;
+    failed: number;
+  } | null>(null);
 
   // Drop selections that no longer exist in items (e.g. after a delete or
   // when the parent re-tabs).
@@ -92,10 +94,14 @@ export function StorageContentTable({
       {
         onSuccess: (data) => {
           if (data.upid) {
-            void queryClient.invalidateQueries({ queryKey: ["recent-activity"] });
+            void queryClient.invalidateQueries({
+              queryKey: ["recent-activity"],
+            });
           }
         },
-        onSettled: () => { setDeletingVolid(null); },
+        onSettled: () => {
+          setDeletingVolid(null);
+        },
       },
     );
   }
@@ -116,7 +122,11 @@ export function StorageContentTable({
     let failed = 0;
     for (const volid of volids) {
       try {
-        await deleteMutation.mutateAsync({ clusterId, storageId, volume: volid });
+        await deleteMutation.mutateAsync({
+          clusterId,
+          storageId,
+          volume: volid,
+        });
         done += 1;
       } catch {
         failed += 1;
@@ -153,7 +163,9 @@ export function StorageContentTable({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => { setSelected(new Set()); }}
+              onClick={() => {
+                setSelected(new Set());
+              }}
               disabled={bulkDeleting}
             >
               Clear
@@ -161,7 +173,9 @@ export function StorageContentTable({
             <Button
               size="sm"
               variant="destructive"
-              onClick={() => { void handleBulkDelete(); }}
+              onClick={() => {
+                void handleBulkDelete();
+              }}
               disabled={bulkDeleting}
             >
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
@@ -176,7 +190,9 @@ export function StorageContentTable({
           <TableRow>
             <TableHead className="w-10">
               <Checkbox
-                checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                checked={
+                  allSelected ? true : someSelected ? "indeterminate" : false
+                }
                 onCheckedChange={toggleAll}
                 aria-label="Select all items"
               />
@@ -199,7 +215,9 @@ export function StorageContentTable({
               <TableCell>
                 <Checkbox
                   checked={selected.has(item.volid)}
-                  onCheckedChange={() => { toggleRow(item.volid); }}
+                  onCheckedChange={() => {
+                    toggleRow(item.volid);
+                  }}
                   aria-label={`Select ${item.volid}`}
                 />
               </TableCell>
@@ -224,10 +242,13 @@ export function StorageContentTable({
               <TableCell>
                 <div className="flex items-center justify-end">
                   <Button
+                    aria-label={`Delete ${item.volid}`}
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
-                    onClick={() => { handleDelete(item.volid); }}
+                    onClick={() => {
+                      handleDelete(item.volid);
+                    }}
                     disabled={deletingVolid === item.volid || bulkDeleting}
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />

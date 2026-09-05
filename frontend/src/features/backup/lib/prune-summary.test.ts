@@ -14,7 +14,12 @@ const settled = { loading: false, failed: false };
 // The card's job is only to render what it returns.
 describe("summarizePrune", () => {
   it("reports the job's schedule when the datastore carries none", () => {
-    const s = summarizePrune(undefined, {}, [job({ "keep-daily": 14 })], settled);
+    const s = summarizePrune(
+      undefined,
+      {},
+      [job({ "keep-daily": 14 })],
+      settled,
+    );
     expect(s.scheduleLabel).toBe("daily (prune job)");
     expect(s.retention?.["keep-daily"]).toBe(14);
   });
@@ -38,12 +43,18 @@ describe("summarizePrune", () => {
   });
 
   it("does not claim anything while the jobs are still loading", () => {
-    const s = summarizePrune(undefined, {}, undefined, { loading: true, failed: false });
+    const s = summarizePrune(undefined, {}, undefined, {
+      loading: true,
+      failed: false,
+    });
     expect(s.scheduleLabel).toBe("Loading…");
   });
 
   it("does not claim anything when the jobs could not be read", () => {
-    const s = summarizePrune(undefined, {}, undefined, { loading: false, failed: true });
+    const s = summarizePrune(undefined, {}, undefined, {
+      loading: false,
+      failed: true,
+    });
     expect(s.scheduleLabel).toMatch(/unavailable/i);
     expect(s.scheduleLabel).not.toMatch(/not configured/i);
   });
@@ -112,7 +123,11 @@ describe("summarizePrune", () => {
       undefined,
       {},
       [
-        job({ id: "old", "last-run-endtime": 100, "last-run-state": "error: disk full" }),
+        job({
+          id: "old",
+          "last-run-endtime": 100,
+          "last-run-state": "error: disk full",
+        }),
         job({ id: "new", "last-run-endtime": 200, "last-run-state": "OK" }),
       ],
       settled,
@@ -122,7 +137,16 @@ describe("summarizePrune", () => {
   });
 
   it("reports the soonest next run and no run at all for a fresh job", () => {
-    expect(summarizePrune(undefined, {}, [job({ "next-run": 500 }), job({ "next-run": 300 })], settled).nextRun).toBe(300);
-    expect(summarizePrune(undefined, {}, [job()], settled).lastRun).toBeUndefined();
+    expect(
+      summarizePrune(
+        undefined,
+        {},
+        [job({ "next-run": 500 }), job({ "next-run": 300 })],
+        settled,
+      ).nextRun,
+    ).toBe(300);
+    expect(
+      summarizePrune(undefined, {}, [job()], settled).lastRun,
+    ).toBeUndefined();
   });
 });

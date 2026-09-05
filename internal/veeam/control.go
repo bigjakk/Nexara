@@ -26,16 +26,15 @@ import (
 //
 //   - Session non-nil    — accepted, and here is the run to track.
 //   - NoObjects true     — accepted, but the job had nothing to process, so
-//                          Veeam created no run at all. The documented 204 on
-//                          start.
+//     Veeam created no run at all. The documented 204 on
+//     start.
 //   - both zero          — accepted, but the response carried no session
-//                          Nexara can key on. Rare and contract-violating, and
-//                          NOT a failure: Veeam has acted either way.
+//     Nexara can key on. Rare and contract-violating, and
+//     NOT a failure: Veeam has acted either way.
 type JobRun struct {
 	Session   *Session
 	NoObjects bool
 }
-
 
 // StartJob starts a backup job and reports what Veeam did with the request.
 //

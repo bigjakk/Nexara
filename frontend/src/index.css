@@ -61,6 +61,20 @@
 
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
+  /* Task progress whose fraction Proxmox never reported: motion says the task
+     is working without claiming how far along it is. */
+  --animate-task-indeterminate: task-indeterminate 1.4s ease-in-out infinite;
+}
+
+/* Travels the full track: the bar is 30% of its width, so it clears the right
+   edge at 333% of its own. */
+@keyframes task-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
 }
 
 @keyframes accordion-down {
@@ -203,7 +217,11 @@
         hsl(var(--primary) / 0.09),
         transparent 70%
       ),
-      radial-gradient(circle, hsl(var(--foreground) / 0.038) 1px, transparent 1px);
+      radial-gradient(
+        circle,
+        hsl(var(--foreground) / 0.038) 1px,
+        transparent 1px
+      );
     background-size:
       100% 100%,
       22px 22px;
@@ -215,7 +233,11 @@
         hsl(var(--primary) / 0.17),
         transparent 70%
       ),
-      radial-gradient(circle, hsl(var(--foreground) / 0.045) 1px, transparent 1px);
+      radial-gradient(
+        circle,
+        hsl(var(--foreground) / 0.045) 1px,
+        transparent 1px
+      );
   }
 }
 

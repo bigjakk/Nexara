@@ -10,9 +10,9 @@ function orphan(over: Partial<VeeamOrphanedObject> = {}): VeeamOrphanedObject {
     id: "obj-1",
     veeam_object_id: "3aad74b4-8013-4b41-b266-d21b6d88cc21",
     smbios_uuid: "316e531d-55c0-4fef-adc2-f1bb9c4e1873",
-    name: "docker03",
+    name: "linux03",
     object_type: "VM",
-    platform_name: "CRJLAB",
+    platform_name: "cluster01",
     cluster_id: "c0000000-0000-4000-8000-000000000001",
     cluster_name: "Ceph",
     restore_points_count: 12,
@@ -28,9 +28,7 @@ function orphan(over: Partial<VeeamOrphanedObject> = {}): VeeamOrphanedObject {
 describe("VeeamOrphanTable", () => {
   it("says nothing is orphaned rather than rendering an empty table", () => {
     renderWithProviders(<VeeamOrphanTable serverId="srv-1" objects={[]} />);
-    expect(
-      screen.getByText(/matches a guest/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/matches a guest/i)).toBeInTheDocument();
   });
 
   it("shows the SMBIOS uuid that failed to match, which is the whole point", async () => {
@@ -39,7 +37,7 @@ describe("VeeamOrphanTable", () => {
       <VeeamOrphanTable serverId="srv-1" objects={[orphan()]} />,
     );
 
-    await user.click(screen.getByText("docker03"));
+    await user.click(screen.getByText("linux03"));
 
     // The identity Veeam recorded, that no guest on the mapped cluster
     // carries. Without it an operator has no way to tell an orphan from a
@@ -52,10 +50,13 @@ describe("VeeamOrphanTable", () => {
   it("says so when Veeam recorded no identity at all", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <VeeamOrphanTable serverId="srv-1" objects={[orphan({ smbios_uuid: "" })]} />,
+      <VeeamOrphanTable
+        serverId="srv-1"
+        objects={[orphan({ smbios_uuid: "" })]}
+      />,
     );
 
-    await user.click(screen.getByText("docker03"));
+    await user.click(screen.getByText("linux03"));
     expect(screen.getByText("none recorded")).toBeInTheDocument();
   });
 
@@ -65,7 +66,7 @@ describe("VeeamOrphanTable", () => {
       <VeeamOrphanTable serverId="srv-1" objects={[orphan()]} />,
     );
 
-    await user.click(screen.getByText("docker03"));
+    await user.click(screen.getByText("linux03"));
     const button = screen.getByRole("button", { name: /map to this guest/i });
     expect(button).toBeDisabled();
 
@@ -88,7 +89,7 @@ describe("VeeamOrphanTable", () => {
       />,
     );
 
-    await user.click(screen.getByText("docker03"));
+    await user.click(screen.getByText("linux03"));
     await user.type(screen.getByLabelText(/map to guest vmid/i), "105");
 
     // There is no cluster to map it to. The API rejects it; the button must

@@ -2,7 +2,9 @@ package veeam
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -334,6 +336,42 @@ func (c *Client) Sessions(ctx context.Context, since time.Time, maxRows int) ([]
 	return listPaged[Session](ctx, c, "/api/v1/sessions", params, maxRows)
 }
 
+// Session re-reads one session by id.
+//
+// Sessions lists by createdAfterFilter, and a session's STATE keeps changing
+// long after its creationTime — so that window can never re-observe a run it
+// has already scrolled past. This is how a run still in flight when the window
+// moved on is caught up with, and it is the only call that can report the
+// final state of one.
+//
+// A run VBR has forgotten comes back as ErrSessionNotFound, which the caller
+// must tell apart from a transient failure: the two mean opposite things about
+// whether the run is still out there, and the collector deletes on one.
+func (c *Client) Session(ctx context.Context, sessionID string) (*Session, error) {
+	id, err := requireUUID("session id", sessionID)
+	if err != nil {
+		return nil, err
+	}
+	// c.do rather than c.get: the raw status is the ONLY thing that
+	// distinguishes this endpoint's own 404 from one raised anywhere else on
+	// the way here. do reports status 0 for every failure that happened
+	// before the request was answered — a failed token grant included — so a
+	// 404 here came from /sessions/{id} and nowhere else.
+	body, status, err := c.do(ctx, http.MethodGet, "/api/v1/sessions/"+id)
+	if err != nil {
+		if status == http.StatusNotFound {
+			return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, id)
+		}
+		return nil, err
+	}
+
+	var s Session
+	if err := json.Unmarshal(body, &s); err != nil {
+		return nil, fmt.Errorf("veeam: decode session %s response: %w", id, err)
+	}
+	return &s, nil
+}
+
 // ProxmoxProxyType is the EProxyType value for a Veeam worker appliance
 // deployed onto a Proxmox cluster.
 const ProxmoxProxyType = "PVE"
@@ -359,7 +397,7 @@ type ProxyState struct {
 	Description string `json:"description"`
 	HostID      string `json:"hostId"`
 	// HostName is the Proxmox node the appliance runs on for a PVE proxy
-	// ("hv01.example.lan"), and the literal string "This server" for a proxy
+	// ("pve-01.example.com"), and the literal string "This server" for a proxy
 	// role the VBR server fills itself.
 	HostName    string `json:"hostName"`
 	IsDisabled  bool   `json:"isDisabled"`
@@ -386,9 +424,9 @@ func (c *Client) ProxyStates(ctx context.Context) ([]ProxyState, error) {
 // is infrastructure, and a coverage report that flags it teaches operators to
 // ignore the report.
 //
-// Name is the FQDN Veeam knows the server by ("Veeam01.example.lan") and is
+// Name is the FQDN Veeam knows the server by ("vbr01.example.com") and is
 // what matches a Proxmox guest name. serverInfo.name is NOT interchangeable
-// with it: on the lab that field is the short "Veeam01", which matches no
+// with it: that field is the short hostname ("vbr01"), which matches no
 // guest at all.
 type ManagedServer struct {
 	ID             string `json:"id"`

@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/netguard"
 )
 
 const (
@@ -45,11 +46,11 @@ type CVEClient struct {
 	queries    *db.Queries
 	logger     *slog.Logger
 
-	mu                sync.Mutex
-	trackerData       map[string]map[string]debianCVEEntry
-	trackerLoadedAt   time.Time
-	cacheTTL          time.Duration // overridable for tests
-	feedURL           string        // overridable for tests
+	mu              sync.Mutex
+	trackerData     map[string]map[string]debianCVEEntry
+	trackerLoadedAt time.Time
+	cacheTTL        time.Duration // overridable for tests
+	feedURL         string        // overridable for tests
 }
 
 // debianCVEEntry is the per-CVE entry inside a package's map.
@@ -75,7 +76,7 @@ func NewCVEClient(queries *db.Queries, httpClient *http.Client, logger *slog.Log
 		logger = slog.Default()
 	}
 	if httpClient == nil {
-		httpClient = newScannerHTTPClient(120 * time.Second)
+		httpClient = netguard.NewHTTPClient(120 * time.Second)
 	}
 	return &CVEClient{
 		httpClient: httpClient,

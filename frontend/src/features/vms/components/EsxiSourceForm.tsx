@@ -14,7 +14,11 @@ interface EsxiSourceFormProps {
 // PVE storage IDs: start with a letter, then letters/digits/-_. (no spaces or slashes).
 const storageIdPattern = /^[A-Za-z][A-Za-z0-9\-_.]*$/;
 
-export function EsxiSourceForm({ clusterId, onRegistered, onCancel }: EsxiSourceFormProps) {
+export function EsxiSourceForm({
+  clusterId,
+  onRegistered,
+  onCancel,
+}: EsxiSourceFormProps) {
   const [storage, setStorage] = useState("");
   const [server, setServer] = useState("");
   const [username, setUsername] = useState("");
@@ -24,7 +28,10 @@ export function EsxiSourceForm({ clusterId, onRegistered, onCancel }: EsxiSource
 
   const storageValid = storageIdPattern.test(storage) && storage.length <= 64;
   const canSubmit =
-    storageValid && server.trim() !== "" && username.trim() !== "" && password !== "";
+    storageValid &&
+    server.trim() !== "" &&
+    username.trim() !== "" &&
+    password !== "";
 
   function submit() {
     if (!canSubmit) return;
@@ -55,7 +62,9 @@ export function EsxiSourceForm({ clusterId, onRegistered, onCancel }: EsxiSource
           <Label>Storage ID</Label>
           <Input
             value={storage}
-            onChange={(e) => { setStorage(e.target.value); }}
+            onChange={(e) => {
+              setStorage(e.target.value);
+            }}
             placeholder="esxi-prod"
             autoComplete="off"
             spellCheck={false}
@@ -70,7 +79,9 @@ export function EsxiSourceForm({ clusterId, onRegistered, onCancel }: EsxiSource
           <Label>Server</Label>
           <Input
             value={server}
-            onChange={(e) => { setServer(e.target.value); }}
+            onChange={(e) => {
+              setServer(e.target.value);
+            }}
             placeholder="esxi.example.com"
             autoComplete="off"
             spellCheck={false}
@@ -80,7 +91,9 @@ export function EsxiSourceForm({ clusterId, onRegistered, onCancel }: EsxiSource
           <Label>Username</Label>
           <Input
             value={username}
-            onChange={(e) => { setUsername(e.target.value); }}
+            onChange={(e) => {
+              setUsername(e.target.value);
+            }}
             placeholder="root"
             autoComplete="off"
             spellCheck={false}
@@ -91,7 +104,9 @@ export function EsxiSourceForm({ clusterId, onRegistered, onCancel }: EsxiSource
           <Input
             type="password"
             value={password}
-            onChange={(e) => { setPassword(e.target.value); }}
+            onChange={(e) => {
+              setPassword(e.target.value);
+            }}
             autoComplete="off"
           />
         </div>
@@ -99,20 +114,35 @@ export function EsxiSourceForm({ clusterId, onRegistered, onCancel }: EsxiSource
       <label className="flex items-center gap-2 text-sm">
         <Checkbox
           checked={skipCert}
-          onCheckedChange={(v) => { setSkipCert(v === true); }}
+          onCheckedChange={(v) => {
+            setSkipCert(v === true);
+          }}
         />
         <span>Skip TLS certificate verification (self-signed ESXi hosts)</span>
       </label>
       {register.isError && (
         <p className="text-sm text-destructive">
-          {register.error instanceof Error ? register.error.message : "Failed to register source"}
+          {register.error instanceof Error
+            ? register.error.message
+            : "Failed to register source"}
         </p>
       )}
       <div className="flex gap-2">
-        <Button type="button" size="sm" disabled={!canSubmit || register.isPending} onClick={submit}>
+        <Button
+          type="button"
+          size="sm"
+          disabled={!canSubmit || register.isPending}
+          onClick={submit}
+        >
           {register.isPending ? "Registering…" : "Register source"}
         </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onCancel} disabled={register.isPending}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={onCancel}
+          disabled={register.isPending}
+        >
           Cancel
         </Button>
       </div>

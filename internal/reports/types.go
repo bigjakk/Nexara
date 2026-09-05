@@ -83,21 +83,21 @@ type ForecastResult struct {
 
 // BackupComplianceEntry describes a VM's backup status.
 type BackupComplianceEntry struct {
-	VMName       string `json:"vm_name"`
-	VMID         int    `json:"vmid"`
-	NodeName     string `json:"node_name"`
-	HasBackup    bool   `json:"has_backup"`
-	LastBackup   string `json:"last_backup,omitempty"`
-	BackupAge    string `json:"backup_age,omitempty"`
-	IsStale      bool   `json:"is_stale"`
+	VMName     string `json:"vm_name"`
+	VMID       int    `json:"vmid"`
+	NodeName   string `json:"node_name"`
+	HasBackup  bool   `json:"has_backup"`
+	LastBackup string `json:"last_backup,omitempty"`
+	BackupAge  string `json:"backup_age,omitempty"`
+	IsStale    bool   `json:"is_stale"`
 }
 
 // BackupComplianceSummary is the overall backup coverage info.
 type BackupComplianceSummary struct {
-	TotalVMs    int     `json:"total_vms"`
-	BackedUp    int     `json:"backed_up"`
-	Missing     int     `json:"missing"`
-	Stale       int     `json:"stale"`
+	TotalVMs        int     `json:"total_vms"`
+	BackedUp        int     `json:"backed_up"`
+	Missing         int     `json:"missing"`
+	Stale           int     `json:"stale"`
 	CoveragePercent float64 `json:"coverage_percent"`
 }
 
@@ -105,12 +105,12 @@ type BackupComplianceSummary struct {
 
 // PatchStatusNode describes per-node vulnerability counts.
 type PatchStatusNode struct {
-	NodeName     string `json:"node_name"`
-	TotalVulns   int    `json:"total_vulns"`
-	Critical     int    `json:"critical"`
-	High         int    `json:"high"`
-	Medium       int    `json:"medium"`
-	Low          int    `json:"low"`
+	NodeName     string  `json:"node_name"`
+	TotalVulns   int     `json:"total_vulns"`
+	Critical     int     `json:"critical"`
+	High         int     `json:"high"`
+	Medium       int     `json:"medium"`
+	Low          int     `json:"low"`
 	PostureScore float64 `json:"posture_score"`
 }
 
@@ -118,9 +118,9 @@ type PatchStatusNode struct {
 
 // UptimeEntry holds node uptime info.
 type UptimeEntry struct {
-	NodeName   string        `json:"node_name"`
-	Status     string        `json:"status"`
-	Uptime     time.Duration `json:"-"`
-	UptimeStr  string        `json:"uptime"`
-	UptimePct  float64       `json:"uptime_pct"`
+	NodeName  string        `json:"node_name"`
+	Status    string        `json:"status"`
+	Uptime    time.Duration `json:"-"`
+	UptimeStr string        `json:"uptime"`
+	UptimePct float64       `json:"uptime_pct"`
 }

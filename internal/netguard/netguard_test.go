@@ -2,8 +2,11 @@ package netguard
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsCloudMetadataIP(t *testing.T) {
@@ -39,15 +42,15 @@ func TestIsAlwaysBlocked(t *testing.T) {
 		want bool
 	}{
 		// Always blocked
-		{"169.254.169.254", true},   // cloud metadata
-		{"0.0.0.0", true},           // unspecified IPv4
-		{"::", true},                // unspecified IPv6
-		{"224.0.0.1", true},         // multicast IPv4
-		{"239.255.255.250", true},   // multicast IPv4 (SSDP)
-		{"ff02::1", true},           // multicast IPv6
-		{"255.255.255.255", true},   // limited broadcast
-		{"240.0.0.1", true},         // class E
-		{"255.255.255.0", true},     // class E (just under limited broadcast)
+		{"169.254.169.254", true}, // cloud metadata
+		{"0.0.0.0", true},         // unspecified IPv4
+		{"::", true},              // unspecified IPv6
+		{"224.0.0.1", true},       // multicast IPv4
+		{"239.255.255.250", true}, // multicast IPv4 (SSDP)
+		{"ff02::1", true},         // multicast IPv6
+		{"255.255.255.255", true}, // limited broadcast
+		{"240.0.0.1", true},       // class E
+		{"255.255.255.0", true},   // class E (just under limited broadcast)
 		{"::ffff:169.254.169.254", true},
 
 		// NOT always blocked (private but legitimate Proxmox/SSH targets)
@@ -115,5 +118,34 @@ func TestDialControlSSRFGuard(t *testing.T) {
 func TestIsAlwaysBlocked_Nil(t *testing.T) {
 	if IsAlwaysBlocked(nil) {
 		t.Error("nil IP should not be reported as blocked")
+	}
+}
+
+// TestNewHTTPClient_RefusesRedirects pins the CheckRedirect contract every
+// caller of this client depends on: the 3xx is surfaced to the caller with its
+// Location intact, not followed. The scanner reads that as fail-closed; the
+// virtio-win client reads the Location as data.
+func TestNewHTTPClient_RefusesRedirects(t *testing.T) {
+	t.Parallel()
+	// A test server that 302s to a different host. The client must
+	// surface the 3xx as a response (because CheckRedirect returned
+	// http.ErrUseLastResponse) rather than following it.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "https://attacker.example/")
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewHTTPClient(5 * time.Second)
+	resp, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("expected no transport error, got %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("expected 302 surfaced to caller, got %d", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc != "https://attacker.example/" {
+		t.Fatalf("expected Location preserved for caller, got %q", loc)
 	}
 }

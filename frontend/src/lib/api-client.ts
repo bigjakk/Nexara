@@ -1,7 +1,4 @@
-import type {
-  ApiError,
-  AuthResponse,
-} from "@/types/api";
+import type { ApiError, AuthResponse } from "@/types/api";
 
 // Cached user metadata for instant render after a hard refresh. Not security
 // sensitive — the JWT is the actual auth gate; this is just so the SPA can
@@ -12,7 +9,12 @@ const USER_KEY = "nexara_user";
 // purge any value at these keys on storeTokens / clearTokens so existing
 // users do not carry their pre-upgrade access/refresh tokens around in
 // JS-reachable storage indefinitely.
-const LEGACY_TOKEN_KEYS = ["access_token", "refresh_token", "expires_at", "user"] as const;
+const LEGACY_TOKEN_KEYS = [
+  "access_token",
+  "refresh_token",
+  "expires_at",
+  "user",
+] as const;
 
 function purgeLegacyTokenKeys() {
   for (const key of LEGACY_TOKEN_KEYS) {

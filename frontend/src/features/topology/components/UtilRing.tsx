@@ -11,8 +11,7 @@ const CIRC = 2 * Math.PI * R;
 
 /** Small utilization arc with the value centered and a label underneath. */
 export function UtilRing({ percent, baseColor, label }: UtilRingProps) {
-  const clamped =
-    percent === null ? null : Math.min(100, Math.max(0, percent));
+  const clamped = percent === null ? null : Math.min(100, Math.max(0, percent));
   const color =
     clamped === null
       ? "transparent"
@@ -44,7 +43,9 @@ export function UtilRing({ percent, baseColor, label }: UtilRingProps) {
             strokeLinecap="round"
             strokeDasharray={`${String((clamped / 100) * CIRC)} ${String(CIRC)}`}
             transform={`rotate(-90 ${String(SIZE / 2)} ${String(SIZE / 2)})`}
-            style={{ transition: "stroke-dasharray 0.7s cubic-bezier(0.2,0.8,0.2,1)" }}
+            style={{
+              transition: "stroke-dasharray 0.7s cubic-bezier(0.2,0.8,0.2,1)",
+            }}
           />
         )}
         <text

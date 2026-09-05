@@ -86,7 +86,9 @@ export function NodeMetricsPanel({
     <div className="space-y-4">
       {/* Time range selector */}
       <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground">Range:</span>
+        <span className="text-sm font-medium text-muted-foreground">
+          Range:
+        </span>
         <div className="flex gap-1">
           {TIME_RANGES.map((tr) => (
             <Button
@@ -94,7 +96,9 @@ export function NodeMetricsPanel({
               size="sm"
               variant={timeRange === tr.value ? "default" : "outline"}
               className="h-7 px-2.5 text-xs"
-              onClick={() => { setTimeRange(tr.value); }}
+              onClick={() => {
+                setTimeRange(tr.value);
+              }}
             >
               {tr.label}
             </Button>
@@ -108,22 +112,59 @@ export function NodeMetricsPanel({
       {/* Charts (live = seeded 1h + WS ticks) */}
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="h-64">
-          <MetricChart title="CPU Usage" data={chartData} dataKey="cpuPercent" color="hsl(221, 83%, 53%)" timeRange={timeRange} />
+          <MetricChart
+            title="CPU Usage"
+            data={chartData}
+            dataKey="cpuPercent"
+            color="hsl(221, 83%, 53%)"
+            timeRange={timeRange}
+          />
         </div>
         <div className="h-64">
-          <MetricChart title="Memory Usage" data={chartData} dataKey="memPercent" color="hsl(142, 71%, 45%)" timeRange={timeRange} headerDetail={memDetail} />
+          <MetricChart
+            title="Memory Usage"
+            data={chartData}
+            dataKey="memPercent"
+            color="hsl(142, 71%, 45%)"
+            timeRange={timeRange}
+            headerDetail={memDetail}
+          />
         </div>
         <div className="h-64">
-          <MetricChart title="Disk Read" data={chartData} dataKey="diskReadBps" color="hsl(38, 92%, 50%)" timeRange={timeRange} />
+          <MetricChart
+            title="Disk Read"
+            data={chartData}
+            dataKey="diskReadBps"
+            color="hsl(38, 92%, 50%)"
+            timeRange={timeRange}
+          />
         </div>
         <div className="h-64">
-          <MetricChart title="Disk Write" data={chartData} dataKey="diskWriteBps" color="hsl(0, 84%, 60%)" timeRange={timeRange} />
+          <MetricChart
+            title="Disk Write"
+            data={chartData}
+            dataKey="diskWriteBps"
+            color="hsl(0, 84%, 60%)"
+            timeRange={timeRange}
+          />
         </div>
         <div className="h-64">
-          <MetricChart title="Network In" data={chartData} dataKey="netInBps" color="hsl(262, 83%, 58%)" timeRange={timeRange} />
+          <MetricChart
+            title="Network In"
+            data={chartData}
+            dataKey="netInBps"
+            color="hsl(262, 83%, 58%)"
+            timeRange={timeRange}
+          />
         </div>
         <div className="h-64">
-          <MetricChart title="Network Out" data={chartData} dataKey="netOutBps" color="hsl(330, 81%, 60%)" timeRange={timeRange} />
+          <MetricChart
+            title="Network Out"
+            data={chartData}
+            dataKey="netOutBps"
+            color="hsl(330, 81%, 60%)"
+            timeRange={timeRange}
+          />
         </div>
       </div>
     </div>

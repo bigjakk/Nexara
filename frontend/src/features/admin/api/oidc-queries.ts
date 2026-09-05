@@ -57,8 +57,7 @@ export function useUpdateOIDCConfig() {
 export function useDeleteOIDCConfig() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiClient.delete(`/api/v1/oidc/configs/${id}`),
+    mutationFn: (id: string) => apiClient.delete(`/api/v1/oidc/configs/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["oidc", "configs"] });
     },

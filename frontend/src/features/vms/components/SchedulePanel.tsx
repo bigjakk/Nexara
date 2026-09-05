@@ -85,7 +85,13 @@ export function SchedulePanel({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Scheduled Tasks</h3>
-        <Button size="sm" className="gap-2" onClick={() => { setDialogOpen(true); }}>
+        <Button
+          size="sm"
+          className="gap-2"
+          onClick={() => {
+            setDialogOpen(true);
+          }}
+        >
           <Plus className="h-4 w-4" />
           Add Schedule
         </Button>
@@ -118,7 +124,27 @@ export function SchedulePanel({
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">{s.schedule}</td>
                   <td className="px-4 py-2">
-                    <StatusIcon status={s.last_status} />
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <StatusIcon status={s.last_status} />
+                        {/* The scheduler disables a task whose cron can never
+                            fire. Without this the row just stops, with a failed
+                            icon and no next run, and nothing saying why. */}
+                        {!s.enabled && (
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Disabled
+                          </span>
+                        )}
+                      </div>
+                      {s.last_error ? (
+                        <span
+                          className="max-w-[22rem] truncate text-xs text-destructive"
+                          title={s.last_error}
+                        >
+                          {s.last_error}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-4 py-2 text-xs text-muted-foreground">
                     {s.next_run_at
@@ -132,9 +158,12 @@ export function SchedulePanel({
                   </td>
                   <td className="px-4 py-2 text-right">
                     <Button
+                      aria-label={`Delete ${s.action} schedule ${s.schedule}`}
                       variant="ghost"
                       size="sm"
-                      onClick={() => { handleDelete(s.id); }}
+                      onClick={() => {
+                        handleDelete(s.id);
+                      }}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -158,7 +187,9 @@ export function SchedulePanel({
               <select
                 className={selectClass}
                 value={action}
-                onChange={(e) => { setAction(e.target.value); }}
+                onChange={(e) => {
+                  setAction(e.target.value);
+                }}
               >
                 <option value="snapshot">Snapshot</option>
                 <option value="reboot">Reboot</option>
@@ -168,11 +199,14 @@ export function SchedulePanel({
               <Label>Cron Expression</Label>
               <Input
                 value={cronExpr}
-                onChange={(e) => { setCronExpr(e.target.value); }}
+                onChange={(e) => {
+                  setCronExpr(e.target.value);
+                }}
                 placeholder="0 2 * * *"
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                Format: minute hour day month weekday (e.g. &quot;0 2 * * *&quot; = daily at 2 AM)
+                Format: minute hour day month weekday (e.g. &quot;0 2 * *
+                *&quot; = daily at 2 AM)
               </p>
             </div>
             {action === "snapshot" && (
@@ -180,14 +214,21 @@ export function SchedulePanel({
                 <Label>Snapshot Name Template (optional)</Label>
                 <Input
                   value={snapName}
-                  onChange={(e) => { setSnapName(e.target.value); }}
+                  onChange={(e) => {
+                    setSnapName(e.target.value);
+                  }}
                   placeholder="auto-YYYYMMDD-HHMMSS"
                 />
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setDialogOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDialogOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button

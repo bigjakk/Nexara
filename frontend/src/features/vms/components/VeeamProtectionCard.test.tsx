@@ -7,7 +7,9 @@ import type { VeeamGuestProtection } from "@/features/backup/types/backup";
 
 vi.mock("@/lib/api-client", async () => {
   const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>("@/lib/api-client");
+    await vi.importActual<typeof import("@/lib/api-client")>(
+      "@/lib/api-client",
+    );
   return {
     ...actual,
     apiClient: { get: vi.fn() },
@@ -19,7 +21,9 @@ const mockedGet = vi.mocked(apiClient.get);
 const CLUSTER = "c0000000-0000-4000-8000-000000000001";
 const VM = "d0000000-0000-4000-8000-000000000001";
 
-function protection(over: Partial<VeeamGuestProtection> = {}): VeeamGuestProtection {
+function protection(
+  over: Partial<VeeamGuestProtection> = {},
+): VeeamGuestProtection {
   return {
     protected: true,
     latest_restore_point: "2026-08-27T02:00:00Z",
@@ -40,7 +44,9 @@ describe("VeeamProtectionCard", () => {
   });
 
   it("renders nothing when Veeam has never seen the guest", async () => {
-    mockedGet.mockResolvedValue(protection({ object_count: 0, protected: false }));
+    mockedGet.mockResolvedValue(
+      protection({ object_count: 0, protected: false }),
+    );
     const { container } = renderWithProviders(
       <VeeamProtectionCard clusterId={CLUSTER} vmId={VM} />,
     );
@@ -56,7 +62,10 @@ describe("VeeamProtectionCard", () => {
 
   it("renders nothing for a viewer without Veeam access", async () => {
     mockedGet.mockRejectedValue(
-      new ApiClientError(403, { error: "forbidden", message: "Insufficient permissions" }),
+      new ApiClientError(403, {
+        error: "forbidden",
+        message: "Insufficient permissions",
+      }),
     );
     const { container } = renderWithProviders(
       <VeeamProtectionCard clusterId={CLUSTER} vmId={VM} />,

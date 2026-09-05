@@ -2,11 +2,9 @@ package db
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
 	"github.com/google/uuid"
 
 	gen "github.com/bigjakk/nexara/internal/db/generated"
@@ -49,9 +47,7 @@ func TestListScope_AlertRulesAndMigrationJobs(t *testing.T) {
 
 	ctx, pool, m := env.Ctx, env.Pool, env.Migrate
 
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
-	}
+	migrateUp(t, m)
 
 	// Deferred rather than t.Cleanup: t.Cleanup runs after the test function's
 	// defers, by which point env.Cleanup has closed the pool. Registering after

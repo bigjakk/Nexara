@@ -1,7 +1,7 @@
-import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
+import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
   "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2",
@@ -20,18 +20,29 @@ const badgeVariants = cva(
     defaultVariants: {
       variant: "default",
     },
-  }
-)
+  },
+);
+
+/**
+ * The variants `badgeVariants` actually defines, derived rather than restated:
+ * adding one to the cva above widens every consumer instead of leaving a
+ * hand-copied union behind to drift. `NonNullable` drops the `null` and
+ * `undefined` that VariantProps admits for "variant not set".
+ */
+export type BadgeVariant = NonNullable<
+  VariantProps<typeof badgeVariants>["variant"]
+>;
 
 export interface BadgeProps
-  extends React.HTMLAttributes<HTMLDivElement>,
+  extends
+    React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof badgeVariants> {}
 
 function Badge({ className, variant, ...props }: BadgeProps) {
   return (
     <div className={cn(badgeVariants({ variant }), className)} {...props} />
-  )
+  );
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export { Badge, badgeVariants }
+export { Badge, badgeVariants };

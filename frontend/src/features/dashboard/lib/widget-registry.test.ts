@@ -71,11 +71,17 @@ describe("widgetTemplates", () => {
 
 describe("parseWidgetId", () => {
   it("parses global widget ID", () => {
-    expect(parseWidgetId("stats-overview")).toEqual({ type: "stats-overview", clusterId: null });
+    expect(parseWidgetId("stats-overview")).toEqual({
+      type: "stats-overview",
+      clusterId: null,
+    });
   });
 
   it("parses per-cluster widget ID", () => {
-    expect(parseWidgetId("cpu-chart:abc123")).toEqual({ type: "cpu-chart", clusterId: "abc123" });
+    expect(parseWidgetId("cpu-chart:abc123")).toEqual({
+      type: "cpu-chart",
+      clusterId: "abc123",
+    });
   });
 
   it("handles widget ID with UUID cluster ID", () => {
@@ -115,18 +121,25 @@ describe("getTemplate", () => {
 });
 
 describe("getWidgetLabel", () => {
-  const names = new Map([["c1", "Prod"], ["c2", "Dev"]]);
+  const names = new Map([
+    ["c1", "Prod"],
+    ["c2", "Dev"],
+  ]);
 
   it("returns template label for global widget", () => {
     expect(getWidgetLabel("stats-overview", names)).toBe("Stats Overview");
   });
 
   it("returns cluster-prefixed label for per-cluster widget", () => {
-    expect(getWidgetLabel("cpu-chart:c1", names)).toBe("Prod — CPU Usage Chart");
+    expect(getWidgetLabel("cpu-chart:c1", names)).toBe(
+      "Prod — CPU Usage Chart",
+    );
   });
 
   it("falls back to 'Cluster' if cluster name not found", () => {
-    expect(getWidgetLabel("cpu-chart:unknown", names)).toBe("Cluster — CPU Usage Chart");
+    expect(getWidgetLabel("cpu-chart:unknown", names)).toBe(
+      "Cluster — CPU Usage Chart",
+    );
   });
 });
 

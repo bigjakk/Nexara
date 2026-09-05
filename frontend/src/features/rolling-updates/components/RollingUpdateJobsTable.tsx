@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -11,10 +11,7 @@ import {
 import type { RollingUpdateJob } from "@/types/api";
 import { Play, XCircle, Eye } from "lucide-react";
 
-const statusVariant: Record<
-  RollingUpdateJob["status"],
-  "default" | "secondary" | "destructive" | "outline"
-> = {
+const statusVariant: Record<RollingUpdateJob["status"], BadgeVariant> = {
   pending: "outline",
   running: "default",
   paused: "secondary",
@@ -84,7 +81,9 @@ export function RollingUpdateJobsTable({
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => { onSelect(job); }}
+                  onClick={() => {
+                    onSelect(job);
+                  }}
                 >
                   <Eye className="mr-1 h-3 w-3" />
                   View
@@ -93,7 +92,9 @@ export function RollingUpdateJobsTable({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => { onStart(job.id); }}
+                    onClick={() => {
+                      onStart(job.id);
+                    }}
                   >
                     <Play className="mr-1 h-3 w-3" />
                     Start
@@ -106,7 +107,9 @@ export function RollingUpdateJobsTable({
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => { onCancel(job.id); }}
+                      onClick={() => {
+                        onCancel(job.id);
+                      }}
                     >
                       <XCircle className="mr-1 h-3 w-3" />
                       Cancel

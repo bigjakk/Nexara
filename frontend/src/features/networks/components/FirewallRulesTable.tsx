@@ -92,9 +92,12 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
                   </TableCell>
                   <TableCell>
                     <Button
+                      aria-label={`Delete rule ${String(rule.pos)}`}
                       variant="ghost"
                       size="icon"
-                      onClick={() => { deleteRule.mutate(rule.pos); }}
+                      onClick={() => {
+                        deleteRule.mutate(rule.pos);
+                      }}
                       disabled={deleteRule.isPending}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />

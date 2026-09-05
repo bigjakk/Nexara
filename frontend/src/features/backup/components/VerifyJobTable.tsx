@@ -63,6 +63,7 @@ export function VerifyJobTable({ jobs, pbsId }: VerifyJobTableProps) {
               </TableCell>
               <TableCell>
                 <Button
+                  aria-label={`Run verify job ${job.job_id}`}
                   variant="ghost"
                   size="sm"
                   onClick={() => {

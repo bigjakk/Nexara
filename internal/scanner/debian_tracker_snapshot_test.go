@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/bigjakk/nexara/internal/netguard"
 )
 
 // minimalTrackerJSON is a stand-in for the Debian Security Tracker JSON
@@ -44,7 +46,7 @@ func TestCVEClientSnapshot_NetworkOnlyOncePerTTL(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewCVEClient(nil, newScannerHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewCVEClient(nil, netguard.NewHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	c.feedURL = srv.URL
 	c.cacheTTL = time.Hour // effectively infinite for this test
 
@@ -81,7 +83,7 @@ func TestCVEClientSnapshot_ConcurrentFetchesSerialiseToOneRequest(t *testing.T) 
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewCVEClient(nil, newScannerHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewCVEClient(nil, netguard.NewHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	c.feedURL = srv.URL
 	c.cacheTTL = time.Hour
 
@@ -127,7 +129,7 @@ func TestCVEClientSnapshot_StaleProcessCacheRefetches(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewCVEClient(nil, newScannerHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewCVEClient(nil, netguard.NewHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	c.feedURL = srv.URL
 	c.cacheTTL = 10 * time.Millisecond
 
@@ -172,7 +174,7 @@ func TestCVEClientSnapshot_NetworkFailReusesRecentMemory(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewCVEClient(nil, newScannerHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewCVEClient(nil, netguard.NewHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	c.feedURL = srv.URL
 	c.cacheTTL = time.Hour
 
@@ -215,7 +217,7 @@ func TestCVEClientSnapshot_NetworkFailRefusesStaleMemory(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewCVEClient(nil, newScannerHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewCVEClient(nil, netguard.NewHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	c.feedURL = srv.URL
 	c.cacheTTL = time.Hour
 
@@ -245,7 +247,7 @@ func TestCVEClientSnapshot_RedirectRejected(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewCVEClient(nil, newScannerHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewCVEClient(nil, netguard.NewHTTPClient(5*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	c.feedURL = srv.URL
 	c.cacheTTL = time.Hour
 
@@ -278,7 +280,7 @@ func TestCVEClientSnapshot_BodyTooLargeRejected(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewCVEClient(nil, newScannerHTTPClient(60*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewCVEClient(nil, netguard.NewHTTPClient(60*time.Second), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	c.feedURL = srv.URL
 	c.cacheTTL = time.Hour
 

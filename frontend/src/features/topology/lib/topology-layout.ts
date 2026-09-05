@@ -39,9 +39,7 @@ export function applyHierarchicalLayout(
   }
 
   // Find root nodes (clusters -- no parent)
-  const roots = nodes
-    .filter((n) => !parentOf.has(n.id))
-    .map((n) => n.id);
+  const roots = nodes.filter((n) => !parentOf.has(n.id)).map((n) => n.id);
 
   const positions = new Map<string, { x: number; y: number }>();
   const isHorizontal = options.direction === "LR";
@@ -71,11 +69,7 @@ export function applyHierarchicalLayout(
   }
 
   // Position nodes recursively
-  function positionNode(
-    nodeId: string,
-    x: number,
-    y: number,
-  ): void {
+  function positionNode(nodeId: string, x: number, y: number): void {
     const myWidth = subtreeWidth.get(nodeId) ?? 0;
     const nd = nodes.find((n) => n.id === nodeId);
     const nodeData = nd?.data as TopologyNodeData | undefined;

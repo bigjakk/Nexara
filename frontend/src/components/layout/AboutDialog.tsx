@@ -22,11 +22,20 @@ const REPO_URL = "https://github.com/bigjakk/Nexara";
 const STACK = [
   { label: "Go", note: "API + collector + scheduler" },
   { label: "React 19 + TypeScript 5", note: "Frontend SPA" },
-  { label: "PostgreSQL + TimescaleDB", note: "Persistence + time-series metrics" },
+  {
+    label: "PostgreSQL + TimescaleDB",
+    note: "Persistence + time-series metrics",
+  },
   { label: "Redis", note: "Cache + pub/sub" },
   { label: "Fiber, sqlc, gorilla/websocket", note: "Go libraries" },
-  { label: "Vite, TanStack Query, Shadcn/ui, Zustand", note: "Frontend libraries" },
-  { label: "React Flow, Recharts, xterm.js, noVNC", note: "Visualisation & consoles" },
+  {
+    label: "Vite, TanStack Query, Shadcn/ui, Zustand",
+    note: "Frontend libraries",
+  },
+  {
+    label: "React Flow, Recharts, xterm.js, noVNC",
+    note: "Visualisation & consoles",
+  },
 ];
 
 export function AboutDialog({ open, onOpenChange, version }: AboutDialogProps) {
@@ -134,7 +143,12 @@ export function AboutDialog({ open, onOpenChange, version }: AboutDialogProps) {
         </div>
 
         <DialogFooter>
-          <Button variant="secondary" onClick={() => { onOpenChange(false); }}>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              onOpenChange(false);
+            }}
+          >
             Close
           </Button>
         </DialogFooter>

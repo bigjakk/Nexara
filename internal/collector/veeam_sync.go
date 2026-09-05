@@ -23,7 +23,13 @@ import (
 
 // Timeouts for the two passes. The inventory pass fans out one restore-point
 // listing per changed backup object, so it gets the longer budget; the session
-// poll is a single watermarked listing and should never come close to its own.
+// poll is one watermarked listing plus, at most, veeamUnfinishedSessionLimit
+// single-session re-reads. Those only run while something is actually in
+// flight, so the steady state is well inside the budget; the pass that can
+// approach it is the first after an upgrade, when a backlog of frozen rows
+// fills the cap. Overrunning is safe rather than merely tolerable — the
+// deadline reaches the loop as ErrUnreachable, which abandons the batch, and
+// the remaining rows are picked up next pass.
 const (
 	veeamInventoryTimeout = 5 * time.Minute
 	veeamSessionsTimeout  = 90 * time.Second
@@ -43,6 +49,12 @@ const veeamSessionOverlap = 10 * time.Minute
 // bites on a first sync or after a long outage, where taking the newest 500
 // and letting the next tick continue is the right shape.
 const veeamSessionPageLimit = 500
+
+// veeamUnfinishedSessionLimit bounds how many stored in-flight runs one pass
+// re-reads by id. Fifty is far more than a real server has in flight at once,
+// so the cap only ever bites on a backlog left by a long outage — which then
+// converges over a handful of passes rather than in one burst of requests.
+const veeamUnfinishedSessionLimit = 50
 
 // veeamRestorePointWorkers bounds how many restore-point listings are in
 // flight at once.
@@ -114,6 +126,8 @@ type VeeamSyncQueries interface {
 	SetVeeamSessionsSyncedAt(ctx context.Context, id uuid.UUID) error
 	UpsertVeeamSession(ctx context.Context, arg db.UpsertVeeamSessionParams) error
 	PruneVeeamSessions(ctx context.Context, arg db.PruneVeeamSessionsParams) error
+	ListVeeamUnfinishedSessions(ctx context.Context, arg db.ListVeeamUnfinishedSessionsParams) ([]uuid.UUID, error)
+	DeleteVeeamSession(ctx context.Context, arg db.DeleteVeeamSessionParams) error
 }
 
 // VeeamClientFactory builds a client for one server. Swapped in tests.
@@ -128,6 +142,7 @@ type VeeamClient interface {
 	BackupObjects(ctx context.Context) ([]veeam.BackupObject, error)
 	RestorePointsForObject(ctx context.Context, objectID string) ([]veeam.RestorePoint, error)
 	Sessions(ctx context.Context, since time.Time, limit int) ([]veeam.Session, error)
+	Session(ctx context.Context, sessionID string) (*veeam.Session, error)
 	License(ctx context.Context) (*veeam.License, error)
 	Logout(ctx context.Context) error
 }
@@ -198,6 +213,56 @@ func NewVeeamSyncer(queries VeeamSyncQueries, encryptionKey string, cfg VeeamSyn
 	}
 }
 
+// InventoryTrigger is a coalescing request for an out-of-band inventory pass.
+//
+// It deliberately does NOT hang off VeeamSyncer. The syncer is built inside the
+// collector goroutine, while the API handler that fires the trigger is built
+// before that goroutine starts — handing the handler a syncer-owned channel
+// would mean writing the handler's field from the collector goroutine while
+// request goroutines read it. Creating the trigger up front and passing it to
+// both sides keeps the wiring race-free.
+type InventoryTrigger struct{ ch chan struct{} }
+
+// NewInventoryTrigger returns a trigger with a one-slot buffer.
+func NewInventoryTrigger() *InventoryTrigger {
+	return &InventoryTrigger{ch: make(chan struct{}, 1)}
+}
+
+// TriggerInventory asks for an inventory pass as soon as the loop is free.
+//
+// Registering a server is the case this exists for: without it a new server
+// shows nothing until the next tick, which is VeeamSyncInterval (5 minutes by
+// default) of empty tables. The immediate pass the inventory loop runs at
+// startup only covers servers that already existed, not one added while Nexara
+// is already running.
+//
+// Non-blocking, so N rapid registrations coalesce into at most one extra pass:
+// a dropped trigger means one is already queued, and that pass will pick up
+// every server anyway. A trigger raised while a pass is in flight is still
+// honoured — the loop is the serializer, and it reads the buffered nudge the
+// moment it returns to its select.
+//
+// Nil-safe: a nil trigger is the "no collector wired" case, not an error.
+func (t *InventoryTrigger) TriggerInventory() {
+	if t == nil {
+		return
+	}
+	select {
+	case t.ch <- struct{}{}:
+	default:
+	}
+}
+
+// C is the channel an inventory loop selects on alongside its ticker. A nil
+// trigger yields a nil channel, which blocks forever in a select — exactly the
+// "nobody can trigger this" behaviour, with no branch at the call site.
+func (t *InventoryTrigger) C() <-chan struct{} {
+	if t == nil {
+		return nil
+	}
+	return t.ch
+}
+
 // sweepGraceSeconds is the grace window in seconds: the floor, or three sync
 // intervals, whichever is larger. Three so a row survives two consecutive
 // missed passes before anything deletes it.
@@ -227,7 +292,9 @@ func (v *VeeamSyncer) SyncInventory(ctx context.Context) {
 }
 
 // SyncSessions runs one session poll over every enabled server. Cheap and
-// frequent: a single watermarked, type-filtered listing per server.
+// frequent: a watermarked, type-filtered listing per server, followed by a
+// targeted re-read of the unfinished runs that listing can no longer reach
+// (see reconcileUnfinishedSessions).
 func (v *VeeamSyncer) SyncSessions(ctx context.Context) {
 	if !v.sessionsInFlight.CompareAndSwap(false, true) {
 		return
@@ -995,6 +1062,9 @@ func (v *VeeamSyncer) syncServerSessions(ctx context.Context, server db.VeeamSer
 	}
 
 	platforms := map[string]struct{}{}
+	// What this poll already brought up to date, so the reconcile below does
+	// not spend a request re-reading a row that is current as of a moment ago.
+	refreshed := map[uuid.UUID]struct{}{}
 	// OLDEST first, deliberately: the API returns newest-first, and storing in
 	// that order means a failure partway through has already committed the
 	// NEWEST rows — which advances the watermark past the ones that failed, so
@@ -1026,33 +1096,14 @@ func (v *VeeamSyncer) syncServerSessions(ctx context.Context, server db.VeeamSer
 			platforms[s.PlatformID] = struct{}{}
 		}
 
-		if err := v.queries.UpsertVeeamSession(ctx, db.UpsertVeeamSessionParams{
-			VeeamServerID:   server.ID,
-			VeeamID:         sessionID,
-			JobVeeamID:      optionalUUID(s.JobID),
-			Name:            s.Name,
-			SessionType:     s.SessionType,
-			PlatformName:    s.PlatformName,
-			PlatformID:      optionalUUID(s.PlatformID),
-			State:           s.State,
-			Result:          s.Result.Result,
-			ResultMessage:   s.Result.Message,
-			IsCanceled:      s.Result.IsCanceled,
-			Algorithm:       s.Algorithm,
-			Bottleneck:      s.Progress.Bottleneck,
-			Duration:        s.Progress.Duration,
-			ProcessingRate:  s.Progress.ProcessingRate,
-			ProcessedSize:   s.Progress.ProcessedSize,
-			ReadSize:        s.Progress.ReadSize,
-			TransferredSize: s.Progress.TransferredSize,
-			ProgressPercent: int32(s.ProgressPercent), //nolint:gosec // a percentage
-			CreationTime:    s.CreationTime.Time,
-			EndTime:         optionalTimestamp(s.EndTime.Or()),
-			InitiatedBy:     s.InitiatedBy,
-		}); err != nil {
+		if err := v.queries.UpsertVeeamSession(ctx, veeamSessionParams(server.ID, sessionID, s)); err != nil {
 			return res, fmt.Errorf("upsert session %s: %w", s.Name, err)
 		}
+		refreshed[sessionID] = struct{}{}
 	}
+
+	// Catches up the in-flight runs the window above can no longer reach.
+	v.reconcileUnfinishedSessions(ctx, server, client, refreshed)
 
 	// Sessions are the only bridge from a job to its platform, so this runs
 	// immediately after they land rather than waiting for the slower pass.
@@ -1081,6 +1132,130 @@ func (v *VeeamSyncer) syncServerSessions(ctx context.Context, server db.VeeamSer
 		v.publishChange(ctx, "sessions_synced")
 	}
 	return res, nil
+}
+
+// veeamSessionParams maps one API session onto the upsert.
+//
+// Shared by the poll and the reconcile so the two can never write a session
+// differently — a reconcile that dropped a field would leave the row worse
+// than the poll left it, which is the opposite of the point.
+func veeamSessionParams(serverID, sessionID uuid.UUID, s veeam.Session) db.UpsertVeeamSessionParams {
+	return db.UpsertVeeamSessionParams{
+		VeeamServerID:   serverID,
+		VeeamID:         sessionID,
+		JobVeeamID:      optionalUUID(s.JobID),
+		Name:            s.Name,
+		SessionType:     s.SessionType,
+		PlatformName:    s.PlatformName,
+		PlatformID:      optionalUUID(s.PlatformID),
+		State:           s.State,
+		Result:          s.Result.Result,
+		ResultMessage:   s.Result.Message,
+		IsCanceled:      s.Result.IsCanceled,
+		Algorithm:       s.Algorithm,
+		Bottleneck:      s.Progress.Bottleneck,
+		Duration:        s.Progress.Duration,
+		ProcessingRate:  s.Progress.ProcessingRate,
+		ProcessedSize:   s.Progress.ProcessedSize,
+		ReadSize:        s.Progress.ReadSize,
+		TransferredSize: s.Progress.TransferredSize,
+		ProgressPercent: int32(s.ProgressPercent), //nolint:gosec // a percentage
+		CreationTime:    s.CreationTime.Time,
+		EndTime:         optionalTimestamp(s.EndTime.Or()),
+		InitiatedBy:     s.InitiatedBy,
+	}
+}
+
+// reconcileUnfinishedSessions re-reads the stored runs that have not reached a
+// terminal state, so their final state actually lands.
+//
+// The poll above is a createdAfterFilter window over CREATION time, but a
+// session's STATE keeps changing long after it is created — so the window can
+// never re-observe a row it has already scrolled past. A run still in flight
+// when a newer run pushes the watermark beyond it is frozen at whatever state
+// the last poll saw ("Working"), with end_time NULL, permanently: no later
+// poll asks for it again.
+//
+// That is not a cosmetic staleness. ListVeeamJobsByServer derives a job's live
+// run from exactly these rows, so one frozen session paints its job "Running"
+// for good — hours after Veeam itself has gone back to reporting the job as
+// Stopped, and with the Stop button offered in place of Run.
+//
+// Failures here are logged, never fatal: the poll itself succeeded, and losing
+// its watermark advance over one unreadable session would re-fetch the whole
+// window every pass for as long as that session stayed unreadable.
+func (v *VeeamSyncer) reconcileUnfinishedSessions(
+	ctx context.Context,
+	server db.VeeamServer,
+	client VeeamClient,
+	refreshed map[uuid.UUID]struct{},
+) {
+	unfinished, err := v.queries.ListVeeamUnfinishedSessions(ctx, db.ListVeeamUnfinishedSessionsParams{
+		VeeamServerID: server.ID,
+		Limit:         veeamUnfinishedSessionLimit,
+	})
+	if err != nil {
+		v.logger.Warn("veeam sync: listing unfinished sessions failed",
+			"veeam_server_id", server.ID, "error", err)
+		return
+	}
+
+	for _, sessionID := range unfinished {
+		if _, done := refreshed[sessionID]; done {
+			continue
+		}
+
+		s, err := client.Session(ctx, sessionID.String())
+		if err != nil {
+			// ErrSessionNotFound is VBR saying this run is gone. It can never
+			// reach a terminal state now, so keeping the row pins its job to
+			// "Running" forever — the mirror drops it instead.
+			//
+			// The sentinel, never a 404 read off an *APIError: a failed token
+			// grant surfaces the TOKEN endpoint's error verbatim, so a
+			// restarting VBR answering 404 there would otherwise look exactly
+			// like this and delete every row in the batch — including runs
+			// genuinely in flight, along with the nexara_stopped provenance
+			// that suppresses a false veeam_job_failed for them.
+			if errors.Is(err, veeam.ErrSessionNotFound) {
+				if err := v.queries.DeleteVeeamSession(ctx, db.DeleteVeeamSessionParams{
+					VeeamServerID: server.ID,
+					VeeamID:       sessionID,
+				}); err != nil {
+					v.logger.Warn("veeam sync: dropping a vanished session failed",
+						"veeam_server_id", server.ID, "session", sessionID, "error", err)
+				}
+				continue
+			}
+
+			v.logger.Warn("veeam sync: re-reading an unfinished session failed",
+				"veeam_server_id", server.ID, "session", sessionID, "error", err)
+
+			// A broken credential or an unreachable server is a fact about the
+			// CLIENT, not about this row, so every remaining id would fail the
+			// same way — abandon the batch rather than spend fifty doomed
+			// round-trips on it. Anything else is per-session (a 500 on one
+			// run) and must not block the rows behind it: with the newest
+			// first, one permanently-failing run would starve every older one.
+			if errors.Is(err, veeam.ErrAuthFailed) || errors.Is(err, veeam.ErrUnreachable) {
+				return
+			}
+			continue
+		}
+
+		// creation_time is NOT NULL, feeds the watermark, and would be pruned
+		// on this very pass if it were zero — the same guard the poll applies.
+		if s.CreationTime.IsZero() {
+			v.logger.Warn("veeam sync: re-read session has no parseable creation time",
+				"veeam_server_id", server.ID, "session", sessionID)
+			continue
+		}
+
+		if err := v.queries.UpsertVeeamSession(ctx, veeamSessionParams(server.ID, sessionID, *s)); err != nil {
+			v.logger.Warn("veeam sync: storing a re-read session failed",
+				"veeam_server_id", server.ID, "session", sessionID, "error", err)
+		}
+	}
 }
 
 // sessionWatermark returns the createdAfterFilter for the next poll.

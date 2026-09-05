@@ -21,10 +21,7 @@ import {
   useDeleteSSHKnownHost,
 } from "../api/rolling-update-queries";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
-import type {
-  SSHHostKeyPending,
-  SSHHostKeyMismatch,
-} from "@/types/api";
+import type { SSHHostKeyPending, SSHHostKeyMismatch } from "@/types/api";
 import { BulkPinDialog } from "./BulkPinDialog";
 
 interface SSHCredentialsFormProps {
@@ -245,6 +242,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
               Edit
             </Button>
             <Button
+              aria-label="Delete SSH credentials"
               variant="ghost"
               size="sm"
               onClick={handleDelete}
@@ -357,9 +355,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
             <div className="flex items-start gap-2 text-amber-700 dark:text-amber-400">
               <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
-                <p className="font-medium">
-                  Host key not yet trusted.
-                </p>
+                <p className="font-medium">Host key not yet trusted.</p>
                 <p className="mt-1 opacity-90">
                   Compare this fingerprint to the value reported by the node
                   itself (run{" "}
@@ -386,10 +382,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
                 variant="default"
                 disabled={pinKey.isPending}
                 onClick={() => {
-                  handlePin(
-                    testState.nodeName,
-                    testState.info.fingerprint,
-                  );
+                  handlePin(testState.nodeName, testState.info.fingerprint);
                 }}
               >
                 {pinKey.isPending && (

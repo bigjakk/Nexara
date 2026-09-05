@@ -25,14 +25,16 @@ export function PoolDeleteDialog({
   const deletePool = useDeleteCephPool();
 
   function handleDelete() {
-    deletePool.mutate(
-      { clusterId, poolName },
-      { onSettled: onClose },
-    );
+    deletePool.mutate({ clusterId, poolName }, { onSettled: onClose });
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v: boolean) => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v: boolean) => {
+        if (!v) onClose();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Delete Pool &quot;{poolName}&quot;?</DialogTitle>

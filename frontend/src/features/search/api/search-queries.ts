@@ -17,7 +17,10 @@ export interface SearchResult {
 export function useGlobalSearch(query: string) {
   return useQuery({
     queryKey: ["search", query],
-    queryFn: () => apiClient.list<SearchResult>(`/api/v1/search?q=${encodeURIComponent(query)}`),
+    queryFn: () =>
+      apiClient.list<SearchResult>(
+        `/api/v1/search?q=${encodeURIComponent(query)}`,
+      ),
     enabled: query.length >= 2,
     staleTime: 10_000,
   });

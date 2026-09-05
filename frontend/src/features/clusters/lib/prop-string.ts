@@ -41,7 +41,10 @@ export function serializePropString(obj: PropString): string {
 
 /** True if two property-string values represent the same key-value set,
  *  regardless of ordering or whitespace. */
-export function propStringsEqual(a: string | undefined | null, b: string | undefined | null): boolean {
+export function propStringsEqual(
+  a: string | undefined | null,
+  b: string | undefined | null,
+): boolean {
   const pa = parsePropString(a);
   const pb = parsePropString(b);
   const ka = Object.keys(pa).sort();

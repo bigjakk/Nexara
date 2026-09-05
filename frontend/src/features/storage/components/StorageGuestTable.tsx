@@ -96,7 +96,8 @@ export function StorageGuestTable({
         existing.totalBytes += item.size;
         continue;
       }
-      const meta = kind === "ct" ? byVmidCT.get(item.vmid) : byVmidVm.get(item.vmid);
+      const meta =
+        kind === "ct" ? byVmidCT.get(item.vmid) : byVmidVm.get(item.vmid);
       groups.set(key, {
         vmid: item.vmid,
         guestId: meta?.id ?? "",
@@ -117,7 +118,8 @@ export function StorageGuestTable({
   }, [items, vmsQuery.data, ctsQuery.data, nodesQuery.data]);
 
   const allSelected = rows.length > 0 && selectedVmids.size === rows.length;
-  const someSelected = selectedVmids.size > 0 && selectedVmids.size < rows.length;
+  const someSelected =
+    selectedVmids.size > 0 && selectedVmids.size < rows.length;
 
   function toggleAll() {
     if (allSelected) setSelectedVmids(new Set());
@@ -177,13 +179,16 @@ export function StorageGuestTable({
       {selectedVmids.size > 0 && (
         <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm">
           <span>
-            {selectedVmids.size} {selectedVmids.size === 1 ? "guest" : "guests"} selected
+            {selectedVmids.size} {selectedVmids.size === 1 ? "guest" : "guests"}{" "}
+            selected
           </span>
           <div className="flex items-center gap-2">
             <Button
               size="sm"
               variant="outline"
-              onClick={() => { setSelectedVmids(new Set()); }}
+              onClick={() => {
+                setSelectedVmids(new Set());
+              }}
             >
               Clear
             </Button>
@@ -205,7 +210,9 @@ export function StorageGuestTable({
           <TableRow>
             <TableHead className="w-10">
               <Checkbox
-                checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                checked={
+                  allSelected ? true : someSelected ? "indeterminate" : false
+                }
                 onCheckedChange={toggleAll}
                 aria-label="Select all guests"
               />
@@ -228,13 +235,17 @@ export function StorageGuestTable({
             <ContextMenu key={`${row.guestKind}:${String(row.vmid)}`}>
               <ContextMenuTrigger asChild>
                 <TableRow
-                  data-state={selectedVmids.has(row.vmid) ? "selected" : undefined}
+                  data-state={
+                    selectedVmids.has(row.vmid) ? "selected" : undefined
+                  }
                   className="cursor-default"
                 >
                   <TableCell>
                     <Checkbox
                       checked={selectedVmids.has(row.vmid)}
-                      onCheckedChange={() => { toggleRow(row.vmid); }}
+                      onCheckedChange={() => {
+                        toggleRow(row.vmid);
+                      }}
                       aria-label={`Select ${row.name}`}
                     />
                   </TableCell>
@@ -266,7 +277,9 @@ export function StorageGuestTable({
                       {row.guestKind === "ct" ? "CT" : "VM"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-xs">{row.nodeName || "—"}</TableCell>
+                  <TableCell className="text-xs">
+                    {row.nodeName || "—"}
+                  </TableCell>
                   <TableCell className="text-right text-xs">
                     {row.cpuCount > 0 ? row.cpuCount : "—"}
                   </TableCell>
@@ -294,7 +307,9 @@ export function StorageGuestTable({
                             : "No compatible target storage available"
                         }
                         disabled={!canMigrate || !row.guestId}
-                        onClick={() => { migrateRow(row); }}
+                        onClick={() => {
+                          migrateRow(row);
+                        }}
                       >
                         <ArrowRightLeft className="h-4 w-4" />
                       </Button>
@@ -304,11 +319,16 @@ export function StorageGuestTable({
               </ContextMenuTrigger>
               <ContextMenuContent>
                 <ContextMenuItem
-                  onSelect={() => { migrateRow(row); }}
+                  onSelect={() => {
+                    migrateRow(row);
+                  }}
                   disabled={!canMigrate || !row.guestId}
                 >
                   <ArrowRightLeft className="mr-2 h-4 w-4" />
-                  Migrate {row.volumes.length === 1 ? "disk" : `${String(row.volumes.length)} disks`}
+                  Migrate{" "}
+                  {row.volumes.length === 1
+                    ? "disk"
+                    : `${String(row.volumes.length)} disks`}
                 </ContextMenuItem>
               </ContextMenuContent>
             </ContextMenu>

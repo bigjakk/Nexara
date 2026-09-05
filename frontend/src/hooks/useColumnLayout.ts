@@ -1,0 +1,416 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import type { SortAccessors } from "@/hooks/useTableSort";
+import {
+  clampWidth,
+  clearColumnLayout,
+  loadColumnLayout,
+  moveColumn,
+  reconcileOrder,
+  saveColumnLayout,
+} from "@/lib/column-layout";
+
+/**
+ * One column, declared once: its heading, its default width, how its cell
+ * renders, and (when sortable) what it sorts on.
+ *
+ * The single declaration is the point. Reordering columns means the header row
+ * and the body row must both be generated from the same ordered list — a
+ * hand-written sequence of `<td>`s cannot follow a drag, and a header list that
+ * moves while the cells do not puts every value under the wrong heading.
+ *
+ * `Ctx` carries whatever a cell needs that is not on the row itself —
+ * permission flags, mutation handlers, a translator. It exists so the column
+ * array can stay a module-scope constant (which useTableSort requires of the
+ * accessors derived from it) while its cells still close over component state.
+ */
+export interface ColumnDef<Row, K extends string, Ctx = void> {
+  key: K;
+  label: string;
+  /** Default width in px, used until the user drags this column. */
+  width: number;
+  /** Right-aligned, for numeric columns. Applied to header and cell alike. */
+  align?: "right";
+  /**
+   * Let this cell wrap instead of truncating to one line.
+   *
+   * Fixed widths mean a cell clips by default, which is right for a name or a
+   * timestamp and wrong for the only copy of an error message: `truncate` sets
+   * `white-space: nowrap`, so a wrapped `<p>` becomes one clipped line and
+   * `break-words` stops doing anything. Set this on any column whose content
+   * is diagnostic rather than a label.
+   */
+  wrap?: boolean;
+  /**
+   * Drop this column entirely below the `md` breakpoint.
+   *
+   * This is the only way to hide a column, and deliberately so — there is no
+   * free-form class hook on ColumnDef to hide one with. `totalWidth` is summed
+   * over the columns the layout is holding and set as the table's own width,
+   * so a column hidden with `hidden md:table-cell` would still be in that sum:
+   * the table stays exactly as wide as if it were shown, and the narrow
+   * viewport scrolls sideways anyway. Dropping the column from the layout
+   * takes its width out of the sum with it.
+   */
+  hideBelowMd?: boolean;
+  /**
+   * What this column sorts on, for CLIENT-side sorting via useTableSort.
+   * Omit to make the column unsortable — an actions column, say.
+   */
+  sortValue?: (row: Row) => string | number | null;
+  /**
+   * Force the sort control on or off, independent of `sortValue`.
+   *
+   * Needed because a column can be sortable without the client knowing how:
+   * the Tasks tables order server-side, so they have a sort control and an
+   * arrow but no local accessor. Without this they would render as unsortable
+   * and the header click would do nothing.
+   */
+  sortable?: boolean;
+  /** Excluded from drag-to-reorder — a trailing actions column that should
+   *  stay put. Still resizable. */
+  fixed?: boolean;
+  cell: (row: Row, ctx: Ctx) => ReactNode;
+}
+
+/** Where a reorder drag would drop the column if it were released now. */
+export interface DropTarget<K extends string> {
+  key: K;
+  side: "before" | "after";
+}
+
+export interface ColumnLayout<Row, K extends string, Ctx> {
+  /** The table's columns in the user's order. Render header AND cells from
+   *  this, in this order. */
+  columns: ColumnDef<Row, K, Ctx>[];
+  widths: Record<K, number>;
+  /**
+   * Sum of the column widths, to be set as the table's own width alongside
+   * `table-fixed`. DataTableFrame does both; see it for why the two have to
+   * travel together.
+   */
+  totalWidth: number;
+  /** Begin a resize drag from a pointerdown on a column's grip. */
+  startResize: (key: K, event: React.PointerEvent) => void;
+  /** Begin a reorder drag from a pointerdown on a column's heading. Calls
+   *  `onClick` instead if the pointer never passed the drag threshold, which
+   *  is how a plain click still sorts. */
+  startReorder: (
+    key: K,
+    event: React.PointerEvent,
+    onClick: () => void,
+  ) => void;
+  /** The column a reorder drag is currently over, and which edge — for the
+   *  drop indicator. Null when no drag is in flight. */
+  dropTarget: DropTarget<K> | null;
+  /** The column being dragged, for dimming it. */
+  draggingKey: K | null;
+  resizingKey: K | null;
+  /** True once the user has moved or resized anything, so a Reset control can
+   *  hide itself until it has something to undo. */
+  isCustomized: boolean;
+  reset: () => void;
+}
+
+/**
+ * Each column's width: the stored one where the user has dragged it, the
+ * declared one otherwise. Written once so the initial state and the Reset
+ * control cannot disagree about what a default width is.
+ */
+function widthsFrom<Row, K extends string, Ctx>(
+  columns: readonly ColumnDef<Row, K, Ctx>[],
+  stored?: Partial<Record<string, number>>,
+): Record<K, number> {
+  const widths = {} as Record<K, number>;
+  for (const col of columns) {
+    const saved = stored?.[col.key];
+    widths[col.key] = typeof saved === "number" ? clampWidth(saved) : col.width;
+  }
+  return widths;
+}
+
+/** How far the pointer must travel before a press on a heading becomes a drag
+ *  rather than a click. Small enough not to feel sticky, large enough that a
+ *  shaky click still sorts. */
+const DRAG_THRESHOLD_PX = 5;
+
+/**
+ * Per-table column order and widths, persisted to localStorage under
+ * `tableId`, with pointer-driven resize and reorder.
+ *
+ * `tableId` must be unique and stable across releases — it is the storage key,
+ * so renaming it silently discards every user's saved layout.
+ *
+ * `columns` must be a stable reference (a module-scope constant). It is the
+ * declaration; this hook only reorders and resizes it.
+ */
+export function useColumnLayout<Row, K extends string, Ctx = void>(
+  tableId: string,
+  columns: readonly ColumnDef<Row, K, Ctx>[],
+): ColumnLayout<Row, K, Ctx> {
+  // The same subscription the app shell switches layouts on, so a table and
+  // the chrome around it can never disagree about which viewport this is.
+  const atLeastMd = !useIsMobile();
+  // The columns this viewport shows at all. Everything below works from this,
+  // so a hidden column contributes neither an order slot nor a width.
+  const visibleColumns = useMemo(
+    () => (atLeastMd ? columns : columns.filter((c) => !c.hideBelowMd)),
+    [atLeastMd, columns],
+  );
+  const declaredKeys = useMemo(
+    () => visibleColumns.map((c) => c.key),
+    [visibleColumns],
+  );
+
+  // Read storage once, on mount. Re-reading on every render would fight the
+  // user's in-progress drag.
+  const [stored] = useState(() => loadColumnLayout(tableId));
+
+  const [order, setOrder] = useState<K[]>(() =>
+    reconcileOrder(declaredKeys, stored.order),
+  );
+
+  // Crossing the breakpoint changes which columns exist, so the order has to
+  // be reconciled again — otherwise a column hidden on a phone stays missing
+  // after a rotate back to desktop.
+  const declaredKey = declaredKeys.join(",");
+  useEffect(() => {
+    setOrder((prev) => {
+      const next = reconcileOrder(declaredKeys, prev);
+      return next.length === prev.length && next.every((k, i) => k === prev[i])
+        ? prev
+        : next;
+    });
+    // declaredKey is the stable identity of declaredKeys; depending on the
+    // array itself would re-run on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [declaredKey]);
+  const [widths, setWidths] = useState<Record<K, number>>(() =>
+    widthsFrom(columns, stored.widths),
+  );
+
+  const [dropTarget, setDropTarget] = useState<DropTarget<K> | null>(null);
+  const [draggingKey, setDraggingKey] = useState<K | null>(null);
+  const [resizingKey, setResizingKey] = useState<K | null>(null);
+
+  const persist = useCallback(
+    (nextOrder: K[], nextWidths: Record<K, number>) => {
+      saveColumnLayout(tableId, {
+        order: nextOrder,
+        widths: nextWidths,
+      });
+    },
+    [tableId],
+  );
+
+  const startResize = useCallback(
+    (key: K, event: React.PointerEvent) => {
+      // The grip sits inside the heading's press target; without this the same
+      // gesture would start a reorder as well.
+      event.preventDefault();
+      event.stopPropagation();
+
+      const startX = event.clientX;
+      const startWidth = widths[key];
+      const el = event.currentTarget as HTMLElement;
+      // The DOM types say this always exists; jsdom does not implement it, and
+      // a component test that clicks a heading would throw before reaching its
+      // assertion. The optional call is deliberate.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      el.setPointerCapture?.(event.pointerId);
+      setResizingKey(key);
+
+      // Not state, and not a ref either: a resize fires dozens of moves a
+      // second and each render would be wasted, and the two handlers below are
+      // closures over this one gesture — nothing outside it ever reads this.
+      let liveWidth = startWidth;
+
+      const onMove = (moveEvent: PointerEvent) => {
+        liveWidth = clampWidth(startWidth + (moveEvent.clientX - startX));
+        setWidths((prev) => ({ ...prev, [key]: liveWidth }));
+      };
+      const onUp = () => {
+        el.removeEventListener("pointermove", onMove);
+        el.removeEventListener("pointerup", onUp);
+        el.removeEventListener("pointercancel", onUp);
+        setResizingKey(null);
+        setWidths((prev) => {
+          const next = { ...prev, [key]: liveWidth };
+          persist(order, next);
+          return next;
+        });
+      };
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
+    },
+    [order, persist, widths],
+  );
+
+  const startReorder = useCallback(
+    (key: K, event: React.PointerEvent, onClick: () => void) => {
+      const column = columns.find((c) => c.key === key);
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const el = event.currentTarget as HTMLElement;
+      // The row of headings, resolved once — the drag needs every sibling's
+      // box to work out which one the pointer is over.
+      const headerRow = el.closest("tr");
+      let dragging = false;
+      // Travel in ANY direction disqualifies the gesture from being a click,
+      // while only horizontal travel starts a reorder. Without the first half,
+      // pressing a heading and dragging straight down would sort on release —
+      // pointer capture routes that pointerup back here even though the
+      // pointer left the header entirely.
+      let movedFar = false;
+      // See the note in startResize: jsdom lacks setPointerCapture.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      el.setPointerCapture?.(event.pointerId);
+      // See startResize: a per-gesture local, not a ref.
+      let liveDrop: DropTarget<K> | null = null;
+
+      const onMove = (moveEvent: PointerEvent) => {
+        if (!dragging) {
+          if (
+            Math.hypot(
+              moveEvent.clientX - startX,
+              moveEvent.clientY - startY,
+            ) >= DRAG_THRESHOLD_PX
+          ) {
+            movedFar = true;
+          }
+          if (Math.abs(moveEvent.clientX - startX) < DRAG_THRESHOLD_PX) return;
+          // A fixed column can be a drop target but is never itself dragged.
+          if (column?.fixed) return;
+          dragging = true;
+          setDraggingKey(key);
+        }
+        if (!headerRow) return;
+        let found: DropTarget<K> | null = null;
+        for (const cell of headerRow.children) {
+          const cellKey = (cell as HTMLElement).dataset["columnKey"] as
+            | K
+            | undefined;
+          if (!cellKey || cellKey === key) continue;
+          // A pinned column is not a drop target either. Allowing one would
+          // let a data column be dropped "after" the actions column, leaving
+          // actions stranded mid-table — the exact thing `fixed` promises
+          // cannot happen.
+          if (columns.find((c) => c.key === cellKey)?.fixed) continue;
+          const box = cell.getBoundingClientRect();
+          if (moveEvent.clientX >= box.left && moveEvent.clientX <= box.right) {
+            found = {
+              key: cellKey,
+              side:
+                moveEvent.clientX < box.left + box.width / 2
+                  ? "before"
+                  : "after",
+            };
+            break;
+          }
+        }
+        liveDrop = found;
+        setDropTarget(found);
+      };
+
+      // Every way this gesture can end runs the same teardown.
+      const finish = () => {
+        el.removeEventListener("pointermove", onMove);
+        el.removeEventListener("pointerup", onUp);
+        el.removeEventListener("pointercancel", onCancel);
+        setDropTarget(null);
+        setDraggingKey(null);
+      };
+
+      const onUp = () => {
+        const drop = liveDrop;
+        finish();
+        if (!dragging) {
+          // Only a press that stayed put counts as a click.
+          if (!movedFar) onClick();
+          return;
+        }
+        if (!drop) return;
+        setOrder((prev) => {
+          const next = moveColumn(prev, key, drop.key, drop.side);
+          persist(next, widths);
+          return next;
+        });
+      };
+
+      // A cancel is NOT a click. The browser fires pointercancel when it takes
+      // the pointer over for something else — most often a touch that started
+      // on a heading and turned into a vertical scroll. The threshold only
+      // measures horizontal travel, so such a gesture never sets `dragging`,
+      // and routing cancel through onUp would sort the table out from under
+      // someone who was only trying to scroll it.
+      const onCancel = finish;
+
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onCancel);
+    },
+    [columns, persist, widths],
+  );
+
+  const reset = useCallback(() => {
+    clearColumnLayout(tableId);
+    setOrder([...declaredKeys]);
+    setWidths(widthsFrom(columns));
+  }, [columns, declaredKeys, tableId]);
+
+  const orderedColumns = useMemo(() => {
+    const byKey = new Map(visibleColumns.map((c) => [c.key, c]));
+    return order
+      .map((k) => byKey.get(k))
+      .filter((c): c is ColumnDef<Row, K, Ctx> => c !== undefined);
+  }, [visibleColumns, order]);
+
+  const totalWidth = useMemo(
+    () => orderedColumns.reduce((sum, c) => sum + widths[c.key], 0),
+    [orderedColumns, widths],
+  );
+
+  const isCustomized = useMemo(() => {
+    if (order.length !== declaredKeys.length) return true;
+    if (order.some((k, i) => k !== declaredKeys[i])) return true;
+    return columns.some((c) => widths[c.key] !== c.width);
+  }, [columns, declaredKeys, order, widths]);
+
+  return {
+    columns: orderedColumns,
+    widths,
+    totalWidth,
+    startResize,
+    startReorder,
+    dropTarget,
+    draggingKey,
+    resizingKey,
+    isCustomized,
+    reset,
+  };
+}
+
+/**
+ * Derive useTableSort's accessors from the column declarations, so a column's
+ * heading, width, cell and sort key are written once rather than kept in step
+ * across two structures.
+ *
+ * You almost certainly want useDataTable instead — it calls this for you, and
+ * memoises the result, which useTableSort requires. Call it directly only for
+ * a table whose accessors are hand-written rather than derived.
+ *
+ * Columns with no `sortValue` get an accessor that returns null; it is never
+ * reached, because DataTableHead only offers a sort control for columns that
+ * declare one.
+ */
+export function sortAccessorsFrom<Row, K extends string, Ctx>(
+  columns: readonly ColumnDef<Row, K, Ctx>[],
+): SortAccessors<Row, K> {
+  const accessors = {} as SortAccessors<Row, K>;
+  for (const col of columns) {
+    accessors[col.key] = col.sortValue ?? (() => null);
+  }
+  return accessors;
+}

@@ -17,6 +17,7 @@ import { useDRSConfig, useUpdateDRSConfig } from "../api/drs-queries";
 import type { DRSMode, DRSConfigRequest } from "../types/drs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Settings, AlertTriangle } from "lucide-react";
+import { WarningCallout } from "@/components/WarningCallout";
 
 interface DRSConfigCardProps {
   clusterId: string;
@@ -78,7 +79,9 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
     updateConfig.mutate(request, {
       onSuccess: () => {
         setSaveStatus("saved");
-        setTimeout(() => { setSaveStatus("idle"); }, 3000);
+        setTimeout(() => {
+          setSaveStatus("idle");
+        }, 3000);
       },
       onError: () => {
         setSaveStatus("error");
@@ -98,38 +101,51 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       </CardHeader>
       <CardContent className="space-y-6">
         {nativeRebalance && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <div className="space-y-1 text-xs text-amber-700 dark:text-amber-300">
-              <p className="font-medium">Proxmox native Dynamic Load Balancer is active</p>
-              <p>
-                This cluster&apos;s Proxmox CRS is auto-rebalancing HA-managed guests. Nexara DRS{" "}
-                <strong>Automatic</strong> mode is disabled to avoid conflicting migrations &mdash;{" "}
-                <strong>Advisory</strong> still works as a read-only second opinion. Manage the native
-                balancer under{" "}
-                <Link to={`/clusters/${clusterId}?tab=options`} className="underline">
-                  Datacenter &rarr; Options &rarr; CRS
-                </Link>
-                .
-              </p>
-            </div>
-          </div>
+          <WarningCallout title="Proxmox native Dynamic Load Balancer is active">
+            <p>
+              This cluster&apos;s Proxmox CRS is auto-rebalancing HA-managed
+              guests. Nexara DRS <strong>Automatic</strong> mode is disabled to
+              avoid conflicting migrations &mdash; <strong>Advisory</strong>{" "}
+              still works as a read-only second opinion. Manage the native
+              balancer under{" "}
+              <Link
+                to={`/clusters/${clusterId}?tab=options`}
+                className="underline"
+              >
+                Datacenter &rarr; Options &rarr; CRS
+              </Link>
+              .
+            </p>
+          </WarningCallout>
         )}
         <div className="space-y-2">
           <Label>Mode</Label>
-          <Select value={mode} onValueChange={(v) => { setMode(v as DRSMode); }}>
+          <Select
+            value={mode}
+            onValueChange={(v) => {
+              setMode(v as DRSMode);
+            }}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="disabled">Disabled &mdash; do nothing</SelectItem>
-              <SelectItem value="advisory">Advisory &mdash; recommend only</SelectItem>
-              <SelectItem value="automatic" disabled={nativeRebalance}>Automatic &mdash; migrate VMs</SelectItem>
+              <SelectItem value="disabled">
+                Disabled &mdash; do nothing
+              </SelectItem>
+              <SelectItem value="advisory">
+                Advisory &mdash; recommend only
+              </SelectItem>
+              <SelectItem value="automatic" disabled={nativeRebalance}>
+                Automatic &mdash; migrate VMs
+              </SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            Disabled turns DRS off. Advisory logs recommendations without acting. Automatic will live-migrate VMs.
-            {nativeRebalance && " Automatic is unavailable while Proxmox native CRS rebalancing is on."}
+            Disabled turns DRS off. Advisory logs recommendations without
+            acting. Automatic will live-migrate VMs.
+            {nativeRebalance &&
+              " Automatic is unavailable while Proxmox native CRS rebalancing is on."}
           </p>
         </div>
 
@@ -138,8 +154,8 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             <Label>Resource Weights</Label>
             <p className="text-xs text-muted-foreground">
               How much each resource type influences balance scoring. Higher
-              memory weight means DRS prioritizes evening out memory usage.
-              Must sum to 1.0.
+              memory weight means DRS prioritizes evening out memory usage. Must
+              sum to 1.0.
             </p>
           </div>
           <div className="space-y-3">
@@ -179,7 +195,8 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             </div>
             {Math.abs(weightSum - 1.0) > 0.01 && (
               <p className="text-sm text-destructive">
-                Weights must sum to 1.0 (current: {(weightSum * 100).toFixed(0)}%)
+                Weights must sum to 1.0 (current: {(weightSum * 100).toFixed(0)}
+                %)
               </p>
             )}
           </div>
@@ -204,10 +221,10 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           <p className="text-xs text-muted-foreground">
             {threshold <= 0.15
               ? "Aggressive — triggers on small load differences between nodes."
-              : threshold <= 0.30
+              : threshold <= 0.3
                 ? "Balanced — triggers when node loads diverge moderately."
-                : "Conservative — only triggers on large load imbalances."}
-            {" "}Lower values cause more frequent migrations.
+                : "Conservative — only triggers on large load imbalances."}{" "}
+            Lower values cause more frequent migrations.
           </p>
         </div>
 
@@ -219,9 +236,13 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
               type="number"
               min={60}
               value={evalInterval}
-              onChange={(e) => { setEvalInterval(Number(e.target.value)); }}
+              onChange={(e) => {
+                setEvalInterval(Number(e.target.value));
+              }}
             />
-            <span className="text-sm text-muted-foreground whitespace-nowrap">seconds</span>
+            <span className="text-sm text-muted-foreground whitespace-nowrap">
+              seconds
+            </span>
           </div>
           <p className="text-xs text-muted-foreground">
             How often DRS checks cluster balance.
@@ -236,17 +257,25 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             <Checkbox
               id="include-containers"
               checked={includeContainers}
-              onCheckedChange={(v) => { setIncludeContainers(v === true); }}
+              onCheckedChange={(v) => {
+                setIncludeContainers(v === true);
+              }}
             />
-            <Label htmlFor="include-containers">Include containers in balancing</Label>
+            <Label htmlFor="include-containers">
+              Include containers in balancing
+            </Label>
           </div>
           <div className="flex items-center gap-2">
             <Checkbox
               id="exclude-veeam-workers"
               checked={excludeVeeamWorkers}
-              onCheckedChange={(v) => { setExcludeVeeamWorkers(v === true); }}
+              onCheckedChange={(v) => {
+                setExcludeVeeamWorkers(v === true);
+              }}
             />
-            <Label htmlFor="exclude-veeam-workers">Never migrate Veeam&apos;s own guests</Label>
+            <Label htmlFor="exclude-veeam-workers">
+              Never migrate Veeam&apos;s own guests
+            </Label>
           </div>
           {!excludeVeeamWorkers && (
             <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
@@ -263,9 +292,10 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
               <p className="text-xs text-amber-600 dark:text-amber-400">
-                Container migration requires downtime. Unlike VMs which support live migration,
-                containers must be stopped, moved, and restarted. Only enable this if container
-                downtime during rebalancing is acceptable.
+                Container migration requires downtime. Unlike VMs which support
+                live migration, containers must be stopped, moved, and
+                restarted. Only enable this if container downtime during
+                rebalancing is acceptable.
               </p>
             </div>
           )}

@@ -13,7 +13,6 @@ import { usePBSDatastoreMetrics } from "../api/backup-queries";
 import type { PBSDatastoreMetric } from "../types/backup";
 import { formatBytes } from "@/lib/format";
 
-
 const TIMEFRAMES = ["1h", "6h", "24h", "7d"] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
 
@@ -48,9 +47,7 @@ export function DatastoreChart({ pbsId }: DatastoreChartProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium">
-          Datastore Usage
-        </CardTitle>
+        <CardTitle className="text-sm font-medium">Datastore Usage</CardTitle>
         <div className="flex gap-1">
           {TIMEFRAMES.map((tf) => (
             <button

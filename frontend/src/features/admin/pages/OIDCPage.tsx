@@ -38,9 +38,18 @@ import {
 import { useRoles } from "../api/rbac-queries";
 import type { OIDCConfig, OIDCConfigRequest } from "@/types/api";
 
-type ProviderPreset = "keycloak" | "authentik" | "azure" | "google" | "okta" | "custom";
+type ProviderPreset =
+  | "keycloak"
+  | "authentik"
+  | "azure"
+  | "google"
+  | "okta"
+  | "custom";
 
-const presets: Record<ProviderPreset, { label: string; hint: string; defaults: Partial<OIDCConfigRequest> }> = {
+const presets: Record<
+  ProviderPreset,
+  { label: string; hint: string; defaults: Partial<OIDCConfigRequest> }
+> = {
   keycloak: {
     label: "Keycloak",
     hint: "Issuer: https://<host>/realms/<realm>",
@@ -144,9 +153,8 @@ export function OIDCPage() {
   // Confirm gate for a plain-http callback: the authorization code rides back
   // on that URL, so off loopback it crosses the network in the clear. The
   // backend refuses the first attempt rather than saving.
-  const [redirectWarning, setRedirectWarning] = useState<ConfirmRequired | null>(
-    null,
-  );
+  const [redirectWarning, setRedirectWarning] =
+    useState<ConfirmRequired | null>(null);
   // This page had no error display for create/update at all, so a refusal was
   // simply a Save button that did nothing.
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -156,7 +164,8 @@ export function OIDCPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<OIDCConfigRequest>(emptyForm);
   const [isNew, setIsNew] = useState(false);
-  const [providerPreset, setProviderPreset] = useState<ProviderPreset>("custom");
+  const [providerPreset, setProviderPreset] =
+    useState<ProviderPreset>("custom");
   const [testResult, setTestResult] = useState<{
     success: boolean;
     message: string;
@@ -291,14 +300,20 @@ export function OIDCPage() {
     }
 
     const onError = (err: unknown) => {
-      const confirm = confirmRequiredFromError(err, [INSECURE_OIDC_REDIRECT], target);
+      const confirm = confirmRequiredFromError(
+        err,
+        [INSECURE_OIDC_REDIRECT],
+        target,
+      );
       if (confirm != null) {
         setRedirectWarning(confirm);
         return;
       }
       setRedirectWarning(null);
       setSaveError(
-        err instanceof Error ? err.message : "Failed to save OIDC configuration",
+        err instanceof Error
+          ? err.message
+          : "Failed to save OIDC configuration",
       );
     };
 
@@ -362,7 +377,8 @@ export function OIDCPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">OIDC / SSO</h1>
             <p className="text-muted-foreground">
-              Configure OpenID Connect single sign-on with your identity provider
+              Configure OpenID Connect single sign-on with your identity
+              provider
             </p>
           </div>
           {!showForm && (
@@ -396,11 +412,14 @@ export function OIDCPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => { startEdit(cfg); }}
+                    onClick={() => {
+                      startEdit(cfg);
+                    }}
                   >
                     Edit
                   </Button>
                   <Button
+                    aria-label={`Delete ${cfg.name}`}
                     variant="ghost"
                     size="icon"
                     className="text-destructive"
@@ -439,7 +458,11 @@ export function OIDCPage() {
             <div>
               <Label className="mb-2 block">Provider Preset</Label>
               <div className="flex flex-wrap gap-2">
-                {(Object.entries(presets) as Array<[ProviderPreset, typeof presets[ProviderPreset]]>).map(([key, preset]) => (
+                {(
+                  Object.entries(presets) as Array<
+                    [ProviderPreset, (typeof presets)[ProviderPreset]]
+                  >
+                ).map(([key, preset]) => (
                   <Button
                     key={key}
                     variant={providerPreset === key ? "default" : "outline"}
@@ -469,14 +492,18 @@ export function OIDCPage() {
                 <Label>Name</Label>
                 <Input
                   value={form.name}
-                  onChange={(e) => { setForm({ ...form, name: e.target.value }); }}
+                  onChange={(e) => {
+                    setForm({ ...form, name: e.target.value });
+                  }}
                   placeholder="Default"
                 />
               </div>
               <div className="flex items-center gap-3 pt-6">
                 <Switch
                   checked={form.enabled}
-                  onCheckedChange={(enabled) => { setForm({ ...form, enabled }); }}
+                  onCheckedChange={(enabled) => {
+                    setForm({ ...form, enabled });
+                  }}
                 />
                 <Label>Enabled</Label>
               </div>
@@ -490,7 +517,9 @@ export function OIDCPage() {
                   <Label>Issuer URL</Label>
                   <Input
                     value={form.issuer_url}
-                    onChange={(e) => { setForm({ ...form, issuer_url: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, issuer_url: e.target.value });
+                    }}
                     placeholder="https://auth.example.com/realms/main"
                   />
                   {addressChanged && (
@@ -505,7 +534,9 @@ export function OIDCPage() {
                   <Label>Client ID</Label>
                   <Input
                     value={form.client_id}
-                    onChange={(e) => { setForm({ ...form, client_id: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, client_id: e.target.value });
+                    }}
                     placeholder="nexara"
                   />
                 </div>
@@ -523,7 +554,9 @@ export function OIDCPage() {
                   <Input
                     type="password"
                     value={form.client_secret}
-                    onChange={(e) => { setForm({ ...form, client_secret: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, client_secret: e.target.value });
+                    }}
                     placeholder={
                       addressChanged
                         ? "Re-enter the client secret for the new issuer"
@@ -538,8 +571,12 @@ export function OIDCPage() {
                   <Label>Redirect URI</Label>
                   <Input
                     value={form.redirect_uri}
-                    onChange={(e) => { setForm({ ...form, redirect_uri: e.target.value }); }}
-                    placeholder={window.location.origin + "/api/v1/auth/oidc/callback"}
+                    onChange={(e) => {
+                      setForm({ ...form, redirect_uri: e.target.value });
+                    }}
+                    placeholder={
+                      window.location.origin + "/api/v1/auth/oidc/callback"
+                    }
                   />
                   <p className="text-xs text-muted-foreground">
                     Register this URL in your IdP as the redirect/callback URI
@@ -556,7 +593,9 @@ export function OIDCPage() {
                   <Label>Email Claim</Label>
                   <Input
                     value={form.email_claim}
-                    onChange={(e) => { setForm({ ...form, email_claim: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, email_claim: e.target.value });
+                    }}
                     placeholder="email"
                   />
                 </div>
@@ -564,7 +603,9 @@ export function OIDCPage() {
                   <Label>Display Name Claim</Label>
                   <Input
                     value={form.display_name_claim}
-                    onChange={(e) => { setForm({ ...form, display_name_claim: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, display_name_claim: e.target.value });
+                    }}
                     placeholder="name"
                   />
                 </div>
@@ -572,7 +613,9 @@ export function OIDCPage() {
                   <Label>Groups Claim</Label>
                   <Input
                     value={form.groups_claim}
-                    onChange={(e) => { setForm({ ...form, groups_claim: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, groups_claim: e.target.value });
+                    }}
                     placeholder="groups"
                   />
                 </div>
@@ -584,7 +627,9 @@ export function OIDCPage() {
               <Label>Scopes (comma-separated)</Label>
               <Input
                 value={scopesText}
-                onChange={(e) => { setScopesText(e.target.value); }}
+                onChange={(e) => {
+                  setScopesText(e.target.value);
+                }}
                 placeholder="openid, email, profile"
               />
             </div>
@@ -594,7 +639,9 @@ export function OIDCPage() {
               <div className="flex items-center gap-3">
                 <Switch
                   checked={form.auto_provision}
-                  onCheckedChange={(auto_provision) => { setForm({ ...form, auto_provision }); }}
+                  onCheckedChange={(auto_provision) => {
+                    setForm({ ...form, auto_provision });
+                  }}
                 />
                 <div>
                   <Label>Auto-Provision Users</Label>
@@ -604,10 +651,14 @@ export function OIDCPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Allowed Email Domains (comma-separated, empty = all)</Label>
+                <Label>
+                  Allowed Email Domains (comma-separated, empty = all)
+                </Label>
                 <Input
                   value={domainsText}
-                  onChange={(e) => { setDomainsText(e.target.value); }}
+                  onChange={(e) => {
+                    setDomainsText(e.target.value);
+                  }}
                   placeholder="example.com, corp.example.com"
                 />
               </div>
@@ -630,7 +681,8 @@ export function OIDCPage() {
               </div>
               {mappingRows.length === 0 && (
                 <p className="text-sm text-muted-foreground">
-                  No mappings configured. SSO users will be assigned the default role.
+                  No mappings configured. SSO users will be assigned the default
+                  role.
                 </p>
               )}
               <div className="space-y-2">
@@ -666,6 +718,7 @@ export function OIDCPage() {
                       </SelectContent>
                     </Select>
                     <Button
+                      aria-label={`Remove group mapping ${row.group || String(idx + 1)}`}
                       variant="ghost"
                       size="icon"
                       className="text-destructive"
@@ -737,20 +790,21 @@ export function OIDCPage() {
               </div>
             )}
 
-            {redirectWarning != null && redirectWarning.target === saveTarget && (
-              <ConfirmRequiredWarning
-                title="Callback is not encrypted"
-                message={`${redirectWarning.message} This is fine for a self-hosted lab with no TLS — confirm to continue, or go back and use an https callback.`}
-                confirmLabel="Save with a cleartext callback"
-                onConfirm={() => {
-                  save(true);
-                }}
-                onCancel={() => {
-                  setRedirectWarning(null);
-                }}
-                pending={createConfig.isPending || updateConfig.isPending}
-              />
-            )}
+            {redirectWarning != null &&
+              redirectWarning.target === saveTarget && (
+                <ConfirmRequiredWarning
+                  title="Callback is not encrypted"
+                  message={`${redirectWarning.message} This is fine for a self-hosted lab with no TLS — confirm to continue, or go back and use an https callback.`}
+                  confirmLabel="Save with a cleartext callback"
+                  onConfirm={() => {
+                    save(true);
+                  }}
+                  onCancel={() => {
+                    setRedirectWarning(null);
+                  }}
+                  pending={createConfig.isPending || updateConfig.isPending}
+                />
+              )}
 
             {saveError != null && (
               <p className="text-sm text-destructive">{saveError}</p>
@@ -758,7 +812,10 @@ export function OIDCPage() {
 
             {/* Actions */}
             <div className="flex gap-2">
-              <Button onClick={handleSave} disabled={createConfig.isPending || updateConfig.isPending}>
+              <Button
+                onClick={handleSave}
+                disabled={createConfig.isPending || updateConfig.isPending}
+              >
                 {(createConfig.isPending || updateConfig.isPending) && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}

@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { useVeeamSessionLogs } from "../api/backup-queries";
 import type { VeeamSession } from "../types/backup";
 
@@ -9,9 +9,7 @@ interface VeeamSessionLogProps {
   enabled: boolean;
 }
 
-function statusVariant(
-  status: string,
-): "default" | "secondary" | "destructive" | "outline" {
+function statusVariant(status: string): BadgeVariant {
   switch (status) {
     case "Succeeded":
       return "default";

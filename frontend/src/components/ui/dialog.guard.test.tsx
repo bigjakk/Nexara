@@ -122,7 +122,8 @@ describe("DialogContent call sites", () => {
     const offenders = callSites()
       .filter(({ tag }) => /overflow-/.test(tag) && !/max-h-/.test(tag))
       .map(
-        ({ path, line, tag }) => `${path}:${String(line)} → ${tag.replace(/\s+/g, " ")}`,
+        ({ path, line, tag }) =>
+          `${path}:${String(line)} → ${tag.replace(/\s+/g, " ")}`,
       );
 
     expect(offenders).toEqual([]);
