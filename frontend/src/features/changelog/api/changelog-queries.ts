@@ -7,6 +7,5 @@ export function useChangelog() {
     queryKey: ["changelog"],
     queryFn: () => apiClient.list<ChangelogEntry>("/api/v1/changelog"),
     staleTime: 1000 * 60 * 60, // 1 hour — backend caches for the same TTL
-    retry: 1,
   });
 }
