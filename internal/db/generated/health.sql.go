@@ -11,6 +11,73 @@ import (
 	"github.com/google/uuid"
 )
 
+const listClusterPinnedFingerprints = `-- name: ListClusterPinnedFingerprints :many
+SELECT
+    c.id            AS cluster_id,
+    c.api_url,
+    c.tls_fingerprint,
+    n.name          AS node_name,
+    n.address       AS node_address,
+    n.ssl_fingerprint
+FROM clusters c
+JOIN nodes n ON n.cluster_id = c.id
+WHERE c.is_active
+  AND c.tls_fingerprint <> ''
+  AND n.address <> ''
+  AND n.ssl_fingerprint <> ''
+`
+
+type ListClusterPinnedFingerprintsRow struct {
+	ClusterID      uuid.UUID `json:"cluster_id"`
+	ApiUrl         string    `json:"api_url"`
+	TlsFingerprint string    `json:"tls_fingerprint"`
+	NodeName       string    `json:"node_name"`
+	NodeAddress    string    `json:"node_address"`
+	SslFingerprint string    `json:"ssl_fingerprint"`
+}
+
+// Feeds the "TLS certificate changed" health issue.
+//
+// Pairs each active cluster's pinned fingerprint (clusters.tls_fingerprint,
+// set once when the cluster was registered) with the per-node fingerprints the
+// collector refreshes on every sync (nodes.ssl_fingerprint). When a Proxmox
+// upgrade regenerates a node certificate the two diverge, and every live
+// Proxmox call for that cluster starts failing the TLS handshake while
+// inventory keeps flowing — the collector fails over to another member, so
+// nothing else looks wrong.
+//
+// Matching api_url to a node address is deliberately left to Go
+// (proxmox.APIURLHost): a cluster reached through a VIP, a load balancer or a
+// DNS name that is not literally a member address then matches no row and
+// stays silent, rather than reporting a mismatch against a certificate the
+// endpoint never presents.
+func (q *Queries) ListClusterPinnedFingerprints(ctx context.Context) ([]ListClusterPinnedFingerprintsRow, error) {
+	rows, err := q.db.Query(ctx, listClusterPinnedFingerprints)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListClusterPinnedFingerprintsRow{}
+	for rows.Next() {
+		var i ListClusterPinnedFingerprintsRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.ApiUrl,
+			&i.TlsFingerprint,
+			&i.NodeName,
+			&i.NodeAddress,
+			&i.SslFingerprint,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFailedDisks = `-- name: ListFailedDisks :many
 SELECT d.cluster_id, n.name AS node_name, d.dev_path, d.model, d.health
 FROM node_disks d

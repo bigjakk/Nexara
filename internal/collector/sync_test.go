@@ -33,6 +33,7 @@ type mockQueries struct {
 	clusters       []db.Cluster
 	nodesByCluster []db.Node // returned by ListNodesByCluster (failover candidates)
 
+	auditLogs                     []db.InsertAuditLogParams
 	upsertNodeCalls               []db.UpsertNodeParams
 	upsertVMCalls                 []db.UpsertVMParams
 	upsertStorageCalls            []db.UpsertStoragePoolParams
@@ -335,7 +336,8 @@ func (m *mockQueries) DeleteStalePBSVerifyJobs(_ context.Context, _ db.DeleteSta
 	return nil
 }
 
-func (m *mockQueries) InsertAuditLog(_ context.Context, _ db.InsertAuditLogParams) error {
+func (m *mockQueries) InsertAuditLog(_ context.Context, arg db.InsertAuditLogParams) error {
+	m.auditLogs = append(m.auditLogs, arg)
 	return nil
 }
 

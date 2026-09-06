@@ -841,6 +841,22 @@ type Querier interface {
 	ListCVEScanVulnsKEV(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
 	ListCVEScans(ctx context.Context, arg ListCVEScansParams) ([]CveScan, error)
 	ListCleanupPendingJobsForCluster(ctx context.Context, clusterID uuid.UUID) ([]RollingUpdateJob, error)
+	// Feeds the "TLS certificate changed" health issue.
+	//
+	// Pairs each active cluster's pinned fingerprint (clusters.tls_fingerprint,
+	// set once when the cluster was registered) with the per-node fingerprints the
+	// collector refreshes on every sync (nodes.ssl_fingerprint). When a Proxmox
+	// upgrade regenerates a node certificate the two diverge, and every live
+	// Proxmox call for that cluster starts failing the TLS handshake while
+	// inventory keeps flowing — the collector fails over to another member, so
+	// nothing else looks wrong.
+	//
+	// Matching api_url to a node address is deliberately left to Go
+	// (proxmox.APIURLHost): a cluster reached through a VIP, a load balancer or a
+	// DNS name that is not literally a member address then matches no row and
+	// stays silent, rather than reporting a mismatch against a certificate the
+	// endpoint never presents.
+	ListClusterPinnedFingerprints(ctx context.Context) ([]ListClusterPinnedFingerprintsRow, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	// ListClustersWithVeeamPlatform returns the clusters an operator has mapped a
 	// Veeam platform to. The per-guest config fetch that fills guest_smbios runs
@@ -932,6 +948,9 @@ type Querier interface {
 	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
 	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
 	ListNodeDisksByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeDisk, error)
+	// status is included so callers can prefer a member that is actually up when
+	// the configured api_url node is not: the rolling orchestrator and the client
+	// cache both fail over to another member rather than losing the whole cluster.
 	ListNodeEndpoints(ctx context.Context, clusterID uuid.UUID) ([]ListNodeEndpointsRow, error)
 	// Health-aggregator queries: each returns ONLY problem rows across all clusters,
 	// so the clusters list can attach a generic issues[] without per-cluster calls.
@@ -1379,6 +1398,15 @@ type Querier interface {
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)
 	UpdateClusterPVEVersion(ctx context.Context, arg UpdateClusterPVEVersionParams) error
 	UpdateClusterQuorate(ctx context.Context, arg UpdateClusterQuorateParams) error
+	// Narrow on purpose. Re-pinning a rotated certificate is the one field the
+	// verify-certificate flow may change, and going through the full UpdateCluster
+	// would make it possible to clobber an api_url or credential that someone else
+	// edited between the operator seeing the banner and clicking accept.
+	// api_url is part of the predicate, not just the row identity: the caller
+	// dialled a specific address to obtain this fingerprint, so if someone
+	// re-pointed the cluster in between, pinning would attach the old endpoint's
+	// certificate to the new address. Zero rows means "it moved, start over".
+	UpdateClusterTLSFingerprint(ctx context.Context, arg UpdateClusterTLSFingerprintParams) (int64, error)
 	UpdateDRSHistoryStatus(ctx context.Context, arg UpdateDRSHistoryStatusParams) error
 	UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) error
 	UpdateFirewallTemplate(ctx context.Context, arg UpdateFirewallTemplateParams) (FirewallTemplate, error)

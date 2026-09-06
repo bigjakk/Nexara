@@ -30,8 +30,18 @@ type fakeQueries struct {
 	mu           sync.Mutex
 	clusters     map[uuid.UUID]db.Cluster
 	pbsServers   map[uuid.UUID]db.PbsServer
+	endpoints    map[uuid.UUID][]db.ListNodeEndpointsRow
 	clusterCalls int32
 	pbsCalls     int32
+}
+
+// Empty by default, which is the "no evidence" case: SelectClusterEndpoint
+// then leaves the configured api_url alone, so every existing cache test keeps
+// exercising exactly the endpoint it always did.
+func (q *fakeQueries) ListNodeEndpoints(_ context.Context, clusterID uuid.UUID) ([]db.ListNodeEndpointsRow, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.endpoints[clusterID], nil
 }
 
 func (q *fakeQueries) GetCluster(_ context.Context, id uuid.UUID) (db.Cluster, error) {
@@ -513,4 +523,67 @@ func TestPVESignatureChangesWithCredentials(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestClientCache_FailsOverToHealthyMember — the API layer used to have no
+// failover at all, so a cluster whose api_url node was rebooting (or serving a
+// rotated certificate) lost every live Proxmox call while the collector kept
+// working through another member. The cache is where that asymmetry is closed,
+// so this pins that a client really is built against the substitute.
+func TestClientCache_FailsOverToHealthyMember(t *testing.T) {
+	newCache := func(t *testing.T, cluster db.Cluster, eps []db.ListNodeEndpointsRow) (*ClientCache, *fakeQueries) {
+		t.Helper()
+		q := newFakeQueries()
+		q.setCluster(cluster)
+		q.endpoints = map[uuid.UUID][]db.ListNodeEndpointsRow{cluster.ID: eps}
+		cache := NewClientCache(q, testCacheEncryptionKey, nil, quietLogger())
+		t.Cleanup(cache.Close)
+		return cache, q
+	}
+
+	t.Run("offline primary yields a client aimed at a live member", func(t *testing.T) {
+		cluster := makeTestCluster(t, "https://10.0.0.1:8006/")
+		cluster.TlsFingerprint = "AA:BB"
+		cache, q := newCache(t, cluster, []db.ListNodeEndpointsRow{
+			{Name: "pve1", Address: "10.0.0.1", SslFingerprint: "AA:BB", Status: "offline"},
+			{Name: "pve2", Address: "10.0.0.2", SslFingerprint: "CC:DD", Status: "online"},
+		})
+
+		client, err := cache.Get(context.Background(), cluster.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got := client.baseURL; got != "https://10.0.0.2:8006" {
+			t.Errorf("baseURL = %q, want the live member", got)
+		}
+
+		// The address alone is not enough. Members present distinct
+		// certificates, so a client that took the substitute's URL while
+		// keeping the cluster's pin would fail every handshake in production
+		// and still pass an assertion on baseURL. The pin lives inside a
+		// VerifyPeerCertificate closure, so check the selection that fed it.
+		chosen := clusterEndpoint(context.Background(), q, cluster)
+		if chosen.TLSFingerprint != "CC:DD" {
+			t.Errorf("TLSFingerprint = %q, want the member's own CC:DD", chosen.TLSFingerprint)
+		}
+	})
+
+	t.Run("healthy primary is still used verbatim", func(t *testing.T) {
+		// The failure mode that would matter most: silently redirecting a
+		// perfectly good cluster somewhere the operator never configured.
+		cluster := makeTestCluster(t, "https://10.0.0.1:8006/")
+		cluster.TlsFingerprint = "AA:BB"
+		cache, _ := newCache(t, cluster, []db.ListNodeEndpointsRow{
+			{Name: "pve1", Address: "10.0.0.1", SslFingerprint: "AA:BB", Status: "online"},
+			{Name: "pve2", Address: "10.0.0.2", SslFingerprint: "CC:DD", Status: "online"},
+		})
+
+		client, err := cache.Get(context.Background(), cluster.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got := client.baseURL; got != "https://10.0.0.1:8006" {
+			t.Errorf("baseURL = %q, want the configured endpoint", got)
+		}
+	})
 }

@@ -351,3 +351,32 @@ func (q *Queries) UpdateClusterQuorate(ctx context.Context, arg UpdateClusterQuo
 	_, err := q.db.Exec(ctx, updateClusterQuorate, arg.ID, arg.Quorate)
 	return err
 }
+
+const updateClusterTLSFingerprint = `-- name: UpdateClusterTLSFingerprint :execrows
+UPDATE clusters
+SET tls_fingerprint = $2,
+    updated_at = now()
+WHERE id = $1 AND api_url = $3
+`
+
+type UpdateClusterTLSFingerprintParams struct {
+	ID             uuid.UUID `json:"id"`
+	TlsFingerprint string    `json:"tls_fingerprint"`
+	ApiUrl         string    `json:"api_url"`
+}
+
+// Narrow on purpose. Re-pinning a rotated certificate is the one field the
+// verify-certificate flow may change, and going through the full UpdateCluster
+// would make it possible to clobber an api_url or credential that someone else
+// edited between the operator seeing the banner and clicking accept.
+// api_url is part of the predicate, not just the row identity: the caller
+// dialled a specific address to obtain this fingerprint, so if someone
+// re-pointed the cluster in between, pinning would attach the old endpoint's
+// certificate to the new address. Zero rows means "it moved, start over".
+func (q *Queries) UpdateClusterTLSFingerprint(ctx context.Context, arg UpdateClusterTLSFingerprintParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateClusterTLSFingerprint, arg.ID, arg.TlsFingerprint, arg.ApiUrl)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

@@ -70,6 +70,9 @@ type invalidateMessage struct {
 type CacheQueries interface {
 	GetCluster(ctx context.Context, id uuid.UUID) (db.Cluster, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (db.PbsServer, error)
+	// ListNodeEndpoints backs endpoint failover: it is what lets a client
+	// avoid an api_url node that is offline or serving a rotated certificate.
+	ListNodeEndpoints(ctx context.Context, clusterID uuid.UUID) ([]db.ListNodeEndpointsRow, error)
 }
 
 // NewClientForCluster builds a client from a cluster's stored credentials:
@@ -84,22 +87,42 @@ func NewClientForCluster(ctx context.Context, q CacheQueries, encryptionKey stri
 	if err != nil {
 		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
 	}
-	return newClientForClusterRow(cluster, encryptionKey, timeout)
+	return newClientForClusterRow(cluster, clusterEndpoint(ctx, q, cluster), encryptionKey, timeout)
+}
+
+// clusterEndpoint picks the member this client should talk to. A failed or
+// empty endpoint list yields the configured api_url, so losing this lookup
+// degrades to exactly the previous behaviour rather than breaking the client.
+func clusterEndpoint(ctx context.Context, q CacheQueries, cluster db.Cluster) ClusterEndpoint {
+	rows, err := q.ListNodeEndpoints(ctx, cluster.ID)
+	if err != nil {
+		return ClusterEndpoint{BaseURL: cluster.ApiUrl, TLSFingerprint: cluster.TlsFingerprint}
+	}
+	endpoints := make([]NodeEndpoint, 0, len(rows))
+	for _, r := range rows {
+		endpoints = append(endpoints, NodeEndpoint{
+			Name:           r.Name,
+			Address:        r.Address,
+			SSLFingerprint: r.SslFingerprint,
+			Status:         r.Status,
+		})
+	}
+	return SelectClusterEndpoint(cluster.ApiUrl, cluster.TlsFingerprint, endpoints)
 }
 
 // newClientForClusterRow is NewClientForCluster's second half, split out so
 // ClientCache.Get can reuse it while keeping the db.Cluster row it needs for
 // the credential signature.
-func newClientForClusterRow(cluster db.Cluster, encryptionKey string, timeout time.Duration) (*Client, error) {
+func newClientForClusterRow(cluster db.Cluster, endpoint ClusterEndpoint, encryptionKey string, timeout time.Duration) (*Client, error) {
 	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt cluster %s credentials: %w", cluster.ID, err)
 	}
 	client, err := NewClient(ClientConfig{
-		BaseURL:        cluster.ApiUrl,
+		BaseURL:        endpoint.BaseURL,
 		TokenID:        cluster.TokenID,
 		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
+		TLSFingerprint: endpoint.TLSFingerprint,
 		Timeout:        timeout,
 	})
 	if err != nil {
@@ -247,14 +270,28 @@ func (c *ClientCache) Get(ctx context.Context, clusterID uuid.UUID) (*Client, er
 		if err != nil {
 			return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
 		}
-		client, err := newClientForClusterRow(cluster, c.encKey, CachedClientTimeout)
+		endpoint := clusterEndpoint(ctx, c.queries, cluster)
+		client, err := newClientForClusterRow(cluster, endpoint, c.encKey, CachedClientTimeout)
 		if err != nil {
 			return nil, err
 		}
+		if endpoint.ViaNode != "" && c.logger != nil {
+			c.logger.Warn("proxmox: configured endpoint unusable, client built against failover member",
+				"cluster_id", cluster.ID,
+				"primary_url", cluster.ApiUrl,
+				"failover_node", endpoint.ViaNode,
+			)
+		}
 
 		newEntry := &pveEntry{
-			client:    client,
-			signature: pveSignature(cluster),
+			client: client,
+			// The chosen endpoint joins the signature so it stays a faithful
+			// description of what this client was built from. Note nothing
+			// currently compares signatures — a substitute endpoint is undone
+			// by cacheTTL (10 minutes) or by the explicit invalidation a
+			// cluster update publishes, which is what makes re-pinning a
+			// rotated certificate take effect immediately.
+			signature: pveSignature(cluster) + "|" + endpoint.BaseURL + "|" + endpoint.TLSFingerprint,
 			builtAt:   time.Now(),
 		}
 		c.mu.Lock()

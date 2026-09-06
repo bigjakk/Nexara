@@ -58,7 +58,10 @@ GROUP BY cluster_id;
 SELECT address FROM nodes WHERE cluster_id = $1 AND name = $2;
 
 -- name: ListNodeEndpoints :many
-SELECT name, address, ssl_fingerprint FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name;
+-- status is included so callers can prefer a member that is actually up when
+-- the configured api_url node is not: the rolling orchestrator and the client
+-- cache both fail over to another member rather than losing the whole cluster.
+SELECT name, address, ssl_fingerprint, status FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name;
 
 -- UpdateNodeStatusFast flips just the status column, and only when it actually
 -- differs — the fast resource-sync loop calls this per node every few seconds

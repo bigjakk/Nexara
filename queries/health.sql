@@ -67,3 +67,33 @@ WHERE lock_state = 'io-error';
 SELECT cluster_id, guest, node, target, fail_count, error
 FROM replication_jobs
 WHERE fail_count > 0;
+
+-- name: ListClusterPinnedFingerprints :many
+-- Feeds the "TLS certificate changed" health issue.
+--
+-- Pairs each active cluster's pinned fingerprint (clusters.tls_fingerprint,
+-- set once when the cluster was registered) with the per-node fingerprints the
+-- collector refreshes on every sync (nodes.ssl_fingerprint). When a Proxmox
+-- upgrade regenerates a node certificate the two diverge, and every live
+-- Proxmox call for that cluster starts failing the TLS handshake while
+-- inventory keeps flowing — the collector fails over to another member, so
+-- nothing else looks wrong.
+--
+-- Matching api_url to a node address is deliberately left to Go
+-- (proxmox.APIURLHost): a cluster reached through a VIP, a load balancer or a
+-- DNS name that is not literally a member address then matches no row and
+-- stays silent, rather than reporting a mismatch against a certificate the
+-- endpoint never presents.
+SELECT
+    c.id            AS cluster_id,
+    c.api_url,
+    c.tls_fingerprint,
+    n.name          AS node_name,
+    n.address       AS node_address,
+    n.ssl_fingerprint
+FROM clusters c
+JOIN nodes n ON n.cluster_id = c.id
+WHERE c.is_active
+  AND c.tls_fingerprint <> ''
+  AND n.address <> ''
+  AND n.ssl_fingerprint <> '';

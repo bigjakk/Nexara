@@ -155,15 +155,19 @@ func (q *Queries) GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClus
 }
 
 const listNodeEndpoints = `-- name: ListNodeEndpoints :many
-SELECT name, address, ssl_fingerprint FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name
+SELECT name, address, ssl_fingerprint, status FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name
 `
 
 type ListNodeEndpointsRow struct {
 	Name           string `json:"name"`
 	Address        string `json:"address"`
 	SslFingerprint string `json:"ssl_fingerprint"`
+	Status         string `json:"status"`
 }
 
+// status is included so callers can prefer a member that is actually up when
+// the configured api_url node is not: the rolling orchestrator and the client
+// cache both fail over to another member rather than losing the whole cluster.
 func (q *Queries) ListNodeEndpoints(ctx context.Context, clusterID uuid.UUID) ([]ListNodeEndpointsRow, error) {
 	rows, err := q.db.Query(ctx, listNodeEndpoints, clusterID)
 	if err != nil {
@@ -173,7 +177,12 @@ func (q *Queries) ListNodeEndpoints(ctx context.Context, clusterID uuid.UUID) ([
 	items := []ListNodeEndpointsRow{}
 	for rows.Next() {
 		var i ListNodeEndpointsRow
-		if err := rows.Scan(&i.Name, &i.Address, &i.SslFingerprint); err != nil {
+		if err := rows.Scan(
+			&i.Name,
+			&i.Address,
+			&i.SslFingerprint,
+			&i.Status,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

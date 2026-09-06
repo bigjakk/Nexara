@@ -23,6 +23,10 @@ vi.mock("../api/cluster-queries", () => ({
   useCluster: (...args: unknown[]) => mockUseCluster(...args) as unknown,
   useClusterNodes: (...args: unknown[]) =>
     mockUseClusterNodes(...args) as unknown,
+  // Consumed by ClusterCertificateBanner, which the page renders above the
+  // tabs. Inert here — the banner returns null unless the cluster carries the
+  // certificate issue, which these fixtures do not.
+  useVerifyClusterCertificate: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 // Mock tab components to avoid pulling in their dependencies

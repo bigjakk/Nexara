@@ -71,6 +71,9 @@ func (s *Server) setupRoutes() {
 		clusters.Get("/", s.clusterHandler.List)
 		clusters.Get("/:id", s.clusterHandler.Get)
 		clusters.Put("/:id", s.clusterHandler.Update)
+		// Rate-limited alongside fetch-fingerprint: it opens the same kind of
+		// outbound TLS connection, just to an address already on file.
+		clusters.Post("/:id/verify-certificate", s.fingerprintFetchLimiter(), s.clusterHandler.VerifyCertificate)
 		clusters.Delete("/:id", s.clusterHandler.Delete)
 
 		// Nested resources by cluster.

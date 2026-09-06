@@ -31,6 +31,42 @@ type healthIssueResponse struct {
 	Detail   string `json:"detail"`   // human-readable reason
 }
 
+// endpointFingerprintStale reports whether a (cluster, node) pair shows the
+// cluster's pinned certificate going stale: the cluster's api_url addresses
+// this node's pveproxy directly, and the certificate that node now serves
+// differs from what is pinned.
+//
+// Both guards exist to avoid crying wolf, which matters more here than
+// catching every case — an alarm the operator cannot clear is worse than none.
+// nodes.ssl_fingerprint only ever describes what pveproxy serves, so it is
+// evidence about the configured endpoint in exactly one situation: the URL
+// names a member and talks to port 8006.
+//   - A VIP, load balancer or DNS name matches no member address.
+//   - A reverse proxy terminating TLS on the node's own address (https://node/
+//     or :443 in front of :8006) does match the address, and would otherwise
+//     have the operator's proxy certificate compared against pveproxy's —
+//     firing permanently, and unfixable, since re-pinning the fingerprint this
+//     reports would pin a certificate that endpoint never presents.
+//
+// The comparison itself is proxmox.EndpointCertificateChanged, shared with the
+// client cache's endpoint selection so the banner and the code that actually
+// routes around a bad endpoint can never disagree about what "changed" means.
+// It normalises both sides, matching the TLS verifier; in practice both
+// columns hold Proxmox's uppercase colon-separated form, so that is defence
+// against a hand-entered pin rather than a routine difference.
+func endpointFingerprintStale(apiURL, pinned, nodeAddress, nodeFingerprint string) bool {
+	if nodeAddress == "" || nodeFingerprint == "" || pinned == "" {
+		return false
+	}
+	if !proxmox.APIURLIsDirectToPVEProxy(apiURL) {
+		return false
+	}
+	if !strings.EqualFold(nodeAddress, proxmox.APIURLHost(apiURL)) {
+		return false
+	}
+	return proxmox.EndpointCertificateChanged(pinned, nodeFingerprint)
+}
+
 // buildAllClusterIssues runs the health-aggregator queries once and returns the
 // problems grouped by cluster id. Each query failure is skipped so one broken
 // signal never blanks the whole indicator.
@@ -46,6 +82,47 @@ func buildAllClusterIssues(ctx context.Context, q *db.Queries) map[uuid.UUID][]h
 			for _, it := range cephIssues(r.HealthStatus, r.HealthChecks) {
 				add(r.ClusterID, it)
 			}
+		}
+	}
+
+	// TLS — the certificate the configured endpoint presents no longer matches
+	// the fingerprint pinned for the cluster.
+	//
+	// This is worth its own signal because nothing else reports it. Every live
+	// Proxmox call for the cluster fails the handshake, but the collector
+	// fails over to another member (failoverCluster) and keeps inventory and
+	// metrics flowing, so the cluster looks healthy everywhere else while the
+	// UI's live tabs return 502. The collector's own tls_fingerprint_mismatch
+	// audit entry only fires when the whole sync fails, which failover
+	// prevents.
+	//
+	// Compared against the per-node fingerprint the collector re-reads each
+	// sync, so this reflects the certificate actually being served — not a
+	// second stale copy.
+	//
+	// A cluster whose node addresses were never learned reports nothing, which
+	// covers the single-node install. That is the case this signal is least
+	// needed for: with no member to fail over to the sync genuinely fails, so
+	// the collector's existing tls_fingerprint_mismatch audit entry does fire.
+	if rows, err := q.ListClusterPinnedFingerprints(ctx); err == nil {
+		for _, r := range rows {
+			if !endpointFingerprintStale(r.ApiUrl, r.TlsFingerprint, r.NodeAddress, r.SslFingerprint) {
+				continue
+			}
+			add(r.ClusterID, healthIssueResponse{
+				Type: "tls_fingerprint_changed", Severity: healthSevErr, Scope: "cluster",
+				Summary: "TLS certificate changed",
+				// The fingerprint is shown so it can be checked against the node
+				// itself (`pvenode cert info` on its console), not so it can be
+				// pasted back in: re-pinning goes through fetch-fingerprint,
+				// which performs its own live handshake.
+				Detail: fmt.Sprintf(
+					"%s is presenting a different certificate than the one pinned for this cluster, "+
+						"so live Proxmox operations fail. This is expected after a Proxmox upgrade or a "+
+						"certificate renewal. It now presents %s — confirm that on the node before "+
+						"accepting it.",
+					r.NodeName, r.SslFingerprint),
+			})
 		}
 	}
 

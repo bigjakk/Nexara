@@ -1030,10 +1030,34 @@ func (h *ClusterHandler) FetchFingerprint(c fiber.Ctx) error {
 		return renderAddressPolicyError(c, err)
 	}
 
-	u, _ := url.Parse(req.APIURL)
+	fingerprint, untrusted, err := dialLeafFingerprint(req.APIURL)
+	if err != nil {
+		return err
+	}
+
+	return c.JSON(fetchFingerprintResponse{
+		Fingerprint: fingerprint,
+		SelfSigned:  untrusted,
+	})
+}
+
+// dialLeafFingerprint opens a TLS connection to apiURL and returns the leaf
+// certificate's SHA-256 fingerprint in Proxmox's uppercase colon-separated
+// form, plus whether the chain is untrusted by the system CA pool.
+//
+// The caller is responsible for having already run the URL through
+// validateURLFormat and enforceURLAddressPolicy — this dials whatever it is
+// given. Errors come back as fiber errors ready to return.
+func dialLeafFingerprint(apiURL string) (fingerprint string, untrusted bool, err error) {
+	u, _ := url.Parse(apiURL)
+	// url.Port(), not a colon scan: a bracketed IPv6 literal such as
+	// "[2001:db8::1]" is full of colons but carries no port, so the naive
+	// check never appended one and the dial failed. VerifyCertificate reaches
+	// this with a stored address rather than one a human just typed, so the
+	// case is no longer hypothetical.
 	host := u.Host
-	if !strings.Contains(host, ":") {
-		host += ":443"
+	if u.Port() == "" {
+		host = net.JoinHostPort(u.Hostname(), "443")
 	}
 
 	// Connect with InsecureSkipVerify to get the certificate regardless of CA trust.
@@ -1044,19 +1068,19 @@ func (h *ClusterHandler) FetchFingerprint(c fiber.Ctx) error {
 		Timeout: 10 * time.Second,
 		Control: netguard.DialControlSSRFGuard,
 	}
-	conn, err := tls.DialWithDialer(dialer, "tcp", host, &tls.Config{
+	conn, dialErr := tls.DialWithDialer(dialer, "tcp", host, &tls.Config{
 		InsecureSkipVerify: true, //nolint:gosec // Intentional: we're fetching the fingerprint for user verification
 		MinVersion:         tls.VersionTLS12,
 	})
-	if err != nil {
-		slog.Warn("fingerprint fetch: TLS dial failed", "host", u.Host, "error", err)
-		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("Failed to connect to %s (connection or TLS handshake failed)", u.Host))
+	if dialErr != nil {
+		slog.Warn("fingerprint fetch: TLS dial failed", "host", u.Host, "error", dialErr)
+		return "", false, fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("Failed to connect to %s (connection or TLS handshake failed)", u.Host))
 	}
 	defer func() { _ = conn.Close() }()
 
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) == 0 {
-		return fiber.NewError(fiber.StatusBadGateway, "Server presented no TLS certificates")
+		return "", false, fiber.NewError(fiber.StatusBadGateway, "Server presented no TLS certificates")
 	}
 
 	// SHA-256 fingerprint of the leaf certificate in colon-separated hex format.
@@ -1066,12 +1090,12 @@ func (h *ClusterHandler) FetchFingerprint(c fiber.Ctx) error {
 	for i := 0; i < len(hexStr); i += 2 {
 		parts = append(parts, strings.ToUpper(hexStr[i:i+2]))
 	}
-	fingerprint := strings.Join(parts, ":")
+	fingerprint = strings.Join(parts, ":")
 
 	// Check if the cert is trusted by the system CA pool.
 	// Proxmox typically uses an internal CA (not self-signed leaf, but still untrusted).
 	systemPool, _ := x509.SystemCertPool()
-	untrusted := true
+	untrusted = true
 	if systemPool != nil {
 		_, verifyErr := certs[0].Verify(x509.VerifyOptions{
 			Roots: systemPool,
@@ -1079,8 +1103,221 @@ func (h *ClusterHandler) FetchFingerprint(c fiber.Ctx) error {
 		untrusted = verifyErr != nil
 	}
 
-	return c.JSON(fetchFingerprintResponse{
-		Fingerprint: fingerprint,
-		SelfSigned:  untrusted,
+	return fingerprint, untrusted, nil
+}
+
+type verifyCertificateResponse struct {
+	Fingerprint string `json:"fingerprint"`
+	Updated     bool   `json:"updated"`
+	Message     string `json:"message"`
+}
+
+// VerifyCertificate handles POST /api/v1/clusters/:id/verify-certificate.
+//
+// Re-pins the cluster to the certificate its configured endpoint is currently
+// serving, after corroborating it two independent ways. This exists because a
+// Proxmox upgrade or an ACME renewal rotates node certificates, which breaks
+// every live Proxmox call for the cluster until someone re-pins — a chore the
+// operator previously had to do by hand through the edit dialog.
+//
+// What makes one click acceptable here is that neither source is trusted
+// alone:
+//
+//   - A live TLS handshake to the configured api_url says what that endpoint
+//     serves right now. On its own it proves nothing: an attacker in the path
+//     would present their certificate to this dial exactly as they would to
+//     any other.
+//   - nodes.ssl_fingerprint is what the cluster itself reports for that node,
+//     read by the collector over a connection pinned to a fingerprint we
+//     already trusted. An attacker who cannot break that pin cannot forge it.
+//
+// Requiring both to agree means accepting only a certificate the existing
+// trust chain vouches for. If they disagree the request is refused rather than
+// resolved — that combination is the signature of an interception, and the
+// operator needs to look rather than click again.
+//
+// Deliberately NOT automatic. Copying nodes.ssl_fingerprint into the cluster
+// row on a timer would make the pin follow whatever the cluster reports, which
+// is the same as not pinning at all.
+func (h *ClusterHandler) VerifyCertificate(c fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	// Re-pinning changes what the app will trust, so it needs the same
+	// permission as editing the cluster's credentials.
+	if err := requireClusterPerm(c, "manage", "cluster", id); err != nil {
+		return err
+	}
+
+	cluster, err := h.queries.GetCluster(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusNotFound, "Cluster not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
+	}
+
+	// Re-check before dialling. allowPrivate is true because the address is
+	// already on file and was accepted once — re-prompting for a confirmation
+	// on a one-click repair would be hostile — so this does NOT re-apply the
+	// operator's private-address decision. What it still catches is the
+	// always-blocked classes (cloud metadata, multicast, broadcast, Class E)
+	// behind a hostname that has since been re-pointed; netguard's dial
+	// control closes the rebinding window between here and the handshake.
+	if err := validateURLFormat(cluster.ApiUrl); err != nil {
+		return err
+	}
+	if err := enforceURLAddressPolicy(c.Context(), cluster.ApiUrl, true); err != nil {
+		return renderAddressPolicyError(c, err)
+	}
+
+	live, _, err := dialLeafFingerprint(cluster.ApiUrl)
+	if err != nil {
+		return err
+	}
+
+	attested, err := h.attestedFingerprint(c, cluster)
+	if err != nil {
+		return err
+	}
+
+	switch decideCertificateVerify(cluster.TlsFingerprint, live, attested) {
+	case certVerifyRefuseUnattested:
+		return fiber.NewError(fiber.StatusConflict,
+			"Nexara has no independently observed certificate for this endpoint to check against, "+
+				"so it cannot verify one automatically. Set the fingerprint through Edit Cluster after "+
+				"confirming it on the node itself.")
+	case certVerifyRefuseMismatch:
+		return fiber.NewError(fiber.StatusConflict,
+			"The certificate served by this endpoint does not match what the cluster reports for that node. "+
+				"Nexara will not pin it. Check the endpoint before retrying.")
+	case certVerifyUnchanged:
+		return c.JSON(verifyCertificateResponse{
+			Fingerprint: live,
+			Updated:     false,
+			Message:     "The pinned certificate already matches; nothing to change.",
+		})
+	case certVerifyAccept:
+		// fall through to the update below
+	}
+
+	previous := cluster.TlsFingerprint
+	// Conditional on the api_url we dialled: if another admin re-pointed the
+	// cluster while this request was in flight, pinning would attach the old
+	// endpoint's certificate to the new address and break every call.
+	rows, err := h.queries.UpdateClusterTLSFingerprint(c.Context(), db.UpdateClusterTLSFingerprintParams{
+		ID:             id,
+		TlsFingerprint: live,
+		ApiUrl:         cluster.ApiUrl,
 	})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update cluster fingerprint")
+	}
+	if rows == 0 {
+		return fiber.NewError(fiber.StatusConflict,
+			"The cluster's address changed while its certificate was being verified. Try again.")
+	}
+
+	details, _ := json.Marshal(map[string]string{
+		"cluster_name":         cluster.Name,
+		"api_url":              cluster.ApiUrl,
+		"previous_fingerprint": previous,
+		"new_fingerprint":      live,
+	})
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Bytes: id, Valid: true},
+		"cluster", id.String(), "tls_fingerprint_verified", details)
+
+	// Drop the cached client so the very next request uses the new pin rather
+	// than waiting out the cache TTL.
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPVE, id)
+	}
+
+	return c.JSON(verifyCertificateResponse{
+		Fingerprint: live,
+		Updated:     true,
+		Message:     "Certificate verified against the cluster and re-pinned.",
+	})
+}
+
+// attestedFingerprint returns what the cluster itself reports for the node the
+// api_url points at, or "" when nothing has been observed for it. Whether an
+// empty result is fatal is decideCertificateVerify's call, not this lookup's.
+func (h *ClusterHandler) attestedFingerprint(c fiber.Ctx, cluster db.Cluster) (string, error) {
+	endpoints, err := h.queries.ListNodeEndpoints(c.Context(), cluster.ID)
+	if err != nil {
+		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to list cluster nodes")
+	}
+
+	// nodes.ssl_fingerprint describes pveproxy's certificate only, so it can
+	// corroborate this endpoint only when the endpoint IS pveproxy. Without
+	// this, a reverse proxy terminating TLS on the node's own address matches
+	// by address and its perfectly valid certificate gets reported as a
+	// mismatch — telling a correctly configured operator they may be under
+	// attack. Returning "" instead routes them to the manual path, which is
+	// the honest answer: we have nothing to check against.
+	if !proxmox.APIURLIsDirectToPVEProxy(cluster.ApiUrl) {
+		return "", nil
+	}
+
+	host := proxmox.APIURLHost(cluster.ApiUrl)
+	for _, ep := range endpoints {
+		if strings.EqualFold(ep.Address, host) && ep.SslFingerprint != "" {
+			return ep.SslFingerprint, nil
+		}
+	}
+	return "", nil
+}
+
+// certVerifyOutcome is what VerifyCertificate should do with a candidate
+// certificate. Split out from the handler so the security decision — the only
+// part of this flow that can go wrong quietly — is a pure function with a
+// table test, rather than three conditionals wrapped around a database.
+type certVerifyOutcome int
+
+const (
+	// certVerifyAccept: corroborated by both sources and different from the
+	// current pin, so re-pin.
+	certVerifyAccept certVerifyOutcome = iota
+	// certVerifyUnchanged: already pinned to this certificate. Not an error —
+	// the operator may simply have clicked twice, or another admin got there
+	// first.
+	certVerifyUnchanged
+	// certVerifyRefuseUnattested: nothing observed for this endpoint, so there
+	// is no second source. Accepting on the live handshake alone would trust
+	// whatever answers the address, which is what pinning exists to prevent.
+	certVerifyRefuseUnattested
+	// certVerifyRefuseMismatch: the live handshake and the cluster's own
+	// report disagree. That is the shape of an interception, so refuse and
+	// make a human look.
+	certVerifyRefuseMismatch
+)
+
+// decideCertificateVerify judges a candidate certificate against the two
+// independent sources.
+//
+// Order matters: the absence of corroboration is checked before agreement, so
+// an unattested endpoint can never be waved through by comparing a value
+// against itself.
+//
+// The explicit `pinned != ""` is load-bearing for the same reason.
+// EndpointCertificateChanged answers "changed" as false when either side is
+// unknown — correct for its own callers, where absence of evidence must not
+// raise an alarm, but it means an unpinned cluster would otherwise report
+// "already matches" and never get pinned. An unpinned cluster reaching here
+// has had an operator explicitly ask to verify and pin, and both sources
+// corroborate the certificate, so pinning it is the right answer and strictly
+// stronger than leaving it on system-CA verification.
+func decideCertificateVerify(pinned, live, attested string) certVerifyOutcome {
+	if attested == "" || live == "" {
+		return certVerifyRefuseUnattested
+	}
+	if proxmox.EndpointCertificateChanged(attested, live) {
+		return certVerifyRefuseMismatch
+	}
+	if pinned != "" && !proxmox.EndpointCertificateChanged(pinned, live) {
+		return certVerifyUnchanged
+	}
+	return certVerifyAccept
 }

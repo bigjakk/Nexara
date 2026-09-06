@@ -189,7 +189,8 @@ type Syncer struct {
 	eventPub             eventPublisher
 	logger               *slog.Logger
 	lastSyncErrorMu      sync.Mutex
-	lastSyncError        map[uuid.UUID]time.Time // rate-limit sync error reporting per cluster
+	lastSyncError        map[uuid.UUID]time.Time // rate-limits the info-level endpoint-failover report
+	lastSyncFailure      map[uuid.UUID]time.Time // rate-limits the error-level sync-failure report
 	fastSyncInFlight     atomic.Bool             // re-entrancy guard for SyncAllResources
 	snapshotSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllGuestSnapshots
 	smbiosSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestSmbios
@@ -304,6 +305,17 @@ func (s *Syncer) failoverCluster(ctx context.Context, cluster db.Cluster, primar
 			"failover_node", n.Name,
 			"failover_url", failoverURL,
 		)
+		// Report even though the sync is about to succeed. Nothing else will:
+		// reportSyncError only runs when the sync fails, which this branch
+		// prevents, so before this the condition was recorded nowhere.
+		//
+		// It still matters now that the client cache also routes around a bad
+		// primary. The cluster keeps working, which is the point — but it is
+		// working on a crutch, leaning on members the operator did not
+		// configure, and the audit trail is what says since when.
+		s.reportEndpointFailover(ctx, cluster, n.Name,
+			endpointFailureAction(primaryErr, "cluster_endpoint_failover"),
+			primaryErr.Error())
 		return failClient, entries, true
 	}
 
@@ -344,6 +356,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	if err != nil {
 		return nil, fmt.Errorf("sync cluster %s: %w", cluster.ID, err)
 	}
+	s.reportEndpointSubstitution(ctx, cluster)
 
 	nodes, err := client.GetNodes(ctx)
 	if err != nil {
@@ -1575,26 +1588,140 @@ func clusterSyncTimeout(cluster db.Cluster) time.Duration {
 	return timeout
 }
 
-// reportSyncError writes an audit log entry and publishes an event when a cluster sync fails.
-// Rate-limited to one report per cluster per 5 minutes to avoid flooding the audit log.
-func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncErr error) {
+// syncReportAllowed reports whether this cluster is due another audit entry,
+// and records the attempt when it is. One report per cluster per 5 minutes,
+// shared by the sync-failure and failover paths so a primary that is both
+// unreachable and flapping cannot flood the audit log from two directions.
+//
+// The budget is per severity rather than flat. Failover is reported first —
+// it happens inside the successful branch — so a single shared budget would
+// let "we routed around it" swallow a genuine sync failure arriving later in
+// the same window, silencing the more serious of the two. A failure may
+// therefore always follow a failover; the reverse is still suppressed.
+func (s *Syncer) syncReportAllowed(clusterID uuid.UUID, severe bool) bool {
 	s.lastSyncErrorMu.Lock()
+	defer s.lastSyncErrorMu.Unlock()
 	if s.lastSyncError == nil {
 		s.lastSyncError = make(map[uuid.UUID]time.Time)
 	}
-	if last, ok := s.lastSyncError[cluster.ID]; ok && time.Since(last) < 5*time.Minute {
-		s.lastSyncErrorMu.Unlock()
+	if s.lastSyncFailure == nil {
+		s.lastSyncFailure = make(map[uuid.UUID]time.Time)
+	}
+
+	budget := s.lastSyncError
+	if severe {
+		budget = s.lastSyncFailure
+	}
+	if last, ok := budget[clusterID]; ok && time.Since(last) < 5*time.Minute {
+		return false
+	}
+	budget[clusterID] = time.Now()
+	return true
+}
+
+// endpointFailureAction names the audit action for a primary-endpoint failure.
+// A certificate that no longer matches the pin is a different problem from a
+// node being down — it needs the operator to verify and re-pin, not to wait —
+// so it gets its own action rather than being filed as a generic failure.
+func endpointFailureAction(err error, fallback string) string {
+	if err != nil && strings.Contains(err.Error(), "fingerprint mismatch") {
+		return "tls_fingerprint_mismatch"
+	}
+	return fallback
+}
+
+// reportEndpointSubstitution records that the client cache is routing this
+// cluster's traffic through a member other than its configured api_url.
+//
+// This exists because the reactive report below stopped firing once the cache
+// learned to pick a healthy endpoint up front: GetNodes now succeeds on the
+// first try, so failoverCluster is never reached and the condition went back
+// to being invisible. The cluster is working, which is exactly what makes it
+// easy to miss — it is running on a substitute, and only the audit trail says
+// since when.
+//
+// It asks proxmox.SelectClusterEndpoint rather than inspecting the client, so
+// it reports precisely what the cache decided and cannot drift from it.
+func (s *Syncer) reportEndpointSubstitution(ctx context.Context, cluster db.Cluster) {
+	nodes, err := s.queries.ListNodesByCluster(ctx, cluster.ID)
+	if err != nil || len(nodes) == 0 {
 		return
 	}
-	s.lastSyncError[cluster.ID] = time.Now()
-	s.lastSyncErrorMu.Unlock()
+
+	endpoints := make([]proxmox.NodeEndpoint, 0, len(nodes))
+	for _, n := range nodes {
+		endpoints = append(endpoints, proxmox.NodeEndpoint{
+			Name:           n.Name,
+			Address:        n.Address,
+			SSLFingerprint: n.SslFingerprint,
+			Status:         n.Status,
+		})
+	}
+
+	chosen := proxmox.SelectClusterEndpoint(cluster.ApiUrl, cluster.TlsFingerprint, endpoints)
+	if chosen.ViaNode == "" {
+		return
+	}
+
+	// Name the cause, because the operator's next step differs: a rotated
+	// certificate needs them to verify and re-pin, a down node needs nothing.
+	action, reason := "cluster_endpoint_failover", "configured endpoint is not usable"
+	primaryHost := proxmox.APIURLHost(cluster.ApiUrl)
+	for _, ep := range endpoints {
+		if strings.EqualFold(ep.Address, primaryHost) &&
+			proxmox.EndpointCertificateChanged(cluster.TlsFingerprint, ep.SSLFingerprint) {
+			action = "tls_fingerprint_mismatch"
+			reason = "configured endpoint is serving a certificate other than the pinned one"
+			break
+		}
+	}
+
+	s.reportEndpointFailover(ctx, cluster, chosen.ViaNode, action, reason)
+}
+
+// reportEndpointFailover records that the cluster's configured endpoint could
+// not be reached and the sync completed through another member instead.
+//
+// Deliberately reported at info level rather than as a failure: nothing was
+// lost, the data is current, and the cluster is not degraded. What the
+// operator needs to know is that the endpoint they configured is broken and
+// the cluster is running on substitutes — a state that looks entirely healthy
+// until the last usable member goes too.
+func (s *Syncer) reportEndpointFailover(ctx context.Context, cluster db.Cluster, failoverNode, action, reason string) {
+	if !s.syncReportAllowed(cluster.ID, false) {
+		return
+	}
+
+	details, _ := json.Marshal(map[string]string{
+		"cluster_name":  cluster.Name,
+		"primary_url":   cluster.ApiUrl,
+		"failover_node": failoverNode,
+		"error":         reason,
+	})
+
+	_ = s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
+		ResourceType: "cluster",
+		ResourceID:   cluster.ID.String(),
+		Action:       action,
+		Details:      details,
+	})
+
+	if s.eventPub != nil {
+		s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindAuditEntry, "cluster", cluster.ID.String(), action)
+	}
+}
+
+// reportSyncError writes an audit log entry and publishes an event when a cluster sync fails.
+// Rate-limited to one report per cluster per 5 minutes to avoid flooding the audit log.
+func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncErr error) {
+	if !s.syncReportAllowed(cluster.ID, true) {
+		return
+	}
 
 	errMsg := syncErr.Error()
-
-	action := "sync_failed"
-	if strings.Contains(errMsg, "fingerprint mismatch") {
-		action = "tls_fingerprint_mismatch"
-	}
+	action := endpointFailureAction(syncErr, "sync_failed")
 
 	details, _ := json.Marshal(map[string]string{
 		"cluster_name": cluster.Name,

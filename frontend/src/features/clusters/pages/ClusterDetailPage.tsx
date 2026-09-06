@@ -27,6 +27,7 @@ import { ResourceTable } from "@/features/inventory/components/ResourceTable";
 import { InventoryUnavailableNote } from "@/features/inventory/components/InventoryUnavailableNote";
 import { useInventoryData } from "@/features/inventory/api/inventory-queries";
 import { ClusterCephTab } from "../components/ClusterCephTab";
+import { ClusterCertificateBanner } from "../components/ClusterCertificateBanner";
 import { ClusterNetworksTab } from "../components/ClusterNetworksTab";
 import { ClusterFirewallTab } from "../components/ClusterFirewallTab";
 import { ClusterDRSTab } from "../components/ClusterDRSTab";
@@ -144,6 +145,8 @@ export function ClusterDetailPage() {
               </div>
             </div>
           )}
+
+          {cluster != null && <ClusterCertificateBanner cluster={cluster} />}
 
           <Tabs value={tabParam || "overview"} onValueChange={setTab}>
             <TabsList>

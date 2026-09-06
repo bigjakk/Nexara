@@ -79,3 +79,17 @@ UPDATE clusters SET pve_version = $2 WHERE id = $1;
 
 -- name: UpdateClusterQuorate :exec
 UPDATE clusters SET quorate = $2 WHERE id = $1;
+
+-- name: UpdateClusterTLSFingerprint :execrows
+-- Narrow on purpose. Re-pinning a rotated certificate is the one field the
+-- verify-certificate flow may change, and going through the full UpdateCluster
+-- would make it possible to clobber an api_url or credential that someone else
+-- edited between the operator seeing the banner and clicking accept.
+UPDATE clusters
+SET tls_fingerprint = $2,
+    updated_at = now()
+-- api_url is part of the predicate, not just the row identity: the caller
+-- dialled a specific address to obtain this fingerprint, so if someone
+-- re-pointed the cluster in between, pinning would attach the old endpoint's
+-- certificate to the new address. Zero rows means "it moved, start over".
+WHERE id = $1 AND api_url = $3;

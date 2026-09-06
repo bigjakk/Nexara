@@ -804,3 +804,34 @@ export function useClusterVMs(clusterId: string) {
     refetchInterval: 60_000, // WS events handle immediate updates
   });
 }
+
+/** Result of asking the server to re-verify and re-pin a cluster certificate. */
+export interface VerifyCertificateResult {
+  fingerprint: string;
+  updated: boolean;
+  message: string;
+}
+
+/**
+ * Re-pins a cluster to the certificate its endpoint currently serves.
+ *
+ * The server refuses unless a live TLS handshake and the cluster's own report
+ * of that node agree, so this is a one-click repair for a rotated certificate
+ * rather than a blanket "trust whatever is there" — see VerifyCertificate in
+ * internal/api/handlers/clusters.go.
+ */
+export function useVerifyClusterCertificate(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiClient.post<VerifyCertificateResult>(
+        `/api/v1/clusters/${clusterId}/verify-certificate`,
+        {},
+      ),
+    onSuccess: () => {
+      // The cluster row carries the health issue that drives the banner, so
+      // refetching is what makes the warning disappear once it is repaired.
+      void queryClient.invalidateQueries({ queryKey: ["clusters"] });
+    },
+  });
+}

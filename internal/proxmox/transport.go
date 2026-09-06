@@ -12,6 +12,24 @@ import (
 	"github.com/bigjakk/nexara/internal/netguard"
 )
 
+// NormalizeFingerprint puts a certificate fingerprint into the form the TLS
+// verifier compares: lowercase hex with any colon separators removed.
+//
+// Both shapes are in circulation. Proxmox reports and stores fingerprints as
+// uppercase colon-separated hex ("AA:BB:…") — that is what reaches
+// clusters.tls_fingerprint and nodes.ssl_fingerprint — while
+// formatFingerprint derives "aabb…" in memory from the presented certificate.
+// Exported so anything asking "are these the same certificate?" asks it the
+// way buildHTTPClient's verifier does, rather than reimplementing the rule and
+// drifting from it.
+//
+// Deliberately no TrimSpace: the verifier does not trim either, and a health
+// check that is more forgiving than the code that actually rejects the
+// connection would report agreement where the handshake will still fail.
+func NormalizeFingerprint(fp string) string {
+	return strings.ToLower(strings.ReplaceAll(fp, ":", ""))
+}
+
 // buildHTTPClient constructs the hardened HTTP client every Proxmox client
 // shares: the SSRF dial guard, TLS fingerprint pinning with session tickets
 // disabled, and redirect refusal.
@@ -33,7 +51,7 @@ func buildHTTPClient(tlsFingerprint string, timeout time.Duration) (*http.Client
 	}
 
 	if tlsFingerprint != "" {
-		expected := strings.ToLower(strings.ReplaceAll(tlsFingerprint, ":", ""))
+		expected := NormalizeFingerprint(tlsFingerprint)
 
 		tlsCfg.InsecureSkipVerify = true //nolint:gosec // Custom VerifyPeerCertificate provides fingerprint verification
 		// Disable TLS session tickets to ensure VerifyPeerCertificate is called on every connection.
