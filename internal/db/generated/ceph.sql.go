@@ -113,31 +113,102 @@ func (q *Queries) GetCephClusterMetrics5m(ctx context.Context, arg GetCephCluste
 }
 
 const getCephClusterMetricsHistory = `-- name: GetCephClusterMetricsHistory :many
-SELECT time, cluster_id, health_status, osds_total, osds_up, osds_in, pgs_total, bytes_used, bytes_avail, bytes_total, read_ops_sec, write_ops_sec, read_bytes_sec, write_bytes_sec, health_checks
+SELECT
+    time_bucket(make_interval(secs => $1::int), time)::timestamptz AS bucket,
+    cluster_id,
+    last(health_status, time)::text     AS health_status,
+    AVG(osds_total)::int                AS osds_total,
+    MIN(osds_up)::int                   AS osds_up,
+    MIN(osds_in)::int                   AS osds_in,
+    AVG(pgs_total)::int                 AS pgs_total,
+    AVG(bytes_used)::bigint             AS bytes_used,
+    AVG(bytes_avail)::bigint            AS bytes_avail,
+    AVG(bytes_total)::bigint            AS bytes_total,
+    AVG(read_ops_sec)::bigint           AS read_ops_sec,
+    AVG(write_ops_sec)::bigint          AS write_ops_sec,
+    AVG(read_bytes_sec)::bigint         AS read_bytes_sec,
+    AVG(write_bytes_sec)::bigint        AS write_bytes_sec
 FROM ceph_cluster_metrics
-WHERE cluster_id = $1
-  AND time >= $2
-  AND time <= $3
-ORDER BY time ASC
+WHERE cluster_id = $2
+  AND time >= $3
+  AND time <= $4
+GROUP BY bucket, cluster_id
+ORDER BY bucket ASC
 `
 
 type GetCephClusterMetricsHistoryParams struct {
-	ClusterID uuid.UUID `json:"cluster_id"`
-	Time      time.Time `json:"time"`
-	Time_2    time.Time `json:"time_2"`
+	BucketSeconds int32     `json:"bucket_seconds"`
+	ClusterID     uuid.UUID `json:"cluster_id"`
+	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
 }
 
-func (q *Queries) GetCephClusterMetricsHistory(ctx context.Context, arg GetCephClusterMetricsHistoryParams) ([]CephClusterMetric, error) {
-	rows, err := q.db.Query(ctx, getCephClusterMetricsHistory, arg.ClusterID, arg.Time, arg.Time_2)
+type GetCephClusterMetricsHistoryRow struct {
+	Bucket        time.Time `json:"bucket"`
+	ClusterID     uuid.UUID `json:"cluster_id"`
+	HealthStatus  string    `json:"health_status"`
+	OsdsTotal     int32     `json:"osds_total"`
+	OsdsUp        int32     `json:"osds_up"`
+	OsdsIn        int32     `json:"osds_in"`
+	PgsTotal      int32     `json:"pgs_total"`
+	BytesUsed     int64     `json:"bytes_used"`
+	BytesAvail    int64     `json:"bytes_avail"`
+	BytesTotal    int64     `json:"bytes_total"`
+	ReadOpsSec    int64     `json:"read_ops_sec"`
+	WriteOpsSec   int64     `json:"write_ops_sec"`
+	ReadBytesSec  int64     `json:"read_bytes_sec"`
+	WriteBytesSec int64     `json:"write_bytes_sec"`
+}
+
+// Downsampled in the database, deliberately. The raw hypertable holds one row
+// per cluster per METRICS_COLLECT_INTERVAL — 10s in docker-compose.yml and
+// .env.example — so a 7-day window runs to tens of thousands of rows. That is
+// megabytes of JSON the browser parses, formats and lays out on its only
+// thread, and CephMetricsChart draws it into four charts on a 60s refetch. The
+// caller derives bucket_seconds from the timeframe so every window comes back
+// at chart resolution instead.
+//
+// The bucket is aliased `bucket`, matching the ceph_cluster_metrics_5m/_1h
+// continuous aggregates in migration 000006. That alias is doing real work:
+// naming it `time` would make `GROUP BY time` ambiguous, and PostgreSQL
+// resolves an ambiguous GROUP BY name to the INPUT column — silently grouping
+// per raw sample and restoring the full response with no error. No column is
+// called `bucket`, so the grouping can only mean the expression. The API's
+// JSON key stays "time": cephClusterMetricResponse maps it.
+//
+// Reducers are chosen per column, not uniformly:
+//   - osds_up / osds_in use MIN, not AVG. These feed the "OSDs Up" chart,
+//     which exists to show an operator when OSDs dropped out. Averaging hides
+//     exactly that: one OSD down for five minutes inside a ten-minute bucket
+//     rounds straight back to the full count, so the dip disappears at every
+//     timeframe. MIN keeps "something went down in this window" visible.
+//     This deliberately diverges from the _5m/_1h aggregates above, which are
+//     generic rollups rather than an availability signal.
+//   - The remaining gauges average, which is the faithful reducer for them.
+//   - health_status takes the bucket's last value, matching those aggregates.
+//
+// health_checks is not selected. The history DTO already drops it (see
+// cephClusterMetricResponse) because only the latest health needs reasons, so
+// aggregating a per-sample JSONB here would cost work nothing consumes.
+//
+// No ORDER BY tiebreaker is needed, unlike the PBS equivalent: cluster_id is
+// pinned by the WHERE clause, so each bucket yields exactly one row.
+func (q *Queries) GetCephClusterMetricsHistory(ctx context.Context, arg GetCephClusterMetricsHistoryParams) ([]GetCephClusterMetricsHistoryRow, error) {
+	rows, err := q.db.Query(ctx, getCephClusterMetricsHistory,
+		arg.BucketSeconds,
+		arg.ClusterID,
+		arg.StartTime,
+		arg.EndTime,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CephClusterMetric{}
+	items := []GetCephClusterMetricsHistoryRow{}
 	for rows.Next() {
-		var i CephClusterMetric
+		var i GetCephClusterMetricsHistoryRow
 		if err := rows.Scan(
-			&i.Time,
+			&i.Bucket,
 			&i.ClusterID,
 			&i.HealthStatus,
 			&i.OsdsTotal,
@@ -151,7 +222,6 @@ func (q *Queries) GetCephClusterMetricsHistory(ctx context.Context, arg GetCephC
 			&i.WriteOpsSec,
 			&i.ReadBytesSec,
 			&i.WriteBytesSec,
-			&i.HealthChecks,
 		); err != nil {
 			return nil, err
 		}

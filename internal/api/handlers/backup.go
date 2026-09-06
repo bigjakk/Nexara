@@ -712,6 +712,43 @@ func (h *BackupHandler) ListVerifyJobs(c fiber.Ctx) error {
 	return RespondItems(c, jobs)
 }
 
+// datastoreMetricsTimeframes pairs each supported timeframe with its history
+// window and the bucket width the query downsamples to.
+//
+// The two are chosen together on purpose. Samples land once per
+// METRICS_COLLECT_INTERVAL — 10s in docker-compose.yml and .env.example — so
+// an un-bucketed 7-day window runs to tens of thousands of rows per datastore:
+// megabytes of JSON, and a browser main thread that stops answering while it
+// parses and lays them out. Every pairing here holds window/bucket to a couple
+// of hundred points, already finer than the pixels available to draw them.
+//
+// This is a table rather than a switch so TestDatastoreMetricsWindowBounded
+// can range over it, and a timeframe added later is covered by that bound
+// without anyone remembering to add a test row.
+var datastoreMetricsTimeframes = map[string]struct {
+	window        time.Duration
+	bucketSeconds int32
+}{
+	"1h":  {time.Hour, 60},
+	"6h":  {6 * time.Hour, 300},
+	"24h": {24 * time.Hour, 600},
+	"7d":  {7 * 24 * time.Hour, 3600},
+}
+
+// datastoreMetricsDefaultTimeframe is what an unrecognised ?timeframe= falls
+// back to; it must be a key of datastoreMetricsTimeframes.
+const datastoreMetricsDefaultTimeframe = "1h"
+
+// datastoreMetricsWindow maps a requested timeframe to its window and bucket
+// width, falling back to the default for anything unrecognised.
+func datastoreMetricsWindow(timeframe string) (window time.Duration, bucketSeconds int32) {
+	tf, ok := datastoreMetricsTimeframes[timeframe]
+	if !ok {
+		tf = datastoreMetricsTimeframes[datastoreMetricsDefaultTimeframe]
+	}
+	return tf.window, tf.bucketSeconds
+}
+
 // GetDatastoreMetrics handles GET /api/v1/pbs-servers/:pbs_id/metrics
 func (h *BackupHandler) GetDatastoreMetrics(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
@@ -733,24 +770,13 @@ func (h *BackupHandler) GetDatastoreMetrics(c fiber.Ctx) error {
 	}
 
 	now := time.Now()
-	var start time.Time
-	switch timeframe {
-	case "1h":
-		start = now.Add(-1 * time.Hour)
-	case "6h":
-		start = now.Add(-6 * time.Hour)
-	case "24h":
-		start = now.Add(-24 * time.Hour)
-	case "7d":
-		start = now.Add(-7 * 24 * time.Hour)
-	default:
-		start = now.Add(-1 * time.Hour)
-	}
+	window, bucketSeconds := datastoreMetricsWindow(timeframe)
 
 	metrics, err := h.queries.GetPBSDatastoreMetricsHistory(c.Context(), db.GetPBSDatastoreMetricsHistoryParams{
-		PbsServerID: pbsID,
-		Time:        start,
-		Time_2:      now,
+		BucketSeconds: bucketSeconds,
+		PbsServerID:   pbsID,
+		StartTime:     now.Add(-window),
+		EndTime:       now,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get datastore metrics history")

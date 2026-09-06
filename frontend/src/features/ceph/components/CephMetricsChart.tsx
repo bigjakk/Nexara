@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AreaChart,
   Area,
@@ -29,12 +29,27 @@ const TIMEFRAMES = [
 
 type Timeframe = (typeof TIMEFRAMES)[number]["value"];
 
-function formatTime(ts: string, timeframe: Timeframe): string {
-  const d = new Date(ts);
-  if (timeframe === "7d") {
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
-  }
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+// Built once. Constructing an Intl formatter dwarfs the cost of using one, and
+// an axis formatter is called per tick.
+const CLOCK_FMT = new Intl.DateTimeFormat([], {
+  hour: "2-digit",
+  minute: "2-digit",
+});
+const DAY_FMT = new Intl.DateTimeFormat([], {
+  month: "short",
+  day: "numeric",
+});
+
+// Both branches are module-level constants, so the tickFormatter prop keeps a
+// stable identity across renders instead of handing Recharts a fresh closure
+// every time.
+const formatAxisClock = (ts: number): string => CLOCK_FMT.format(ts);
+const formatAxisDay = (ts: number): string => DAY_FMT.format(ts);
+
+// A clock reading repeated across seven days names no point in particular, so
+// the week view labels by date.
+function axisFormatter(timeframe: Timeframe) {
+  return timeframe === "7d" ? formatAxisDay : formatAxisClock;
 }
 
 function formatOps(ops: number): string {
@@ -124,9 +139,24 @@ function MiniChart({
               )}
             </defs>
             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+            {/* A time axis, not the default category axis. This is a
+                correctness change, not the performance fix — server-side
+                bucketing is what stopped this page freezing, and a number axis
+                on a horizontal chart still maps one tick candidate per datum
+                (combineCategoricalDomain in recharts' axisSelectors). What it
+                buys: a category axis spaces points evenly whatever time they
+                stand for, so a gap in collection — and bucketing emits no row
+                for an empty bucket — collapsed to nothing instead of showing
+                as one. minTickGap is the part that cuts work and clutter: it
+                thins the labels actually drawn, and the same tick list drives
+                CartesianGrid's vertical lines. */}
             <XAxis
-              dataKey="time"
-              tickFormatter={(ts: string) => formatTime(ts, timeframe)}
+              dataKey="timestamp"
+              type="number"
+              scale="time"
+              domain={["dataMin", "dataMax"]}
+              tickFormatter={axisFormatter(timeframe)}
+              minTickGap={48}
               tick={{ fontSize: 10 }}
             />
             <YAxis
@@ -134,11 +164,13 @@ function MiniChart({
               tick={{ fontSize: 10 }}
               width={60}
             />
+            {/* Number(), not String(), in labelFormatter: the X dataKey is
+                epoch milliseconds now, and new Date("1757116800000") is an
+                Invalid Date. */}
             <Tooltip
-              labelFormatter={(label: unknown) => {
-                const d = new Date(String(label));
-                return d.toLocaleString();
-              }}
+              labelFormatter={(label: unknown) =>
+                new Date(Number(label)).toLocaleString()
+              }
               formatter={(value: unknown, name: unknown) => [
                 value != null ? formatter(Number(value)) : "0",
                 typeof name === "string" ? name : "",
@@ -180,18 +212,26 @@ function MiniChart({
 export function CephMetricsChart({ clusterId, status }: CephMetricsChartProps) {
   const [timeframe, setTimeframe] = useState<Timeframe>("1h");
   const metricsQuery = useCephMetrics(clusterId, timeframe);
-  const metrics = metricsQuery.data ?? [];
 
-  const chartData = metrics.map((m) => ({
-    time: m.time,
-    readOps: m.read_ops_sec,
-    writeOps: m.write_ops_sec,
-    readBytes: m.read_bytes_sec,
-    writeBytes: m.write_bytes_sec,
-    usedPct: m.bytes_total > 0 ? (m.bytes_used / m.bytes_total) * 100 : 0,
-    osdsUp: m.osds_up,
-    osdsTotal: m.osds_total,
-  }));
+  // Keyed on metricsQuery.data, not on `metrics`: the `?? []` above mints a
+  // fresh array whenever data is undefined, which would make the memo recompute
+  // on every render. Worth having — all four charts below share this array and
+  // the query refetches on a 60s interval. Timestamps stay numeric and are
+  // formatted at the axis, so only the ticks actually drawn pay for formatting.
+  const chartData = useMemo(
+    () =>
+      (metricsQuery.data ?? []).map((m) => ({
+        timestamp: new Date(m.time).getTime(),
+        readOps: m.read_ops_sec,
+        writeOps: m.write_ops_sec,
+        readBytes: m.read_bytes_sec,
+        writeBytes: m.write_bytes_sec,
+        usedPct: m.bytes_total > 0 ? (m.bytes_used / m.bytes_total) * 100 : 0,
+        osdsUp: m.osds_up,
+        osdsTotal: m.osds_total,
+      })),
+    [metricsQuery.data],
+  );
 
   // Live values from status (30s refetch)
   const liveReadOps = status?.pgmap.read_op_per_sec ?? 0;
@@ -320,7 +360,7 @@ export function CephMetricsChart({ clusterId, status }: CephMetricsChartProps) {
         />
       </div>
 
-      {metrics.length === 0 && !metricsQuery.isLoading && (
+      {chartData.length === 0 && !metricsQuery.isLoading && (
         <p className="text-center text-sm text-muted-foreground">
           No historical metrics available yet.
         </p>

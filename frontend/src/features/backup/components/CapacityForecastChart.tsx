@@ -14,11 +14,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePBSDatastoreMetrics } from "../api/backup-queries";
 import { formatBytes } from "@/lib/format";
 
+// Module-scoped, not rebuilt per call: constructing an Intl formatter is far
+// more expensive than using one, and an axis formatter is called per tick.
+const DATE_FMT = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+});
+
 function formatDate(ts: number): string {
-  return new Date(ts).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
+  return DATE_FMT.format(ts);
 }
 
 interface ForecastPoint {
@@ -190,9 +194,22 @@ export function CapacityForecastChart({
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+            {/* A time axis, not the default category axis — and here it is
+                a correctness fix, not the performance one. This series splices
+                bucketed history onto 6-hourly forecast steps, and a category
+                axis spaces every point equally regardless of the time it
+                stands for, so the ~360 forecast points covering 90 days were
+                squeezed into a sliver while a week of history took nearly the
+                whole width. (The freeze was fixed by bucketing the query
+                server-side; a number axis still maps one tick candidate per
+                datum.) minTickGap thins the labels actually drawn. */}
             <XAxis
               dataKey="timestamp"
+              type="number"
+              scale="time"
+              domain={["dataMin", "dataMax"]}
               tickFormatter={formatDate}
+              minTickGap={56}
               tick={{ fontSize: 10 }}
             />
             <YAxis

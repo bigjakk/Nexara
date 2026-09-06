@@ -470,11 +470,13 @@ type cephClusterMetricResponse struct {
 	WriteBytesSec int64     `json:"write_bytes_sec"`
 }
 
-func toCephClusterMetricResponses(rows []db.CephClusterMetric) []cephClusterMetricResponse {
+func toCephClusterMetricResponses(rows []db.GetCephClusterMetricsHistoryRow) []cephClusterMetricResponse {
 	out := make([]cephClusterMetricResponse, len(rows))
 	for i, m := range rows {
 		out[i] = cephClusterMetricResponse{
-			Time:          m.Time,
+			// The query aliases the time_bucket expression `bucket`; the DTO
+			// is what keeps the JSON key "time".
+			Time:          m.Bucket,
 			ClusterID:     m.ClusterID,
 			HealthStatus:  m.HealthStatus,
 			OSDsTotal:     m.OsdsTotal,
@@ -493,6 +495,50 @@ func toCephClusterMetricResponses(rows []db.CephClusterMetric) []cephClusterMetr
 	return out
 }
 
+// cephMetricsTimeframes pairs each supported ?timeframe= with its history
+// window and the bucket width GetCephClusterMetricsHistory downsamples to.
+//
+// The two are chosen together on purpose. Samples land once per
+// METRICS_COLLECT_INTERVAL — 10s in docker-compose.yml and .env.example — so
+// an un-bucketed 7-day window runs to tens of thousands of rows: megabytes of
+// JSON, and a browser main thread that stops answering while it parses and
+// lays them out. Every pairing here holds window/bucket to a couple of hundred
+// points, already finer than the pixels available to draw them.
+//
+// Deliberately a separate table from datastoreMetricsTimeframes in backup.go
+// rather than a shared one, even though the pairings currently agree: the two
+// feed different collectors and different charts, and Ceph additionally has
+// the ceph_cluster_metrics_5m/_1h rollups it could switch to. Unify them only
+// if a third caller appears.
+//
+// This is a table rather than a switch so TestCephMetricsWindowBounded can
+// range over it, and a timeframe added later is covered by that bound without
+// anyone remembering to add a test row.
+var cephMetricsTimeframes = map[string]struct {
+	window        time.Duration
+	bucketSeconds int32
+}{
+	"1h":  {time.Hour, 60},
+	"6h":  {6 * time.Hour, 300},
+	"24h": {24 * time.Hour, 600},
+	"7d":  {7 * 24 * time.Hour, 3600},
+}
+
+// cephMetricsDefaultTimeframe is both the documented default for a missing
+// ?timeframe= and the fallback for an unrecognised one; it must be a key of
+// cephMetricsTimeframes.
+const cephMetricsDefaultTimeframe = "1h"
+
+// cephMetricsWindow maps a requested timeframe to its window and bucket width,
+// falling back to the default for anything unrecognised.
+func cephMetricsWindow(timeframe string) (window time.Duration, bucketSeconds int32) {
+	tf, ok := cephMetricsTimeframes[timeframe]
+	if !ok {
+		tf = cephMetricsTimeframes[cephMetricsDefaultTimeframe]
+	}
+	return tf.window, tf.bucketSeconds
+}
+
 // GetHistorical handles GET /api/v1/clusters/:cluster_id/ceph/metrics
 func (h *CephHandler) GetHistorical(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -503,27 +549,15 @@ func (h *CephHandler) GetHistorical(c fiber.Ctx) error {
 		return err
 	}
 
-	timeframe := c.Query("timeframe", "1h")
+	timeframe := c.Query("timeframe", cephMetricsDefaultTimeframe)
 	now := time.Now()
-	var start time.Time
-
-	switch timeframe {
-	case "1h":
-		start = now.Add(-1 * time.Hour)
-	case "6h":
-		start = now.Add(-6 * time.Hour)
-	case "24h":
-		start = now.Add(-24 * time.Hour)
-	case "7d":
-		start = now.Add(-7 * 24 * time.Hour)
-	default:
-		start = now.Add(-1 * time.Hour)
-	}
+	window, bucketSeconds := cephMetricsWindow(timeframe)
 
 	metrics, err := h.queries.GetCephClusterMetricsHistory(c.Context(), db.GetCephClusterMetricsHistoryParams{
-		ClusterID: clusterID,
-		Time:      start,
-		Time_2:    now,
+		BucketSeconds: bucketSeconds,
+		ClusterID:     clusterID,
+		StartTime:     now.Add(-window),
+		EndTime:       now,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get ceph metrics")

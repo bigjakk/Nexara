@@ -419,7 +419,40 @@ type Querier interface {
 	GetCVEScanSchedule(ctx context.Context, clusterID uuid.UUID) (CveScanSchedule, error)
 	GetCephClusterMetrics1h(ctx context.Context, arg GetCephClusterMetrics1hParams) ([]CephClusterMetrics1h, error)
 	GetCephClusterMetrics5m(ctx context.Context, arg GetCephClusterMetrics5mParams) ([]CephClusterMetrics5m, error)
-	GetCephClusterMetricsHistory(ctx context.Context, arg GetCephClusterMetricsHistoryParams) ([]CephClusterMetric, error)
+	// Downsampled in the database, deliberately. The raw hypertable holds one row
+	// per cluster per METRICS_COLLECT_INTERVAL — 10s in docker-compose.yml and
+	// .env.example — so a 7-day window runs to tens of thousands of rows. That is
+	// megabytes of JSON the browser parses, formats and lays out on its only
+	// thread, and CephMetricsChart draws it into four charts on a 60s refetch. The
+	// caller derives bucket_seconds from the timeframe so every window comes back
+	// at chart resolution instead.
+	//
+	// The bucket is aliased `bucket`, matching the ceph_cluster_metrics_5m/_1h
+	// continuous aggregates in migration 000006. That alias is doing real work:
+	// naming it `time` would make `GROUP BY time` ambiguous, and PostgreSQL
+	// resolves an ambiguous GROUP BY name to the INPUT column — silently grouping
+	// per raw sample and restoring the full response with no error. No column is
+	// called `bucket`, so the grouping can only mean the expression. The API's
+	// JSON key stays "time": cephClusterMetricResponse maps it.
+	//
+	// Reducers are chosen per column, not uniformly:
+	//   * osds_up / osds_in use MIN, not AVG. These feed the "OSDs Up" chart,
+	//     which exists to show an operator when OSDs dropped out. Averaging hides
+	//     exactly that: one OSD down for five minutes inside a ten-minute bucket
+	//     rounds straight back to the full count, so the dip disappears at every
+	//     timeframe. MIN keeps "something went down in this window" visible.
+	//     This deliberately diverges from the _5m/_1h aggregates above, which are
+	//     generic rollups rather than an availability signal.
+	//   * The remaining gauges average, which is the faithful reducer for them.
+	//   * health_status takes the bucket's last value, matching those aggregates.
+	//
+	// health_checks is not selected. The history DTO already drops it (see
+	// cephClusterMetricResponse) because only the latest health needs reasons, so
+	// aggregating a per-sample JSONB here would cost work nothing consumes.
+	//
+	// No ORDER BY tiebreaker is needed, unlike the PBS equivalent: cluster_id is
+	// pinned by the WHERE clause, so each bucket yields exactly one row.
+	GetCephClusterMetricsHistory(ctx context.Context, arg GetCephClusterMetricsHistoryParams) ([]GetCephClusterMetricsHistoryRow, error)
 	GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
 	GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error)
 	GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics5mParams) ([]GetClusterMetrics5mRow, error)
@@ -551,7 +584,25 @@ type Querier interface {
 	GetNotificationChannelEnabled(ctx context.Context, id uuid.UUID) (NotificationChannel, error)
 	GetNotificationDLQ(ctx context.Context, id uuid.UUID) (NotificationDlq, error)
 	GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, error)
-	GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]PbsDatastoreMetric, error)
+	// Downsampled in the database, deliberately. The raw hypertable holds one row
+	// per datastore per METRICS_COLLECT_INTERVAL — 10s in docker-compose.yml and
+	// .env.example, so a 7-day window runs to tens of thousands of rows per
+	// datastore. That is megabytes of JSON the
+	// browser then parses, formats and lays out on its only thread. The caller
+	// derives bucket_seconds from the timeframe so every window comes back at
+	// chart resolution (~60-170 points per datastore) instead. Averaging is the
+	// right reducer here: these are capacity gauges, not counters.
+	//
+	// The GROUP BY and ORDER BY ordinals are load-bearing — do not "clarify" them
+	// to `GROUP BY time`. PostgreSQL resolves an ambiguous GROUP BY name to the
+	// INPUT column, so that spelling would group by the raw per-sample timestamp,
+	// silently restoring one group per row and the whole 60k-row response, with no
+	// error to notice. (ORDER BY resolves the other way, preferring the output
+	// alias; the ordinals sidestep the asymmetry.)
+	// datastore breaks the tie: every datastore shares a bucket key, and the
+	// HashAggregate above leaves their relative order unspecified otherwise, so
+	// two identical requests could return rows in different orders.
+	GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]GetPBSDatastoreMetricsHistoryRow, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
 	GetPermission(ctx context.Context, id uuid.UUID) (Permission, error)
 	GetPermissionByActionResource(ctx context.Context, arg GetPermissionByActionResourceParams) (Permission, error)

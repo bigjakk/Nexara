@@ -101,27 +101,69 @@ func (q *Queries) GetLatestPBSDatastoreMetrics(ctx context.Context, pbsServerID 
 }
 
 const getPBSDatastoreMetricsHistory = `-- name: GetPBSDatastoreMetricsHistory :many
-SELECT time, pbs_server_id, datastore, total, used, avail
+SELECT
+    time_bucket(make_interval(secs => $1::int), time)::timestamptz AS time,
+    pbs_server_id,
+    datastore,
+    AVG(total)::BIGINT AS total,
+    AVG(used)::BIGINT AS used,
+    AVG(avail)::BIGINT AS avail
 FROM pbs_datastore_metrics
-WHERE pbs_server_id = $1 AND time >= $2 AND time <= $3
-ORDER BY time ASC
+WHERE pbs_server_id = $2
+  AND time >= $3
+  AND time <= $4
+GROUP BY 1, pbs_server_id, datastore
+ORDER BY 1 ASC, datastore ASC
 `
 
 type GetPBSDatastoreMetricsHistoryParams struct {
-	PbsServerID uuid.UUID `json:"pbs_server_id"`
-	Time        time.Time `json:"time"`
-	Time_2      time.Time `json:"time_2"`
+	BucketSeconds int32     `json:"bucket_seconds"`
+	PbsServerID   uuid.UUID `json:"pbs_server_id"`
+	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
 }
 
-func (q *Queries) GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]PbsDatastoreMetric, error) {
-	rows, err := q.db.Query(ctx, getPBSDatastoreMetricsHistory, arg.PbsServerID, arg.Time, arg.Time_2)
+type GetPBSDatastoreMetricsHistoryRow struct {
+	Time        time.Time `json:"time"`
+	PbsServerID uuid.UUID `json:"pbs_server_id"`
+	Datastore   string    `json:"datastore"`
+	Total       int64     `json:"total"`
+	Used        int64     `json:"used"`
+	Avail       int64     `json:"avail"`
+}
+
+// Downsampled in the database, deliberately. The raw hypertable holds one row
+// per datastore per METRICS_COLLECT_INTERVAL — 10s in docker-compose.yml and
+// .env.example, so a 7-day window runs to tens of thousands of rows per
+// datastore. That is megabytes of JSON the
+// browser then parses, formats and lays out on its only thread. The caller
+// derives bucket_seconds from the timeframe so every window comes back at
+// chart resolution (~60-170 points per datastore) instead. Averaging is the
+// right reducer here: these are capacity gauges, not counters.
+//
+// The GROUP BY and ORDER BY ordinals are load-bearing — do not "clarify" them
+// to `GROUP BY time`. PostgreSQL resolves an ambiguous GROUP BY name to the
+// INPUT column, so that spelling would group by the raw per-sample timestamp,
+// silently restoring one group per row and the whole 60k-row response, with no
+// error to notice. (ORDER BY resolves the other way, preferring the output
+// alias; the ordinals sidestep the asymmetry.)
+// datastore breaks the tie: every datastore shares a bucket key, and the
+// HashAggregate above leaves their relative order unspecified otherwise, so
+// two identical requests could return rows in different orders.
+func (q *Queries) GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]GetPBSDatastoreMetricsHistoryRow, error) {
+	rows, err := q.db.Query(ctx, getPBSDatastoreMetricsHistory,
+		arg.BucketSeconds,
+		arg.PbsServerID,
+		arg.StartTime,
+		arg.EndTime,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []PbsDatastoreMetric{}
+	items := []GetPBSDatastoreMetricsHistoryRow{}
 	for rows.Next() {
-		var i PbsDatastoreMetric
+		var i GetPBSDatastoreMetricsHistoryRow
 		if err := rows.Scan(
 			&i.Time,
 			&i.PbsServerID,

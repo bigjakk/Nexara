@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
@@ -258,6 +259,67 @@ func TestFilterPruneJobsByStore(t *testing.T) {
 			}
 			if strings.Join(ids, ",") != strings.Join(tt.wantIDs, ",") {
 				t.Errorf("ids = %v, want %v", ids, tt.wantIDs)
+			}
+		})
+	}
+}
+
+// The bug this guards: GetDatastoreMetrics used to hand the raw hypertable
+// straight to the client. At the 10s collection interval that docker-compose
+// ships, a 7-day window is tens of thousands of rows per datastore — a 6.4MB
+// response that froze the browser for ~10s while it parsed and laid the points
+// out, taking the rest of the SPA with it. Bucketing is what keeps the
+// response bounded, so the invariant worth pinning is the point count, not the
+// individual constants.
+//
+// This ranges over the timeframe table rather than restating it, so a
+// timeframe added later is held to the same bound without a new test row.
+func TestDatastoreMetricsWindowBounded(t *testing.T) {
+	// A few hundred points is already finer than the pixels available to draw
+	// them; well past that and we are shipping data no one can see.
+	const maxPointsPerDatastore = 256
+
+	for timeframe := range datastoreMetricsTimeframes {
+		t.Run(timeframe, func(t *testing.T) {
+			window, bucketSeconds := datastoreMetricsWindow(timeframe)
+
+			if bucketSeconds <= 0 {
+				// time_bucket() rejects a zero or negative width outright, so
+				// this would be a 500 on every metrics request rather than a
+				// silent fallback to raw rows.
+				t.Fatalf("bucketSeconds = %d, must be positive", bucketSeconds)
+			}
+			if window <= 0 {
+				t.Fatalf("window = %v, must be positive", window)
+			}
+
+			points := int64(window/time.Second) / int64(bucketSeconds)
+			if points > maxPointsPerDatastore {
+				t.Errorf("timeframe %q yields %d points per datastore "+
+					"(window %v / bucket %ds), want <= %d",
+					timeframe, points, window, bucketSeconds,
+					maxPointsPerDatastore)
+			}
+		})
+	}
+}
+
+// An unrecognised ?timeframe= must still resolve to a bounded window — the
+// query is driven by whatever the client sends.
+func TestDatastoreMetricsWindowFallback(t *testing.T) {
+	fallback, ok := datastoreMetricsTimeframes[datastoreMetricsDefaultTimeframe]
+	if !ok {
+		t.Fatalf("default timeframe %q is not in the table",
+			datastoreMetricsDefaultTimeframe)
+	}
+
+	for _, timeframe := range []string{"", "not-a-timeframe", "1H", "30d"} {
+		t.Run("falls back: "+timeframe, func(t *testing.T) {
+			window, bucketSeconds := datastoreMetricsWindow(timeframe)
+			if window != fallback.window || bucketSeconds != fallback.bucketSeconds {
+				t.Errorf("datastoreMetricsWindow(%q) = (%v, %d), want (%v, %d)",
+					timeframe, window, bucketSeconds,
+					fallback.window, fallback.bucketSeconds)
 			}
 		})
 	}
