@@ -257,7 +257,9 @@ describe("ClusterCephTab", () => {
 
     renderWithProviders(<ClusterCephTab clusterId="test-cluster-id" />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const button = screen.getByRole("button", { name: "Retry" });
+    expect(button).toBeEnabled();
+    await userEvent.click(button);
     expect(refetch).toHaveBeenCalledOnce();
   });
 
@@ -285,6 +287,98 @@ describe("ClusterCephTab", () => {
     expect(container.innerHTML).not.toBe("");
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(refetch).toHaveBeenCalledOnce();
+  });
+
+  // The 60s poll: fetchState clears `error` and puts a dataless query back to
+  // "pending", so without a remembered failure the component drops into its
+  // isLoading branch and replaces the notice with skeletons once a minute.
+  it("keeps the notice up across a poll instead of flashing skeletons", () => {
+    mockUseCephStatus.mockReturnValue(
+      failedResult(
+        new ApiClientError(502, {
+          error: "internal_server_error",
+          message: "binary not installed: /usr/bin/ceph-mon",
+        }),
+      ),
+    );
+
+    const { container, rerender } = renderWithProviders(
+      <ClusterCephTab clusterId="test-cluster-id" />,
+    );
+    expect(screen.getByText("Ceph Not Available")).toBeInTheDocument();
+
+    mockUseCephStatus.mockReturnValue(
+      queryResult({
+        isLoading: true,
+        isFetching: true,
+        fetchStatus: "fetching",
+      }),
+    );
+    rerender(<ClusterCephTab clusterId="test-cluster-id" />);
+
+    expect(container.querySelectorAll(".h-32")).toHaveLength(0);
+    expect(screen.getByText("Ceph Not Available")).toBeInTheDocument();
+    expect(
+      screen.getByText("binary not installed: /usr/bin/ceph-mon"),
+    ).toBeInTheDocument();
+    // Keeping the card up makes the mid-fetch window reachable, and a refetch
+    // started from there is a no-op — so the control must not invite a click
+    // it cannot honour. The label carries the in-flight news instead.
+    expect(screen.getByRole("button", { name: "Checking..." })).toBeDisabled();
+  });
+
+  it("does not carry a remembered failure onto a different cluster", () => {
+    mockUseCephStatus.mockReturnValue(
+      failedResult(
+        new ApiClientError(502, {
+          error: "internal_server_error",
+          message: "binary not installed: /usr/bin/ceph-mon",
+        }),
+      ),
+    );
+
+    const { container, rerender } = renderWithProviders(
+      <ClusterCephTab clusterId="cluster-a" />,
+    );
+    expect(screen.getByText("Ceph Not Available")).toBeInTheDocument();
+
+    mockUseCephStatus.mockReturnValue(
+      queryResult({
+        isLoading: true,
+        isFetching: true,
+        fetchStatus: "fetching",
+      }),
+    );
+    rerender(<ClusterCephTab clusterId="cluster-b" />);
+
+    // A cluster with no outcome of its own is a genuine first load.
+    expect(container.querySelectorAll(".h-32")).toHaveLength(4);
+    expect(screen.queryByText("Ceph Not Available")).not.toBeInTheDocument();
+  });
+
+  it("forgets the failure once status resolves", () => {
+    mockUseCephStatus.mockReturnValue(
+      failedResult(
+        new ApiClientError(502, {
+          error: "internal_server_error",
+          message: "Failed to connect to Proxmox",
+        }),
+      ),
+    );
+
+    const { rerender } = renderWithProviders(
+      <ClusterCephTab clusterId="test-cluster-id" />,
+    );
+    expect(screen.getByText("Ceph Not Available")).toBeInTheDocument();
+
+    mockUseCephStatus.mockReturnValue(succeededResult(healthyStatus));
+    rerender(<ClusterCephTab clusterId="test-cluster-id" />);
+
+    expect(screen.queryByText("Ceph Not Available")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/most recent refresh failed/i),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /OSDs \(6\)/ })).toBeInTheDocument();
   });
 
   it("renders the Ceph dashboard once status resolves", () => {
