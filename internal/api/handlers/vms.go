@@ -1883,19 +1883,31 @@ func mapProxmoxError(err error) error {
 	}
 	var apiErr *proxmox.APIError
 	if errors.As(err, &apiErr) {
-		// Try to parse Proxmox validation error format:
+		// Proxmox reports failures in a JSON envelope:
 		// {"errors":{"field":"message"},"message":"Parameter verification failed.\n","data":null}
 		var pxResp struct {
 			Message string            `json:"message"`
 			Errors  map[string]string `json:"errors"`
 		}
-		if jsonErr := json.Unmarshal([]byte(apiErr.Message), &pxResp); jsonErr == nil && len(pxResp.Errors) > 0 {
-			var parts []string
-			for field, msg := range pxResp.Errors {
-				parts = append(parts, field+": "+msg)
+		if jsonErr := json.Unmarshal([]byte(apiErr.Message), &pxResp); jsonErr == nil {
+			// A per-field map means the operator's own input was rejected.
+			if len(pxResp.Errors) > 0 {
+				var parts []string
+				for field, msg := range pxResp.Errors {
+					parts = append(parts, field+": "+msg)
+				}
+				return fiber.NewError(fiber.StatusBadRequest, strings.Join(parts, "; "))
 			}
-			return fiber.NewError(fiber.StatusBadRequest, strings.Join(parts, "; "))
+			// Otherwise the human sentence is in `message` — "binary not
+			// installed: /usr/bin/ceph-mon\n" and the like. It is surfaced to
+			// the operator verbatim (see describeError in ClusterCephTab.tsx),
+			// so hand over the sentence rather than the envelope around it.
+			if msg := strings.TrimSpace(pxResp.Message); msg != "" {
+				return fiber.NewError(fiber.StatusBadGateway, msg)
+			}
 		}
+		// Not JSON, or JSON carrying nothing to say: the raw text is still the
+		// most informative thing available.
 		return fiber.NewError(fiber.StatusBadGateway, apiErr.Message)
 	}
 	return fiber.NewError(fiber.StatusInternalServerError, "Proxmox operation failed: "+err.Error())
