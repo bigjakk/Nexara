@@ -65,7 +65,7 @@ describe("the app-wide query defaults", () => {
     const queryFn = vi.fn().mockRejectedValue(apiError(status));
 
     await expect(
-      client.fetchQuery({ queryKey: ["retry-policy", status], queryFn }),
+      client.query({ queryKey: ["retry-policy", status], queryFn }),
     ).rejects.toThrow(ApiClientError);
 
     expect(queryFn).toHaveBeenCalledTimes(calls);
