@@ -329,7 +329,7 @@ func (c *Client) WipeDisk(ctx context.Context, node, disk string) (string, error
 	form := url.Values{}
 	form.Set("disk", disk)
 	var upid string
-	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/disks/smart", form, &upid); err != nil {
+	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/disks/wipedisk", form, &upid); err != nil {
 		return "", fmt.Errorf("wipe disk on node %s disk %s: %w", node, disk, err)
 	}
 	return upid, nil
