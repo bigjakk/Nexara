@@ -51,6 +51,7 @@ var upidMethods = map[string]bool{
 	// Ceph (internal/proxmox/client_storage.go). Note the OSD in/out mon
 	// commands are NOT here: they return no UPID, so their handlers AuditLog.
 	"CephServiceAction": true,
+	"CreateCephPool":    true, "DeleteCephPool": true,
 
 	// Replication / storage / backup / acme
 	"TriggerReplication":   true,

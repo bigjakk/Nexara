@@ -7,6 +7,7 @@ import type {
   CephOSDActionResponse,
   CephOSDPreflight,
   CephPool,
+  CephPoolActionResponse,
   CephMon,
   CephFS,
   CephCrushRule,
@@ -123,17 +124,37 @@ export function useCreateCephPool() {
 
   return useMutation({
     mutationFn: ({ clusterId, body }: CreatePoolParams) =>
-      apiClient.post<{ status: string; name: string }>(
+      apiClient.post<CephPoolActionResponse>(
         `/api/v1/clusters/${clusterId}/ceph/pools`,
         body,
       ),
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "ceph", "pools"],
-      });
+      invalidatePoolsAfterSettle(queryClient, variables.clusterId);
     },
   });
 }
+
+/**
+ * Refetches the pool list twice: once now, and once after the Proxmox worker
+ * has had time to finish. Pool create and delete are dispatched as tasks, so
+ * the immediate refetch still reads pre-task state — on its own it shows a
+ * freshly created pool as absent, and a deleted one as still present, until
+ * the 60s poll catches up.
+ */
+function invalidatePoolsAfterSettle(
+  queryClient: ReturnType<typeof useQueryClient>,
+  clusterId: string,
+) {
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: ["clusters", clusterId, "ceph", "pools"],
+    });
+  void invalidate();
+  setTimeout(() => void invalidate(), POOL_SETTLE_MS);
+}
+
+/** Roughly how long Proxmox takes to create or destroy a Ceph pool. */
+const POOL_SETTLE_MS = 5000;
 
 /**
  * Fetches the redundancy assessment for an OSD action. Kept out of the cache
@@ -214,13 +235,11 @@ export function useDeleteCephPool() {
 
   return useMutation({
     mutationFn: ({ clusterId, poolName }: DeletePoolParams) =>
-      apiClient.delete<{ status: string; name: string }>(
+      apiClient.delete<CephPoolActionResponse>(
         `/api/v1/clusters/${clusterId}/ceph/pools/${encodeURIComponent(poolName)}`,
       ),
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "ceph", "pools"],
-      });
+      invalidatePoolsAfterSettle(queryClient, variables.clusterId);
     },
   });
 }

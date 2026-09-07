@@ -561,12 +561,25 @@ func (c *Client) GetCephCrushRules(ctx context.Context, node string) ([]CephCrus
 	}
 	return rules, nil
 }
-func (c *Client) CreateCephPool(ctx context.Context, node string, params CephPoolCreateParams) error {
+
+// CreateCephPool creates a Ceph pool via POST /nodes/{node}/ceph/pool and
+// returns the UPID of the resulting Proxmox task.
+//
+// The path is singular. PVE mounts the pool endpoints as a subclass —
+// PVE::API2::Ceph registers PVE::API2::Ceph::Pool at path 'pool' — and there is
+// no plural alias, so a request to /ceph/pools is answered by the dispatcher
+// with 501 "Method not implemented" and no pool is ever created. GetCephPools
+// above already reads the singular path; this write side did not.
+//
+// PVE's createpool runs in a fork_worker('cephcreatepool'), so the UPID is the
+// only handle on whether the pool actually appeared: the POST returns as soon
+// as the worker is queued, long before Ceph has finished.
+func (c *Client) CreateCephPool(ctx context.Context, node string, params CephPoolCreateParams) (string, error) {
 	if err := validateNodeName(node); err != nil {
-		return err
+		return "", err
 	}
 	if params.Name == "" {
-		return fmt.Errorf("pool name is required")
+		return "", fmt.Errorf("pool name is required")
 	}
 	form := url.Values{}
 	form.Set("name", params.Name)
@@ -579,29 +592,48 @@ func (c *Client) CreateCephPool(ctx context.Context, node string, params CephPoo
 		form.Set("application", params.Application)
 	}
 	if params.CrushRule != "" {
-		form.Set("crush_rule_name", params.CrushRule)
+		// PVE calls this parameter `crush_rule`. It was sent as
+		// `crush_rule_name` — the field name from the pool *listing* response —
+		// which PVE's schema rejects outright, since register_method schemas
+		// disallow additional properties. That never surfaced because the
+		// request went to an unregistered path and failed before validation.
+		form.Set("crush_rule", params.CrushRule)
 	}
 	if params.PGAutoScale != "" {
 		form.Set("pg_autoscale_mode", params.PGAutoScale)
 	}
-	path := "/nodes/" + url.PathEscape(node) + "/ceph/pools"
-	if err := c.doPost(ctx, path, form, nil); err != nil {
-		return fmt.Errorf("create ceph pool %s on %s: %w", params.Name, node, err)
+	var upid string
+	path := "/nodes/" + url.PathEscape(node) + "/ceph/pool"
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("create ceph pool %s on %s: %w", params.Name, node, err)
 	}
-	return nil
+	return upid, nil
 }
-func (c *Client) DeleteCephPool(ctx context.Context, node, poolName string) error {
+
+// DeleteCephPool destroys a Ceph pool and its contents via
+// DELETE /nodes/{node}/ceph/pool/{name}, returning the UPID of the resulting
+// task. Singular for the same reason as CreateCephPool; PVE's destroypool runs
+// in a fork_worker('cephdestroypool').
+//
+// Not unconditional: PVE checks the pool for volumes before forking the worker
+// and refuses — synchronously, as an error from this call rather than a failed
+// task — when a storage still references it and holds disks. force and
+// remove_storages, which override that, are deliberately not sent; PVE's
+// defaults are the safe ones, and CreateCephPool likewise omits add_storages,
+// so a pool Nexara created has no storage entry to strand.
+func (c *Client) DeleteCephPool(ctx context.Context, node, poolName string) (string, error) {
 	if err := validateNodeName(node); err != nil {
-		return err
+		return "", err
 	}
 	if poolName == "" {
-		return fmt.Errorf("pool name is required")
+		return "", fmt.Errorf("pool name is required")
 	}
-	path := "/nodes/" + url.PathEscape(node) + "/ceph/pools/" + url.PathEscape(poolName)
-	if err := c.doDelete(ctx, path, nil); err != nil {
-		return fmt.Errorf("delete ceph pool %s on %s: %w", poolName, node, err)
+	var upid string
+	path := "/nodes/" + url.PathEscape(node) + "/ceph/pool/" + url.PathEscape(poolName)
+	if err := c.doDelete(ctx, path, &upid); err != nil {
+		return "", fmt.Errorf("delete ceph pool %s on %s: %w", poolName, node, err)
 	}
-	return nil
+	return upid, nil
 }
 
 // cephOSDInOutActions are the mon-level OSD membership commands. Unlike the

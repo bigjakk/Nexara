@@ -797,8 +797,8 @@ update its credentials.
 | GET | `/clusters/:id/ceph/monitors` | List monitors |
 | GET | `/clusters/:id/ceph/fs` | List CephFS |
 | GET | `/clusters/:id/ceph/rules` | List CRUSH rules |
-| POST | `/clusters/:id/ceph/pools` | Create Ceph pool |
-| DELETE | `/clusters/:id/ceph/pools/:name` | Delete Ceph pool |
+| POST | `/clusters/:id/ceph/pools` | Create Ceph pool. Proxmox runs this in a background worker, so it answers `202` with the task `upid` — the pool does not exist yet |
+| DELETE | `/clusters/:id/ceph/pools/:name` | Delete Ceph pool and its data. Also a background worker: `202` with the task `upid`. Proxmox refuses outright, before dispatching, if a storage still references the pool and holds disks |
 | GET | `/clusters/:id/ceph/osds/:osd_id/preflight?action=` | Redundancy verdict for a proposed OSD action (`out` by default), cross-referencing OSD counts against pool `size`/`min_size`. A pool-config read failure does not block it — the gap is flagged instead |
 | POST | `/clusters/:id/ceph/osds/:osd_id/in` | Mark OSD in |
 | POST | `/clusters/:id/ceph/osds/:osd_id/out` | Mark OSD out |

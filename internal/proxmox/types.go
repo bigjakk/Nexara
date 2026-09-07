@@ -910,7 +910,7 @@ type CephPoolCreateParams struct {
 	MinSize     int    `json:"min_size,omitempty"`
 	PGNum       int    `json:"pg_num"`
 	Application string `json:"application,omitempty"`
-	CrushRule   string `json:"crush_rule_name,omitempty"`
+	CrushRule   string `json:"crush_rule,omitempty"`
 	PGAutoScale string `json:"pg_autoscale_mode,omitempty"`
 }
 

@@ -124,6 +124,19 @@ export interface CephCrushRule {
   max_size: number;
 }
 
+/**
+ * Returned by pool create and delete. Proxmox runs both in a background worker,
+ * so the response only means the task was dispatched — the pool does not exist
+ * (or still exists) at the moment it arrives. `upid` is the handle on the real
+ * outcome, and the task shows up in the activity feed.
+ */
+export interface CephPoolActionResponse {
+  status: string;
+  name: string;
+  node: string;
+  upid: string;
+}
+
 export interface CreatePoolRequest {
   name: string;
   size: number;

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -113,8 +114,20 @@ type createPoolRequest struct {
 	MinSize     int    `json:"min_size,omitempty"`
 	PGNum       int    `json:"pg_num"`
 	Application string `json:"application,omitempty"`
+	// crush_rule_name is Nexara's own wire name for this field and differs from
+	// PVE's, which is crush_rule. Do not "align" it — the client translates.
 	CrushRule   string `json:"crush_rule_name,omitempty"`
 	PGAutoScale string `json:"pg_autoscale_mode,omitempty"`
+}
+
+// cephPoolActionResponse is returned by pool create and delete. Both are
+// dispatched as Proxmox tasks, so the UPID is the caller's handle on the
+// outcome; neither operation has finished when the response is written.
+type cephPoolActionResponse struct {
+	Status string `json:"status"`
+	Name   string `json:"name"`
+	Node   string `json:"node"`
+	UPID   string `json:"upid"`
 }
 
 // --- Live Proxmox proxy endpoints ---
@@ -395,7 +408,7 @@ func (h *CephHandler) CreatePool(c fiber.Ctx) error {
 		return err
 	}
 
-	if err := pxClient.CreateCephPool(c.Context(), nodeName, proxmox.CephPoolCreateParams{
+	upid, err := pxClient.CreateCephPool(c.Context(), nodeName, proxmox.CephPoolCreateParams{
 		Name:        req.Name,
 		Size:        req.Size,
 		MinSize:     req.MinSize,
@@ -403,15 +416,35 @@ func (h *CephHandler) CreatePool(c fiber.Ctx) error {
 		Application: req.Application,
 		CrushRule:   req.CrushRule,
 		PGAutoScale: req.PGAutoScale,
-	}); err != nil {
+	})
+	if err != nil {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ceph_pool", req.Name, "create", nil)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "ceph_pool",
+		ResourceID:   req.Name,
+		ResourceName: req.Name,
+		Action:       "create",
+		UPID:         upid,
+		Description:  fmt.Sprintf("Create Ceph pool %s on %s", req.Name, nodeName),
+		Extra: map[string]any{
+			"size":   req.Size,
+			"pg_num": req.PGNum,
+		},
+	})
 
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"status": "created",
-		"name":   req.Name,
+	// 202, not 201: PVE creates the pool in a background worker, so nothing is
+	// created yet at this point. Reporting 201 "created" meant a pool that
+	// failed inside the worker was still reported to the operator as a success.
+	// The UPID is the handle on the real outcome.
+	return c.Status(fiber.StatusAccepted).JSON(cephPoolActionResponse{
+		Status: "dispatched",
+		Name:   req.Name,
+		Node:   nodeName,
+		UPID:   upid,
 	})
 }
 
@@ -435,15 +468,29 @@ func (h *CephHandler) DeletePool(c fiber.Ctx) error {
 		return err
 	}
 
-	if err := pxClient.DeleteCephPool(c.Context(), nodeName, poolName); err != nil {
+	upid, err := pxClient.DeleteCephPool(c.Context(), nodeName, poolName)
+	if err != nil {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ceph_pool", poolName, "delete", nil)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "ceph_pool",
+		ResourceID:   poolName,
+		ResourceName: poolName,
+		Action:       "delete",
+		UPID:         upid,
+		Description:  fmt.Sprintf("Destroy Ceph pool %s on %s", poolName, nodeName),
+	})
 
-	return c.JSON(fiber.Map{
-		"status": "deleted",
-		"name":   poolName,
+	// Accepted rather than "deleted" — see CreatePool. The pool and its data are
+	// removed by a background worker.
+	return c.Status(fiber.StatusAccepted).JSON(cephPoolActionResponse{
+		Status: "dispatched",
+		Name:   poolName,
+		Node:   nodeName,
+		UPID:   upid,
 	})
 }
 
