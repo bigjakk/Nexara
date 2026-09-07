@@ -3,6 +3,7 @@ package proxmox
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 )
 
@@ -36,10 +37,28 @@ var (
 type APIError struct {
 	StatusCode int
 	Message    string
+	// Fields is Proxmox's per-parameter rejection map, set only when the
+	// response carried one. Message already holds the same content flattened
+	// in a stable order, so prefer Message for anything user-facing — a Go map
+	// has no order, and ranging this directly reintroduces the per-request
+	// shuffle that sorting Message exists to prevent.
+	Fields map[string]string
 }
 
 func (e *APIError) Error() string {
 	return fmt.Sprintf("proxmox API error %d: %s", e.StatusCode, e.Message)
+}
+
+// IsParameterRejection reports whether Proxmox refused the caller's own
+// parameters, rather than failing to carry the request out.
+//
+// Both halves are load-bearing. The per-field map is how a rejection is
+// recognised at all, and the 400 is what keeps the meaning: checkStatus parses
+// every body from 400 up, so a reverse proxy answering 503 with an
+// {"errors":{...}} document would otherwise be reported as the operator's
+// mistake — and, being a client error, would stop being retried.
+func (e *APIError) IsParameterRejection() bool {
+	return e.StatusCode == http.StatusBadRequest && len(e.Fields) > 0
 }
 
 // IsGroupsMigratedError reports whether err is the Proxmox VE 9.x response

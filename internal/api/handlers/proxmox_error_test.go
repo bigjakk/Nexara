@@ -73,12 +73,10 @@ func TestMapProxmoxError_APIErrorEnvelope(t *testing.T) {
 			wantMsg:  "binary not installed: /usr/bin/ceph-mon",
 		},
 		{
-			// What a parameter-verification failure ACTUALLY looks like here:
-			// proxmox.checkStatus builds every APIError through
-			// parseProxmoxError, which has already flattened the envelope's
-			// `errors` map into this string. It is no longer JSON, so it
-			// arrives as a 502 — see TestMapProxmoxError_ValidationBranchIsDefensive.
-			name:     "a pre-flattened validation failure passes through intact",
+			// Same flattened text, but with no rejection map alongside it, so
+			// there is nothing to say the operator's input was at fault. The
+			// map is what promotes this to a 400 — see the Fields case below.
+			name:     "flattened text alone is not a validation failure",
 			message:  "vmid: property is not defined in schema",
 			wantCode: fiber.StatusBadGateway,
 			wantMsg:  "vmid: property is not defined in schema",
@@ -136,24 +134,73 @@ func TestMapProxmoxError_APIErrorEnvelope(t *testing.T) {
 	}
 }
 
-// The `errors`-map branch keeps its own regression guard, but it is defensive
-// only: nothing in internal/proxmox hands mapProxmoxError a live envelope,
-// because parseProxmoxError flattens the map before the APIError is built. So a
-// real parameter-verification failure reaches the operator as a 502, not the
-// 400 this branch would give it. Asserted here so the gap is recorded rather
-// than implied by a passing test.
-func TestMapProxmoxError_ValidationBranchIsDefensive(t *testing.T) {
-	raw := `{"errors":{"vmid":"property is not defined in schema"},"message":"Parameter verification failed.\n","data":null}`
+// A rejected parameter is the operator's own typo, so it must not be dressed up
+// as an upstream gateway failure. The APIError below is exactly what
+// proxmox.checkStatus builds from a real PVE parameter-verification body — see
+// TestCheckStatus_ParameterVerificationKeepsTheFieldMap, which pins that half.
+func TestMapProxmoxError_ParameterRejectionIsAClientError(t *testing.T) {
+	err := &proxmox.APIError{
+		StatusCode: 400,
+		Message:    "vmid: property is not defined in schema",
+		Fields:     map[string]string{"vmid": "property is not defined in schema"},
+	}
 
 	var fe *fiber.Error
-	if !errors.As(mapProxmoxError(&proxmox.APIError{StatusCode: 400, Message: raw}), &fe) {
+	if !errors.As(mapProxmoxError(err), &fe) {
 		t.Fatal("want *fiber.Error")
 	}
 	if fe.Code != fiber.StatusBadRequest {
 		t.Errorf("status = %d, want %d", fe.Code, fiber.StatusBadRequest)
 	}
+	// Message, not a fresh join of Fields: the stable order lives in Message,
+	// and re-deriving it here would reintroduce the per-request shuffle.
 	if fe.Message != "vmid: property is not defined in schema" {
 		t.Errorf("message = %q, want the flattened field list", fe.Message)
+	}
+}
+
+// Only a rejection map on a 400 is the operator's mistake. Everything else
+// stays a gateway error — including a 5xx that happens to carry a map, which a
+// reverse proxy in front of Proxmox can produce and which must keep being
+// retried rather than being blamed on the caller.
+func TestMapProxmoxError_OnlyA400RejectionIsAClientError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *proxmox.APIError
+		wantCode int
+		wantMsg  string
+	}{
+		{
+			name:     "400 with no rejection map",
+			err:      &proxmox.APIError{StatusCode: 400, Message: `{"message":"nope\n","data":null}`},
+			wantCode: fiber.StatusBadGateway,
+			wantMsg:  "nope",
+		},
+		{
+			name: "503 carrying a rejection map is still the gateway's failure",
+			err: &proxmox.APIError{
+				StatusCode: 503,
+				Message:    "detail: no healthy upstream",
+				Fields:     map[string]string{"detail": "no healthy upstream"},
+			},
+			wantCode: fiber.StatusBadGateway,
+			wantMsg:  "detail: no healthy upstream",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fe *fiber.Error
+			if !errors.As(mapProxmoxError(tt.err), &fe) {
+				t.Fatal("want *fiber.Error")
+			}
+			if fe.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", fe.Code, tt.wantCode)
+			}
+			if fe.Message != tt.wantMsg {
+				t.Errorf("message = %q, want %q", fe.Message, tt.wantMsg)
+			}
+		})
 	}
 }
 

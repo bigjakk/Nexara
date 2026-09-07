@@ -1883,25 +1883,21 @@ func mapProxmoxError(err error) error {
 	}
 	var apiErr *proxmox.APIError
 	if errors.As(err, &apiErr) {
-		// Proxmox reports failures in a JSON envelope:
-		// {"errors":{"field":"message"},"message":"Parameter verification failed.\n","data":null}
+		// Proxmox rejected the operator's own parameters, so this is a client
+		// error, not a gateway one. checkStatus keeps the rejection map on the
+		// error and has already flattened it into Message in a stable order.
+		if apiErr.IsParameterRejection() {
+			return fiber.NewError(fiber.StatusBadRequest, apiErr.Message)
+		}
+		// Everything else arrives as Proxmox's JSON envelope with the human
+		// sentence in `message` — "binary not installed: /usr/bin/ceph-mon\n"
+		// and the like. It is surfaced to the operator verbatim (see
+		// describeError in ClusterCephTab.tsx), so hand over the sentence
+		// rather than the envelope around it.
 		var pxResp struct {
-			Message string            `json:"message"`
-			Errors  map[string]string `json:"errors"`
+			Message string `json:"message"`
 		}
 		if jsonErr := json.Unmarshal([]byte(apiErr.Message), &pxResp); jsonErr == nil {
-			// A per-field map means the operator's own input was rejected.
-			if len(pxResp.Errors) > 0 {
-				var parts []string
-				for field, msg := range pxResp.Errors {
-					parts = append(parts, field+": "+msg)
-				}
-				return fiber.NewError(fiber.StatusBadRequest, strings.Join(parts, "; "))
-			}
-			// Otherwise the human sentence is in `message` — "binary not
-			// installed: /usr/bin/ceph-mon\n" and the like. It is surfaced to
-			// the operator verbatim (see describeError in ClusterCephTab.tsx),
-			// so hand over the sentence rather than the envelope around it.
 			if msg := strings.TrimSpace(pxResp.Message); msg != "" {
 				return fiber.NewError(fiber.StatusBadGateway, msg)
 			}

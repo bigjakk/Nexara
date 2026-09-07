@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -363,30 +364,37 @@ func checkStatus(statusCode int, body []byte) error {
 		}
 		return ErrForbidden
 	case statusCode >= 400:
+		msg, fields := parseProxmoxError(body)
 		return &APIError{
 			StatusCode: statusCode,
-			Message:    parseProxmoxError(body),
+			Message:    msg,
+			Fields:     fields,
 		}
 	}
 	return nil
 }
 
 // parseProxmoxError extracts a human-readable message from the Proxmox API
-// error JSON envelope. Proxmox returns {"errors":{"field":"msg",...},"message":"..."}
-// on validation failures. If parsing fails, the raw body is returned as-is.
-func parseProxmoxError(body []byte) string {
+// error JSON envelope, plus the per-field rejection map when the response
+// carried one. Proxmox returns {"errors":{"field":"msg",...},"message":"..."}
+// on validation failures. If parsing fails, the raw body is returned as the
+// message with no fields.
+func parseProxmoxError(body []byte) (message string, fields map[string]string) {
 	var envelope struct {
 		Errors  map[string]string `json:"errors"`
 		Message string            `json:"message"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil || len(envelope.Errors) == 0 {
-		return strings.TrimSpace(string(body))
+		return strings.TrimSpace(string(body)), nil
 	}
 	parts := make([]string, 0, len(envelope.Errors))
 	for field, msg := range envelope.Errors {
 		parts = append(parts, field+": "+msg)
 	}
-	return strings.Join(parts, "; ")
+	// Map iteration order is randomised, so without this the operator is shown
+	// the same rejected fields in a different order on every request.
+	slices.Sort(parts)
+	return strings.Join(parts, "; "), envelope.Errors
 }
 
 // unmarshalData unmarshals the standard Proxmox API response envelope.
