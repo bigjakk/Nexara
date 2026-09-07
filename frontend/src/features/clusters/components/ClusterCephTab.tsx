@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,6 +20,8 @@ import { MonitorList } from "@/features/ceph/components/MonitorList";
 import { CrushTree } from "@/features/ceph/components/CrushTree";
 import { CephMetricsChart } from "@/features/ceph/components/CephMetricsChart";
 import { ApiClientError } from "@/lib/api-client";
+import { describeError } from "@/lib/api-error";
+import { retryState, useSettledQueryError } from "@/hooks/useSettledQueryError";
 import { formatTimestamp } from "@/lib/format";
 
 interface ClusterCephTabProps {
@@ -73,13 +75,6 @@ function CephNotice({
   );
 }
 
-/** The server's own message, or a bare status when the body carried none —
- *  a proxy-generated 502 has no JSON body and, over HTTP/2, no statusText. */
-function describeError(error: unknown): string {
-  if (!(error instanceof ApiClientError)) return "";
-  return error.message !== "" ? error.message : `HTTP ${String(error.status)}`;
-}
-
 export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
   const statusQuery = useCephStatus(clusterId);
   const osdsQuery = useCephOSDs(clusterId);
@@ -95,27 +90,10 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
   const filesystems = fsQuery.data ?? [];
   const crushRules = crushRulesQuery.data ?? [];
 
-  // TanStack clears `error` and resets status to "pending" every time it
-  // refetches a query that has no data (fetchState in query.js), so on each 60s
-  // poll this component forgets it ever failed and falls back into the
-  // isLoading branch below. The notice the operator is reading would be
-  // replaced by skeletons once a minute, forever — for the whole duration of
-  // the request, which on an unreachable cluster is a full Proxmox timeout.
-  // Remembering the last settled failure is what keeps the notice up. The
-  // write is idempotent for a given render input, so StrictMode's double
-  // render is harmless, and stamping the cluster id means a remembered failure
-  // can never be shown against a different cluster.
-  const lastFailure = useRef<{ clusterId: string; error: Error } | null>(null);
-  if (statusQuery.isError) {
-    lastFailure.current = { clusterId, error: statusQuery.error };
-  } else if (statusQuery.isSuccess) {
-    lastFailure.current = null;
-  }
-  const settledError = statusQuery.isError
-    ? statusQuery.error
-    : lastFailure.current?.clusterId === clusterId
-      ? lastFailure.current.error
-      : null;
+  // Without this the notice below would be replaced by skeletons on every 60s
+  // poll, for the whole duration of a request that on an unreachable cluster
+  // runs to a full Proxmox timeout. See the hook for why.
+  const settledError = useSettledQueryError(statusQuery, clusterId);
 
   const isCephNotFound =
     settledError instanceof ApiClientError &&
@@ -130,8 +108,7 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
   const serverMessage = describeError(settledError);
 
   const retryStatus = () => void statusQuery.refetch();
-  // "idle" is the only state a refetch can actually start from.
-  const fetchInFlight = statusQuery.fetchStatus !== "idle";
+  const retry = retryState(statusQuery);
 
   // Skeletons are for the first load only: once there is an outcome to show,
   // a background refetch must not take it off the screen.
@@ -157,7 +134,7 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
         <CephNotice
           title="Ceph Not Available"
           onRetry={retryStatus}
-          busy={fetchInFlight}
+          busy={retry.busy}
         >
           <p>
             Nexara could not read Ceph status from this cluster. Ceph may not be
@@ -178,7 +155,7 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
       <CephNotice
         title="Failed to Load Ceph Status"
         onRetry={retryStatus}
-        busy={fetchInFlight}
+        busy={retry.busy}
       >
         <p>Nexara could not read Ceph status from this cluster.</p>
         {serverMessage !== "" && (
@@ -199,13 +176,8 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
     return (
       <CephNotice
         title="Ceph Status Unavailable"
-        // A paused retryer cannot be restarted from here: Query.fetch() sees a
-        // non-idle fetchStatus and early-returns into continueRetry(), which
-        // only flips a flag — nothing dispatches and no request goes out. Only
-        // queryCache.onFocus()/onOnline() call the retryer's real continue().
-        // So offer the button solely from "idle", where refetch() does work.
-        onRetry={statusQuery.isPaused ? undefined : retryStatus}
-        busy={fetchInFlight}
+        onRetry={retry.offer ? retryStatus : undefined}
+        busy={retry.busy}
       >
         <p>
           {statusQuery.isPaused
