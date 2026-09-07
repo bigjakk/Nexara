@@ -32,6 +32,7 @@ import { ResourceTable } from "@/features/inventory/components/ResourceTable";
 import { InventoryUnavailableNote } from "@/features/inventory/components/InventoryUnavailableNote";
 import { useInventoryData } from "@/features/inventory/api/inventory-queries";
 import { DetailChip } from "@/components/DetailChip";
+import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -471,16 +472,12 @@ function NetworkTab({
   clusterId: string;
   nodeName: string;
 }) {
-  const { data: networkInterfaces, isLoading } = useNodeNetworkInterfacesLive(
-    clusterId,
-    nodeName,
-  );
+  const interfacesQuery = useNodeNetworkInterfacesLive(clusterId, nodeName);
+  const networkInterfaces = interfacesQuery.data;
   const deleteIface = useDeleteNetworkInterface(clusterId, nodeName);
   const apply = useApplyNetworkConfig(clusterId, nodeName);
   const revert = useRevertNetworkConfig(clusterId, nodeName);
   const [editIface, setEditIface] = useState<NetworkInterface | null>(null);
-
-  if (isLoading) return <Skeleton className="h-48 w-full" />;
 
   return (
     <div className="space-y-3">
@@ -517,9 +514,12 @@ function NetworkTab({
       </div>
 
       {!networkInterfaces || networkInterfaces.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No network interfaces found.
-        </p>
+        <QueryStateNotice
+          query={interfacesQuery}
+          subject="this node's network interfaces"
+          empty="No network interfaces found."
+          skeletonClassName="h-48 w-full"
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
@@ -648,7 +648,8 @@ function DisksTab({
   nodeName: string;
   isOnline: boolean;
 }) {
-  const { data: disks, isLoading } = useNodeDisks(clusterId, nodeId);
+  const disksQuery = useNodeDisks(clusterId, nodeId);
+  const disks = disksQuery.data;
   const [smartDisk, setSmartDisk] = useState<string | null>(null);
   const initGPT = useInitializeGPT(clusterId, nodeName);
   const wipeDisk = useWipeDisk(clusterId, nodeName);
@@ -661,12 +662,13 @@ function DisksTab({
           <HardDrive className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-lg font-semibold">Physical Disks</h2>
         </div>
-        {isLoading ? (
-          <Skeleton className="h-48 w-full" />
-        ) : !disks || disks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No physical disks found.
-          </p>
+        {!disks || disks.length === 0 ? (
+          <QueryStateNotice
+            query={disksQuery}
+            subject="this node's physical disks"
+            empty="No physical disks found."
+            skeletonClassName="h-48 w-full"
+          />
         ) : (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
@@ -836,10 +838,26 @@ function DiskSMARTPanel({
   nodeName: string;
   disk: string;
 }) {
-  const { data: smart, isLoading } = useDiskSMART(clusterId, nodeName, disk);
+  const smartQuery = useDiskSMART(clusterId, nodeName, disk);
+  const smart = smartQuery.data;
 
-  if (isLoading) return <Skeleton className="h-24 w-full" />;
-  if (!smart) return null;
+  // The panel is opened by clicking a disk, so it has to appear whatever the
+  // read does. Returning null on failure looked exactly like the click not
+  // registering, and left the operator with no reason for it.
+  if (!smart) {
+    return (
+      <div className="rounded-lg border p-4">
+        <h3 className="mb-3 text-sm font-semibold">S.M.A.R.T. Data - {disk}</h3>
+        <QueryStateNotice
+          query={smartQuery}
+          subject={`S.M.A.R.T. data for ${disk}`}
+          empty="No S.M.A.R.T. data available for this disk."
+          identity={disk}
+          skeletonClassName="h-24 w-full"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-lg border p-4">
@@ -903,6 +921,28 @@ function DiskSMARTPanel({
   );
 }
 
+/**
+ * What the four create forms show where their disk picker would be. An empty
+ * picker is the same picture whether the node has no spare disks or Nexara
+ * could not ask it, so the distinction has to come from the query.
+ */
+function UnusedDisksNotice({
+  query,
+  className,
+}: {
+  query: Parameters<typeof QueryStateNotice>[0]["query"];
+  className?: string;
+}) {
+  return (
+    <QueryStateNotice
+      query={query}
+      subject="this node's disks"
+      empty="No unused disks available."
+      skeletonClassName={className ?? "h-8 w-full"}
+    />
+  );
+}
+
 function diskLabel(d: LiveDiskResponse): string {
   const size = formatBytes(d.size);
   const model = d.model ? ` - ${d.model}` : "";
@@ -917,8 +957,10 @@ function ZFSPoolsSection({
   clusterId: string;
   nodeName: string;
 }) {
-  const { data: pools, isLoading } = useNodeZFSPools(clusterId, nodeName);
-  const { data: liveDisks } = useLiveDisks(clusterId, nodeName);
+  const poolsQuery = useNodeZFSPools(clusterId, nodeName);
+  const pools = poolsQuery.data;
+  const liveDisksQuery = useLiveDisks(clusterId, nodeName);
+  const liveDisks = liveDisksQuery.data;
   const [showCreate, setShowCreate] = useState(false);
   const [zfsName, setZfsName] = useState("");
   const [zfsRaid, setZfsRaid] = useState("single");
@@ -1009,9 +1051,7 @@ function ZFSPoolsSection({
                 Select Disks ({zfsSelectedDisks.length} selected)
               </Label>
               {unusedDisks.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  No unused disks available
-                </p>
+                <UnusedDisksNotice query={liveDisksQuery} />
               ) : (
                 <div className="max-h-40 overflow-auto rounded border p-2 space-y-1">
                   {unusedDisks.map((d) => (
@@ -1081,10 +1121,12 @@ function ZFSPoolsSection({
           </div>
         </div>
       )}
-      {isLoading ? (
-        <Skeleton className="h-24 w-full" />
-      ) : !pools || pools.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No ZFS pools found.</p>
+      {!pools || pools.length === 0 ? (
+        <QueryStateNotice
+          query={poolsQuery}
+          subject="this node's ZFS pools"
+          empty="No ZFS pools found."
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
@@ -1213,8 +1255,10 @@ function LVMSection({
   clusterId: string;
   nodeName: string;
 }) {
-  const { data: vgs, isLoading } = useNodeLVM(clusterId, nodeName);
-  const { data: liveDisks } = useLiveDisks(clusterId, nodeName);
+  const vgsQuery = useNodeLVM(clusterId, nodeName);
+  const vgs = vgsQuery.data;
+  const liveDisksQuery = useLiveDisks(clusterId, nodeName);
+  const liveDisks = liveDisksQuery.data;
   const [showCreate, setShowCreate] = useState(false);
   const [lvmName, setLvmName] = useState("");
   const [lvmDevice, setLvmDevice] = useState("");
@@ -1285,6 +1329,12 @@ function LVMSection({
                   </option>
                 ))}
               </select>
+              {unusedDisks.length === 0 && (
+                <UnusedDisksNotice
+                  query={liveDisksQuery}
+                  className="h-4 w-40"
+                />
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1321,12 +1371,12 @@ function LVMSection({
           </div>
         </div>
       )}
-      {isLoading ? (
-        <Skeleton className="h-24 w-full" />
-      ) : !vgs || vgs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No LVM volume groups found.
-        </p>
+      {!vgs || vgs.length === 0 ? (
+        <QueryStateNotice
+          query={vgsQuery}
+          subject="this node's LVM volume groups"
+          empty="No LVM volume groups found."
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
@@ -1446,8 +1496,10 @@ function LVMThinSection({
   clusterId: string;
   nodeName: string;
 }) {
-  const { data: pools, isLoading } = useNodeLVMThin(clusterId, nodeName);
-  const { data: liveDisks } = useLiveDisks(clusterId, nodeName);
+  const poolsQuery = useNodeLVMThin(clusterId, nodeName);
+  const pools = poolsQuery.data;
+  const liveDisksQuery = useLiveDisks(clusterId, nodeName);
+  const liveDisks = liveDisksQuery.data;
   const [showCreate, setShowCreate] = useState(false);
   const [thinName, setThinName] = useState("");
   const [thinDevice, setThinDevice] = useState("");
@@ -1518,6 +1570,12 @@ function LVMThinSection({
                   </option>
                 ))}
               </select>
+              {unusedDisks.length === 0 && (
+                <UnusedDisksNotice
+                  query={liveDisksQuery}
+                  className="h-4 w-40"
+                />
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1554,12 +1612,12 @@ function LVMThinSection({
           </div>
         </div>
       )}
-      {isLoading ? (
-        <Skeleton className="h-24 w-full" />
-      ) : !pools || pools.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No LVM thin pools found.
-        </p>
+      {!pools || pools.length === 0 ? (
+        <QueryStateNotice
+          query={poolsQuery}
+          subject="this node's LVM thin pools"
+          empty="No LVM thin pools found."
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
@@ -1680,8 +1738,10 @@ function DirectorySection({
   clusterId: string;
   nodeName: string;
 }) {
-  const { data: dirs, isLoading } = useNodeDirectories(clusterId, nodeName);
-  const { data: liveDisks } = useLiveDisks(clusterId, nodeName);
+  const dirsQuery = useNodeDirectories(clusterId, nodeName);
+  const dirs = dirsQuery.data;
+  const liveDisksQuery = useLiveDisks(clusterId, nodeName);
+  const liveDisks = liveDisksQuery.data;
   const [showCreate, setShowCreate] = useState(false);
   const [dirName, setDirName] = useState("");
   const [dirDevice, setDirDevice] = useState("");
@@ -1753,6 +1813,12 @@ function DirectorySection({
                   </option>
                 ))}
               </select>
+              {unusedDisks.length === 0 && (
+                <UnusedDisksNotice
+                  query={liveDisksQuery}
+                  className="h-4 w-40"
+                />
+              )}
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Filesystem</Label>
@@ -1802,12 +1868,12 @@ function DirectorySection({
           </div>
         </div>
       )}
-      {isLoading ? (
-        <Skeleton className="h-24 w-full" />
-      ) : !dirs || dirs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No directory storage entries found.
-        </p>
+      {!dirs || dirs.length === 0 ? (
+        <QueryStateNotice
+          query={dirsQuery}
+          subject="this node's directory storage entries"
+          empty="No directory storage entries found."
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
@@ -1844,13 +1910,12 @@ function FirewallTab({
   nodeName: string;
 }) {
   const [showLog, setShowLog] = useState(false);
-  const { data: rules, isLoading } = useNodeFirewallRules(clusterId, nodeName);
+  const rulesQuery = useNodeFirewallRules(clusterId, nodeName);
+  const rules = rulesQuery.data;
   const deleteRule = useDeleteNodeFirewallRule(clusterId, nodeName);
   const createRule = useCreateNodeFirewallRule(clusterId, nodeName);
-  const { data: logEntries, isLoading: logLoading } = useNodeFirewallLog(
-    clusterId,
-    nodeName,
-  );
+  const logQuery = useNodeFirewallLog(clusterId, nodeName);
+  const logEntries = logQuery.data;
 
   const handleQuickAdd = (action: string) => {
     createRule.mutate({
@@ -1897,12 +1962,13 @@ function FirewallTab({
         </div>
       </div>
 
-      {isLoading ? (
-        <Skeleton className="h-32 w-full" />
-      ) : !rules || rules.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No firewall rules configured.
-        </p>
+      {!rules || rules.length === 0 ? (
+        <QueryStateNotice
+          query={rulesQuery}
+          subject="this node's firewall rules"
+          empty="No firewall rules configured."
+          skeletonClassName="h-32 w-full"
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
@@ -1980,10 +2046,13 @@ function FirewallTab({
       {showLog && (
         <div className="space-y-2">
           <h3 className="text-sm font-semibold">Firewall Log</h3>
-          {logLoading ? (
-            <Skeleton className="h-32 w-full" />
-          ) : !logEntries || logEntries.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No log entries.</p>
+          {!logEntries || logEntries.length === 0 ? (
+            <QueryStateNotice
+              query={logQuery}
+              subject="this node's firewall log"
+              empty="No log entries."
+              skeletonClassName="h-32 w-full"
+            />
           ) : (
             <div className="max-h-[400px] overflow-auto rounded-lg border bg-muted/30 p-3">
               <pre className="text-xs leading-relaxed">
@@ -2006,106 +2075,117 @@ function ServicesTab({
   clusterId: string;
   nodeName: string;
 }) {
-  const { data: services, isLoading } = useNodeServices(clusterId, nodeName);
+  const servicesQuery = useNodeServices(clusterId, nodeName);
+  const services = servicesQuery.data;
   const serviceAction = useServiceAction(clusterId, nodeName);
 
-  if (isLoading) return <Skeleton className="h-48 w-full" />;
-
-  if (!services || services.length === 0) {
-    return <p className="text-sm text-muted-foreground">No services found.</p>;
-  }
-
+  // The heading is outside the branch so it stays whatever the read does: a
+  // failure then reads as this section failing rather than as the section not
+  // existing, which is what the old bare <p> looked like.
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <Cog className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-lg font-semibold">Node Services</h2>
       </div>
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="border-b bg-muted/50">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">Service</th>
-              <th className="px-3 py-2 text-left font-medium">Description</th>
-              <th className="px-3 py-2 text-left font-medium">State</th>
-              <th className="w-40 px-3 py-2 text-left font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {services.map((svc) => (
-              <tr key={svc.service} className="hover:bg-muted/30">
-                <td className="px-3 py-2 font-mono text-xs">{svc.service}</td>
-                <td className="px-3 py-2 text-xs">
-                  {svc.desc || svc.name || "--"}
-                </td>
-                <td className="px-3 py-2">
-                  <Badge
-                    variant={svc.state === "running" ? "default" : "secondary"}
-                    className="text-xs"
-                  >
-                    {svc.state}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex gap-1">
-                    {svc.state !== "running" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 gap-1 text-xs"
-                        onClick={() => {
-                          serviceAction.mutate({
-                            service: svc.service,
-                            action: "start",
-                          });
-                        }}
-                        disabled={serviceAction.isPending}
-                      >
-                        <Play className="h-3 w-3" />
-                        Start
-                      </Button>
-                    )}
-                    {svc.state === "running" && (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 gap-1 text-xs"
-                          onClick={() => {
-                            serviceAction.mutate({
-                              service: svc.service,
-                              action: "restart",
-                            });
-                          }}
-                          disabled={serviceAction.isPending}
-                        >
-                          <RotateCw className="h-3 w-3" />
-                          Restart
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 gap-1 text-xs"
-                          onClick={() => {
-                            serviceAction.mutate({
-                              service: svc.service,
-                              action: "stop",
-                            });
-                          }}
-                          disabled={serviceAction.isPending}
-                        >
-                          <Square className="h-3 w-3" />
-                          Stop
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </td>
+      {!services || services.length === 0 ? (
+        <QueryStateNotice
+          query={servicesQuery}
+          subject="this node's services"
+          empty="No services found."
+          skeletonClassName="h-48 w-full"
+        />
+      ) : (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Service</th>
+                <th className="px-3 py-2 text-left font-medium">Description</th>
+                <th className="px-3 py-2 text-left font-medium">State</th>
+                <th className="w-40 px-3 py-2 text-left font-medium">
+                  Actions
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y">
+              {services.map((svc) => (
+                <tr key={svc.service} className="hover:bg-muted/30">
+                  <td className="px-3 py-2 font-mono text-xs">{svc.service}</td>
+                  <td className="px-3 py-2 text-xs">
+                    {svc.desc || svc.name || "--"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <Badge
+                      variant={
+                        svc.state === "running" ? "default" : "secondary"
+                      }
+                      className="text-xs"
+                    >
+                      {svc.state}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-1">
+                      {svc.state !== "running" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => {
+                            serviceAction.mutate({
+                              service: svc.service,
+                              action: "start",
+                            });
+                          }}
+                          disabled={serviceAction.isPending}
+                        >
+                          <Play className="h-3 w-3" />
+                          Start
+                        </Button>
+                      )}
+                      {svc.state === "running" && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1 text-xs"
+                            onClick={() => {
+                              serviceAction.mutate({
+                                service: svc.service,
+                                action: "restart",
+                              });
+                            }}
+                            disabled={serviceAction.isPending}
+                          >
+                            <RotateCw className="h-3 w-3" />
+                            Restart
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1 text-xs"
+                            onClick={() => {
+                              serviceAction.mutate({
+                                service: svc.service,
+                                action: "stop",
+                              });
+                            }}
+                            disabled={serviceAction.isPending}
+                          >
+                            <Square className="h-3 w-3" />
+                            Stop
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -2145,16 +2225,13 @@ function SyslogTab({
   const since = `${String(timespanHours)}h`;
 
   const startParam = page === null ? undefined : page * SYSLOG_PAGE_SIZE;
-  const { data, isLoading, isFetching, isError } = useNodeSyslog(
-    clusterId,
-    nodeName,
-    {
-      limit: SYSLOG_PAGE_SIZE,
-      start: startParam,
-      service: serviceFilter || undefined,
-      since,
-    },
-  );
+  const syslogQuery = useNodeSyslog(clusterId, nodeName, {
+    limit: SYSLOG_PAGE_SIZE,
+    start: startParam,
+    service: serviceFilter || undefined,
+    since,
+  });
+  const { data, isFetching } = syslogQuery;
   const entries = data?.items;
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / SYSLOG_PAGE_SIZE));
@@ -2215,17 +2292,13 @@ function SyslogTab({
           />
         </div>
       </div>
-      {isLoading ? (
-        <Skeleton className="h-64 w-full" />
-      ) : isError ? (
-        <p className="text-sm text-destructive">
-          Failed to load syslog. The node may be unreachable or the request
-          timed out.
-        </p>
-      ) : !entries || entries.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No syslog entries found.
-        </p>
+      {!entries || entries.length === 0 ? (
+        <QueryStateNotice
+          query={syslogQuery}
+          subject="this node's syslog"
+          empty="No syslog entries found."
+          skeletonClassName="h-64 w-full"
+        />
       ) : (
         <>
           <div className="max-h-[600px] overflow-auto rounded-lg border bg-muted/30 p-3">
@@ -2312,50 +2385,54 @@ function PCIDevicesTab({
   clusterId: string;
   nodeId: string;
 }) {
-  const { data: pciDevices, isLoading } = useNodePCIDevices(clusterId, nodeId);
+  const pciQuery = useNodePCIDevices(clusterId, nodeId);
+  const pciDevices = pciQuery.data;
 
-  if (isLoading) return <Skeleton className="h-48 w-full" />;
-
-  if (!pciDevices || pciDevices.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">No PCI devices found.</p>
-    );
-  }
-
+  // Heading outside the branch, as in ServicesTab: a failure has to read as
+  // this section failing, not as the section not being there.
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <CircuitBoard className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-lg font-semibold">PCI Devices</h2>
       </div>
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="border-b bg-muted/50">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">PCI ID</th>
-              <th className="px-3 py-2 text-left font-medium">Device</th>
-              <th className="px-3 py-2 text-left font-medium">Vendor</th>
-              <th className="px-3 py-2 text-left font-medium">IOMMU Group</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {pciDevices.map((d) => (
-              <tr key={d.id} className="hover:bg-muted/30">
-                <td className="px-3 py-2 font-mono text-xs">{d.pci_id}</td>
-                <td className="px-3 py-2 text-xs">
-                  {d.device_name || d.device || "--"}
-                </td>
-                <td className="px-3 py-2 text-xs">
-                  {d.vendor_name || d.vendor || "--"}
-                </td>
-                <td className="px-3 py-2">
-                  {d.iommu_group >= 0 ? String(d.iommu_group) : "--"}
-                </td>
+      {!pciDevices || pciDevices.length === 0 ? (
+        <QueryStateNotice
+          query={pciQuery}
+          subject="this node's PCI devices"
+          empty="No PCI devices found."
+          skeletonClassName="h-48 w-full"
+        />
+      ) : (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">PCI ID</th>
+                <th className="px-3 py-2 text-left font-medium">Device</th>
+                <th className="px-3 py-2 text-left font-medium">Vendor</th>
+                <th className="px-3 py-2 text-left font-medium">IOMMU Group</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y">
+              {pciDevices.map((d) => (
+                <tr key={d.id} className="hover:bg-muted/30">
+                  <td className="px-3 py-2 font-mono text-xs">{d.pci_id}</td>
+                  <td className="px-3 py-2 text-xs">
+                    {d.device_name || d.device || "--"}
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {d.vendor_name || d.vendor || "--"}
+                  </td>
+                  <td className="px-3 py-2">
+                    {d.iommu_group >= 0 ? String(d.iommu_group) : "--"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
