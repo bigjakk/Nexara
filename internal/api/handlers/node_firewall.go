@@ -110,7 +110,7 @@ func (h *NodeHandler) UpdateNodeFirewallRule(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateNodeFirewallRule(c.Context(), nodeName, pos, req.toParams()); err != nil {
-		return mapProxmoxError(err)
+		return mapFirewallRuleError(err)
 	}
 	details, _ := json.Marshal(req)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "update_firewall_rule", details)
@@ -135,7 +135,7 @@ func (h *NodeHandler) DeleteNodeFirewallRule(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteNodeFirewallRule(c.Context(), nodeName, pos); err != nil {
-		return mapProxmoxError(err)
+		return mapFirewallRuleError(err)
 	}
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "delete_firewall_rule", nil)
 	return c.JSON(fiber.Map{"status": "ok"})

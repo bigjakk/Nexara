@@ -285,3 +285,128 @@ func TestMapPoolError(t *testing.T) {
 		t.Error("mapPoolError(nil) should stay nil")
 	}
 }
+
+// PVE's rule endpoints die with a plain "no rule at position N" — a bare 500
+// with no rejection map — so mapProxmoxError alone can only call it a gateway
+// failure. Two operators with the same rule list open produce this routinely.
+func TestMapFirewallRuleError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantMsg  string
+	}{
+		{
+			name:     "a stale position is not found, not a gateway failure",
+			err:      &proxmox.APIError{StatusCode: 500, Message: "no rule at position 5"},
+			wantCode: fiber.StatusNotFound,
+			wantMsg:  "No firewall rule at that position — the list may be out of date",
+		},
+		{
+			// The shape production really produces: parseProxmoxError returns
+			// the raw body when there is no errors map, and client_firewall.go
+			// then wraps it — so neither a bare sentence nor an unwrapped
+			// error is what this function actually receives.
+			name: "recognised through the envelope and the client's wrap",
+			err: fmt.Errorf("delete cluster firewall rule %d: %w", 5,
+				&proxmox.APIError{StatusCode: 500, Message: `{"data":null,"message":"no rule at position 5\n"}`}),
+			wantCode: fiber.StatusNotFound,
+		},
+		{
+			// A different plain-500 die must stay a gateway error. This is the
+			// case that fails if the match is ever loosened to "no rule".
+			name:     "an unrelated die string is left alone",
+			err:      &proxmox.APIError{StatusCode: 500, Message: "no such alias"},
+			wantCode: fiber.StatusBadGateway,
+		},
+		{
+			name:     "a rejected parameter still reaches the shared mapping",
+			err:      &proxmox.APIError{StatusCode: 400, Message: "dport: invalid format", Fields: map[string]string{"dport": "invalid format"}},
+			wantCode: fiber.StatusBadRequest,
+		},
+		{
+			name:     "an unreachable cluster is still a gateway failure",
+			err:      proxmox.ErrConnectionFailed,
+			wantCode: fiber.StatusBadGateway,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fe *fiber.Error
+			if !errors.As(mapFirewallRuleError(tt.err), &fe) {
+				t.Fatal("want *fiber.Error")
+			}
+			if fe.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", fe.Code, tt.wantCode)
+			}
+			if tt.wantMsg != "" && fe.Message != tt.wantMsg {
+				t.Errorf("message = %q, want %q", fe.Message, tt.wantMsg)
+			}
+		})
+	}
+
+	if mapFirewallRuleError(nil) != nil {
+		t.Error("mapFirewallRuleError(nil) should stay nil")
+	}
+}
+
+// These handlers have no onError, so the message is toasted verbatim. The
+// connection branch of mapProxmoxError is static, so without this wrapper a
+// failed apply produces a toast that never mentions the apply.
+func TestMapNetworkOpError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantMsg  string
+	}{
+		{
+			name:     "an unreachable cluster still names the operation",
+			err:      proxmox.ErrConnectionFailed,
+			wantCode: fiber.StatusBadGateway,
+			wantMsg:  "apply network configuration: Failed to connect to Proxmox",
+		},
+		{
+			name:     "a rejected parameter keeps both its status and its reason",
+			err:      &proxmox.APIError{StatusCode: 400, Message: "iface: interface already exists", Fields: map[string]string{"iface": "interface already exists"}},
+			wantCode: fiber.StatusBadRequest,
+			wantMsg:  "apply network configuration: iface: interface already exists",
+		},
+		{
+			name:     "a missing node keeps its 404",
+			err:      proxmox.ErrNotFound,
+			wantCode: fiber.StatusNotFound,
+			wantMsg:  "apply network configuration: Resource not found on Proxmox",
+		},
+		{
+			// The forbidden branch returns the whole wrap chain, which the
+			// client already stamped with the operation — prefixing it here
+			// would say the operation twice.
+			name: "an operation already named in the message is not repeated",
+			err: fmt.Errorf("apply network configuration on %s: %w", "pve-01",
+				proxmox.ErrForbidden),
+			wantCode: fiber.StatusForbidden,
+			wantMsg:  "Proxmox API: apply network configuration on pve-01: forbidden",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fe *fiber.Error
+			if !errors.As(mapNetworkOpError("apply network configuration", tt.err), &fe) {
+				t.Fatal("want *fiber.Error")
+			}
+			if fe.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", fe.Code, tt.wantCode)
+			}
+			if fe.Message != tt.wantMsg {
+				t.Errorf("message = %q, want %q", fe.Message, tt.wantMsg)
+			}
+		})
+	}
+
+	if mapNetworkOpError("apply network configuration", nil) != nil {
+		t.Error("mapNetworkOpError(op, nil) should stay nil")
+	}
+}

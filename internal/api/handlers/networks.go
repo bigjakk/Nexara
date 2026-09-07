@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -36,6 +37,67 @@ func (h *NetworkHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (
 }
 
 // --- Network Interface Endpoints ---
+
+// mapNetworkOpError keeps the operation in the message.
+//
+// mapProxmoxError's connection branch answers with a static "Failed to connect
+// to Proxmox", discarding the client's wrap chain — and these handlers have no
+// onError, so the global MutationCache handler toasts that string verbatim. On
+// apply in particular that leaves the operator with a toast that does not say
+// which operation failed, and apply is the one place where "did it happen?" is
+// the whole question: the PUT can have been delivered and the srvreload worker
+// forked before the link dropped.
+func mapNetworkOpError(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	mapped := mapProxmoxError(err)
+	var fe *fiber.Error
+	if !errors.As(mapped, &fe) {
+		return mapped
+	}
+	// Two of mapProxmoxError's branches (forbidden, and the unknown-error tail)
+	// embed the whole wrap chain, which the client already stamped with the
+	// operation. Prefixing those would say it twice.
+	if strings.Contains(fe.Message, op) {
+		return mapped
+	}
+	return fiber.NewError(fe.Code, op+": "+fe.Message)
+}
+
+// mapFirewallCreateError gives a duplicate name the same 409 that mapPoolError
+// gives a duplicate pool. PVE reports it as a plain 500 die() string on some
+// endpoints and a 400 param rejection on others; IsAlreadyExistsError matches
+// the text either way, and 409 is the more precise answer to both. Without it
+// the second operator to pick a name is told the cluster is unreachable.
+func mapFirewallCreateError(kind string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if proxmox.IsAlreadyExistsError(err) {
+		return fiber.NewError(fiber.StatusConflict, "A "+kind+" with that name already exists")
+	}
+	return mapProxmoxError(err)
+}
+
+// mapFirewallRuleError adds position-specific handling on top of
+// mapProxmoxError, in the same shape as mapPoolError.
+//
+// PVE's rule endpoints die with a plain "no rule at position N" — a bare 500
+// with no rejection map — so mapProxmoxError can only call it a gateway
+// failure. It is not one: two operators with the same list open will do this to
+// each other routinely, and the answer is "your view is stale", which is what
+// 404 says. Nexara sends no digest, so PVE's assert_if_modified 409 never
+// fires and 404 is the right code here.
+func mapFirewallRuleError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "no rule at position") {
+		return fiber.NewError(fiber.StatusNotFound, "No firewall rule at that position — the list may be out of date")
+	}
+	return mapProxmoxError(err)
+}
 
 // ListNetworkInterfaces handles GET /clusters/:cluster_id/networks.
 func (h *NetworkHandler) ListNetworkInterfaces(c fiber.Ctx) error {
@@ -99,7 +161,7 @@ func (h *NetworkHandler) ListNodeNetworkInterfaces(c fiber.Ctx) error {
 
 	ifaces, err := pxClient.GetNetworkInterfaces(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get network interfaces")
+		return mapProxmoxError(err)
 	}
 
 	return RespondItems(c, ifaces)
@@ -183,7 +245,7 @@ func (h *NetworkHandler) CreateNetworkInterface(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.CreateNetworkInterface(c.Context(), nodeName, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to create network interface: %v", err))
+		return mapNetworkOpError("create network interface", err)
 	}
 
 	details, _ := json.Marshal(map[string]any{
@@ -237,7 +299,7 @@ func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.UpdateNetworkInterface(c.Context(), nodeName, ifaceName, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to update network interface: %v", err))
+		return mapNetworkOpError("update network interface", err)
 	}
 
 	details, _ := json.Marshal(map[string]any{
@@ -274,7 +336,7 @@ func (h *NetworkHandler) DeleteNetworkInterface(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.DeleteNetworkInterface(c.Context(), nodeName, ifaceName); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to delete network interface: %v", err))
+		return mapNetworkOpError("delete network interface", err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": ifaceName})
@@ -304,7 +366,7 @@ func (h *NetworkHandler) ApplyNetworkConfig(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.ApplyNetworkConfig(c.Context(), nodeName); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to apply network config: %v", err))
+		return mapNetworkOpError("apply network configuration", err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName})
@@ -334,7 +396,7 @@ func (h *NetworkHandler) RevertNetworkConfig(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.RevertNetworkConfig(c.Context(), nodeName); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to revert network config: %v", err))
+		return mapNetworkOpError("revert network configuration", err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName})
@@ -362,7 +424,7 @@ func (h *NetworkHandler) ListClusterFirewallRules(c fiber.Ctx) error {
 
 	rules, err := pxClient.GetClusterFirewallRules(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get firewall rules")
+		return mapProxmoxError(err)
 	}
 
 	return RespondItems(c, rules)
@@ -428,7 +490,7 @@ func (h *NetworkHandler) UpdateClusterFirewallRule(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.UpdateClusterFirewallRule(c.Context(), pos, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update firewall rule")
+		return mapFirewallRuleError(err)
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"position": pos, "action": req.Action, "type": req.Type})
@@ -458,7 +520,7 @@ func (h *NetworkHandler) DeleteClusterFirewallRule(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.DeleteClusterFirewallRule(c.Context(), pos); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete firewall rule")
+		return mapFirewallRuleError(err)
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"position": pos})
@@ -517,7 +579,7 @@ func (h *NetworkHandler) ListVMFirewallRules(c fiber.Ctx) error {
 
 	rules, err := pxClient.GetVMFirewallRules(c.Context(), nodeName, vmid)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get VM firewall rules")
+		return mapProxmoxError(err)
 	}
 
 	return RespondItems(c, rules)
@@ -558,7 +620,7 @@ func (h *NetworkHandler) CreateVMFirewallRule(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.CreateVMFirewallRule(c.Context(), nodeName, vmid, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create VM firewall rule")
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "action": req.Action, "type": req.Type})
@@ -603,7 +665,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.UpdateVMFirewallRule(c.Context(), nodeName, vmid, pos, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update VM firewall rule")
+		return mapFirewallRuleError(err)
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "position": pos, "action": req.Action, "type": req.Type})
@@ -643,7 +705,7 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.DeleteVMFirewallRule(c.Context(), nodeName, vmid, pos); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete VM firewall rule")
+		return mapFirewallRuleError(err)
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "position": pos})
@@ -671,7 +733,7 @@ func (h *NetworkHandler) GetFirewallOptions(c fiber.Ctx) error {
 
 	opts, err := pxClient.GetClusterFirewallOptions(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get firewall options")
+		return mapProxmoxError(err)
 	}
 
 	return c.JSON(opts)
@@ -698,7 +760,7 @@ func (h *NetworkHandler) SetFirewallOptions(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.SetClusterFirewallOptions(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to set firewall options")
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(req)
@@ -1108,7 +1170,7 @@ func (h *NetworkHandler) ApplySDN(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.ApplySDN(c.Context()); err != nil {
-		return mapProxmoxError(err)
+		return mapNetworkOpError("apply SDN configuration", err)
 	}
 
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", "cluster", "sdn_applied", nil)
@@ -1668,7 +1730,7 @@ func (h *NetworkHandler) ListFirewallAliases(c fiber.Ctx) error {
 	}
 	aliases, err := pxClient.GetFirewallAliases(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get firewall aliases")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, aliases)
 }
@@ -1694,7 +1756,7 @@ func (h *NetworkHandler) CreateFirewallAlias(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateFirewallAlias(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create firewall alias")
+		return mapFirewallCreateError("firewall alias", err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": req.Name, "cidr": req.CIDR})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", req.Name, "created", details)
@@ -1720,7 +1782,7 @@ func (h *NetworkHandler) UpdateFirewallAlias(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateFirewallAlias(c.Context(), name, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update firewall alias")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", name, "updated", details)
@@ -1742,7 +1804,7 @@ func (h *NetworkHandler) DeleteFirewallAlias(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteFirewallAlias(c.Context(), name); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete firewall alias")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", name, "deleted", details)
@@ -1766,7 +1828,7 @@ func (h *NetworkHandler) ListFirewallIPSets(c fiber.Ctx) error {
 	}
 	sets, err := pxClient.GetFirewallIPSets(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get IP sets")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, sets)
 }
@@ -1795,7 +1857,7 @@ func (h *NetworkHandler) CreateFirewallIPSet(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateFirewallIPSet(c.Context(), req.Name, req.Comment); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create IP set")
+		return mapFirewallCreateError("IP set", err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": req.Name})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset", req.Name, "created", details)
@@ -1817,7 +1879,7 @@ func (h *NetworkHandler) DeleteFirewallIPSet(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteFirewallIPSet(c.Context(), name); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete IP set")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset", name, "deleted", details)
@@ -1840,7 +1902,7 @@ func (h *NetworkHandler) ListFirewallIPSetEntries(c fiber.Ctx) error {
 	}
 	entries, err := pxClient.GetFirewallIPSetEntries(c.Context(), name)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get IP set entries")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, entries)
 }
@@ -1867,7 +1929,7 @@ func (h *NetworkHandler) AddFirewallIPSetEntry(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.AddFirewallIPSetEntry(c.Context(), name, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to add IP set entry")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"set": name, "cidr": req.CIDR})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", name+"/"+req.CIDR, "created", details)
@@ -1890,7 +1952,7 @@ func (h *NetworkHandler) DeleteFirewallIPSetEntry(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteFirewallIPSetEntry(c.Context(), name, cidr); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete IP set entry")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"set": name, "cidr": cidr})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", name+"/"+cidr, "deleted", details)
@@ -1914,7 +1976,7 @@ func (h *NetworkHandler) ListSecurityGroups(c fiber.Ctx) error {
 	}
 	groups, err := pxClient.GetFirewallSecurityGroups(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get security groups")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, groups)
 }
@@ -1940,7 +2002,7 @@ func (h *NetworkHandler) CreateSecurityGroup(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateFirewallSecurityGroup(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create security group")
+		return mapFirewallCreateError("security group", err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": req.Group})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group", req.Group, "created", details)
@@ -1962,7 +2024,7 @@ func (h *NetworkHandler) DeleteSecurityGroup(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteFirewallSecurityGroup(c.Context(), group); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete security group")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group", group, "deleted", details)
@@ -1985,7 +2047,7 @@ func (h *NetworkHandler) ListSecurityGroupRules(c fiber.Ctx) error {
 	}
 	rules, err := pxClient.GetSecurityGroupRules(c.Context(), group)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get security group rules")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, rules)
 }
@@ -2009,7 +2071,7 @@ func (h *NetworkHandler) CreateSecurityGroupRule(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateSecurityGroupRule(c.Context(), group, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create security group rule")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "action": req.Action})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", group, "rule_created", details)
@@ -2039,7 +2101,7 @@ func (h *NetworkHandler) UpdateSecurityGroupRule(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateSecurityGroupRule(c.Context(), group, pos, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update security group rule")
+		return mapFirewallRuleError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "pos": strconv.Itoa(pos)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", group, "rule_updated", details)
@@ -2065,7 +2127,7 @@ func (h *NetworkHandler) DeleteSecurityGroupRule(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteSecurityGroupRule(c.Context(), group, pos); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete security group rule")
+		return mapFirewallRuleError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "pos": strconv.Itoa(pos)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", group, "rule_deleted", details)
@@ -2095,7 +2157,7 @@ func (h *NetworkHandler) GetFirewallLog(c fiber.Ctx) error {
 	}
 	entries, err := pxClient.GetNodeFirewallLog(c.Context(), nodeName, limit, start)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get firewall log")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, entries)
 }
