@@ -251,7 +251,12 @@ export function SecurityDashboardPage() {
             )}
           </div>
 
-          <NodeUpdatesOverview clusterId={activeClusterId} />
+          {/* Gated like every sibling on this tab: with no clusters
+              activeClusterId is "", which disables the query behind the card
+              and leaves it reporting a read that was never going to happen. */}
+          {activeClusterId && (
+            <NodeUpdatesOverview clusterId={activeClusterId} />
+          )}
 
           {canManageSSH && activeClusterId && (
             <div className="space-y-2">
