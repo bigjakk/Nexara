@@ -38,50 +38,8 @@ func (h *NetworkHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (
 
 // --- Network Interface Endpoints ---
 
-// mapNetworkOpError keeps the operation in the message.
-//
-// mapProxmoxError's connection branch answers with a static "Failed to connect
-// to Proxmox", discarding the client's wrap chain — and these handlers have no
-// onError, so the global MutationCache handler toasts that string verbatim. On
-// apply in particular that leaves the operator with a toast that does not say
-// which operation failed, and apply is the one place where "did it happen?" is
-// the whole question: the PUT can have been delivered and the srvreload worker
-// forked before the link dropped.
-func mapNetworkOpError(op string, err error) error {
-	if err == nil {
-		return nil
-	}
-	mapped := mapProxmoxError(err)
-	var fe *fiber.Error
-	if !errors.As(mapped, &fe) {
-		return mapped
-	}
-	// Two of mapProxmoxError's branches (forbidden, and the unknown-error tail)
-	// embed the whole wrap chain, which the client already stamped with the
-	// operation. Prefixing those would say it twice.
-	if strings.Contains(fe.Message, op) {
-		return mapped
-	}
-	return fiber.NewError(fe.Code, op+": "+fe.Message)
-}
-
-// mapFirewallCreateError gives a duplicate name the same 409 that mapPoolError
-// gives a duplicate pool. PVE reports it as a plain 500 die() string on some
-// endpoints and a 400 param rejection on others; IsAlreadyExistsError matches
-// the text either way, and 409 is the more precise answer to both. Without it
-// the second operator to pick a name is told the cluster is unreachable.
-func mapFirewallCreateError(kind string, err error) error {
-	if err == nil {
-		return nil
-	}
-	if proxmox.IsAlreadyExistsError(err) {
-		return fiber.NewError(fiber.StatusConflict, "A "+kind+" with that name already exists")
-	}
-	return mapProxmoxError(err)
-}
-
 // mapFirewallRuleError adds position-specific handling on top of
-// mapProxmoxError, in the same shape as mapPoolError.
+// mapProxmoxError, in the same shape as mapTemplateError.
 //
 // PVE's rule endpoints die with a plain "no rule at position N" — a bare 500
 // with no rejection map — so mapProxmoxError can only call it a gateway
@@ -245,7 +203,7 @@ func (h *NetworkHandler) CreateNetworkInterface(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.CreateNetworkInterface(c.Context(), nodeName, req); err != nil {
-		return mapNetworkOpError("create network interface", err)
+		return mapNamedOpError("create network interface", err)
 	}
 
 	details, _ := json.Marshal(map[string]any{
@@ -299,7 +257,7 @@ func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.UpdateNetworkInterface(c.Context(), nodeName, ifaceName, req); err != nil {
-		return mapNetworkOpError("update network interface", err)
+		return mapNamedOpError("update network interface", err)
 	}
 
 	details, _ := json.Marshal(map[string]any{
@@ -336,7 +294,7 @@ func (h *NetworkHandler) DeleteNetworkInterface(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.DeleteNetworkInterface(c.Context(), nodeName, ifaceName); err != nil {
-		return mapNetworkOpError("delete network interface", err)
+		return mapNamedOpError("delete network interface", err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": ifaceName})
@@ -366,7 +324,7 @@ func (h *NetworkHandler) ApplyNetworkConfig(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.ApplyNetworkConfig(c.Context(), nodeName); err != nil {
-		return mapNetworkOpError("apply network configuration", err)
+		return mapNamedOpError("apply network configuration", err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName})
@@ -396,7 +354,7 @@ func (h *NetworkHandler) RevertNetworkConfig(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.RevertNetworkConfig(c.Context(), nodeName); err != nil {
-		return mapNetworkOpError("revert network configuration", err)
+		return mapNamedOpError("revert network configuration", err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName})
@@ -1170,7 +1128,7 @@ func (h *NetworkHandler) ApplySDN(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.ApplySDN(c.Context()); err != nil {
-		return mapNetworkOpError("apply SDN configuration", err)
+		return mapNamedOpError("apply SDN configuration", err)
 	}
 
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", "cluster", "sdn_applied", nil)
@@ -1756,7 +1714,7 @@ func (h *NetworkHandler) CreateFirewallAlias(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateFirewallAlias(c.Context(), req); err != nil {
-		return mapFirewallCreateError("firewall alias", err)
+		return mapDuplicateNameError("A firewall alias with that name already exists", err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": req.Name, "cidr": req.CIDR})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", req.Name, "created", details)
@@ -1857,7 +1815,7 @@ func (h *NetworkHandler) CreateFirewallIPSet(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateFirewallIPSet(c.Context(), req.Name, req.Comment); err != nil {
-		return mapFirewallCreateError("IP set", err)
+		return mapDuplicateNameError("An IP set with that name already exists", err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": req.Name})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset", req.Name, "created", details)
@@ -2002,7 +1960,7 @@ func (h *NetworkHandler) CreateSecurityGroup(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateFirewallSecurityGroup(c.Context(), req); err != nil {
-		return mapFirewallCreateError("security group", err)
+		return mapDuplicateNameError("A security group with that name already exists", err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": req.Group})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group", req.Group, "created", details)

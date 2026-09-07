@@ -224,10 +224,15 @@ func TestMapProxmoxError_WrappedAPIErrorKeepsSentinelPrecedence(t *testing.T) {
 	}
 }
 
-// PVE reports a duplicate pool as a plain 500 with a die() string, so it
-// carries no rejection map and mapProxmoxError alone can only call it a
-// gateway failure. It is the operator's chosen name that is at fault.
-func TestMapPoolError(t *testing.T) {
+// The conflict sentence is supplied by each caller; these tests use the pool
+// wording throughout.
+const poolConflict = "A pool with that ID already exists"
+
+// PVE reports a duplicate as a plain 500 with a die() string, so it carries no
+// rejection map and mapProxmoxError alone can only call it a gateway failure.
+// It is the operator's chosen name that is at fault.
+
+func TestMapDuplicateNameError(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      error
@@ -264,12 +269,21 @@ func TestMapPoolError(t *testing.T) {
 			err:      proxmox.ErrNotFound,
 			wantCode: fiber.StatusNotFound,
 		},
+		{
+			// PVE's HA rules say "already defined", which IsAlreadyExistsError
+			// does not match — which is why CreateHARule is deliberately not
+			// wired to this helper. Pinned so that loosening the predicate
+			// cannot quietly turn HA-rule failures into a wrong 409.
+			name:     "already defined is not already exists",
+			err:      &proxmox.APIError{StatusCode: 500, Message: "HA rule 'r1' already defined"},
+			wantCode: fiber.StatusBadGateway,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var fe *fiber.Error
-			if !errors.As(mapPoolError(tt.err), &fe) {
+			if !errors.As(mapDuplicateNameError(poolConflict, tt.err), &fe) {
 				t.Fatal("want *fiber.Error")
 			}
 			if fe.Code != tt.wantCode {
@@ -281,8 +295,8 @@ func TestMapPoolError(t *testing.T) {
 		})
 	}
 
-	if mapPoolError(nil) != nil {
-		t.Error("mapPoolError(nil) should stay nil")
+	if mapDuplicateNameError(poolConflict, nil) != nil {
+		t.Error("mapDuplicateNameError(poolConflict, nil) should stay nil")
 	}
 }
 
@@ -354,7 +368,7 @@ func TestMapFirewallRuleError(t *testing.T) {
 // These handlers have no onError, so the message is toasted verbatim. The
 // connection branch of mapProxmoxError is static, so without this wrapper a
 // failed apply produces a toast that never mentions the apply.
-func TestMapNetworkOpError(t *testing.T) {
+func TestMapNamedOpError(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      error
@@ -380,21 +394,31 @@ func TestMapNetworkOpError(t *testing.T) {
 			wantMsg:  "apply network configuration: Resource not found on Proxmox",
 		},
 		{
-			// The forbidden branch returns the whole wrap chain, which the
-			// client already stamped with the operation — prefixing it here
-			// would say the operation twice.
-			name: "an operation already named in the message is not repeated",
-			err: fmt.Errorf("apply network configuration on %s: %w", "pve-01",
+			// The forbidden branch builds its message from err.Error(), so it
+			// already carries the client's wrap. Note the client says "apply
+			// network config on %s" while the handler passes "apply network
+			// configuration": the two wordings live in different files and do
+			// not agree, which is exactly why this decision is made on the
+			// sentinel and not by looking for the operation in the text.
+			name: "a message built from the wrap chain is not prefixed",
+			err: fmt.Errorf("apply network config on %s: %w", "pve-01",
 				proxmox.ErrForbidden),
 			wantCode: fiber.StatusForbidden,
-			wantMsg:  "Proxmox API: apply network configuration on pve-01: forbidden",
+			wantMsg:  "Proxmox API: apply network config on pve-01: forbidden",
+		},
+		{
+			// Same shape for the unknown-error tail.
+			name:     "an unrecognised error keeps its own chain",
+			err:      fmt.Errorf("shutdown node %s: %w", "pve-01", errors.New("boom")),
+			wantCode: fiber.StatusInternalServerError,
+			wantMsg:  "Proxmox operation failed: shutdown node pve-01: boom",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var fe *fiber.Error
-			if !errors.As(mapNetworkOpError("apply network configuration", tt.err), &fe) {
+			if !errors.As(mapNamedOpError("apply network configuration", tt.err), &fe) {
 				t.Fatal("want *fiber.Error")
 			}
 			if fe.Code != tt.wantCode {
@@ -406,7 +430,7 @@ func TestMapNetworkOpError(t *testing.T) {
 		})
 	}
 
-	if mapNetworkOpError("apply network configuration", nil) != nil {
-		t.Error("mapNetworkOpError(op, nil) should stay nil")
+	if mapNamedOpError("apply network configuration", nil) != nil {
+		t.Error("mapNamedOpError(op, nil) should stay nil")
 	}
 }

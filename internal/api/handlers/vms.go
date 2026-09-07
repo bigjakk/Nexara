@@ -1861,54 +1861,6 @@ func (h *VMHandler) GetGuestAgentInfo(c fiber.Ctx) error {
 	})
 }
 
-// mapProxmoxError converts a Proxmox client error to an appropriate Fiber error.
-func mapProxmoxError(err error) error {
-	// The client refused to send this — it never reached Proxmox, so reporting
-	// it as a Proxmox failure (500) would misdirect the operator. The message is
-	// safe to surface: it describes their own input.
-	if errors.Is(err, proxmox.ErrInvalidInput) {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
-	}
-	if errors.Is(err, proxmox.ErrNotFound) {
-		return fiber.NewError(fiber.StatusNotFound, "Resource not found on Proxmox")
-	}
-	if errors.Is(err, proxmox.ErrForbidden) {
-		if unwrapped := err.Error(); unwrapped != "" && unwrapped != "forbidden" {
-			return fiber.NewError(fiber.StatusForbidden, "Proxmox API: "+unwrapped)
-		}
-		return fiber.NewError(fiber.StatusForbidden, "Proxmox API permission denied")
-	}
-	if errors.Is(err, proxmox.ErrConnectionFailed) {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to connect to Proxmox")
-	}
-	var apiErr *proxmox.APIError
-	if errors.As(err, &apiErr) {
-		// Proxmox rejected the operator's own parameters, so this is a client
-		// error, not a gateway one. checkStatus keeps the rejection map on the
-		// error and has already flattened it into Message in a stable order.
-		if apiErr.IsParameterRejection() {
-			return fiber.NewError(fiber.StatusBadRequest, apiErr.Message)
-		}
-		// Everything else arrives as Proxmox's JSON envelope with the human
-		// sentence in `message` — "binary not installed: /usr/bin/ceph-mon\n"
-		// and the like. It is surfaced to the operator verbatim (see
-		// describeError in ClusterCephTab.tsx), so hand over the sentence
-		// rather than the envelope around it.
-		var pxResp struct {
-			Message string `json:"message"`
-		}
-		if jsonErr := json.Unmarshal([]byte(apiErr.Message), &pxResp); jsonErr == nil {
-			if msg := strings.TrimSpace(pxResp.Message); msg != "" {
-				return fiber.NewError(fiber.StatusBadGateway, msg)
-			}
-		}
-		// Not JSON, or JSON carrying nothing to say: the raw text is still the
-		// most informative thing available.
-		return fiber.NewError(fiber.StatusBadGateway, apiErr.Message)
-	}
-	return fiber.NewError(fiber.StatusInternalServerError, "Proxmox operation failed: "+err.Error())
-}
-
 // --- ISO Listing ---
 
 type isoResponse struct {

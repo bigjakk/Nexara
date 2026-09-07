@@ -360,7 +360,7 @@ func (h *NodeHandler) GetNodeDNS(c fiber.Ctx) error {
 	}
 	dns, err := pxClient.GetNodeDNS(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node DNS configuration")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(dns)
 }
@@ -393,7 +393,7 @@ func (h *NodeHandler) SetNodeDNS(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.SetNodeDNS(c.Context(), nodeName, req.Search, req.DNS1, req.DNS2, req.DNS3); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to set node DNS configuration")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(req)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "set_dns", details)
@@ -415,7 +415,7 @@ func (h *NodeHandler) GetNodeTime(c fiber.Ctx) error {
 	}
 	t, err := pxClient.GetNodeTime(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node time configuration")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(t)
 }
@@ -445,7 +445,7 @@ func (h *NodeHandler) SetNodeTimezone(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.SetNodeTimezone(c.Context(), nodeName, req.Timezone); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to set node timezone")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(req)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "set_timezone", details)
@@ -466,7 +466,7 @@ func (h *NodeHandler) ShutdownNode(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.ShutdownNode(c.Context(), nodeName); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to shutdown node")
+		return mapNamedOpError("shut down node", err)
 	}
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "shutdown", nil)
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -486,7 +486,7 @@ func (h *NodeHandler) RebootNode(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.RebootNode(c.Context(), nodeName); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to reboot node")
+		return mapNamedOpError("reboot node", err)
 	}
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "reboot", nil)
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -529,7 +529,7 @@ func (h *NodeHandler) EvacuateNode(c fiber.Ctx) error {
 	// Get cluster nodes.
 	clusterNodes, err := pxClient.GetNodes(ctx)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to get cluster nodes: %v", err))
+		return mapProxmoxError(err)
 	}
 
 	// Build workload map for DRS-aware selection.

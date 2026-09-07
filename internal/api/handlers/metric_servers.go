@@ -42,7 +42,7 @@ func (h *MetricServerHandler) ListServers(c fiber.Ctx) error {
 	}
 	servers, err := pxClient.GetMetricServers(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get metric servers")
+		return mapProxmoxError(err)
 	}
 	// The InfluxDB token is a write-only credential — never return it on a read.
 	for i := range servers {
@@ -72,7 +72,7 @@ func (h *MetricServerHandler) CreateServer(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateMetricServer(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create metric server")
+		return mapDuplicateNameError("A metric server with that ID already exists", err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": req.ID, "type": req.Type})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", req.ID, "created", details)
@@ -95,7 +95,7 @@ func (h *MetricServerHandler) GetServer(c fiber.Ctx) error {
 	}
 	server, err := pxClient.GetMetricServer(c.Context(), serverID)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get metric server")
+		return mapProxmoxError(err)
 	}
 	// The InfluxDB token is a write-only credential — never return it on a read.
 	if server != nil {
@@ -123,7 +123,7 @@ func (h *MetricServerHandler) UpdateServer(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateMetricServer(c.Context(), serverID, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update metric server")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": serverID})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", serverID, "updated", details)
@@ -145,7 +145,7 @@ func (h *MetricServerHandler) DeleteServer(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteMetricServer(c.Context(), serverID); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete metric server")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": serverID})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", serverID, "deleted", details)

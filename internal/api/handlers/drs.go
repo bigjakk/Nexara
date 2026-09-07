@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -683,7 +682,7 @@ func (h *DRSHandler) ListHARules(c fiber.Ctx) error {
 
 	haRules, err := client.GetHARules(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to fetch HA rules: %v", err))
+		return mapProxmoxError(err)
 	}
 
 	resp := make([]drsRuleResponse, 0, len(haRules))
@@ -758,7 +757,7 @@ func (h *DRSHandler) CreateHARule(c fiber.Ctx) error {
 	}
 
 	if err := client.CreateHARule(c.Context(), haRuleType, params); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to create HA rule: %v", err))
+		return mapProxmoxError(err)
 	}
 
 	haDetails, _ := json.Marshal(map[string]interface{}{"rule_name": req.RuleName, "rule_type": req.RuleType, "vm_ids": req.VMIDs, "ha_type": haRuleType})
@@ -788,7 +787,7 @@ func (h *DRSHandler) DeleteHARule(c fiber.Ctx) error {
 	}
 
 	if err := client.DeleteHARule(c.Context(), ruleName); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to delete HA rule: %v", err))
+		return mapProxmoxError(err)
 	}
 
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", ruleName, "ha_rule_deleted", nil)

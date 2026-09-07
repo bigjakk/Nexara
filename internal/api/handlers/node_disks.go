@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"fmt"
-
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/gofiber/fiber/v3"
 )
@@ -37,7 +35,7 @@ func (h *NodeHandler) ListLiveDisks(c fiber.Ctx) error {
 	}
 	disks, err := pxClient.GetNodeDisks(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list disks")
+		return mapProxmoxError(err)
 	}
 	resp := make([]liveDiskResponse, len(disks))
 	for i, d := range disks {
@@ -77,7 +75,7 @@ func (h *NodeHandler) GetDiskSMART(c fiber.Ctx) error {
 	}
 	smart, err := pxClient.GetDiskSMART(c.Context(), nodeName, disk)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get SMART data")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(smart)
 }
@@ -99,7 +97,7 @@ func (h *NodeHandler) ListZFSPools(c fiber.Ctx) error {
 	}
 	pools, err := pxClient.GetNodeZFSPools(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list ZFS pools")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, pools)
 }
@@ -140,7 +138,7 @@ func (h *NodeHandler) CreateZFSPool(c fiber.Ctx) error {
 		Ashift:      req.Ashift,
 	})
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to create ZFS pool: %v", err))
+		return mapDuplicateNameError("A ZFS pool with that name already exists", err)
 	}
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
@@ -176,7 +174,7 @@ func (h *NodeHandler) DeleteZFSPool(c fiber.Ctx) error {
 	}
 	upid, err := pxClient.DeleteNodeZFSPool(c.Context(), nodeName, poolName, cleanupDisks, cleanupConfig)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy ZFS pool: %v", err))
+		return mapProxmoxError(err)
 	}
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
@@ -208,7 +206,7 @@ func (h *NodeHandler) ListLVM(c fiber.Ctx) error {
 	}
 	vgs, err := pxClient.GetNodeLVM(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list LVM volume groups")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, vgs)
 }
@@ -245,7 +243,7 @@ func (h *NodeHandler) CreateLVM(c fiber.Ctx) error {
 		AddStorage: req.AddStorage,
 	})
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create LVM volume group")
+		return mapDuplicateNameError("A volume group or storage entry with that name already exists on this node", err)
 	}
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
@@ -281,7 +279,7 @@ func (h *NodeHandler) DeleteLVM(c fiber.Ctx) error {
 	}
 	upid, err := pxClient.DeleteNodeLVM(c.Context(), nodeName, vgName, cleanupDisks, cleanupConfig)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy LVM volume group: %v", err))
+		return mapProxmoxError(err)
 	}
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
@@ -313,7 +311,7 @@ func (h *NodeHandler) ListLVMThin(c fiber.Ctx) error {
 	}
 	pools, err := pxClient.GetNodeLVMThin(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list LVM thin pools")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, pools)
 }
@@ -350,7 +348,7 @@ func (h *NodeHandler) CreateLVMThin(c fiber.Ctx) error {
 		AddStorage: req.AddStorage,
 	})
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create LVM thin pool")
+		return mapDuplicateNameError("A thin pool or storage entry with that name already exists on this node", err)
 	}
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
@@ -390,7 +388,7 @@ func (h *NodeHandler) DeleteLVMThin(c fiber.Ctx) error {
 	}
 	upid, err := pxClient.DeleteNodeLVMThin(c.Context(), nodeName, poolName, volumeGroup, cleanupDisks, cleanupConfig)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy LVM-Thin pool: %v", err))
+		return mapProxmoxError(err)
 	}
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
@@ -422,7 +420,7 @@ func (h *NodeHandler) ListDirectories(c fiber.Ctx) error {
 	}
 	dirs, err := pxClient.GetNodeDirectories(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list directories")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, dirs)
 }
@@ -461,7 +459,7 @@ func (h *NodeHandler) CreateDirectory(c fiber.Ctx) error {
 		AddStorage: req.AddStorage,
 	})
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create directory")
+		return mapDuplicateNameError("A directory, mount unit, or storage entry with that name already exists on this node", err)
 	}
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
@@ -504,7 +502,7 @@ func (h *NodeHandler) InitializeGPT(c fiber.Ctx) error {
 	}
 	upid, err := pxClient.InitializeGPT(c.Context(), nodeName, req.Disk)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to initialize disk with GPT")
+		return mapNamedOpError("initialize disk", err)
 	}
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
@@ -541,7 +539,7 @@ func (h *NodeHandler) WipeDisk(c fiber.Ctx) error {
 	}
 	upid, err := pxClient.WipeDisk(c.Context(), nodeName, req.Disk)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to wipe disk")
+		return mapNamedOpError("wipe disk", err)
 	}
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
