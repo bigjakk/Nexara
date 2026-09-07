@@ -712,7 +712,7 @@ func (h *RollingUpdateHandler) PreviewPackages(c fiber.Ctx) error {
 
 	updates, err := client.GetNodeAptUpdates(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get package updates")
+		return mapProxmoxError(err)
 	}
 
 	return RespondItems(c, updates)
