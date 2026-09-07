@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -38,6 +37,11 @@ func (h *NetworkHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (
 
 // --- Network Interface Endpoints ---
 
+// firewallRuleMissingPhrases is the one die PVE's rule endpoints use for a
+// position that is no longer there. Deliberately just the one: "no such alias"
+// is a different object on a neighbouring endpoint and must keep its 502.
+var firewallRuleMissingPhrases = []string{"no rule at position"}
+
 // mapFirewallRuleError adds position-specific handling on top of
 // mapProxmoxError, in the same shape as mapTemplateError.
 //
@@ -48,13 +52,8 @@ func (h *NetworkHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (
 // 404 says. Nexara sends no digest, so PVE's assert_if_modified 409 never
 // fires and 404 is the right code here.
 func mapFirewallRuleError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if strings.Contains(strings.ToLower(err.Error()), "no rule at position") {
-		return fiber.NewError(fiber.StatusNotFound, "No firewall rule at that position — the list may be out of date")
-	}
-	return mapProxmoxError(err)
+	return mapMissingObjectError("No firewall rule at that position — the list may be out of date",
+		firewallRuleMissingPhrases, err)
 }
 
 // ListNetworkInterfaces handles GET /clusters/:cluster_id/networks.

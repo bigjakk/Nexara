@@ -550,6 +550,36 @@ func (h *HAHandler) DeleteGroup(c fiber.Ctx) error {
 
 // --- HA Rules (PVE 8.3+) ---
 
+// haRuleMissingPhrases are the die() strings PVE uses for an HA rule that is no
+// longer there, from pve-ha-manager src/PVE/API2/HA/Rules.pm: update_rule says
+// "HA rule '<id>' does not exist", and read_rule — GET {rule}, which Nexara
+// does not call, since ListRules lists and DeleteRule filters that list — says
+// "no such ha rule '<id>'" via $get_api_ha_rule.
+//
+// delete_rule is deliberately absent. It runs an unconditional
+// `delete $rules->{ids}->{$ruleid}`, and deleting a key that is not there is a
+// no-op in Perl, so PVE answers 200 for an already-deleted rule and DeleteRule
+// has no error to map. Adding one here would be unreachable code.
+//
+// Two near-misses to keep in view if PVE ever rewords, because both would be
+// actively wrong as a 404 — they describe a rule that is present:
+// "cannot use non-existent node(s) …" and "cannot use unmanaged resource(s) …"
+// (a typo'd node or guest on this same PUT) escape only because neither is
+// spelled "does not exist"; and update_rule's
+// delete_from_config can die "no such option '<k>'" (pve-common
+// SectionConfig.pm), which is why this set names "no such ha rule" in full
+// rather than "no such". UpdateHARuleParams has no delete field today, so that
+// one is out of reach — adding one brings it into range.
+var haRuleMissingPhrases = []string{"does not exist", "no such ha rule"}
+
+// mapHARuleError is the HA-rule half of mapMissingObjectError, in the same
+// wrapper shape as mapFirewallRuleError so the sentence, the phrase set and the
+// handlers that use them are wired together in one testable place.
+func mapHARuleError(err error) error {
+	return mapMissingObjectError("No HA rule by that name — the list may be out of date",
+		haRuleMissingPhrases, err)
+}
+
 // ListRules handles GET /clusters/:cluster_id/ha/rules.
 func (h *HAHandler) ListRules(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -656,7 +686,7 @@ func (h *HAHandler) UpdateRule(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateHARule(c.Context(), rule, req.Type, req.UpdateHARuleParams); err != nil {
-		return mapProxmoxError(err)
+		return mapHARuleError(err)
 	}
 	detailMap := map[string]any{"rule": rule, "type": req.Type}
 	if req.Resources != nil {
@@ -703,8 +733,11 @@ func (h *HAHandler) DeleteRule(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	// Snapshot the rule before deletion so the audit entry has context.
-	// Proxmox has no GET /cluster/ha/rules/{rule} endpoint, so we list and filter.
+	// Snapshot the rule before deletion so the audit entry has context. PVE does
+	// have a GET /cluster/ha/rules/{rule} (Rules.pm read_rule, present for as
+	// long as the rules API has been), but the client has no method for it, so
+	// this lists and filters. Note it returns nil both when the rule is absent
+	// and when the list read failed.
 	snapshot := findHARule(c.Context(), pxClient, rule)
 	if err := pxClient.DeleteHARule(c.Context(), rule); err != nil {
 		return mapProxmoxError(err)

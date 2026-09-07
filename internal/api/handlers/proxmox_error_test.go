@@ -327,8 +327,11 @@ func TestMapFirewallRuleError(t *testing.T) {
 			wantCode: fiber.StatusNotFound,
 		},
 		{
-			// A different plain-500 die must stay a gateway error. This is the
-			// case that fails if the match is ever loosened to "no rule".
+			// A different plain-500 die must stay a gateway error. Note this
+			// fixture does not itself contain "no rule", so it is not the guard
+			// against that particular loosening — the cross-set test_RejectEachOthersNegatives
+			// runs the "no rule with that name" fixture against this set, which
+			// is the one that fails if the match is shortened.
 			name:     "an unrelated die string is left alone",
 			err:      &proxmox.APIError{StatusCode: 500, Message: "no such alias"},
 			wantCode: fiber.StatusBadGateway,
@@ -432,5 +435,335 @@ func TestMapNamedOpError(t *testing.T) {
 
 	if mapNamedOpError("apply network configuration", nil) != nil {
 		t.Error("mapNamedOpError(op, nil) should stay nil")
+	}
+}
+
+// The die strings below were read out of PVE source, not inferred: HA rules
+// from pve-ha-manager src/PVE/API2/HA/Rules.pm, metric servers from pve-manager
+// PVE/API2/Cluster/MetricServer.pm, and the delete-path croak from pve-common
+// src/PVE/SectionConfig.pm. Each arrives as a bare 500 with no rejection map,
+// so mapProxmoxError alone can only call it a gateway failure.
+func TestMapMissingObjectError(t *testing.T) {
+	const haMissing = "No HA rule by that name — the list may be out of date"
+	const msMissing = "No metric server with that ID — the list may be out of date"
+
+	tests := []struct {
+		name     string
+		mapper   func(error) error
+		err      error
+		wantCode int
+		wantMsg  string
+	}{
+		{
+			// update_rule: `my $rule = $rules->{ids}->{$ruleid} || die ...`
+			name:     "a stale HA rule name is not found, not a gateway failure",
+			mapper:   mapHARuleError,
+			err:      &proxmox.APIError{StatusCode: 500, Message: "HA rule 'r1' does not exist"},
+			wantCode: fiber.StatusNotFound,
+			wantMsg:  haMissing,
+		},
+		{
+			// The shape production really produces: the envelope
+			// parseProxmoxError falls back to, inside the client's wrap. PVE
+			// prefixes it too — lock_ha_domain turns the die into "update HA
+			// rules failed: HA rule 'r1' does not exist" — which is why the
+			// match is a substring rather than a whole-message compare.
+			name:   "recognised through the envelope and PVE's own lock prefix",
+			mapper: mapHARuleError,
+			err: fmt.Errorf("update ha rule %s: %w", "r1",
+				&proxmox.APIError{StatusCode: 500, Message: `{"data":null,"message":"update HA rules failed: HA rule 'r1' does not exist\n"}`}),
+			wantCode: fiber.StatusNotFound,
+			wantMsg:  haMissing,
+		},
+		{
+			// read_rule, via $get_api_ha_rule. GET /cluster/ha/rules/{rule}
+			// exists, but the client has no method for it — ListRules lists and
+			// DeleteRule filters — so this phrase is carried ahead of a caller.
+			// Pinned so it cannot rot unnoticed the way "already defined" would
+			// have on mapDuplicateNameError.
+			name:     "the single-rule read wording is covered too",
+			mapper:   mapHARuleError,
+			err:      &proxmox.APIError{StatusCode: 500, Message: "no such ha rule 'r1'"},
+			wantCode: fiber.StatusNotFound,
+			wantMsg:  haMissing,
+		},
+		{
+			// Rules.pm dies this when HA groups have not been migrated yet. It
+			// is a real cluster-side state, not a stale list, and 404 would tell
+			// the operator to go looking for a rule that is sitting right there.
+			name:     "an unrelated HA die string is left alone",
+			mapper:   mapHARuleError,
+			err:      &proxmox.APIError{StatusCode: 500, Message: "cannot update ha rule: ha groups have not been migrated yet"},
+			wantCode: fiber.StatusBadGateway,
+		},
+		{
+			name:     "metric server read",
+			mapper:   mapMetricServerError,
+			err:      &proxmox.APIError{StatusCode: 500, Message: "status server entry 'influx1' does not exist"},
+			wantCode: fiber.StatusNotFound,
+			wantMsg:  msMissing,
+		},
+		{
+			name:     "metric server update",
+			mapper:   mapMetricServerError,
+			err:      &proxmox.APIError{StatusCode: 500, Message: "no such server 'influx1'"},
+			wantCode: fiber.StatusNotFound,
+			wantMsg:  msMissing,
+		},
+		{
+			// PVE's delete sub never checks; the absent entry's undef type
+			// reaches SectionConfig::lookup, which croaks — so the croak, with
+			// the file and line croak appends, is what a stale delete produces.
+			name:     "metric server delete croaks instead of checking",
+			mapper:   mapMetricServerError,
+			err:      &proxmox.APIError{StatusCode: 500, Message: "cannot lookup undefined type! at /usr/share/perl5/PVE/API2/Cluster/MetricServer.pm line 295."},
+			wantCode: fiber.StatusNotFound,
+			wantMsg:  msMissing,
+		},
+		{
+			// The false positive this predicate is shaped to avoid. PVE's
+			// update sub dies BOTH "no such server '$id'" and "no such option
+			// '$k'"; the second is the operator's own delete= parameter, and
+			// answering 404 would send them hunting for a server that exists.
+			// This is the case that fails if the match is loosened to "no such".
+			name:     "no such option is a parameter mistake, not a missing server",
+			mapper:   mapMetricServerError,
+			err:      &proxmox.APIError{StatusCode: 500, Message: "no such option 'bogus'"},
+			wantCode: fiber.StatusBadGateway,
+		},
+		{
+			name:     "a rejected parameter still reaches the shared mapping",
+			mapper:   mapMetricServerError,
+			err:      &proxmox.APIError{StatusCode: 400, Message: "port: invalid format", Fields: map[string]string{"port": "invalid format"}},
+			wantCode: fiber.StatusBadRequest,
+		},
+		{
+			name:     "an unreachable cluster is still a gateway failure",
+			mapper:   mapMetricServerError,
+			err:      proxmox.ErrConnectionFailed,
+			wantCode: fiber.StatusBadGateway,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fe *fiber.Error
+			if !errors.As(tt.mapper(tt.err), &fe) {
+				t.Fatal("want *fiber.Error")
+			}
+			if fe.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", fe.Code, tt.wantCode)
+			}
+			if tt.wantMsg != "" && fe.Message != tt.wantMsg {
+				t.Errorf("message = %q, want %q", fe.Message, tt.wantMsg)
+			}
+		})
+	}
+
+	for name, mapper := range map[string]func(error) error{
+		"mapHARuleError":       mapHARuleError,
+		"mapMetricServerError": mapMetricServerError,
+	} {
+		if mapper(nil) != nil {
+			t.Errorf("%s(nil) should stay nil", name)
+		}
+	}
+
+	// The helper itself, not through a wrapper: an empty set must never match,
+	// so a caller that forgets its phrases degrades to the old 502 rather than
+	// answering 404 to everything.
+	empty := mapMissingObjectError("unused", nil,
+		&proxmox.APIError{StatusCode: 500, Message: "no such server 'influx1'"})
+	var fe *fiber.Error
+	if !errors.As(empty, &fe) || fe.Code != fiber.StatusBadGateway {
+		t.Errorf("empty phrase set: got %v, want a 502", empty)
+	}
+	if mapMissingObjectError("unused", metricServerMissingPhrases, nil) != nil {
+		t.Error("mapMissingObjectError(..., nil) should stay nil")
+	}
+}
+
+// Every phrase set must reject every other set's negatives.
+//
+// Without this, each set is only ever tested against the negatives its own
+// author thought of, and a later loosening passes: "no such option '<k>'" and
+// "no such alias" were pinned only against the metric-server set, so shortening
+// haRuleMissingPhrases to "no such" broke nothing. That is not hypothetical —
+// PVE's update_rule reaches SectionConfig's delete_from_config, which dies
+// "no such option '<k>'" on the very same PUT.
+//
+// Each fixture is a real or realistic PVE die that means something other than
+// "the object you named is gone", so a 404 would be wrong for all of them
+// whichever endpoint produced it.
+func TestMissingObjectPhraseSets_RejectEachOthersNegatives(t *testing.T) {
+	sets := map[string][]string{
+		"haRuleMissingPhrases":       haRuleMissingPhrases,
+		"metricServerMissingPhrases": metricServerMissingPhrases,
+		"firewallRuleMissingPhrases": firewallRuleMissingPhrases,
+	}
+	negatives := []string{
+		// SectionConfig delete_from_config — the operator's own delete= param.
+		"no such option 'bogus'",
+		// A neighbouring firewall object; guards a shortening to "no such".
+		"no such alias",
+		// Guards a shortening of "no rule at position" to "no rule".
+		"no rule with that name",
+		// Rules.pm, a real cluster state rather than a stale list.
+		"cannot update ha rule: ha groups have not been migrated yet",
+		// Rules.pm's two param validators. The rule is right there; only the
+		// node or the resource is wrong, so a 404 naming the rule would be
+		// actively misleading. The first guards "does not exist" being widened
+		// to "exist"; the second is pinned because it is the sibling check on
+		// the same PUT and the likeliest place for PVE to reword into range.
+		"cannot use non-existent node(s) pve-01.",
+		"cannot use unmanaged resource(s) vm:999.",
+		// SectionConfig lookup's *other* branch: a defined but unknown type is
+		// a real config problem, not a missing id.
+		"unknown section type 'influxdb'",
+	}
+
+	for name, phrases := range sets {
+		for _, msg := range negatives {
+			t.Run(name+"/"+msg, func(t *testing.T) {
+				err := &proxmox.APIError{StatusCode: 500, Message: msg}
+
+				var fe *fiber.Error
+				if !errors.As(mapMissingObjectError("should not be used", phrases, err), &fe) {
+					t.Fatal("want *fiber.Error")
+				}
+				if fe.Code != fiber.StatusBadGateway {
+					t.Errorf("status = %d, want %d — %s matched a die that is not a missing object",
+						fe.Code, fiber.StatusBadGateway, name)
+				}
+			})
+		}
+	}
+}
+
+// Only Proxmox's own message is scanned, never the client's wrap around it.
+//
+// The wrap interpolates the id off the request path — client_admin.go's
+// "get metric server %s", client_ha.go's "update ha rule %s" — so scanning the
+// whole chain would let the caller's own input decide the status code. PVE
+// types these ids as pve-configid and would reject this one, so the fixture is
+// synthetic; the point is that the match should not depend on that.
+func TestMapMissingObjectError_IgnoresTheClientsWrap(t *testing.T) {
+	err := fmt.Errorf("get metric server %s: %w", "no such server",
+		&proxmox.APIError{StatusCode: 500, Message: "unable to read status.cfg"})
+
+	var fe *fiber.Error
+	if !errors.As(mapMetricServerError(err), &fe) {
+		t.Fatal("want *fiber.Error")
+	}
+	if fe.Code != fiber.StatusBadGateway {
+		t.Errorf("status = %d, want %d — the phrase came from the caller's id, not from Proxmox",
+			fe.Code, fiber.StatusBadGateway)
+	}
+}
+
+// A phrase only ever meets a lowercased message, so mapMissingObjectError's
+// strings.ToLower is what makes PVE's own capitalisation match. Nothing else
+// pins it: every other fixture is already lowercase where it matters, so
+// deleting that call would leave the suite green.
+func TestMapMissingObjectError_MatchIsCaseInsensitive(t *testing.T) {
+	err := &proxmox.APIError{StatusCode: 500, Message: "Status Server Entry 'influx1' Does Not Exist"}
+
+	var fe *fiber.Error
+	if !errors.As(mapMetricServerError(err), &fe) {
+		t.Fatal("want *fiber.Error")
+	}
+	if fe.Code != fiber.StatusNotFound {
+		t.Errorf("status = %d, want %d", fe.Code, fiber.StatusNotFound)
+	}
+}
+
+// The phrase scan runs only on the 502-from-APIError branch, so a status
+// mapProxmoxError already got right cannot be overwritten by a phrase that
+// happens to appear in the text.
+//
+// This is not theoretical for the forbidden case: ErrForbidden's message is the
+// raw response body, and PVE has 403s worded "pool 'x' does not exist"
+// (pve-access-control RPCEnvironment.pm). Answering 404 "the list may be out of
+// date" would send the operator looking for a missing object when what they
+// actually lack is a privilege.
+func TestMapMissingObjectError_DoesNotOutrankABetterStatus(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantMsg  string
+	}{
+		{
+			name:     "a forbidden body carrying the phrase keeps its 403",
+			err:      fmt.Errorf("%w: pool 'web-tier' does not exist", proxmox.ErrForbidden),
+			wantCode: fiber.StatusForbidden,
+			wantMsg:  "Proxmox API: forbidden: pool 'web-tier' does not exist",
+		},
+		{
+			// The 400 also carries Fields, which the 404 would discard along
+			// with the status — the operator would lose the field list too.
+			name: "a rejected parameter carrying the phrase keeps its 400",
+			err: &proxmox.APIError{
+				StatusCode: 400,
+				Message:    "id: status server entry 'x' does not exist",
+				Fields:     map[string]string{"id": "status server entry 'x' does not exist"},
+			},
+			wantCode: fiber.StatusBadRequest,
+			wantMsg:  "id: status server entry 'x' does not exist",
+		},
+		{
+			name:     "input the client refused to send keeps its 400",
+			err:      fmt.Errorf("%w: server id %q does not exist", proxmox.ErrInvalidInput, "a/b"),
+			wantCode: fiber.StatusBadRequest,
+		},
+		{
+			// Both are 502, so this one is about the message, not the status:
+			// an unreachable cluster must not be relabelled as a stale list.
+			name:     "an unreachable cluster keeps its own message",
+			err:      fmt.Errorf("%w: no such server", proxmox.ErrConnectionFailed),
+			wantCode: fiber.StatusBadGateway,
+			wantMsg:  "Failed to connect to Proxmox",
+		},
+		{
+			name:     "an unrecognised error keeps its 500",
+			err:      fmt.Errorf("marshal params: %w", errors.New("no such server")),
+			wantCode: fiber.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fe *fiber.Error
+			if !errors.As(mapMetricServerError(tt.err), &fe) {
+				t.Fatal("want *fiber.Error")
+			}
+			if fe.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", fe.Code, tt.wantCode)
+			}
+			if tt.wantMsg != "" && fe.Message != tt.wantMsg {
+				t.Errorf("message = %q, want %q", fe.Message, tt.wantMsg)
+			}
+		})
+	}
+}
+
+// The phrases are matched case-insensitively against a lowercased message, so a
+// phrase written with a capital could never match anything. PVE's HA wording
+// ("HA rule '<id>' does not exist") is exactly the kind that invites one.
+func TestMissingObjectPhrasesAreLowercase(t *testing.T) {
+	sets := map[string][]string{
+		"haRuleMissingPhrases":       haRuleMissingPhrases,
+		"metricServerMissingPhrases": metricServerMissingPhrases,
+		"firewallRuleMissingPhrases": firewallRuleMissingPhrases,
+	}
+	for name, phrases := range sets {
+		if len(phrases) == 0 {
+			t.Errorf("%s is empty — every caller of it is dead code", name)
+		}
+		for _, phrase := range phrases {
+			if phrase != strings.ToLower(phrase) {
+				t.Errorf("%s: %q has uppercase and can never match", name, phrase)
+			}
+		}
 	}
 }

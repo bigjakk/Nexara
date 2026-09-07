@@ -113,3 +113,69 @@ func mapDuplicateNameError(conflict string, err error) error {
 	}
 	return mapProxmoxError(err)
 }
+
+// mapMissingObjectError answers PVE's "the object you named is not there" die
+// with 404 rather than the gateway failure mapProxmoxError would otherwise
+// report. Same reasoning as mapDuplicateNameError, one status along: PVE
+// signals these with a plain 500 and a die() string carrying no rejection map,
+// so the shared mapping can only call them a gateway failure. They are not
+// one. Two operators with the same list open produce them routinely, and the
+// answer is "your view is stale", which is what 404 says.
+//
+// The phrases are supplied by the caller rather than kept in one shared list
+// here, because how loose a phrase may safely be depends entirely on which
+// endpoint's errors reach it. MetricServer.pm's update sub dies both
+// "no such server '$id'" (the object is gone) and "no such option '$k'" (the
+// operator sent a bad delete=), so a predicate of "no such " would answer 404
+// to a parameter mistake. Keeping the evidence next to each call site also
+// keeps it re-checkable against PVE source, which is the only thing that makes
+// these matches trustworthy — see the "already defined" note on
+// mapDuplicateNameError for what a phrase that has quietly stopped matching
+// costs.
+//
+// Phrases must be lowercase, and are matched against Proxmox's own message —
+// the JSON envelope included, since that is where the die() sentence sits.
+func mapMissingObjectError(missing string, phrases []string, err error) error {
+	if err == nil {
+		return nil
+	}
+	// Only Proxmox's own words are worth scanning, and only when nothing better
+	// has already been established. Deciding that from the mapped result rather
+	// than re-testing the sentinels keeps a single copy of mapProxmoxError's
+	// precedence, the way mapNamedOpError does: 502 is reached by exactly two
+	// branches, so ruling out the connection failure leaves the APIError one —
+	// the plain 500 die() these phrases describe.
+	//
+	// It matters because these phrases are looser than mapFirewallRuleError's
+	// was. ErrForbidden's message is the raw 403 body, and PVE has 403s that
+	// read "pool 'x' does not exist" (pve-access-control RPCEnvironment.pm);
+	// ErrInvalidInput never reached Proxmox at all; a 400's message is the
+	// flattened field map. Scanning first would let a phrase overwrite any of
+	// those with a 404, turning a permission problem into "the list may be out
+	// of date" — and the field map would be dropped with the 400.
+	//
+	// What is left is any APIError checkStatus did not tag as a parameter
+	// rejection. That is wider than the plain 500 die() these phrases were read
+	// off — a 409 or a 503 lands here too — but every one of them is Proxmox
+	// answering in its own words, which is the only text worth scanning.
+	mapped := mapProxmoxError(err)
+	var fe *fiber.Error
+	var apiErr *proxmox.APIError
+	if !errors.As(mapped, &fe) || fe.Code != fiber.StatusBadGateway ||
+		errors.Is(err, proxmox.ErrConnectionFailed) || !errors.As(err, &apiErr) {
+		return mapped
+	}
+	// Proxmox's own words only. err.Error() would also carry the client's wrap,
+	// which interpolates the caller's id — "get metric server %s" in
+	// client_admin.go, "update ha rule %s" in client_ha.go — and that id comes
+	// off the request path. PVE types both as pve-configid so an id spelling out
+	// a phrase comes back as a rejection the gate above has already returned on,
+	// but there is no reason to let operator-supplied text into the match.
+	msg := strings.ToLower(apiErr.Message)
+	for _, phrase := range phrases {
+		if strings.Contains(msg, phrase) {
+			return fiber.NewError(fiber.StatusNotFound, missing)
+		}
+	}
+	return mapped
+}

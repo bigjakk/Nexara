@@ -11,6 +11,36 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
+// metricServerMissingPhrases are the ways PVE reports a metric server id that
+// is not in status.cfg, from pve-manager PVE/API2/Cluster/MetricServer.pm:
+//
+//	read    "status server entry '<id>' does not exist"
+//	update  "no such server '<id>'"
+//	delete  no check at all — it reads the absent entry, then hands its undef
+//	        type to PVE::Status::Plugin->lookup, which croaks "cannot lookup
+//	        undefined type!" (pve-common src/PVE/SectionConfig.pm).
+//
+// The croak is safe to read as "no entry with that id" here: a parsed section
+// always has a type, because the type *is* the section header, so on this
+// endpoint an undefined one means the lookup found nothing.
+//
+// "no such server" is spelled out rather than shortened to "no such ": the same
+// update sub also dies "no such option '<k>'" for a bad delete=, which is the
+// operator's own parameter and must keep its 400/502 rather than becoming a 404.
+var metricServerMissingPhrases = []string{
+	"does not exist",
+	"no such server",
+	"cannot lookup undefined type",
+}
+
+// mapMetricServerError is the metric-server half of mapMissingObjectError. One
+// sentence covers read, update and delete: the operator's next move is the same
+// whichever verb found the id gone.
+func mapMetricServerError(err error) error {
+	return mapMissingObjectError("No metric server with that ID — the list may be out of date",
+		metricServerMissingPhrases, err)
+}
+
 // MetricServerHandler handles metric server configuration endpoints.
 type MetricServerHandler struct {
 	queries       *db.Queries
@@ -95,7 +125,7 @@ func (h *MetricServerHandler) GetServer(c fiber.Ctx) error {
 	}
 	server, err := pxClient.GetMetricServer(c.Context(), serverID)
 	if err != nil {
-		return mapProxmoxError(err)
+		return mapMetricServerError(err)
 	}
 	// The InfluxDB token is a write-only credential — never return it on a read.
 	if server != nil {
@@ -123,7 +153,7 @@ func (h *MetricServerHandler) UpdateServer(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateMetricServer(c.Context(), serverID, req); err != nil {
-		return mapProxmoxError(err)
+		return mapMetricServerError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": serverID})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", serverID, "updated", details)
@@ -145,7 +175,7 @@ func (h *MetricServerHandler) DeleteServer(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteMetricServer(c.Context(), serverID); err != nil {
-		return mapProxmoxError(err)
+		return mapMetricServerError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": serverID})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", serverID, "deleted", details)
