@@ -24,7 +24,40 @@ credentials. UUIDs were deliberately kept so cross-file references stay intact �
 Substitutions applied: `*.ad.<internal>.net` → `*.example.com`, user → `jdoe`,
 org → `EXAMPLE`/`ExampleOrg`, repositories → `repo-nas-01` / `example-bucket`,
 object-store endpoint → `s3.object-store.example.com`, worker appliances →
-`vbr01-worker01..03`.
+`vbr01-worker01..03`, UTC offsets → `+00:00`.
+
+**Timestamps were re-labelled, not shifted.** The capture's offsets were a
+DST/standard pair, which locates the operator as surely as a timezone name would.
+They were replaced with `+00:00` and every wall-clock digit left untouched, so
+every ordering survives — a session still ends after it begins — and the
+offset-less timestamps in `backups_list.json` now sit in the same frame as the
+rest rather than seven hours off it. Instants move by a whole number of hours per
+row: 7 for the 633 that read `-07:00`, 8 for the single `-08:00` one
+(`jobs_states.json` `nextRun`, a December date). So it is two constants, not one
+— the only duration that changes is that row's own `lastRun`→`nextRun` span, by
+an hour. Nothing reads it, and the row is eight months from every other timestamp,
+so no ordering can flip. Cross-file references are UUIDs rather than times, so
+nothing else had to move. On the next recapture, apply the same rule:
+
+```bash
+sed -E 's/(T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?)[+-][0-9]{2}:[0-9]{2}"/\1+00:00"/g'
+```
+
+Do **not** "properly" convert to UTC by adding the offset to the clock instead.
+The decisive reason is that these fixtures carry a **human-rendered local clock
+beside the machine timestamp** — `jobs_states.json` `nextRunPolicy` reads
+`"8/26/2026 5:00 AM"` and matches its row's `nextRun` wall clock exactly, and
+`jobs_list.json` has schedule `localTime` values. Re-labelling keeps those two
+agreeing; adding 7h to the machine clock would leave them 7h apart and advertise
+the very offset the scrub removes. It also buys nothing (no test asserts an
+absolute instant) and would trip over `token_password_grant.json`'s seven
+fractional digits (`.2300016`), which a datetime round-trip silently truncates
+to six.
+
+One offset is deliberately **not** zero: the parser table in
+`inventory_test.go` uses `+05:30`. That test exists to prove offsets are honoured
+and half-hour ones handled; a `+00:00` input would pass even against a parser
+that ignored the offset entirely.
 
 The workers' mixed case (`vbr01-worker01` beside `Vbr01-worker02`) is preserved
 deliberately: the guest-resolution tests turn on it, and a substitution that

@@ -8,7 +8,7 @@
       "id": "74ebd705-5216-4a4b-8732-5079606c5b75",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-25T12:57:50-07:00",
+      "creationTime": "2026-08-25T12:57:50+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "20ff3c43-65c0-414d-ae03-10cf59fd2faa",
       "allowedOperations": [
@@ -25,7 +25,7 @@
       "id": "e4430b31-0932-4238-b26f-77c394f452d2",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-25T12:57:50-07:00",
+      "creationTime": "2026-08-25T12:57:50+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "20ff3c43-65c0-414d-ae03-10cf59fd2faa",
       "allowedOperations": [
@@ -42,7 +42,7 @@
       "id": "a424be96-1b73-4934-83b0-ac1bcaf68b4b",
       "name": "linux02.example.com",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-25T05:00:42-07:00",
+      "creationTime": "2026-08-25T05:00:42+00:00",
       "backupId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
       "sessionId": "4d211c85-cb7b-4858-84a2-fc669f1eef5f",
       "allowedOperations": [
@@ -60,7 +60,7 @@
       "id": "eb15fd14-6467-47d3-9e45-ea166bc26b27",
       "name": "192.0.2.20:/export/backups Id: 309",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-25T03:30:45.212204-07:00",
+      "creationTime": "2026-08-25T03:30:45.212204+00:00",
       "backupId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
       "allowedOperations": [
         "StartFlrRestore"
@@ -76,7 +76,7 @@
       "id": "4324149e-c827-45f5-8a53-810f10732da2",
       "name": "192.0.2.20:/export/backups Id: 310",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-25T01:00:42.630417-07:00",
+      "creationTime": "2026-08-25T01:00:42.630417+00:00",
       "backupId": "a0616711-8079-4579-ab7b-c762a83b3775",
       "allowedOperations": [
         "StartFlrRestore"
@@ -94,7 +94,7 @@
       "id": "1370d7c2-4d06-4bc4-80f7-b2c8da12fa21",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:20:09-07:00",
+      "creationTime": "2026-08-24T22:20:09+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -111,7 +111,7 @@
       "id": "60b061df-3502-46f8-9e7b-e1275617e7a4",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:20:09-07:00",
+      "creationTime": "2026-08-24T22:20:09+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -128,7 +128,7 @@
       "id": "6d1fcf66-5c09-4706-916d-ddb59cc044f1",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:19:00-07:00",
+      "creationTime": "2026-08-24T22:19:00+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -145,7 +145,7 @@
       "id": "3c66def8-3df9-4da8-b603-ce201546f9b1",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:19:00-07:00",
+      "creationTime": "2026-08-24T22:19:00+00:00",
       "backupId": "25b20007-f063-440b-bd37-3cd2644cb662",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -162,7 +162,7 @@
       "id": "6016b763-8381-4163-a184-5cc065c5be8f",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:14:23-07:00",
+      "creationTime": "2026-08-24T22:14:23+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "02817e43-0bde-46bc-970b-5130ec41dc96",
       "allowedOperations": [
@@ -179,7 +179,7 @@
       "id": "6282342b-c79b-4cb0-80c5-a64ed38b87cc",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:14:23-07:00",
+      "creationTime": "2026-08-24T22:14:23+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "02817e43-0bde-46bc-970b-5130ec41dc96",
       "allowedOperations": [
@@ -196,7 +196,7 @@
       "id": "42d8f766-2437-4b06-a504-41dc2a2b9eb3",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:11:38-07:00",
+      "creationTime": "2026-08-24T22:11:38+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "bed4048b-f4c3-4bda-bc4b-b00dff299505",
       "allowedOperations": [
@@ -213,7 +213,7 @@
       "id": "4871db65-41a0-4796-9835-1767c8637f73",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:11:38-07:00",
+      "creationTime": "2026-08-24T22:11:38+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "bed4048b-f4c3-4bda-bc4b-b00dff299505",
       "allowedOperations": [
@@ -230,7 +230,7 @@
       "id": "06878ac6-661d-4829-a500-71285c926282",
       "name": "linux08.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:10:42-07:00",
+      "creationTime": "2026-08-24T22:10:42+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "6b2ab538-ec8f-4c73-a4e9-c699c4a751b5",
       "allowedOperations": [
@@ -247,7 +247,7 @@
       "id": "9bf67e7f-20b5-4f1e-95b7-317f1d179c89",
       "name": "win01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:09:18-07:00",
+      "creationTime": "2026-08-24T22:09:18+00:00",
       "backupId": "105b7425-6c7d-4a25-b64e-7585b56dc7ee",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -264,7 +264,7 @@
       "id": "6f0e10b2-9767-4152-9ced-ff7936012f08",
       "name": "linux06.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:08:50-07:00",
+      "creationTime": "2026-08-24T22:08:50+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -281,7 +281,7 @@
       "id": "46a60373-627a-4f2a-a415-b199ed94bf1e",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:02:13-07:00",
+      "creationTime": "2026-08-24T22:02:13+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "02817e43-0bde-46bc-970b-5130ec41dc96",
       "allowedOperations": [
@@ -298,7 +298,7 @@
       "id": "8b80336b-178a-4242-8f75-68a8fe7a1ef6",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:02:13-07:00",
+      "creationTime": "2026-08-24T22:02:13+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "02817e43-0bde-46bc-970b-5130ec41dc96",
       "allowedOperations": [
@@ -315,7 +315,7 @@
       "id": "0dcf1e1f-dd84-437a-ac99-8029362cf006",
       "name": "linux09.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:02:13-07:00",
+      "creationTime": "2026-08-24T22:02:13+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -332,7 +332,7 @@
       "id": "f1a34e5a-7b94-4bb5-a001-22ba280342b1",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:02:12-07:00",
+      "creationTime": "2026-08-24T22:02:12+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "bed4048b-f4c3-4bda-bc4b-b00dff299505",
       "allowedOperations": [
@@ -349,7 +349,7 @@
       "id": "fc842df0-d0e2-4dd5-828b-323658b58721",
       "name": "linux05.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:02:12-07:00",
+      "creationTime": "2026-08-24T22:02:12+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "6b2ab538-ec8f-4c73-a4e9-c699c4a751b5",
       "allowedOperations": [
@@ -366,7 +366,7 @@
       "id": "a03cb398-a848-472a-b01c-c0f64458fb80",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-24T22:02:12-07:00",
+      "creationTime": "2026-08-24T22:02:12+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "bed4048b-f4c3-4bda-bc4b-b00dff299505",
       "allowedOperations": [
@@ -381,7 +381,7 @@
       "id": "1580bbd4-a68b-434b-ad3e-c41c83a491a4",
       "name": "\\\\192.0.2.10\\share Id: 307",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-24T20:00:47.686974-07:00",
+      "creationTime": "2026-08-24T20:00:47.686974+00:00",
       "backupId": "85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
       "allowedOperations": [
         "StartFlrRestore"
@@ -399,7 +399,7 @@
       "id": "1bb5aff1-fe2f-4406-af02-772dd00c3d8f",
       "name": "linux02.example.com",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-24T05:00:27-07:00",
+      "creationTime": "2026-08-24T05:00:27+00:00",
       "backupId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
       "sessionId": "efd29244-64f7-4e62-842e-d744e3a6c105",
       "allowedOperations": [
@@ -417,7 +417,7 @@
       "id": "addb791a-f46c-48c7-869a-c8d2177fc11b",
       "name": "192.0.2.20:/export/backups Id: 308",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-24T03:30:51.081129-07:00",
+      "creationTime": "2026-08-24T03:30:51.081129+00:00",
       "backupId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
       "allowedOperations": [
         "StartFlrRestore"
@@ -433,7 +433,7 @@
       "id": "c7609421-5b8d-46cb-8061-a8ba0ee2aa7c",
       "name": "192.0.2.20:/export/backups Id: 309",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-24T01:00:31.647178-07:00",
+      "creationTime": "2026-08-24T01:00:31.647178+00:00",
       "backupId": "a0616711-8079-4579-ab7b-c762a83b3775",
       "allowedOperations": [
         "StartFlrRestore"
@@ -451,7 +451,7 @@
       "id": "cff5c653-1309-44f7-85db-a818f62802c8",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T23:35:16-07:00",
+      "creationTime": "2026-08-23T23:35:16+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -468,7 +468,7 @@
       "id": "5d75350f-5155-4184-afcc-9f644043a7c5",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T23:35:16-07:00",
+      "creationTime": "2026-08-23T23:35:16+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -485,7 +485,7 @@
       "id": "fbeaf1b8-62ca-48fe-85a7-b92f1c7392b7",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T23:32:29-07:00",
+      "creationTime": "2026-08-23T23:32:29+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "12568fbc-3ca2-4d27-a493-7b9044f03809",
       "allowedOperations": [
@@ -502,7 +502,7 @@
       "id": "ebb95d07-7b38-4037-a131-24fc7ab20745",
       "name": "linux08.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T23:32:29-07:00",
+      "creationTime": "2026-08-23T23:32:29+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "f21e3851-7410-4d4c-afdb-55778c5e8dfb",
       "allowedOperations": [
@@ -519,7 +519,7 @@
       "id": "e6bd02d9-aadd-4588-8850-8ca8d4fce56d",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T23:32:29-07:00",
+      "creationTime": "2026-08-23T23:32:29+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "12568fbc-3ca2-4d27-a493-7b9044f03809",
       "allowedOperations": [
@@ -536,7 +536,7 @@
       "id": "b6be5fd2-28c3-481d-a978-9f2d4bc9ff99",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:48:19-07:00",
+      "creationTime": "2026-08-23T22:48:19+00:00",
       "backupId": "25b20007-f063-440b-bd37-3cd2644cb662",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -553,7 +553,7 @@
       "id": "f49b4d20-8f2a-4e7f-a62d-47681843660a",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:48:19-07:00",
+      "creationTime": "2026-08-23T22:48:19+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -570,7 +570,7 @@
       "id": "396a9dfc-939f-48e7-8a9a-f449ce72ed39",
       "name": "linux07.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:25:58-07:00",
+      "creationTime": "2026-08-23T22:25:58+00:00",
       "backupId": "f07776e2-7e90-428e-bf3a-3a7c08151f4b",
       "sessionId": "d9eed44c-c203-4901-9c12-a02dd2a44238",
       "allowedOperations": [
@@ -587,7 +587,7 @@
       "id": "512739bb-06bc-4cbc-83f5-7fc15fb130d5",
       "name": "linux06.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:11:56-07:00",
+      "creationTime": "2026-08-23T22:11:56+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -604,7 +604,7 @@
       "id": "4c5a2be4-daa3-4677-a0c7-c2848d2ead6b",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:09:52-07:00",
+      "creationTime": "2026-08-23T22:09:52+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "93d28025-bfe5-481f-b07f-83522bd08edc",
       "allowedOperations": [
@@ -621,7 +621,7 @@
       "id": "5e19b850-4da7-4180-b0da-65243c0dadb4",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:09:52-07:00",
+      "creationTime": "2026-08-23T22:09:52+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "93d28025-bfe5-481f-b07f-83522bd08edc",
       "allowedOperations": [
@@ -638,7 +638,7 @@
       "id": "dd15aae7-0e6e-46fc-b1f2-c2ddff3915f3",
       "name": "home-assistant",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:09:31-07:00",
+      "creationTime": "2026-08-23T22:09:31+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -655,7 +655,7 @@
       "id": "4d2edf87-14ae-4f92-b053-88c571694ebe",
       "name": "home-assistant",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:09:31-07:00",
+      "creationTime": "2026-08-23T22:09:31+00:00",
       "backupId": "5b15f4ac-41c0-4fe4-92d6-5469eb0f3a28",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -672,7 +672,7 @@
       "id": "1cc3332f-11fd-464e-9bf2-a5da10ceafc6",
       "name": "linux09.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:01:51-07:00",
+      "creationTime": "2026-08-23T22:01:51+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -689,7 +689,7 @@
       "id": "26ee9ef7-b79e-4430-a066-34d75a9aa483",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:01:51-07:00",
+      "creationTime": "2026-08-23T22:01:51+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "93d28025-bfe5-481f-b07f-83522bd08edc",
       "allowedOperations": [
@@ -706,7 +706,7 @@
       "id": "c34a968c-fe38-43e5-a188-7ddc88fbe90d",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:01:51-07:00",
+      "creationTime": "2026-08-23T22:01:51+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "93d28025-bfe5-481f-b07f-83522bd08edc",
       "allowedOperations": [
@@ -723,7 +723,7 @@
       "id": "d56c9593-2cf3-451b-b3a6-96809e33a71f",
       "name": "linux05.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:01:50-07:00",
+      "creationTime": "2026-08-23T22:01:50+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "1e0d9818-5ece-42d6-b562-25f82502d3f3",
       "allowedOperations": [
@@ -740,7 +740,7 @@
       "id": "adbe8c75-e27a-448f-b94d-96eb26105b8f",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:01:49-07:00",
+      "creationTime": "2026-08-23T22:01:49+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "be07d4ef-6921-41f1-bf26-030d6ec80c6f",
       "allowedOperations": [
@@ -757,7 +757,7 @@
       "id": "76e8f813-bad3-4297-9851-805bcee9af22",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T22:01:49-07:00",
+      "creationTime": "2026-08-23T22:01:49+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "be07d4ef-6921-41f1-bf26-030d6ec80c6f",
       "allowedOperations": [
@@ -772,7 +772,7 @@
       "id": "323375ef-2a3d-4aa3-b742-bed5933c2185",
       "name": "\\\\192.0.2.10\\share Id: 306",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-23T20:00:43.453272-07:00",
+      "creationTime": "2026-08-23T20:00:43.453272+00:00",
       "backupId": "85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
       "allowedOperations": [
         "StartFlrRestore"
@@ -788,7 +788,7 @@
       "id": "5b578edf-6eac-46d5-aae1-c1eb55eb7f58",
       "name": "\\\\192.0.2.10\\share Id: 305",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-23T13:26:30.879666-07:00",
+      "creationTime": "2026-08-23T13:26:30.879666+00:00",
       "backupId": "85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
       "allowedOperations": [
         "StartFlrRestore"
@@ -806,7 +806,7 @@
       "id": "5f221cf0-8084-4e57-bfa2-e6a756630bb6",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T13:19:48-07:00",
+      "creationTime": "2026-08-23T13:19:48+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "38f103c8-81ea-450c-8694-88fededca9ef",
       "allowedOperations": [
@@ -823,7 +823,7 @@
       "id": "c1c816fc-5cc4-46a7-919f-a33100d2c810",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T13:19:48-07:00",
+      "creationTime": "2026-08-23T13:19:48+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "38f103c8-81ea-450c-8694-88fededca9ef",
       "allowedOperations": [
@@ -840,7 +840,7 @@
       "id": "50b2ed83-f6c3-444d-9691-0ee659f06c6f",
       "name": "linux08.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:34:07-07:00",
+      "creationTime": "2026-08-23T11:34:07+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "b1d97d59-fb1f-4d37-ac3d-061d52770c09",
       "allowedOperations": [
@@ -857,7 +857,7 @@
       "id": "da0fe6b0-5f21-49fe-89bc-b18a63cafdea",
       "name": "linux06.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:30:31-07:00",
+      "creationTime": "2026-08-23T11:30:31+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -874,7 +874,7 @@
       "id": "6d75a460-d9ce-4a47-8323-81c6c7c7511e",
       "name": "linux05.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:28:59-07:00",
+      "creationTime": "2026-08-23T11:28:59+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -891,7 +891,7 @@
       "id": "5e4d4c5d-8f75-4d93-a03f-07bd4e1b2f97",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:28:56-07:00",
+      "creationTime": "2026-08-23T11:28:56+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "a5512ef5-3230-4657-8d26-1d69ee26dc99",
       "allowedOperations": [
@@ -908,7 +908,7 @@
       "id": "c4f85b84-b002-40b4-9592-6bf1b26ef470",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:28:56-07:00",
+      "creationTime": "2026-08-23T11:28:56+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "a5512ef5-3230-4657-8d26-1d69ee26dc99",
       "allowedOperations": [
@@ -925,7 +925,7 @@
       "id": "961f2463-104a-4f2c-ae5a-89f74cb00352",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:27:32-07:00",
+      "creationTime": "2026-08-23T11:27:32+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "a5512ef5-3230-4657-8d26-1d69ee26dc99",
       "allowedOperations": [
@@ -942,7 +942,7 @@
       "id": "d220cf9e-c8ae-485c-9942-dc17c22e6ce3",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:27:32-07:00",
+      "creationTime": "2026-08-23T11:27:32+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "a5512ef5-3230-4657-8d26-1d69ee26dc99",
       "allowedOperations": [
@@ -959,7 +959,7 @@
       "id": "92539bae-b3df-466d-a479-4001d2ab24ea",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:27:29-07:00",
+      "creationTime": "2026-08-23T11:27:29+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -976,7 +976,7 @@
       "id": "631603ee-3b64-40b6-bdb8-72d59da94791",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:27:29-07:00",
+      "creationTime": "2026-08-23T11:27:29+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -993,7 +993,7 @@
       "id": "da9935d1-5087-4f8b-8ac0-dea9f6d88825",
       "name": "win01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:23:07-07:00",
+      "creationTime": "2026-08-23T11:23:07+00:00",
       "backupId": "105b7425-6c7d-4a25-b64e-7585b56dc7ee",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1010,7 +1010,7 @@
       "id": "0526a19a-a7a1-4b57-9a59-97067ed29ec3",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:21:17-07:00",
+      "creationTime": "2026-08-23T11:21:17+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1027,7 +1027,7 @@
       "id": "cc49eba6-d03d-433e-865d-4801afb136ce",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:21:17-07:00",
+      "creationTime": "2026-08-23T11:21:17+00:00",
       "backupId": "25b20007-f063-440b-bd37-3cd2644cb662",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1044,7 +1044,7 @@
       "id": "fd44bff4-36e6-45f8-af30-6eea89c64536",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:19:35-07:00",
+      "creationTime": "2026-08-23T11:19:35+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "a5512ef5-3230-4657-8d26-1d69ee26dc99",
       "allowedOperations": [
@@ -1061,7 +1061,7 @@
       "id": "221ced15-0672-4f26-82c4-dfac904362a4",
       "name": "linux09.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:19:35-07:00",
+      "creationTime": "2026-08-23T11:19:35+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1078,7 +1078,7 @@
       "id": "17071b5b-4bbb-4c12-8dca-e8940e888ef9",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:19:35-07:00",
+      "creationTime": "2026-08-23T11:19:35+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "a5512ef5-3230-4657-8d26-1d69ee26dc99",
       "allowedOperations": [
@@ -1095,7 +1095,7 @@
       "id": "1a16d362-1c35-4d67-87dd-0d54308baf51",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:19:34-07:00",
+      "creationTime": "2026-08-23T11:19:34+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "ac189d38-6639-4b16-851f-a2c1bcd724e1",
       "allowedOperations": [
@@ -1112,7 +1112,7 @@
       "id": "905edb71-d436-4824-b317-d4c1cba56b30",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-23T11:19:34-07:00",
+      "creationTime": "2026-08-23T11:19:34+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "ac189d38-6639-4b16-851f-a2c1bcd724e1",
       "allowedOperations": [
@@ -1127,7 +1127,7 @@
       "id": "d05dcf23-b8f8-45dd-ac65-a5887c11b4b0",
       "name": "192.0.2.20:/export/backups Id: 307",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-23T11:08:35.581376-07:00",
+      "creationTime": "2026-08-23T11:08:35.581376+00:00",
       "backupId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
       "allowedOperations": [
         "StartFlrRestore"
@@ -1143,7 +1143,7 @@
       "id": "908e4ccc-c977-4410-a4ec-0a2b54bd5ad1",
       "name": "192.0.2.20:/export/backups Id: 308",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-23T11:08:32.415654-07:00",
+      "creationTime": "2026-08-23T11:08:32.415654+00:00",
       "backupId": "a0616711-8079-4579-ab7b-c762a83b3775",
       "allowedOperations": [
         "StartFlrRestore"
@@ -1161,7 +1161,7 @@
       "id": "864ed8fb-5870-4d23-8fda-476265622038",
       "name": "linux02.example.com",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-23T11:08:26-07:00",
+      "creationTime": "2026-08-23T11:08:26+00:00",
       "backupId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
       "sessionId": "ebb8c629-0cf9-4797-a3e8-93cb7aa5f7d7",
       "allowedOperations": [
@@ -1181,7 +1181,7 @@
       "id": "4a93fe99-0810-4af5-979c-01f172d19906",
       "name": "linux02.example.com",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-23T05:00:31-07:00",
+      "creationTime": "2026-08-23T05:00:31+00:00",
       "backupId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
       "sessionId": "8959d14b-93a3-4829-9cda-fd037b4dc3e5",
       "allowedOperations": [
@@ -1199,7 +1199,7 @@
       "id": "d2dff2cb-1ab4-4d8b-8f97-636264dc9a03",
       "name": "192.0.2.20:/export/backups Id: 306",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-23T03:30:53.896462-07:00",
+      "creationTime": "2026-08-23T03:30:53.896462+00:00",
       "backupId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
       "allowedOperations": [
         "StartFlrRestore"
@@ -1215,7 +1215,7 @@
       "id": "5661a0d6-9c48-425a-96f2-4dbbb4aa1cce",
       "name": "192.0.2.20:/export/backups Id: 307",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-23T01:00:33.640904-07:00",
+      "creationTime": "2026-08-23T01:00:33.640904+00:00",
       "backupId": "a0616711-8079-4579-ab7b-c762a83b3775",
       "allowedOperations": [
         "StartFlrRestore"
@@ -1233,7 +1233,7 @@
       "id": "6b4d73af-b508-4527-9d0d-60023ffe03bc",
       "name": "linux02.example.com",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-22T05:00:33-07:00",
+      "creationTime": "2026-08-22T05:00:33+00:00",
       "backupId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
       "sessionId": "c28bd367-8762-4d48-ac96-addfaec9fabc",
       "allowedOperations": [
@@ -1251,7 +1251,7 @@
       "id": "279d9cae-69f7-43fe-808e-c766d5557cd3",
       "name": "192.0.2.20:/export/backups Id: 305",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-22T03:30:37.3341-07:00",
+      "creationTime": "2026-08-22T03:30:37.3341+00:00",
       "backupId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
       "allowedOperations": [
         "StartFlrRestore"
@@ -1267,7 +1267,7 @@
       "id": "fc17378d-599a-458c-be37-19d0a2da6e55",
       "name": "192.0.2.20:/export/backups Id: 306",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-22T01:13:10.672679-07:00",
+      "creationTime": "2026-08-22T01:13:10.672679+00:00",
       "backupId": "a0616711-8079-4579-ab7b-c762a83b3775",
       "allowedOperations": [
         "StartFlrRestore"
@@ -1285,7 +1285,7 @@
       "id": "42451af0-e5cc-403a-9322-a43894beaa77",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:18:14-07:00",
+      "creationTime": "2026-08-21T22:18:14+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1302,7 +1302,7 @@
       "id": "e6850033-c5a8-4935-8d3e-ec008dbc3b2d",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:18:14-07:00",
+      "creationTime": "2026-08-21T22:18:14+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1319,7 +1319,7 @@
       "id": "ced3d77b-edb5-4da2-adfd-5c022a1c8115",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:16:01-07:00",
+      "creationTime": "2026-08-21T22:16:01+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1336,7 +1336,7 @@
       "id": "9aaa52dd-eb1f-47d0-8883-97c63538abf3",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:16:01-07:00",
+      "creationTime": "2026-08-21T22:16:01+00:00",
       "backupId": "25b20007-f063-440b-bd37-3cd2644cb662",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1353,7 +1353,7 @@
       "id": "1dc3ae10-e7af-4f92-bb26-ecdda1c19eb6",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:14:43-07:00",
+      "creationTime": "2026-08-21T22:14:43+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "9b6e5693-0a7b-42e1-b5a2-3ad25fe8bbac",
       "allowedOperations": [
@@ -1370,7 +1370,7 @@
       "id": "2d501466-b310-488f-aea5-f712dd6128be",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:14:43-07:00",
+      "creationTime": "2026-08-21T22:14:43+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "9b6e5693-0a7b-42e1-b5a2-3ad25fe8bbac",
       "allowedOperations": [
@@ -1387,7 +1387,7 @@
       "id": "b1f52f1d-a5d0-4d50-982a-fcb91d63342b",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:14:41-07:00",
+      "creationTime": "2026-08-21T22:14:41+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "97b2c2af-147b-480c-bf66-ef5bb008b61f",
       "allowedOperations": [
@@ -1404,7 +1404,7 @@
       "id": "e838e2bc-63f2-4832-be62-802f5a792f10",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:14:41-07:00",
+      "creationTime": "2026-08-21T22:14:41+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "97b2c2af-147b-480c-bf66-ef5bb008b61f",
       "allowedOperations": [
@@ -1421,7 +1421,7 @@
       "id": "f7edbeb5-b21f-451b-bece-2edccd1e8678",
       "name": "linux08.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:12:45-07:00",
+      "creationTime": "2026-08-21T22:12:45+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "96585e29-b8b6-47bb-a0f8-f985a8c56781",
       "allowedOperations": [
@@ -1438,7 +1438,7 @@
       "id": "08405a43-b7f5-4e16-9d17-66e4b87bdf49",
       "name": "win01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:12:02-07:00",
+      "creationTime": "2026-08-21T22:12:02+00:00",
       "backupId": "105b7425-6c7d-4a25-b64e-7585b56dc7ee",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1455,7 +1455,7 @@
       "id": "85a34bfc-1ddb-44f9-99d2-88cd7a76b82a",
       "name": "linux06.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:09:44-07:00",
+      "creationTime": "2026-08-21T22:09:44+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "96585e29-b8b6-47bb-a0f8-f985a8c56781",
       "allowedOperations": [
@@ -1472,7 +1472,7 @@
       "id": "0c913004-fcb0-45b8-9864-33e9b6ba7024",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:08:50-07:00",
+      "creationTime": "2026-08-21T22:08:50+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "97b2c2af-147b-480c-bf66-ef5bb008b61f",
       "allowedOperations": [
@@ -1489,7 +1489,7 @@
       "id": "d2e6d407-138c-43f5-a393-39ea744487cf",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:08:50-07:00",
+      "creationTime": "2026-08-21T22:08:50+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "97b2c2af-147b-480c-bf66-ef5bb008b61f",
       "allowedOperations": [
@@ -1506,7 +1506,7 @@
       "id": "0e9a6a03-2858-4be7-975e-192c870a6730",
       "name": "linux09.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:02:28-07:00",
+      "creationTime": "2026-08-21T22:02:28+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1523,7 +1523,7 @@
       "id": "aeccfb09-642d-4259-a18b-25af80b6b6d8",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:02:27-07:00",
+      "creationTime": "2026-08-21T22:02:27+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "9b6e5693-0a7b-42e1-b5a2-3ad25fe8bbac",
       "allowedOperations": [
@@ -1540,7 +1540,7 @@
       "id": "81e567f7-da76-42d3-986e-ce356ddcc50a",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:02:27-07:00",
+      "creationTime": "2026-08-21T22:02:27+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "97b2c2af-147b-480c-bf66-ef5bb008b61f",
       "allowedOperations": [
@@ -1557,7 +1557,7 @@
       "id": "58339288-5273-4544-a20c-f144a1d2f940",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:02:27-07:00",
+      "creationTime": "2026-08-21T22:02:27+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "9b6e5693-0a7b-42e1-b5a2-3ad25fe8bbac",
       "allowedOperations": [
@@ -1574,7 +1574,7 @@
       "id": "f8695b51-cf8d-4835-bd80-eac6e5505372",
       "name": "linux05.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:02:27-07:00",
+      "creationTime": "2026-08-21T22:02:27+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "96585e29-b8b6-47bb-a0f8-f985a8c56781",
       "allowedOperations": [
@@ -1591,7 +1591,7 @@
       "id": "c4021f62-ec2c-4ac8-a431-2ab76552b364",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-21T22:02:27-07:00",
+      "creationTime": "2026-08-21T22:02:27+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "97b2c2af-147b-480c-bf66-ef5bb008b61f",
       "allowedOperations": [
@@ -1606,7 +1606,7 @@
       "id": "676df33e-4482-4e38-97c6-17781cdc835e",
       "name": "\\\\192.0.2.10\\share Id: 304",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-21T20:00:47.989269-07:00",
+      "creationTime": "2026-08-21T20:00:47.989269+00:00",
       "backupId": "85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
       "allowedOperations": [
         "StartFlrRestore"
@@ -1624,7 +1624,7 @@
       "id": "4da5bb5a-e701-4514-bb9f-612199e8ca62",
       "name": "linux02.example.com",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-21T05:00:32-07:00",
+      "creationTime": "2026-08-21T05:00:32+00:00",
       "backupId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
       "sessionId": "fd373479-0396-42f0-a98a-68b66b4b8cec",
       "allowedOperations": [
@@ -1642,7 +1642,7 @@
       "id": "0a9e6386-e407-4c86-8e31-4c68b9be4c14",
       "name": "192.0.2.20:/export/backups Id: 304",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-21T03:30:55.434069-07:00",
+      "creationTime": "2026-08-21T03:30:55.434069+00:00",
       "backupId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
       "allowedOperations": [
         "StartFlrRestore"
@@ -1658,7 +1658,7 @@
       "id": "109027c3-3eda-452a-9601-774deaf5a369",
       "name": "192.0.2.20:/export/backups Id: 304",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-21T01:00:37.340478-07:00",
+      "creationTime": "2026-08-21T01:00:37.340478+00:00",
       "backupId": "a0616711-8079-4579-ab7b-c762a83b3775",
       "allowedOperations": [
         "StartFlrRestore"
@@ -1676,7 +1676,7 @@
       "id": "40ec6ac1-7639-43eb-a11e-416e79cc50e9",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:17:23-07:00",
+      "creationTime": "2026-08-20T22:17:23+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1693,7 +1693,7 @@
       "id": "a7c4b37e-2e4e-48af-91f8-bcd95e5133d5",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:17:23-07:00",
+      "creationTime": "2026-08-20T22:17:23+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1710,7 +1710,7 @@
       "id": "9a877279-df53-4f1a-b79a-2a481374e235",
       "name": "win01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:16:31-07:00",
+      "creationTime": "2026-08-20T22:16:31+00:00",
       "backupId": "105b7425-6c7d-4a25-b64e-7585b56dc7ee",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1727,7 +1727,7 @@
       "id": "33cef7d7-b2fb-4607-b406-45b29ba76d0c",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:15:04-07:00",
+      "creationTime": "2026-08-20T22:15:04+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "1de4011f-3838-42ae-92ef-d3199d396a97",
       "allowedOperations": [
@@ -1744,7 +1744,7 @@
       "id": "03d1962c-b86b-4ea4-a2d9-641c48f59e04",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:15:04-07:00",
+      "creationTime": "2026-08-20T22:15:04+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "1de4011f-3838-42ae-92ef-d3199d396a97",
       "allowedOperations": [
@@ -1761,7 +1761,7 @@
       "id": "2e8c6a38-8c08-41bc-acae-9e08d0fe6dc2",
       "name": "linux08.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:14:17-07:00",
+      "creationTime": "2026-08-20T22:14:17+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "6a28b65c-4b6a-4140-a122-d13e47695e64",
       "allowedOperations": [
@@ -1778,7 +1778,7 @@
       "id": "d0cdfe7d-deb7-4c87-b3a1-ebc727a853e3",
       "name": "linux06.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:13:27-07:00",
+      "creationTime": "2026-08-20T22:13:27+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "6a28b65c-4b6a-4140-a122-d13e47695e64",
       "allowedOperations": [
@@ -1795,7 +1795,7 @@
       "id": "18026406-55d4-4b3c-be35-8567e6acae76",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:10:42-07:00",
+      "creationTime": "2026-08-20T22:10:42+00:00",
       "backupId": "25b20007-f063-440b-bd37-3cd2644cb662",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1812,7 +1812,7 @@
       "id": "411012cd-da51-4ec6-91c9-6f89f9fb3284",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:10:42-07:00",
+      "creationTime": "2026-08-20T22:10:42+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1829,7 +1829,7 @@
       "id": "1f8c3ec3-9681-411b-b8ad-59ce43407d90",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:09:21-07:00",
+      "creationTime": "2026-08-20T22:09:21+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "c7c4d926-81fc-421f-87fb-893ae80d4708",
       "allowedOperations": [
@@ -1846,7 +1846,7 @@
       "id": "ab129497-c64b-4947-bd39-052811aa3776",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:09:21-07:00",
+      "creationTime": "2026-08-20T22:09:21+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "c7c4d926-81fc-421f-87fb-893ae80d4708",
       "allowedOperations": [
@@ -1863,7 +1863,7 @@
       "id": "b1e33909-9123-47e6-b76e-7ad409d2e50a",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:08:59-07:00",
+      "creationTime": "2026-08-20T22:08:59+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "c7c4d926-81fc-421f-87fb-893ae80d4708",
       "allowedOperations": [
@@ -1880,7 +1880,7 @@
       "id": "5d17c0fc-5074-474b-a3c1-30e92212e375",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:08:59-07:00",
+      "creationTime": "2026-08-20T22:08:59+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "c7c4d926-81fc-421f-87fb-893ae80d4708",
       "allowedOperations": [
@@ -1897,7 +1897,7 @@
       "id": "665982f5-3563-42ee-bcd5-685ffd505e5d",
       "name": "linux09.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:02:16-07:00",
+      "creationTime": "2026-08-20T22:02:16+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -1914,7 +1914,7 @@
       "id": "848e8e7f-632f-4b85-a155-e4fb9d64ad79",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:02:14-07:00",
+      "creationTime": "2026-08-20T22:02:14+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "c7c4d926-81fc-421f-87fb-893ae80d4708",
       "allowedOperations": [
@@ -1931,7 +1931,7 @@
       "id": "f8dc39b2-ab1c-4aef-857d-a70ce86b198b",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:02:14-07:00",
+      "creationTime": "2026-08-20T22:02:14+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "1de4011f-3838-42ae-92ef-d3199d396a97",
       "allowedOperations": [
@@ -1948,7 +1948,7 @@
       "id": "3cd1e6e7-ea43-4d99-a810-45919fb1e240",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:02:14-07:00",
+      "creationTime": "2026-08-20T22:02:14+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "c7c4d926-81fc-421f-87fb-893ae80d4708",
       "allowedOperations": [
@@ -1965,7 +1965,7 @@
       "id": "5b93382a-7db8-424b-b734-3857548990e1",
       "name": "linux05.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:02:14-07:00",
+      "creationTime": "2026-08-20T22:02:14+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "6a28b65c-4b6a-4140-a122-d13e47695e64",
       "allowedOperations": [
@@ -1982,7 +1982,7 @@
       "id": "1bf3ef75-cd88-4d37-9262-c7ea9c06fe9b",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-20T22:02:14-07:00",
+      "creationTime": "2026-08-20T22:02:14+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "1de4011f-3838-42ae-92ef-d3199d396a97",
       "allowedOperations": [
@@ -1997,7 +1997,7 @@
       "id": "2d2cc331-716b-48ad-b743-c0d874b1f2dc",
       "name": "\\\\192.0.2.10\\share Id: 303",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-20T20:00:44.872511-07:00",
+      "creationTime": "2026-08-20T20:00:44.872511+00:00",
       "backupId": "85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
       "allowedOperations": [
         "StartFlrRestore"
@@ -2015,7 +2015,7 @@
       "id": "78cb4285-ff42-4e7e-972a-8724a666d9e1",
       "name": "linux02.example.com",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-20T05:00:45-07:00",
+      "creationTime": "2026-08-20T05:00:45+00:00",
       "backupId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
       "sessionId": "fd7146c8-648f-4c40-b4f6-bff9eb3d940f",
       "allowedOperations": [
@@ -2033,7 +2033,7 @@
       "id": "f6b2d8fe-f7c8-4a9c-937c-dc0b19d29253",
       "name": "192.0.2.20:/export/backups Id: 303",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-20T03:31:04.549035-07:00",
+      "creationTime": "2026-08-20T03:31:04.549035+00:00",
       "backupId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
       "allowedOperations": [
         "StartFlrRestore"
@@ -2049,7 +2049,7 @@
       "id": "e41ca0bc-21f9-4cb9-995e-0f642112cb28",
       "name": "192.0.2.20:/export/backups Id: 303",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-20T01:00:30.061212-07:00",
+      "creationTime": "2026-08-20T01:00:30.061212+00:00",
       "backupId": "a0616711-8079-4579-ab7b-c762a83b3775",
       "allowedOperations": [
         "StartFlrRestore"
@@ -2067,7 +2067,7 @@
       "id": "751a01aa-80de-412c-8828-39d605db1a43",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:16:50-07:00",
+      "creationTime": "2026-08-19T22:16:50+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "7bb01684-b1d9-4744-a684-fd8b57e73be6",
       "allowedOperations": [
@@ -2084,7 +2084,7 @@
       "id": "da5c6335-ca90-4af9-b1be-89e7d47f65b3",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:16:50-07:00",
+      "creationTime": "2026-08-19T22:16:50+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "7bb01684-b1d9-4744-a684-fd8b57e73be6",
       "allowedOperations": [
@@ -2101,7 +2101,7 @@
       "id": "24e5625c-cc6a-436b-b5e6-6665cd3aa687",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:15:13-07:00",
+      "creationTime": "2026-08-19T22:15:13+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "7bb01684-b1d9-4744-a684-fd8b57e73be6",
       "allowedOperations": [
@@ -2118,7 +2118,7 @@
       "id": "20f5da6b-1734-4788-a0fb-9ea2b470c460",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:15:13-07:00",
+      "creationTime": "2026-08-19T22:15:13+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "7bb01684-b1d9-4744-a684-fd8b57e73be6",
       "allowedOperations": [
@@ -2135,7 +2135,7 @@
       "id": "df1a10d5-6b43-4c58-ad62-cfc351c10cf3",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:13:46-07:00",
+      "creationTime": "2026-08-19T22:13:46+00:00",
       "backupId": "25b20007-f063-440b-bd37-3cd2644cb662",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -2152,7 +2152,7 @@
       "id": "14ca06a9-cc24-4423-b47d-f9edf70f949e",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:13:46-07:00",
+      "creationTime": "2026-08-19T22:13:46+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -2169,7 +2169,7 @@
       "id": "60f404c6-d215-4820-b4e3-5004d4b56224",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:13:43-07:00",
+      "creationTime": "2026-08-19T22:13:43+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "7bb01684-b1d9-4744-a684-fd8b57e73be6",
       "allowedOperations": [
@@ -2186,7 +2186,7 @@
       "id": "350eaff2-9c1f-4394-a219-1a960c66a8a4",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:13:43-07:00",
+      "creationTime": "2026-08-19T22:13:43+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "7bb01684-b1d9-4744-a684-fd8b57e73be6",
       "allowedOperations": [
@@ -2203,7 +2203,7 @@
       "id": "1ccb0e5a-7931-4d0c-9e8d-573da6e2f493",
       "name": "win01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:11:48-07:00",
+      "creationTime": "2026-08-19T22:11:48+00:00",
       "backupId": "105b7425-6c7d-4a25-b64e-7585b56dc7ee",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -2220,7 +2220,7 @@
       "id": "97c9ec46-0dbb-47ca-9f1f-2402d94ad190",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:10:06-07:00",
+      "creationTime": "2026-08-19T22:10:06+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "ad1ded28-c4cf-4fa6-b926-c311bd40432c",
       "allowedOperations": [
@@ -2237,7 +2237,7 @@
       "id": "1aab653f-5a62-4e5e-9724-d954806eff6b",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:10:06-07:00",
+      "creationTime": "2026-08-19T22:10:06+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "ad1ded28-c4cf-4fa6-b926-c311bd40432c",
       "allowedOperations": [
@@ -2254,7 +2254,7 @@
       "id": "9f1487d5-e6c5-4a4c-b36f-9fb7632c4cd5",
       "name": "linux08.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:09:03-07:00",
+      "creationTime": "2026-08-19T22:09:03+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "962708fb-5c39-40fa-8c6b-18bb7dd952c3",
       "allowedOperations": [
@@ -2271,7 +2271,7 @@
       "id": "b91d61d0-9d96-43d4-877d-fa0d56e64923",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:05:39-07:00",
+      "creationTime": "2026-08-19T22:05:39+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "ad1ded28-c4cf-4fa6-b926-c311bd40432c",
       "allowedOperations": [
@@ -2288,7 +2288,7 @@
       "id": "fcf51277-6833-4b80-9741-3d4a010d6f9a",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:05:39-07:00",
+      "creationTime": "2026-08-19T22:05:39+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "ad1ded28-c4cf-4fa6-b926-c311bd40432c",
       "allowedOperations": [
@@ -2305,7 +2305,7 @@
       "id": "33d8d455-9f5b-4d8c-9bdf-2e7864bead8f",
       "name": "linux09.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:02:05-07:00",
+      "creationTime": "2026-08-19T22:02:05+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -2322,7 +2322,7 @@
       "id": "da00a588-616c-469b-b922-9be5d7e799f1",
       "name": "linux05.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:02:04-07:00",
+      "creationTime": "2026-08-19T22:02:04+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "962708fb-5c39-40fa-8c6b-18bb7dd952c3",
       "allowedOperations": [
@@ -2339,7 +2339,7 @@
       "id": "2666b704-5c1d-4211-a53d-35245ba07a7b",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:02:03-07:00",
+      "creationTime": "2026-08-19T22:02:03+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "ad1ded28-c4cf-4fa6-b926-c311bd40432c",
       "allowedOperations": [
@@ -2356,7 +2356,7 @@
       "id": "6cab39bc-3ef0-4117-85d4-b1bc36ab4597",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:02:03-07:00",
+      "creationTime": "2026-08-19T22:02:03+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "ad1ded28-c4cf-4fa6-b926-c311bd40432c",
       "allowedOperations": [
@@ -2373,7 +2373,7 @@
       "id": "f6b73916-ba2e-4935-a28d-9b1992c592d8",
       "name": "linux06.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T22:02:02-07:00",
+      "creationTime": "2026-08-19T22:02:02+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "962708fb-5c39-40fa-8c6b-18bb7dd952c3",
       "allowedOperations": [
@@ -2388,7 +2388,7 @@
       "id": "9677436c-da79-480e-8fd9-e5a7adac06bf",
       "name": "\\\\192.0.2.10\\share Id: 302",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-19T20:00:40.692825-07:00",
+      "creationTime": "2026-08-19T20:00:40.692825+00:00",
       "backupId": "85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
       "allowedOperations": [
         "StartFlrRestore"
@@ -2406,7 +2406,7 @@
       "id": "74f77a4f-c9ec-4817-8052-7fa16f70bb35",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T11:01:47-07:00",
+      "creationTime": "2026-08-19T11:01:47+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "ef612752-c25c-40c3-8cdb-2281494ce522",
       "allowedOperations": [
@@ -2423,7 +2423,7 @@
       "id": "ac57df49-9ce3-45d5-9ca8-2742fa3304b5",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-19T11:01:47-07:00",
+      "creationTime": "2026-08-19T11:01:47+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "ef612752-c25c-40c3-8cdb-2281494ce522",
       "allowedOperations": [
@@ -2440,7 +2440,7 @@
       "id": "09a12c32-106a-46f3-845f-59a0d4299b2f",
       "name": "linux02.example.com",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-19T05:00:26-07:00",
+      "creationTime": "2026-08-19T05:00:26+00:00",
       "backupId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
       "sessionId": "6a3c0de7-89aa-4c24-841a-b856ff73845f",
       "allowedOperations": [
@@ -2458,7 +2458,7 @@
       "id": "06d8b26d-4e46-4ef9-9230-380b1aec3c93",
       "name": "192.0.2.20:/export/backups Id: 302",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-19T03:31:00.502266-07:00",
+      "creationTime": "2026-08-19T03:31:00.502266+00:00",
       "backupId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
       "allowedOperations": [
         "StartFlrRestore"
@@ -2474,7 +2474,7 @@
       "id": "da31f8f3-6dbe-4ddc-b0fe-fe17b36de29e",
       "name": "192.0.2.20:/export/backups Id: 302",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-19T01:00:39.772061-07:00",
+      "creationTime": "2026-08-19T01:00:39.772061+00:00",
       "backupId": "a0616711-8079-4579-ab7b-c762a83b3775",
       "allowedOperations": [
         "StartFlrRestore"
@@ -2492,7 +2492,7 @@
       "id": "5512186b-5bfc-4477-a013-494b7a261c4e",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:14:43-07:00",
+      "creationTime": "2026-08-18T22:14:43+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "a977db50-3949-4952-b095-12a76b21010b",
       "allowedOperations": [
@@ -2509,7 +2509,7 @@
       "id": "a182c3f6-9a16-4a0a-a477-167949801abf",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:14:43-07:00",
+      "creationTime": "2026-08-18T22:14:43+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "a977db50-3949-4952-b095-12a76b21010b",
       "allowedOperations": [
@@ -2526,7 +2526,7 @@
       "id": "98747891-23a3-4406-bac7-0bab1727bb37",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:13:57-07:00",
+      "creationTime": "2026-08-18T22:13:57+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -2543,7 +2543,7 @@
       "id": "1bc2734c-5df9-4faa-a8ba-d693637b0060",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:13:57-07:00",
+      "creationTime": "2026-08-18T22:13:57+00:00",
       "backupId": "25b20007-f063-440b-bd37-3cd2644cb662",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -2560,7 +2560,7 @@
       "id": "fe667e5e-cfa3-4a45-b5e7-3540eba493e5",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:13:41-07:00",
+      "creationTime": "2026-08-18T22:13:41+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "a977db50-3949-4952-b095-12a76b21010b",
       "allowedOperations": [
@@ -2577,7 +2577,7 @@
       "id": "198665c8-e32c-4a34-b9cf-bfbfd44f3790",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:13:41-07:00",
+      "creationTime": "2026-08-18T22:13:41+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "a977db50-3949-4952-b095-12a76b21010b",
       "allowedOperations": [
@@ -2594,7 +2594,7 @@
       "id": "d5680005-36c7-45df-9143-44ed4a10ffc4",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:11:20-07:00",
+      "creationTime": "2026-08-18T22:11:20+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "eb7be5ef-728e-4190-a0e7-31ecb948a3a6",
       "allowedOperations": [
@@ -2611,7 +2611,7 @@
       "id": "070688ad-59fb-4159-91a1-09151db227f1",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:11:20-07:00",
+      "creationTime": "2026-08-18T22:11:20+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "eb7be5ef-728e-4190-a0e7-31ecb948a3a6",
       "allowedOperations": [
@@ -2628,7 +2628,7 @@
       "id": "836be64c-b977-4af2-9a87-edc740ad299d",
       "name": "win01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:10:58-07:00",
+      "creationTime": "2026-08-18T22:10:58+00:00",
       "backupId": "105b7425-6c7d-4a25-b64e-7585b56dc7ee",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -2645,7 +2645,7 @@
       "id": "79b43840-04b7-4dc7-b57d-e74911718f96",
       "name": "linux08.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:09:15-07:00",
+      "creationTime": "2026-08-18T22:09:15+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "d4b9a4f9-7858-4b8d-a52a-49bd03f0f019",
       "allowedOperations": [
@@ -2662,7 +2662,7 @@
       "id": "811cf666-899b-4aaa-a4de-a3f1e9f51dc6",
       "name": "linux06.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:09:00-07:00",
+      "creationTime": "2026-08-18T22:09:00+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "d4b9a4f9-7858-4b8d-a52a-49bd03f0f019",
       "allowedOperations": [
@@ -2679,7 +2679,7 @@
       "id": "2930da14-67d9-476e-b4b6-94e13a0c464e",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:05:02-07:00",
+      "creationTime": "2026-08-18T22:05:02+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "eb7be5ef-728e-4190-a0e7-31ecb948a3a6",
       "allowedOperations": [
@@ -2696,7 +2696,7 @@
       "id": "b55eba8c-940a-46c6-858e-1607cb277c19",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:05:02-07:00",
+      "creationTime": "2026-08-18T22:05:02+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "eb7be5ef-728e-4190-a0e7-31ecb948a3a6",
       "allowedOperations": [
@@ -2713,7 +2713,7 @@
       "id": "3bc33746-9c0d-4897-a5c4-6b2c092ff759",
       "name": "linux09.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:02:01-07:00",
+      "creationTime": "2026-08-18T22:02:01+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -2730,7 +2730,7 @@
       "id": "e472a848-c46c-4b66-be65-f46549a95eb1",
       "name": "linux05.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:02:00-07:00",
+      "creationTime": "2026-08-18T22:02:00+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "d4b9a4f9-7858-4b8d-a52a-49bd03f0f019",
       "allowedOperations": [
@@ -2747,7 +2747,7 @@
       "id": "8e520e85-abf3-47b1-ad63-305ca4ed073b",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:02:00-07:00",
+      "creationTime": "2026-08-18T22:02:00+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "a977db50-3949-4952-b095-12a76b21010b",
       "allowedOperations": [
@@ -2764,7 +2764,7 @@
       "id": "68bb4c51-7d86-46fd-8bf6-4fba12e45c27",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-18T22:02:00-07:00",
+      "creationTime": "2026-08-18T22:02:00+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "a977db50-3949-4952-b095-12a76b21010b",
       "allowedOperations": [
@@ -2779,7 +2779,7 @@
       "id": "ad5f9bc3-87be-449e-9a62-7a0a1e24c94b",
       "name": "\\\\192.0.2.10\\share Id: 301",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-18T20:00:37.341111-07:00",
+      "creationTime": "2026-08-18T20:00:37.341111+00:00",
       "backupId": "85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
       "allowedOperations": [
         "StartFlrRestore"
@@ -2797,7 +2797,7 @@
       "id": "fcd5e965-17f8-4bb8-a648-46ddd9fb728d",
       "name": "linux02.example.com",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-18T05:00:36-07:00",
+      "creationTime": "2026-08-18T05:00:36+00:00",
       "backupId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
       "sessionId": "0ed1512c-5370-4897-840f-b43fc702658c",
       "allowedOperations": [
@@ -2815,7 +2815,7 @@
       "id": "46d94709-9bd2-46d6-b6cb-cbd494c6c691",
       "name": "192.0.2.20:/export/backups Id: 301",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-18T03:47:01.540974-07:00",
+      "creationTime": "2026-08-18T03:47:01.540974+00:00",
       "backupId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
       "allowedOperations": [
         "StartFlrRestore"
@@ -2831,7 +2831,7 @@
       "id": "fc4917cb-ecae-4634-9e6b-3d28a27a9586",
       "name": "192.0.2.20:/export/backups Id: 301",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-18T01:00:48.580095-07:00",
+      "creationTime": "2026-08-18T01:00:48.580095+00:00",
       "backupId": "a0616711-8079-4579-ab7b-c762a83b3775",
       "allowedOperations": [
         "StartFlrRestore"
@@ -2849,7 +2849,7 @@
       "id": "811a15b9-dbfc-4817-b2a9-064e3e5c8356",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:20:13-07:00",
+      "creationTime": "2026-08-17T22:20:13+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "5ee6ea33-4069-42e6-8db2-63b38c2a058d",
       "allowedOperations": [
@@ -2866,7 +2866,7 @@
       "id": "7b0d93ef-759f-473a-85ca-e5503bbcc0ef",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:20:13-07:00",
+      "creationTime": "2026-08-17T22:20:13+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "5ee6ea33-4069-42e6-8db2-63b38c2a058d",
       "allowedOperations": [
@@ -2883,7 +2883,7 @@
       "id": "0bf551e8-8354-4025-9053-ee68c393e61b",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:16:39-07:00",
+      "creationTime": "2026-08-17T22:16:39+00:00",
       "backupId": "25b20007-f063-440b-bd37-3cd2644cb662",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -2900,7 +2900,7 @@
       "id": "8715ab16-7f4f-4809-90b1-97beaef8c47f",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:16:39-07:00",
+      "creationTime": "2026-08-17T22:16:39+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -2917,7 +2917,7 @@
       "id": "5106263e-1f5d-442b-977a-86ded9db39b9",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:16:11-07:00",
+      "creationTime": "2026-08-17T22:16:11+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "5ee6ea33-4069-42e6-8db2-63b38c2a058d",
       "allowedOperations": [
@@ -2934,7 +2934,7 @@
       "id": "295746de-de65-42f0-92e1-dbb1c33e5ed2",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:16:11-07:00",
+      "creationTime": "2026-08-17T22:16:11+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "5ee6ea33-4069-42e6-8db2-63b38c2a058d",
       "allowedOperations": [
@@ -2951,7 +2951,7 @@
       "id": "9608f14f-37c0-41a7-8908-a990b2c36128",
       "name": "linux08.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:15:36-07:00",
+      "creationTime": "2026-08-17T22:15:36+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "3c161830-5e21-4ca3-b8a2-9a15dada4eba",
       "allowedOperations": [
@@ -2968,7 +2968,7 @@
       "id": "eb1a8fad-8149-428b-ac4b-096423c848f9",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:15:32-07:00",
+      "creationTime": "2026-08-17T22:15:32+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "0fe20ea3-d8d9-4cee-b581-b2dec01c0895",
       "allowedOperations": [
@@ -2985,7 +2985,7 @@
       "id": "c5ab75d2-198b-4b2a-ac93-3edd8bf6a1db",
       "name": "dc02.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:15:32-07:00",
+      "creationTime": "2026-08-17T22:15:32+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "0fe20ea3-d8d9-4cee-b581-b2dec01c0895",
       "allowedOperations": [
@@ -3002,7 +3002,7 @@
       "id": "3858387d-c684-4a56-9490-5193081adab3",
       "name": "win01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:12:01-07:00",
+      "creationTime": "2026-08-17T22:12:01+00:00",
       "backupId": "105b7425-6c7d-4a25-b64e-7585b56dc7ee",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -3019,7 +3019,7 @@
       "id": "2c9227da-171f-4294-a30e-7ab1122b76f8",
       "name": "linux06.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:11:15-07:00",
+      "creationTime": "2026-08-17T22:11:15+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "3c161830-5e21-4ca3-b8a2-9a15dada4eba",
       "allowedOperations": [
@@ -3036,7 +3036,7 @@
       "id": "70990346-294a-45e1-b884-83f41eaad565",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:09:44-07:00",
+      "creationTime": "2026-08-17T22:09:44+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "0fe20ea3-d8d9-4cee-b581-b2dec01c0895",
       "allowedOperations": [
@@ -3053,7 +3053,7 @@
       "id": "68794b86-db83-43c9-8e79-198d30aa497b",
       "name": "ca01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:09:44-07:00",
+      "creationTime": "2026-08-17T22:09:44+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "0fe20ea3-d8d9-4cee-b581-b2dec01c0895",
       "allowedOperations": [
@@ -3070,7 +3070,7 @@
       "id": "b6156e56-7f00-411e-bbc9-6f405e3a8f82",
       "name": "linux09.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:02:11-07:00",
+      "creationTime": "2026-08-17T22:02:11+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -3087,7 +3087,7 @@
       "id": "b9f82c2c-56cc-42ab-967a-60693ac64257",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:02:09-07:00",
+      "creationTime": "2026-08-17T22:02:09+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "0fe20ea3-d8d9-4cee-b581-b2dec01c0895",
       "allowedOperations": [
@@ -3104,7 +3104,7 @@
       "id": "b02de00b-742d-4d31-b6f2-8373979e516f",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:02:09-07:00",
+      "creationTime": "2026-08-17T22:02:09+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "0fe20ea3-d8d9-4cee-b581-b2dec01c0895",
       "allowedOperations": [
@@ -3121,7 +3121,7 @@
       "id": "17b0a2de-7a75-4ab8-9acf-2d1729346e53",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:02:09-07:00",
+      "creationTime": "2026-08-17T22:02:09+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "5ee6ea33-4069-42e6-8db2-63b38c2a058d",
       "allowedOperations": [
@@ -3138,7 +3138,7 @@
       "id": "f4d8e9b3-e5a9-4909-bc13-5cb1d7b4a3f7",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:02:09-07:00",
+      "creationTime": "2026-08-17T22:02:09+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "5ee6ea33-4069-42e6-8db2-63b38c2a058d",
       "allowedOperations": [
@@ -3155,7 +3155,7 @@
       "id": "7c422148-66b7-4634-ac9e-845946d18df4",
       "name": "linux05.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T22:02:09-07:00",
+      "creationTime": "2026-08-17T22:02:09+00:00",
       "backupId": "0b50efbe-d6fa-487c-ab39-603443967af5",
       "sessionId": "3c161830-5e21-4ca3-b8a2-9a15dada4eba",
       "allowedOperations": [
@@ -3170,7 +3170,7 @@
       "id": "d306a7b2-b307-4670-bf28-040b319f5013",
       "name": "\\\\192.0.2.10\\share Id: 300",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-17T20:01:52.230849-07:00",
+      "creationTime": "2026-08-17T20:01:52.230849+00:00",
       "backupId": "85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
       "allowedOperations": [
         "StartFlrRestore"
@@ -3188,7 +3188,7 @@
       "id": "09708784-8bb1-421d-9c29-48d7c6a30b23",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T15:07:19-07:00",
+      "creationTime": "2026-08-17T15:07:19+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "dfacf8d2-3f0c-4c53-b9cd-5719daff7009",
       "allowedOperations": [
@@ -3205,7 +3205,7 @@
       "id": "63bb3325-a4db-42be-9afd-ac067242f7f7",
       "name": "dc01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-17T15:07:19-07:00",
+      "creationTime": "2026-08-17T15:07:19+00:00",
       "backupId": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
       "sessionId": "dfacf8d2-3f0c-4c53-b9cd-5719daff7009",
       "allowedOperations": [
@@ -3220,7 +3220,7 @@
       "id": "051c6eba-f563-45ad-b4ad-c1aefcbe4b42",
       "name": "192.0.2.20:/export/backups Id: 299",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-17T03:30:40.423432-07:00",
+      "creationTime": "2026-08-17T03:30:40.423432+00:00",
       "backupId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
       "allowedOperations": [
         "StartFlrRestore"
@@ -3236,7 +3236,7 @@
       "id": "56b71cf3-768d-4c6f-904c-0162df5a0806",
       "name": "192.0.2.20:/export/backups Id: 300",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-17T01:00:46.06335-07:00",
+      "creationTime": "2026-08-17T01:00:46.06335+00:00",
       "backupId": "a0616711-8079-4579-ab7b-c762a83b3775",
       "allowedOperations": [
         "StartFlrRestore"
@@ -3254,7 +3254,7 @@
       "id": "a81c7c8e-bf3d-47d1-9df7-7ce89aea7c05",
       "name": "linux02.example.com",
       "platformId": "00000000-0000-0000-0000-000000000000",
-      "creationTime": "2026-08-17T00:01:29-07:00",
+      "creationTime": "2026-08-17T00:01:29+00:00",
       "backupId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
       "sessionId": "1970a089-41c1-4f36-a13c-04a334489f38",
       "allowedOperations": [
@@ -3274,7 +3274,7 @@
       "id": "3912bcad-dafe-4342-9a9d-c0611e4695bf",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-16T22:16:22-07:00",
+      "creationTime": "2026-08-16T22:16:22+00:00",
       "backupId": "25b20007-f063-440b-bd37-3cd2644cb662",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -3291,7 +3291,7 @@
       "id": "07ba9343-3f7f-4d1e-9725-2f30e90ab627",
       "name": "pihole",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-16T22:16:22-07:00",
+      "creationTime": "2026-08-16T22:16:22+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "00000000-0000-0000-0000-000000000000",
       "allowedOperations": [
@@ -3308,7 +3308,7 @@
       "id": "5b82ab8d-09ee-49bf-a224-c036c1cecd22",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-16T22:15:45-07:00",
+      "creationTime": "2026-08-16T22:15:45+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "4c6636b2-5d20-436f-8cfb-265acc39039f",
       "allowedOperations": [
@@ -3325,7 +3325,7 @@
       "id": "6a09dcaa-3667-429d-953f-c8eb8479e634",
       "name": "linux04.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-16T22:15:45-07:00",
+      "creationTime": "2026-08-16T22:15:45+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "4c6636b2-5d20-436f-8cfb-265acc39039f",
       "allowedOperations": [
@@ -3342,7 +3342,7 @@
       "id": "99a93ccb-6316-430d-8e57-56224c513619",
       "name": "linux07.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-16T22:14:22-07:00",
+      "creationTime": "2026-08-16T22:14:22+00:00",
       "backupId": "f07776e2-7e90-428e-bf3a-3a7c08151f4b",
       "sessionId": "c59e1cf0-1a56-42a4-ba42-ddf3727f2d42",
       "allowedOperations": [
@@ -3359,7 +3359,7 @@
       "id": "5f6a80da-96d4-4137-b285-b7f1f383ccc9",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-16T22:13:45-07:00",
+      "creationTime": "2026-08-16T22:13:45+00:00",
       "backupId": "cf9569ad-a28e-476d-89ce-7e46989622f1",
       "sessionId": "4c6636b2-5d20-436f-8cfb-265acc39039f",
       "allowedOperations": [
@@ -3376,7 +3376,7 @@
       "id": "f79c29de-5d65-452a-a7f4-6370ac5bfb2b",
       "name": "linux01.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-16T22:13:45-07:00",
+      "creationTime": "2026-08-16T22:13:45+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "4c6636b2-5d20-436f-8cfb-265acc39039f",
       "allowedOperations": [
@@ -3393,7 +3393,7 @@
       "id": "bca6768b-6260-4bfe-82f4-da8bb4263e0a",
       "name": "linux03.example.com",
       "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
-      "creationTime": "2026-08-16T22:11:48-07:00",
+      "creationTime": "2026-08-16T22:11:48+00:00",
       "backupId": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
       "sessionId": "4c6636b2-5d20-436f-8cfb-265acc39039f",
       "allowedOperations": [

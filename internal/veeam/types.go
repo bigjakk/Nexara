@@ -128,7 +128,7 @@ func (l *License) ProxmoxClusters() []ProxmoxCluster {
 // Timestamp is a time the Veeam API emitted.
 //
 // It exists because the API is not consistent about offsets: session and job
-// timestamps carry one ("2026-08-24T22:00:29.381149-07:00") while others do
+// timestamps carry one ("2026-08-24T22:00:29.381149+05:30") while others do
 // not ("2026-02-14T22:37:33" on a backup's creationTime). A plain time.Time
 // field fails the whole decode on the second form, which would take down a
 // sync for one bad field on one row.

@@ -444,8 +444,11 @@ func TestTimestamp_DecodesEveryLayoutTheAPIEmits(t *testing.T) {
 		raw  string
 		want string // RFC3339 in UTC, or "" for the zero time
 	}{
-		{"offset with nanos", `"2026-08-24T22:00:29.381149-07:00"`, "2026-08-25T05:00:29Z"},
-		{"offset without nanos", `"2026-08-25T12:57:50-07:00"`, "2026-08-25T19:57:50Z"},
+		// A half-hour offset on purpose: a whole-hour one cannot catch a
+		// parser that reads the hours and drops the minutes, and a +00:00 one
+		// would pass even if the offset were ignored entirely.
+		{"offset with nanos", `"2026-08-24T22:00:29.381149+05:30"`, "2026-08-24T16:30:29Z"},
+		{"offset without nanos", `"2026-08-25T12:57:50+05:30"`, "2026-08-25T07:27:50Z"},
 		{"zulu", `"2027-04-27T00:00:00Z"`, "2027-04-27T00:00:00Z"},
 		// The backups listing emits this form. A plain time.Time field fails
 		// the whole decode on it.
@@ -479,7 +482,7 @@ func TestTimestamp_DecodesEveryLayoutTheAPIEmits(t *testing.T) {
 
 func TestTimestamp_RoundTripsThroughJSON(t *testing.T) {
 	var ts Timestamp
-	if err := json.Unmarshal([]byte(`"2026-08-25T12:57:50-07:00"`), &ts); err != nil {
+	if err := json.Unmarshal([]byte(`"2026-08-25T12:57:50+05:30"`), &ts); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	encoded, err := json.Marshal(ts)
