@@ -790,6 +790,65 @@ func classifyHARuleDelete(snapshot *proxmox.HARuleEntry, snapErr error) (action 
 	}
 }
 
+// haRuleDeleteDetails builds the audit detail for a completed HA-rule delete.
+//
+// Shared by both delete endpoints — HAHandler.DeleteRule behind the HA tab and
+// DRSHandler.DeleteHARule behind the DRS page. They file rows under the same
+// resource_type against the same PVE objects, so a reader who has to know which
+// page the operator used before they can read the row is being told two stories
+// about one system. One builder is what stops them drifting apart again.
+//
+// Only the detail is shared: each handler still calls AuditLog itself, because
+// there is exactly one audit path in this package and it should be visible at
+// the call site. A helper that wrapped the audit call would read as a
+// per-handler audit wrapper, which TestGuard_NoHandlerAuditLogWrappers exists
+// to prevent.
+//
+// The map holds only strings, ints and bools, so the marshal cannot fail.
+func haRuleDeleteDetails(ctx context.Context, queries *db.Queries, clusterID uuid.UUID, rule string, snapshot *proxmox.HARuleEntry, priorStateUnknown bool) json.RawMessage {
+	detailMap := map[string]any{"rule": rule}
+	if priorStateUnknown {
+		// Mark the row, so its thin detail reads as "nobody looked" rather than
+		// "the rule held nothing". The error itself stays out of the row and
+		// goes to the caller's log instead: view:audit is granted to every
+		// Viewer by default, and a connection failure names the PVE host and
+		// port.
+		detailMap["prior_state_unknown"] = true
+	}
+	if snapshot != nil {
+		if snapshot.Type != "" {
+			detailMap["type"] = snapshot.Type
+		}
+		if snapshot.Resources != "" {
+			detailMap["resources"] = snapshot.Resources
+			if names := resolveResourceNames(ctx, queries, clusterID, snapshot.Resources); names != nil {
+				detailMap["resource_names"] = names
+			}
+		}
+		if snapshot.Nodes != "" {
+			detailMap["nodes"] = snapshot.Nodes
+		}
+		if snapshot.Strict != 0 {
+			detailMap["strict"] = snapshot.Strict
+		}
+		if snapshot.Affinity != "" {
+			detailMap["affinity"] = snapshot.Affinity
+		}
+		if snapshot.Comment != "" {
+			detailMap["comment"] = snapshot.Comment
+		}
+		if snapshot.Disable != 0 {
+			// UpdateRule records this, so a delete that omitted it made a
+			// disabled rule's row byte-identical to an active one's — and an
+			// operator rebuilding the rule from the audit log would bring it
+			// back enabled.
+			detailMap["disable"] = snapshot.Disable
+		}
+	}
+	details, _ := json.Marshal(detailMap)
+	return details
+}
+
 // DeleteRule handles DELETE /clusters/:cluster_id/ha/rules/:rule.
 //
 // Deliberately idempotent, matching the PVE endpoint underneath: deleting a
@@ -821,40 +880,11 @@ func (h *HAHandler) DeleteRule(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	action, priorStateUnknown := classifyHARuleDelete(snapshot, snapErr)
-	detailMap := map[string]any{"rule": rule}
 	if priorStateUnknown {
-		// Mark the row, so its thin detail reads as "nobody looked" rather than
-		// "the rule held nothing". The error itself stays out of the row and
-		// goes to the log instead: view:audit is granted to every Viewer by
-		// default, and a connection failure names the PVE host and port.
-		detailMap["prior_state_unknown"] = true
 		slog.Warn("HA rule delete: could not read the rules list to snapshot the rule; auditing without its detail",
 			"cluster_id", clusterID, "rule", rule, "error", snapErr)
 	}
-	if snapshot != nil {
-		if snapshot.Type != "" {
-			detailMap["type"] = snapshot.Type
-		}
-		if snapshot.Resources != "" {
-			detailMap["resources"] = snapshot.Resources
-			if names := resolveResourceNames(c.Context(), h.queries, clusterID, snapshot.Resources); names != nil {
-				detailMap["resource_names"] = names
-			}
-		}
-		if snapshot.Nodes != "" {
-			detailMap["nodes"] = snapshot.Nodes
-		}
-		if snapshot.Strict != 0 {
-			detailMap["strict"] = snapshot.Strict
-		}
-		if snapshot.Affinity != "" {
-			detailMap["affinity"] = snapshot.Affinity
-		}
-		if snapshot.Comment != "" {
-			detailMap["comment"] = snapshot.Comment
-		}
-	}
-	details, _ := json.Marshal(detailMap)
+	details := haRuleDeleteDetails(c.Context(), h.queries, clusterID, rule, snapshot, priorStateUnknown)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", rule, action, details)
 	// Published for all three outcomes. ha_change is a cache-invalidation
 	// signal, not a claim about what changed, and the already-absent case is

@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
@@ -143,4 +146,88 @@ func TestClassifyHARuleDelete_NilSnapshotCasesAreNotInterchangeable(t *testing.T
 	if absentAction == "deleted" {
 		t.Errorf("confirmed-absent audits as %q; a no-op must not claim a deletion", absentAction)
 	}
+}
+
+// decodeDetails is the audit reader's view of a detail blob.
+func decodeDetails(t *testing.T, raw json.RawMessage) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("details are not valid JSON (%s): %v", raw, err)
+	}
+	return m
+}
+
+// haRuleDeleteDetails is shared by both delete endpoints, so a field dropped
+// here goes missing from the HA tab's audit rows and the DRS page's alike.
+//
+// Every case below passes a nil *db.Queries, which is safe only because none of
+// them reaches resolveSIDName's database call: "vm:abc" gets past the SID split
+// and then fails ParseInt, which returns before the query. That exercises the
+// resources field without a database, at the cost of never populating
+// resource_names — the one field these tests cannot cover.
+func TestHARuleDeleteDetails(t *testing.T) {
+	clusterID := uuid.New()
+
+	t.Run("carries every field the snapshot had", func(t *testing.T) {
+		snapshot := &proxmox.HARuleEntry{
+			Rule:      "keep-apart",
+			Type:      "resource-affinity",
+			Resources: "vm:abc",
+			Nodes:     "pve-01,pve-02",
+			Strict:    1,
+			Affinity:  "negative",
+			Comment:   "spread the pair",
+			Disable:   1,
+		}
+		got := decodeDetails(t, haRuleDeleteDetails(context.Background(), nil, clusterID, "keep-apart", snapshot, false))
+
+		for key, want := range map[string]any{
+			"rule":      "keep-apart",
+			"type":      "resource-affinity",
+			"resources": "vm:abc",
+			"nodes":     "pve-01,pve-02",
+			"strict":    float64(1),
+			"affinity":  "negative",
+			"comment":   "spread the pair",
+			"disable":   float64(1),
+		} {
+			if got[key] != want {
+				t.Errorf("details[%q] = %v, want %v", key, got[key], want)
+			}
+		}
+		if _, ok := got["prior_state_unknown"]; ok {
+			t.Error("prior_state_unknown is set on a row whose snapshot was read fine")
+		}
+	})
+
+	t.Run("flags a row nobody could snapshot", func(t *testing.T) {
+		got := decodeDetails(t, haRuleDeleteDetails(context.Background(), nil, clusterID, "keep-apart", nil, true))
+
+		if got["prior_state_unknown"] != true {
+			t.Errorf("prior_state_unknown = %v, want true", got["prior_state_unknown"])
+		}
+		if got["rule"] != "keep-apart" {
+			t.Errorf("rule = %v, want the rule name", got["rule"])
+		}
+	})
+
+	t.Run("a confirmed-absent row claims nothing about the rule", func(t *testing.T) {
+		got := decodeDetails(t, haRuleDeleteDetails(context.Background(), nil, clusterID, "gone", nil, false))
+
+		if len(got) != 1 || got["rule"] != "gone" {
+			t.Errorf("details = %v, want only the rule name — there was no rule to describe", got)
+		}
+	})
+
+	// The whole point of the flag: a reader must be able to tell "we looked and
+	// it was not there" from "we never got to look", and both produce a nil
+	// snapshot.
+	t.Run("the two nil-snapshot rows are distinguishable", func(t *testing.T) {
+		absent := haRuleDeleteDetails(context.Background(), nil, clusterID, "r", nil, false)
+		unknown := haRuleDeleteDetails(context.Background(), nil, clusterID, "r", nil, true)
+		if string(absent) == string(unknown) {
+			t.Fatalf("confirmed-absent and could-not-tell both produce %s", absent)
+		}
+	})
 }

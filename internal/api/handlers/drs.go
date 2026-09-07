@@ -761,12 +761,30 @@ func (h *DRSHandler) CreateHARule(c fiber.Ctx) error {
 	}
 
 	haDetails, _ := json.Marshal(map[string]interface{}{"rule_name": req.RuleName, "rule_type": req.RuleType, "vm_ids": req.VMIDs, "ha_type": haRuleType})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", req.RuleName, "ha_rule_created", haDetails)
+	// "created", not "ha_rule_created": the row's resource_type already says
+	// ha_rule, and HAHandler.CreateRule has always written the short verb. One
+	// resource type, one vocabulary.
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", req.RuleName, "created", haDetails)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok", "rule_name": req.RuleName})
 }
 
 // DeleteHARule handles DELETE /api/v1/clusters/:cluster_id/drs/ha-rules/:rule_name.
+//
+// The DRS page's own door onto the same PVE rules table that the HA tab's
+// HAHandler.DeleteRule writes to, so it audits through the same classifier: a
+// 200 from PVE's delete_rule is not evidence of a deletion, because that
+// endpoint is an unconditional Perl hash delete and answers 200 for a rule that
+// was already gone. Two endpoints filing rows under one resource_type must not
+// disagree about what happened.
+//
+// It stays a separate handler rather than delegating to the HA one: this route
+// is gated on manage:drs and that one on manage:ha, so delegating would quietly
+// change which permission the endpoint requires.
+//
+// The snapshot read costs one extra round trip to PVE. That is affordable on an
+// operator-initiated delete, and it is the only evidence the prior state ever
+// leaves behind.
 func (h *DRSHandler) DeleteHARule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
@@ -776,6 +794,10 @@ func (h *DRSHandler) DeleteHARule(c fiber.Ctx) error {
 		return err
 	}
 
+	// Read raw, unlike the HA tab's decodePathParam: the DRS client sends the
+	// rule name unencoded, so decoding here would corrupt a name containing a
+	// literal percent. What matters for the lookup below is that the same
+	// string reaches both findHARule and DeleteHARule, and it does.
 	ruleName := c.Params("rule_name")
 	if ruleName == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "rule_name is required")
@@ -786,11 +808,18 @@ func (h *DRSHandler) DeleteHARule(c fiber.Ctx) error {
 		return err
 	}
 
+	snapshot, snapErr := findHARule(c.Context(), client, ruleName)
 	if err := client.DeleteHARule(c.Context(), ruleName); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", ruleName, "ha_rule_deleted", nil)
+	action, priorStateUnknown := classifyHARuleDelete(snapshot, snapErr)
+	if priorStateUnknown {
+		slog.Warn("DRS HA rule delete: could not read the rules list to snapshot the rule; auditing without its detail",
+			"cluster_id", clusterID, "rule", ruleName, "error", snapErr)
+	}
+	details := haRuleDeleteDetails(c.Context(), h.queries, clusterID, ruleName, snapshot, priorStateUnknown)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", ruleName, action, details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
