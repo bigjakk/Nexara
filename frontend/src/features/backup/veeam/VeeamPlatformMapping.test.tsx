@@ -32,14 +32,14 @@ function guest(
     id: "infra-1",
     veeam_ref: "33de6836-c00c-4d7c-bd37-2bdf37743b47",
     role: "worker",
-    name: "veeam13-appliance01",
+    name: "vbr01-worker01",
     host_name: "pve-01.example.com",
     is_disabled: false,
     is_online: false,
     cluster_id: CEPH,
     cluster_name: "Ceph",
     vmid: 103,
-    guest_name: "veeam13-appliance01",
+    guest_name: "vbr01-worker01",
     last_seen_at: "2026-08-27T02:00:00Z",
     ...over,
   };
@@ -107,7 +107,7 @@ describe("VeeamPlatformMapping", () => {
     );
     // An exclusion nobody can see is indistinguishable from a coverage bug.
     // Twice by design: the name Veeam knows it by, and the guest it matched.
-    expect(screen.getAllByText(/veeam13-appliance01/)).toHaveLength(2);
+    expect(screen.getAllByText(/vbr01-worker01/)).toHaveLength(2);
     expect(screen.getByText("Worker")).toBeInTheDocument();
     expect(screen.getByText("(Ceph #103)")).toBeInTheDocument();
   });

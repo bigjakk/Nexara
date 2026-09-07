@@ -46,7 +46,7 @@ func TestPinVeeamInfrastructure_PinsButKeepsScoring(t *testing.T) {
 
 	nodeWorkloads := map[string][]Workload{
 		"node1": {
-			{VMID: 103, Name: "veeam13-appliance01", Type: "qemu", Node: "node1", CPUUsage: 0.4, CPUs: 4, Mem: 8e9, MaxMem: 8e9},
+			{VMID: 103, Name: "vbr01-worker01", Type: "qemu", Node: "node1", CPUUsage: 0.4, CPUs: 4, Mem: 8e9, MaxMem: 8e9},
 			{VMID: 200, Name: "web01", Type: "qemu", Node: "node1", CPUUsage: 0.3, CPUs: 4, Mem: 4e9, MaxMem: 4e9},
 		},
 		"node2": {
@@ -159,7 +159,7 @@ func TestPlanDoesNotMigratePinnedVeeamWorker(t *testing.T) {
 		"node1": {
 			// The heaviest workload, and therefore the first candidate the
 			// planner considers.
-			{VMID: 103, Name: "veeam13-appliance01", Type: "qemu", Node: "node1",
+			{VMID: 103, Name: "vbr01-worker01", Type: "qemu", Node: "node1",
 				CPUUsage: 0.5, CPUs: 8, Mem: 8e9, MaxMem: 8e9, Pinned: true},
 			{VMID: 200, Name: "web01", Type: "qemu", Node: "node1",
 				CPUUsage: 0.3, CPUs: 4, Mem: 3e9, MaxMem: 6e9},

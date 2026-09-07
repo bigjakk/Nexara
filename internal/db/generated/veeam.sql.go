@@ -2199,10 +2199,10 @@ WHERE i.id = r.id
 //
 // Name is the only key there is: neither the proxy state model nor the
 // managed-server model carries an smbios uuid or a vmid. So the match is
-// exact and case-insensitive (the lab has "veeam13-appliance01" beside
-// "Veeam13-appliance02"), never a prefix or substring test — "Veeam" also
-// appears in the name of the VBR server's own guest, and would in any
-// unrelated guest an operator happened to name that way.
+// exact and case-insensitive (the capture carries "vbr01-worker01" beside
+// "Vbr01-worker02"), never a prefix or substring test — a worker's name
+// commonly shares a prefix with the VBR server's own guest, and would with
+// any unrelated guest an operator happened to name that way.
 //
 // The search is confined to clusters this Veeam server has a mapped platform
 // on, and the match must be UNIQUE across all of them: two guests sharing the

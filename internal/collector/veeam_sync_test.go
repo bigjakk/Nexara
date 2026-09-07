@@ -1502,8 +1502,8 @@ func TestVeeamSync_RecordsVeeamOwnGuests(t *testing.T) {
 			// which are not guests anywhere, and three Proxmox appliances.
 			{ID: uuid.NewString(), Name: "Backup Proxy", Type: "GeneralPurposeProxy", HostName: "This server", IsOnline: true},
 			{ID: uuid.NewString(), Name: "VMware Backup Proxy", Type: "ViProxy", HostName: "This server", IsOnline: true},
-			{ID: uuid.NewString(), Name: "veeam13-appliance01", Type: veeam.ProxmoxProxyType, HostName: "pve-01.example.com"},
-			{ID: uuid.NewString(), Name: "Veeam13-appliance02", Type: veeam.ProxmoxProxyType, HostName: "pve-02.example.com"},
+			{ID: uuid.NewString(), Name: "vbr01-worker01", Type: veeam.ProxmoxProxyType, HostName: "pve-01.example.com"},
+			{ID: uuid.NewString(), Name: "Vbr01-worker02", Type: veeam.ProxmoxProxyType, HostName: "pve-02.example.com"},
 		},
 		managed: []veeam.ManagedServer{
 			{ID: uuid.NewString(), Name: "vbr01.example.com", Type: "WindowsHost", Status: "Available", IsBackupServer: true},
@@ -1527,7 +1527,7 @@ func TestVeeamSync_RecordsVeeamOwnGuests(t *testing.T) {
 	if len(byName) != 3 {
 		t.Fatalf("infrastructure rows = %d (%v), want 3", len(byName), byName)
 	}
-	for _, name := range []string{"veeam13-appliance01", "Veeam13-appliance02"} {
+	for _, name := range []string{"vbr01-worker01", "Vbr01-worker02"} {
 		row, ok := byName[name]
 		if !ok {
 			t.Errorf("worker %q was not recorded", name)
@@ -1556,7 +1556,7 @@ func TestVeeamSync_UnreadableManagedServersStillRecordsWorkers(t *testing.T) {
 	q := &fakeVeeamQueries{servers: []db.VeeamServer{server}}
 	c := &fakeVeeamClient{
 		proxies: []veeam.ProxyState{
-			{ID: uuid.NewString(), Name: "veeam13-appliance01", Type: veeam.ProxmoxProxyType},
+			{ID: uuid.NewString(), Name: "vbr01-worker01", Type: veeam.ProxmoxProxyType},
 		},
 		managedErr: errors.New("insufficient rights"),
 	}

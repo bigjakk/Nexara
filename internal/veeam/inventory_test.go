@@ -560,12 +560,13 @@ func TestProxyStates_FindsProxmoxWorkerAppliances(t *testing.T) {
 	for _, w := range workers {
 		names[w.Name] = w.HostName
 	}
-	// Captured verbatim, mixed case and all — which is exactly why the guest
-	// resolution matches case-insensitively.
+	// Names are substituted for the public repo, but the capture's mixed case
+	// is preserved exactly — which is why the guest resolution matches
+	// case-insensitively.
 	for name, wantHost := range map[string]string{
-		"veeam13-appliance01": "pve-01.example.com",
-		"Veeam13-appliance02": "pve-02.example.com",
-		"Veeam13-appliance03": "pve-03.example.com",
+		"vbr01-worker01": "pve-01.example.com",
+		"Vbr01-worker02": "pve-02.example.com",
+		"Vbr01-worker03": "pve-03.example.com",
 	} {
 		if got, ok := names[name]; !ok {
 			t.Errorf("worker %q missing from the listing", name)

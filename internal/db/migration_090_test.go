@@ -95,14 +95,14 @@ func TestMigration090_ResolvesVeeamOwnGuests(t *testing.T) {
 			t.Fatalf("seed guest %d: %v", vmid, err)
 		}
 	}
-	// Case differs from what Veeam reports — the lab really does mix
-	// "veeam13-appliance01" with "Veeam13-appliance02".
-	seedGuest(103, "Veeam13-appliance01", "qemu", m090ClusterA)
+	// Case differs from what Veeam reports — the capture really does mix
+	// "vbr01-worker01" with "Vbr01-worker02".
+	seedGuest(103, "Vbr01-worker01", "qemu", m090ClusterA)
 	// Ambiguous: the same name on two clusters the server is mapped to.
-	seedGuest(132, "veeam13-appliance02", "qemu", m090ClusterA)
-	seedGuest(232, "veeam13-appliance02", "qemu", m090ClusterB)
+	seedGuest(132, "vbr01-worker02", "qemu", m090ClusterA)
+	seedGuest(232, "vbr01-worker02", "qemu", m090ClusterB)
 	// On a cluster with no mapped platform.
-	seedGuest(333, "veeam13-appliance03", "qemu", m090ClusterC)
+	seedGuest(333, "vbr01-worker03", "qemu", m090ClusterC)
 	// A container that shares the backup server's name.
 	seedGuest(124, "vbr01.example.com", "lxc", m090ClusterA)
 	seedGuest(150, "renameme", "qemu", m090ClusterA)
@@ -112,10 +112,10 @@ func TestMigration090_ResolvesVeeamOwnGuests(t *testing.T) {
 
 	type infraSpec struct{ key, role, name string }
 	rows := []infraSpec{
-		{"worker-hit", "worker", "veeam13-appliance01"},
-		{"worker-ambiguous", "worker", "Veeam13-appliance02"},
-		{"worker-unmapped-cluster", "worker", "veeam13-appliance03"},
-		{"worker-absent", "worker", "veeam13-appliance99"},
+		{"worker-hit", "worker", "vbr01-worker01"},
+		{"worker-ambiguous", "worker", "Vbr01-worker02"},
+		{"worker-unmapped-cluster", "worker", "vbr01-worker03"},
+		{"worker-absent", "worker", "vbr01-worker99"},
 		{"vbr-is-a-container", "backup_server", "vbr01.example.com"},
 		{"renamed", "worker", "renameme"},
 		// A blank name. vms.name is NOT NULL DEFAULT '', so without a guard

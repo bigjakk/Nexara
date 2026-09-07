@@ -112,7 +112,7 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 		{
 			// Arm 1: the handler recorded details.vmid explicitly.
 			id: uuid.New(), resType: "vm", resID: uuid.New().String(), action: "destroy",
-			details:  `{"node":"pve-03","vmid":121,"resource_name":"Veeam13-appliance02"}`,
+			details:  `{"node":"pve-03","vmid":121,"resource_name":"Vbr01-worker02"}`,
 			cluster:  &m084Cluster,
 			wantVmid: i(121),
 		},
@@ -240,9 +240,9 @@ func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 	// Property 2: the destroyed guest. Its vms row never existed here, so the
 	// UUID join and the (cluster_id, vmid) join both miss — the name can only
 	// come from what the entry itself recorded.
-	if row := read("destroy"); row.ResourceVmid != 121 || row.ResourceName != "Veeam13-appliance02" {
+	if row := read("destroy"); row.ResourceVmid != 121 || row.ResourceName != "Vbr01-worker02" {
 		t.Errorf("destroy: vmid=%d name=%q, want 121 / %q — a destroyed guest's identity must survive in the entry",
-			row.ResourceVmid, row.ResourceName, "Veeam13-appliance02")
+			row.ResourceVmid, row.ResourceName, "Vbr01-worker02")
 	}
 
 	// Property 3: across churn. resource_id names a UUID nothing points at any

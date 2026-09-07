@@ -23,7 +23,17 @@ credentials. UUIDs were deliberately kept so cross-file references stay intact �
 
 Substitutions applied: `*.ad.<internal>.net` → `*.example.com`, user → `jdoe`,
 org → `EXAMPLE`/`ExampleOrg`, repositories → `repo-nas-01` / `example-bucket`,
-object-store endpoint → `s3.object-store.example.com`.
+object-store endpoint → `s3.object-store.example.com`, worker appliances →
+`vbr01-worker01..03`.
+
+The workers' mixed case (`vbr01-worker01` beside `Vbr01-worker02`) is preserved
+deliberately: the guest-resolution tests turn on it, and a substitution that
+regularised the case would leave them passing against a case-SENSITIVE match.
+When recapturing, a worker name appears in exactly two places — `name` on each
+`"type": "PVE"` row of `backupinfrastructure_proxies_states.json`, and each
+`Preparing worker …` session name in `sessions_list.json`. Leave the
+GeneralPurposeProxy and ViProxy rows in that file alone: their product-default
+names are what prove the worker filter keys on `type`, not on the name.
 
 `swagger_index.js` is the server's Swagger UI bootstrap verbatim — it carries no
 hostname or identifier, so nothing needed redacting.
@@ -70,9 +80,9 @@ committed unused rather than left in a scratch directory to rot.
 - A `PVE` proxy carries **no smbios uuid and no vmid** — only `name` and the
   Proxmox node in `hostName`. Name is therefore the only key for matching a
   worker to a guest, which is why the match is exact and case-insensitive
-  rather than a prefix test: the capture holds `veeam13-appliance01` beside
-  `Veeam13-appliance02`, and "Veeam" also appears in the name of the VBR
-  server's own guest.
+  rather than a prefix test: the capture holds `vbr01-worker01` beside
+  `Vbr01-worker02`, and a worker's name commonly shares a prefix with the VBR
+  server's own guest — here `vbr01`, which a prefix test would collide with.
 - Workers report `isOnline: false` in the capture, and that is the **healthy**
   steady state — Veeam powers an appliance on for a job and off afterwards.
 - The backup server's identity for guest matching is `managedServers.name`,

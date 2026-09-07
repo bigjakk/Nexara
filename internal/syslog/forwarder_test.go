@@ -147,12 +147,12 @@ func TestFormatAuditSDGuestIdentity(t *testing.T) {
 	t.Run("appended after details, in order", func(t *testing.T) {
 		sd := FormatAuditSD(AuditSD{
 			User: "alice", Cluster: "prod", ResourceType: "vm", ResourceID: "uuid-1",
-			Action: "destroy", VMID: "121", ResourceName: "Veeam13-appliance02",
+			Action: "destroy", VMID: "121", ResourceName: "Vbr01-worker02",
 			Details: `{"node":"pve-03"}`,
 		})
 		want := `[nexara@32473 user="alice" cluster="prod" resource_type="vm" ` +
 			`resource_id="uuid-1" action="destroy" details="{\"node\":\"pve-03\"}" ` +
-			`vmid="121" resource_name="Veeam13-appliance02"]`
+			`vmid="121" resource_name="Vbr01-worker02"]`
 		if sd != want {
 			t.Errorf("sd   = %s\nwant = %s", sd, want)
 		}
