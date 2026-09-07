@@ -1932,8 +1932,12 @@ type changeMediaRequest struct {
 }
 
 // ChangeMedia mounts or ejects a CD-ROM ISO on a VM.
-// It detects the existing CD-ROM device from the VM config and uses POST for
-// immediate hotplug (no reboot required).
+// It detects the existing CD-ROM device from the VM config and writes the
+// change synchronously, so the "ok" it answers with means the media really
+// changed — and a hotplug rejection comes back as this request's 400 rather
+// than as a 200 followed by a task nobody opened. A running guest sees the
+// change without a reboot either way: hotplug is a property of the config
+// update, not of the verb that asked for it.
 func (h *VMHandler) ChangeMedia(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
@@ -1996,8 +2000,10 @@ func (h *VMHandler) ChangeMedia(c fiber.Ctx) error {
 		value = req.Volid + ",media=cdrom"
 	}
 
-	// Use POST (UpdateVMConfigSync) for immediate hotplug — no reboot needed.
-	if err := pxClient.UpdateVMConfigSync(c.Context(), node.Name, int(vm.Vmid), map[string]string{
+	// Synchronous: a media change is a config edit, not a long-running job, so
+	// there is no task worth tracking and every failure mode belongs in this
+	// response rather than in an audit row that already claimed success.
+	if err := pxClient.SetVMConfig(c.Context(), node.Name, int(vm.Vmid), map[string]string{
 		cdromKey: value,
 	}); err != nil {
 		return mapProxmoxError(err)

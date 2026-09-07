@@ -1177,6 +1177,34 @@ func (c *Client) GetCTConfig(ctx context.Context, node string, vmid int) (VMConf
 	}
 	return config, nil
 }
+
+// SetVMConfig applies configuration changes to a VM and returns once Proxmox
+// has actually applied them.
+//
+// PUT is Proxmox's synchronous config API. POST on the same path is the
+// asynchronous one: it forks a worker and answers with a task UPID, so it
+// returns the moment the work is QUEUED. Both verbs run the identical update,
+// hotplug included — the only difference is whether the change has happened
+// when the call returns.
+//
+// Every caller here needs it to have happened: they go straight on to act on
+// the new config — mount the disc that was just attached, record the media
+// change as done. A queued worker gives them none of that, and its failure
+// would never reach them.
+//
+// qemu-server's own PUT description does steer callers to POST "for any
+// actions involving hotplug or storage allocation", and that advice is about
+// duration, not behaviour: the sync verb runs the whole update inside the HTTP
+// request, so a slow allocation can outlive it. Nexara accepts that. A cached
+// client allows 5 minutes (proxmox.CachedClientTimeout), which is far past any
+// config write that is going to succeed, and every other config-writing method
+// here already waits the same way. Trading a bounded wait for an answer the
+// caller can act on is the right side of that deal.
+//
+// If an asynchronous variant is genuinely needed, it belongs in a separate
+// method returning (string, error) whose UPID the handler records via
+// TrackTask; upid_signature_guard_test.go enforces that shape for a POST to
+// this path.
 func (c *Client) SetVMConfig(ctx context.Context, node string, vmid int, fields map[string]string) error {
 	if err := validateNodeName(node); err != nil {
 		return err
@@ -1191,23 +1219,6 @@ func (c *Client) SetVMConfig(ctx context.Context, node string, vmid int, fields 
 	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/config"
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("set VM %d config on %s: %w", vmid, node, err)
-	}
-	return nil
-}
-func (c *Client) UpdateVMConfigSync(ctx context.Context, node string, vmid int, fields map[string]string) error {
-	if err := validateNodeName(node); err != nil {
-		return err
-	}
-	if err := validateVMID(vmid); err != nil {
-		return err
-	}
-	form := url.Values{}
-	for k, v := range fields {
-		form.Set(k, v)
-	}
-	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/config"
-	if err := c.doPost(ctx, path, form, nil); err != nil {
-		return fmt.Errorf("update VM %d config on %s: %w", vmid, node, err)
 	}
 	return nil
 }

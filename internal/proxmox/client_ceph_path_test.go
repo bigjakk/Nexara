@@ -2,6 +2,7 @@ package proxmox
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"testing"
@@ -232,5 +233,45 @@ func TestCephPoolOperationsReturnTheUPID(t *testing.T) {
 	}
 	if got != upid {
 		t.Errorf("DeleteCephPool upid = %q, want %q", got, upid)
+	}
+}
+
+// DeleteCephPool puts the pool name in the path, and url.PathEscape does not
+// make that safe on its own: it escapes "/" and leaves ".." untouched, so the
+// segment stays a working traversal. ".." pops the pool collection too, landing
+// DELETE on /nodes/{node}/ceph; "." stops a level short, on /ceph/pool.
+//
+// Neither PVE::API2::Ceph nor PVE::API2::Ceph::Pool registers a DELETE at that
+// level, so both 501 rather than doing harm — but the same was true of the
+// three /disks names guarded alongside this one, and "whatever it lands on
+// happens not to take this verb" is a fact about PVE's routing table, not about
+// this code. CreateCephPool needs no equivalent: its name travels in the form
+// body.
+func TestDeleteCephPoolRejectsPathTraversal(t *testing.T) {
+	const node = "pve-01"
+
+	for _, name := range []string{"", "..", ".", "../..", "pool/../other"} {
+		label := name
+		if label == "" {
+			label = "empty"
+		}
+		t.Run(label, func(t *testing.T) {
+			var reached bool
+			srv := newTestServer(t, map[string]http.HandlerFunc{
+				"/": func(w http.ResponseWriter, _ *http.Request) {
+					reached = true
+					jsonResponse(w, "UPID:"+node+":00001234:00000000:68000000:cephdestroypool:p:root@pam:")
+				},
+			})
+			defer srv.Close()
+
+			_, err := newTestClient(t, srv.URL).DeleteCephPool(context.Background(), node, name)
+			if !errors.Is(err, ErrInvalidInput) {
+				t.Errorf("err = %v, want ErrInvalidInput", err)
+			}
+			if reached {
+				t.Error("the request was sent; a rejected segment must never reach the node")
+			}
+		})
 	}
 }

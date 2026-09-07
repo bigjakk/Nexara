@@ -17,15 +17,6 @@ func (c *Client) GetHAResources(ctx context.Context) ([]HAResource, error) {
 	}
 	return resources, nil
 }
-func (c *Client) SetHAResourceState(ctx context.Context, sid string, state string) error {
-	path := "/cluster/ha/resources/" + url.PathEscape(sid)
-	form := url.Values{}
-	form.Set("state", state)
-	if err := c.doPut(ctx, path, form, nil); err != nil {
-		return fmt.Errorf("set HA resource %s state to %s: %w", sid, state, err)
-	}
-	return nil
-}
 
 // ArmHA re-arms the HA stack cluster-wide after it was disarmed (PVE 9.2+),
 // restoring automatic fencing/recovery. POST /cluster/ha/status/arm-ha.

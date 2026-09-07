@@ -578,8 +578,11 @@ func (c *Client) CreateCephPool(ctx context.Context, node string, params CephPoo
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
+	// Not a path segment — the name goes out in the form body, so it needs no
+	// traversal guard. Wrapped anyway so an empty one is the 400 DeleteCephPool
+	// returns for the same mistake, rather than a 500.
 	if params.Name == "" {
-		return "", fmt.Errorf("pool name is required")
+		return "", fmt.Errorf("%w: pool name is required", ErrInvalidInput)
 	}
 	form := url.Values{}
 	form.Set("name", params.Name)
@@ -625,8 +628,8 @@ func (c *Client) DeleteCephPool(ctx context.Context, node, poolName string) (str
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
-	if poolName == "" {
-		return "", fmt.Errorf("pool name is required")
+	if err := validatePathSegment("ceph pool name", poolName); err != nil {
+		return "", err
 	}
 	var upid string
 	path := "/nodes/" + url.PathEscape(node) + "/ceph/pool/" + url.PathEscape(poolName)

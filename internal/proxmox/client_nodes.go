@@ -150,8 +150,8 @@ func (c *Client) DeleteNodeZFSPool(ctx context.Context, node, poolName string, c
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
-	if poolName == "" {
-		return "", fmt.Errorf("pool name is required")
+	if err := validatePathSegment("zfs pool name", poolName); err != nil {
+		return "", err
 	}
 	params := url.Values{}
 	if cleanupDisks {
@@ -212,8 +212,8 @@ func (c *Client) DeleteNodeLVM(ctx context.Context, node, vgName string, cleanup
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
-	if vgName == "" {
-		return "", fmt.Errorf("volume group name is required")
+	if err := validatePathSegment("volume group name", vgName); err != nil {
+		return "", err
 	}
 	params := url.Values{}
 	if cleanupDisks {
@@ -262,11 +262,14 @@ func (c *Client) DeleteNodeLVMThin(ctx context.Context, node, name, volumeGroup 
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
-	if name == "" {
-		return "", fmt.Errorf("lvmthin name is required")
+	if err := validatePathSegment("lvmthin name", name); err != nil {
+		return "", err
 	}
+	// Not a path segment — it goes out as a query parameter, so it needs no
+	// traversal guard. Wrapped anyway so an empty one is the 400 its three
+	// siblings above return, rather than a 500 for the same mistake.
 	if volumeGroup == "" {
-		return "", fmt.Errorf("volume group is required")
+		return "", fmt.Errorf("%w: volume group is required", ErrInvalidInput)
 	}
 	params := url.Values{}
 	params.Set("volume-group", volumeGroup)

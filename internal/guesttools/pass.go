@@ -431,7 +431,7 @@ func (e *Engine) reconcileOne(ctx context.Context, state db.GuestToolsState) {
 	// It is the case that needs it most: a powered-off guest has not had the
 	// chance to install yet, so it is exactly the one a bad release is still
 	// ahead of. There is no agent to delete the scheduled task through, but
-	// detaching the ISO is enough on its own, and UpdateVMConfigSync works fine
+	// detaching the ISO is enough on its own, and a config write works fine
 	// against a stopped guest.
 	//
 	// What the orphaned task then does at next boot is self-limiting: the

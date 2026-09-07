@@ -351,12 +351,22 @@ func (e *Engine) stage(
 	// winner's live row as failed.
 	result.MarkerWritten = true
 
-	// POST, not PUT: the sync variant hot-plugs the media change so the guest
-	// sees the disc without a reboot. Skipped when the drive already holds the
-	// exact ISO — re-attaching identical media yanks the disc out from under
-	// anything reading it, for no gain.
+	// SetVMConfig is the synchronous config API, and that matters here rather
+	// than being a detail. Asynchronously, a FAILED attach still returns nil:
+	// this function would go on to write the updater, register the task and
+	// mark the row staged against a drive that never received the ISO, and the
+	// only report of the failure would be in a Proxmox task nobody read.
+	//
+	// Completion also orders the runNow path. The updater locates its media by
+	// volume label, so on that path the lookup follows within seconds and can
+	// beat a queued worker to the drive. (Without runNow it waits for the
+	// guest's next boot, so only the failure case above applies.)
+	//
+	// Skipped when the drive already holds the exact ISO — re-attaching
+	// identical media yanks the disc out from under anything reading it, for no
+	// gain.
 	if !placement.AlreadyAttached {
-		if err := client.UpdateVMConfigSync(ctx, node, vmid, map[string]string{
+		if err := client.SetVMConfig(ctx, node, vmid, map[string]string{
 			placement.Key: isoVolid + ",media=cdrom",
 		}); err != nil {
 			return result, fmt.Errorf("attach %s to %s: %w", target.ISOFilename, placement.Key, err)
@@ -550,7 +560,11 @@ func (e *Engine) restoreCDROM(ctx context.Context, client *proxmox.Client, node 
 		fields = map[string]string{key: priorValue}
 	}
 
-	if err := client.UpdateVMConfigSync(ctx, node, vmid, fields); err != nil {
+	// Synchronous again, and load-bearing: this error is what decides the
+	// cdrom_restored flag the caller writes. Queued-not-done would record the
+	// ISO as returned while it is still attached, and the pending-restore sweep
+	// would never look at the guest again.
+	if err := client.SetVMConfig(ctx, node, vmid, fields); err != nil {
 		return fmt.Errorf("restore %s on guest %d: %w", key, vmid, err)
 	}
 	return nil
