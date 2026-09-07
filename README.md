@@ -207,7 +207,7 @@ Nexara runs as a **single Go binary** serving the API, WebSocket, embedded React
                          │                                      │   │  + TimescaleDB   │
    Proxmox VE  ◀────▶   │   Collector   (goroutine)            │   └─────────────────┘
    clusters              │   Scheduler   (goroutine)            │
-                         │                                      │──▶  Redis 7
+                         │                                      │──▶  Redis 8
                          └──────────────────────────────────────┘
 ```
 
@@ -215,7 +215,7 @@ Nexara runs as a **single Go binary** serving the API, WebSocket, embedded React
 |-----------|-------|------|---------|
 | `nexara` | `ghcr.io/bigjakk/nexara` | 80 → 8080 | API + WS + SPA + collector + scheduler |
 | `nexara-db` | `timescale/timescaledb:latest-pg16` | 5432 (internal) | Database with time-series |
-| `nexara-redis` | `redis:7-alpine` | 6379 (internal) | Pub/sub, cache, sessions |
+| `nexara-redis` | `redis:8-alpine` | 6379 (internal) | Pub/sub, cache, sessions |
 
 > **Running more than one replica?** Every instance serves API, WebSocket, and SPA traffic, but the collector and scheduler are each guarded by a Postgres heartbeat lease — exactly one instance runs each role at a time, and a hard-killed leader is taken over within ~40 s (a 30 s lease expiry plus the follower's 10 s retry interval). Nothing extra to configure on the Nexara side; note that the bundled `docker-compose.yml` pins `container_name` and the host port `80:8080`, so scaling out means an orchestrator (Swarm/Kubernetes) or a compose override that drops both.
 
@@ -317,7 +317,7 @@ nexara.example.com {
 | Backend | Go 1.27, Fiber v3, sqlc + pgx, gorilla/websocket |
 | Frontend | React 19, TypeScript 6, Vite 8, Tailwind CSS v4, Shadcn/ui, TanStack Query/Table, Zustand, Recharts, xterm.js, noVNC, React Flow |
 | Database | PostgreSQL 16 + TimescaleDB |
-| Cache | Redis 7 (Valkey compatible) |
+| Cache | Redis 8 (Valkey compatible) |
 | Deploy | Docker Compose (3 containers) |
 
 ---
