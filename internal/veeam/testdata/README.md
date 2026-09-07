@@ -24,18 +24,33 @@ credentials. UUIDs were deliberately kept so cross-file references stay intact �
 Substitutions applied: `*.ad.<internal>.net` → `*.example.com`, user → `jdoe`,
 org → `EXAMPLE`/`ExampleOrg`, repositories → `repo-nas-01` / `example-bucket`,
 object-store endpoint → `s3.object-store.example.com`, worker appliances →
-`vbr01-worker01..03`, UTC offsets → `+00:00`.
+`vbr01-worker01..03`, bucket folder → `veeam-repo`, UTC offsets → `+00:00`,
+guest names → `linuxNN` / `dc01` / `dc02` / `ca01` / `win01` / `win-tmpl01`.
+
+A guest name is **not** confined to a `"name"` field. It is also interpolated
+into session display names (`"linux13 Backup"`,
+`"BackupCopy-Object\\linux13 Backup (Incremental)"`), so a quote-anchored
+substitution silently leaves those behind. Replace the bare token, then grep the
+old name again before believing it is gone. Note too that a guest reporting a
+bare hostname stays bare (`linux13`) while one reporting an FQDN keeps the domain
+(`linux03.example.com`) — the name-matching code has to cope with both, so the
+distinction is deliberate.
+
+Kept on purpose: `home-assistant` in `internal/collector/sync.go` and
+`frontend/src/components/OSIcon.tsx` is the **os-release ID a guest agent
+reports**, not a guest name — upstream product data, in the same category as the
+distro tables. Only the fixture rows where it was a VM's *name* were replaced.
 
 **Timestamps were re-labelled, not shifted.** The capture's offsets were a
 DST/standard pair, which locates the operator as surely as a timezone name would.
 They were replaced with `+00:00` and every wall-clock digit left untouched, so
 every ordering survives — a session still ends after it begins — and the
 offset-less timestamps in `backups_list.json` now sit in the same frame as the
-rest rather than seven hours off it. Instants move by a whole number of hours per
-row: 7 for the 633 that read `-07:00`, 8 for the single `-08:00` one
-(`jobs_states.json` `nextRun`, a December date). So it is two constants, not one
-— the only duration that changes is that row's own `lastRun`→`nextRun` span, by
-an hour. Nothing reads it, and the row is eight months from every other timestamp,
+rest. Instants move by a whole number of hours, and by one hour more for the
+single outlier (`jobs_states.json` `nextRun`, a December date — that seasonal
+gap is exactly what made the pair diagnostic, so the magnitudes are not repeated
+here). It is therefore two constants rather than one, and the only duration that
+changes is that row's own `lastRun`→`nextRun` span, by an hour. Nothing reads it, and the row is eight months from every other timestamp,
 so no ordering can flip. Cross-file references are UUIDs rather than times, so
 nothing else had to move. On the next recapture, apply the same rule:
 

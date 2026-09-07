@@ -5,7 +5,7 @@
       "maxTaskCount": -1,
       "account": {
         "servicePoint": "https://s3.object-store.example.com",
-        "regionId": "us-east-005",
+        "regionId": "us-east-001",
         "credentialsId": "6e1ffbec-ddee-490f-82b9-c54e5b960028",
         "connectionSettings": {
           "connectionType": "Direct",
@@ -16,7 +16,7 @@
       },
       "bucket": {
         "bucketName": "example-bucket",
-        "folderName": "veeam12",
+        "folderName": "veeam-repo",
         "enableAutoProvision": false,
         "workloadsPerBucketLimit": 10,
         "storageConsumptionLimit": {
