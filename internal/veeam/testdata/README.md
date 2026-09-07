@@ -25,11 +25,34 @@ Substitutions applied: `*.ad.<internal>.net` → `*.example.com`, user → `jdoe
 org → `EXAMPLE`/`ExampleOrg`, repositories → `repo-nas-01` / `example-bucket`,
 object-store endpoint → `s3.object-store.example.com`, worker appliances →
 `vbr01-worker01..03`, bucket folder → `veeam-repo`, UTC offsets → `+00:00`,
-guest names → `linuxNN` / `dc01` / `dc02` / `ca01` / `win01` / `win-tmpl01`.
+guest names → `linuxNN` / `dc01` / `dc02` / `ca01` / `win01` / `win-tmpl01`,
+job names → `Daily-Backup-*` / `Daily-Copy-*` / `Weekly-Backup-*` /
+`Weekly-Copy-*` / `Linux Hosts` / `File-Backup-01..03` / `Backup-Copy-01`.
+
+**Treat every job name as an identifier.** Veeam prefills one in the New Job
+wizard, but what reaches the config is whatever the operator kept, so a job name
+is a person's words. The first pass renamed thirteen and left four on the
+reasoning that they read like product defaults. They did not, and they then
+survived three further scrubs — because this substitution list did not mention
+job names at all. That is the lesson worth keeping: an unlisted category is one
+nobody re-checks.
+
+Two neighbouring things *are* product data and must stay. The type enums —
+`jobType` and `type` of `"BackupCopy"`, `sessionType` of `"BackupCopyJob"` —
+which is why the rule is rename the `name`, never the `type`. And most session
+names: the large majority of `sessions_list.json` rows are Veeam's own generated
+titles (`Configuration Database Resynchronize`, `Rescan node …`,
+`Host Discovery`, `Malware Detection`, `Retention job`), and only the minority
+embedding a job or guest name need touching. Substitute the embedded portion,
+not the whole string.
+
+Like guest names, a job name is interpolated into those session titles
+(`"Backup-Copy-01\\linux13 Backup (Incremental)"`), so re-grep the old name
+after substituting rather than trusting a quote-anchored replace.
 
 A guest name is **not** confined to a `"name"` field. It is also interpolated
 into session display names (`"linux13 Backup"`,
-`"BackupCopy-Object\\linux13 Backup (Incremental)"`), so a quote-anchored
+`"Backup-Copy-01\\linux13 Backup (Incremental)"`), so a quote-anchored
 substitution silently leaves those behind. Replace the bare token, then grep the
 old name again before believing it is gone. Note too that a guest reporting a
 bare hostname stays bare (`linux13`) while one reporting an FQDN keeps the domain

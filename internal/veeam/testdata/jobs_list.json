@@ -197,7 +197,7 @@
       },
       "type": "BackupCopy",
       "id": "6d2da606-8ef6-4b43-a6c1-c44c40f782dd",
-      "name": "BackupCopy-Object",
+      "name": "Backup-Copy-01",
       "isDisabled": false
     },
     {
@@ -953,7 +953,7 @@
       },
       "type": "FileBackup",
       "id": "e35f3b9d-62fd-4f6a-ac90-60dcf6a0c661",
-      "name": "FileJob-Offsite",
+      "name": "File-Backup-03",
       "isDisabled": false
     },
     {
@@ -1235,7 +1235,7 @@
       },
       "type": "FileBackup",
       "id": "c5282a66-5356-463d-bb7e-1543bb67dd25",
-      "name": "FileJob-Object",
+      "name": "File-Backup-02",
       "isDisabled": false
     },
     {
@@ -1517,7 +1517,7 @@
       },
       "type": "FileBackup",
       "id": "28f2c35b-7c8d-4e90-bffb-29752a1e5201",
-      "name": "FileJob-NAS",
+      "name": "File-Backup-01",
       "isDisabled": false
     }
   ],
