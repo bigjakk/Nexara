@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -70,20 +71,43 @@ func resolveResourceNames(ctx context.Context, queries *db.Queries, clusterID uu
 	return out
 }
 
-// findHARule returns the rule matching name from the cluster's rule list.
-// Used by the delete handler so we can capture a snapshot before removal,
-// since the Proxmox API has no GET /cluster/ha/rules/{rule} endpoint.
-func findHARule(ctx context.Context, pxClient *proxmox.Client, name string) *proxmox.HARuleEntry {
+// findHARule looks up the rule matching name in the cluster's rule list. Used
+// by the delete handler to snapshot a rule before removing it.
+//
+// Three outcomes, and callers must keep them apart:
+//
+//	(rule, nil) — present, with its content
+//	(nil, nil)  — confirmed absent
+//	(nil, err)  — the list read failed, so the prior state is unknown
+//
+// It used to return a bare *HARuleEntry, which collapsed the last two into one
+// nil. That is how DeleteRule came to record a rule as deleted on the strength
+// of a failed list read: a snapshot helper that cannot say "I did not check"
+// makes its callers' absent-branch silently unconditional, so it never gets
+// exercised and never gets doubted.
+//
+// This lists and filters because the client has no single-rule getter. PVE does
+// expose GET /cluster/ha/rules/{rule} (Rules.pm read_rule, present for as long
+// as the rules API has been) if one is ever added — and it would be the better
+// source, because "confirmed absent" here is only ever as trustworthy as the
+// list read is complete. The index takes optional `type` and `resource`
+// filters; GetHARules sends neither, so what comes back is every rule and
+// absence from it is absence. That is the invariant, and it lives in the
+// client, not in PVE: repointing this at a filtered read — a GetHARulesByType,
+// say — would report a rule of another type as confirmed absent and audit its
+// real deletion as a no-op, inverting the very bug this exists to fix. Keep it
+// on the unfiltered index.
+func findHARule(ctx context.Context, pxClient *proxmox.Client, name string) (*proxmox.HARuleEntry, error) {
 	rules, err := pxClient.GetHARules(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	for i := range rules {
 		if rules[i].Rule == name {
-			return &rules[i]
+			return &rules[i], nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // HAHandler handles HA resources, groups, and status endpoints.
@@ -716,7 +740,64 @@ func (h *HAHandler) UpdateRule(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
+// classifyHARuleDelete decides what a completed DELETE of an HA rule is
+// entitled to claim, from the pre-delete snapshot attempt.
+//
+// It exists because a 200 from that endpoint is not evidence of a deletion.
+// PVE's delete_rule (pve-ha-manager src/PVE/API2/HA/Rules.pm) is an
+// unconditional `delete $rules->{ids}->{$ruleid}` with no die, and deleting an
+// absent key is a no-op in Perl — so the 200 says the rule is gone now, never
+// that this request is what removed it. The snapshot is the only evidence of
+// the prior state, and it has three answers rather than two.
+//
+// Split out from DeleteRule so the decision is unit-testable without a cluster,
+// a database or a request: the branch that was wrong is the one that used to be
+// unreachable in every test.
+//
+// What it narrows, and what it cannot close. The snapshot and the delete are
+// two round trips, so this is check-then-act and the window between them is
+// real. Inside it, a second operator deleting the same rule leaves both
+// requests saying "deleted", and a second operator *creating* that rule leaves
+// a real deletion recorded as "already_deleted". PVE's rules delete takes no
+// digest — unlike update — so there is no compare-and-swap to close it with.
+// The window shrinks from "every stale-list delete" to "a collision inside one
+// round trip"; it does not vanish, and `already_deleted` is evidence of a
+// no-op rather than proof of one.
+func classifyHARuleDelete(snapshot *proxmox.HARuleEntry, snapErr error) (action string, priorStateUnknown bool) {
+	switch {
+	case snapshot != nil:
+		// Seen immediately before the call, and PVE's delete is unconditional,
+		// so the rule is gone and this request is the best available account of
+		// why. A concurrent delete inside the round trip is indistinguishable.
+		return "deleted", false
+	case snapErr != nil:
+		// Could not read the list, so whether the rule was there is unknowable
+		// after the fact. The verb stays "deleted" deliberately: the delete was
+		// issued and accepted, and a SIEM rule or audit filter keyed on
+		// "deleted" must not miss a deletion that really happened. Over-
+		// claiming here is the safer direction — but the caller has to set
+		// prior_state_unknown, both to carry the doubt and so the row's thin
+		// detail does not read as a rule that carried no fields.
+		//
+		// So: action "deleted" alone is not proof of a state change. Anything
+		// auditing these rows has to consult details.prior_state_unknown.
+		return "deleted", true
+	default:
+		// Confirmed absent a moment before the call: nothing was removed. Two
+		// operators racing on a stale rules list both get a 200 here, and only
+		// one of them changed anything.
+		return "already_deleted", false
+	}
+}
+
 // DeleteRule handles DELETE /clusters/:cluster_id/ha/rules/:rule.
+//
+// Deliberately idempotent, matching the PVE endpoint underneath: deleting a
+// rule that is already gone succeeds, which is the kinder answer for two
+// operators racing on one rules table. UpdateRule answers 404 for the same
+// stale-list situation because PVE's update_rule genuinely dies there; the
+// difference is Proxmox's, not ours. What the two must not do is disagree in
+// the audit log, so the no-op case is recorded as the no-op it was.
 func (h *HAHandler) DeleteRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
@@ -733,16 +814,23 @@ func (h *HAHandler) DeleteRule(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	// Snapshot the rule before deletion so the audit entry has context. PVE does
-	// have a GET /cluster/ha/rules/{rule} (Rules.pm read_rule, present for as
-	// long as the rules API has been), but the client has no method for it, so
-	// this lists and filters. Note it returns nil both when the rule is absent
-	// and when the list read failed.
-	snapshot := findHARule(c.Context(), pxClient, rule)
+	// Snapshot the rule before deleting it, both for the audit detail and so
+	// the audit action can tell a real deletion from a no-op.
+	snapshot, snapErr := findHARule(c.Context(), pxClient, rule)
 	if err := pxClient.DeleteHARule(c.Context(), rule); err != nil {
 		return mapProxmoxError(err)
 	}
+	action, priorStateUnknown := classifyHARuleDelete(snapshot, snapErr)
 	detailMap := map[string]any{"rule": rule}
+	if priorStateUnknown {
+		// Mark the row, so its thin detail reads as "nobody looked" rather than
+		// "the rule held nothing". The error itself stays out of the row and
+		// goes to the log instead: view:audit is granted to every Viewer by
+		// default, and a connection failure names the PVE host and port.
+		detailMap["prior_state_unknown"] = true
+		slog.Warn("HA rule delete: could not read the rules list to snapshot the rule; auditing without its detail",
+			"cluster_id", clusterID, "rule", rule, "error", snapErr)
+	}
 	if snapshot != nil {
 		if snapshot.Type != "" {
 			detailMap["type"] = snapshot.Type
@@ -767,7 +855,10 @@ func (h *HAHandler) DeleteRule(c fiber.Ctx) error {
 		}
 	}
 	details, _ := json.Marshal(detailMap)
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", rule, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", rule, action, details)
+	// Published for all three outcomes. ha_change is a cache-invalidation
+	// signal, not a claim about what changed, and the already-absent case is
+	// precisely the one where some client is holding a stale rules list.
 	h.publishHA(c, clusterID, rule, "rule_deleted")
 	return c.JSON(fiber.Map{"status": "ok"})
 }

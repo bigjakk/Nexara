@@ -31,6 +31,10 @@ import (
 // `delete $rules->{ids}->{$ruleid}`, and deleting an absent key is a no-op in
 // Perl, so an already-deleted rule answers 200 and there is no error to map.
 // Adding it here would demand unreachable code.
+//
+// That 200 is not nothing, though — it just is not an error. DeleteRule reads
+// the case off its pre-delete snapshot instead (classifyHARuleDelete in ha.go),
+// so the audit row records a no-op as a no-op rather than as a deletion.
 var missingObjectMappers = map[string]string{
 	"UpdateHARule":       "mapHARuleError",
 	"GetMetricServer":    "mapMetricServerError",
