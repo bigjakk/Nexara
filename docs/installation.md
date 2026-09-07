@@ -237,7 +237,7 @@ docker compose pull
 docker compose up -d
 ```
 
-The stack runs a prebuilt image from GHCR — there is nothing to compile locally. By default it tracks `latest`; pin `NEXARA_VERSION` in `.env` (e.g. `NEXARA_VERSION=1.9.0` — the published image tags drop the leading `v` from the git tag) when you want to control exactly which release you move to, or to roll back to the previous one.
+The stack runs a prebuilt image from GHCR — there is nothing to compile locally. By default it tracks `latest`; pin `NEXARA_VERSION` in `.env` (e.g. `NEXARA_VERSION=1.9.0` — the published image tags drop the leading `v` from the git tag) when you want to control exactly which release you move to, or to roll back to the previous one. Note that pinning `NEXARA_VERSION` rolls back only the Nexara image; if you also revert the compose file to a release that predates Redis 8, see [Rolling back to Redis 7](#rolling-back-to-redis-7).
 
 Database migrations are applied automatically when the API server starts. There is no need to run them manually.
 
@@ -281,6 +281,49 @@ previous image version (`NEXARA_VERSION`), and report the migration error.
 `nexara migrate down <n>` rolls back the last `n` migrations (running their
 `.down.sql`). Down migrations can drop data — only use it as part of a
 deliberate rollback to a matching older image, and always back up first.
+
+### Rolling back to Redis 7
+
+From v1.12.0 the bundled `docker-compose.yml` runs `redis:8-alpine` (it was
+`redis:7-alpine` before). Upgrading is automatic — Redis 8 reads a Redis 7
+volume without help. **Going back is not**, because Redis 8 writes a newer RDB
+format that Redis 7 refuses to load:
+
+```
+# Can't handle RDB format version 15
+# Fatal error loading the DB, check server logs. Exiting.
+```
+
+Redis then restart-loops, and because the app waits on
+`depends_on: nexara-redis: condition: service_healthy`, Nexara never starts
+either. You will see `dependency failed to start: container nexara-redis is
+unhealthy`. This only happens if you revert the compose file (for example
+`git checkout` of an older tag) after having run Redis 8 — pinning
+`NEXARA_VERSION` alone does not change the Redis image.
+
+The fix is to delete the Redis dump and let it start empty:
+
+```bash
+docker compose stop nexara-redis
+docker compose run --rm --no-deps --entrypoint sh nexara-redis -c 'rm -f /data/dump.rdb'
+docker compose up -d
+```
+
+Going through `docker compose run` rather than a bare `docker run -v ...` matters:
+Compose prefixes named volumes with the project name, and `DATA_DIR` replaces
+them with bind mounts entirely, so naming the volume by hand hits the wrong
+target in both cases.
+
+**Nothing is lost.** Nexara uses Redis purely as a cache and pub/sub bus —
+every key it writes carries a TTL, sessions are authoritative in PostgreSQL, and
+the permission cache repopulates on the next request. Users stay logged in.
+
+> Nexara works with Redis 7 and 8 alike, so if you pin the bundled service to
+> `redis:7-alpine`, or point `REDIS_URL` at an external, managed or Valkey
+> instance **and remove the `nexara-redis` service from your compose file**,
+> none of this applies. If you left that service in place, it still starts and
+> the app still waits on it — so the note above applies to it even though your
+> data lives elsewhere.
 
 ## Backup & Restore
 
