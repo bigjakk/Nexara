@@ -9,7 +9,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-blue.svg" alt="License: AGPL v3"></a>
     <a href="https://ghcr.io/bigjakk/nexara"><img src="https://img.shields.io/badge/Container-ghcr.io-2496ED.svg?logo=docker&logoColor=white" alt="Container Image"></a>
     <br>
-    <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.25-00ADD8.svg?logo=go&logoColor=white" alt="Go 1.25"></a>
+    <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8.svg?logo=go&logoColor=white" alt="Go 1.27"></a>
     <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-6-3178C6.svg?logo=typescript&logoColor=white" alt="TypeScript 6"></a>
     <a href="#features"><img src="https://img.shields.io/badge/UI-Responsive-38BDF8.svg?logo=tailwindcss&logoColor=white" alt="Responsive UI"></a>
     <a href="https://github.com/bigjakk/Nexara/issues"><img src="https://img.shields.io/github/issues/bigjakk/Nexara" alt="Open Issues"></a>
@@ -314,7 +314,7 @@ nexara.example.com {
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Go 1.25, Fiber v3, sqlc + pgx, gorilla/websocket |
+| Backend | Go 1.27, Fiber v3, sqlc + pgx, gorilla/websocket |
 | Frontend | React 19, TypeScript 6, Vite 8, Tailwind CSS v4, Shadcn/ui, TanStack Query/Table, Zustand, Recharts, xterm.js, noVNC, React Flow |
 | Database | PostgreSQL 16 + TimescaleDB |
 | Cache | Redis 7 (Valkey compatible) |

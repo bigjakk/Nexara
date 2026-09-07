@@ -52,7 +52,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.13.2
 
       # act_runner has historically started service containers without gating
       # on their health, so the health-cmd above cannot be relied on here the

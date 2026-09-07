@@ -6,13 +6,13 @@ Thank you for your interest in contributing to Nexara! This guide covers the dev
 
 ### Prerequisites
 
-- **Go** 1.25+ — [install](https://go.dev/doc/install)
+- **Go** 1.27+ — [install](https://go.dev/doc/install)
 - **Node.js** 22 — [install](https://nodejs.org/) (CI builds on 22; the hard floor is Vite 8's `^20.19.0 || >=22.12.0`)
 - **PostgreSQL** 16 with TimescaleDB — or use Docker
 - **Redis** 7 — or use Docker
 - **sqlc** — `go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest`
 - **golang-migrate** — `go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest`
-- **golangci-lint** v2 — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2` (the `/v2` path matters: `.golangci.yml` is a v2-schema config and a v1 binary rejects it; CI pins v2.12.2)
+- **golangci-lint** v2 — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2` (the `/v2` path matters: `.golangci.yml` is a v2-schema config and a v1 binary rejects it; CI pins v2.13.2)
 - **govulncheck** (only for `make audit`) — `go install golang.org/x/vuln/cmd/govulncheck@latest`
 
 ### Quick Start

@@ -185,9 +185,11 @@ func New(a *nexapp.App) *Server {
 // — the safe default for direct-to-internet deployments. When TRUSTED_PROXIES names
 // the reverse proxy (e.g. "127.0.0.1,10.0.0.0/8"), c.IP() returns the real client IP
 // from X-Forwarded-For, which is what the auth/general/refresh/ws-token rate limiters
-// key on (Finding #13). EnableIPValidation returns just the first valid IP from the
-// header rather than the raw comma-separated list, so a malicious downstream can't
-// craft a header that lands in an oddly-keyed bucket.
+// key on (Finding #13). EnableIPValidation makes Fiber walk that header right-to-left
+// and return the first entry that is NOT itself a trusted proxy, so a client can't
+// prepend a spoofed IP to land in an oddly-keyed bucket — everything it controls sits
+// left of the real hop and is skipped. (Fiber v3.5 changed this: it used to return the
+// left-most valid IP, which the client could forge.)
 //
 // Fiber v3 rename: EnableTrustedProxyCheck → TrustProxy, and the TrustedProxies list
 // moved into TrustProxyConfig.Proxies. The TrustProxyConfig.{Loopback,LinkLocal,
