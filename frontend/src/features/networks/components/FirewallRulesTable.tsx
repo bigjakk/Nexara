@@ -14,18 +14,16 @@ import {
   useDeleteClusterFirewallRule,
 } from "../api/network-queries";
 import { CreateFirewallRuleDialog } from "./CreateFirewallRuleDialog";
+import { QueryStateNotice } from "@/components/QueryStateNotice";
 
 interface FirewallRulesTableProps {
   clusterId: string;
 }
 
 export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
-  const { data: rules, isLoading } = useClusterFirewallRules(clusterId);
+  const rulesQuery = useClusterFirewallRules(clusterId);
+  const rules = rulesQuery.data;
   const deleteRule = useDeleteClusterFirewallRule(clusterId);
-
-  if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
-  }
 
   return (
     <div className="space-y-4">
@@ -34,9 +32,11 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
       </div>
 
       {!rules || rules.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No firewall rules configured.
-        </p>
+        <QueryStateNotice
+          query={rulesQuery}
+          subject="the cluster firewall rules"
+          empty="No firewall rules configured."
+        />
       ) : (
         <div className="rounded-md border">
           <Table>

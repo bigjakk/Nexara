@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { QueryFailureNote } from "@/components/QueryStateNotice";
 import {
   useDRSRules,
   useDeleteDRSRule,
@@ -32,9 +32,10 @@ interface DRSRulesTableProps {
 }
 
 export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
-  const { data: manualRules, isLoading: loadingManual } =
-    useDRSRules(clusterId);
-  const { data: haRules, isLoading: loadingHA } = useHARules(clusterId);
+  const manualQuery = useDRSRules(clusterId);
+  const haQuery = useHARules(clusterId);
+  const manualRules = manualQuery.data;
+  const haRules = haQuery.data;
   const deleteManualRule = useDeleteDRSRule(clusterId);
   const deleteHARule = useDeleteHARule(clusterId);
   const [deleteTarget, setDeleteTarget] = useState<DRSRule | null>(null);
@@ -51,11 +52,18 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
     return [...manual, ...ha];
   }, [manualRules, haRules]);
 
-  const isLoading = loadingManual || loadingHA;
-
-  if (isLoading) {
-    return <Skeleton className="h-48 w-full" />;
-  }
+  // Both sources have to be readable before an empty table means anything.
+  // `haRules ?? []` absorbs a failed HA read into the merge, so a token that
+  // cannot list HA rules used to leave an operator looking at a table that
+  // said, without qualification, that the cluster has no rules.
+  const bothRead = manualQuery.isSuccess && haQuery.isSuccess;
+  const stillLoading = manualQuery.isLoading || haQuery.isLoading;
+  // errorUpdatedAt, not isError: TanStack clears `error` on every refetch of a
+  // query with no data, but leaves the timestamp. Without this the row would
+  // assert "could not be listed" for a query that is merely paused or
+  // disabled — the same claim-what-you-did-not-read shape being fixed here.
+  const eitherFailed =
+    manualQuery.errorUpdatedAt > 0 || haQuery.errorUpdatedAt > 0;
 
   const handleDelete = () => {
     if (!deleteTarget) return;
@@ -79,6 +87,18 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
 
   return (
     <>
+      <QueryFailureNote
+        query={manualQuery}
+        subject="this cluster's DRS rules"
+        identity={clusterId}
+        className="mb-2"
+      />
+      <QueryFailureNote
+        query={haQuery}
+        subject="this cluster's HA rules"
+        identity={clusterId}
+        className="mb-2"
+      />
       <div className="rounded-md border">
         <Table>
           <TableHeader>
@@ -98,7 +118,13 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
                   colSpan={6}
                   className="text-center text-muted-foreground"
                 >
-                  No rules configured
+                  {stillLoading
+                    ? "Loading rules..."
+                    : bothRead
+                      ? "No rules configured"
+                      : eitherFailed
+                        ? "Rules could not be listed"
+                        : "Rules have not been read yet"}
                 </TableCell>
               </TableRow>
             ) : (

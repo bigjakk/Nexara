@@ -19,8 +19,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Trash2 } from "lucide-react";
+import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useMetricServers,
@@ -130,12 +130,14 @@ export function ClusterMetricServersTab({
         )}
       </CardHeader>
       <CardContent>
-        {serversQuery.isLoading ? (
-          <Skeleton className="h-20 w-full" />
-        ) : !serversQuery.data || serversQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No external metric servers configured.
-          </p>
+        {!serversQuery.data || serversQuery.data.length === 0 ? (
+          <QueryStateNotice
+            query={serversQuery}
+            subject="this cluster's metric servers"
+            empty="No external metric servers configured."
+            identity={clusterId}
+            skeletonClassName="h-20 w-full"
+          />
         ) : (
           <Table>
             <TableHeader>

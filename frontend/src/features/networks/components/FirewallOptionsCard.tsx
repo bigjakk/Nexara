@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { QueryStateNotice } from "@/components/QueryStateNotice";
 import {
   useFirewallOptions,
   useSetFirewallOptions,
@@ -19,14 +20,36 @@ interface FirewallOptionsCardProps {
 }
 
 export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
-  const { data: opts, isLoading } = useFirewallOptions(clusterId);
+  const optionsQuery = useFirewallOptions(clusterId);
+  const opts = optionsQuery.data;
   const setOpts = useSetFirewallOptions(clusterId);
 
-  if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
+  // `opts?.enable === 1` is false for a read that failed as readily as for a
+  // firewall that is off, and this badge is a statement about the cluster's
+  // security posture. Say nothing rather than say "Disabled" about a setting
+  // nobody managed to read — and withhold the controls, which would otherwise
+  // offer to toggle from a state that was guessed.
+  if (!opts) {
+    return (
+      <div className="space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Cluster Firewall</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <QueryStateNotice
+              query={optionsQuery}
+              subject="the cluster firewall options"
+              empty="Proxmox returned no firewall options for this cluster."
+              skeletonClassName="h-20 w-full"
+            />
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
-  const isEnabled = opts?.enable === 1;
+  const isEnabled = opts.enable === 1;
 
   return (
     <div className="space-y-4">
@@ -57,7 +80,7 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
             <div className="space-y-2">
               <Label>Inbound Policy</Label>
               <Select
-                value={opts?.policy_in || "DROP"}
+                value={opts.policy_in || "DROP"}
                 onValueChange={(val) => {
                   setOpts.mutate({ policy_in: val });
                 }}
@@ -75,7 +98,7 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
             <div className="space-y-2">
               <Label>Outbound Policy</Label>
               <Select
-                value={opts?.policy_out || "ACCEPT"}
+                value={opts.policy_out || "ACCEPT"}
                 onValueChange={(val) => {
                   setOpts.mutate({ policy_out: val });
                 }}

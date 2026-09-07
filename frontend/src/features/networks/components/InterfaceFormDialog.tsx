@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { QueryFailureNote } from "@/components/QueryStateNotice";
 import {
   useCreateNetworkInterface,
   useUpdateNetworkInterface,
@@ -77,16 +78,16 @@ export function InterfaceFormDialog({
 
   // Populate the OVS bridge picker from the node's existing bridges, the way
   // Proxmox's BridgeSelector does.
-  const { data: nodeInterfaces } = useNodeNetworkInterfaces(
+  const nodeInterfacesQuery = useNodeNetworkInterfaces(
     clusterId,
     open ? nodeName : "",
   );
   const ovsBridges = useMemo(
     () =>
-      (nodeInterfaces ?? [])
+      (nodeInterfacesQuery.data ?? [])
         .filter((i) => i.type === "OVSBridge")
         .map((i) => i.iface),
-    [nodeInterfaces],
+    [nodeInterfacesQuery.data],
   );
 
   // Reset to the interface under edit (or to create defaults) each time the
@@ -400,13 +401,24 @@ export function InterfaceFormDialog({
                   </SelectContent>
                 </Select>
               ) : (
-                <Input
-                  placeholder="e.g. vmbr1"
-                  value={form.ovs_bridge ?? ""}
-                  onChange={(e) => {
-                    set("ovs_bridge")(e.target.value);
-                  }}
-                />
+                <>
+                  {/* Typing the name is the right fallback for a node that
+                      genuinely has no OVS bridge yet. It is also what a failed
+                      read leaves behind, hence the note. */}
+                  <Input
+                    placeholder="e.g. vmbr1"
+                    value={form.ovs_bridge ?? ""}
+                    onChange={(e) => {
+                      set("ovs_bridge")(e.target.value);
+                    }}
+                  />
+                  <QueryFailureNote
+                    query={nodeInterfacesQuery}
+                    subject="this node's existing bridges"
+                    identity={nodeName}
+                    className="mt-1"
+                  />
+                </>
               )}
             </Field>
           )}
