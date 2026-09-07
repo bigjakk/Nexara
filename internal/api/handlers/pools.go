@@ -27,6 +27,24 @@ func (h *PoolHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*pr
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
+// mapPoolError adds pool-specific handling on top of mapProxmoxError, in the
+// same shape as mapTemplateError.
+//
+// PVE reports "this pool is already there" as a plain 500 with a die() string
+// rather than a distinguishing status, so it carries no rejection map and
+// mapProxmoxError can only call it a gateway failure. It is not one — it is the
+// single most likely way CreatePool fails, and it is entirely about the name
+// the operator chose, which is what 409 says.
+func mapPoolError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if proxmox.IsAlreadyExistsError(err) {
+		return fiber.NewError(fiber.StatusConflict, "A pool with that ID already exists")
+	}
+	return mapProxmoxError(err)
+}
+
 // CreatePool handles POST /clusters/:cluster_id/pools.
 func (h *PoolHandler) CreatePool(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -48,7 +66,7 @@ func (h *PoolHandler) CreatePool(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateResourcePool(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create resource pool")
+		return mapPoolError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"poolid": req.PoolID})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pool", req.PoolID, "created", details)
@@ -75,7 +93,7 @@ func (h *PoolHandler) GetPool(c fiber.Ctx) error {
 	}
 	pool, err := pxClient.GetResourcePool(c.Context(), poolID)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get resource pool")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(pool)
 }
@@ -102,7 +120,7 @@ func (h *PoolHandler) UpdatePool(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateResourcePool(c.Context(), poolID, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update resource pool")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"poolid": poolID})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pool", poolID, "updated", details)
@@ -128,7 +146,7 @@ func (h *PoolHandler) DeletePool(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteResourcePool(c.Context(), poolID); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete resource pool")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"poolid": poolID})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pool", poolID, "deleted", details)

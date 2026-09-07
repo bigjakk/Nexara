@@ -223,3 +223,65 @@ func TestMapProxmoxError_WrappedAPIErrorKeepsSentinelPrecedence(t *testing.T) {
 		t.Errorf("message = %q, want the connection-failed message", fe.Message)
 	}
 }
+
+// PVE reports a duplicate pool as a plain 500 with a die() string, so it
+// carries no rejection map and mapProxmoxError alone can only call it a
+// gateway failure. It is the operator's chosen name that is at fault.
+func TestMapPoolError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantMsg  string
+	}{
+		{
+			name:     "duplicate pool is a conflict",
+			err:      &proxmox.APIError{StatusCode: 500, Message: "pool 'web-tier' already exists"},
+			wantCode: fiber.StatusConflict,
+			wantMsg:  "A pool with that ID already exists",
+		},
+		{
+			// client_admin.go wraps every create with the pool id, so the bare
+			// error above is not the shape production hands this function.
+			name: "the conflict is still recognised through the client's wrap",
+			err: fmt.Errorf("create resource pool %s: %w", "web-tier",
+				&proxmox.APIError{StatusCode: 500, Message: "pool 'web-tier' already exists"}),
+			wantCode: fiber.StatusConflict,
+			wantMsg:  "A pool with that ID already exists",
+		},
+		{
+			name:     "a rejected parameter still reaches the shared mapping",
+			err:      &proxmox.APIError{StatusCode: 400, Message: "poolid: invalid format", Fields: map[string]string{"poolid": "invalid format"}},
+			wantCode: fiber.StatusBadRequest,
+		},
+		{
+			name:     "an unreachable cluster is still a gateway failure",
+			err:      proxmox.ErrConnectionFailed,
+			wantCode: fiber.StatusBadGateway,
+		},
+		{
+			name:     "a missing pool is still a 404",
+			err:      proxmox.ErrNotFound,
+			wantCode: fiber.StatusNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fe *fiber.Error
+			if !errors.As(mapPoolError(tt.err), &fe) {
+				t.Fatal("want *fiber.Error")
+			}
+			if fe.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", fe.Code, tt.wantCode)
+			}
+			if tt.wantMsg != "" && fe.Message != tt.wantMsg {
+				t.Errorf("message = %q, want %q", fe.Message, tt.wantMsg)
+			}
+		})
+	}
+
+	if mapPoolError(nil) != nil {
+		t.Error("mapPoolError(nil) should stay nil")
+	}
+}

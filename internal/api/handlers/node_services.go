@@ -30,7 +30,7 @@ func (h *NodeHandler) ListNodeServices(c fiber.Ctx) error {
 	}
 	services, err := pxClient.GetNodeServices(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list node services")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, services)
 }
@@ -61,7 +61,7 @@ func (h *NodeHandler) ServiceAction(c fiber.Ctx) error {
 	}
 	upid, err := pxClient.ServiceAction(c.Context(), nodeName, service, action)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to "+action+" service "+service)
+		return mapProxmoxError(err)
 	}
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,

@@ -23,7 +23,7 @@ func (h *NodeHandler) ListNodeFirewallRules(c fiber.Ctx) error {
 	}
 	rules, err := pxClient.GetNodeFirewallRules(c.Context(), nodeName)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list node firewall rules")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, rules)
 }
@@ -81,7 +81,7 @@ func (h *NodeHandler) CreateNodeFirewallRule(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateNodeFirewallRule(c.Context(), nodeName, req.toParams()); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create node firewall rule")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(req)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "create_firewall_rule", details)
@@ -110,7 +110,7 @@ func (h *NodeHandler) UpdateNodeFirewallRule(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateNodeFirewallRule(c.Context(), nodeName, pos, req.toParams()); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update node firewall rule")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(req)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "update_firewall_rule", details)
@@ -135,7 +135,7 @@ func (h *NodeHandler) DeleteNodeFirewallRule(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteNodeFirewallRule(c.Context(), nodeName, pos); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete node firewall rule")
+		return mapProxmoxError(err)
 	}
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "delete_firewall_rule", nil)
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -161,7 +161,7 @@ func (h *NodeHandler) GetNodeFirewallLog(c fiber.Ctx) error {
 	}
 	entries, err := pxClient.GetNodeFirewallLog(c.Context(), nodeName, limit, start)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node firewall log")
+		return mapProxmoxError(err)
 	}
 	return RespondItems(c, entries)
 }
