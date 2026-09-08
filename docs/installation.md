@@ -318,12 +318,18 @@ target in both cases.
 every key it writes carries a TTL, sessions are authoritative in PostgreSQL, and
 the permission cache repopulates on the next request. Users stay logged in.
 
-> Nexara works with Redis 7 and 8 alike, so if you pin the bundled service to
-> `redis:7-alpine`, or point `REDIS_URL` at an external, managed or Valkey
-> instance **and remove the `nexara-redis` service from your compose file**,
-> none of this applies. If you left that service in place, it still starts and
-> the app still waits on it — so the note above applies to it even though your
-> data lives elsewhere.
+> **Running your own stack?** If you deploy from your own compose file, a Swarm
+> stack, or Kubernetes rather than the bundled `docker-compose.yml`, `git pull`
+> never touches your Redis image — it stays on whatever you pinned. That is
+> fine: **Nexara works with Redis 7 and 8 alike**, so there is nothing you have
+> to do. Move to `redis:8-alpine` when it suits you, and note that once you do,
+> going back needs the `dump.rdb` step above.
+>
+> The same applies if you pin the bundled service to `redis:7-alpine`, or point
+> `REDIS_URL` at an external, managed or Valkey instance **and remove the
+> `nexara-redis` service from your compose file**. If you left that service in
+> place it still starts, and the app still waits on it — so the note above
+> applies to it even though your data lives elsewhere.
 
 ## Backup & Restore
 
