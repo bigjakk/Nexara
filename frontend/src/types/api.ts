@@ -240,6 +240,39 @@ export interface UserSession {
   is_current: boolean;
 }
 
+/** A resource the caller has starred: cluster, node or guest. */
+export type FavoriteResourceType = "cluster" | "node" | "vm";
+
+/**
+ * One starred resource, already resolved to what the sidebar needs to draw and
+ * navigate to it without expanding its cluster.
+ *
+ * `ref` is the stable Proxmox identity the favorite is stored against (empty
+ * for a cluster, the node name, the VMID) and is what an unstar sends back.
+ * `target_id` is the row id to route to right now — the collector re-issues
+ * those UUIDs, so it is resolved server-side on every read and must never be
+ * cached as if it were the identity.
+ */
+export interface Favorite {
+  resource_type: FavoriteResourceType;
+  cluster_id: string;
+  cluster_name: string;
+  ref: string;
+  target_id: string;
+  name: string;
+  status: string;
+  /** "qemu" | "lxc" for a guest, "" otherwise. Picks the route and the icon. */
+  vm_kind: string;
+  vmid: number;
+  /** The node a guest is on right now; empty for the other types. */
+  node_name: string;
+  template: boolean;
+  ha_state: string;
+  ostype: string;
+  config_ostype: string;
+  created_at: string;
+}
+
 export interface TOTPRequiredResponse {
   totp_required: boolean;
   totp_pending_token: string;

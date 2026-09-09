@@ -6,6 +6,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { FavoritesSection } from "@/features/favorites/components/FavoritesSection";
 import { InventoryTree } from "./InventoryTree";
 import { StorageTree } from "./StorageTree";
 import { VMTree } from "./VMTree";
@@ -59,6 +60,7 @@ export function TreeView() {
   return (
     <div className="flex flex-col">
       <PerspectiveToggle />
+      <FavoritesSection />
       {perspective === "hosts" && <InventoryTree />}
       {perspective === "vms" && <VMTree />}
       {perspective === "storage" && <StorageTree />}

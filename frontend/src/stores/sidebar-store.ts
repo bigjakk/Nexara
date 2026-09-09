@@ -8,6 +8,16 @@ interface SidebarState {
   expandedNodes: Set<string>;
   width: number;
   perspective: TreePerspective;
+  /**
+   * Whether the Favorites section above the tree is folded away.
+   *
+   * A field of its own rather than a key in expandedNodes, because that set
+   * treats absence as collapsed and this section has to default to OPEN — a
+   * list you curated yourself is useless if it starts hidden. Encoding that as
+   * a "favorites-collapsed" member of a set named expandedNodes would invert
+   * the set's meaning for one entry.
+   */
+  favoritesCollapsed: boolean;
 }
 
 interface SidebarActions {
@@ -17,6 +27,7 @@ interface SidebarActions {
   expandNode: (key: string) => void;
   setWidth: (width: number) => void;
   setPerspective: (perspective: TreePerspective) => void;
+  toggleFavoritesCollapsed: () => void;
 }
 
 const STORAGE_KEY = "nexara-sidebar";
@@ -40,6 +51,7 @@ function loadPersistedState(): SidebarState {
           width: typeof obj["width"] === "number" ? obj["width"] : 240,
           perspective:
             persp === "storage" ? "storage" : persp === "vms" ? "vms" : "hosts",
+          favoritesCollapsed: obj["favoritesCollapsed"] === true,
         };
       }
     }
@@ -52,6 +64,7 @@ function loadPersistedState(): SidebarState {
     expandedNodes: new Set<string>(),
     width: 240,
     perspective: "vms",
+    favoritesCollapsed: false,
   };
 }
 
@@ -65,6 +78,7 @@ function persist(state: SidebarState) {
         expandedNodes: [...state.expandedNodes],
         width: state.width,
         perspective: state.perspective,
+        favoritesCollapsed: state.favoritesCollapsed,
       }),
     );
   } catch {
@@ -115,6 +129,12 @@ export const useSidebarStore = create<SidebarState & SidebarActions>()(
     setPerspective: (perspective: TreePerspective) => {
       const state = { ...get(), perspective };
       set({ perspective });
+      persist(state);
+    },
+    toggleFavoritesCollapsed: () => {
+      const next = !get().favoritesCollapsed;
+      const state = { ...get(), favoritesCollapsed: next };
+      set({ favoritesCollapsed: next });
       persist(state);
     },
   }),

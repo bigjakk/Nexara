@@ -21,6 +21,7 @@ import {
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useConsoleStore } from "@/stores/console-store";
 import { usePermissions } from "@/hooks/usePermissions";
+import { FavoriteContextItem } from "@/features/favorites/components/FavoriteMenuItem";
 import type { VMAction } from "../types/vm";
 
 interface VMContextMenuProps {
@@ -160,6 +161,14 @@ export function VMContextMenu({
         )}
 
         <ContextMenuSeparator />
+        <FavoriteContextItem
+          target={{
+            resource_type: "vm",
+            cluster_id: target.clusterId,
+            ref: String(target.vmid),
+          }}
+          onAction={onAction}
+        />
         <ContextMenuItem
           onClick={() => {
             onAction?.();

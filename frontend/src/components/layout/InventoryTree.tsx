@@ -4,9 +4,6 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   ChevronRight,
   Server,
-  Monitor,
-  Container,
-  FileBox,
   MoreVertical,
   Plus,
   Pencil,
@@ -29,6 +26,7 @@ import { visibleClusterIssues } from "@/lib/health-issues";
 import { useHealthDismissStore } from "@/stores/health-dismiss-store";
 import { useHealthMuteStore } from "@/stores/health-mute-store";
 import { StatusIcon } from "@/components/StatusIcon";
+import { VMIcon } from "@/components/VMIcon";
 import { OSIcon } from "@/components/OSIcon";
 import { classifyOS } from "@/lib/os-classify";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
@@ -54,6 +52,10 @@ import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDial
 import { EditClusterDialog } from "@/features/clusters/components/EditClusterDialog";
 import { DeleteClusterDialog } from "@/features/clusters/components/DeleteClusterDialog";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
+import {
+  FavoriteContextItem,
+  FavoriteDropdownItem,
+} from "@/features/favorites/components/FavoriteMenuItem";
 import { CreateResourceContextItems } from "./create-resource-actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,18 +65,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { ClusterResponse, NodeResponse, VMResponse } from "@/types/api";
-
-function VMIcon({ type, template }: { type: string; template?: boolean }) {
-  if (template) {
-    return (
-      <FileBox className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-    );
-  }
-  if (type === "lxc") {
-    return <Container className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
-  }
-  return <Monitor className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
-}
 
 interface NodeBranchProps {
   node: NodeResponse;
@@ -161,18 +151,28 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
             </button>
           </div>
         </ContextMenuTrigger>
-        {canMaintenance && (
-          <ContextMenuContent className="w-48">
-            <ContextMenuItem
-              onClick={() => {
-                setMaintOpen(true);
-              }}
-            >
-              <Wrench className="mr-2 h-3.5 w-3.5" />
-              {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
-            </ContextMenuItem>
-          </ContextMenuContent>
-        )}
+        <ContextMenuContent className="w-48">
+          <FavoriteContextItem
+            target={{
+              resource_type: "node",
+              cluster_id: clusterId,
+              ref: node.name,
+            }}
+          />
+          {canMaintenance && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onClick={() => {
+                  setMaintOpen(true);
+                }}
+              >
+                <Wrench className="mr-2 h-3.5 w-3.5" />
+                {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
       </ContextMenu>
 
       {isExpanded && nodeVMs.length > 0 && (
@@ -362,7 +362,14 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
                     <MoreVertical className="h-3 w-3" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-32">
+                <DropdownMenuContent align="end" className="w-44">
+                  <FavoriteDropdownItem
+                    target={{
+                      resource_type: "cluster",
+                      cluster_id: cluster.id,
+                      ref: "",
+                    }}
+                  />
                   <DropdownMenuItem
                     onClick={() => {
                       setEditOpen(true);
@@ -401,8 +408,16 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
             )}
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-40">
+        <ContextMenuContent className="w-48">
           <CreateResourceContextItems clusterId={cluster.id} />
+          <ContextMenuSeparator />
+          <FavoriteContextItem
+            target={{
+              resource_type: "cluster",
+              cluster_id: cluster.id,
+              ref: "",
+            }}
+          />
           <ContextMenuSeparator />
           <ContextMenuItem
             onClick={() => {

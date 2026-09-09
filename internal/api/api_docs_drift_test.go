@@ -34,6 +34,7 @@ func newRouteStubServer(t *testing.T) *Server {
 		guestToolsHandler:      &handlers.GuestToolsHandler{},
 		vmImportHandler:        &handlers.VMImportHandler{},
 		vmFoldersHandler:       &handlers.VMFoldersHandler{},
+		favoritesHandler:       &handlers.FavoritesHandler{},
 		metricsHandler:         &handlers.MetricsHandler{},
 		cephHandler:            &handlers.CephHandler{},
 		backupHandler:          &handlers.BackupHandler{},

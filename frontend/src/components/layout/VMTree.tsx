@@ -4,9 +4,6 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   ChevronRight,
   Server,
-  Monitor,
-  Container,
-  FileBox,
   Folder,
   FolderOpen,
   Pencil,
@@ -22,6 +19,7 @@ import {
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { StatusIcon } from "@/components/StatusIcon";
+import { VMIcon } from "@/components/VMIcon";
 import { OSIcon } from "@/components/OSIcon";
 import { classifyOS } from "@/lib/os-classify";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
@@ -46,18 +44,6 @@ import {
   type FolderNode,
 } from "@/features/vms/lib/folder-tree";
 import type { ClusterResponse, VMFolder, VMResponse } from "@/types/api";
-
-function VMIcon({ type, template }: { type: string; template?: boolean }) {
-  if (template) {
-    return (
-      <FileBox className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-    );
-  }
-  if (type === "lxc") {
-    return <Container className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
-  }
-  return <Monitor className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
-}
 
 interface VMLeafProps {
   vm: VMResponse;

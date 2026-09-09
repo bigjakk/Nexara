@@ -853,6 +853,17 @@ func (s *Server) setupRoutes() {
 		v1.Get("/search", s.authRequired(), s.searchHandler.GlobalSearch)
 	}
 
+	// Per-user favorites (self-service): the caller's own starred clusters,
+	// nodes and guests, surfaced above the sidebar tree.
+	if s.favoritesHandler != nil {
+		favorites := v1.Group("/favorites", s.authRequired())
+		favorites.Get("/", s.favoritesHandler.ListFavorites)
+		favorites.Post("/", s.favoritesHandler.AddFavorite)
+		// The target is identified by query parameters rather than a path, so a
+		// node name never has to survive URL path segmentation.
+		favorites.Delete("/", s.favoritesHandler.RemoveFavorite)
+	}
+
 	// API keys (self-service).
 	if s.apiKeyHandler != nil {
 		apiKeys := v1.Group("/api-keys", s.authRequired())

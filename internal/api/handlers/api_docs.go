@@ -96,6 +96,11 @@ var endpointMeta = map[string]APIEndpoint{
 	"DELETE /api/v1/api-keys/:id": {Description: "Revoke an API key", Permission: "manage:api_key", Group: "API Keys"},
 	"DELETE /api/v1/api-keys":     {Description: "Revoke all your API keys", Permission: "manage:api_key", Group: "API Keys"},
 
+	// ── Favorites ─────────────────────────────────────────────────────
+	"GET /api/v1/favorites":    {Description: "List your starred clusters, nodes and guests", Permission: "view:cluster|view:node|view:vm", Group: "Favorites"},
+	"POST /api/v1/favorites":   {Description: "Star a cluster, node or guest", Permission: "view:cluster|view:node|view:vm", Group: "Favorites"},
+	"DELETE /api/v1/favorites": {Description: "Unstar one of your own favorites", Group: "Favorites"},
+
 	// ── Clusters ──────────────────────────────────────────────────────
 	"GET /api/v1/clusters":                    {Description: "List all clusters", Permission: "view:cluster", Group: "Clusters"},
 	"POST /api/v1/clusters":                   {Description: "Add a Proxmox cluster, with a pasted API token or a Nexara-minted one", Permission: "manage:cluster", Group: "Clusters"},

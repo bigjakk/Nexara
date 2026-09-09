@@ -1012,6 +1012,16 @@ type User struct {
 	AuthSource   string      `json:"auth_source"`
 }
 
+// Per-user starred resources, surfaced above the sidebar tree
+type UserFavorite struct {
+	UserID       uuid.UUID `json:"user_id"`
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	ResourceType string    `json:"resource_type"`
+	// Stable Proxmox identity: empty for a cluster, node name for a node, VMID for a guest
+	ResourceRef string    `json:"resource_ref"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type UserRole struct {
 	ID        uuid.UUID   `json:"id"`
 	UserID    uuid.UUID   `json:"user_id"`

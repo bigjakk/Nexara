@@ -56,6 +56,7 @@ import { useTaskLogStore } from "@/stores/task-log-store";
 import { useConsoleStore } from "@/stores/console-store";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePermissions } from "@/hooks/usePermissions";
+import { FavoritePlainItem } from "@/features/favorites/components/FavoriteMenuItem";
 import type { VMAction } from "@/features/vms/types/vm";
 import { applyFilter } from "../lib/search-parser";
 import {
@@ -169,8 +170,9 @@ function RowContextMenu({
 
   // Clamp position so menu doesn't overflow viewport
   const menuWidth = 176;
+  // +4: the header, the console item, the favorite item, and the separators.
   const menuHeight =
-    (visibleLifecycle.length + visibleManagement.length + 3) * 32;
+    (visibleLifecycle.length + visibleManagement.length + 4) * 32;
   const x = Math.min(menu.x, window.innerWidth - menuWidth - 8);
   const y = Math.min(menu.y, window.innerHeight - menuHeight - 8);
 
@@ -273,6 +275,24 @@ function RowContextMenu({
           </button>
         </>
       )}
+
+      {/* Guarded like the other separators in this menu: a guest in a state
+          with no lifecycle actions and no console would otherwise render a rule
+          directly under the header. */}
+      {(visibleLifecycle.length > 0 ||
+        (normalizedStatus === "running" && consoleAllowed)) && (
+        <div className="-mx-1 my-1 h-px bg-border" />
+      )}
+      {/* Always a guest: toContextTarget returns null for node rows, so this
+          menu never opens for one. */}
+      <FavoritePlainItem
+        target={{
+          resource_type: "vm",
+          cluster_id: target.clusterId,
+          ref: String(target.vmid),
+        }}
+        onAction={onClose}
+      />
 
       {visibleManagement.length > 0 && (
         <div className="-mx-1 my-1 h-px bg-border" />

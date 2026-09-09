@@ -124,6 +124,7 @@ var selfServiceRoutes = map[string]string{
 	"GET /api/v1/api-keys":                             "manages the caller's own API keys",
 	"DELETE /api/v1/api-keys":                          "manages the caller's own API keys",
 	"DELETE /api/v1/api-keys/:id":                      "manages the caller's own API keys",
+	"DELETE /api/v1/favorites":                         "removes one of the caller's own favorites; the DELETE is keyed by the authenticated user id, and gating it on view access would strand rows a user can no longer see",
 }
 
 // publicRouteKeys parses router.go and returns the "METHOD path" keys of every
