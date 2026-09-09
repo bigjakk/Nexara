@@ -105,6 +105,7 @@ import { NodeAptRepositories } from "../components/NodeAptRepositories";
 import { NodePowerActions } from "../components/node/NodePowerActions";
 import { NodeReportButton } from "../components/node/NodeReportButton";
 import { NodeMetricsPanel } from "../components/node/NodeMetricsPanel";
+import { NodeTemperatures } from "../components/node/NodeTemperatures";
 import {
   EditDNSDialog,
   EditTimezoneDialog,
@@ -379,6 +380,15 @@ export function NodeDetailPage() {
                   <EditDNSDialog clusterId={clusterId} nodeName={node.name} />
                 ) : undefined
               }
+            />
+            {/* Full-width under the hardware cards: the reading count varies
+                with the host, so a fixed grid slot would either crop a
+                well-instrumented board or leave a mostly-empty card. */}
+            <NodeTemperatures
+              clusterId={clusterId}
+              nodeName={node.name}
+              online={node.status === "online"}
+              className="sm:col-span-2 lg:col-span-4"
             />
           </div>
 

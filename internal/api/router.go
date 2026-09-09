@@ -128,6 +128,11 @@ func (s *Server) setupRoutes() {
 			// see the handler for why.
 			clusters.Get("/:cluster_id/nodes/:node_name/report", s.nodeHandler.GetNodeReport)
 
+			// Hardware temperatures, read from the node's hwmon tree over SSH
+			// because Proxmox exposes no sensor API. Degrades to "not
+			// available" rather than erroring — see the handler.
+			clusters.Get("/:cluster_id/nodes/:node_name/sensors", s.nodeHandler.GetNodeSensors)
+
 			// Node firewall.
 			clusters.Get("/:cluster_id/nodes/:node_name/firewall/rules", s.nodeHandler.ListNodeFirewallRules)
 			clusters.Post("/:cluster_id/nodes/:node_name/firewall/rules", s.nodeHandler.CreateNodeFirewallRule)

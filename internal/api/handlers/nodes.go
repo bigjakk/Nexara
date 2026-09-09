@@ -25,11 +25,21 @@ type NodeHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+
+	// sensors caches hwmon temperature reads, which cost an SSH session each.
+	// See node_sensors.go. Nil-safe: a handler built without the constructor
+	// simply does not cache.
+	sensors *nodeSensorsCache
 }
 
 // NewNodeHandler creates a new node handler.
 func NewNodeHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *NodeHandler {
-	return &NodeHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
+	return &NodeHandler{
+		queries:       queries,
+		encryptionKey: encryptionKey,
+		eventPub:      eventPub,
+		sensors:       newNodeSensorsCache(),
+	}
 }
 
 // nodeMaintenanceNameRe restricts node names to safe characters before they are

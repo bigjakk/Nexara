@@ -898,3 +898,59 @@ export function useDownloadNodeReport(clusterId: string, nodeName: string) {
     },
   });
 }
+
+/** One temperature the node's kernel exposes, as read from its hwmon tree. */
+export interface NodeSensorReading {
+  /** hwmon chip name, e.g. "coretemp" or "nvme". */
+  chip: string;
+  /** hwmon directory, e.g. "hwmon2" — the only thing separating two devices
+   * that share a chip name, which is normal for multiple NVMe drives. */
+  device: string;
+  /** Stable identity within the device, e.g. "temp1". Shown when the kernel
+   * publishes no label for the sensor. */
+  key: string;
+  label: string;
+  temp_c: number;
+  /** tempN_max, when the driver publishes a usable one. */
+  high_c?: number;
+  /** tempN_crit, when the driver publishes a usable one. */
+  crit_c?: number;
+}
+
+export interface NodeSensorsResponse {
+  items: NodeSensorReading[];
+  total: number;
+  /** False when the node could not be read at all; `reason` then says why and
+   * what to do about it. True with an empty `items` is the other outcome — the
+   * node was read and simply exposes no temperature sensors. */
+  available: boolean;
+  reason?: string;
+}
+
+/**
+ * Reads a node's hardware temperatures.
+ *
+ * apiClient.get, not .list: the payload is the standard {items,total} envelope
+ * plus the availability fields, and .list would throw those away.
+ *
+ * The poll matches the server's 60s cache exactly, so an open node page costs
+ * at most one SSH session per minute however many people are watching it.
+ * TanStack pauses the interval when the tab loses focus, which is what keeps a
+ * forgotten background tab from doing this all night.
+ */
+export function useNodeSensors(
+  clusterId: string,
+  nodeName: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeName, "sensors"],
+    queryFn: () =>
+      apiClient.get<NodeSensorsResponse>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/sensors`,
+      ),
+    enabled: enabled && clusterId.length > 0 && nodeName.length > 0,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+}
