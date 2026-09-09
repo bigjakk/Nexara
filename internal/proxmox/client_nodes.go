@@ -24,6 +24,29 @@ func (c *Client) GetNodeStatus(ctx context.Context, node string) (*NodeStatus, e
 	}
 	return &status, nil
 }
+
+// GetNodeReport returns the node's system report: the same bundle `pvereport`
+// assembles, as one plain-text document. Proxmox sends it as a single JSON
+// string rather than a structured object, so the destination is a string.
+//
+// The report is expensive to produce (it shells out to a long list of commands
+// on the node) and large, so nothing should call this on a schedule or hold it
+// in a cache — it exists for an operator who has been asked to produce one.
+// Callers should give the client a longer timeout than the default.
+//
+// It is also a full disclosure of the host: storage configuration, network
+// layout, package inventory and guest configs. Gate it accordingly.
+func (c *Client) GetNodeReport(ctx context.Context, node string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	var report string
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/report", &report); err != nil {
+		return "", fmt.Errorf("get node %s report: %w", node, err)
+	}
+	return report, nil
+}
+
 func (c *Client) GetNodeDNS(ctx context.Context, node string) (*NodeDNS, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err

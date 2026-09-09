@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, getValidAccessToken } from "@/lib/api-client";
 import type {
   ClusterResponse,
   NodeResponse,
@@ -831,6 +831,70 @@ export function useVerifyClusterCertificate(clusterId: string) {
       // The cluster row carries the health issue that drives the banner, so
       // refetching is what makes the warning disappear once it is repaired.
       void queryClient.invalidateQueries({ queryKey: ["clusters"] });
+    },
+  });
+}
+
+/**
+ * Filename the server asked us to save a download as.
+ *
+ * Only the plain `filename="..."` form is read, because that is the only form
+ * our handlers emit. Anything else falls back to the caller's own name rather
+ * than letting a response header pick a name on disk — the server already
+ * sanitises it, and this is the cheap second check.
+ */
+function filenameFromDisposition(header: string | null): string {
+  if (!header) return "";
+  const name = /filename="([^"]+)"/.exec(header)?.[1] ?? "";
+  if (
+    !name ||
+    name.includes("/") ||
+    name.includes("\\") ||
+    name.includes("..")
+  ) {
+    return "";
+  }
+  return name;
+}
+
+/**
+ * Downloads a node's `pvereport` support bundle and hands it to the browser.
+ *
+ * A mutation rather than a query: it is an imperative action with a side
+ * effect (a file lands in Downloads), it is expensive enough that Proxmox
+ * takes tens of seconds to assemble one, and caching the result would pin
+ * megabytes of text in memory for no benefit.
+ *
+ * apiClient is bypassed deliberately — it decodes JSON, and this endpoint
+ * answers with plain text plus the Content-Disposition that names the file.
+ */
+export function useDownloadNodeReport(clusterId: string, nodeName: string) {
+  return useMutation({
+    mutationFn: async () => {
+      const token = (await getValidAccessToken()) ?? "";
+      const res = await fetch(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/report`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          credentials: "same-origin",
+        },
+      );
+      if (!res.ok) {
+        throw new Error(
+          res.status === 403
+            ? "You do not have permission to download this report."
+            : `Failed to generate the report (HTTP ${String(res.status)}).`,
+        );
+      }
+
+      const blob = await res.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download =
+        filenameFromDisposition(res.headers.get("Content-Disposition")) ||
+        `nexara-report-${nodeName}.txt`;
+      link.click();
+      URL.revokeObjectURL(link.href);
     },
   });
 }

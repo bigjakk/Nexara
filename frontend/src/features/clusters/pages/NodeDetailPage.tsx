@@ -103,6 +103,7 @@ import { useConsoleStore } from "@/stores/console-store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { NodeAptRepositories } from "../components/NodeAptRepositories";
 import { NodePowerActions } from "../components/node/NodePowerActions";
+import { NodeReportButton } from "../components/node/NodeReportButton";
 import { NodeMetricsPanel } from "../components/node/NodeMetricsPanel";
 import {
   EditDNSDialog,
@@ -155,7 +156,7 @@ export function NodeDetailPage() {
   const liveMetric = clusterMetrics?.nodeMetrics.get(nodeId);
   const addTab = useConsoleStore((s) => s.addTab);
   const showConsole = useConsoleStore((s) => s.showConsole);
-  const { canConsole } = usePermissions();
+  const { canConsole, canManage } = usePermissions();
 
   function openShell() {
     if (!node) return;
@@ -252,6 +253,9 @@ export function NodeDetailPage() {
                 <Terminal className="h-4 w-4" />
                 Shell
               </Button>
+            )}
+            {canManage("node") && (
+              <NodeReportButton clusterId={clusterId} nodeName={node.name} />
             )}
             <NodePowerActions
               clusterId={clusterId}

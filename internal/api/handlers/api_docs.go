@@ -106,6 +106,7 @@ var endpointMeta = map[string]APIEndpoint{
 	"GET /api/v1/clusters/:cluster_id/nodes":                    {Description: "List cluster nodes", Permission: "view:node", Group: "Nodes"},
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/syslog":  {Description: "Read a node's syslog over a time window (since/until)", Permission: "view:node", Group: "Nodes"},
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/journal": {Description: "Read a node's systemd journal by line count (lastentries) or cursor", Permission: "view:node", Group: "Nodes"},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/report":  {Description: "Download a node's pvereport support bundle as plain text", Permission: "manage:node", Group: "Nodes"},
 
 	// ── Virtual Machines ──────────────────────────────────────────────
 	"GET /api/v1/clusters/:cluster_id/vms":                                       {Description: "List all VMs in a cluster", Permission: "view:vm", Group: "Virtual Machines"},

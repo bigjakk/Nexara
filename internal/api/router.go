@@ -120,6 +120,10 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/nodes/:node_name/syslog", s.nodeHandler.GetNodeSyslog)
 			clusters.Get("/:cluster_id/nodes/:node_name/journal", s.nodeHandler.GetNodeJournal)
 
+			// Node support bundle (pvereport). manage:node, not view:node —
+			// see the handler for why.
+			clusters.Get("/:cluster_id/nodes/:node_name/report", s.nodeHandler.GetNodeReport)
+
 			// Node firewall.
 			clusters.Get("/:cluster_id/nodes/:node_name/firewall/rules", s.nodeHandler.ListNodeFirewallRules)
 			clusters.Post("/:cluster_id/nodes/:node_name/firewall/rules", s.nodeHandler.CreateNodeFirewallRule)
