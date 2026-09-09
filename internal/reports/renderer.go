@@ -91,7 +91,37 @@ const htmlShell = `<!DOCTYPE html>
   td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
   tr:hover td { background: #f8fafc; }
   .footer { padding: 16px 32px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 12px; }
-  @media print { body { background: white; padding: 0; } .report { box-shadow: none; } }
+
+  /* Print / Save-as-PDF. Browsers drop background colours from printed output
+     unless the user ticks "Background graphics", so anything that relied on a
+     dark fill has to restate its colours here — the header was white text on a
+     #1e293b bar, i.e. invisible on paper. Rather than force the fill on with
+     print-color-adjust and burn a page of ink, print inverts the header to dark
+     text on white and keeps the rule beneath it. */
+  @page { margin: 14mm; }
+  @media print {
+    body { background: white; padding: 0; }
+    /* overflow is reset with the rest: a non-visible overflow on the element
+       wrapping the whole report is the classic cause of printed output being
+       clipped to the first page. */
+    .report { box-shadow: none; border-radius: 0; max-width: none; overflow: visible; }
+    .header { background: none; color: #1a1a2e; padding: 0 0 12px 0; border-bottom: 3px solid #1e293b; }
+    .header .meta { opacity: 1; color: #475569; }
+    .content { padding: 16px 0 0 0; }
+    .footer { padding: 12px 0 0 0; }
+    /* Repeat column headers on every page a table spills onto, and keep a row
+       from being sliced through the middle. */
+    thead { display: table-header-group; }
+    tr, td, th { break-inside: avoid; }
+    th { background: none; border-bottom: 2px solid #94a3b8; }
+    td { border-bottom: 1px solid #cbd5e1; }
+    tr:hover td { background: none; }
+    /* A section heading stranded alone at the foot of a page reads as an empty
+       section; keep it with the content it introduces. The section itself is
+       free to span pages — some are longer than one. */
+    .section h2 { break-after: avoid; }
+    .section { margin-bottom: 20px; }
+  }
 </style>
 </head>
 <body>
