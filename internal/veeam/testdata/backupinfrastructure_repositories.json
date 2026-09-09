@@ -87,7 +87,7 @@
     },
     {
       "share": {
-        "sharePath": "\\\\192.0.2.10\\veeam",
+        "sharePath": "\\\\192.0.2.10\\backups",
         "credentialsId": "23400bb7-32de-48f1-8c01-8d50813c95aa",
         "gatewayServer": {
           "autoSelectEnabled": true,

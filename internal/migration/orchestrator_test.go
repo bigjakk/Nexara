@@ -75,9 +75,9 @@ func TestResolveDiskTargets(t *testing.T) {
 
 	t.Run("per-disk map keeps unmapped disks in place", func(t *testing.T) {
 		// Only scsi0 is mapped; scsi1 has no entry -> stays put.
-		moves := resolveDiskTargets(disks, map[string]string{"scsi0": "proxmox-ssd"}, "")
-		if len(moves) != 1 || moves[0].Disk != "scsi0" || moves[0].Target != "proxmox-ssd" {
-			t.Fatalf("got %+v, want only scsi0 -> proxmox-ssd", moves)
+		moves := resolveDiskTargets(disks, map[string]string{"scsi0": "store01"}, "")
+		if len(moves) != 1 || moves[0].Disk != "scsi0" || moves[0].Target != "store01" {
+			t.Fatalf("got %+v, want only scsi0 -> store01", moves)
 		}
 	})
 

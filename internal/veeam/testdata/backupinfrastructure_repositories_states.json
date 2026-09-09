@@ -33,7 +33,7 @@
       "name": "repo-nas-01",
       "description": "Created by AD\\jdoe at 10/19/2025 6:19 PM.",
       "hostName": "Gateway (auto)",
-      "path": "\\\\192.0.2.10\\veeam",
+      "path": "\\\\192.0.2.10\\backups",
       "capacityGB": 28576.3,
       "freeGB": 9374.1,
       "usedSpaceGB": 2672.7,

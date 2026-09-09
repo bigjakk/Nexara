@@ -135,14 +135,14 @@ describe("filterStorageByContent", () => {
     const list = [
       makeStorage({
         id: "s1",
-        storage: "proxmox-ssd",
+        storage: "store01",
         content: "rootdir",
         shared: true,
         node_id: "n1",
       }),
       makeStorage({
         id: "s2",
-        storage: "proxmox-ssd",
+        storage: "store01",
         content: "rootdir",
         shared: true,
         node_id: "n2",
@@ -155,7 +155,7 @@ describe("filterStorageByContent", () => {
       "pve1",
     );
     expect(result).toHaveLength(1);
-    expect(result[0]?.storage).toBe("proxmox-ssd");
+    expect(result[0]?.storage).toBe("store01");
   });
 
   it("skips the node filter when target node cannot be resolved", () => {

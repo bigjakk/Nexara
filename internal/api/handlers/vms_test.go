@@ -75,11 +75,11 @@ func TestValidateSnapshotName(t *testing.T) {
 
 func TestSnapshotBlockingVolumes(t *testing.T) {
 	storageTypes := map[string]string{
-		"nas":         "nfs",
-		"proxmox-ssd": "nfs",
-		"local":       "dir",
-		"test":        "rbd",
-		"local-lvm":   "lvmthin",
+		"nas":       "nfs",
+		"store01":   "nfs",
+		"local":     "dir",
+		"test":      "rbd",
+		"local-lvm": "lvmthin",
 	}
 
 	tests := []struct {
@@ -90,12 +90,12 @@ func TestSnapshotBlockingVolumes(t *testing.T) {
 		{
 			name: "win11: qcow2 disk fine, raw tpm state on nfs flagged",
 			config: proxmox.VMConfig{
-				"scsi0":     "proxmox-ssd:102/vm-102-disk-0.qcow2,discard=on,size=125G",
-				"tpmstate0": "proxmox-ssd:102/vm-102-disk-1.raw,size=4M,version=v2.0",
+				"scsi0":     "store01:102/vm-102-disk-0.qcow2,discard=on,size=125G",
+				"tpmstate0": "store01:102/vm-102-disk-1.raw,size=4M,version=v2.0",
 				"ide2":      "none,media=cdrom",
 				"bios":      "ovmf",
 			},
-			want: []string{"tpmstate0 on proxmox-ssd"},
+			want: []string{"tpmstate0 on store01"},
 		},
 		{
 			name: "raw disk on nfs flagged",
@@ -130,10 +130,10 @@ func TestSnapshotBlockingVolumes(t *testing.T) {
 		{
 			name: "container rootfs and mount point raw on nfs flagged",
 			config: proxmox.VMConfig{
-				"rootfs": "proxmox-ssd:105/vm-105-disk-0.raw,size=8G",
+				"rootfs": "store01:105/vm-105-disk-0.raw,size=8G",
 				"mp0":    "test:vm-105-disk-1,mp=/data,size=10G",
 			},
-			want: []string{"rootfs on proxmox-ssd"},
+			want: []string{"rootfs on store01"},
 		},
 		{
 			name: "unknown storage is not accused",

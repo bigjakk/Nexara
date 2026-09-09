@@ -107,7 +107,7 @@ describe("CreateSnapshotDialog", () => {
   it("warns when the guest cannot snapshot but does not block submit", async () => {
     capabilityState.current = {
       supported: false,
-      blocking_volumes: ["tpmstate0 on proxmox-ssd"],
+      blocking_volumes: ["tpmstate0 on store01"],
     };
     const user = userEvent.setup();
     renderWithProviders(<CreateSnapshotDialog {...defaultProps} />);
@@ -115,7 +115,7 @@ describe("CreateSnapshotDialog", () => {
     expect(
       screen.getByText(/cannot take snapshots in its current configuration/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/tpmstate0 on proxmox-ssd/i)).toBeInTheDocument();
+    expect(screen.getByText(/tpmstate0 on store01/i)).toBeInTheDocument();
 
     // Warning, not a block: a valid name still enables Create.
     await user.type(screen.getByLabelText("Name"), "before-upgrade");

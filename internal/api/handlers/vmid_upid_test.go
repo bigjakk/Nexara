@@ -33,7 +33,7 @@ func TestVmidFromUPID_OnlyGuestTaskTypes(t *testing.T) {
 		// No guest, for assorted reasons.
 		{"node apt update has an empty id", "UPID:pve-01:0000A1B2:00000001:6A8CE407:aptupdate::root@pam:", 0},
 		{"node-wide backup has an empty id", "UPID:pve-01:0000A1B2:00000001:6A8CE407:vzdump::root@pam:", 0},
-		{"storage id is not numeric", "UPID:pve-01:0000A1B2:00000001:6A8CE407:imgdel:105@proxmox-hdd:root@pam:", 0},
+		{"storage id is not numeric", "UPID:pve-01:0000A1B2:00000001:6A8CE407:imgdel:105@store02:root@pam:", 0},
 		{"service restart names a unit", "UPID:pve-01:0000A1B2:00000001:6A8CE407:srvrestart:osd.1:root@pam:", 0},
 		{"truncated upid", "UPID:pve-01:0000A1B2", 0},
 		{"empty", "", 0},
