@@ -28,6 +28,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ApiClientError } from "@/lib/api-client";
+import { ActiveSessionsCard } from "../components/ActiveSessionsCard";
 import {
   useTOTPStatus,
   useTOTPSetup,
@@ -158,7 +159,7 @@ export function SecurityPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Security Settings</h1>
         <p className="text-muted-foreground">
-          Manage two-factor authentication for your account
+          Manage two-factor authentication and active sessions for your account
         </p>
       </div>
 
@@ -356,6 +357,8 @@ export function SecurityPage() {
           </CardContent>
         </Card>
       )}
+
+      <ActiveSessionsCard />
 
       {/* Disable 2FA Dialog */}
       <Dialog open={disableDialogOpen} onOpenChange={setDisableDialogOpen}>

@@ -220,6 +220,26 @@ export interface TOTPStatusResponse {
   recovery_codes_remaining: number;
 }
 
+/**
+ * One of the caller's own active sessions, from GET /api/v1/auth/sessions.
+ *
+ * device_name and device_type are empty strings rather than null for sessions
+ * created before the device columns existed — the server normalises them, so
+ * the UI only has to handle "".
+ */
+export interface UserSession {
+  id: string;
+  device_name: string;
+  device_type: string;
+  user_agent: string;
+  ip_address: string;
+  created_at: string;
+  last_used_at: string;
+  expires_at: string;
+  /** The session this request was made from; the UI warns before revoking it. */
+  is_current: boolean;
+}
+
 export interface TOTPRequiredResponse {
   totp_required: boolean;
   totp_pending_token: string;

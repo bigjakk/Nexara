@@ -28,6 +28,10 @@ func (s *Server) setupRoutes() {
 		// SameSite=Strict + same-origin SPA already, but defence-in-depth).
 		authGroup.Post("/logout", s.authOptional(), s.authHandler.Logout)
 		authGroup.Post("/logout-all", s.authRequired(), s.authHandler.LogoutAll)
+		// The caller's own sessions: what is signed in to this account, and
+		// revoking one of them individually.
+		authGroup.Get("/sessions", s.authRequired(), s.authHandler.ListSessions)
+		authGroup.Delete("/sessions/:id", s.authRequired(), s.authHandler.RevokeSessionByID)
 		authGroup.Post("/console-token", s.authRequired(), s.authHandler.ConsoleToken)
 		authGroup.Post("/ws-token", s.authRequired(), s.authHandler.WSToken)
 

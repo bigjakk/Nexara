@@ -66,6 +66,8 @@ var endpointMeta = map[string]APIEndpoint{
 	"POST /api/v1/auth/refresh":             {Description: "Refresh an expired access token", Group: "Authentication"},
 	"POST /api/v1/auth/logout":              {Description: "End the current session", Group: "Authentication"},
 	"POST /api/v1/auth/logout-all":          {Description: "End all sessions for the current user", Group: "Authentication"},
+	"GET /api/v1/auth/sessions":             {Description: "List the caller's own active sessions", Group: "Authentication"},
+	"DELETE /api/v1/auth/sessions/:id":      {Description: "Revoke one of the caller's own sessions", Group: "Authentication"},
 	"POST /api/v1/auth/console-token":       {Description: "Mint a short-lived scope-locked JWT for a specific console WebSocket (mobile)", Permission: "console:node|console:vm|console:container", Group: "Authentication"},
 	"POST /api/v1/auth/ws-token":            {Description: "Mint a short-lived JWT for the /ws hub upgrade (subscription channels)", Group: "Authentication"},
 	"GET /api/v1/auth/me":                   {Description: "Get current user profile", Group: "Authentication"},

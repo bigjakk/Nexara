@@ -51,6 +51,8 @@ var auditClusterExempt = map[string]string{
 	"auth.go.UpdateProfile":  "profile change for one user; install-global",
 	"auth.go.WSToken":        "the event-stream token is not bound to a cluster (unlike ConsoleToken, which is)",
 
+	"auth_sessions.go.RevokeSessionByID": "sessions belong to a user account, not a cluster; same scope as Logout/LogoutAll",
+
 	"totp.go.ConfirmSetup":            "MFA enrolment for one user; install-global",
 	"totp.go.Disable":                 "MFA change for one user; install-global",
 	"totp.go.RegenerateRecoveryCodes": "MFA change for one user; install-global",

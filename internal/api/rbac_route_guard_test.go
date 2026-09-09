@@ -111,6 +111,8 @@ var selfServiceRoutes = map[string]string{
 	"PUT /api/v1/auth/profile":                         "updates the caller's own profile",
 	"POST /api/v1/auth/change-password":                "changes the caller's own password",
 	"POST /api/v1/auth/logout-all":                     "revokes the caller's own sessions",
+	"GET /api/v1/auth/sessions":                        "lists the caller's own sessions; the query is keyed by the authenticated user id",
+	"DELETE /api/v1/auth/sessions/:id":                 "revokes one of the caller's own sessions; ownership is checked in the handler",
 	"POST /api/v1/auth/ws-token":                       "mints a hub token for the caller; per-cluster authorization is enforced at subscribe time in internal/ws",
 	"POST /api/v1/auth/totp/setup":                     "enrolls the caller's own second factor",
 	"POST /api/v1/auth/totp/setup/verify":              "confirms the caller's own enrollment",
