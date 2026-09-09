@@ -37,7 +37,20 @@ const METRICS = [
   { value: "veeam_malware_status", label: "Veeam Malware Verdict (0-3)" },
   { value: "veeam_repo_used_percent", label: "Veeam Repository Usage (%)" },
   { value: "veeam_job_failed", label: "Veeam Failed Jobs (count)" },
+  { value: "pve_backup_failed", label: "Proxmox Failed Backups (count)" },
+  { value: "pve_task_failed", label: "Proxmox Failed Tasks (count)" },
 ];
+
+/**
+ * Metrics whose value is "how many happened inside the Duration window", as
+ * opposed to a level sampled at a point in time.
+ *
+ * Worth calling out in the form because Duration means something different for
+ * them. For CPU it is "sustained above the threshold for this long"; for these
+ * it is the window being counted, and the default of 300s counts only the last
+ * five minutes — useless for a nightly backup nobody looks at until morning.
+ */
+const WINDOWED_METRICS = new Set(["pve_backup_failed", "pve_task_failed"]);
 
 /**
  * Which scopes each metric supports, mirroring notifications.MetricScopes on
@@ -57,6 +70,10 @@ const METRIC_SCOPES: Record<string, string[]> = {
   // A Veeam job protects many guests at once, so there is no single vm its
   // failure belongs to.
   veeam_job_failed: ["cluster"],
+  // Tasks carry a node name while a rule carries a node UUID, so the backend
+  // offers cluster scope only — see evaluatePVETaskFailedRule.
+  pve_backup_failed: ["cluster"],
+  pve_task_failed: ["cluster"],
 };
 
 const ALL_SCOPES = ["cluster", "node", "vm"];
@@ -83,7 +100,37 @@ const METRIC_DEFAULT_THRESHOLD: Record<string, string> = {
   // A count, so "> 0" is the rule almost everyone wants. Left adjustable for
   // an estate with a known-flaky job that is already ticketed.
   veeam_job_failed: "0",
+  pve_backup_failed: "0",
+  pve_task_failed: "0",
 };
+
+/**
+ * Duration default per metric, in seconds.
+ *
+ * The windowed metrics get 24h rather than the form's 300s: a nightly backup
+ * that failed at 02:00 has aged out of a five-minute window long before anyone
+ * is awake, so the rule would evaluate false every tick and never fire. This is
+ * the single most likely way to create one of these rules that silently cannot
+ * work.
+ */
+const METRIC_DEFAULT_DURATION: Record<string, string> = {
+  pve_backup_failed: "86400",
+  pve_task_failed: "86400",
+};
+
+/**
+ * Duration cap, mirroring maxDurationFor in the alerts handler.
+ *
+ * The windowed metrics get 30 days because a weekly backup schedule needs a
+ * window longer than a week; every other metric keeps the 24-hour cap, since
+ * "CPU above 90% for more than a day" is already an extreme rule.
+ */
+const MAX_DURATION = 86400;
+const MAX_WINDOWED_DURATION = 2592000;
+
+function maxDurationFor(metric: string): number {
+  return WINDOWED_METRICS.has(metric) ? MAX_WINDOWED_DURATION : MAX_DURATION;
+}
 
 const SCOPE_LABELS: Record<string, string> = {
   cluster: "Cluster",
@@ -269,6 +316,16 @@ export function AlertRuleForm() {
                     // default every unbounded metric started with.
                     setThreshold("90");
                   }
+                  // Same treatment for Duration, which the windowed metrics
+                  // reinterpret as the window they count over. Leaving it at
+                  // 300s creates a backup rule that evaluates false every tick
+                  // and can never fire.
+                  const durationPreset = METRIC_DEFAULT_DURATION[v];
+                  if (durationPreset !== undefined) {
+                    setDurationSeconds(durationPreset);
+                  } else if (METRIC_DEFAULT_DURATION[metric] !== undefined) {
+                    setDurationSeconds("300");
+                  }
                 }}
               >
                 <SelectTrigger id="metric">
@@ -427,13 +484,17 @@ export function AlertRuleForm() {
               <Input
                 id="duration"
                 type="number"
+                min="0"
+                max={maxDurationFor(metric)}
                 value={durationSeconds}
                 onChange={(e) => {
                   setDurationSeconds(e.target.value);
                 }}
               />
               <p className="text-xs text-muted-foreground">
-                How long condition must persist
+                {WINDOWED_METRICS.has(metric)
+                  ? "How far back to count — 86400 covers a nightly run, up to 2592000 (30 days)"
+                  : "How long condition must persist"}
               </p>
             </div>
 

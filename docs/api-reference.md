@@ -1107,6 +1107,16 @@ Informative 1, Suspicious 2, Infected 3), `veeam_repo_used_percent` (**global**
 scope only — one repository holds every cluster's backups) and
 `veeam_job_failed` (cluster scope only, excluding runs Nexara itself stopped).
 
+Two more read the Proxmox task history Nexara already collects: `pve_backup_failed`
+and `pve_task_failed` (both cluster scope only) count tasks that failed inside the
+rule's `duration_seconds` window — for these that field is the window being
+counted, not a persistence requirement, so they fire on the first evaluation
+that sees a failure rather than waiting the window out. They also accept a
+`duration_seconds` up to 2592000 (30 days) where every other metric is capped at
+86400. A task Proxmox finished with `WARNINGS: N` counts as a success, matching
+the Tasks page; one whose status Proxmox can no longer report (`vanished`) is
+not counted at all, since that is lost track of rather than failed.
+
 ### Migrations (Cross-Cluster)
 
 | Method | Path | Description |

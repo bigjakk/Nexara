@@ -193,6 +193,9 @@ func TestValidMetric(t *testing.T) {
 		// honest is veeam_sessions.nexara_stopped, which the control handlers
 		// set and GetClusterVeeamJobFailureStats excludes on.
 		"veeam_job_failed",
+		// The PVE task metrics needed no new collection — task_history already
+		// carried the terminal status. What was missing was a trigger on it.
+		"pve_backup_failed", "pve_task_failed",
 	} {
 		if !ValidMetric(m) {
 			t.Errorf("ValidMetric(%q) = false, want true", m)
@@ -221,6 +224,11 @@ func TestMetricScopes(t *testing.T) {
 		// its failure belongs to — and raising it against every guest in the
 		// job would be N alarms for one event.
 		{"veeam_job_failed", []string{"cluster"}},
+		// task_history stores a node NAME while a rule stores a node UUID, so
+		// node scope would need the name resolved and the dedupe dimension
+		// threaded through. Cluster only until someone wants that stream.
+		{"pve_backup_failed", []string{"cluster"}},
+		{"pve_task_failed", []string{"cluster"}},
 		// nil means "the ordinary node/vm/cluster set", which the caller
 		// distinguishes from a restricted list.
 		{"cpu_usage", nil},

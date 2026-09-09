@@ -737,6 +737,23 @@ Four metrics are backed by the Veeam inventory rather than the metric tables, an
 
 `veeam_repo_used_percent` is global-scope only because one repository holds the backups of every cluster a Veeam server protects — there is no cluster to attribute it to. A global rule raises alerts with no cluster, which existing RBAC already handles: such an alert is readable only by a holder of global `view:alert`. `veeam_job_failed` is cluster-only because a job protects many guests, so there is no single VM to blame.
 
+### Proxmox Task Alerts
+
+Nexara collects every Proxmox task into its task history, including the terminal status Proxmox reported. Two metrics turn that into a notification:
+
+| Metric | Unit | Scopes | Meaning |
+|--------|------|--------|---------|
+| `pve_backup_failed` | count | **cluster only** | `vzdump` backups that failed inside the Duration window |
+| `pve_task_failed` | count | **cluster only** | Tasks of **any** type that failed inside the Duration window |
+
+Three things to know before creating one:
+
+- **Duration is the window being counted**, not "how long the condition must persist" as it is for the percentage metrics. The form defaults it to 24 hours for these two. Leaving it at 300 seconds creates a rule that counts only the last five minutes — a nightly backup that failed at 02:00 has aged out long before anyone reads the alert, so the rule evaluates false every tick and can never fire. These two metrics accept up to **30 days** (2592000), where every other metric is capped at 24 hours: a weekly backup needs a window longer than a week to be seen at all.
+- **A task that completed with warnings is not a failure.** Proxmox reports `WARNINGS: N` for a run that finished with non-fatal warnings, and `vzdump` emits it routinely; a backup that warned still produced a backup. Nexara uses one success rule everywhere, so this agrees with what the Tasks page shows for the same task.
+- **A cancelled task is indistinguishable from a broken one.** Proxmox records an operator who stops a migration exactly as it records one that failed, so `pve_task_failed` will count both — which is why the alert text says "failed or cancelled". Prefer `pve_backup_failed` unless you want that noise: nobody cancels backups by hand.
+
+Both are cluster-scoped because a task's node is stored by name while an alert rule targets a node by ID. The alert names the failed tasks, so the node is one click away in the Tasks page.
+
 ---
 
 ## Snapshots

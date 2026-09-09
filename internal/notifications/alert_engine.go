@@ -50,6 +50,17 @@ var validMetrics = map[string]bool{
 	"veeam_malware_status":    true,
 	"veeam_repo_used_percent": true,
 	"veeam_job_failed":        true,
+	// The PVE task metrics read task_history — already collected, previously
+	// notifying nobody. Counts of failures inside the rule's duration_seconds
+	// window; cluster scope only. See alert_tasks.go.
+	//
+	// pve_backup_failed — failed vzdump tasks. The low-noise signal: an
+	//                     operator does not cancel backups by hand.
+	// pve_task_failed   — failed tasks of ANY type. Broader and noisier, since
+	//                     a cancelled migration is recorded identically to one
+	//                     that broke.
+	"pve_backup_failed": true,
+	"pve_task_failed":   true,
 }
 
 // Veeam metric names, referenced by both the engine and the API's scope
@@ -60,6 +71,17 @@ const (
 	MetricVeeamRepoUsed   = "veeam_repo_used_percent"
 	MetricVeeamJobFailed  = "veeam_job_failed"
 	MetricSnapshotAgeDays = "snapshot_age_days"
+)
+
+// PVE task-failure metric names, and the worker type that distinguishes them.
+const (
+	MetricPVETaskFailed   = "pve_task_failed"
+	MetricPVEBackupFailed = "pve_backup_failed"
+
+	// backupTaskType is PVE's worker type for a backup run, as it appears in
+	// task_history.task_type — the same string collector/task_mapping.go maps
+	// to the "backup" resource type.
+	backupTaskType = "vzdump"
 )
 
 // MetricBound is the inclusive range a metric's threshold must fall in.
@@ -88,6 +110,11 @@ func MetricBounds(metric string) (MetricBound, bool) {
 // once per tick, forever, on a rule that can never fire.
 func MetricScopes(metric string) []string {
 	switch metric {
+	case MetricPVETaskFailed, MetricPVEBackupFailed:
+		// A task belongs to a node, but the rule stores a node UUID while the
+		// task row stores its name; cluster scope only until someone needs the
+		// per-node stream. See evaluatePVETaskFailedRule.
+		return []string{"cluster"}
 	case MetricSnapshotAgeDays, MetricVeeamRPOHours, MetricVeeamMalware:
 		return []string{"cluster", "vm"}
 	case MetricVeeamRepoUsed:
@@ -97,6 +124,52 @@ func MetricScopes(metric string) []string {
 	default:
 		return nil
 	}
+}
+
+// windowedMetrics are the metrics whose duration_seconds is the WINDOW being
+// counted over, rather than how long a level must persist above a threshold.
+//
+// The distinction is not cosmetic: it changes what a sane maximum is. "CPU has
+// been over 90% for 24 hours" is already an extreme rule, so the ordinary cap
+// is a day — but "how many backups failed in the last week" is the ordinary
+// case for a weekly schedule, and capping it at a day makes the rule unable to
+// see the backup it exists to watch.
+var windowedMetrics = map[string]bool{
+	MetricPVETaskFailed:   true,
+	MetricPVEBackupFailed: true,
+}
+
+// IsWindowedMetric reports whether a metric counts events inside
+// duration_seconds rather than requiring a level to persist for it. The API
+// uses it to pick the duration cap; the form mirrors the same set.
+func IsWindowedMetric(metric string) bool {
+	return windowedMetrics[metric]
+}
+
+// pendingDuration is how long a rule's condition must hold before a pending
+// alert transitions to firing.
+//
+// Zero for the windowed metrics, and that is load-bearing rather than a
+// shortcut. duration_seconds is their measurement WINDOW: the value handed to
+// handleRuleResult is already an aggregate over exactly that interval, so
+// requiring it to *also* persist for that long counts the same interval twice.
+//
+// Worse than redundant, it is self-defeating. An alert goes pending at the tick
+// that first sees the failure, which is necessarily AFTER the task itself
+// finished — so the pending timer matures at (pending + D) while the failure
+// leaves the window at (finished + D), strictly earlier. On the tick the alert
+// would finally fire, the condition has already gone false and handleRuleResult
+// takes the auto-resolve branch instead. The operator's only notification is a
+// "resolved" one, a day late, for an alert that never fired.
+//
+// A count over a window is debounced by construction; the pending delay exists
+// to stop a spiky instantaneous level flapping, which is not a thing a count
+// can do.
+func pendingDuration(rule db.AlertRule) time.Duration {
+	if IsWindowedMetric(rule.Metric) {
+		return 0
+	}
+	return time.Duration(rule.DurationSeconds) * time.Second
 }
 
 // ValidMetric returns true if the metric name is supported.
@@ -184,6 +257,11 @@ func (e *Engine) evaluateRule(ctx context.Context, rule db.AlertRule, windows []
 		return e.evaluateVeeamRepoRule(ctx, rule)
 	case MetricVeeamJobFailed:
 		return e.evaluateVeeamJobFailedRule(ctx, rule, windows)
+	case MetricPVEBackupFailed:
+		return e.evaluatePVETaskFailedRule(ctx, rule, windows, backupTaskType)
+	case MetricPVETaskFailed:
+		// "" = any worker type.
+		return e.evaluatePVETaskFailedRule(ctx, rule, windows, "")
 	}
 
 	switch rule.ScopeType {
@@ -481,7 +559,7 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 			// Already tracking — check if pending needs transition to firing.
 			if existing.State == "pending" {
 				elapsed := time.Since(existing.PendingAt)
-				if elapsed >= time.Duration(rule.DurationSeconds)*time.Second {
+				if elapsed >= pendingDuration(rule) {
 					if err := e.queries.TransitionAlertToFiring(ctx, existing.ID); err != nil {
 						return fmt.Errorf("transition to firing: %w", err)
 					}
@@ -546,8 +624,9 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 		e.logger.Info("alert pending",
 			"rule", rule.Name, "resource", resourceName, "alert_id", alert.ID)
 
-		// If duration is 0, immediately fire.
-		if rule.DurationSeconds == 0 {
+		// Fire immediately when nothing has to persist first — an explicit
+		// duration of 0, or a windowed metric whose duration is its window.
+		if pendingDuration(rule) == 0 {
 			if err := e.queries.TransitionAlertToFiring(ctx, alert.ID); err != nil {
 				return fmt.Errorf("immediate fire: %w", err)
 			}

@@ -201,3 +201,60 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_
   AND (sqlc.narg('vmids')::int[]   IS NULL OR vmid       = ANY(sqlc.narg('vmids')::int[]))
   AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
        OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]));
+
+-- name: GetClusterFailedTaskStats :one
+-- pve_task_failed / pve_backup_failed: how many Proxmox tasks failed in a window.
+--
+-- "Failed" is task_history.status, which the collector derives from
+-- proxmox.TaskSucceeded via classifyTaskExit — the single source of truth for
+-- the success rule, shared with the DRS executor and both orchestrators.
+-- Reusing it means this alert cannot disagree with what the Tasks page says
+-- about the same UPID. It also settles the one genuinely ambiguous case:
+-- "WARNINGS: N" is a SUCCESS there and so is not counted here. vzdump emits it
+-- routinely, and a backup that warned still produced a backup.
+--
+-- Windowed on COALESCE(finished_at, started_at), i.e. when the task ENDED. A
+-- backup that starts at 20:00 and fails at 04:00 failed an hour ago, not eight
+-- — filtering on started_at would hide it from a six-hour rule and silently
+-- shorten every failure's visible life by however long the task ran. The
+-- COALESCE is belt-and-braces: every current writer of status='failed' sets
+-- finished_at, and a row that somehow lacks one still gets counted rather than
+-- vanishing.
+--
+-- exit_status 'vanished' is excluded. The collector writes it when a task has
+-- been running past staleTaskGrace and Proxmox can no longer report on it
+-- (see task_reconcile.go) — that is "we lost track of it", not "it failed", and
+-- an alert that says a backup failed on that evidence is claiming more than it
+-- knows.
+--
+-- @task_type '' matches any type; 'vzdump' narrows it to backups.
+--
+-- failed_count counts ROWS (three failures of one job are three failures), but
+-- the name list is DISTINCT and ordered most-recent-first: a job that retried
+-- five times would otherwise fill all three slots with its own name and hide
+-- every other job that failed. unnamed_count is derived from the distinct count
+-- so it stays consistent with the list it is qualifying.
+WITH failed AS (
+    SELECT description, COALESCE(finished_at, started_at) AS ended_at
+    FROM task_history
+    WHERE cluster_id = @cluster_id::uuid
+      AND status = 'failed'
+      AND exit_status <> 'vanished'
+      AND COALESCE(finished_at, started_at) >= @since::timestamptz
+      AND (@task_type::text = '' OR task_type = @task_type::text)
+),
+distinct_names AS (
+    SELECT description, max(ended_at) AS last_failed
+    FROM failed
+    GROUP BY description
+)
+-- failed_names lists at most three and SAYS SO when it truncates, via
+-- unnamed_count. A message reading "8 tasks failed: A, B, C" with no ellipsis
+-- reads as the complete list, and an operator works three and never learns
+-- about the other five.
+SELECT
+    (SELECT count(*) FROM failed)::bigint AS failed_count,
+    COALESCE((SELECT string_agg(description, ', ' ORDER BY last_failed DESC)
+              FROM (SELECT description, last_failed FROM distinct_names
+                    ORDER BY last_failed DESC LIMIT 3) AS t), '')::text AS failed_names,
+    GREATEST((SELECT count(*) FROM distinct_names) - 3, 0)::bigint AS unnamed_count;

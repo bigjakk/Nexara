@@ -564,3 +564,41 @@ func TestAlertRuleScopeTouched(t *testing.T) {
 		})
 	}
 }
+
+// TestMaxDurationFor pins the metric-aware duration cap.
+//
+// The uniform 86400 cap that preceded it made pve_backup_failed unable to watch
+// a weekly backup at all: the window could never reach back far enough to
+// include the run it existed to check, so the rule was accepted, stored,
+// evaluated every tick, and could never fire. The browser caught this — the
+// API rejected a 30-day window with "must be between 0 and 86400" — which no
+// unit test would have, because every test until now used the default 300.
+func TestMaxDurationFor(t *testing.T) {
+	tests := []struct {
+		metric string
+		want   int32
+	}{
+		// Windowed: duration_seconds is the span being counted.
+		{"pve_backup_failed", maxWindowedDurationSec},
+		{"pve_task_failed", maxWindowedDurationSec},
+		// Level metrics: duration_seconds is how long the threshold must hold,
+		// where more than a day is already an extreme rule.
+		{"cpu_usage", maxDurationSec},
+		{"mem_percent", maxDurationSec},
+		{"veeam_job_failed", maxDurationSec},
+		{"snapshot_age_days", maxDurationSec},
+		// An unknown metric is rejected before the cap is consulted; the
+		// conservative default is still the right answer here.
+		{"bogus", maxDurationSec},
+	}
+	for _, tt := range tests {
+		if got := maxDurationFor(tt.metric); got != tt.want {
+			t.Errorf("maxDurationFor(%q) = %d, want %d", tt.metric, got, tt.want)
+		}
+	}
+
+	if maxWindowedDurationSec <= 7*24*60*60 {
+		t.Errorf("windowed cap %d does not exceed a week, so a weekly backup "+
+			"cannot be covered by its own alert window", maxWindowedDurationSec)
+	}
+}

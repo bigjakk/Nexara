@@ -294,7 +294,22 @@ const (
 	maxDescriptionLen = 1024
 	maxDurationSec    = 86400  // 24 hours
 	maxCooldownSec    = 604800 // 7 days
+
+	// maxWindowedDurationSec caps duration_seconds for the metrics that count
+	// events inside it instead of requiring a level to persist. 30 days covers
+	// a weekly or monthly backup schedule; the 24-hour cap would leave a weekly
+	// job permanently outside its own alert's window.
+	maxWindowedDurationSec = 2592000 // 30 days
 )
+
+// maxDurationFor returns the duration_seconds cap for a metric. See
+// notifications.IsWindowedMetric for why the two differ.
+func maxDurationFor(metric string) int32 {
+	if notifications.IsWindowedMetric(metric) {
+		return maxWindowedDurationSec
+	}
+	return maxDurationSec
+}
 
 // validateEscalationChain validates the structure of an escalation chain.
 func validateEscalationChain(data json.RawMessage) error {
@@ -456,8 +471,9 @@ func validateAlertRuleFields(f alertRuleFields) error {
 	if !validOperators[f.Operator] {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid operator")
 	}
-	if f.DurationSeconds < 0 || f.DurationSeconds > maxDurationSec {
-		return fiber.NewError(fiber.StatusBadRequest, "duration_seconds must be between 0 and 86400")
+	if maxDuration := maxDurationFor(f.Metric); f.DurationSeconds < 0 || f.DurationSeconds > maxDuration {
+		return fiber.NewError(fiber.StatusBadRequest,
+			fmt.Sprintf("duration_seconds must be between 0 and %d", maxDuration))
 	}
 	if f.CooldownSeconds < 0 || f.CooldownSeconds > maxCooldownSec {
 		return fiber.NewError(fiber.StatusBadRequest, "cooldown_seconds must be between 0 and 604800")
