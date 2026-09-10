@@ -194,7 +194,13 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 			}
 			o.publishEvent(ctx, job.ClusterID, job.ID, "completed")
 			o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_completed", nil)
-			o.sendJobNotification(ctx, job, "completed", "Rolling update completed successfully")
+			// A node that finished with a reboot still owed did not fully
+			// finish, and the notification is the only part of this the
+			// operator sees without going looking. Reporting a bare success
+			// would leave a node running a stale kernel with nothing anywhere
+			// saying so.
+			o.sendJobNotification(ctx, job, "completed",
+				"Rolling update completed successfully"+o.rebootPendingSuffix(ctx, job.ID))
 			o.logger.Info("rolling update job completed", "job_id", job.ID)
 			o.triggerPostUpgradeCVEScan(job)
 			// Release everything the job held (DRS pause, native CRS pause,
@@ -232,6 +238,26 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 			ID:           node.ID,
 			PackagesJson: freshPkgs,
 		})
+	}
+
+	// In-place job: upgrade this node without moving anything off it.
+	//
+	// Branches here, ahead of the guest snapshot rather than just ahead of the
+	// drain, and that placement is the point. Everything between here and
+	// completeDrain exists to make the node empty — snapshotting guests,
+	// disabling the HA rules that would block their migration, choosing target
+	// nodes, shutting down passthrough guests. None of it applies when the
+	// guests are staying, and disabling a cluster's HA rules for an upgrade
+	// that never migrates anything would be a real side effect for no reason.
+	//
+	// Leaving guests_json empty also makes the restore step a no-op by
+	// construction: advanceHealthCheck completes the node immediately when the
+	// snapshot is empty, so there is no path that tries to migrate guests
+	// "back" to the node they never left.
+	if !job.DrainGuests {
+		o.logger.Info("in-place upgrade, not draining node", "job_id", job.ID, "node", node.NodeName)
+		o.beginUpgrade(ctx, job, node)
+		return
 	}
 
 	// Snapshot running guests on this node.
@@ -565,7 +591,10 @@ func (o *Orchestrator) completeDrain(ctx context.Context, client *proxmox.Client
 		return
 	}
 
-	// Refresh apt index on the node.
+	// Refresh apt index on the node. Only on this path: the drain took minutes,
+	// so the index startNode refreshed is stale by now. The in-place path
+	// reaches beginUpgrade milliseconds after that refresh and would just be
+	// dispatching a second identical Proxmox task and waiting out its poll.
 	upid, err := client.RefreshNodeAptIndex(ctx, node.NodeName)
 	if err != nil {
 		o.logger.Warn("failed to refresh apt index", "node", node.NodeName, "error", err)
@@ -573,23 +602,50 @@ func (o *Orchestrator) completeDrain(ctx context.Context, client *proxmox.Client
 		o.waitForTask(ctx, client, node.NodeName, upid)
 	}
 
+	o.beginUpgrade(ctx, job, node)
+}
+
+// beginUpgrade moves a node from "ready to upgrade" to the upgrade itself.
+//
+// Shared by the drained path (completeDrain, which verifies the node is empty
+// first) and the in-place path (startNode, which deliberately does not). Split
+// out so the two cannot drift: the difference between them is only whether the
+// node had to be emptied, never what happens next.
+func (o *Orchestrator) beginUpgrade(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode) {
+	// An in-place node has no drain timestamps to write. Same step transition,
+	// different query, so the progress panel does not report a drain that never
+	// happened.
+	drained := job.DrainGuests
+
 	if job.AutoUpgrade {
 		// Auto-upgrade mode: transition to 'upgrading' step — the scheduler
 		// tick will pick this up and run apt dist-upgrade via SSH.
-		if err := o.queries.SetNodeDrainCompletedAuto(ctx, node.ID); err != nil {
-			o.logger.Error("failed to set node drain completed (auto)", "node_id", node.ID, "error", err)
+		var err error
+		if drained {
+			err = o.queries.SetNodeDrainCompletedAuto(ctx, node.ID)
+		} else {
+			err = o.queries.SetNodeInPlaceUpgradeAuto(ctx, node.ID)
+		}
+		if err != nil {
+			o.logger.Error("failed to set node ready for automated upgrade", "node_id", node.ID, "error", err)
 			return
 		}
 		o.publishEvent(ctx, job.ClusterID, job.ID, "node_upgrading")
-		o.logger.Info("node drained, starting automated upgrade", "node", node.NodeName)
+		o.logger.Info("node ready, starting automated upgrade", "node", node.NodeName, "drained", drained)
 	} else {
 		// Manual mode: pause for admin confirmation.
-		if err := o.queries.SetNodeDrainCompletedManual(ctx, node.ID); err != nil {
-			o.logger.Error("failed to set node drain completed (manual)", "node_id", node.ID, "error", err)
+		var err error
+		if drained {
+			err = o.queries.SetNodeDrainCompletedManual(ctx, node.ID)
+		} else {
+			err = o.queries.SetNodeInPlaceUpgradeManual(ctx, node.ID)
+		}
+		if err != nil {
+			o.logger.Error("failed to set node awaiting manual upgrade", "node_id", node.ID, "error", err)
 			return
 		}
 		o.publishEvent(ctx, job.ClusterID, job.ID, "node_awaiting_upgrade")
-		o.logger.Info("node drained, awaiting manual upgrade", "node", node.NodeName)
+		o.logger.Info("node ready, awaiting manual upgrade", "node", node.NodeName, "drained", drained)
 	}
 }
 
@@ -1045,12 +1101,25 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 		// Guests can land on the node during a long apt run (manual
 		// migration, HA recovery) — re-verify it's still empty right before
 		// pulling the trigger on the reboot.
-		if violations, verr := o.verifyNodeDrained(ctx, client, node.NodeName); verr != nil {
-			o.logger.Warn("could not verify node is empty before reboot, proceeding",
-				"node", node.NodeName, "error", verr)
-		} else if len(violations) > 0 {
+		violations, verr := o.verifyNodeDrained(ctx, client, node.NodeName)
+		switch decideReboot(job, violations, verr) {
+		case rebootDefer:
+			o.logger.Info("upgrade complete, reboot deferred",
+				"node", node.NodeName, "guests", formatGuestList(violations), "verify_error", verr)
+			if err := o.queries.SetNodeUpgradeCompletedRebootPending(ctx, node.ID); err != nil {
+				o.logger.Error("failed to set node upgrade completed (reboot pending)", "node_id", node.ID, "error", err)
+				return
+			}
+			o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check_passed")
+			return
+		case rebootFail:
 			o.failNode(ctx, job, node, fmt.Sprintf("refusing to reboot: running guests present on node: %s", formatGuestList(violations)))
 			return
+		case rebootProceed:
+			if verr != nil {
+				o.logger.Warn("could not verify node is empty before reboot, proceeding",
+					"node", node.NodeName, "error", verr)
+			}
 		}
 
 		if err := o.queries.SetNodeUpgradeCompleted(ctx, node.ID); err != nil {
@@ -1354,11 +1423,27 @@ func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJ
 		// (manual migration, HA recovery after another node died). Refuse
 		// the reboot before confirming anything, so the node stays
 		// awaiting_upgrade and the admin can move the guests off and retry.
-		if violations, verr := o.verifyNodeDrained(ctx, client, node.NodeName); verr != nil {
-			o.logger.Warn("could not verify node is empty before confirmed reboot, proceeding",
-				"node", node.NodeName, "error", verr)
-		} else if len(violations) > 0 {
+		violations, verr := o.verifyNodeDrained(ctx, client, node.NodeName)
+		switch decideReboot(job, violations, verr) {
+		case rebootDefer:
+			// The upgrade is confirmed and finished; only the reboot is put
+			// off. Refusing instead would leave an in-place node upgraded but
+			// stuck in awaiting_upgrade, and the only way out would be draining
+			// it — the thing the operator chose not to do.
+			o.logger.Info("upgrade confirmed, reboot deferred",
+				"node", node.NodeName, "guests", formatGuestList(violations), "verify_error", verr)
+			if err := o.queries.SetNodeUpgradeCompletedRebootPending(ctx, node.ID); err != nil {
+				return fmt.Errorf("confirm node upgrade (reboot pending): %w", err)
+			}
+			o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check_passed")
+			return nil
+		case rebootFail:
 			return fmt.Errorf("node has running guests, refusing to reboot: %s — migrate them off and confirm again", formatGuestList(violations))
+		case rebootProceed:
+			if verr != nil {
+				o.logger.Warn("could not verify node is empty before confirmed reboot, proceeding",
+					"node", node.NodeName, "error", verr)
+			}
 		}
 	}
 
@@ -1935,6 +2020,26 @@ func (o *Orchestrator) reenableHARules(ctx context.Context, client *proxmox.Clie
 }
 
 // sendJobNotification dispatches a notification to the configured channel when a job completes or fails.
+// rebootPendingSuffix names the nodes that were upgraded but not rebooted, for
+// appending to a completion message. Empty when every node is fully done, which
+// is always the case for a drained job.
+func (o *Orchestrator) rebootPendingSuffix(ctx context.Context, jobID uuid.UUID) string {
+	nodes, err := o.queries.ListRollingUpdateNodes(ctx, jobID)
+	if err != nil {
+		return ""
+	}
+	var pending []string
+	for _, n := range nodes {
+		if n.RebootRequired {
+			pending = append(pending, n.NodeName)
+		}
+	}
+	if len(pending) == 0 {
+		return ""
+	}
+	return " — reboot still required on: " + strings.Join(pending, ", ")
+}
+
 func (o *Orchestrator) sendJobNotification(ctx context.Context, job db.RollingUpdateJob, status, message string) {
 	if o.notifyRegistry == nil || !job.NotifyChannelID.Valid {
 		return

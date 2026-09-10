@@ -37,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { NodeUpdatePanel } from "@/features/rolling-updates/components/NodeUpdatePanel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -461,12 +462,18 @@ export function NodeDetailPage() {
         </TabsContent>
 
         {/* Updates Tab */}
-        <TabsContent value="updates" className="mt-4">
+        <TabsContent value="updates" className="mt-4 space-y-4">
           {node.status === "online" ? (
-            <NodeAptRepositories clusterId={clusterId} nodeName={node.name} />
+            <>
+              {/* Above the repositories: what is pending and how to apply it is
+                  the question this tab is opened with; where the packages come
+                  from is the follow-up. */}
+              <NodeUpdatePanel clusterId={clusterId} nodeName={node.name} />
+              <NodeAptRepositories clusterId={clusterId} nodeName={node.name} />
+            </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Node must be online to view repositories.
+              Node must be online to view updates.
             </p>
           )}
         </TabsContent>

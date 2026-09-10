@@ -5,9 +5,9 @@ import { PackagePreviewTable } from "./PackagePreviewTable";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useNodePackagePreview } from "../api/rolling-update-queries";
 import { useSettledQueryError } from "@/hooks/useSettledQueryError";
+import { securityPackageCount } from "../lib/packages";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { describeError } from "@/lib/api-error";
-import type { AptPackage } from "@/types/api";
 import {
   Loader2,
   Package,
@@ -38,11 +38,7 @@ function NodePackageRow({
   const unread = settledError === null && packages === undefined;
 
   const count = packages?.length ?? 0;
-  const securityCount =
-    packages?.filter(
-      (p: AptPackage) =>
-        p.Priority === "important" || p.Origin === "Debian-Security",
-    ).length ?? 0;
+  const securityCount = securityPackageCount(packages);
 
   return (
     <div className="rounded-md border">

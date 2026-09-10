@@ -1438,6 +1438,13 @@ type Querier interface {
 	SetNodeDrainStarted(ctx context.Context, id uuid.UUID) error
 	SetNodeGuestsJSON(ctx context.Context, arg SetNodeGuestsJSONParams) error
 	SetNodeHealthCheckPassed(ctx context.Context, id uuid.UUID) error
+	// An in-place node was never drained, so it has no drain timestamps to set.
+	// Writing drain_completed_at without drain_started_at — which is what the
+	// drained queries above would do here — makes the progress panel render
+	// "Drain done: <time>" and light the draining step green for a node whose
+	// guests never moved.
+	SetNodeInPlaceUpgradeAuto(ctx context.Context, id uuid.UUID) error
+	SetNodeInPlaceUpgradeManual(ctx context.Context, id uuid.UUID) error
 	SetNodePackagesJSON(ctx context.Context, arg SetNodePackagesJSONParams) error
 	SetNodeRebootCompleted(ctx context.Context, id uuid.UUID) error
 	SetNodeRebootStarted(ctx context.Context, id uuid.UUID) error
@@ -1446,6 +1453,16 @@ type Querier interface {
 	SetNodeStoppedPassthrough(ctx context.Context, arg SetNodeStoppedPassthroughParams) error
 	SetNodeUpgradeCompleted(ctx context.Context, id uuid.UUID) error
 	SetNodeUpgradeCompletedNoReboot(ctx context.Context, id uuid.UUID) error
+	// SetNodeUpgradeCompletedRebootPending finishes a node whose upgrade succeeded
+	// but which could not be rebooted because guests are running on it.
+	//
+	// Only reachable for an in-place job (drain_guests = false), where those guests
+	// are running because the operator asked for that. Lands on 'health_check' like
+	// the no-reboot path — with guests_json empty for an in-place job, health check
+	// falls straight through to 'completed' — and records reboot_required so the UI
+	// can say "updates applied, reboot pending" instead of the node reading as
+	// cleanly finished.
+	SetNodeUpgradeCompletedRebootPending(ctx context.Context, id uuid.UUID) error
 	SetNodeUpgradeOutput(ctx context.Context, arg SetNodeUpgradeOutputParams) error
 	// COALESCE preserves the original upgrade_started_at on a resume re-launch
 	// (after a Swarm reschedule or K8s rolling restart killed the previous

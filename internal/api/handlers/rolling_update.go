@@ -50,6 +50,7 @@ type rollingUpdateJobResponse struct {
 	HAPolicy          string          `json:"ha_policy"`
 	HAWarnings        json.RawMessage `json:"ha_warnings"`
 	AutoUpgrade       bool            `json:"auto_upgrade"`
+	DrainGuests       bool            `json:"drain_guests"`
 	FailureReason     string          `json:"failure_reason"`
 	NotifyChannelID   string          `json:"notify_channel_id,omitempty"`
 	CreatedBy         string          `json:"created_by"`
@@ -80,8 +81,12 @@ type rollingUpdateNodeResponse struct {
 	UpgradeStartedAt   string          `json:"upgrade_started_at,omitempty"`
 	UpgradeCompletedAt string          `json:"upgrade_completed_at,omitempty"`
 	UpgradeOutput      string          `json:"upgrade_output,omitempty"`
-	CreatedAt          string          `json:"created_at"`
-	UpdatedAt          string          `json:"updated_at"`
+	// RebootRequired marks a node whose upgrade landed but which still owes a
+	// reboot, because guests were running on it. Only ever set on an in-place
+	// job; a drained job reboots or fails.
+	RebootRequired bool   `json:"reboot_required"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 func toJobResponse(j db.RollingUpdateJob) rollingUpdateJobResponse {
@@ -100,6 +105,7 @@ func toJobResponse(j db.RollingUpdateJob) rollingUpdateJobResponse {
 		HAPolicy:          j.HaPolicy,
 		HAWarnings:        haWarnings,
 		AutoUpgrade:       j.AutoUpgrade,
+		DrainGuests:       j.DrainGuests,
 		FailureReason:     j.FailureReason,
 		CreatedBy:         j.CreatedBy.String(),
 		CreatedAt:         j.CreatedAt.Format(time.RFC3339Nano),
@@ -149,6 +155,7 @@ func toRollingNodeResponse(n db.RollingUpdateNode) rollingUpdateNodeResponse {
 		UpgradeStartedAt:   formatTimestamptz(n.UpgradeStartedAt),
 		UpgradeCompletedAt: formatTimestamptz(n.UpgradeCompletedAt),
 		UpgradeOutput:      n.UpgradeOutput,
+		RebootRequired:     n.RebootRequired,
 		CreatedAt:          n.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:          n.UpdatedAt.Format(time.RFC3339Nano),
 	}
@@ -199,6 +206,10 @@ type createRollingUpdateRequest struct {
 	HAPolicy          string   `json:"ha_policy"`
 	AutoUpgrade       *bool    `json:"auto_upgrade"`
 	NotifyChannelID   *string  `json:"notify_channel_id"`
+	// DrainGuests false upgrades each node in place, leaving its guests
+	// running. Pointer so an older client that omits it keeps the drained
+	// behaviour, which is the only one that existed before.
+	DrainGuests *bool `json:"drain_guests"`
 }
 
 // CreateJob creates a new rolling update job.
@@ -277,6 +288,11 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 		req.PackageExcludes = []string{}
 	}
 
+	drainGuests := true
+	if req.DrainGuests != nil {
+		drainGuests = *req.DrainGuests
+	}
+
 	haPolicy := req.HAPolicy
 	if haPolicy == "" {
 		haPolicy = "warn"
@@ -286,9 +302,17 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 	}
 
 	// Run pre-flight checks: HA constraints + capacity analysis.
+	//
+	// Both are questions about migration — whether HA/DRS rules would block
+	// guests leaving a node, and whether the remaining nodes could absorb them.
+	// An in-place job migrates nothing, so neither has an answer worth acting
+	// on, and running them anyway does active harm: AnalyzeCapacity on a
+	// single-node cluster reports that the (nonexistent) remaining nodes cannot
+	// absorb the workload, which under ha_policy "strict" is a 409 refusing the
+	// one job shape a single-node cluster can actually run.
 	var haWarningsJSON json.RawMessage
 	client, clientErr := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
-	if clientErr == nil {
+	if clientErr == nil && drainGuests {
 		var allConflicts []rolling.HAConflict
 		preflightHasErrors := false
 
@@ -348,6 +372,7 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 		HaPolicy:          haPolicy,
 		HaWarnings:        haWarningsJSON,
 		AutoUpgrade:       autoUpgrade,
+		DrainGuests:       drainGuests,
 		CreatedBy:         userID,
 		NotifyChannelID:   notifyChannelID,
 	})

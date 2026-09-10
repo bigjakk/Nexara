@@ -1,6 +1,6 @@
 -- name: InsertRollingUpdateJob :one
-INSERT INTO rolling_update_jobs (cluster_id, parallelism, reboot_after_update, auto_restore_guests, package_excludes, ha_policy, ha_warnings, auto_upgrade, created_by, notify_channel_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO rolling_update_jobs (cluster_id, parallelism, reboot_after_update, auto_restore_guests, package_excludes, ha_policy, ha_warnings, auto_upgrade, created_by, notify_channel_id, drain_guests)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
 -- name: GetRollingUpdateJob :one
@@ -111,6 +111,21 @@ UPDATE rolling_update_nodes
 SET drain_completed_at = now(), step = 'upgrading', updated_at = now()
 WHERE id = $1;
 
+-- An in-place node was never drained, so it has no drain timestamps to set.
+-- Writing drain_completed_at without drain_started_at — which is what the
+-- drained queries above would do here — makes the progress panel render
+-- "Drain done: <time>" and light the draining step green for a node whose
+-- guests never moved.
+-- name: SetNodeInPlaceUpgradeAuto :exec
+UPDATE rolling_update_nodes
+SET step = 'upgrading', updated_at = now()
+WHERE id = $1;
+
+-- name: SetNodeInPlaceUpgradeManual :exec
+UPDATE rolling_update_nodes
+SET step = 'awaiting_upgrade', updated_at = now()
+WHERE id = $1;
+
 -- name: SetNodePackagesJSON :exec
 UPDATE rolling_update_nodes
 SET packages_json = $2, updated_at = now()
@@ -143,6 +158,21 @@ WHERE id = $1;
 -- name: SetNodeUpgradeCompletedNoReboot :exec
 UPDATE rolling_update_nodes
 SET step = 'health_check', upgrade_completed_at = now(), upgrade_confirmed_at = now(), health_check_at = now(), updated_at = now()
+WHERE id = $1;
+
+-- SetNodeUpgradeCompletedRebootPending finishes a node whose upgrade succeeded
+-- but which could not be rebooted because guests are running on it.
+--
+-- Only reachable for an in-place job (drain_guests = false), where those guests
+-- are running because the operator asked for that. Lands on 'health_check' like
+-- the no-reboot path — with guests_json empty for an in-place job, health check
+-- falls straight through to 'completed' — and records reboot_required so the UI
+-- can say "updates applied, reboot pending" instead of the node reading as
+-- cleanly finished.
+-- name: SetNodeUpgradeCompletedRebootPending :exec
+UPDATE rolling_update_nodes
+SET step = 'health_check', upgrade_completed_at = now(), upgrade_confirmed_at = now(),
+    health_check_at = now(), reboot_required = true, updated_at = now()
 WHERE id = $1;
 
 -- name: SetNodeUpgradeOutput :exec

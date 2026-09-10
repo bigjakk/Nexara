@@ -842,6 +842,9 @@ export interface RollingUpdateJob {
   ha_policy: "strict" | "warn";
   ha_warnings: HAConflict[] | null;
   auto_upgrade: boolean;
+  /** False means the job upgrades each node in place, leaving its guests
+   * running. Lets the progress view explain why a node shows no drain. */
+  drain_guests: boolean;
   failure_reason: string;
   notify_channel_id?: string;
   created_by: string;
@@ -869,6 +872,9 @@ export interface RollingUpdateNode {
     | "skipped";
   failure_reason: string;
   skip_reason?: string;
+  /** Upgrade applied, but the node still owes a reboot it could not take
+   * because guests were running on it. Only set on an in-place job. */
+  reboot_required?: boolean;
   packages_json: AptPackage[];
   guests_json: GuestSnapshot[];
   drain_started_at?: string;
@@ -915,6 +921,13 @@ export interface CreateRollingUpdateRequest {
   ha_policy: "strict" | "warn";
   auto_upgrade: boolean;
   notify_channel_id?: string | undefined;
+  /**
+   * False upgrades each node in place, leaving its guests running.
+   *
+   * Omitted means true, matching the server default and the only behaviour
+   * that existed before: a job that drains each node before touching it.
+   */
+  drain_guests?: boolean | undefined;
 }
 
 export interface SSHCredential {

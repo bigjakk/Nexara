@@ -1071,6 +1071,31 @@ Each node goes through these steps:
 
 > **Native CRS:** if the cluster runs Proxmox VE 9.2's native CRS dynamic balancer with auto-rebalance enabled, Nexara pauses `ha-auto-rebalance` for the duration of the job — so the balancer can't move guests back onto a node being drained — and restores it when the job finishes or fails.
 
+### Updating a Single Node In Place
+
+A node's own **Updates** tab lists its pending packages and offers **Update this node**. This is the same job machinery — same SSH path, same progress view — with the drain turned off: the node is upgraded where it stands and its guests keep running.
+
+Use it when draining is not what you want:
+
+- **A single-node cluster.** The drain migrates guests to another online node, so with no other node it fails with *no available target nodes for migration*. In-place is the only form of update job such a cluster can run.
+- **A package update with no reboot.** `apt` on a PVE node does not require the guests to be elsewhere, so draining a whole node to install userland updates is work for nothing.
+
+What it does differently from a cluster-wide rolling update:
+
+| | Rolling update | Update this node |
+| --- | --- | --- |
+| Guests | Migrated off, then back | Stay running on the node |
+| Other nodes | Needed as migration targets | Not involved |
+| HA rules | Temporarily disabled so guests can move | Untouched |
+| Pre-flight HA/capacity checks | Run | Skipped — nothing migrates |
+| Reboot | Taken once the node is empty | Only if you asked for one *and* no guests are running |
+
+DRS and native CRS are paused for the cluster in both cases, and restored when the job ends.
+
+**Reboots are never taken under running guests.** If the upgrade needs one — any kernel update leaves `/var/run/reboot-required` behind — the node finishes as **Reboot required** instead of **Completed**, the completion notification names it, and you schedule the reboot yourself. The same applies when Nexara cannot confirm what is running on the node: it defers rather than guessing.
+
+The cluster-wide wizard does not offer this mode; it is reached from the node page.
+
 ### Managing Jobs
 
 - **Start** — begin the rolling update

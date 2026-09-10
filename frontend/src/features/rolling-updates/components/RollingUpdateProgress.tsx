@@ -29,6 +29,7 @@ import {
   ChevronDown,
   ChevronRight,
   AlertTriangle,
+  RotateCcw,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -126,7 +127,19 @@ function NodeRow({
         )}
 
         <span className="min-w-[120px] font-medium">{node.node_name}</span>
-        <NodeStepBadge step={node.step} />
+        {/* An in-place upgrade never reboots a node that still has guests on
+            it, so a kernel update finishes with the reboot still owed. The
+            badge says that instead of "Completed", or the row reads as done. */}
+        <NodeStepBadge
+          step={node.step}
+          rebootRequired={node.reboot_required === true}
+        />
+        {node.reboot_required === true && (
+          <RotateCcw
+            aria-label="Reboot required"
+            className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500"
+          />
+        )}
         <StepIndicator node={node} />
 
         <div className="ml-auto flex items-center gap-2">

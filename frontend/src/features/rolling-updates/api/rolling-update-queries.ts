@@ -84,6 +84,71 @@ export function useCreateRollingUpdateJob() {
   });
 }
 
+/**
+ * Create a one-node in-place update job and start it, as a single operation.
+ *
+ * Both calls live in one mutationFn on purpose. Chaining them through the
+ * create's `onSuccess` looked equivalent and was not: TanStack only invokes
+ * per-call callbacks while the observer still has listeners, so unmounting the
+ * component drops them silently. The panel lives inside a Radix tab, which
+ * unmounts on tab switch — so clicking Update and then switching tabs while the
+ * POST was in flight left the job created but never started.
+ *
+ * That failure is worse than it sounds. HasRunningJobForCluster counts
+ * 'pending' as active, so one orphan job makes every later rolling update on
+ * that cluster — this panel and the cluster-wide wizard both — refuse with
+ * "A rolling update job is already active", until someone finds and cancels a
+ * job they never knew existed. Awaiting both calls inside the mutation means
+ * neither can be stranded by a render.
+ */
+export function useStartInPlaceNodeUpdate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      clusterId,
+      nodeName,
+    }: {
+      clusterId: string;
+      nodeName: string;
+    }) => {
+      const job = await apiClient.post<RollingUpdateJob>(
+        `/api/v1/clusters/${clusterId}/rolling-updates`,
+        {
+          nodes: [nodeName],
+          parallelism: 1,
+          // In place: no migration, no target node needed, guests keep running.
+          drain_guests: false,
+          // Nothing was moved, so there is nothing to move back. Explicit
+          // rather than defaulted so the intent survives a default change.
+          auto_restore_guests: false,
+          // Not requested, and for an in-place job that is binding: the
+          // orchestrator defers any reboot apt asks for and flags the node.
+          reboot_after_update: false,
+          auto_upgrade: true,
+          package_excludes: [],
+          ha_policy: "warn",
+        },
+      );
+      await apiClient.post<RollingUpdateJob>(
+        `/api/v1/clusters/${clusterId}/rolling-updates/${job.id}/start`,
+      );
+      return job;
+    },
+    onSettled: (_data, _err, vars) => {
+      void qc.invalidateQueries({
+        queryKey: ["rolling-update-jobs", vars.clusterId],
+      });
+      // The node's pending-package list is now stale — the upgrade is about to
+      // remove the very rows the panel is still showing next to an armed
+      // button. Without this it keeps them for the 5 minute staleTime, and a
+      // second click creates a job that immediately skips the node.
+      void qc.invalidateQueries({
+        queryKey: ["node-packages", vars.clusterId, vars.nodeName],
+      });
+    },
+  });
+}
+
 export function useStartRollingUpdateJob() {
   const qc = useQueryClient();
   return useMutation({

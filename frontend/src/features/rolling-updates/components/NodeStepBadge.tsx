@@ -20,7 +20,22 @@ const stepConfig: Record<
   skipped: { label: "Skipped", variant: "outline" },
 };
 
-export function NodeStepBadge({ step }: { step: RollingUpdateNode["step"] }) {
+export function NodeStepBadge({
+  step,
+  rebootRequired = false,
+}: {
+  step: RollingUpdateNode["step"];
+  /** The node's upgrade landed but it still owes a reboot. */
+  rebootRequired?: boolean;
+}) {
+  // Overrides the label rather than sitting beside it, following what
+  // guest-tools does with the same concept: a node that owes a reboot has not
+  // finished, and "Completed" next to a secondary badge is read as finished.
+  // The only surface that tells an operator a reboot is pending must not also
+  // be the one saying the work is done.
+  if (rebootRequired) {
+    return <Badge variant="secondary">Reboot required</Badge>;
+  }
   const config = stepConfig[step];
   return <Badge variant={config.variant}>{config.label}</Badge>;
 }

@@ -871,6 +871,8 @@ type RollingUpdateJob struct {
 	DisabledHaRules   []byte             `json:"disabled_ha_rules"`
 	CleanupPending    bool               `json:"cleanup_pending"`
 	CleanupAttempts   int32              `json:"cleanup_attempts"`
+	// False upgrades each node in place, leaving its guests running (no migration, no target node needed)
+	DrainGuests bool `json:"drain_guests"`
 }
 
 type RollingUpdateNode struct {
@@ -898,6 +900,8 @@ type RollingUpdateNode struct {
 	DisabledHaRules        json.RawMessage    `json:"disabled_ha_rules"`
 	SkipReason             string             `json:"skip_reason"`
 	StoppedPassthroughJson []byte             `json:"stopped_passthrough_json"`
+	// Upgrade applied but a reboot is still pending; set when the node could not be rebooted because guests are running on it
+	RebootRequired bool `json:"reboot_required"`
 }
 
 type ScheduledTask struct {
