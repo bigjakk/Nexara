@@ -238,7 +238,7 @@ NEXARA_TEST_DB_URL="postgres://nexara:changeme@localhost:5432/nexara_chaintest?s
   go test -race ./internal/db/...
 ```
 
-Never point it at `nexara`, `nexara_dev`, or anything else you care about. CI sets it for every push, PR, and `v*` tag against a TimescaleDB service container, so the round-trip always runs there.
+Never point it at `nexara`, `nexara_dev`, or anything else you care about. CI sets it against a TimescaleDB service container for every pull request and every `v*` tag, so the round-trip always runs there. Note that the push trigger is `branches: ["*"]`, and that glob does **not** match a `/`, so a push to a branch named `feat/...` runs no workflow at all — open the PR and the round-trip runs.
 
 Use table-driven tests:
 
@@ -406,7 +406,9 @@ cd frontend && npx eslint src/
 
 ## Pull Request Process
 
-> **Where the code lives.** GitHub is a **one-way mirror**. The upstream repository is a private Gitea instance and every push flows Gitea → GitHub, never back. Cloning, building and reading from GitHub all work normally, but a pull request opened there cannot be merged in place — a maintainer replays the commits upstream and they reappear in the mirror on the next sync. Open issues and pull requests on GitHub anyway; that is the contact point. Expect a PR to be closed with thanks rather than merged when the change actually lands.
+> **Where the code lives.** GitHub is the upstream repository. Fork it, push your branch to your fork, and open the pull request there — a maintainer merges it in place onto `master` like any other project, and nothing gets replayed elsewhere. A private Gitea instance keeps a read-only mirror that pulls *from* GitHub for internal use; it never pushes back and needs nothing from contributors.
+>
+> This reverses the arrangement in place before 2026-09-14, when Gitea was upstream and GitHub was a push mirror. Each sync force-pruned any branch GitHub had and Gitea did not, so same-repo PR branches were deleted under their pull requests — which is why older PRs, Dependabot's in particular, show as closed rather than merged.
 
 ### Branch Naming
 
@@ -475,9 +477,9 @@ git push origin master v1.9.0
 
 The version the binary reports comes from `git describe --tags`, injected via ldflags into `internal/api.Version` (see `LDFLAGS` in the Makefile). Pick the bump from the commits since the last tag: `fix:`/`docs:`/`chore:` → patch, `feat:` → minor, a `BREAKING:` commit → major.
 
-Pushing a `v*` tag fires **two** release workflows — `.gitea/workflows/release.yml` on Gitea Actions and `.github/workflows/release.yml` on GitHub Actions once the mirror syncs. Each one re-runs the full CI suite (including the Postgres-backed migration round-trip — a `v*` tag does *not* match `ci.yml`'s `push: branches` trigger, which is why that block is duplicated there), builds and pushes the image to its registry, and creates the release automatically. The in-app changelog popup reads the GitHub Release, so nothing needs to be published by hand.
+Pushing a `v*` tag fires `.github/workflows/release.yml` on GitHub Actions. It re-runs the full CI suite (including the Postgres-backed migration round-trip — a `v*` tag does *not* match `ci.yml`'s `push: branches` trigger, which is why that block is duplicated there), builds and pushes the image to `ghcr.io`, and creates the GitHub Release automatically. The in-app changelog popup reads that release, so nothing needs to be published by hand.
 
-The two workflow sets are deliberate copies: **change one, change the other.** They differ only where the runners differ — the Gitea job runs inside a container, so it addresses the Postgres service by name and waits for it explicitly, while the GitHub job maps the port onto localhost.
+`.gitea/workflows/` holds a second copy of both workflows, kept as the record of how the Gitea runner was wired. It is **dormant** — Gitea does not fire Actions on a mirror sync, and the Gitea repository is a pull mirror now — so edit `.github/workflows/` alone; there is no second set to keep in step. Read the old copy as a reference rather than an equivalent: `ci.yml` differs only in runner shape (it ran the job in a container, so it addressed the Postgres service by name and waited for it explicitly, where the GitHub job maps the port onto localhost), but `release.yml` differs substantially — it pushed to the Gitea registry rather than `ghcr.io`, logged in with a raw `docker login`, and created the release by `curl`ing the Gitea API instead of using `softprops/action-gh-release`.
 
 ## Common Commands
 

@@ -145,6 +145,6 @@ Some languages need additional plural forms. See [i18next pluralization docs](ht
 
 ## Submitting
 
-1. Create a branch: `git checkout -b feat/i18n-<lang-code>`
+1. Fork the repository, then create a branch on your fork: `git checkout -b feat/i18n-<lang-code>`
 2. Commit your translations: `git commit -m "feat: add <language> translations"`
-3. Open a pull request on GitHub with a summary of what was translated. GitHub is a one-way mirror of a private upstream repository, so a maintainer replays the commits upstream rather than merging your PR in place — the change appears in the mirror on the next sync and the PR is closed with thanks.
+3. Open a pull request on GitHub with a summary of what was translated. GitHub is the upstream repository, so a maintainer merges your PR in place onto `master` like any other project.

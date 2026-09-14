@@ -42,7 +42,7 @@ var (
 //	{}   → no grant anywhere  → nothing
 //
 // Skipped unless NEXARA_TEST_DB_URL names a throwaway database (CI sets it;
-// see .gitea/workflows/ci.yml). It seeds and deletes its own rows and does not
+// see .github/workflows/ci.yml). It seeds and deletes its own rows and does not
 // migrate the schema down.
 func TestAuditScope_NullClusterRowsAreGlobal(t *testing.T) {
 	env := setupMigration(t)

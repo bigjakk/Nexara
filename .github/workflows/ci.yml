@@ -16,10 +16,12 @@ jobs:
     # automatically against existing user databases on container startup, so a
     # broken one would ship unnoticed.
     #
-    # This covers pushes and PRs only. A v* tag does NOT run this workflow —
-    # `on: push: branches` does not match a tag ref — so release.yml carries its
-    # own copy of this block. Keep the two in sync; dropping it there is what
-    # would let an unvalidated migration chain ship.
+    # This covers PRs, plus pushes to a branch whose name has no `/` in it —
+    # the `*` glob above does not match a slash, so a push to `feat/...` runs
+    # nothing and the PR is what exercises this. A v* tag does NOT run this
+    # workflow either — `on: push: branches` does not match a tag ref — so
+    # release.yml carries its own copy of this block. Keep the two in sync;
+    # dropping it there is what would let an unvalidated migration chain ship.
     #
     # TimescaleDB rather than the stock postgres image: migration 000002 runs
     # CREATE EXTENSION timescaledb, which needs the library preloaded — plain
@@ -62,8 +64,8 @@ jobs:
           # A throwaway database: the migration tests round-trip the schema all
           # the way up and back down, so this must never address a real one.
           # Reached on localhost because GitHub runs the job on the runner VM
-          # and maps the service port to it (the Gitea workflow addresses the
-          # service by name instead — its runner puts the job in a container).
+          # and maps the service port to it. The dormant .gitea copy addressed
+          # the service by name instead — act_runner put the job in a container.
           NEXARA_TEST_DB_URL: postgres://nexara:nexara@localhost:5432/nexara_test?sslmode=disable
 
       - name: Build unified binary

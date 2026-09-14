@@ -1,3 +1,10 @@
+# DORMANT — retained as the record of how releases were cut on Gitea Actions.
+#
+# The Gitea repository became a read-only pull mirror of GitHub on 2026-09-14,
+# and Gitea does not fire Actions on a mirror sync, so nothing here runs any
+# more. The live workflows are .github/workflows/{ci,release}.yml — edit those.
+# Do not treat this file as a second copy to keep in step.
+
 name: Release
 
 on:
