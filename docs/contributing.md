@@ -238,7 +238,7 @@ NEXARA_TEST_DB_URL="postgres://nexara:changeme@localhost:5432/nexara_chaintest?s
   go test -race ./internal/db/...
 ```
 
-Never point it at `nexara`, `nexara_dev`, or anything else you care about. CI sets it against a TimescaleDB service container for every pull request and every `v*` tag, so the round-trip always runs there. Note that the push trigger is `branches: ["*"]`, and that glob does **not** match a `/`, so a push to a branch named `feat/...` runs no workflow at all — open the PR and the round-trip runs.
+Never point it at `nexara`, `nexara_dev`, or anything else you care about. CI sets it against a TimescaleDB service container for every pull request, every `v*` tag, and every direct push to `master`, so the round-trip always runs there. A push to a feature branch runs nothing until you open the PR — that is deliberate, so a branch with a PR open does not burn two identical runs per push.
 
 Use table-driven tests:
 
@@ -479,7 +479,7 @@ The version the binary reports comes from `git describe --tags`, injected via ld
 
 Pushing a `v*` tag fires `.github/workflows/release.yml` on GitHub Actions. It re-runs the full CI suite (including the Postgres-backed migration round-trip — a `v*` tag does *not* match `ci.yml`'s `push: branches` trigger, which is why that block is duplicated there), builds and pushes the image to `ghcr.io`, and creates the GitHub Release automatically. The in-app changelog popup reads that release, so nothing needs to be published by hand.
 
-`.gitea/workflows/` holds a second copy of both workflows, kept as the record of how the Gitea runner was wired. It is **dormant** — Gitea does not fire Actions on a mirror sync, and the Gitea repository is a pull mirror now — so edit `.github/workflows/` alone; there is no second set to keep in step. Read the old copy as a reference rather than an equivalent: `ci.yml` differs only in runner shape (it ran the job in a container, so it addressed the Postgres service by name and waited for it explicitly, where the GitHub job maps the port onto localhost), but `release.yml` differs substantially — it pushed to the Gitea registry rather than `ghcr.io`, logged in with a raw `docker login`, and created the release by `curl`ing the Gitea API instead of using `softprops/action-gh-release`.
+`.gitea/workflows/` holds a second copy of both workflows, kept as the record of how the Gitea runner was wired. It is **dormant** — Gitea does not fire Actions on a mirror sync, and the Gitea repository is a pull mirror now — so edit `.github/workflows/` alone; there is no second set to keep in step. Read the old copy as a reference rather than an equivalent: `ci.yml` differs in runner shape (it ran the job in a container, so it addressed the Postgres service by name and waited for it explicitly, where the GitHub job maps the port onto localhost) and in its push trigger (it still carries the old `branches: ["*"]`, where the live copy triggers on `master`), while `release.yml` differs substantially — it pushed to the Gitea registry rather than `ghcr.io`, logged in with a raw `docker login`, and created the release by `curl`ing the Gitea API instead of using `softprops/action-gh-release`.
 
 ## Common Commands
 

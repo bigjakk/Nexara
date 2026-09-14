@@ -1,8 +1,18 @@
 name: CI
 
 on:
+  # `master` rather than a glob: `*` does not match a `/`, so the old value
+  # silently covered slash-free branches (`master`, `ci-verify`, `mirror-nudge`)
+  # while skipping every `feat/…` and `dependabot/…` branch — coverage decided
+  # by punctuation. Code reaches `master` only as a direct push or as a merged
+  # PR, and the two triggers below cover both, so this is full coverage of
+  # everything that lands with no branch firing both and burning two identical
+  # runs. A feature-branch push with no PR open runs nothing, by design.
+  #
+  # If a merge queue is ever enabled here, add `merge_group:` — a queued PR
+  # waits on a check that otherwise never starts, and hangs silently.
   push:
-    branches: ["*"]
+    branches: [master]
   pull_request:
     branches: [master]
 
@@ -16,10 +26,8 @@ jobs:
     # automatically against existing user databases on container startup, so a
     # broken one would ship unnoticed.
     #
-    # This covers PRs, plus pushes to a branch whose name has no `/` in it —
-    # the `*` glob above does not match a slash, so a push to `feat/...` runs
-    # nothing and the PR is what exercises this. A v* tag does NOT run this
-    # workflow either — `on: push: branches` does not match a tag ref — so
+    # This covers direct pushes to master and every PR. A v* tag does NOT run
+    # this workflow — `on: push: branches` does not match a tag ref — so
     # release.yml carries its own copy of this block. Keep the two in sync;
     # dropping it there is what would let an unvalidated migration chain ship.
     #
