@@ -64,17 +64,17 @@ Kept on purpose: `home-assistant` in `internal/collector/sync.go` and
 reports**, not a guest name — upstream product data, in the same category as the
 distro tables. Only the fixture rows where it was a VM's *name* were replaced.
 
-**Timestamps were re-labelled, not shifted.** The capture's offsets were a
-DST/standard pair, which locates the operator as surely as a timezone name would.
+**Timestamps were re-labelled, not shifted.** The capture carried the
+operator's local offsets, which locate them as surely as a timezone name would.
 They were replaced with `+00:00` and every wall-clock digit left untouched, so
 every ordering survives — a session still ends after it begins — and the
 offset-less timestamps in `backups_list.json` now sit in the same frame as the
-rest. Instants move by a whole number of hours, and by one hour more for the
-single outlier (`jobs_states.json` `nextRun`, a December date — that seasonal
-gap is exactly what made the pair diagnostic, so the magnitudes are not repeated
-here). It is therefore two constants rather than one, and the only duration that
-changes is that row's own `lastRun`→`nextRun` span, by an hour. Nothing reads it, and the row is eight months from every other timestamp,
-so no ordering can flip. Cross-file references are UUIDs rather than times, so
+rest. Instants move by a whole number of hours; the single outlier
+(`jobs_states.json` `nextRun`, a date eight months from every other timestamp)
+moved by its own constant, and the magnitudes are deliberately not repeated
+here. The only duration that changes is that row's own `lastRun`→`nextRun`
+span, by an hour. Nothing reads it, and the row is eight months from every
+other timestamp, so no ordering can flip. Cross-file references are UUIDs rather than times, so
 nothing else had to move. On the next recapture, apply the same rule:
 
 ```bash
@@ -86,7 +86,8 @@ The decisive reason is that these fixtures carry a **human-rendered local clock
 beside the machine timestamp** — `jobs_states.json` `nextRunPolicy` reads
 `"8/26/2026 5:00 AM"` and matches its row's `nextRun` wall clock exactly, and
 `jobs_list.json` has schedule `localTime` values. Re-labelling keeps those two
-agreeing; adding 7h to the machine clock would leave them 7h apart and advertise
+agreeing; adding the offset to the machine clock would leave them that many
+hours apart and advertise
 the very offset the scrub removes. It also buys nothing (no test asserts an
 absolute instant) and would trip over `token_password_grant.json`'s seven
 fractional digits (`.2300016`), which a datetime round-trip silently truncates
