@@ -811,6 +811,8 @@ type ReportRun struct {
 	StartedAt      pgtype.Timestamptz `json:"started_at"`
 	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
 	CreatedAt      time.Time          `json:"created_at"`
+	// The report parameters this run was generated with (stale_after_hours, top_n, section toggles). Empty object = the defaults
+	Parameters json.RawMessage `json:"parameters"`
 }
 
 type ReportSchedule struct {
@@ -831,6 +833,8 @@ type ReportSchedule struct {
 	CreatedBy       uuid.UUID          `json:"created_by"`
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`
+	// The user whose grants each scheduled run reads under — the last person to save the schedule, never merely its creator. A run also refuses to start when this user is deactivated
+	RunAs uuid.UUID `json:"run_as"`
 }
 
 type Role struct {

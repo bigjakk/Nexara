@@ -1356,3 +1356,43 @@ SELECT
     COALESCE((SELECT string_agg(name, ', ' ORDER BY name)
               FROM (SELECT name FROM failed ORDER BY name LIMIT 3) AS t), '')::text AS failed_names,
     GREATEST((SELECT count(*) FROM failed) - 3, 0)::bigint                 AS unnamed_count;
+
+-- ---------------------------------------------------------------------------
+-- Reports.
+-- ---------------------------------------------------------------------------
+
+-- ListVeeamPlatformsForCluster answers "which Veeam servers protect this
+-- cluster": every platform an operator has mapped to it, with the server it
+-- belongs to. The backup compliance report reads repositories and orphaned
+-- objects per server from this list, and names the servers in its masthead.
+-- name: ListVeeamPlatformsForCluster :many
+SELECT
+    p.veeam_server_id,
+    p.platform_id,
+    p.display_name,
+    v.name            AS server_name,
+    v.product_version AS server_version
+FROM veeam_platforms p
+JOIN veeam_servers v ON v.id = p.veeam_server_id
+WHERE p.cluster_id = @cluster_id::uuid
+ORDER BY v.name, p.display_name, p.platform_id;
+
+-- ListVeeamSessionsForClusterInWindow is the cluster's Veeam job history for
+-- one reporting period, newest first. Scoped through the platform mapping,
+-- like every other cluster-scoped Veeam read: a session whose platform is
+-- unmapped belongs to no cluster's report.
+--
+-- Windowed on when the run ENDED (falling back to its start while it runs),
+-- the same rule the vzdump listing applies, so a job that started before the
+-- period and failed inside it is this period's failure.
+-- name: ListVeeamSessionsForClusterInWindow :many
+SELECT s.*
+FROM veeam_sessions s
+JOIN veeam_platforms p
+  ON p.veeam_server_id = s.veeam_server_id
+ AND p.platform_id = s.platform_id
+WHERE p.cluster_id = @cluster_id::uuid
+  AND COALESCE(s.end_time, s.creation_time) >= @since::timestamptz
+  AND COALESCE(s.end_time, s.creation_time) < @until::timestamptz
+ORDER BY COALESCE(s.end_time, s.creation_time) DESC
+LIMIT @row_limit::int;

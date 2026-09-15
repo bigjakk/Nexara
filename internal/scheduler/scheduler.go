@@ -894,12 +894,25 @@ func (s *Scheduler) RunReportGeneration(ctx context.Context) {
 }
 
 func (s *Scheduler) generateScheduledReport(ctx context.Context, sched db.ReportSchedule) {
+	params, pErr := reports.ParseParams(sched.Parameters)
+	if pErr != nil {
+		// The API validates parameters on write, so this is a row edited by
+		// hand. Run with the defaults and say so rather than skip the report.
+		s.logger.Warn("report schedule has invalid parameters, using defaults", "schedule_id", sched.ID, "error", pErr)
+		params = reports.DefaultParams()
+	}
+	paramsJSON := sched.Parameters
+	if len(paramsJSON) == 0 {
+		paramsJSON = json.RawMessage(`{}`)
+	}
+
 	run, err := s.queries.InsertReportRun(ctx, db.InsertReportRunParams{
 		ScheduleID:     pgtype.UUID{Bytes: sched.ID, Valid: true},
 		ReportType:     sched.ReportType,
 		ClusterID:      sched.ClusterID,
 		Status:         "running",
 		TimeRangeHours: sched.TimeRangeHours,
+		Parameters:     paramsJSON,
 		CreatedBy:      sched.CreatedBy,
 	})
 	if err != nil {
@@ -909,7 +922,26 @@ func (s *Scheduler) generateScheduledReport(ctx context.Context, sched db.Report
 
 	_ = s.queries.UpdateReportRunStarted(ctx, run.ID)
 
-	data, err := s.reportGen.Generate(ctx, sched.ReportType, sched.ClusterID, int(sched.TimeRangeHours))
+	// The run reads under the grants of whoever last saved the schedule
+	// (run_as), and only while that account is active: a deactivated user's
+	// grants must not keep producing reports on their behalf.
+	runAs, uErr := s.queries.GetUserByID(ctx, sched.RunAs)
+	if uErr != nil || !runAs.IsActive {
+		_ = s.queries.UpdateReportRunFailed(ctx, db.UpdateReportRunFailedParams{
+			ID:           run.ID,
+			ErrorMessage: "the user this schedule runs as is deactivated or gone; save the schedule again as an active user",
+		})
+		s.logger.Warn("report schedule skipped: run_as user inactive or missing", "schedule_id", sched.ID, "run_as", sched.RunAs, "error", uErr)
+		s.updateScheduleNextRun(ctx, sched)
+		return
+	}
+	data, err := s.reportGen.Generate(ctx, reports.Request{
+		Type:           sched.ReportType,
+		ClusterID:      sched.ClusterID,
+		TimeRangeHours: int(sched.TimeRangeHours),
+		Params:         params,
+		RequestedBy:    sched.RunAs,
+	})
 	if err != nil {
 		_ = s.queries.UpdateReportRunFailed(ctx, db.UpdateReportRunFailedParams{
 			ID:           run.ID,
@@ -954,11 +986,16 @@ func (s *Scheduler) generateScheduledReport(ctx context.Context, sched db.Report
 	s.logger.Info("scheduled report generated",
 		"schedule_id", sched.ID, "run_id", run.ID, "type", sched.ReportType)
 
-	// Send email if configured.
+	// Email: the digest as the body, the report attached. The schedule's
+	// format decides the attachments — HTML always, CSV alongside it when the
+	// schedule asks for CSV.
 	if sched.EmailEnabled && sched.EmailChannelID.Valid {
 		channelID, _ := uuid.FromBytes(sched.EmailChannelID.Bytes[:])
-		subject := fmt.Sprintf("Nexara Report: %s", data.Title)
-		if err := reports.SendReportEmail(ctx, s.queries, s.encryptionKey, channelID, sched.EmailRecipients, subject, htmlOutput, s.logger); err != nil {
+		msg := reports.ReportMessage(data, htmlOutput, csvOutput, sched.Format == "csv", reports.DigestOptions{
+			ScheduleName: sched.Name,
+			RunID:        run.ID.String(),
+		})
+		if err := reports.SendReportEmail(ctx, s.queries, s.encryptionKey, channelID, sched.EmailRecipients, msg, s.logger); err != nil {
 			s.logger.Error("failed to send report email", "schedule_id", sched.ID, "error", err)
 		}
 	}

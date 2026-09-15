@@ -2,8 +2,8 @@
 
 -- name: InsertReportSchedule :one
 INSERT INTO report_schedules (name, report_type, cluster_id, time_range_hours, schedule,
-    format, email_enabled, email_channel_id, email_recipients, parameters, enabled, next_run_at, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    format, email_enabled, email_channel_id, email_recipients, parameters, enabled, next_run_at, created_by, run_as)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 RETURNING *;
 
 -- name: GetReportSchedule :one
@@ -32,11 +32,14 @@ WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- UpdateReportSchedule stamps run_as with the saver on EVERY update, not
+-- just when the report type or cluster changes: the grants a run reads under
+-- must always be those of a person who chose this exact configuration.
 -- name: UpdateReportSchedule :one
 UPDATE report_schedules
 SET name = $2, report_type = $3, cluster_id = $4, time_range_hours = $5, schedule = $6,
     format = $7, email_enabled = $8, email_channel_id = $9, email_recipients = $10,
-    parameters = $11, enabled = $12, next_run_at = $13, updated_at = now()
+    parameters = $11, enabled = $12, next_run_at = $13, run_as = $14, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -56,8 +59,8 @@ WHERE id = $1;
 -- Report Runs
 
 -- name: InsertReportRun :one
-INSERT INTO report_runs (schedule_id, report_type, cluster_id, status, time_range_hours, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO report_runs (schedule_id, report_type, cluster_id, status, time_range_hours, parameters, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetReportRun :one
@@ -112,3 +115,10 @@ SELECT id, cluster_id, report_html FROM report_runs WHERE id = $1;
 
 -- name: GetReportRunCSV :one
 SELECT id, cluster_id, report_csv FROM report_runs WHERE id = $1;
+
+-- GetReportRunForEmail is what "email this run" reads: both renderings and
+-- the type, so the digest and the attachments come from the stored run
+-- rather than a fresh generation that might say something different.
+-- name: GetReportRunForEmail :one
+SELECT id, cluster_id, report_type, status, report_data, report_html, report_csv, completed_at
+FROM report_runs WHERE id = $1;

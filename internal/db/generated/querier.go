@@ -131,6 +131,13 @@ type Querier interface {
 	CountActiveAPIKeysByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) (CountActiveAlertsByClusterRow, error)
 	CountActiveNodes(ctx context.Context, jobID uuid.UUID) (int64, error)
+	// ---------------------------------------------------------------------------
+	// Reports.
+	// ---------------------------------------------------------------------------
+	// CountAlertHistoryBySeverityInWindow feeds the cluster digest: how many
+	// alerts fired in the period per severity, and how many of them are resolved
+	// or still open. Windowed on created_at (when the alert was raised).
+	CountAlertHistoryBySeverityInWindow(ctx context.Context, arg CountAlertHistoryBySeverityInWindowParams) ([]CountAlertHistoryBySeverityInWindowRow, error)
 	// CountAuditLogAdvanced returns the total matching the same filters, for the
 	// audit page pagination. Must stay filter-for-filter in sync with
 	// ListAuditLogAdvanced — in particular accessible_cluster_ids, or the Total
@@ -182,6 +189,10 @@ type Querier interface {
 	// signal would permanently unstar guests for migrating.
 	// Same MATERIALIZED fence, and for the same reason, as ListFavoriteVMs.
 	CountResolvableFavorites(ctx context.Context, userID uuid.UUID) (int32, error)
+	// CountTaskHistoryByStatusInWindow feeds the cluster digest: how many tasks
+	// ended in the period, by terminal status. Same window rule as the listing
+	// above.
+	CountTaskHistoryByStatusInWindow(ctx context.Context, arg CountTaskHistoryByStatusInWindowParams) ([]CountTaskHistoryByStatusInWindowRow, error)
 	// CountTaskHistoryFiltered returns the total matching the same filters, for the
 	// Tasks page pagination. Mirrors CountAuditLogAdvanced. Must stay filter-for-filter in
 	// sync with ListTaskHistoryFiltered — in particular accessible_cluster_ids, or
@@ -680,6 +691,10 @@ type Querier interface {
 	GetPermissionByActionResource(ctx context.Context, arg GetPermissionByActionResourceParams) (Permission, error)
 	GetReportRun(ctx context.Context, id uuid.UUID) (ReportRun, error)
 	GetReportRunCSV(ctx context.Context, id uuid.UUID) (GetReportRunCSVRow, error)
+	// GetReportRunForEmail is what "email this run" reads: both renderings and
+	// the type, so the digest and the attachments come from the stored run
+	// rather than a fresh generation that might say something different.
+	GetReportRunForEmail(ctx context.Context, id uuid.UUID) (GetReportRunForEmailRow, error)
 	GetReportRunHTML(ctx context.Context, id uuid.UUID) (GetReportRunHTMLRow, error)
 	GetReportSchedule(ctx context.Context, id uuid.UUID) (ReportSchedule, error)
 	GetRole(ctx context.Context, id uuid.UUID) (Role, error)
@@ -967,6 +982,10 @@ type Querier interface {
 	// on the next successful run, so gating on fail_count (not the possibly-stale
 	// error string) matches "in error state" as the PVE GUI shows it.
 	ListFailedReplication(ctx context.Context) ([]ListFailedReplicationRow, error)
+	// ListFailedTaskHistoryInWindow is the digest's failed-task list, newest
+	// first. 'vanished' is excluded for the reason GetClusterFailedTaskStats
+	// gives: losing track of a task is not the task failing.
+	ListFailedTaskHistoryInWindow(ctx context.Context, arg ListFailedTaskHistoryInWindowParams) ([]TaskHistory, error)
 	// Favorites are keyed on the STABLE Proxmox identity, never on the surrogate
 	// nodes.id/vms.id, because the collector re-inserts those rows with fresh UUIDs
 	// whenever Proxmox transiently stops listing a resource (see the note in
@@ -1152,6 +1171,19 @@ type Querier interface {
 	ListStorageNearFull(ctx context.Context) ([]ListStorageNearFullRow, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
+	// ListTaskHistoryByTypeInWindow feeds the backup compliance report's "runs in
+	// the period" section: every task of one worker type that ENDED inside the
+	// window, newest first.
+	//
+	// Windowed on COALESCE(finished_at, started_at) for the same reason
+	// GetClusterFailedTaskStats is: a backup that starts before the window and
+	// fails inside it belongs to this period's report. Still-running tasks have
+	// no finished_at and are windowed on their start, so a run in flight at
+	// generation time appears as running rather than vanishing.
+	//
+	// exit_status 'vanished' rows are returned; the caller renders them as
+	// "lost track of" rather than as failures.
+	ListTaskHistoryByTypeInWindow(ctx context.Context, arg ListTaskHistoryByTypeInWindowParams) ([]TaskHistory, error)
 	// ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status +
 	// vmids filters with offset pagination. Mirrors ListAuditLogAdvanced. NULL
 	// narg = no filter on that column. vmids matches the guest VMID parsed from
@@ -1186,6 +1218,9 @@ type Querier interface {
 	// keeps them visible to ORDER BY as columns of `ranked` without carrying them
 	// into the result — which keeps the generated row struct the shape of the table.
 	ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]ListTaskHistoryFilteredRow, error)
+	// ListTopAlertRulesInWindow lists the rules that fired most in the period,
+	// for the digest's "noisiest rules" table.
+	ListTopAlertRulesInWindow(ctx context.Context, arg ListTopAlertRulesInWindowParams) ([]ListTopAlertRulesInWindowRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
@@ -1290,6 +1325,14 @@ type Querier interface {
 	ListVeeamOrphanedObjects(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamOrphanedObjectsRow, error)
 	ListVeeamPlatformsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamPlatform, error)
 	// ---------------------------------------------------------------------------
+	// Reports.
+	// ---------------------------------------------------------------------------
+	// ListVeeamPlatformsForCluster answers "which Veeam servers protect this
+	// cluster": every platform an operator has mapped to it, with the server it
+	// belongs to. The backup compliance report reads repositories and orphaned
+	// objects per server from this list, and names the servers in its masthead.
+	ListVeeamPlatformsForCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVeeamPlatformsForClusterRow, error)
+	// ---------------------------------------------------------------------------
 	// Phase 3: platform mapping and guest correlation.
 	// ---------------------------------------------------------------------------
 	// ListVeeamPlatformsWithCluster feeds the mapping UI: every Proxmox connection
@@ -1314,6 +1357,15 @@ type Querier interface {
 	// global-only. pgx sends a nil slice as NULL and a non-nil empty slice as
 	// '{}', and that distinction is what makes both cases work.
 	ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSessionsByServerParams) ([]VeeamSession, error)
+	// ListVeeamSessionsForClusterInWindow is the cluster's Veeam job history for
+	// one reporting period, newest first. Scoped through the platform mapping,
+	// like every other cluster-scoped Veeam read: a session whose platform is
+	// unmapped belongs to no cluster's report.
+	//
+	// Windowed on when the run ENDED (falling back to its start while it runs),
+	// the same rule the vzdump listing applies, so a job that started before the
+	// period and failed inside it is this period's failure.
+	ListVeeamSessionsForClusterInWindow(ctx context.Context, arg ListVeeamSessionsForClusterInWindowParams) ([]VeeamSession, error)
 	// The stored runs that have not reached a terminal state, newest first.
 	//
 	// Deliberately the SAME predicate as the live-run LATERAL in
@@ -1566,6 +1618,9 @@ type Querier interface {
 	UpdateReportRunCompleted(ctx context.Context, arg UpdateReportRunCompletedParams) error
 	UpdateReportRunFailed(ctx context.Context, arg UpdateReportRunFailedParams) error
 	UpdateReportRunStarted(ctx context.Context, id uuid.UUID) error
+	// UpdateReportSchedule stamps run_as with the saver on EVERY update, not
+	// just when the report type or cluster changes: the grants a run reads under
+	// must always be those of a person who chose this exact configuration.
 	UpdateReportSchedule(ctx context.Context, arg UpdateReportScheduleParams) (ReportSchedule, error)
 	UpdateReportScheduleLastRun(ctx context.Context, arg UpdateReportScheduleLastRunParams) error
 	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)

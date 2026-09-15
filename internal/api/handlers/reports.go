@@ -63,22 +63,26 @@ type reportScheduleResponse struct {
 	LastRunAt       *string         `json:"last_run_at,omitempty"`
 	NextRunAt       *string         `json:"next_run_at,omitempty"`
 	CreatedBy       uuid.UUID       `json:"created_by"`
-	CreatedAt       string          `json:"created_at"`
-	UpdatedAt       string          `json:"updated_at"`
+	// RunAs is the user whose grants each scheduled run reads under: the
+	// last person to save the schedule.
+	RunAs     uuid.UUID `json:"run_as"`
+	CreatedAt string    `json:"created_at"`
+	UpdatedAt string    `json:"updated_at"`
 }
 
 type reportRunResponse struct {
-	ID             uuid.UUID  `json:"id"`
-	ScheduleID     *uuid.UUID `json:"schedule_id,omitempty"`
-	ReportType     string     `json:"report_type"`
-	ClusterID      uuid.UUID  `json:"cluster_id"`
-	Status         string     `json:"status"`
-	TimeRangeHours int32      `json:"time_range_hours"`
-	ErrorMessage   string     `json:"error_message,omitempty"`
-	CreatedBy      uuid.UUID  `json:"created_by"`
-	StartedAt      *string    `json:"started_at,omitempty"`
-	CompletedAt    *string    `json:"completed_at,omitempty"`
-	CreatedAt      string     `json:"created_at"`
+	ID             uuid.UUID       `json:"id"`
+	ScheduleID     *uuid.UUID      `json:"schedule_id,omitempty"`
+	ReportType     string          `json:"report_type"`
+	ClusterID      uuid.UUID       `json:"cluster_id"`
+	Status         string          `json:"status"`
+	TimeRangeHours int32           `json:"time_range_hours"`
+	Parameters     json.RawMessage `json:"parameters"`
+	ErrorMessage   string          `json:"error_message,omitempty"`
+	CreatedBy      uuid.UUID       `json:"created_by"`
+	StartedAt      *string         `json:"started_at,omitempty"`
+	CompletedAt    *string         `json:"completed_at,omitempty"`
+	CreatedAt      string          `json:"created_at"`
 }
 
 func toReportScheduleResponse(s db.ReportSchedule) reportScheduleResponse {
@@ -95,6 +99,7 @@ func toReportScheduleResponse(s db.ReportSchedule) reportScheduleResponse {
 		Parameters:      s.Parameters,
 		Enabled:         s.Enabled,
 		CreatedBy:       s.CreatedBy,
+		RunAs:           s.RunAs,
 		CreatedAt:       s.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:       s.UpdatedAt.Format(time.RFC3339Nano),
 	}
@@ -123,9 +128,13 @@ func toRunResponse(r db.ReportRun) reportRunResponse {
 		ClusterID:      r.ClusterID,
 		Status:         r.Status,
 		TimeRangeHours: r.TimeRangeHours,
+		Parameters:     r.Parameters,
 		ErrorMessage:   r.ErrorMessage,
 		CreatedBy:      r.CreatedBy,
 		CreatedAt:      r.CreatedAt.Format(time.RFC3339Nano),
+	}
+	if len(resp.Parameters) == 0 {
+		resp.Parameters = json.RawMessage(`{}`)
 	}
 	if r.ScheduleID.Valid {
 		id, _ := uuid.FromBytes(r.ScheduleID.Bytes[:])
@@ -219,9 +228,12 @@ func (h *ReportHandler) CreateSchedule(c fiber.Ctx) error {
 	if req.TimeRangeHours == 0 {
 		req.TimeRangeHours = 168
 	}
-	if req.Parameters == nil {
-		req.Parameters = json.RawMessage(`{}`)
+	// Stored in canonical form: only the keys the validator saw.
+	_, paramsJSON, pErr := reports.NormalizeParams(req.Parameters)
+	if pErr != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid parameters: "+pErr.Error())
 	}
+	req.Parameters = paramsJSON
 	if req.EmailRecipients == nil {
 		req.EmailRecipients = []string{}
 	}
@@ -257,6 +269,7 @@ func (h *ReportHandler) CreateSchedule(c fiber.Ctx) error {
 		Enabled:         enabled,
 		NextRunAt:       nextRunAt,
 		CreatedBy:       userID,
+		RunAs:           userID,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create schedule")
@@ -370,7 +383,11 @@ func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 	}
 	parameters := existing.Parameters
 	if req.Parameters != nil {
-		parameters = req.Parameters
+		_, canonical, pErr := reports.NormalizeParams(req.Parameters)
+		if pErr != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid parameters: "+pErr.Error())
+		}
+		parameters = canonical
 	}
 	enabled := existing.Enabled
 	if req.Enabled != nil {
@@ -413,6 +430,15 @@ func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 		}
 	}
 
+	// Whoever saves the schedule becomes the user its runs read under. Any
+	// manage:report holder may retarget a schedule to a report type or a
+	// cluster; without this stamp the run would keep reading under the
+	// original creator's grants, which may reach further than the editor's.
+	editorID, _ := c.Locals("user_id").(uuid.UUID)
+	if editorID == uuid.Nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "No user in request context")
+	}
+
 	updated, err := h.queries.UpdateReportSchedule(c.Context(), db.UpdateReportScheduleParams{
 		ID:              id,
 		Name:            name,
@@ -427,6 +453,7 @@ func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 		Parameters:      parameters,
 		Enabled:         enabled,
 		NextRunAt:       nextRunAt,
+		RunAs:           editorID,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update schedule")
@@ -467,10 +494,11 @@ func (h *ReportHandler) DeleteSchedule(c fiber.Ctx) error {
 // GenerateReport handles POST /api/v1/reports/generate
 func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
 	var req struct {
-		ReportType     string `json:"report_type"`
-		ClusterID      string `json:"cluster_id"`
-		TimeRangeHours int    `json:"time_range_hours"`
-		Format         string `json:"format"`
+		ReportType     string          `json:"report_type"`
+		ClusterID      string          `json:"cluster_id"`
+		TimeRangeHours int             `json:"time_range_hours"`
+		Format         string          `json:"format"`
+		Parameters     json.RawMessage `json:"parameters"`
 	}
 	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
@@ -478,6 +506,10 @@ func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
 
 	if !reports.ValidReportType(req.ReportType) {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid report_type")
+	}
+	params, paramsJSON, err := reports.NormalizeParams(req.Parameters)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid parameters: "+err.Error())
 	}
 	clusterID, err := uuid.Parse(req.ClusterID)
 	if err != nil {
@@ -514,6 +546,7 @@ func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
 		ClusterID:      clusterID,
 		Status:         "running",
 		TimeRangeHours: safeconv.Int32(req.TimeRangeHours),
+		Parameters:     paramsJSON,
 		CreatedBy:      userID,
 	})
 	if err != nil {
@@ -522,7 +555,15 @@ func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
 
 	_ = h.queries.UpdateReportRunStarted(c.Context(), run.ID)
 
-	data, err := h.generator.Generate(c.Context(), req.ReportType, clusterID, req.TimeRangeHours)
+	// The requester's own grants decide what the report may read (Veeam
+	// data in particular); the stored run is then readable under view:report.
+	data, err := h.generator.Generate(c.Context(), reports.Request{
+		Type:           req.ReportType,
+		ClusterID:      clusterID,
+		TimeRangeHours: req.TimeRangeHours,
+		Params:         params,
+		RequestedBy:    userID,
+	})
 	if err != nil {
 		_ = h.queries.UpdateReportRunFailed(c.Context(), db.UpdateReportRunFailedParams{
 			ID:           run.ID,
@@ -729,5 +770,106 @@ func (h *ReportHandler) validateScheduleRequest(c fiber.Ctx, name, reportType, c
 	if len(parameters) > 65536 {
 		return fiber.NewError(fiber.StatusBadRequest, "parameters must be under 64KB")
 	}
+	if _, err := reports.ParseParams(parameters); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid parameters: "+err.Error())
+	}
 	return nil
+}
+
+// DeleteRun handles DELETE /api/v1/reports/runs/:id
+//
+// manage:report on the run's cluster, the same grant that owns schedules: a
+// run is the durable record of a report, and removing one is a management
+// act rather than a viewing one.
+func (h *ReportHandler) DeleteRun(c fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
+	}
+	run, err := h.queries.GetReportRun(c.Context(), id)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "Run not found")
+	}
+	if err := requireClusterPerm(c, "manage", "report", run.ClusterID); err != nil {
+		return err
+	}
+	if err := h.queries.DeleteReportRun(c.Context(), id); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete run")
+	}
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(run.ClusterID), "report", id.String(), "deleted", nil)
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// EmailRun handles POST /api/v1/reports/runs/:id/email
+//
+// Sends a finished run through an email channel: the digest as the body, the
+// stored HTML attached, and the CSV when asked for. Gated on generate:report,
+// the grant that produces reports — delivering one is the same act as making
+// one, and nothing here reads anything the caller could not already download.
+func (h *ReportHandler) EmailRun(c fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
+	}
+	var req struct {
+		ChannelID  string   `json:"channel_id"`
+		Recipients []string `json:"recipients"`
+		WithCSV    bool     `json:"with_csv"`
+	}
+	if err := c.Bind().Body(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	channelID, err := uuid.Parse(req.ChannelID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid channel_id")
+	}
+	if len(req.Recipients) > 50 {
+		return fiber.NewError(fiber.StatusBadRequest, "recipients limited to 50 addresses")
+	}
+	for _, addr := range req.Recipients {
+		if !emailRegex.MatchString(addr) {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid recipient: %s", addr))
+		}
+	}
+
+	row, err := h.queries.GetReportRunForEmail(c.Context(), id)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "Run not found")
+	}
+	if err := requireClusterPerm(c, "generate", "report", row.ClusterID); err != nil {
+		return err
+	}
+	if row.Status != "completed" || !row.ReportHtml.Valid || row.ReportHtml.String == "" {
+		return fiber.NewError(fiber.StatusConflict, "Run has no finished report to send")
+	}
+	ch, err := h.queries.GetNotificationChannel(c.Context(), channelID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Email channel not found")
+	}
+	if ch.ChannelType != "email" {
+		return fiber.NewError(fiber.StatusBadRequest, "Channel must be of type 'email'")
+	}
+
+	// The stored ReportData drives the digest so the email says exactly what
+	// the run said. A run from before typed reports has no usable data; it is
+	// sent as a plain attachment with a one-line body.
+	var data reports.ReportData
+	if len(row.ReportData) == 0 || json.Unmarshal(row.ReportData, &data) != nil || data.Schema < reports.SchemaVersion {
+		data = reports.ReportData{
+			Schema:      reports.SchemaVersion,
+			Title:       reports.ReportType(row.ReportType).Name() + " · run " + id.String()[:8],
+			Kicker:      reports.ReportType(row.ReportType).Name(),
+			Heading:     "Report run " + id.String()[:8],
+			ReportType:  row.ReportType,
+			ClusterName: row.ClusterID.String(),
+			GeneratedAt: row.CompletedAt.Time.UTC().Format("2006-01-02 15:04") + " UTC",
+		}
+	}
+	msg := reports.ReportMessage(&data, row.ReportHtml.String, row.ReportCsv.String, req.WithCSV && row.ReportCsv.Valid, reports.DigestOptions{RunID: id.String()})
+	if err := reports.SendReportEmail(c.Context(), h.queries, h.encryptionKey, channelID, req.Recipients, msg, h.logger); err != nil {
+		h.logger.Error("report email failed", "run_id", id, "error", err)
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to send report email")
+	}
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(row.ClusterID), "report", id.String(), "emailed", nil)
+	return c.SendStatus(fiber.StatusNoContent)
 }
