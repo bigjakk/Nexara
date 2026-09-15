@@ -1703,6 +1703,61 @@ func (q *Queries) ListVeeamPlatformsByServer(ctx context.Context, veeamServerID 
 	return items, nil
 }
 
+const listVeeamPlatformsForCluster = `-- name: ListVeeamPlatformsForCluster :many
+
+SELECT
+    p.veeam_server_id,
+    p.platform_id,
+    p.display_name,
+    v.name            AS server_name,
+    v.product_version AS server_version
+FROM veeam_platforms p
+JOIN veeam_servers v ON v.id = p.veeam_server_id
+WHERE p.cluster_id = $1::uuid
+ORDER BY v.name, p.display_name, p.platform_id
+`
+
+type ListVeeamPlatformsForClusterRow struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	PlatformID    uuid.UUID `json:"platform_id"`
+	DisplayName   string    `json:"display_name"`
+	ServerName    string    `json:"server_name"`
+	ServerVersion string    `json:"server_version"`
+}
+
+// ---------------------------------------------------------------------------
+// Reports.
+// ---------------------------------------------------------------------------
+// ListVeeamPlatformsForCluster answers "which Veeam servers protect this
+// cluster": every platform an operator has mapped to it, with the server it
+// belongs to. The backup compliance report reads repositories and orphaned
+// objects per server from this list, and names the servers in its masthead.
+func (q *Queries) ListVeeamPlatformsForCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVeeamPlatformsForClusterRow, error) {
+	rows, err := q.db.Query(ctx, listVeeamPlatformsForCluster, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVeeamPlatformsForClusterRow{}
+	for rows.Next() {
+		var i ListVeeamPlatformsForClusterRow
+		if err := rows.Scan(
+			&i.VeeamServerID,
+			&i.PlatformID,
+			&i.DisplayName,
+			&i.ServerName,
+			&i.ServerVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVeeamPlatformsWithCluster = `-- name: ListVeeamPlatformsWithCluster :many
 
 SELECT
@@ -1991,6 +2046,87 @@ type ListVeeamSessionsByServerParams struct {
 // '{}', and that distinction is what makes both cases work.
 func (q *Queries) ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSessionsByServerParams) ([]VeeamSession, error) {
 	rows, err := q.db.Query(ctx, listVeeamSessionsByServer, arg.VeeamServerID, arg.PlatformIds, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VeeamSession{}
+	for rows.Next() {
+		var i VeeamSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.VeeamServerID,
+			&i.VeeamID,
+			&i.JobVeeamID,
+			&i.Name,
+			&i.SessionType,
+			&i.PlatformName,
+			&i.PlatformID,
+			&i.State,
+			&i.Result,
+			&i.ResultMessage,
+			&i.IsCanceled,
+			&i.Algorithm,
+			&i.Bottleneck,
+			&i.Duration,
+			&i.ProcessingRate,
+			&i.ProcessedSize,
+			&i.ReadSize,
+			&i.TransferredSize,
+			&i.ProgressPercent,
+			&i.CreationTime,
+			&i.EndTime,
+			&i.InitiatedBy,
+			&i.NexaraInitiated,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.NexaraStopped,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamSessionsForClusterInWindow = `-- name: ListVeeamSessionsForClusterInWindow :many
+SELECT s.id, s.veeam_server_id, s.veeam_id, s.job_veeam_id, s.name, s.session_type, s.platform_name, s.platform_id, s.state, s.result, s.result_message, s.is_canceled, s.algorithm, s.bottleneck, s.duration, s.processing_rate, s.processed_size, s.read_size, s.transferred_size, s.progress_percent, s.creation_time, s.end_time, s.initiated_by, s.nexara_initiated, s.last_seen_at, s.created_at, s.nexara_stopped
+FROM veeam_sessions s
+JOIN veeam_platforms p
+  ON p.veeam_server_id = s.veeam_server_id
+ AND p.platform_id = s.platform_id
+WHERE p.cluster_id = $1::uuid
+  AND COALESCE(s.end_time, s.creation_time) >= $2::timestamptz
+  AND COALESCE(s.end_time, s.creation_time) < $3::timestamptz
+ORDER BY COALESCE(s.end_time, s.creation_time) DESC
+LIMIT $4::int
+`
+
+type ListVeeamSessionsForClusterInWindowParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Since     time.Time `json:"since"`
+	Until     time.Time `json:"until"`
+	RowLimit  int32     `json:"row_limit"`
+}
+
+// ListVeeamSessionsForClusterInWindow is the cluster's Veeam job history for
+// one reporting period, newest first. Scoped through the platform mapping,
+// like every other cluster-scoped Veeam read: a session whose platform is
+// unmapped belongs to no cluster's report.
+//
+// Windowed on when the run ENDED (falling back to its start while it runs),
+// the same rule the vzdump listing applies, so a job that started before the
+// period and failed inside it is this period's failure.
+func (q *Queries) ListVeeamSessionsForClusterInWindow(ctx context.Context, arg ListVeeamSessionsForClusterInWindowParams) ([]VeeamSession, error) {
+	rows, err := q.db.Query(ctx, listVeeamSessionsForClusterInWindow,
+		arg.ClusterID,
+		arg.Since,
+		arg.Until,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

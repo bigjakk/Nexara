@@ -644,6 +644,8 @@ func (s *Server) setupRoutes() {
 		rpts.Get("/runs/:id", s.reportHandler.GetRun)
 		rpts.Get("/runs/:id/html", s.reportHandler.GetRunHTML)
 		rpts.Get("/runs/:id/csv", s.reportHandler.GetRunCSV)
+		rpts.Delete("/runs/:id", s.reportHandler.DeleteRun)
+		rpts.Post("/runs/:id/email", s.reportHandler.EmailRun)
 	}
 
 	// PBS server routes.

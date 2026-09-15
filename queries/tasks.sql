@@ -258,3 +258,49 @@ SELECT
               FROM (SELECT description, last_failed FROM distinct_names
                     ORDER BY last_failed DESC LIMIT 3) AS t), '')::text AS failed_names,
     GREATEST((SELECT count(*) FROM distinct_names) - 3, 0)::bigint AS unnamed_count;
+
+-- ListTaskHistoryByTypeInWindow feeds the backup compliance report's "runs in
+-- the period" section: every task of one worker type that ENDED inside the
+-- window, newest first.
+--
+-- Windowed on COALESCE(finished_at, started_at) for the same reason
+-- GetClusterFailedTaskStats is: a backup that starts before the window and
+-- fails inside it belongs to this period's report. Still-running tasks have
+-- no finished_at and are windowed on their start, so a run in flight at
+-- generation time appears as running rather than vanishing.
+--
+-- exit_status 'vanished' rows are returned; the caller renders them as
+-- "lost track of" rather than as failures.
+-- name: ListTaskHistoryByTypeInWindow :many
+SELECT * FROM task_history
+WHERE cluster_id = @cluster_id::uuid
+  AND task_type = @task_type::text
+  AND COALESCE(finished_at, started_at) >= @since::timestamptz
+  AND COALESCE(finished_at, started_at) < @until::timestamptz
+ORDER BY started_at DESC
+LIMIT @row_limit::int;
+
+-- CountTaskHistoryByStatusInWindow feeds the cluster digest: how many tasks
+-- ended in the period, by terminal status. Same window rule as the listing
+-- above.
+-- name: CountTaskHistoryByStatusInWindow :many
+SELECT status, count(*)::bigint AS n
+FROM task_history
+WHERE cluster_id = @cluster_id::uuid
+  AND COALESCE(finished_at, started_at) >= @since::timestamptz
+  AND COALESCE(finished_at, started_at) < @until::timestamptz
+GROUP BY status
+ORDER BY status;
+
+-- ListFailedTaskHistoryInWindow is the digest's failed-task list, newest
+-- first. 'vanished' is excluded for the reason GetClusterFailedTaskStats
+-- gives: losing track of a task is not the task failing.
+-- name: ListFailedTaskHistoryInWindow :many
+SELECT * FROM task_history
+WHERE cluster_id = @cluster_id::uuid
+  AND status = 'failed'
+  AND exit_status <> 'vanished'
+  AND COALESCE(finished_at, started_at) >= @since::timestamptz
+  AND COALESCE(finished_at, started_at) < @until::timestamptz
+ORDER BY COALESCE(finished_at, started_at) DESC
+LIMIT @row_limit::int;

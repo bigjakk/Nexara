@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,877 +13,235 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
+// PermissionChecker is the slice of the RBAC engine the generator needs: it
+// asks whether the requesting user may see Veeam data on the cluster.
+// *auth.RBACEngine satisfies it.
+type PermissionChecker interface {
+	HasPermission(ctx context.Context, userID uuid.UUID, action, resource, scopeType string, scopeID uuid.UUID) (bool, error)
+}
+
 // Generator builds report data from database queries.
 type Generator struct {
-	queries *db.Queries
+	queries db.Querier
+	perms   PermissionChecker
 	logger  *slog.Logger
+	now     func() time.Time
 }
 
-// NewGenerator creates a new report generator.
-func NewGenerator(queries *db.Queries, logger *slog.Logger) *Generator {
-	return &Generator{queries: queries, logger: logger}
+// NewGenerator creates a report generator. perms may be nil, in which case no
+// report ever includes Veeam data — the fail-closed answer for a deployment
+// without an RBAC engine.
+func NewGenerator(queries db.Querier, perms PermissionChecker, logger *slog.Logger) *Generator {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Generator{queries: queries, perms: perms, logger: logger, now: time.Now}
 }
 
-// Generate produces a report of the given type for a cluster.
-func (g *Generator) Generate(ctx context.Context, reportType string, clusterID uuid.UUID, timeRangeHours int) (*ReportData, error) {
-	cluster, err := g.queries.GetCluster(ctx, clusterID)
+// Request describes one report to produce.
+type Request struct {
+	Type           string
+	ClusterID      uuid.UUID
+	TimeRangeHours int
+	Params         Params
+	// RequestedBy is the user whose grants decide what the report may read:
+	// the on-demand requester, or the schedule's creator for a scheduled run.
+	// A stored run is then readable by anyone holding view:report on the
+	// cluster, which is the same posture audit details take for Viewers — a
+	// report is a summary product, shared under view:report by design.
+	RequestedBy uuid.UUID
+}
+
+// genCtx carries what every generator needs about the run.
+type genCtx struct {
+	cluster db.Cluster
+	now     time.Time
+	since   time.Time
+	hours   int
+	params  Params
+	user    uuid.UUID
+}
+
+// Generate produces a report of the requested type for a cluster.
+func (g *Generator) Generate(ctx context.Context, req Request) (*ReportData, error) {
+	if !ValidReportType(req.Type) {
+		return nil, fmt.Errorf("unsupported report type: %s", req.Type)
+	}
+	cluster, err := g.queries.GetCluster(ctx, req.ClusterID)
 	if err != nil {
 		return nil, fmt.Errorf("get cluster: %w", err)
 	}
-
-	now := time.Now().UTC()
-	since := now.Add(-time.Duration(timeRangeHours) * time.Hour)
-
-	data := &ReportData{
-		ClusterName: cluster.Name,
-		ClusterID:   clusterID.String(),
-		ReportType:  reportType,
-		GeneratedAt: now.Format(time.RFC3339Nano),
-		TimeRange: TimeRange{
-			StartTime: since.Format(time.RFC3339Nano),
-			EndTime:   now.Format(time.RFC3339Nano),
-			Hours:     timeRangeHours,
-		},
+	hours := req.TimeRangeHours
+	if hours <= 0 {
+		hours = 168
+	}
+	params := req.Params.WithDefaults()
+	now := g.now().UTC()
+	gc := genCtx{
+		cluster: cluster,
+		now:     now,
+		since:   now.Add(-time.Duration(hours) * time.Hour),
+		hours:   hours,
+		params:  params,
+		user:    req.RequestedBy,
 	}
 
-	switch ReportType(reportType) {
-	case TypeResourceUtilization:
-		data.Title = fmt.Sprintf("Resource Utilization Report - %s", cluster.Name)
-		return g.generateResourceUtilization(ctx, data, clusterID, since)
-	case TypeCapacityForecast:
-		data.Title = fmt.Sprintf("Capacity Forecast Report - %s", cluster.Name)
-		return g.generateCapacityForecast(ctx, data, clusterID, since)
+	rt := ReportType(req.Type)
+	data := g.newReport(rt, gc)
+
+	switch rt {
 	case TypeBackupCompliance:
-		data.Title = fmt.Sprintf("Backup Compliance Report - %s", cluster.Name)
-		return g.generateBackupCompliance(ctx, data, clusterID)
-	case TypePatchStatus:
-		data.Title = fmt.Sprintf("Patch Status Report - %s", cluster.Name)
-		return g.generatePatchStatus(ctx, data, clusterID)
-	case TypeUptimeSummary:
-		data.Title = fmt.Sprintf("Uptime Summary Report - %s", cluster.Name)
-		return g.generateUptimeSummary(ctx, data, clusterID)
+		err = g.generateBackupCompliance(ctx, gc, data)
+	case TypeResourceUtilization:
+		err = g.generateResourceUtilization(ctx, gc, data)
+	case TypeCapacityForecast:
+		err = g.generateCapacityForecast(ctx, gc, data)
 	case TypeVMResourceUsage:
-		data.Title = fmt.Sprintf("VM Resource Usage Report - %s", cluster.Name)
-		return g.generateVMResourceUsage(ctx, data, clusterID, since)
+		err = g.generateVMResourceUsage(ctx, gc, data)
 	case TypeSnapshotInventory:
-		data.Title = fmt.Sprintf("Snapshot Inventory Report - %s", cluster.Name)
-		return g.generateSnapshotInventory(ctx, data, clusterID)
+		err = g.generateSnapshotInventory(ctx, gc, data)
+	case TypePatchStatus:
+		err = g.generatePatchStatus(ctx, gc, data)
+	case TypeUptimeSummary:
+		err = g.generateUptimeSummary(ctx, gc, data)
+	case TypeClusterDigest:
+		err = g.generateClusterDigest(ctx, gc, data)
 	default:
-		return nil, fmt.Errorf("unsupported report type: %s", reportType)
+		err = fmt.Errorf("unsupported report type: %s", req.Type)
+	}
+	if err != nil {
+		return nil, err
+	}
+	sortFindings(data.Findings)
+	return data, nil
+}
+
+// newReport fills the fields every report shares.
+func (g *Generator) newReport(rt ReportType, gc genCtx) *ReportData {
+	period := periodLabel(gc.hours, gc.now)
+	return &ReportData{
+		Schema:      SchemaVersion,
+		Title:       fmt.Sprintf("%s · %s · %s", rt.Name(), gc.cluster.Name, period),
+		Kicker:      rt.Name(),
+		Heading:     fmt.Sprintf("%s · %s", gc.cluster.Name, period),
+		ClusterName: gc.cluster.Name,
+		ClusterID:   gc.cluster.ID.String(),
+		ReportType:  string(rt),
+		GeneratedAt: gc.now.Format("2006-01-02 15:04") + " UTC",
+		TimeRange: TimeRange{
+			StartTime: gc.since.Format(time.RFC3339Nano),
+			EndTime:   gc.now.Format(time.RFC3339Nano),
+			Hours:     gc.hours,
+		},
+		Meta: []MetaItem{{
+			Label: "Period",
+			Value: fmt.Sprintf("%s → %s UTC (%d h)", gc.since.Format("2006-01-02 15:04"), gc.now.Format("2006-01-02 15:04"), gc.hours),
+		}},
+		Sections: []Section{},
 	}
 }
 
-// generateSnapshotInventory reports the cluster's guest snapshot inventory
-// (collected by the snapshot sync loop): an age-bucket summary plus the
-// oldest snapshots, so forgotten snapshots surface in scheduled digests.
-// It is a point-in-time report — the schedule's time range is ignored, like
-// backup compliance. Ages come from snap_time (unix seconds); rows with
-// snap_time = 0 have unknown age and are counted separately, never aged
-// from epoch 0.
-func (g *Generator) generateSnapshotInventory(ctx context.Context, data *ReportData, clusterID uuid.UUID) (*ReportData, error) {
-	rows, err := g.queries.ListGuestSnapshotsForReport(ctx, clusterID)
+// includeVeeam decides whether the requesting user may see Veeam data on the
+// cluster. No engine, or no user, means no: the report never says more than
+// its reader could learn from the coverage page.
+func (g *Generator) includeVeeam(ctx context.Context, gc genCtx) bool {
+	if g.perms == nil || gc.user == uuid.Nil {
+		return false
+	}
+	ok, err := g.perms.HasPermission(ctx, gc.user, "view", "veeam", "cluster", gc.cluster.ID)
 	if err != nil {
-		return nil, fmt.Errorf("list guest snapshots: %w", err)
+		g.logger.Warn("report: veeam permission check failed, omitting Veeam data",
+			"cluster_id", gc.cluster.ID, "user_id", gc.user, "error", err)
+		return false
 	}
+	return ok
+}
 
-	now := time.Now().Unix()
-	guests := make(map[int32]bool)
-	var over7, over30, unknown int
-	for _, row := range rows {
-		guests[row.Vmid] = true
-		if row.SnapTime <= 0 {
-			unknown++
-			continue
+// periodLabel is the human period: "7 days to 2026-09-14", or "36 h to
+// 2026-09-14 06:00" when the range is not whole days.
+func periodLabel(hours int, end time.Time) string {
+	if hours >= 24 && hours%24 == 0 {
+		days := hours / 24
+		if days == 1 {
+			return "24 hours to " + end.Format("2006-01-02")
 		}
-		days := float64(now-row.SnapTime) / 86400
-		switch {
-		case days > 30:
-			over30++
-			over7++ // ">7 days" includes ">30 days", matching the UI stat cards
-		case days > 7:
-			over7++
-		}
+		return fmt.Sprintf("%d days to %s", days, end.Format("2006-01-02"))
 	}
+	return fmt.Sprintf("%d h to %s", hours, end.Format("2006-01-02 15:04"))
+}
 
-	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Snapshot Summary",
-		Headers: []string{"Total Snapshots", "Guests With Snapshots", "Older Than 7 Days", "Older Than 30 Days", "Unknown Age"},
-		Rows: []map[string]string{{
-			"Total Snapshots":       fmt.Sprintf("%d", len(rows)),
-			"Guests With Snapshots": fmt.Sprintf("%d", len(guests)),
-			"Older Than 7 Days":     fmt.Sprintf("%d", over7),
-			"Older Than 30 Days":    fmt.Sprintf("%d", over30),
-			"Unknown Age":           fmt.Sprintf("%d", unknown),
-		}},
+// --- Findings ---
+
+var severityRank = map[string]int{SevCritical: 0, SevSerious: 1, SevWarning: 2, SevInfo: 3}
+
+// sortFindings orders findings most severe first, keeping insertion order
+// within a severity so a generator's own ordering survives.
+func sortFindings(fs []Finding) {
+	sort.SliceStable(fs, func(i, j int) bool {
+		return severityRank[fs[i].Severity] < severityRank[fs[j].Severity]
 	})
-
-	const maxOldestRows = 25
-	oldest := ReportSection{
-		Title:   "Oldest Snapshots",
-		Headers: []string{"Guest", "VMID", "Type", "Snapshot", "Age", "RAM", "Node", "Description"},
-		Rows:    []map[string]string{},
-	}
-	for i, row := range rows {
-		if i >= maxOldestRows {
-			break
-		}
-		guestName := fmt.Sprintf("#%d", row.Vmid)
-		if row.VmName.Valid {
-			guestName = row.VmName.String
-		}
-		age := "Unknown"
-		if row.SnapTime > 0 {
-			days := float64(now-row.SnapTime) / 86400
-			if days < 0 {
-				days = 0 // clock skew must not render "-0d"
-			}
-			// Floor, not round: 7.4 days must display as 7d so the summary's
-			// ">7 days" bucket and the visible ages agree at the boundary.
-			age = fmt.Sprintf("%dd", int(days))
-		}
-		ram := "No"
-		if row.Vmstate {
-			ram = "Yes"
-		}
-		oldest.Rows = append(oldest.Rows, map[string]string{
-			"Guest":       guestName,
-			"VMID":        fmt.Sprintf("%d", row.Vmid),
-			"Type":        row.GuestType,
-			"Snapshot":    row.Name,
-			"Age":         age,
-			"RAM":         ram,
-			"Node":        row.Node,
-			"Description": row.Description,
-		})
-	}
-	data.Sections = append(data.Sections, oldest)
-	return data, nil
 }
 
-func (g *Generator) generateResourceUtilization(ctx context.Context, data *ReportData, clusterID uuid.UUID, since time.Time) (*ReportData, error) {
-	nodes, err := g.queries.ListNodesByCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("list nodes: %w", err)
-	}
-
-	// Per-node summary: aggregate all days into one row per node.
-	section := ReportSection{
-		Title:   "Node Resource Utilization (Period Average)",
-		Headers: []string{"Node", "Status", "CPU Avg %", "CPU Peak %", "Mem Avg %", "Mem Peak %", "Mem Used", "Mem Total", "Disk Read/s", "Disk Write/s", "Net In/s", "Net Out/s"},
-		Rows:    []map[string]string{},
-	}
-
-	for _, node := range nodes {
-		metrics, mErr := g.queries.GetNodeMetricsDailyAvg(ctx, db.GetNodeMetricsDailyAvgParams{
-			NodeID: node.ID,
-			Bucket: since,
-		})
-		if mErr != nil {
-			g.logger.Warn("failed to get node daily metrics", "node", node.Name, "error", mErr)
-			continue
-		}
-
-		// Fetch IO rates computed from raw counter deltas.
-		ioRates, ioErr := g.queries.GetNodeIODailyRate(ctx, db.GetNodeIODailyRateParams{
-			NodeID: node.ID,
-			Time:   since,
-		})
-		if ioErr != nil {
-			g.logger.Warn("failed to get node IO rates", "node", node.Name, "error", ioErr)
-		}
-
-		if len(metrics) == 0 {
-			section.Rows = append(section.Rows, map[string]string{
-				"Node":         node.Name,
-				"Status":       node.Status,
-				"CPU Avg %":    "N/A",
-				"CPU Peak %":   "N/A",
-				"Mem Avg %":    "N/A",
-				"Mem Peak %":   "N/A",
-				"Mem Used":     "N/A",
-				"Mem Total":    "N/A",
-				"Disk Read/s":  "N/A",
-				"Disk Write/s": "N/A",
-				"Net In/s":     "N/A",
-				"Net Out/s":    "N/A",
-			})
-			continue
-		}
-
-		// Aggregate CPU/memory across all days for this node.
-		var cpuSum, cpuMax, memUsedSum, memUsedMax, memTotalSum float64
-		for _, m := range metrics {
-			cpuSum += m.Cpu
-			if m.CpuMax > cpuMax {
-				cpuMax = m.CpuMax
-			}
-			memUsedSum += m.MemUsed
-			if m.MemUsedMax > memUsedMax {
-				memUsedMax = m.MemUsedMax
-			}
-			memTotalSum += m.MemTotal
-		}
-		n := float64(len(metrics))
-		cpuAvg := cpuSum / n
-		memAvgTotal := memTotalSum / n
-		memAvgUsed := memUsedSum / n
-		memPct := 0.0
-		memMaxPct := 0.0
-		if memAvgTotal > 0 {
-			memPct = memAvgUsed / memAvgTotal * 100
-			memMaxPct = memUsedMax / memAvgTotal * 100
-		}
-
-		// Aggregate IO rates across all days.
-		var diskReadSum, diskWriteSum, netInSum, netOutSum float64
-		ioCount := float64(len(ioRates))
-		for _, io := range ioRates {
-			diskReadSum += io.DiskReadRate
-			diskWriteSum += io.DiskWriteRate
-			netInSum += io.NetInRate
-			netOutSum += io.NetOutRate
-		}
-		diskReadAvg, diskWriteAvg, netInAvg, netOutAvg := 0.0, 0.0, 0.0, 0.0
-		if ioCount > 0 {
-			diskReadAvg = diskReadSum / ioCount
-			diskWriteAvg = diskWriteSum / ioCount
-			netInAvg = netInSum / ioCount
-			netOutAvg = netOutSum / ioCount
-		}
-
-		section.Rows = append(section.Rows, map[string]string{
-			"Node":         node.Name,
-			"Status":       node.Status,
-			"CPU Avg %":    fmt.Sprintf("%.1f", cpuAvg),
-			"CPU Peak %":   fmt.Sprintf("%.1f", cpuMax),
-			"Mem Avg %":    fmt.Sprintf("%.1f", memPct),
-			"Mem Peak %":   fmt.Sprintf("%.1f", memMaxPct),
-			"Mem Used":     formatBytes(memAvgUsed),
-			"Mem Total":    formatBytes(memAvgTotal),
-			"Disk Read/s":  formatBytesRate(diskReadAvg),
-			"Disk Write/s": formatBytesRate(diskWriteAvg),
-			"Net In/s":     formatBytesRate(netInAvg),
-			"Net Out/s":    formatBytesRate(netOutAvg),
-		})
-	}
-
-	data.Sections = append(data.Sections, section)
-
-	// Cluster-wide daily trend.
-	clusterMetrics, err := g.queries.GetClusterMetricsDailyAvg(ctx, db.GetClusterMetricsDailyAvgParams{
-		ClusterID: clusterID,
-		Bucket:    since,
-	})
-	if err == nil && len(clusterMetrics) > 0 {
-		// Compute cluster-wide IO rates per day by summing all nodes.
-		type dayIO struct {
-			diskRead, diskWrite, netIn, netOut float64
-			count                              int
-		}
-		clusterIO := make(map[string]*dayIO)
-		for _, node := range nodes {
-			ioRates, ioErr := g.queries.GetNodeIODailyRate(ctx, db.GetNodeIODailyRateParams{
-				NodeID: node.ID,
-				Time:   since,
-			})
-			if ioErr != nil {
-				continue
-			}
-			for _, io := range ioRates {
-				key := io.Day.Format("2006-01-02")
-				d, ok := clusterIO[key]
-				if !ok {
-					d = &dayIO{}
-					clusterIO[key] = d
-				}
-				d.diskRead += io.DiskReadRate
-				d.diskWrite += io.DiskWriteRate
-				d.netIn += io.NetInRate
-				d.netOut += io.NetOutRate
-				d.count++
-			}
-		}
-
-		trend := ReportSection{
-			Title:   "Cluster Daily Trend",
-			Headers: []string{"Day", "CPU Avg %", "CPU Peak %", "Mem Avg %", "Mem Peak %", "Disk Read/s", "Disk Write/s", "Net In/s", "Net Out/s"},
-			Rows:    []map[string]string{},
-		}
-		for _, m := range clusterMetrics {
-			memPct := 0.0
-			memMaxPct := 0.0
-			if m.MemTotal > 0 {
-				memPct = m.MemUsed / m.MemTotal * 100
-				memMaxPct = m.MemUsedMax / m.MemTotal * 100
-			}
-			dayKey := m.Day.Format("2006-01-02")
-			diskR, diskW, nIn, nOut := "N/A", "N/A", "N/A", "N/A"
-			if d, ok := clusterIO[dayKey]; ok && d.count > 0 {
-				diskR = formatBytesRate(d.diskRead)
-				diskW = formatBytesRate(d.diskWrite)
-				nIn = formatBytesRate(d.netIn)
-				nOut = formatBytesRate(d.netOut)
-			}
-			trend.Rows = append(trend.Rows, map[string]string{
-				"Day":          dayKey,
-				"CPU Avg %":    fmt.Sprintf("%.1f", m.Cpu),
-				"CPU Peak %":   fmt.Sprintf("%.1f", m.CpuMax),
-				"Mem Avg %":    fmt.Sprintf("%.1f", memPct),
-				"Mem Peak %":   fmt.Sprintf("%.1f", memMaxPct),
-				"Disk Read/s":  diskR,
-				"Disk Write/s": diskW,
-				"Net In/s":     nIn,
-				"Net Out/s":    nOut,
-			})
-		}
-		data.Sections = append(data.Sections, trend)
-	}
-
-	return data, nil
+func (d *ReportData) addFinding(sev, lead, text, where string) {
+	d.Findings = append(d.Findings, Finding{Severity: sev, Lead: lead, Text: text, Where: where})
 }
 
-func (g *Generator) generateCapacityForecast(ctx context.Context, data *ReportData, clusterID uuid.UUID, since time.Time) (*ReportData, error) {
-	nodes, err := g.queries.ListNodesByCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("list nodes: %w", err)
-	}
-
-	section := ReportSection{
-		Title:   "Capacity Forecast (Linear Regression)",
-		Headers: []string{"Node", "Metric", "Current Value", "Trend/Day", "Days to Exhaust", "Exhaustion Date"},
-		Rows:    []map[string]string{},
-	}
-
-	for _, node := range nodes {
-		metrics, mErr := g.queries.GetNodeMetricsDailyAvg(ctx, db.GetNodeMetricsDailyAvgParams{
-			NodeID: node.ID,
-			Bucket: since,
-		})
-		if mErr != nil || len(metrics) < 2 {
-			continue
-		}
-
-		times := make([]time.Time, len(metrics))
-		cpuVals := make([]float64, len(metrics))
-		memVals := make([]float64, len(metrics))
-
-		for i, m := range metrics {
-			times[i] = m.Day
-			cpuVals[i] = m.Cpu
-			if m.MemTotal > 0 {
-				memVals[i] = m.MemUsed / m.MemTotal * 100
-			}
-		}
-
-		// CPU forecast to 100%
-		addForecastRow(&section, node.Name, "CPU %", cpuVals, times, 100)
-		// Memory forecast to 100%
-		addForecastRow(&section, node.Name, "Memory %", memVals, times, 100)
-	}
-
-	data.Sections = append(data.Sections, section)
-	return data, nil
+func (d *ReportData) addSection(title, why string, blocks ...Block) {
+	d.Sections = append(d.Sections, Section{Title: title, Why: why, Blocks: blocks})
 }
 
-func addForecastRow(section *ReportSection, nodeName, metric string, values []float64, times []time.Time, threshold float64) {
-	if len(values) < 2 {
-		return
-	}
-	currentVal := values[len(values)-1]
-
-	// Compute trend per day using linear regression
-	start := times[0]
-	xs := make([]float64, len(times))
-	for i, t := range times {
-		xs[i] = t.Sub(start).Hours() / 24.0
-	}
-	slope, _, ok := LinearRegression(xs, values)
-
-	row := map[string]string{
-		"Node":            nodeName,
-		"Metric":          metric,
-		"Current Value":   fmt.Sprintf("%.1f%%", currentVal),
-		"Trend/Day":       "N/A",
-		"Days to Exhaust": "N/A",
-		"Exhaustion Date": "N/A",
-	}
-
-	if ok {
-		row["Trend/Day"] = fmt.Sprintf("%+.2f%%", slope)
-		days, date := ForecastMetric(times, values, threshold)
-		if days != nil {
-			row["Days to Exhaust"] = fmt.Sprintf("%.0f", *days)
-		}
-		if date != nil {
-			row["Exhaustion Date"] = date.Format("2006-01-02")
-		}
-	}
-
-	section.Rows = append(section.Rows, row)
+func (d *ReportData) addMeta(label, value string) {
+	d.Meta = append(d.Meta, MetaItem{Label: label, Value: value})
 }
 
-func (g *Generator) generateBackupCompliance(ctx context.Context, data *ReportData, clusterID uuid.UUID) (*ReportData, error) {
-	vms, err := g.queries.ListVMsByCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("list VMs: %w", err)
-	}
+// --- Cell and block builders ---
 
-	nodes, err := g.queries.ListNodesByCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("list nodes: %w", err)
-	}
-	nodeNames := make(map[uuid.UUID]string)
-	for _, n := range nodes {
-		nodeNames[n.ID] = n.Name
-	}
+func col(name string) Column       { return Column{Name: name} }
+func numCol(name string) Column    { return Column{Name: name, Numeric: true} }
+func nowrapCol(name string) Column { return Column{Name: name, NoWrap: true} }
+func text(s string) Cell           { return Cell{Text: s} }
+func textSub(s, sub string) Cell   { return Cell{Text: s, Sub: sub} }
+func strong(s string) Cell         { return Cell{Text: s, Kind: CellStrong} }
+func idCell(v any) Cell            { return Cell{Text: fmt.Sprint(v), Kind: CellID} }
+func mute(s string) Cell           { return Cell{Text: s, Kind: CellMute} }
+func num(v any) Cell               { return Cell{Text: fmt.Sprint(v)} }
+func pill(s, tone string) Cell     { return Cell{Text: s, Kind: CellPill, Tone: tone} }
+func chips(cs ...Chip) Cell        { return Cell{Kind: CellChips, Chips: cs} }
 
-	// Get PBS snapshots for this cluster's VMs
-	type backupInfo struct {
-		lastTime time.Time
-	}
-	backups := make(map[int]backupInfo) // vmid -> last backup
-
-	// Look up PBS snapshots by backup_id (VMID as string)
-	for _, vm := range vms {
-		snaps, sErr := g.queries.ListPBSSnapshotsByBackupID(ctx, strconv.Itoa(int(vm.Vmid)))
-		if sErr != nil || len(snaps) == 0 {
-			continue
-		}
-		backups[int(vm.Vmid)] = backupInfo{lastTime: time.Unix(snaps[0].BackupTime, 0)}
-	}
-
-	staleThreshold := 48 * time.Hour
-	var totalVMs, backedUp, missing, stale int
-
-	section := ReportSection{
-		Title:   "VM Backup Compliance",
-		Headers: []string{"VM Name", "VMID", "Node", "Has Backup", "Last Backup", "Backup Age", "Status"},
-		Rows:    []map[string]string{},
-	}
-
-	for _, vm := range vms {
-		if vm.Template {
-			continue
-		}
-		totalVMs++
-
-		row := map[string]string{
-			"VM Name":     vm.Name,
-			"VMID":        strconv.Itoa(int(vm.Vmid)),
-			"Node":        nodeNames[vm.NodeID],
-			"Has Backup":  "No",
-			"Last Backup": "N/A",
-			"Backup Age":  "N/A",
-			"Status":      "Missing",
-		}
-
-		if b, ok := backups[int(vm.Vmid)]; ok {
-			backedUp++
-			age := time.Since(b.lastTime)
-			row["Has Backup"] = "Yes"
-			row["Last Backup"] = b.lastTime.Format("2006-01-02 15:04")
-			row["Backup Age"] = formatDuration(age)
-			if age > staleThreshold {
-				stale++
-				row["Status"] = "Stale"
-			} else {
-				row["Status"] = "OK"
-			}
-		} else {
-			missing++
-		}
-
-		section.Rows = append(section.Rows, row)
-	}
-
-	coveragePct := 0.0
-	if totalVMs > 0 {
-		coveragePct = float64(backedUp) / float64(totalVMs) * 100
-	}
-
-	summary := ReportSection{
-		Title:   "Backup Compliance Summary",
-		Headers: []string{"Total VMs", "Backed Up", "Missing Backups", "Stale Backups", "Coverage %"},
-		Rows: []map[string]string{{
-			"Total VMs":       strconv.Itoa(totalVMs),
-			"Backed Up":       strconv.Itoa(backedUp),
-			"Missing Backups": strconv.Itoa(missing),
-			"Stale Backups":   strconv.Itoa(stale),
-			"Coverage %":      fmt.Sprintf("%.1f", coveragePct),
-		}},
-	}
-
-	data.Sections = append(data.Sections, summary, section)
-	return data, nil
+func tableBlock(title, subtitle string, table *Table, empty string) Block {
+	return Block{Kind: BlockTable, Title: title, Subtitle: subtitle, Table: table, Empty: empty}
 }
 
-func (g *Generator) generatePatchStatus(ctx context.Context, data *ReportData, clusterID uuid.UUID) (*ReportData, error) {
-	scan, err := g.queries.GetLatestCVEScan(ctx, clusterID)
-	if err != nil {
-		// No scan data — return empty sections
-		data.Sections = append(data.Sections, ReportSection{
-			Title:   "Patch Status",
-			Headers: []string{"Info"},
-			Rows: []map[string]string{{
-				"Info": "No CVE scan data available for this cluster",
-			}},
-		})
-		return data, nil
-	}
-
-	scanNodes, err := g.queries.ListCVEScanNodes(ctx, scan.ID)
-	if err != nil {
-		return nil, fmt.Errorf("list scan nodes: %w", err)
-	}
-
-	summary := ReportSection{
-		Title:   "CVE Scan Summary",
-		Headers: []string{"Scan Date", "Total Vulnerabilities", "Critical", "High", "Medium", "Low", "Status"},
-		Rows: []map[string]string{{
-			"Scan Date":             scan.CreatedAt.Format("2006-01-02 15:04"),
-			"Total Vulnerabilities": strconv.FormatInt(int64(scan.TotalVulns), 10),
-			"Critical":              strconv.FormatInt(int64(scan.CriticalCount), 10),
-			"High":                  strconv.FormatInt(int64(scan.HighCount), 10),
-			"Medium":                strconv.FormatInt(int64(scan.MediumCount), 10),
-			"Low":                   strconv.FormatInt(int64(scan.LowCount), 10),
-			"Status":                scan.Status,
-		}},
-	}
-
-	nodeSection := ReportSection{
-		Title:   "Per-Node Vulnerability Breakdown",
-		Headers: []string{"Node", "Total Vulns", "Posture Score", "Status"},
-		Rows:    []map[string]string{},
-	}
-	for _, n := range scanNodes {
-		posture := float64(0)
-		if n.PostureScore.Valid {
-			posture = float64(n.PostureScore.Float32)
-		}
-		nodeSection.Rows = append(nodeSection.Rows, map[string]string{
-			"Node":          n.NodeName,
-			"Total Vulns":   strconv.FormatInt(int64(n.VulnsFound), 10),
-			"Posture Score": fmt.Sprintf("%.0f", posture),
-			"Status":        n.Status,
-		})
-	}
-
-	data.Sections = append(data.Sections, summary, nodeSection)
-	return data, nil
+func wideTable(title string, table *Table, empty string) Block {
+	b := tableBlock(title, "", table, empty)
+	b.Wide = true
+	return b
 }
 
-func (g *Generator) generateUptimeSummary(ctx context.Context, data *ReportData, clusterID uuid.UUID) (*ReportData, error) {
-	nodes, err := g.queries.ListNodesByCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("list nodes: %w", err)
-	}
-
-	section := ReportSection{
-		Title:   "Node Uptime",
-		Headers: []string{"Node", "Status", "Uptime", "PVE Version"},
-		Rows:    []map[string]string{},
-	}
-
-	var totalUptime, maxUptime int64
-	onlineCount := 0
-	for _, n := range nodes {
-		uptime := time.Duration(n.Uptime) * time.Second
-		section.Rows = append(section.Rows, map[string]string{
-			"Node":        n.Name,
-			"Status":      n.Status,
-			"Uptime":      formatDuration(uptime),
-			"PVE Version": n.PveVersion,
-		})
-		totalUptime += n.Uptime
-		if n.Uptime > maxUptime {
-			maxUptime = n.Uptime
-		}
-		if n.Status == "online" {
-			onlineCount++
-		}
-	}
-
-	slaPct := 0.0
-	if len(nodes) > 0 {
-		slaPct = float64(onlineCount) / float64(len(nodes)) * 100
-	}
-
-	summary := ReportSection{
-		Title:   "Cluster Uptime Summary",
-		Headers: []string{"Total Nodes", "Online Nodes", "SLA %", "Longest Uptime"},
-		Rows: []map[string]string{{
-			"Total Nodes":    strconv.Itoa(len(nodes)),
-			"Online Nodes":   strconv.Itoa(onlineCount),
-			"SLA %":          fmt.Sprintf("%.1f", slaPct),
-			"Longest Uptime": formatDuration(time.Duration(maxUptime) * time.Second),
-		}},
-	}
-
-	data.Sections = append(data.Sections, summary, section)
-	return data, nil
+func chartBlock(title, subtitle string, chart *Chart) Block {
+	return Block{Kind: BlockChart, Title: title, Subtitle: subtitle, Chart: chart}
 }
 
-func (g *Generator) generateVMResourceUsage(ctx context.Context, data *ReportData, clusterID uuid.UUID, since time.Time) (*ReportData, error) {
-	vms, err := g.queries.ListVMsByCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("list VMs: %w", err)
-	}
-
-	nodes, err := g.queries.ListNodesByCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("list nodes: %w", err)
-	}
-	nodeNames := make(map[uuid.UUID]string)
-	for _, n := range nodes {
-		nodeNames[n.ID] = n.Name
-	}
-
-	// Collect per-VM metrics.
-	stats := make([]vmReportStats, 0, len(vms))
-
-	for _, vm := range vms {
-		if vm.Template {
-			continue
-		}
-
-		s := vmReportStats{
-			name:      vm.Name,
-			nodeName:  nodeNames[vm.NodeID],
-			vmType:    vm.Type,
-			status:    vm.Status,
-			vmid:      int(vm.Vmid),
-			cpuCount:  int(vm.CpuCount),
-			diskTotal: vm.DiskTotal,
-		}
-
-		metrics, mErr := g.queries.GetVMMetricsDailyAvg(ctx, db.GetVMMetricsDailyAvgParams{
-			VmID:   vm.ID,
-			Bucket: since,
-		})
-		if mErr == nil && len(metrics) > 0 {
-			var cpuSum, cpuMax, memUsedSum, memTotalSum, memUsedMax float64
-			for _, m := range metrics {
-				cpuSum += m.Cpu
-				if m.CpuMax > cpuMax {
-					cpuMax = m.CpuMax
-				}
-				memUsedSum += m.MemUsed
-				if m.MemUsedMax > memUsedMax {
-					memUsedMax = m.MemUsedMax
-				}
-				memTotalSum += m.MemTotal
-			}
-			n := float64(len(metrics))
-			s.cpuAvg = cpuSum / n
-			s.cpuMax = cpuMax
-			s.memUsed = memUsedSum / n
-			s.memTotal = memTotalSum / n
-			if s.memTotal > 0 {
-				s.memPct = s.memUsed / s.memTotal * 100
-			}
-		}
-
-		ioRates, ioErr := g.queries.GetVMIODailyRate(ctx, db.GetVMIODailyRateParams{
-			VmID: vm.ID,
-			Time: since,
-		})
-		if ioErr == nil && len(ioRates) > 0 {
-			var drSum, dwSum, niSum, noSum float64
-			for _, io := range ioRates {
-				drSum += io.DiskReadRate
-				dwSum += io.DiskWriteRate
-				niSum += io.NetInRate
-				noSum += io.NetOutRate
-			}
-			ioN := float64(len(ioRates))
-			s.diskRead = drSum / ioN
-			s.diskWrite = dwSum / ioN
-			s.netIn = niSum / ioN
-			s.netOut = noSum / ioN
-		}
-
-		stats = append(stats, s)
-	}
-
-	// --- Section 1: VM Inventory Summary ---
-	var totalVMs, runningVMs, stoppedVMs, qemuCount, lxcCount int
-	for _, s := range stats {
-		totalVMs++
-		switch s.status {
-		case "running":
-			runningVMs++
-		case "stopped":
-			stoppedVMs++
-		}
-		switch s.vmType {
-		case "qemu":
-			qemuCount++
-		case "lxc":
-			lxcCount++
-		}
-	}
-	inventorySummary := ReportSection{
-		Title:   "VM Inventory Summary",
-		Headers: []string{"Total VMs/CTs", "Running", "Stopped", "QEMU VMs", "LXC Containers"},
-		Rows: []map[string]string{{
-			"Total VMs/CTs":  strconv.Itoa(totalVMs),
-			"Running":        strconv.Itoa(runningVMs),
-			"Stopped":        strconv.Itoa(stoppedVMs),
-			"QEMU VMs":       strconv.Itoa(qemuCount),
-			"LXC Containers": strconv.Itoa(lxcCount),
-		}},
-	}
-
-	// --- Section 2: Top CPU Consumers (top 10) ---
-	topCPU := make([]vmReportStats, len(stats))
-	copy(topCPU, stats)
-	sortDesc(topCPU, func(s vmReportStats) float64 { return s.cpuAvg })
-	limit := 10
-	if len(topCPU) < limit {
-		limit = len(topCPU)
-	}
-	cpuSection := ReportSection{
-		Title:   "Top CPU Consumers (Avg %)",
-		Headers: []string{"VM Name", "VMID", "Type", "Node", "Status", "vCPUs", "CPU Avg %", "CPU Peak %"},
-		Rows:    []map[string]string{},
-	}
-	for _, s := range topCPU[:limit] {
-		cpuSection.Rows = append(cpuSection.Rows, map[string]string{
-			"VM Name":    s.name,
-			"VMID":       strconv.Itoa(s.vmid),
-			"Type":       s.vmType,
-			"Node":       s.nodeName,
-			"Status":     s.status,
-			"vCPUs":      strconv.Itoa(s.cpuCount),
-			"CPU Avg %":  fmt.Sprintf("%.1f", s.cpuAvg),
-			"CPU Peak %": fmt.Sprintf("%.1f", s.cpuMax),
-		})
-	}
-
-	// --- Section 3: Top Memory Consumers (top 10) ---
-	topMem := make([]vmReportStats, len(stats))
-	copy(topMem, stats)
-	sortDesc(topMem, func(s vmReportStats) float64 { return s.memPct })
-	limit = 10
-	if len(topMem) < limit {
-		limit = len(topMem)
-	}
-	memSection := ReportSection{
-		Title:   "Top Memory Consumers (Avg %)",
-		Headers: []string{"VM Name", "VMID", "Type", "Node", "Status", "Mem Avg %", "Mem Used", "Mem Total"},
-		Rows:    []map[string]string{},
-	}
-	for _, s := range topMem[:limit] {
-		memSection.Rows = append(memSection.Rows, map[string]string{
-			"VM Name":   s.name,
-			"VMID":      strconv.Itoa(s.vmid),
-			"Type":      s.vmType,
-			"Node":      s.nodeName,
-			"Status":    s.status,
-			"Mem Avg %": fmt.Sprintf("%.1f", s.memPct),
-			"Mem Used":  formatBytes(s.memUsed),
-			"Mem Total": formatBytes(s.memTotal),
-		})
-	}
-
-	// --- Section 4: Top Network Consumers (top 10) ---
-	topNet := make([]vmReportStats, len(stats))
-	copy(topNet, stats)
-	sortDesc(topNet, func(s vmReportStats) float64 { return s.netIn + s.netOut })
-	limit = 10
-	if len(topNet) < limit {
-		limit = len(topNet)
-	}
-	netSection := ReportSection{
-		Title:   "Top Network Consumers (Avg In+Out)",
-		Headers: []string{"VM Name", "VMID", "Type", "Node", "Net In/s", "Net Out/s", "Total/s"},
-		Rows:    []map[string]string{},
-	}
-	for _, s := range topNet[:limit] {
-		netSection.Rows = append(netSection.Rows, map[string]string{
-			"VM Name":   s.name,
-			"VMID":      strconv.Itoa(s.vmid),
-			"Type":      s.vmType,
-			"Node":      s.nodeName,
-			"Net In/s":  formatBytesRate(s.netIn),
-			"Net Out/s": formatBytesRate(s.netOut),
-			"Total/s":   formatBytesRate(s.netIn + s.netOut),
-		})
-	}
-
-	// --- Section 5: Top Disk I/O Consumers (top 10) ---
-	topDisk := make([]vmReportStats, len(stats))
-	copy(topDisk, stats)
-	sortDesc(topDisk, func(s vmReportStats) float64 { return s.diskRead + s.diskWrite })
-	limit = 10
-	if len(topDisk) < limit {
-		limit = len(topDisk)
-	}
-	diskSection := ReportSection{
-		Title:   "Top Disk I/O Consumers (Avg Read+Write)",
-		Headers: []string{"VM Name", "VMID", "Type", "Node", "Disk Read/s", "Disk Write/s", "Total/s"},
-		Rows:    []map[string]string{},
-	}
-	for _, s := range topDisk[:limit] {
-		diskSection.Rows = append(diskSection.Rows, map[string]string{
-			"VM Name":      s.name,
-			"VMID":         strconv.Itoa(s.vmid),
-			"Type":         s.vmType,
-			"Node":         s.nodeName,
-			"Disk Read/s":  formatBytesRate(s.diskRead),
-			"Disk Write/s": formatBytesRate(s.diskWrite),
-			"Total/s":      formatBytesRate(s.diskRead + s.diskWrite),
-		})
-	}
-
-	// --- Section 6: Full VM List ---
-	allVMs := ReportSection{
-		Title:   "All VMs/Containers",
-		Headers: []string{"VM Name", "VMID", "Type", "Node", "Status", "vCPUs", "CPU Avg %", "Mem Avg %", "Disk Alloc", "Net In/s", "Net Out/s"},
-		Rows:    []map[string]string{},
-	}
-	for _, s := range stats {
-		allVMs.Rows = append(allVMs.Rows, map[string]string{
-			"VM Name":    s.name,
-			"VMID":       strconv.Itoa(s.vmid),
-			"Type":       s.vmType,
-			"Node":       s.nodeName,
-			"Status":     s.status,
-			"vCPUs":      strconv.Itoa(s.cpuCount),
-			"CPU Avg %":  fmt.Sprintf("%.1f", s.cpuAvg),
-			"Mem Avg %":  fmt.Sprintf("%.1f", s.memPct),
-			"Disk Alloc": formatBytes(float64(s.diskTotal)),
-			"Net In/s":   formatBytesRate(s.netIn),
-			"Net Out/s":  formatBytesRate(s.netOut),
-		})
-	}
-
-	data.Sections = append(data.Sections, inventorySummary, cpuSection, memSection, netSection, diskSection, allVMs)
-	return data, nil
+func metersBlock(title, subtitle string, meters []Meter, empty string) Block {
+	return Block{Kind: BlockMeters, Title: title, Subtitle: subtitle, Meters: meters, Empty: empty, Wide: true}
 }
 
-type vmReportStats struct {
-	name, nodeName, vmType, status string
-	vmid                           int
-	cpuAvg, cpuMax                 float64
-	memUsed, memTotal              float64
-	memPct                         float64
-	diskRead, diskWrite            float64
-	netIn, netOut                  float64
-	cpuCount                       int
-	diskTotal                      int64
+// nameList joins up to limit names and says how many more there are.
+func nameList(names []string, limit int) string {
+	if len(names) <= limit {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(names[:limit], ", "), len(names)-limit)
 }
 
-// sortDesc sorts a slice in descending order by the given key function.
-func sortDesc(s []vmReportStats, key func(vmReportStats) float64) {
-	for i := 0; i < len(s); i++ {
-		for j := i + 1; j < len(s); j++ {
-			if key(s[j]) > key(s[i]) {
-				s[i], s[j] = s[j], s[i]
-			}
-		}
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
 	}
+	return fmt.Sprintf("%d %s", n, many)
 }
+
+// --- Formatting ---
 
 func formatBytesRate(b float64) string {
 	switch {
@@ -919,4 +278,77 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dd %dh", days, hours)
 	}
 	return fmt.Sprintf("%dh %dm", hours, int(d.Minutes())%60)
+}
+
+// formatAge writes an age the way the report tables show it: "3 h",
+// "2 d 4 h", "6 d". Never "-0d": a clock skew reads as zero.
+func formatAge(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	h := int(d.Hours())
+	if h < 24 {
+		if h == 0 {
+			return fmt.Sprintf("%d min", int(d.Minutes()))
+		}
+		return fmt.Sprintf("%d h", h)
+	}
+	days, rem := h/24, h%24
+	if rem == 0 {
+		return fmt.Sprintf("%d d", days)
+	}
+	return fmt.Sprintf("%d d %d h", days, rem)
+}
+
+func ts(t time.Time) string { return t.UTC().Format("2006-01-02 15:04") }
+
+// formatThreshold writes a rule's threshold the way an operator set it: in
+// hours below two days ("24 h", "36 h"), in days from there on.
+func formatThreshold(d time.Duration) string {
+	if d < 48*time.Hour {
+		return fmt.Sprintf("%d h", int(d.Hours()))
+	}
+	return formatAge(d)
+}
+
+// capacityTone colours a fill percentage: critical from 90 %, warning from 75 %.
+func capacityTone(pct float64) string {
+	switch {
+	case pct >= 90:
+		return ToneCrit
+	case pct >= 75:
+		return ToneWarn
+	}
+	return ToneAccent
+}
+
+// dayBuckets splits a window into UTC days (or seven-day chunks counted from
+// the window's first day, when the window is longer than five weeks) and
+// returns the bucket starts and their labels.
+func dayBuckets(since, until time.Time) (starts []time.Time, labels []string, step time.Duration) {
+	step = 24 * time.Hour
+	if until.Sub(since) > 35*24*time.Hour {
+		step = 7 * 24 * time.Hour
+	}
+	start := time.Date(since.Year(), since.Month(), since.Day(), 0, 0, 0, 0, time.UTC)
+	for t := start; t.Before(until); t = t.Add(step) {
+		starts = append(starts, t)
+		if step > 24*time.Hour {
+			labels = append(labels, "wk "+t.Format("Jan 2"))
+		} else {
+			labels = append(labels, t.Format("Jan 2"))
+		}
+	}
+	return starts, labels, step
+}
+
+func bucketIndex(starts []time.Time, step time.Duration, t time.Time) int {
+	if len(starts) == 0 || t.Before(starts[0]) {
+		return -1
+	}
+	i := int(t.Sub(starts[0]) / step)
+	if i >= len(starts) {
+		return -1
+	}
+	return i
 }

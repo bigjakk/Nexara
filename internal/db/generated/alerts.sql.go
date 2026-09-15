@@ -63,6 +63,64 @@ func (q *Queries) CountActiveAlertsByCluster(ctx context.Context, clusterID pgty
 	return i, err
 }
 
+const countAlertHistoryBySeverityInWindow = `-- name: CountAlertHistoryBySeverityInWindow :many
+
+SELECT severity,
+       count(*)::bigint AS fired,
+       (count(*) FILTER (WHERE state = 'resolved'))::bigint AS resolved,
+       (count(*) FILTER (WHERE state IN ('pending', 'firing', 'acknowledged')))::bigint AS open_count
+FROM alert_history
+WHERE cluster_id = $1::uuid
+  AND created_at >= $2::timestamptz
+  AND created_at < $3::timestamptz
+GROUP BY severity
+ORDER BY severity
+`
+
+type CountAlertHistoryBySeverityInWindowParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Since     time.Time `json:"since"`
+	Until     time.Time `json:"until"`
+}
+
+type CountAlertHistoryBySeverityInWindowRow struct {
+	Severity  string `json:"severity"`
+	Fired     int64  `json:"fired"`
+	Resolved  int64  `json:"resolved"`
+	OpenCount int64  `json:"open_count"`
+}
+
+// ---------------------------------------------------------------------------
+// Reports.
+// ---------------------------------------------------------------------------
+// CountAlertHistoryBySeverityInWindow feeds the cluster digest: how many
+// alerts fired in the period per severity, and how many of them are resolved
+// or still open. Windowed on created_at (when the alert was raised).
+func (q *Queries) CountAlertHistoryBySeverityInWindow(ctx context.Context, arg CountAlertHistoryBySeverityInWindowParams) ([]CountAlertHistoryBySeverityInWindowRow, error) {
+	rows, err := q.db.Query(ctx, countAlertHistoryBySeverityInWindow, arg.ClusterID, arg.Since, arg.Until)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountAlertHistoryBySeverityInWindowRow{}
+	for rows.Next() {
+		var i CountAlertHistoryBySeverityInWindowRow
+		if err := rows.Scan(
+			&i.Severity,
+			&i.Fired,
+			&i.Resolved,
+			&i.OpenCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteAlertRule = `-- name: DeleteAlertRule :exec
 DELETE FROM alert_rules WHERE id = $1
 `
@@ -1259,6 +1317,64 @@ func (q *Queries) ListNotificationChannels(ctx context.Context) ([]NotificationC
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTopAlertRulesInWindow = `-- name: ListTopAlertRulesInWindow :many
+SELECT r.name, ah.metric, ah.severity, count(*)::bigint AS fired
+FROM alert_history ah
+JOIN alert_rules r ON r.id = ah.rule_id
+WHERE ah.cluster_id = $1::uuid
+  AND ah.created_at >= $2::timestamptz
+  AND ah.created_at < $3::timestamptz
+GROUP BY r.name, ah.metric, ah.severity
+ORDER BY fired DESC, r.name
+LIMIT $4::int
+`
+
+type ListTopAlertRulesInWindowParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Since     time.Time `json:"since"`
+	Until     time.Time `json:"until"`
+	RowLimit  int32     `json:"row_limit"`
+}
+
+type ListTopAlertRulesInWindowRow struct {
+	Name     string `json:"name"`
+	Metric   string `json:"metric"`
+	Severity string `json:"severity"`
+	Fired    int64  `json:"fired"`
+}
+
+// ListTopAlertRulesInWindow lists the rules that fired most in the period,
+// for the digest's "noisiest rules" table.
+func (q *Queries) ListTopAlertRulesInWindow(ctx context.Context, arg ListTopAlertRulesInWindowParams) ([]ListTopAlertRulesInWindowRow, error) {
+	rows, err := q.db.Query(ctx, listTopAlertRulesInWindow,
+		arg.ClusterID,
+		arg.Since,
+		arg.Until,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTopAlertRulesInWindowRow{}
+	for rows.Next() {
+		var i ListTopAlertRulesInWindowRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.Metric,
+			&i.Severity,
+			&i.Fired,
 		); err != nil {
 			return nil, err
 		}

@@ -13,6 +13,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countTaskHistoryByStatusInWindow = `-- name: CountTaskHistoryByStatusInWindow :many
+SELECT status, count(*)::bigint AS n
+FROM task_history
+WHERE cluster_id = $1::uuid
+  AND COALESCE(finished_at, started_at) >= $2::timestamptz
+  AND COALESCE(finished_at, started_at) < $3::timestamptz
+GROUP BY status
+ORDER BY status
+`
+
+type CountTaskHistoryByStatusInWindowParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Since     time.Time `json:"since"`
+	Until     time.Time `json:"until"`
+}
+
+type CountTaskHistoryByStatusInWindowRow struct {
+	Status string `json:"status"`
+	N      int64  `json:"n"`
+}
+
+// CountTaskHistoryByStatusInWindow feeds the cluster digest: how many tasks
+// ended in the period, by terminal status. Same window rule as the listing
+// above.
+func (q *Queries) CountTaskHistoryByStatusInWindow(ctx context.Context, arg CountTaskHistoryByStatusInWindowParams) ([]CountTaskHistoryByStatusInWindowRow, error) {
+	rows, err := q.db.Query(ctx, countTaskHistoryByStatusInWindow, arg.ClusterID, arg.Since, arg.Until)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountTaskHistoryByStatusInWindowRow{}
+	for rows.Next() {
+		var i CountTaskHistoryByStatusInWindowRow
+		if err := rows.Scan(&i.Status, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countTaskHistoryFiltered = `-- name: CountTaskHistoryFiltered :one
 SELECT count(*) FROM task_history
 WHERE ($1::uuid IS NULL OR cluster_id = $1)
@@ -270,6 +314,69 @@ func (q *Queries) InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryPa
 	return i, err
 }
 
+const listFailedTaskHistoryInWindow = `-- name: ListFailedTaskHistoryInWindow :many
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid FROM task_history
+WHERE cluster_id = $1::uuid
+  AND status = 'failed'
+  AND exit_status <> 'vanished'
+  AND COALESCE(finished_at, started_at) >= $2::timestamptz
+  AND COALESCE(finished_at, started_at) < $3::timestamptz
+ORDER BY COALESCE(finished_at, started_at) DESC
+LIMIT $4::int
+`
+
+type ListFailedTaskHistoryInWindowParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Since     time.Time `json:"since"`
+	Until     time.Time `json:"until"`
+	RowLimit  int32     `json:"row_limit"`
+}
+
+// ListFailedTaskHistoryInWindow is the digest's failed-task list, newest
+// first. 'vanished' is excluded for the reason GetClusterFailedTaskStats
+// gives: losing track of a task is not the task failing.
+func (q *Queries) ListFailedTaskHistoryInWindow(ctx context.Context, arg ListFailedTaskHistoryInWindowParams) ([]TaskHistory, error) {
+	rows, err := q.db.Query(ctx, listFailedTaskHistoryInWindow,
+		arg.ClusterID,
+		arg.Since,
+		arg.Until,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskHistory{}
+	for rows.Next() {
+		var i TaskHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.UserID,
+			&i.Upid,
+			&i.Description,
+			&i.Status,
+			&i.ExitStatus,
+			&i.Node,
+			&i.TaskType,
+			&i.Progress,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Source,
+			&i.Vmid,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningTaskHistoryByCluster = `-- name: ListRunningTaskHistoryByCluster :many
 SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid FROM task_history
 WHERE cluster_id = $1 AND status = 'running'
@@ -277,6 +384,79 @@ WHERE cluster_id = $1 AND status = 'running'
 
 func (q *Queries) ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]TaskHistory, error) {
 	rows, err := q.db.Query(ctx, listRunningTaskHistoryByCluster, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskHistory{}
+	for rows.Next() {
+		var i TaskHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.UserID,
+			&i.Upid,
+			&i.Description,
+			&i.Status,
+			&i.ExitStatus,
+			&i.Node,
+			&i.TaskType,
+			&i.Progress,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Source,
+			&i.Vmid,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaskHistoryByTypeInWindow = `-- name: ListTaskHistoryByTypeInWindow :many
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid FROM task_history
+WHERE cluster_id = $1::uuid
+  AND task_type = $2::text
+  AND COALESCE(finished_at, started_at) >= $3::timestamptz
+  AND COALESCE(finished_at, started_at) < $4::timestamptz
+ORDER BY started_at DESC
+LIMIT $5::int
+`
+
+type ListTaskHistoryByTypeInWindowParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	TaskType  string    `json:"task_type"`
+	Since     time.Time `json:"since"`
+	Until     time.Time `json:"until"`
+	RowLimit  int32     `json:"row_limit"`
+}
+
+// ListTaskHistoryByTypeInWindow feeds the backup compliance report's "runs in
+// the period" section: every task of one worker type that ENDED inside the
+// window, newest first.
+//
+// Windowed on COALESCE(finished_at, started_at) for the same reason
+// GetClusterFailedTaskStats is: a backup that starts before the window and
+// fails inside it belongs to this period's report. Still-running tasks have
+// no finished_at and are windowed on their start, so a run in flight at
+// generation time appears as running rather than vanishing.
+//
+// exit_status 'vanished' rows are returned; the caller renders them as
+// "lost track of" rather than as failures.
+func (q *Queries) ListTaskHistoryByTypeInWindow(ctx context.Context, arg ListTaskHistoryByTypeInWindowParams) ([]TaskHistory, error) {
+	rows, err := q.db.Query(ctx, listTaskHistoryByTypeInWindow,
+		arg.ClusterID,
+		arg.TaskType,
+		arg.Since,
+		arg.Until,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

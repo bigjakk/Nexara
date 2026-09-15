@@ -165,7 +165,14 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 		// than waiting for the next 6-hour scan tick.
 		a.RollingOrch.SetCVEScanner(a.CVEScanner)
 
-		a.ReportGen = reports.NewGenerator(a.Queries, logger.With("component", "report-gen"))
+		// The generator asks the RBAC engine whether a report's requester may
+		// see Veeam data. A typed nil must not reach the interface: without an
+		// engine the generator gets a nil interface and omits Veeam everywhere.
+		var reportPerms reports.PermissionChecker
+		if a.RBAC != nil {
+			reportPerms = a.RBAC
+		}
+		a.ReportGen = reports.NewGenerator(a.Queries, reportPerms, logger.With("component", "report-gen"))
 
 		a.VirtioWin = virtiowin.NewEngine(a.Queries, cfg.EncryptionKey, logger.With("component", "virtio-win"))
 		a.GuestTools = guesttools.NewEngine(a.Queries, cfg.EncryptionKey, logger.With("component", "guest-tools"))

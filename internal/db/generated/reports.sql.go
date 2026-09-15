@@ -43,7 +43,7 @@ func (q *Queries) DeleteReportSchedule(ctx context.Context, id uuid.UUID) error 
 }
 
 const getReportRun = `-- name: GetReportRun :one
-SELECT id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at FROM report_runs WHERE id = $1
+SELECT id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at, parameters FROM report_runs WHERE id = $1
 `
 
 func (q *Queries) GetReportRun(ctx context.Context, id uuid.UUID) (ReportRun, error) {
@@ -64,6 +64,7 @@ func (q *Queries) GetReportRun(ctx context.Context, id uuid.UUID) (ReportRun, er
 		&i.StartedAt,
 		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.Parameters,
 	)
 	return i, err
 }
@@ -85,6 +86,41 @@ func (q *Queries) GetReportRunCSV(ctx context.Context, id uuid.UUID) (GetReportR
 	return i, err
 }
 
+const getReportRunForEmail = `-- name: GetReportRunForEmail :one
+SELECT id, cluster_id, report_type, status, report_data, report_html, report_csv, completed_at
+FROM report_runs WHERE id = $1
+`
+
+type GetReportRunForEmailRow struct {
+	ID          uuid.UUID          `json:"id"`
+	ClusterID   uuid.UUID          `json:"cluster_id"`
+	ReportType  string             `json:"report_type"`
+	Status      string             `json:"status"`
+	ReportData  []byte             `json:"report_data"`
+	ReportHtml  pgtype.Text        `json:"report_html"`
+	ReportCsv   pgtype.Text        `json:"report_csv"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+}
+
+// GetReportRunForEmail is what "email this run" reads: both renderings and
+// the type, so the digest and the attachments come from the stored run
+// rather than a fresh generation that might say something different.
+func (q *Queries) GetReportRunForEmail(ctx context.Context, id uuid.UUID) (GetReportRunForEmailRow, error) {
+	row := q.db.QueryRow(ctx, getReportRunForEmail, id)
+	var i GetReportRunForEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.ReportType,
+		&i.Status,
+		&i.ReportData,
+		&i.ReportHtml,
+		&i.ReportCsv,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const getReportRunHTML = `-- name: GetReportRunHTML :one
 SELECT id, cluster_id, report_html FROM report_runs WHERE id = $1
 `
@@ -103,7 +139,7 @@ func (q *Queries) GetReportRunHTML(ctx context.Context, id uuid.UUID) (GetReport
 }
 
 const getReportSchedule = `-- name: GetReportSchedule :one
-SELECT id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at FROM report_schedules WHERE id = $1
+SELECT id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at, run_as FROM report_schedules WHERE id = $1
 `
 
 func (q *Queries) GetReportSchedule(ctx context.Context, id uuid.UUID) (ReportSchedule, error) {
@@ -127,24 +163,26 @@ func (q *Queries) GetReportSchedule(ctx context.Context, id uuid.UUID) (ReportSc
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RunAs,
 	)
 	return i, err
 }
 
 const insertReportRun = `-- name: InsertReportRun :one
 
-INSERT INTO report_runs (schedule_id, report_type, cluster_id, status, time_range_hours, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at
+INSERT INTO report_runs (schedule_id, report_type, cluster_id, status, time_range_hours, parameters, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at, parameters
 `
 
 type InsertReportRunParams struct {
-	ScheduleID     pgtype.UUID `json:"schedule_id"`
-	ReportType     string      `json:"report_type"`
-	ClusterID      uuid.UUID   `json:"cluster_id"`
-	Status         string      `json:"status"`
-	TimeRangeHours int32       `json:"time_range_hours"`
-	CreatedBy      uuid.UUID   `json:"created_by"`
+	ScheduleID     pgtype.UUID     `json:"schedule_id"`
+	ReportType     string          `json:"report_type"`
+	ClusterID      uuid.UUID       `json:"cluster_id"`
+	Status         string          `json:"status"`
+	TimeRangeHours int32           `json:"time_range_hours"`
+	Parameters     json.RawMessage `json:"parameters"`
+	CreatedBy      uuid.UUID       `json:"created_by"`
 }
 
 // Report Runs
@@ -155,6 +193,7 @@ func (q *Queries) InsertReportRun(ctx context.Context, arg InsertReportRunParams
 		arg.ClusterID,
 		arg.Status,
 		arg.TimeRangeHours,
+		arg.Parameters,
 		arg.CreatedBy,
 	)
 	var i ReportRun
@@ -173,6 +212,7 @@ func (q *Queries) InsertReportRun(ctx context.Context, arg InsertReportRunParams
 		&i.StartedAt,
 		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.Parameters,
 	)
 	return i, err
 }
@@ -180,9 +220,9 @@ func (q *Queries) InsertReportRun(ctx context.Context, arg InsertReportRunParams
 const insertReportSchedule = `-- name: InsertReportSchedule :one
 
 INSERT INTO report_schedules (name, report_type, cluster_id, time_range_hours, schedule,
-    format, email_enabled, email_channel_id, email_recipients, parameters, enabled, next_run_at, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-RETURNING id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at
+    format, email_enabled, email_channel_id, email_recipients, parameters, enabled, next_run_at, created_by, run_as)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+RETURNING id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at, run_as
 `
 
 type InsertReportScheduleParams struct {
@@ -199,6 +239,7 @@ type InsertReportScheduleParams struct {
 	Enabled         bool               `json:"enabled"`
 	NextRunAt       pgtype.Timestamptz `json:"next_run_at"`
 	CreatedBy       uuid.UUID          `json:"created_by"`
+	RunAs           uuid.UUID          `json:"run_as"`
 }
 
 // Report Schedules
@@ -217,6 +258,7 @@ func (q *Queries) InsertReportSchedule(ctx context.Context, arg InsertReportSche
 		arg.Enabled,
 		arg.NextRunAt,
 		arg.CreatedBy,
+		arg.RunAs,
 	)
 	var i ReportSchedule
 	err := row.Scan(
@@ -237,12 +279,13 @@ func (q *Queries) InsertReportSchedule(ctx context.Context, arg InsertReportSche
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RunAs,
 	)
 	return i, err
 }
 
 const listDueReportSchedules = `-- name: ListDueReportSchedules :many
-SELECT id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at FROM report_schedules
+SELECT id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at, run_as FROM report_schedules
 WHERE enabled = true AND schedule != '' AND next_run_at <= now()
 ORDER BY next_run_at
 `
@@ -274,6 +317,7 @@ func (q *Queries) ListDueReportSchedules(ctx context.Context) ([]ReportSchedule,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RunAs,
 		); err != nil {
 			return nil, err
 		}
@@ -286,7 +330,7 @@ func (q *Queries) ListDueReportSchedules(ctx context.Context) ([]ReportSchedule,
 }
 
 const listReportRuns = `-- name: ListReportRuns :many
-SELECT id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at FROM report_runs
+SELECT id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at, parameters FROM report_runs
 WHERE ($3::uuid[] IS NULL
        OR cluster_id = ANY($3::uuid[]))
 ORDER BY created_at DESC
@@ -327,6 +371,7 @@ func (q *Queries) ListReportRuns(ctx context.Context, arg ListReportRunsParams) 
 			&i.StartedAt,
 			&i.CompletedAt,
 			&i.CreatedAt,
+			&i.Parameters,
 		); err != nil {
 			return nil, err
 		}
@@ -339,7 +384,7 @@ func (q *Queries) ListReportRuns(ctx context.Context, arg ListReportRunsParams) 
 }
 
 const listReportRunsByCluster = `-- name: ListReportRunsByCluster :many
-SELECT id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at FROM report_runs
+SELECT id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at, parameters FROM report_runs
 WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -375,6 +420,7 @@ func (q *Queries) ListReportRunsByCluster(ctx context.Context, arg ListReportRun
 			&i.StartedAt,
 			&i.CompletedAt,
 			&i.CreatedAt,
+			&i.Parameters,
 		); err != nil {
 			return nil, err
 		}
@@ -387,7 +433,7 @@ func (q *Queries) ListReportRunsByCluster(ctx context.Context, arg ListReportRun
 }
 
 const listReportRunsBySchedule = `-- name: ListReportRunsBySchedule :many
-SELECT id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at FROM report_runs
+SELECT id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at, parameters FROM report_runs
 WHERE schedule_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -423,6 +469,7 @@ func (q *Queries) ListReportRunsBySchedule(ctx context.Context, arg ListReportRu
 			&i.StartedAt,
 			&i.CompletedAt,
 			&i.CreatedAt,
+			&i.Parameters,
 		); err != nil {
 			return nil, err
 		}
@@ -435,7 +482,7 @@ func (q *Queries) ListReportRunsBySchedule(ctx context.Context, arg ListReportRu
 }
 
 const listReportSchedules = `-- name: ListReportSchedules :many
-SELECT id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at FROM report_schedules
+SELECT id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at, run_as FROM report_schedules
 WHERE ($3::uuid[] IS NULL
        OR cluster_id = ANY($3::uuid[]))
 ORDER BY created_at DESC
@@ -485,6 +532,7 @@ func (q *Queries) ListReportSchedules(ctx context.Context, arg ListReportSchedul
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RunAs,
 		); err != nil {
 			return nil, err
 		}
@@ -497,7 +545,7 @@ func (q *Queries) ListReportSchedules(ctx context.Context, arg ListReportSchedul
 }
 
 const listReportSchedulesByCluster = `-- name: ListReportSchedulesByCluster :many
-SELECT id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at FROM report_schedules
+SELECT id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at, run_as FROM report_schedules
 WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -536,6 +584,7 @@ func (q *Queries) ListReportSchedulesByCluster(ctx context.Context, arg ListRepo
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RunAs,
 		); err != nil {
 			return nil, err
 		}
@@ -599,9 +648,9 @@ const updateReportSchedule = `-- name: UpdateReportSchedule :one
 UPDATE report_schedules
 SET name = $2, report_type = $3, cluster_id = $4, time_range_hours = $5, schedule = $6,
     format = $7, email_enabled = $8, email_channel_id = $9, email_recipients = $10,
-    parameters = $11, enabled = $12, next_run_at = $13, updated_at = now()
+    parameters = $11, enabled = $12, next_run_at = $13, run_as = $14, updated_at = now()
 WHERE id = $1
-RETURNING id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at
+RETURNING id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at, run_as
 `
 
 type UpdateReportScheduleParams struct {
@@ -618,8 +667,12 @@ type UpdateReportScheduleParams struct {
 	Parameters      json.RawMessage    `json:"parameters"`
 	Enabled         bool               `json:"enabled"`
 	NextRunAt       pgtype.Timestamptz `json:"next_run_at"`
+	RunAs           uuid.UUID          `json:"run_as"`
 }
 
+// UpdateReportSchedule stamps run_as with the saver on EVERY update, not
+// just when the report type or cluster changes: the grants a run reads under
+// must always be those of a person who chose this exact configuration.
 func (q *Queries) UpdateReportSchedule(ctx context.Context, arg UpdateReportScheduleParams) (ReportSchedule, error) {
 	row := q.db.QueryRow(ctx, updateReportSchedule,
 		arg.ID,
@@ -635,6 +688,7 @@ func (q *Queries) UpdateReportSchedule(ctx context.Context, arg UpdateReportSche
 		arg.Parameters,
 		arg.Enabled,
 		arg.NextRunAt,
+		arg.RunAs,
 	)
 	var i ReportSchedule
 	err := row.Scan(
@@ -655,6 +709,7 @@ func (q *Queries) UpdateReportSchedule(ctx context.Context, arg UpdateReportSche
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RunAs,
 	)
 	return i, err
 }

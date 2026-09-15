@@ -15,17 +15,9 @@ import {
   useDeleteReportSchedule,
 } from "../api/report-queries";
 import { useAuth } from "@/hooks/useAuth";
+import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import type { ReportSchedule } from "@/types/api";
-
-const REPORT_TYPE_LABELS: Record<string, string> = {
-  resource_utilization: "Resource Utilization",
-  vm_resource_usage: "VM Resource Usage",
-  capacity_forecast: "Capacity Forecast",
-  backup_compliance: "Backup Compliance",
-  patch_status: "Patch Status",
-  uptime_summary: "Uptime Summary",
-  snapshot_inventory: "Snapshot Inventory",
-};
+import { reportTypeLabel, periodLabel } from "../report-types";
 
 interface ReportSchedulesTableProps {
   onEdit?: (schedule: ReportSchedule) => void;
@@ -37,6 +29,7 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
   const deleteSchedule = useDeleteReportSchedule();
   const { hasPermission } = useAuth();
   const canManage = hasPermission("manage", "report");
+  const { data: clusters } = useClusters();
 
   if (isLoading)
     return (
@@ -71,10 +64,11 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
       <TableHeader>
         <TableRow>
           <TableHead>Name</TableHead>
-          <TableHead>Type</TableHead>
+          <TableHead>Report</TableHead>
+          <TableHead>Cluster</TableHead>
           <TableHead>Schedule</TableHead>
-          <TableHead>Format</TableHead>
-          <TableHead>Email</TableHead>
+          <TableHead>Period</TableHead>
+          <TableHead>Delivers</TableHead>
           <TableHead>Status</TableHead>
           <TableHead>Last Run</TableHead>
           <TableHead>Next Run</TableHead>
@@ -85,16 +79,23 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
         {schedules.map((s) => (
           <TableRow key={s.id}>
             <TableCell className="font-medium">{s.name}</TableCell>
+            <TableCell>{reportTypeLabel(s.report_type)}</TableCell>
             <TableCell>
-              {REPORT_TYPE_LABELS[s.report_type] ?? s.report_type}
+              {clusters?.find((c) => c.id === s.cluster_id)?.name ?? "—"}
             </TableCell>
             <TableCell className="font-mono text-xs">
               {s.schedule || "Manual"}
             </TableCell>
+            <TableCell>{periodLabel(s.time_range_hours)}</TableCell>
             <TableCell>
-              <Badge variant="outline">{s.format.toUpperCase()}</Badge>
+              <div className="flex flex-wrap gap-1">
+                {s.email_enabled && (
+                  <Badge variant="outline">email digest</Badge>
+                )}
+                <Badge variant="outline">HTML</Badge>
+                {s.format === "csv" && <Badge variant="outline">CSV</Badge>}
+              </div>
             </TableCell>
-            <TableCell>{s.email_enabled ? "Yes" : "No"}</TableCell>
             <TableCell>
               <Badge variant={s.enabled ? "default" : "secondary"}>
                 {s.enabled ? "Enabled" : "Disabled"}

@@ -259,3 +259,35 @@ FROM vm_metrics
 WHERE vm_id = $1 AND time >= $2
 ORDER BY time DESC;
 
+
+-- ---------------------------------------------------------------------------
+-- Reports.
+-- ---------------------------------------------------------------------------
+
+-- CountAlertHistoryBySeverityInWindow feeds the cluster digest: how many
+-- alerts fired in the period per severity, and how many of them are resolved
+-- or still open. Windowed on created_at (when the alert was raised).
+-- name: CountAlertHistoryBySeverityInWindow :many
+SELECT severity,
+       count(*)::bigint AS fired,
+       (count(*) FILTER (WHERE state = 'resolved'))::bigint AS resolved,
+       (count(*) FILTER (WHERE state IN ('pending', 'firing', 'acknowledged')))::bigint AS open_count
+FROM alert_history
+WHERE cluster_id = @cluster_id::uuid
+  AND created_at >= @since::timestamptz
+  AND created_at < @until::timestamptz
+GROUP BY severity
+ORDER BY severity;
+
+-- ListTopAlertRulesInWindow lists the rules that fired most in the period,
+-- for the digest's "noisiest rules" table.
+-- name: ListTopAlertRulesInWindow :many
+SELECT r.name, ah.metric, ah.severity, count(*)::bigint AS fired
+FROM alert_history ah
+JOIN alert_rules r ON r.id = ah.rule_id
+WHERE ah.cluster_id = @cluster_id::uuid
+  AND ah.created_at >= @since::timestamptz
+  AND ah.created_at < @until::timestamptz
+GROUP BY r.name, ah.metric, ah.severity
+ORDER BY fired DESC, r.name
+LIMIT @row_limit::int;

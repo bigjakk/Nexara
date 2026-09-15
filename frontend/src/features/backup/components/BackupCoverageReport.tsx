@@ -134,7 +134,7 @@ function CoverageBadge({
 }
 
 export function BackupCoverageReport() {
-  const { data: entries, isLoading } = useBackupCoverage();
+  const { data: entries, isLoading, isError, error } = useBackupCoverage();
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
 
@@ -182,6 +182,18 @@ export function BackupCoverageReport() {
           ))}
         </div>
         <Skeleton className="h-64" />
+      </div>
+    );
+  }
+
+  // A failed read must not render as "0 backup targets": the coverage
+  // computation now fails loudly when a provider table cannot be read, and
+  // an empty page would turn that into a confident all-clear.
+  if (isError && !entries) {
+    return (
+      <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+        Backup coverage could not be computed
+        {error instanceof Error ? `: ${error.message}` : "."}
       </div>
     );
   }
