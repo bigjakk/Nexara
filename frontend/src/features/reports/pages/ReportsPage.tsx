@@ -4,73 +4,97 @@ import { ReportSchedulesTable } from "../components/ReportSchedulesTable";
 import { ReportRunsTable } from "../components/ReportRunsTable";
 import { ReportScheduleForm } from "../components/ReportScheduleForm";
 import { ReportGenerateDialog } from "../components/ReportGenerateDialog";
-import { ReportPreview } from "../components/ReportPreview";
+import { ReportCatalogue } from "../components/ReportCatalogue";
+import { useReportRuns } from "../api/report-queries";
 import { useAuth } from "@/hooks/useAuth";
-import type { ReportSchedule, ReportRun } from "@/types/api";
+import type { ReportSchedule } from "@/types/api";
 
 export function ReportsPage() {
   const { hasPermission } = useAuth();
   const canManage = hasPermission("manage", "report");
   const canGenerate = hasPermission("generate", "report");
+  const { data: runs } = useReportRuns();
 
   const [editSchedule, setEditSchedule] = useState<
     ReportSchedule | undefined
   >();
-  const [editOpen, setEditOpen] = useState(false);
-  const [previewRunId, setPreviewRunId] = useState("");
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleType, setScheduleType] = useState<string | undefined>();
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [generateType, setGenerateType] = useState<string | undefined>();
 
   const handleEdit = (schedule: ReportSchedule) => {
     setEditSchedule(schedule);
-    setEditOpen(true);
-  };
-
-  const handlePreview = (run: ReportRun) => {
-    setPreviewRunId(run.id);
-    setPreviewOpen(true);
+    setScheduleType(undefined);
+    setScheduleOpen(true);
   };
 
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight">Reports</h1>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Reports</h1>
+          <p className="text-sm text-muted-foreground">
+            Generate a report now, or schedule one and have it emailed.
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
           {canGenerate && <ReportGenerateDialog />}
           {canManage && <ReportScheduleForm />}
         </div>
       </div>
 
-      <Tabs defaultValue="schedules">
+      <ReportCatalogue
+        runs={runs}
+        canGenerate={canGenerate}
+        canManage={canManage}
+        onGenerate={(type) => {
+          setGenerateType(type);
+          setGenerateOpen(true);
+        }}
+        onSchedule={(type) => {
+          setEditSchedule(undefined);
+          setScheduleType(type);
+          setScheduleOpen(true);
+        }}
+      />
+
+      <Tabs defaultValue="history">
         <TabsList>
+          <TabsTrigger value="history">Report history</TabsTrigger>
           <TabsTrigger value="schedules">Schedules</TabsTrigger>
-          <TabsTrigger value="history">Report History</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="history" className="mt-4">
+          <ReportRunsTable />
+        </TabsContent>
 
         <TabsContent value="schedules" className="mt-4">
           <ReportSchedulesTable onEdit={handleEdit} />
         </TabsContent>
-
-        <TabsContent value="history" className="mt-4">
-          <ReportRunsTable onPreview={handlePreview} />
-        </TabsContent>
       </Tabs>
 
+      {canGenerate && (
+        <ReportGenerateDialog
+          initialType={generateType}
+          open={generateOpen}
+          onOpenChange={setGenerateOpen}
+        />
+      )}
       {canManage && (
         <ReportScheduleForm
           editSchedule={editSchedule}
-          open={editOpen}
+          initialType={scheduleType}
+          open={scheduleOpen}
           onOpenChange={(o) => {
-            setEditOpen(o);
-            if (!o) setEditSchedule(undefined);
+            setScheduleOpen(o);
+            if (!o) {
+              setEditSchedule(undefined);
+              setScheduleType(undefined);
+            }
           }}
         />
       )}
-
-      <ReportPreview
-        runId={previewRunId}
-        open={previewOpen}
-        onOpenChange={setPreviewOpen}
-      />
     </div>
   );
 }

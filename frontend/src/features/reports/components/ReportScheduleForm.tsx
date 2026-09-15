@@ -23,28 +23,22 @@ import {
   useUpdateReportSchedule,
 } from "../api/report-queries";
 import { useNotificationChannels } from "@/features/alerts/api/alert-queries";
-import { useQuery } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
-import type { ClusterResponse, ReportSchedule } from "@/types/api";
-
-const REPORT_TYPES = [
-  { value: "resource_utilization", label: "Resource Utilization" },
-  { value: "vm_resource_usage", label: "VM Resource Usage" },
-  { value: "capacity_forecast", label: "Capacity Forecast" },
-  { value: "backup_compliance", label: "Backup Compliance" },
-  { value: "patch_status", label: "Patch Status" },
-  { value: "uptime_summary", label: "Uptime Summary" },
-  { value: "snapshot_inventory", label: "Snapshot Inventory" },
-] as const;
+import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import type { ReportParameters, ReportSchedule } from "@/types/api";
+import { REPORT_TYPES, reportTypeInfo } from "../report-types";
+import { ReportParametersFields } from "./ReportParametersFields";
 
 interface ReportScheduleFormProps {
   editSchedule?: ReportSchedule | undefined;
+  /** Pre-selects a type when opened from a catalogue card. */
+  initialType?: string | undefined;
   open?: boolean | undefined;
   onOpenChange?: ((open: boolean) => void) | undefined;
 }
 
 export function ReportScheduleForm({
   editSchedule,
+  initialType,
   open: controlledOpen,
   onOpenChange,
 }: ReportScheduleFormProps) {
@@ -53,7 +47,7 @@ export function ReportScheduleForm({
   const setOpen = onOpenChange ?? setInternalOpen;
 
   const [name, setName] = useState("");
-  const [reportType, setReportType] = useState("resource_utilization");
+  const [reportType, setReportType] = useState("backup_compliance");
   const [clusterId, setClusterId] = useState("");
   const [timeRangeHours, setTimeRangeHours] = useState(168);
   const [schedule, setSchedule] = useState("");
@@ -61,15 +55,12 @@ export function ReportScheduleForm({
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [emailChannelId, setEmailChannelId] = useState("");
   const [enabled, setEnabled] = useState(true);
+  const [parameters, setParameters] = useState<ReportParameters>({});
 
   const createSchedule = useCreateReportSchedule();
   const updateSchedule = useUpdateReportSchedule();
   const { data: channels } = useNotificationChannels();
-  const { data: clusters } = useQuery({
-    queryKey: ["clusters"],
-    queryFn: () => apiClient.list<ClusterResponse>("/api/v1/clusters"),
-    enabled: open,
-  });
+  const { data: clusters } = useClusters();
 
   const emailChannels =
     channels?.filter((c) => c.channel_type === "email") ?? [];
@@ -86,18 +77,25 @@ export function ReportScheduleForm({
       setEmailEnabled(editSchedule.email_enabled);
       setEmailChannelId(editSchedule.email_channel_id ?? "");
       setEnabled(editSchedule.enabled);
+      setParameters(editSchedule.parameters);
     } else if (!editSchedule && open) {
       setName("");
-      setReportType("resource_utilization");
-      setClusterId("");
+      setReportType(initialType ?? "backup_compliance");
+      setClusterId(
+        clusters && clusters.length === 1 ? (clusters[0]?.id ?? "") : "",
+      );
       setTimeRangeHours(168);
       setSchedule("");
       setFormat("html");
       setEmailEnabled(false);
       setEmailChannelId("");
       setEnabled(true);
+      setParameters({});
     }
-  }, [editSchedule, open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset on open only
+  }, [editSchedule, initialType, open]);
+
+  const info = reportTypeInfo(reportType);
 
   const handleSubmit = () => {
     const data = {
@@ -110,7 +108,7 @@ export function ReportScheduleForm({
       email_enabled: emailEnabled,
       email_channel_id: emailEnabled ? emailChannelId || undefined : undefined,
       email_recipients: [] as string[],
-      parameters: {} as Record<string, unknown>,
+      parameters,
       enabled,
     };
 
@@ -168,6 +166,9 @@ export function ReportScheduleForm({
                 ))}
               </SelectContent>
             </Select>
+            {info && (
+              <p className="text-xs text-muted-foreground">{info.blurb}</p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -215,16 +216,20 @@ export function ReportScheduleForm({
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label>Format</Label>
+            <Label>Attachments</Label>
             <Select value={format} onValueChange={setFormat}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="html">HTML</SelectItem>
-                <SelectItem value="csv">CSV</SelectItem>
+                <SelectItem value="html">HTML report</SelectItem>
+                <SelectItem value="csv">HTML report + CSV</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              What an emailed run attaches; the body is always the findings
+              digest.
+            </p>
           </div>
 
           <div className="flex items-center gap-2 pt-6">
@@ -236,6 +241,12 @@ export function ReportScheduleForm({
             <Label htmlFor="schedule-enabled">Enabled</Label>
           </div>
         </div>
+
+        <ReportParametersFields
+          reportType={reportType}
+          value={parameters}
+          onChange={setParameters}
+        />
 
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -277,7 +288,10 @@ export function ReportScheduleForm({
     </DialogContent>
   );
 
-  if (isEditing) {
+  // A controlled instance (the page's edit / catalogue-driven one) must not
+  // mount a trigger of its own, or the page grows a second "New schedule"
+  // button beneath the tables.
+  if (isEditing || controlledOpen !== undefined) {
     return (
       <Dialog open={open} onOpenChange={setOpen}>
         {content}

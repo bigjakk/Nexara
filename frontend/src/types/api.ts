@@ -476,11 +476,7 @@ export interface TestChannelResponse {
 }
 
 export type DLQState =
-  | "pending"
-  | "rate_limited"
-  | "retrying"
-  | "resolved"
-  | "dismissed";
+  "pending" | "rate_limited" | "retrying" | "resolved" | "dismissed";
 
 export type DLQFailureKind = "send_failed" | "rate_limited" | "config_error";
 
@@ -542,11 +538,26 @@ export interface AlertRuleRequest {
 
 // Report types
 export type ReportType =
-  | "resource_utilization"
-  | "capacity_forecast"
+  | "cluster_digest"
   | "backup_compliance"
+  | "resource_utilization"
+  | "vm_resource_usage"
+  | "capacity_forecast"
+  | "snapshot_inventory"
   | "patch_status"
   | "uptime_summary";
+
+/**
+ * Per-report options, stored as JSON on schedules and runs. Every field has a
+ * server-side default, so an empty object is the report as it has always
+ * been; `sections` switches optional sections off by name.
+ */
+export interface ReportParameters {
+  stale_after_hours?: number;
+  top_n?: number;
+  snapshot_warn_days?: number;
+  sections?: Record<string, boolean>;
+}
 
 export interface ReportSchedule {
   id: string;
@@ -559,11 +570,13 @@ export interface ReportSchedule {
   email_enabled: boolean;
   email_channel_id?: string;
   email_recipients: string[];
-  parameters: Record<string, unknown>;
+  parameters: ReportParameters;
   enabled: boolean;
   last_run_at?: string;
   next_run_at?: string;
   created_by: string;
+  /** Whose grants each run reads under: the last person to save the schedule. */
+  run_as: string;
   created_at: string;
   updated_at: string;
 }
@@ -575,6 +588,7 @@ export interface ReportRun {
   cluster_id: string;
   status: "pending" | "running" | "completed" | "failed";
   time_range_hours: number;
+  parameters: ReportParameters;
   error_message?: string;
   created_by: string;
   started_at?: string;
@@ -829,12 +843,7 @@ export interface RollingUpdateJob {
   id: string;
   cluster_id: string;
   status:
-    | "pending"
-    | "running"
-    | "paused"
-    | "completed"
-    | "failed"
-    | "cancelled";
+    "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
   parallelism: number;
   reboot_after_update: boolean;
   auto_restore_guests: boolean;

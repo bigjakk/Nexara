@@ -140,6 +140,11 @@ const ReportsPage = lazy(() =>
     default: m.ReportsPage,
   })),
 );
+const ReportViewerPage = lazy(() =>
+  import("@/features/reports/pages/ReportViewerPage").then((m) => ({
+    default: m.ReportViewerPage,
+  })),
+);
 const TopologyPage = lazy(() =>
   import("@/features/topology/pages/TopologyPage").then((m) => ({
     default: m.TopologyPage,
@@ -334,6 +339,14 @@ const router = createBrowserRouter([
             element: (
               <LazyPage>
                 <ReportsPage />
+              </LazyPage>
+            ),
+          },
+          {
+            path: "reports/runs/:runId",
+            element: (
+              <LazyPage>
+                <ReportViewerPage />
               </LazyPage>
             ),
           },
