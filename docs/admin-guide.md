@@ -1166,40 +1166,52 @@ For continuous delivery, expand **Syslog Forwarding** on the Audit Log tab:
 
 ## Reports
 
-Navigate to **Reports** from the sidebar.
+Navigate to **Reports** from the sidebar. The page opens on a **catalogue** of report types — each card says what the report answers, what is inside, and when it last ran — with the run history and schedules beneath it.
 
-### Generating Reports
+Every report shares one layout: a masthead with the period and the sources consulted, a strip of headline figures, a ranked list of **findings** in plain language (the thing to act on, most severe first), the evidence sections with charts and tables, and a footer stating exactly how each number was computed. Charts are inline SVG, so the same document previews in the app, prints or saves as PDF from the viewer's **Print / PDF** button, downloads as HTML, and travels as an email attachment.
 
-1. Click **Generate Report**
-2. Select report type:
-   - **Resource Utilization** — CPU, memory, and storage usage across the cluster
-   - **VM Resource Usage** — per-guest resource consumption
-   - **Snapshot Inventory** — every guest snapshot, its age, and the guests carrying stale ones
-   - **Capacity Forecast** — resource trends and projected exhaustion
-   - **Backup Compliance** — which guests are protected and how recently
-   - **Patch Status** — pending package updates per node
-   - **Uptime Summary** — node and guest availability over the period
-3. Pick a **Cluster** and a **Time Range (hours)** (1–8760)
-4. Click **Generate**
-5. The finished run appears on the **Report History** tab — click the eye icon to preview the rendered HTML, or the download icon for CSV
+### Report types
 
-Runs produced by a *schedule* are pruned automatically after 90 days. A report you generate on demand is kept indefinitely — there is no delete action for report runs yet.
+| Report | What it answers | Options |
+|---|---|---|
+| **Cluster digest** | One page across availability, load, backups, alerts, tasks, snapshots and patching, with every other report's findings | stale hours, snapshot age |
+| **Backup compliance** | Every guest against **Proxmox Backup Server and Veeam**: coverage by state, recovery-point age, backup runs and failures in the period, datastore and repository capacity with days-to-full, malware verdicts and orphaned Veeam objects | stale hours; the runs section can be switched off |
+| **Resource utilisation** | CPU, memory, disk and network per node and per day, with sustained-pressure findings | — |
+| **VM resource usage** | Top consumers per resource, idle guests, every guest's period averages | top N |
+| **Capacity forecast** | Where the period's trend takes CPU and memory per node; how full each storage pool is | — |
+| **Snapshot inventory** | Every guest snapshot by age, and the ones most likely forgotten | snapshot age |
+| **Patch status** | The latest vulnerability scan per node, known-exploited CVEs first | — |
+| **Uptime summary** | Which nodes are up, for how long, and which rebooted in the period | — |
 
-### Scheduled Reports
+**Backup compliance and Veeam.** The report shares its verdict with the Backup page's coverage view, so the two never disagree: a guest is *current* when its newest restore point from **either** provider is younger than the stale threshold (default 24 h), *stale* otherwise, and has *no backup* when neither provider holds a point. PBS snapshots are matched through the datastores the cluster actually mounts, so a same-numbered guest on another cluster never counts. Veeam objects are matched on the guest's SMBIOS UUID; a name-only match is flagged. Veeam's own worker appliances and backup server are listed but excluded from every percentage.
 
-1. Click **New Schedule**
+Veeam data appears in a report when the person who requested it — the on-demand requester, or for a schedule the person who last **saved** it — holds `view:veeam` on that cluster; otherwise the report consults Proxmox Backup Server alone and says so. Saving a schedule makes its runs read under your grants from then on, and a schedule whose saver has been deactivated stops running until someone saves it again. A stored run is then readable by anyone holding `view:report` on the cluster: a report is a summary product, shared under that one grant by design, the same posture audit details take for Viewers. If the Veeam tables cannot be read, the run **fails** rather than quietly calling every Veeam-only guest unprotected.
+
+### Generating a report
+
+1. Click **Generate** on a catalogue card (or **Generate report** at the top of the page)
+2. Pick the **Cluster** and the **Period** in hours (1–8760). Point-in-time reports — snapshots, patch status — use the period as context only
+3. Set any **report options** the type offers; blank means the documented default
+4. Click **Generate**. The finished run opens on its own page with **Print / PDF**, **HTML**, **CSV**, **Email** and **Run again**
+
+Runs also appear on the **Report history** tab, where each one can be opened, downloaded, emailed or — with `manage:report` — deleted. Runs produced by a *schedule* are pruned automatically after 90 days; a report you generate on demand is kept until you delete it.
+
+### Scheduled reports
+
+1. Click **Schedule** on a catalogue card (or **New schedule**)
 2. Configure:
-   - **Name** — e.g. `Weekly CPU Report`
-   - **Report Type** — the same seven types as an on-demand run
-   - **Cluster** — one cluster per schedule
-   - **Cron Schedule** — minute hour day month weekday (e.g. `0 8 * * 1` = Mondays at 8 AM)
-   - **Time Range (hours)** — how much history each run covers
-   - **Format** — **HTML** or **CSV**
-   - **Enabled**
+   - **Name** — e.g. `Weekly backup review`
+   - **Report** and **Cluster** — one cluster per schedule
+   - **Cron schedule** — minute hour day month weekday (e.g. `0 6 * * 1` = Mondays at 06:00)
+   - **Period (hours)** — how much history each run covers
+   - **Attachments** — **HTML report**, or **HTML report + CSV**
+   - **Report options** — the same options as an on-demand run
    - **Email delivery** (optional) — pick an email notification channel and every run is mailed to it
-3. Click **Create Schedule**
+3. Click **Create schedule**
 
-Generated runs land on the **Report History** tab alongside on-demand ones. Scheduled runs are pruned after 90 days.
+### Emailed reports
+
+An emailed run carries a **digest** as the body — the headline figures, a coverage bar and the top findings, built from plain tables so every mail client renders it — with the full report attached as `<type>-<cluster>-<date>.html` (and `.csv` when the schedule asks for it). The digest is built from the same data as the attachment, so the two cannot disagree. Any finished run can also be sent on demand from its page or the history tab: pick the channel, optionally override the recipients, and choose whether to attach the CSV.
 
 ---
 
