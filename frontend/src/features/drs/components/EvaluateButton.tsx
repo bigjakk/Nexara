@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,17 +54,31 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
   const [blockReason, setBlockReason] = useState("");
   const [queued, setQueued] = useState(false);
 
-  // Reset state when switching clusters.
-  useEffect(() => {
+  /**
+   * Clear every field a verdict is derived from. Both the cluster-switch
+   * reset and the failure path go through here on purpose: the false
+   * all-clear this replaced came from those two clears drifting apart — one
+   * set `results` to `null`, the other to `[]`, and `[]` reads as a
+   * successful evaluation that found zero moves. `results === null` is the
+   * sentinel the whole verdict card gates on, via `hasResults`.
+   */
+  const clearEvaluation = useCallback((didEvaluate: boolean) => {
     setResults(null);
     setNodeScores(null);
     setImbalance(0);
     setThreshold(0);
-    setEvaluated(false);
     setBlocked(false);
     setBlockReason("");
     setQueued(false);
-  }, [clusterId]);
+    // True after a failed run too — a request finished, it just produced
+    // nothing to show. Never branch on this alone.
+    setEvaluated(didEvaluate);
+  }, []);
+
+  // Reset state when switching clusters.
+  useEffect(() => {
+    clearEvaluation(false);
+  }, [clusterId, clearEvaluation]);
 
   const handleEvaluate = () => {
     evaluation.mutate(undefined, {
@@ -79,12 +93,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
         setEvaluated(true);
       },
       onError: () => {
-        setResults([]);
-        setNodeScores(null);
-        setBlocked(false);
-        setBlockReason("");
-        setQueued(false);
-        setEvaluated(true);
+        clearEvaluation(true);
       },
     });
   };
@@ -119,8 +128,16 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
         Run Evaluation
       </Button>
 
-      {errorMessage && (
-        <p className="text-sm text-destructive">{errorMessage}</p>
+      {/*
+        Gate on isError, not on the message: a proxy 502 with an HTML body
+        falls back to res.statusText, which is "" over HTTP/2, and a failure
+        now clears the results — so keying off the message alone would render
+        the whole panel blank.
+      */}
+      {evaluation.isError && (
+        <p className="text-sm text-destructive">
+          {errorMessage || "Evaluation failed."}
+        </p>
       )}
 
       {isBlocked && (
