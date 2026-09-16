@@ -212,13 +212,52 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 	}
 
 	// Collect workloads per node.
+	//
 	// When include_containers is false, containers still count toward node load
 	// scoring (so DRS has accurate scores) but are marked as pinned so they
 	// won't be selected for migration. Container migration requires downtime
 	// (stop → move → start) unlike VM live migration.
+	//
+	// A node is registered in nodeEntries — which is what makes it visible to
+	// scoring and to the planner, as both a migration source and a target —
+	// only once its guests have actually been read. Registering it up front and
+	// then giving up on the listing is what this used to do, and it did not
+	// merely leave the node unconstrained, it INVERTED its score: an empty
+	// workload list reads as cpuLoad 0 and memLoad 0, so ScoreNode calls the
+	// node idle, while the affinity checks find no guest on it for any rule to
+	// conflict with. The node nobody could read thereby became the single most
+	// attractive target on the cluster — findSourceTargetPairs ranks by score
+	// gap, and a fabricated 0.0 is the widest gap available — so DRS piled
+	// guests onto the one node it had no information about.
+	//
+	// Failing the whole evaluation is the wrong treatment at this level, unlike
+	// the HA gates above. Those listings are cluster-wide and read once; this
+	// one is per-node and read N times, so a single flaky node would stop all
+	// balancing everywhere. Dropping the node keeps the other N-1 balancing and
+	// is the honest position when its load and its guest list are both unknown.
+	//
+	// Dropping rather than PINNING is deliberate, and is the opposite of the
+	// call made for Veeam guests and for containers under
+	// include_containers=false (see pinVeeamInfrastructure and Workload.Pinned).
+	// Pinning keeps a guest visible — still counted toward node load, still
+	// matched by affinity rules — because its figures are known and only its
+	// mobility is in question. Here nothing is known: there is no load to count
+	// and no guest list to show a rule. An "unknown" marker would have to be
+	// excluded from scoring, from targeting and from sourcing alike, which is
+	// dropping the node with extra steps.
+	//
+	// What the drop does cost: a guest on the dropped node is invisible to
+	// findVMNode, so an AFFINITY rule with a member there is skipped rather than
+	// enforced (see isAffinityAllowed) and the movable member may be moved away
+	// from a partner it should have stayed with. That fail-open predates this
+	// and cannot be closed without the listing itself. The anti-affinity
+	// direction — the one that co-locates guests that must never share a node —
+	// is not affected, because the dropped node can no longer be a target.
 	includeContainers := cfg.IncludeContainers
 	nodeWorkloads := make(map[string][]Workload)
 	nodeEntries := make(map[string]proxmox.NodeListEntry)
+	eligible, unreadable := 0, 0
+	var lastListErr error
 	for _, n := range nodes {
 		if n.Status != "online" {
 			continue
@@ -230,56 +269,45 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 			)
 			continue
 		}
+		eligible++
+
+		wl, err := collectNodeWorkloads(ctx, client, n.Node, includeContainers)
+		if err != nil {
+			unreadable++
+			lastListErr = err
+			e.logger.Warn("DRS excluding node from this evaluation: its guests could not be listed",
+				"cluster_id", clusterID, "node", n.Node, "error", err)
+			continue
+		}
 		nodeEntries[n.Node] = n
+		if len(wl) > 0 {
+			nodeWorkloads[n.Node] = wl
+		}
+	}
 
-		vms, err := client.GetVMs(ctx, n.Node)
-		if err != nil {
-			e.logger.Warn("failed to get VMs for node", "node", n.Node, "error", err)
-			continue
-		}
-		for _, vm := range vms {
-			if vm.Status != "running" || vm.Template == 1 {
-				continue
-			}
-			nodeWorkloads[n.Node] = append(nodeWorkloads[n.Node], Workload{
-				VMID:     vm.VMID,
-				Name:     vm.Name,
-				Type:     "qemu",
-				Node:     n.Node,
-				CPUUsage: vm.CPU,
-				CPUs:     vm.CPUs,
-				Mem:      vm.Mem,
-				MaxMem:   vm.MaxMem,
-				NetIn:    vm.NetIn,
-				NetOut:   vm.NetOut,
-				Status:   vm.Status,
-			})
-		}
-
-		cts, err := client.GetContainers(ctx, n.Node)
-		if err != nil {
-			e.logger.Warn("failed to get containers for node", "node", n.Node, "error", err)
-			continue
-		}
-		for _, ct := range cts {
-			if ct.Status != "running" || ct.Template == 1 {
-				continue
-			}
-			nodeWorkloads[n.Node] = append(nodeWorkloads[n.Node], Workload{
-				VMID:     ct.VMID,
-				Name:     ct.Name,
-				Type:     "lxc",
-				Node:     n.Node,
-				CPUUsage: ct.CPU,
-				CPUs:     ct.CPUs,
-				Mem:      ct.Mem,
-				MaxMem:   ct.MaxMem,
-				NetIn:    ct.NetIn,
-				NetOut:   ct.NetOut,
-				Status:   ct.Status,
-				Pinned:   !includeContainers,
-			})
-		}
+	// Dropping nodes one at a time is right while enough of the cluster remains
+	// to compare; below two readable nodes there is nothing to compare, and the
+	// drop must not be allowed to turn that into a verdict. CalculateImbalance
+	// returns 0 for a map of fewer than two entries and Plan bails at the same
+	// count, so Evaluate would otherwise hand back imbalance 0.0000 and no
+	// recommendations — which the API renders, and the UI reads, as "Cluster
+	// Balanced, variance 0%". That green light would be reporting the health of
+	// a cluster two thirds of which nobody could read.
+	//
+	// The threshold is two rather than "all N failed" for exactly that reason:
+	// the honesty defect appears as soon as fewer than two nodes survive, not
+	// only when none do. GetNodes already hard-fails on cluster-wide faults, so
+	// erroring here is consistent with it rather than a new failure mode.
+	//
+	// The unreadable count is what distinguishes zero from zero-out-of-zero —
+	// the same distinction unhealthyHANodes draws for unparseable LRM entries. A
+	// cluster whose nodes are all offline, or all in HA maintenance, also
+	// arrives here under the node threshold, but nothing failed to read and
+	// there is nothing to report; likewise a genuine single-node cluster, which
+	// has no migrations available and never did.
+	if unreadable > 0 && len(nodeEntries) < 2 {
+		return nil, fmt.Errorf("only %d of %d eligible node(s) could be listed, need at least 2 to compare: %w",
+			len(nodeEntries), eligible, lastListErr)
 	}
 
 	// Auto-import HA pin rules. A listing nobody could read stops the
@@ -375,6 +403,70 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 	result.Recommendations = Plan(scores, nodeWorkloads, nodeEntries, rules, weights, cfg.ImbalanceThreshold, e.logger)
 
 	return result, nil
+}
+
+// collectNodeWorkloads reads one node's running guests.
+//
+// BOTH listings must succeed for the node to be usable. Keeping the VMs when
+// only the container listing failed is the tempting half-fix, and it reproduces
+// the same bug at lower amplitude: the node is then undercounted rather than
+// empty, which moves its score down — the one direction that makes it a more
+// attractive migration target — while the containers it is actually running
+// stay invisible to every anti-affinity check. Partial knowledge of a node's
+// workload is not usable knowledge here, because every consumer of it reads
+// "fewer guests" as "more room".
+//
+// Returning early on the VM listing also preserves the old behaviour of not
+// issuing the container request for a node already known to be unreadable.
+func collectNodeWorkloads(ctx context.Context, client *proxmox.Client, node string, includeContainers bool) ([]Workload, error) {
+	vms, err := client.GetVMs(ctx, node)
+	if err != nil {
+		return nil, fmt.Errorf("list VMs: %w", err)
+	}
+	cts, err := client.GetContainers(ctx, node)
+	if err != nil {
+		return nil, fmt.Errorf("list containers: %w", err)
+	}
+
+	workloads := make([]Workload, 0, len(vms)+len(cts))
+	for _, vm := range vms {
+		if vm.Status != "running" || vm.Template == 1 {
+			continue
+		}
+		workloads = append(workloads, Workload{
+			VMID:     vm.VMID,
+			Name:     vm.Name,
+			Type:     "qemu",
+			Node:     node,
+			CPUUsage: vm.CPU,
+			CPUs:     vm.CPUs,
+			Mem:      vm.Mem,
+			MaxMem:   vm.MaxMem,
+			NetIn:    vm.NetIn,
+			NetOut:   vm.NetOut,
+			Status:   vm.Status,
+		})
+	}
+	for _, ct := range cts {
+		if ct.Status != "running" || ct.Template == 1 {
+			continue
+		}
+		workloads = append(workloads, Workload{
+			VMID:     ct.VMID,
+			Name:     ct.Name,
+			Type:     "lxc",
+			Node:     node,
+			CPUUsage: ct.CPU,
+			CPUs:     ct.CPUs,
+			Mem:      ct.Mem,
+			MaxMem:   ct.MaxMem,
+			NetIn:    ct.NetIn,
+			NetOut:   ct.NetOut,
+			Status:   ct.Status,
+			Pinned:   !includeContainers,
+		})
+	}
+	return workloads, nil
 }
 
 // ScoreNode computes a weighted load score for a node (0.0 = idle, 1.0 = fully loaded).

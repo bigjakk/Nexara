@@ -136,8 +136,20 @@ func Plan(
 					currentWorkloads[target] = currentWorkloads[target][:len(currentWorkloads[target])-1]
 					w.Node = source
 					currentWorkloads[source] = append(currentWorkloads[source][:j], append([]Workload{w}, currentWorkloads[source][j:]...)...)
-					currentScores[source] = ScoreNode(nodeEntries[source], currentWorkloads[source], weights)
-					currentScores[target] = ScoreNode(nodeEntries[target], currentWorkloads[target], weights)
+					// Guarded for the same reason as the apply path above, and
+					// not merely for symmetry: a missing entry would index to a
+					// zero-value NodeListEntry, whose MaxCPU and MaxMem of 0
+					// make ScoreNode return 0.0 — scoring the node as perfectly
+					// idle and so making it the most attractive target on the
+					// cluster. That is precisely the inversion Evaluate now
+					// keeps unreadable nodes out of nodeEntries to prevent, and
+					// an unguarded index here is a second door into it.
+					if entry, ok := nodeEntries[source]; ok {
+						currentScores[source] = ScoreNode(entry, currentWorkloads[source], weights)
+					}
+					if entry, ok := nodeEntries[target]; ok {
+						currentScores[target] = ScoreNode(entry, currentWorkloads[target], weights)
+					}
 					continue
 				}
 
