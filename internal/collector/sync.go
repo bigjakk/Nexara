@@ -39,6 +39,107 @@ const staleVMGrace = 5 * time.Minute
 // for storage pools, doesn't emit spurious inventory-change events.
 const staleInventoryGrace = 5 * time.Minute
 
+// inventoryHeartbeat is how stale a node-hardware row's last_seen_at may get
+// before an otherwise-unchanged re-sync rewrites it. Between heartbeats an
+// unchanged row is not written at all — the upserts below gate their DO UPDATE
+// on a content change OR this window — which is what keeps a sweep over static
+// hardware (PCI devices especially: hundreds of rows that change only when
+// someone physically opens the host) free of dirty tuples, WAL and fsync.
+//
+// It MUST stay comfortably below staleInventoryGrace. The prune deletes any row
+// whose last_seen_at is older than the grace window, so a heartbeat at or near
+// that boundary would race the prune and churn rows through delete/re-insert —
+// strictly worse than the update churn it replaces, since an insert is not HOT
+// and rewrites every index entry. inventoryHeartbeatWithinGrace in
+// sync_inventory_test.go pins the relationship so the two can't drift apart.
+const inventoryHeartbeat = staleInventoryGrace / 3
+
+// The nodeXxxRow types are the wire format for the batched inventory upserts:
+// each is marshalled to a JSON array and expanded back into rows by
+// jsonb_to_recordset. The json tags MUST match the column names in the query's
+// AS-list exactly, and MUST NOT use omitempty — a missing key becomes NULL and
+// every one of these columns is NOT NULL.
+type nodePCIDeviceRow struct {
+	PciID           string `json:"pci_id"`
+	Class           string `json:"class"`
+	DeviceName      string `json:"device_name"`
+	VendorName      string `json:"vendor_name"`
+	Device          string `json:"device"`
+	Vendor          string `json:"vendor"`
+	IommuGroup      int32  `json:"iommu_group"`
+	SubsystemDevice string `json:"subsystem_device"`
+	SubsystemVendor string `json:"subsystem_vendor"`
+}
+
+type nodeNetworkInterfaceRow struct {
+	Iface       string `json:"iface"`
+	IfaceType   string `json:"iface_type"`
+	Active      bool   `json:"active"`
+	Autostart   bool   `json:"autostart"`
+	Method      string `json:"method"`
+	Method6     string `json:"method6"`
+	Address     string `json:"address"`
+	Netmask     string `json:"netmask"`
+	Gateway     string `json:"gateway"`
+	Cidr        string `json:"cidr"`
+	BridgePorts string `json:"bridge_ports"`
+	Comments    string `json:"comments"`
+	Mtu         int32  `json:"mtu"`
+}
+
+type nodeDiskRow struct {
+	DevPath  string `json:"dev_path"`
+	Model    string `json:"model"`
+	Serial   string `json:"serial"`
+	Size     int64  `json:"size"`
+	DiskType string `json:"disk_type"`
+	Health   string `json:"health"`
+	Wearout  string `json:"wearout"`
+	Rpm      int32  `json:"rpm"`
+	Vendor   string `json:"vendor"`
+	Wwn      string `json:"wwn"`
+}
+
+// upsertInventoryBatch marshals one node's inventory rows and hands them to a
+// batched upsert as a single statement — one transaction, and at most one WAL
+// flush, for the whole table instead of one implicit transaction per row.
+//
+// A generic function rather than a Syncer method because Go does not allow type
+// parameters on methods.
+//
+// An empty batch is skipped: there is nothing to write, and json.Marshal of a
+// nil slice is "null", which jsonb_to_recordset rejects. Rows the node has
+// stopped reporting are removed by the grace-windowed prune each caller runs
+// afterwards, not by this function.
+//
+// Returns whether the node's rows are known to have been refreshed, and the
+// caller MUST skip its stale prune when that is false. The batch is
+// all-or-nothing where the old per-row loop was not: one unrepresentable value
+// (a NUL byte out of smartctl reaches the ::jsonb cast as \u0000, which
+// Postgres rejects) now aborts the whole statement instead of dropping one row.
+// Pruning anyway would then delete EVERY row for that node — the rows are all
+// unrefreshed, so they age past the grace window together — and keep deleting
+// them every sweep while the node sits there healthy. An empty batch returns
+// true: nothing failed, and rows the node no longer reports still need to age
+// out, which is what the old loop did with zero iterations.
+func upsertInventoryBatch[T any](logger *slog.Logger, nodeName, kind string, rows []T, exec func(json.RawMessage) error) bool {
+	if len(rows) == 0 {
+		return true
+	}
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		logger.Warn("failed to encode inventory batch; skipping stale prune",
+			"node", nodeName, "kind", kind, "error", err)
+		return false
+	}
+	if err := exec(payload); err != nil {
+		logger.Warn("failed to upsert inventory batch; skipping stale prune",
+			"node", nodeName, "kind", kind, "error", err)
+		return false
+	}
+	return true
+}
+
 // SyncQueries defines the database operations needed by the Syncer.
 // This interface enables testing with mock implementations.
 type SyncQueries interface {
@@ -97,11 +198,11 @@ type SyncQueries interface {
 	UpsertGuestSmbios(ctx context.Context, arg db.UpsertGuestSmbiosParams) error
 	DeleteGuestSmbiosForVanishedGuests(ctx context.Context, arg db.DeleteGuestSmbiosForVanishedGuestsParams) (int64, error)
 	// Node hardware detail queries
-	UpsertNodeDisk(ctx context.Context, arg db.UpsertNodeDiskParams) (db.NodeDisk, error)
+	UpsertNodeDisks(ctx context.Context, arg db.UpsertNodeDisksParams) error
 	DeleteStaleNodeDisks(ctx context.Context, arg db.DeleteStaleNodeDisksParams) error
-	UpsertNodeNetworkInterface(ctx context.Context, arg db.UpsertNodeNetworkInterfaceParams) (db.NodeNetworkInterface, error)
+	UpsertNodeNetworkInterfaces(ctx context.Context, arg db.UpsertNodeNetworkInterfacesParams) error
 	DeleteStaleNodeNetworkInterfaces(ctx context.Context, arg db.DeleteStaleNodeNetworkInterfacesParams) error
-	UpsertNodePCIDevice(ctx context.Context, arg db.UpsertNodePCIDeviceParams) (db.NodePciDevice, error)
+	UpsertNodePCIDevices(ctx context.Context, arg db.UpsertNodePCIDevicesParams) error
 	DeleteStaleNodePCIDevices(ctx context.Context, arg db.DeleteStaleNodePCIDevicesParams) error
 }
 
@@ -850,35 +951,41 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	if disks, err := client.GetNodeDisks(ctx, node.Node); err != nil {
 		s.logger.Warn("failed to sync node disks", "node", node.Node, "error", err)
 	} else {
+		rows := make([]nodeDiskRow, 0, len(disks))
 		for _, d := range disks {
-			if _, err := s.queries.UpsertNodeDisk(ctx, db.UpsertNodeDiskParams{
-				NodeID:    dbNode.ID,
-				ClusterID: clusterID,
-				DevPath:   d.DevPath,
-				Model:     d.Model,
-				Serial:    d.Serial,
-				Size:      d.Size,
-				DiskType:  d.Type,
-				Health:    d.Health,
-				Wearout:   d.Wearout.String(),
-				Rpm:       safeconv.Int32(d.RPM),
-				Vendor:    d.Vendor,
-				Wwn:       d.WWN,
-			}); err != nil {
-				s.logger.Warn("failed to upsert node disk", "node", node.Node, "dev", d.DevPath, "error", err)
-			}
+			rows = append(rows, nodeDiskRow{
+				DevPath:  d.DevPath,
+				Model:    d.Model,
+				Serial:   d.Serial,
+				Size:     d.Size,
+				DiskType: d.Type,
+				Health:   d.Health,
+				Wearout:  d.Wearout.String(),
+				Rpm:      safeconv.Int32(d.RPM),
+				Vendor:   d.Vendor,
+				Wwn:      d.WWN,
+			})
 		}
-		_ = s.queries.DeleteStaleNodeDisks(ctx, db.DeleteStaleNodeDisksParams{NodeID: dbNode.ID, GraceSeconds: int32(staleInventoryGrace.Seconds())})
+		refreshed := upsertInventoryBatch(s.logger, node.Node, "node disks", rows, func(payload json.RawMessage) error {
+			return s.queries.UpsertNodeDisks(ctx, db.UpsertNodeDisksParams{
+				NodeID:           dbNode.ID,
+				ClusterID:        clusterID,
+				Disks:            payload,
+				HeartbeatSeconds: safeconv.Int32(int(inventoryHeartbeat.Seconds())),
+			})
+		})
+		if refreshed {
+			_ = s.queries.DeleteStaleNodeDisks(ctx, db.DeleteStaleNodeDisksParams{NodeID: dbNode.ID, GraceSeconds: int32(staleInventoryGrace.Seconds())})
+		}
 	}
 
 	// Sync network interfaces.
 	if ifaces, err := client.GetNetworkInterfaces(ctx, node.Node); err != nil {
 		s.logger.Warn("failed to sync network interfaces", "node", node.Node, "error", err)
 	} else {
+		rows := make([]nodeNetworkInterfaceRow, 0, len(ifaces))
 		for _, iface := range ifaces {
-			if _, err := s.queries.UpsertNodeNetworkInterface(ctx, db.UpsertNodeNetworkInterfaceParams{
-				NodeID:      dbNode.ID,
-				ClusterID:   clusterID,
+			rows = append(rows, nodeNetworkInterfaceRow{
 				Iface:       iface.Iface,
 				IfaceType:   iface.Type,
 				Active:      iface.Active == 1,
@@ -893,21 +1000,28 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				Comments:    iface.Comments,
 				// Proxmox omits mtu for interfaces that inherit the default, so 0 means "not configured".
 				Mtu: safeconv.Int32(int(iface.MTU)),
-			}); err != nil {
-				s.logger.Warn("failed to upsert network interface", "node", node.Node, "iface", iface.Iface, "error", err)
-			}
+			})
 		}
-		_ = s.queries.DeleteStaleNodeNetworkInterfaces(ctx, db.DeleteStaleNodeNetworkInterfacesParams{NodeID: dbNode.ID, GraceSeconds: int32(staleInventoryGrace.Seconds())})
+		refreshed := upsertInventoryBatch(s.logger, node.Node, "network interfaces", rows, func(payload json.RawMessage) error {
+			return s.queries.UpsertNodeNetworkInterfaces(ctx, db.UpsertNodeNetworkInterfacesParams{
+				NodeID:           dbNode.ID,
+				ClusterID:        clusterID,
+				Interfaces:       payload,
+				HeartbeatSeconds: safeconv.Int32(int(inventoryHeartbeat.Seconds())),
+			})
+		})
+		if refreshed {
+			_ = s.queries.DeleteStaleNodeNetworkInterfaces(ctx, db.DeleteStaleNodeNetworkInterfacesParams{NodeID: dbNode.ID, GraceSeconds: int32(staleInventoryGrace.Seconds())})
+		}
 	}
 
 	// Sync PCI devices.
 	if devs, err := client.GetNodePCIDevices(ctx, node.Node); err != nil {
 		s.logger.Warn("failed to sync PCI devices", "node", node.Node, "error", err)
 	} else {
+		rows := make([]nodePCIDeviceRow, 0, len(devs))
 		for _, d := range devs {
-			if _, err := s.queries.UpsertNodePCIDevice(ctx, db.UpsertNodePCIDeviceParams{
-				NodeID:          dbNode.ID,
-				ClusterID:       clusterID,
+			rows = append(rows, nodePCIDeviceRow{
 				PciID:           d.ID,
 				Class:           d.Class,
 				DeviceName:      d.DeviceName,
@@ -917,11 +1031,19 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				IommuGroup:      safeconv.Int32(d.IOMMUGroup),
 				SubsystemDevice: d.SubsystemDevice,
 				SubsystemVendor: d.SubsystemVendor,
-			}); err != nil {
-				s.logger.Warn("failed to upsert PCI device", "node", node.Node, "pci", d.ID, "error", err)
-			}
+			})
 		}
-		_ = s.queries.DeleteStaleNodePCIDevices(ctx, db.DeleteStaleNodePCIDevicesParams{NodeID: dbNode.ID, GraceSeconds: int32(staleInventoryGrace.Seconds())})
+		refreshed := upsertInventoryBatch(s.logger, node.Node, "PCI devices", rows, func(payload json.RawMessage) error {
+			return s.queries.UpsertNodePCIDevices(ctx, db.UpsertNodePCIDevicesParams{
+				NodeID:           dbNode.ID,
+				ClusterID:        clusterID,
+				Devices:          payload,
+				HeartbeatSeconds: safeconv.Int32(int(inventoryHeartbeat.Seconds())),
+			})
+		})
+		if refreshed {
+			_ = s.queries.DeleteStaleNodePCIDevices(ctx, db.DeleteStaleNodePCIDevicesParams{NodeID: dbNode.ID, GraceSeconds: int32(staleInventoryGrace.Seconds())})
+		}
 	}
 
 	// Sum VM/CT disk and network I/O into the node metric snapshot.

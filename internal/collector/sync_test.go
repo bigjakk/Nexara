@@ -414,24 +414,24 @@ func (m *mockQueries) UpdateClusterPVEVersion(_ context.Context, _ db.UpdateClus
 	return nil
 }
 
-func (m *mockQueries) UpsertNodeDisk(_ context.Context, _ db.UpsertNodeDiskParams) (db.NodeDisk, error) {
-	return db.NodeDisk{}, nil
+func (m *mockQueries) UpsertNodeDisks(_ context.Context, _ db.UpsertNodeDisksParams) error {
+	return nil
 }
 
 func (m *mockQueries) DeleteStaleNodeDisks(_ context.Context, _ db.DeleteStaleNodeDisksParams) error {
 	return nil
 }
 
-func (m *mockQueries) UpsertNodeNetworkInterface(_ context.Context, _ db.UpsertNodeNetworkInterfaceParams) (db.NodeNetworkInterface, error) {
-	return db.NodeNetworkInterface{}, nil
+func (m *mockQueries) UpsertNodeNetworkInterfaces(_ context.Context, _ db.UpsertNodeNetworkInterfacesParams) error {
+	return nil
 }
 
 func (m *mockQueries) DeleteStaleNodeNetworkInterfaces(_ context.Context, _ db.DeleteStaleNodeNetworkInterfacesParams) error {
 	return nil
 }
 
-func (m *mockQueries) UpsertNodePCIDevice(_ context.Context, _ db.UpsertNodePCIDeviceParams) (db.NodePciDevice, error) {
-	return db.NodePciDevice{}, nil
+func (m *mockQueries) UpsertNodePCIDevices(_ context.Context, _ db.UpsertNodePCIDevicesParams) error {
+	return nil
 }
 
 func (m *mockQueries) DeleteStaleNodePCIDevices(_ context.Context, _ db.DeleteStaleNodePCIDevicesParams) error {

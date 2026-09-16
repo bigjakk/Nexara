@@ -301,10 +301,13 @@ type Querier interface {
 	DeleteSettingByID(ctx context.Context, id uuid.UUID) error
 	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
 	// a momentary non-observation no longer churns physical-disk rows.
+	// The grace window MUST exceed the upsert's @heartbeat_seconds above.
 	DeleteStaleNodeDisks(ctx context.Context, arg DeleteStaleNodeDisksParams) error
 	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
+	// The grace window MUST exceed the upsert's @heartbeat_seconds above.
 	DeleteStaleNodeNetworkInterfaces(ctx context.Context, arg DeleteStaleNodeNetworkInterfacesParams) error
 	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
+	// The grace window MUST exceed the upsert's @heartbeat_seconds above.
 	DeleteStaleNodePCIDevices(ctx context.Context, arg DeleteStaleNodePCIDevicesParams) error
 	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
 	// a momentary non-observation no longer churns PBS inventory rows, and the
@@ -1682,9 +1685,57 @@ type Querier interface {
 	UpsertGuestToolsPolicy(ctx context.Context, arg UpsertGuestToolsPolicyParams) (GuestToolsPolicy, error)
 	UpsertKEVEntry(ctx context.Context, arg UpsertKEVEntryParams) error
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
-	UpsertNodeDisk(ctx context.Context, arg UpsertNodeDiskParams) (NodeDisk, error)
-	UpsertNodeNetworkInterface(ctx context.Context, arg UpsertNodeNetworkInterfaceParams) (NodeNetworkInterface, error)
-	UpsertNodePCIDevice(ctx context.Context, arg UpsertNodePCIDeviceParams) (NodePciDevice, error)
+	// One statement — and therefore one transaction and at most one WAL flush —
+	// for a whole node's physical-disk inventory, instead of one implicit
+	// transaction per disk. See UpsertNodePCIDevices for the full rationale.
+	//
+	// The DO UPDATE is gated: an unchanged disk whose last_seen_at is still inside
+	// the heartbeat window writes NOTHING, so a sweep over unchanged hardware
+	// produces no dirty tuples, no WAL and no fsync. @heartbeat_seconds MUST stay
+	// well below the DeleteStaleNodeDisks grace window, or the prune below would
+	// delete rows the heartbeat has not refreshed yet.
+	//
+	// Note health/wearout are SMART-derived and do move on their own, so this
+	// table is not as static as PCI devices; the content gate handles that — a
+	// real SMART change writes immediately, it is only the idle case that is free.
+	//
+	// DISTINCT ON dedupes the input on the conflict key: Postgres rejects an
+	// ON CONFLICT DO UPDATE that would touch the same row twice in one statement.
+	// The batch arrives as one jsonb array rather than N parallel array parameters
+	// because sqlc cannot parse multi-argument unnest(...).
+	UpsertNodeDisks(ctx context.Context, arg UpsertNodeDisksParams) error
+	// One statement — and therefore one transaction and at most one WAL flush —
+	// for a whole node's network inventory, instead of one implicit transaction
+	// per interface. See UpsertNodePCIDevices for the full rationale.
+	//
+	// The DO UPDATE is gated: an unchanged interface whose last_seen_at is still
+	// inside the heartbeat window writes NOTHING, so a sweep over unchanged
+	// hardware produces no dirty tuples, no WAL and no fsync. @heartbeat_seconds
+	// MUST stay well below the DeleteStaleNodeNetworkInterfaces grace window, or
+	// the prune below would delete rows the heartbeat has not refreshed yet.
+	//
+	// DISTINCT ON dedupes the input on the conflict key: Postgres rejects an
+	// ON CONFLICT DO UPDATE that would touch the same row twice in one statement.
+	// The batch arrives as one jsonb array rather than N parallel array parameters
+	// because sqlc cannot parse multi-argument unnest(...).
+	UpsertNodeNetworkInterfaces(ctx context.Context, arg UpsertNodeNetworkInterfacesParams) error
+	// One statement — and therefore one transaction and at most one WAL flush —
+	// for a whole node's PCI inventory, instead of one implicit transaction per
+	// device. On a 3-node cluster that is ~265 commits per sync collapsed into 3.
+	//
+	// The DO UPDATE is gated: an unchanged device whose last_seen_at is still
+	// inside the heartbeat window writes NOTHING, so a sweep over unchanged
+	// hardware produces no dirty tuples, no WAL and no fsync. @heartbeat_seconds
+	// MUST stay well below the DeleteStaleNodePCIDevices grace window, or the
+	// prune below would delete rows the heartbeat has not refreshed yet.
+	//
+	// DISTINCT ON dedupes the input on the conflict key: Postgres rejects an
+	// ON CONFLICT DO UPDATE that would touch the same row twice in one statement,
+	// which a per-row loop could never hit but a set-based upsert can.
+	//
+	// The batch arrives as one jsonb array rather than N parallel text[]/int[]
+	// parameters because sqlc cannot parse multi-argument unnest(...).
+	UpsertNodePCIDevices(ctx context.Context, arg UpsertNodePCIDevicesParams) error
 	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)
 	UpsertPBSSyncJob(ctx context.Context, arg UpsertPBSSyncJobParams) (PbsSyncJob, error)
 	UpsertPBSVerifyJob(ctx context.Context, arg UpsertPBSVerifyJobParams) (PbsVerifyJob, error)

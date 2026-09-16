@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -43,14 +44,22 @@ var nodeInventoryTables = []string{
 //
 // Setting it unconditionally to now() would have made it a duplicate of
 // last_seen_at, so the upsert compares the content columns and moves
-// updated_at only on a real change. Three properties:
+// updated_at only on a real change.
 //
-//  1. A re-sync that changes nothing leaves updated_at alone while last_seen_at
-//     still advances — the collector polls constantly, and that must not read
-//     as the row changing.
-//  2. A re-sync that changes content moves updated_at.
-//  3. None of these tables grows a set_updated_at trigger, which would
-//     override the CASE and make properties 1 and 2 unenforceable.
+// That comparison later grew a second job: it also gates whether the row is
+// written AT ALL. Bumping last_seen_at every tick rewrote every row of static
+// hardware on every sweep, and on an NFS-backed data directory each of those
+// tuples cost a WAL flush and an fsync. The upsert now writes only on a content
+// change or an expired heartbeat. Five properties:
+//
+//  1. A re-sync that changes nothing, inside the heartbeat window, writes
+//     nothing — neither updated_at nor last_seen_at moves.
+//  2. Once the heartbeat window expires, an unchanged re-sync advances
+//     last_seen_at only, so the grace-windowed prune never deletes a live row.
+//  3. A re-sync that changes content writes immediately and moves updated_at.
+//  4. A batch repeating one conflict key does not error.
+//  5. None of these tables grows a set_updated_at trigger, which would
+//     override the CASE and make properties 1-3 unenforceable.
 //
 // Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database — never the
 // live nexara DB).
@@ -84,7 +93,7 @@ func TestNodeInventoryUpdatedAt_MovesOnlyOnContentChange(t *testing.T) {
 		t.Fatalf("seed node: %v", err)
 	}
 
-	// Property 3 first: the guard only works on tables without the trigger, so
+	// Property 5 first: the guard only works on tables without the trigger, so
 	// establish that before asserting behaviour that depends on it.
 	for _, table := range nodeInventoryTables {
 		var triggers int
@@ -103,9 +112,23 @@ func TestNodeInventoryUpdatedAt_MovesOnlyOnContentChange(t *testing.T) {
 
 	q := gen.New(pool)
 
-	iface := gen.UpsertNodeNetworkInterfaceParams{
-		NodeID:      invUpdNode,
-		ClusterID:   invUpdCluster,
+	type ifaceRow struct {
+		Iface       string `json:"iface"`
+		IfaceType   string `json:"iface_type"`
+		Active      bool   `json:"active"`
+		Autostart   bool   `json:"autostart"`
+		Method      string `json:"method"`
+		Method6     string `json:"method6"`
+		Address     string `json:"address"`
+		Netmask     string `json:"netmask"`
+		Gateway     string `json:"gateway"`
+		Cidr        string `json:"cidr"`
+		BridgePorts string `json:"bridge_ports"`
+		Comments    string `json:"comments"`
+		Mtu         int32  `json:"mtu"`
+	}
+
+	base := ifaceRow{
 		Iface:       "vmbr0",
 		IfaceType:   "bridge",
 		Active:      true,
@@ -118,38 +141,104 @@ func TestNodeInventoryUpdatedAt_MovesOnlyOnContentChange(t *testing.T) {
 		Mtu:         1500,
 	}
 
-	first, err := q.UpsertNodeNetworkInterface(ctx, iface)
-	if err != nil {
-		t.Fatalf("initial upsert: %v", err)
+	// heartbeatNever is long enough that a row written moments ago is always
+	// inside the window, so only a content change can trigger a write.
+	const heartbeatNever = 3600
+	// heartbeatNow expires the window immediately: last_seen_at < now() - 0s is
+	// true for any earlier write, so the heartbeat branch always fires.
+	const heartbeatNow = 0
+
+	upsert := func(t *testing.T, heartbeatSeconds int32, rows ...ifaceRow) {
+		t.Helper()
+		payload, err := json.Marshal(rows)
+		if err != nil {
+			t.Fatalf("marshal interfaces: %v", err)
+		}
+		if err := q.UpsertNodeNetworkInterfaces(ctx, gen.UpsertNodeNetworkInterfacesParams{
+			NodeID:           invUpdNode,
+			ClusterID:        invUpdCluster,
+			Interfaces:       payload,
+			HeartbeatSeconds: heartbeatSeconds,
+		}); err != nil {
+			t.Fatalf("upsert interfaces: %v", err)
+		}
 	}
 
-	// Property 1: an unchanged re-sync advances last_seen_at only.
-	unchanged, err := q.UpsertNodeNetworkInterface(ctx, iface)
-	if err != nil {
-		t.Fatalf("unchanged re-upsert: %v", err)
+	read := func(t *testing.T) (updatedAt, lastSeenAt time.Time, mtu int32) {
+		t.Helper()
+		if err := pool.QueryRow(ctx,
+			`SELECT updated_at, last_seen_at, mtu FROM node_network_interfaces
+			 WHERE node_id = $1 AND iface = $2`, invUpdNode, base.Iface,
+		).Scan(&updatedAt, &lastSeenAt, &mtu); err != nil {
+			t.Fatalf("read interface: %v", err)
+		}
+		return updatedAt, lastSeenAt, mtu
 	}
-	if !unchanged.UpdatedAt.Equal(first.UpdatedAt) {
+
+	upsert(t, heartbeatNever, base)
+	firstUpdated, firstSeen, _ := read(t)
+
+	// Property 1: an unchanged re-sync inside the heartbeat window writes
+	// NOTHING. This is the whole point of the gate — the collector re-reads
+	// static hardware every tick, and on an NFS-backed data directory each
+	// dirtied tuple costs a WAL flush and an fsync. last_seen_at holding still
+	// here is the observable proof that no tuple was written.
+	upsert(t, heartbeatNever, base)
+	unchangedUpdated, unchangedSeen, _ := read(t)
+	if !unchangedSeen.Equal(firstSeen) {
+		t.Errorf("unchanged re-sync inside the heartbeat window advanced last_seen_at: %s -> %s; it must not write at all",
+			firstSeen, unchangedSeen)
+	}
+	if !unchangedUpdated.Equal(firstUpdated) {
 		t.Errorf("unchanged re-sync moved updated_at: %s -> %s; it must track content changes, not polls",
-			first.UpdatedAt, unchanged.UpdatedAt)
-	}
-	if !unchanged.LastSeenAt.After(first.LastSeenAt) {
-		t.Errorf("unchanged re-sync did not advance last_seen_at: %s -> %s",
-			first.LastSeenAt, unchanged.LastSeenAt)
+			firstUpdated, unchangedUpdated)
 	}
 
-	// Property 2: a content change moves updated_at. MTU is the newest content
+	// Property 2: once the heartbeat window has expired, an unchanged re-sync
+	// does write, advancing last_seen_at only. Without this the grace-windowed
+	// prune would eventually delete rows the node is still reporting.
+	upsert(t, heartbeatNow, base)
+	beatUpdated, beatSeen, _ := read(t)
+	if !beatSeen.After(firstSeen) {
+		t.Errorf("expired heartbeat did not advance last_seen_at: %s -> %s; the stale prune would delete live rows",
+			firstSeen, beatSeen)
+	}
+	if !beatUpdated.Equal(firstUpdated) {
+		t.Errorf("heartbeat-only refresh moved updated_at: %s -> %s", firstUpdated, beatUpdated)
+	}
+
+	// Property 3: a content change writes immediately even when the heartbeat
+	// window has not expired, and moves updated_at. MTU is the newest content
 	// column, so it doubles as a check that the column reaches the comparison.
-	changed := iface
+	changed := base
 	changed.Mtu = 9000
-	after, err := q.UpsertNodeNetworkInterface(ctx, changed)
-	if err != nil {
-		t.Fatalf("changed re-upsert: %v", err)
+	upsert(t, heartbeatNever, changed)
+	afterUpdated, afterSeen, afterMtu := read(t)
+	if !afterUpdated.After(beatUpdated) {
+		t.Errorf("content change did not move updated_at: %s -> %s", beatUpdated, afterUpdated)
 	}
-	if !after.UpdatedAt.After(unchanged.UpdatedAt) {
-		t.Errorf("content change did not move updated_at: %s -> %s",
-			unchanged.UpdatedAt, after.UpdatedAt)
+	if !afterSeen.After(beatSeen) {
+		t.Errorf("content change did not advance last_seen_at: %s -> %s", beatSeen, afterSeen)
 	}
-	if after.Mtu != 9000 {
-		t.Errorf("mtu = %d, want 9000", after.Mtu)
+	if afterMtu != 9000 {
+		t.Errorf("mtu = %d, want 9000", afterMtu)
+	}
+
+	// Property 4: a batch carrying the same conflict key twice must not error.
+	// Postgres refuses an ON CONFLICT DO UPDATE that would touch one row twice
+	// in a single statement — a hazard the old per-row loop could not hit, so
+	// the set-based upsert dedupes with DISTINCT ON. A Proxmox response that
+	// repeated an interface would otherwise abort the whole node's sync.
+	dup := base
+	dup.Mtu = 1234
+	upsert(t, heartbeatNow, base, dup)
+	var rowCount int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM node_network_interfaces WHERE node_id = $1 AND iface = $2`,
+		invUpdNode, base.Iface).Scan(&rowCount); err != nil {
+		t.Fatalf("count interfaces: %v", err)
+	}
+	if rowCount != 1 {
+		t.Errorf("duplicate key in one batch produced %d rows, want 1", rowCount)
 	}
 }

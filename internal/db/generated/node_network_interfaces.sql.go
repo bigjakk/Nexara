@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 )
@@ -23,6 +24,7 @@ type DeleteStaleNodeNetworkInterfacesParams struct {
 }
 
 // Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
+// The grace window MUST exceed the upsert's @heartbeat_seconds above.
 func (q *Queries) DeleteStaleNodeNetworkInterfaces(ctx context.Context, arg DeleteStaleNodeNetworkInterfacesParams) error {
 	_, err := q.db.Exec(ctx, deleteStaleNodeNetworkInterfaces, arg.NodeID, arg.GraceSeconds)
 	return err
@@ -72,10 +74,18 @@ func (q *Queries) ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uu
 	return items, nil
 }
 
-const upsertNodeNetworkInterface = `-- name: UpsertNodeNetworkInterface :one
+const upsertNodeNetworkInterfaces = `-- name: UpsertNodeNetworkInterfaces :exec
 INSERT INTO node_network_interfaces (node_id, cluster_id, iface, iface_type, active, autostart, method, method6,
                                       address, netmask, gateway, cidr, bridge_ports, comments, mtu, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
+SELECT DISTINCT ON (n.iface)
+       $1::uuid, $2::uuid, n.iface, n.iface_type, n.active, n.autostart, n.method, n.method6,
+       n.address, n.netmask, n.gateway, n.cidr, n.bridge_ports, n.comments, n.mtu, now()
+FROM jsonb_to_recordset($3::jsonb) AS n(
+        iface text, iface_type text, active boolean, autostart boolean,
+        method text, method6 text, address text, netmask text, gateway text,
+        cidr text, bridge_ports text, comments text, mtu int
+     )
+ORDER BY n.iface
 ON CONFLICT (node_id, iface) DO UPDATE SET
     iface_type = EXCLUDED.iface_type,
     active = EXCLUDED.active,
@@ -89,8 +99,10 @@ ON CONFLICT (node_id, iface) DO UPDATE SET
     bridge_ports = EXCLUDED.bridge_ports,
     comments = EXCLUDED.comments,
     mtu = EXCLUDED.mtu,
-    -- last_seen_at marks every sync; updated_at moves only when the row's content actually
-    -- changed, so it answers "when did this row last change?" rather than "when was it last polled?".
+    -- last_seen_at marks every sync that gets this far; updated_at moves only when the
+    -- row's content actually changed, so it answers "when did this row last change?"
+    -- rather than "when was it last polled?". The WHERE below lets a heartbeat-only
+    -- refresh through, so this CASE is still what keeps updated_at honest.
     updated_at = CASE WHEN (
         node_network_interfaces.iface_type,
         node_network_interfaces.active,
@@ -119,66 +131,62 @@ ON CONFLICT (node_id, iface) DO UPDATE SET
         EXCLUDED.mtu
     ) THEN now() ELSE node_network_interfaces.updated_at END,
     last_seen_at = now()
-RETURNING id, node_id, cluster_id, iface, iface_type, active, autostart, method, method6, address, netmask, gateway, cidr, bridge_ports, comments, last_seen_at, created_at, updated_at, mtu
+WHERE (
+    node_network_interfaces.iface_type,
+    node_network_interfaces.active,
+    node_network_interfaces.autostart,
+    node_network_interfaces.method,
+    node_network_interfaces.method6,
+    node_network_interfaces.address,
+    node_network_interfaces.netmask,
+    node_network_interfaces.gateway,
+    node_network_interfaces.cidr,
+    node_network_interfaces.bridge_ports,
+    node_network_interfaces.comments,
+    node_network_interfaces.mtu
+) IS DISTINCT FROM (
+    EXCLUDED.iface_type,
+    EXCLUDED.active,
+    EXCLUDED.autostart,
+    EXCLUDED.method,
+    EXCLUDED.method6,
+    EXCLUDED.address,
+    EXCLUDED.netmask,
+    EXCLUDED.gateway,
+    EXCLUDED.cidr,
+    EXCLUDED.bridge_ports,
+    EXCLUDED.comments,
+    EXCLUDED.mtu
+) OR node_network_interfaces.last_seen_at < now() - make_interval(secs => $4::int)
 `
 
-type UpsertNodeNetworkInterfaceParams struct {
-	NodeID      uuid.UUID `json:"node_id"`
-	ClusterID   uuid.UUID `json:"cluster_id"`
-	Iface       string    `json:"iface"`
-	IfaceType   string    `json:"iface_type"`
-	Active      bool      `json:"active"`
-	Autostart   bool      `json:"autostart"`
-	Method      string    `json:"method"`
-	Method6     string    `json:"method6"`
-	Address     string    `json:"address"`
-	Netmask     string    `json:"netmask"`
-	Gateway     string    `json:"gateway"`
-	Cidr        string    `json:"cidr"`
-	BridgePorts string    `json:"bridge_ports"`
-	Comments    string    `json:"comments"`
-	Mtu         int32     `json:"mtu"`
+type UpsertNodeNetworkInterfacesParams struct {
+	NodeID           uuid.UUID       `json:"node_id"`
+	ClusterID        uuid.UUID       `json:"cluster_id"`
+	Interfaces       json.RawMessage `json:"interfaces"`
+	HeartbeatSeconds int32           `json:"heartbeat_seconds"`
 }
 
-func (q *Queries) UpsertNodeNetworkInterface(ctx context.Context, arg UpsertNodeNetworkInterfaceParams) (NodeNetworkInterface, error) {
-	row := q.db.QueryRow(ctx, upsertNodeNetworkInterface,
+// One statement — and therefore one transaction and at most one WAL flush —
+// for a whole node's network inventory, instead of one implicit transaction
+// per interface. See UpsertNodePCIDevices for the full rationale.
+//
+// The DO UPDATE is gated: an unchanged interface whose last_seen_at is still
+// inside the heartbeat window writes NOTHING, so a sweep over unchanged
+// hardware produces no dirty tuples, no WAL and no fsync. @heartbeat_seconds
+// MUST stay well below the DeleteStaleNodeNetworkInterfaces grace window, or
+// the prune below would delete rows the heartbeat has not refreshed yet.
+//
+// DISTINCT ON dedupes the input on the conflict key: Postgres rejects an
+// ON CONFLICT DO UPDATE that would touch the same row twice in one statement.
+// The batch arrives as one jsonb array rather than N parallel array parameters
+// because sqlc cannot parse multi-argument unnest(...).
+func (q *Queries) UpsertNodeNetworkInterfaces(ctx context.Context, arg UpsertNodeNetworkInterfacesParams) error {
+	_, err := q.db.Exec(ctx, upsertNodeNetworkInterfaces,
 		arg.NodeID,
 		arg.ClusterID,
-		arg.Iface,
-		arg.IfaceType,
-		arg.Active,
-		arg.Autostart,
-		arg.Method,
-		arg.Method6,
-		arg.Address,
-		arg.Netmask,
-		arg.Gateway,
-		arg.Cidr,
-		arg.BridgePorts,
-		arg.Comments,
-		arg.Mtu,
+		arg.Interfaces,
+		arg.HeartbeatSeconds,
 	)
-	var i NodeNetworkInterface
-	err := row.Scan(
-		&i.ID,
-		&i.NodeID,
-		&i.ClusterID,
-		&i.Iface,
-		&i.IfaceType,
-		&i.Active,
-		&i.Autostart,
-		&i.Method,
-		&i.Method6,
-		&i.Address,
-		&i.Netmask,
-		&i.Gateway,
-		&i.Cidr,
-		&i.BridgePorts,
-		&i.Comments,
-		&i.LastSeenAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Mtu,
-	)
-	return i, err
+	return err
 }
