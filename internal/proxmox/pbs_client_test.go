@@ -281,7 +281,7 @@ func TestNewPBSClient_Validation(t *testing.T) {
 // The fixtures below are the shapes a live PBS 3.x actually returned for the
 // two paths, so this fails again the moment the leading segment goes back.
 func TestPBSClient_GetDatastoreConfigUsesConfigEndpoint(t *testing.T) {
-	const store = "Test-Backup-Datastore"
+	const store = "datastore01"
 
 	srv := pbsTestServer(t, map[string]interface{}{
 		// The directory index, served where the old code looked.
@@ -339,8 +339,8 @@ func TestPBSClient_GetPruneJobs(t *testing.T) {
 	srv := pbsTestServer(t, map[string]interface{}{
 		"/admin/prune": []map[string]interface{}{
 			{
-				"id":               "default-Test-Backup-Datastore-4f",
-				"store":            "Test-Backup-Datastore",
+				"id":               "default-datastore01-4f",
+				"store":            "datastore01",
 				"schedule":         "daily",
 				"keep-daily":       14,
 				"last-run-state":   "OK",
@@ -373,7 +373,7 @@ func TestPBSClient_GetPruneJobs(t *testing.T) {
 	}
 
 	j := jobs[0]
-	if j.Store != "Test-Backup-Datastore" || j.Schedule != "daily" || j.KeepDaily != 14 {
+	if j.Store != "datastore01" || j.Schedule != "daily" || j.KeepDaily != 14 {
 		t.Errorf("job = %+v, want store/schedule/keep-daily from the fixture", j)
 	}
 	// The reason for preferring /admin/prune: /config/prune carries none of these.

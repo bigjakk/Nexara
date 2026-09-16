@@ -154,19 +154,19 @@ func TestValidateISCSIPortal(t *testing.T) {
 		portal  string
 		wantErr bool
 	}{
-		{"bare host", "192.168.5.2", false},
-		{"host with port", "192.168.5.2:3260", false},
+		{"bare host", "192.0.2.20", false},
+		{"host with port", "192.0.2.20:3260", false},
 		{"hostname", "nas.example.com", false},
 		{"hostname with port", "nas.example.com:3260", false},
 		{"ipv6 bracketed", "[fd00::1]:3260", false},
 
 		{"empty", "", true},
-		{"space", "192.168.5.2 3260", true},
-		{"tab", "192.168.5.2\t", true},
-		{"path separator", "192.168.5.2/target", true},
-		{"query string", "192.168.5.2?x=1", true},
-		{"fragment", "192.168.5.2#x", true},
-		{"newline", "192.168.5.2\niscsi", true},
+		{"space", "192.0.2.20 3260", true},
+		{"tab", "192.0.2.20\t", true},
+		{"path separator", "192.0.2.20/target", true},
+		{"query string", "192.0.2.20?x=1", true},
+		{"fragment", "192.0.2.20#x", true},
+		{"newline", "192.0.2.20\niscsi", true},
 		{"over length", strings.Repeat("a", 256), true},
 	}
 
@@ -182,15 +182,15 @@ func TestValidateISCSIPortal(t *testing.T) {
 
 func TestScanISCSI_RequestShapeAndDecoding(t *testing.T) {
 	srv, seen := newCaptureServer(t,
-		`{"data":[{"target":"iqn.2005-10.org.freenas.ctl:test","portal":"192.168.5.2:3260"}]}`)
+		`{"data":[{"target":"iqn.2005-10.org.freenas.ctl:test","portal":"192.0.2.20:3260"}]}`)
 	c := newTestClient(t, srv.URL)
 
-	targets, err := c.ScanISCSI(context.Background(), "pve1", "192.168.5.2")
+	targets, err := c.ScanISCSI(context.Background(), "pve1", "192.0.2.20")
 	if err != nil {
 		t.Fatalf("ScanISCSI: %v", err)
 	}
 
-	want := "/api2/json/nodes/pve1/scan/iscsi?portal=192.168.5.2"
+	want := "/api2/json/nodes/pve1/scan/iscsi?portal=192.0.2.20"
 	if len(*seen) != 1 || (*seen)[0] != want {
 		t.Errorf("request target = %v, want [%s]", *seen, want)
 	}
@@ -200,7 +200,7 @@ func TestScanISCSI_RequestShapeAndDecoding(t *testing.T) {
 	if targets[0].Target != "iqn.2005-10.org.freenas.ctl:test" {
 		t.Errorf("target = %q", targets[0].Target)
 	}
-	if targets[0].Portal != "192.168.5.2:3260" {
+	if targets[0].Portal != "192.0.2.20:3260" {
 		t.Errorf("portal = %q", targets[0].Portal)
 	}
 }
@@ -210,10 +210,10 @@ func TestScanISCSI_RejectsBadInputWithoutIssuingRequest(t *testing.T) {
 	// portal must be refused here rather than forwarded with the cluster's token.
 	cases := []struct{ node, portal string }{
 		{"pve1", ""},
-		{"pve1", "192.168.5.2/../../access"},
-		{"pve1", "192.168.5.2?x=1"},
-		{"", "192.168.5.2"},
-		{"../other", "192.168.5.2"},
+		{"pve1", "192.0.2.20/../../access"},
+		{"pve1", "192.0.2.20?x=1"},
+		{"", "192.0.2.20"},
+		{"../other", "192.0.2.20"},
 	}
 
 	for _, tc := range cases {

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { summarizePrune } from "./prune-summary";
 import type { PBSPruneJob } from "../types/backup";
 
-const STORE = "Test-Backup-Datastore";
+const STORE = "datastore01";
 
 function job(over: Partial<PBSPruneJob> = {}): PBSPruneJob {
   return { id: "j1", store: STORE, schedule: "daily", ...over };

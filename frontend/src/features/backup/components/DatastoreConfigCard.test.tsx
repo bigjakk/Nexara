@@ -12,7 +12,7 @@ vi.mock("@/lib/api-client", () => ({
 const mockedGet = vi.mocked(apiClient.get);
 const mockedList = vi.mocked(apiClient.list);
 
-const STORE = "Test-Backup-Datastore";
+const STORE = "datastore01";
 
 /** The datastore's own config, as PBS >= 2.2 reports it: no prune keys at all. */
 const configWithoutPrune = {

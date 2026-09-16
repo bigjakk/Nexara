@@ -230,9 +230,9 @@ func TestBackupJobRequestAuditDetails(t *testing.T) {
 
 func TestFilterPruneJobsByStore(t *testing.T) {
 	jobs := []proxmox.PBSPruneJob{
-		{ID: "a", Store: "Test-Backup-Datastore"},
+		{ID: "a", Store: "datastore01"},
 		{ID: "b", Store: "PBS-Test-Datastore"},
-		{ID: "c", Store: "Test-Backup-Datastore"},
+		{ID: "c", Store: "datastore01"},
 	}
 
 	tests := []struct {
@@ -241,10 +241,10 @@ func TestFilterPruneJobsByStore(t *testing.T) {
 		wantIDs []string
 	}{
 		{"empty store is no filter", "", []string{"a", "b", "c"}},
-		{"narrows to one datastore", "Test-Backup-Datastore", []string{"a", "c"}},
+		{"narrows to one datastore", "datastore01", []string{"a", "c"}},
 		{"unknown store yields nothing", "nope", []string{}},
 		// Datastore names are case-sensitive in PBS; a near-miss must not match.
-		{"case-sensitive", "test-backup-datastore", []string{}},
+		{"case-sensitive", "DATASTORE01", []string{}},
 	}
 
 	for _, tt := range tests {

@@ -9,8 +9,8 @@ import "testing"
 // presents. So most of these cases are about staying quiet.
 func TestEndpointFingerprintStale(t *testing.T) {
 	const (
-		pinned = "C9:F2:4E:42:5D:FA:D9:B0:AF:14:53:41:5F:67:EC:6C"
-		other  = "0C:6A:3D:A6:D6:E5:38:EA:F7:C8:88:48:4A:E0:E4:27"
+		pinned = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
+		other  = "11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00"
 	)
 
 	tests := []struct {
@@ -30,7 +30,7 @@ func TestEndpointFingerprintStale(t *testing.T) {
 			// guards a hand-entered pin rather than a routine difference.
 			name:   "colons and case are not a mismatch",
 			apiURL: "https://192.0.2.10:8006/", pinned: pinned,
-			nodeAddress: "192.0.2.10", nodeFinger: "c9f24e425dfad9b0af1453415f67ec6c",
+			nodeAddress: "192.0.2.10", nodeFinger: "aabbccddeeff00112233445566778899",
 			want: false,
 		},
 		{

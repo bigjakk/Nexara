@@ -31,7 +31,7 @@ const FINGERPRINT_ISSUE: HealthIssue = {
   detail:
     "pve-01 is presenting a different certificate than the one pinned for " +
     "this cluster, so live Proxmox operations fail. It now presents " +
-    "0c6a3da6d6e538eaf7c88848 — confirm that on the node before accepting it.",
+    "112233445566778899aabbcc — confirm that on the node before accepting it.",
 };
 
 function makeCluster(issues: HealthIssue[]): ClusterResponse {
@@ -40,7 +40,7 @@ function makeCluster(issues: HealthIssue[]): ClusterResponse {
     name: "cluster01",
     api_url: "https://192.0.2.10:8006/",
     token_id: "root@pam!nexara",
-    tls_fingerprint: "c9f24e425dfad9b0",
+    tls_fingerprint: "aabbccddeeff0011",
     sync_interval_seconds: 30,
     is_active: true,
     status: "online",
@@ -91,7 +91,7 @@ describe("ClusterCertificateBanner", () => {
     expect(screen.getByText("TLS certificate changed")).toBeInTheDocument();
     // The fingerprint has to reach the operator — verifying it out-of-band is
     // the entire point of the flow.
-    expect(screen.getByText(/0c6a3da6d6e538eaf7c88848/)).toBeInTheDocument();
+    expect(screen.getByText(/112233445566778899aabbcc/)).toBeInTheDocument();
   });
 
   it("explains why nothing else looks broken", () => {
