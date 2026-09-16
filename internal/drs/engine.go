@@ -175,8 +175,12 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 	// Detect nodes in HA maintenance / shutdown / unhealthy state. These
 	// must be excluded as both source and target — Proxmox is already
 	// evacuating them for reboot, and DRS counter-migrating would create a
-	// ping-pong with the HA manager.
-	unhealthy := unhealthyHANodes(ctx, client, e.logger, clusterID)
+	// ping-pong with the HA manager. A status nobody could read stops the
+	// evaluation rather than clearing the filter: see unhealthyHANodes.
+	unhealthy, err := unhealthyHANodes(ctx, client, e.logger, clusterID)
+	if err != nil {
+		return nil, err
+	}
 
 	// Collect workloads per node.
 	// When include_containers is false, containers still count toward node load
@@ -413,25 +417,51 @@ func CalculateImbalance(scores map[string]NodeScore) float64 {
 //
 // Proxmox HA LRM states: active, idle, maintenance, wait_for_agent_lock,
 // lost_agent_lock, dead, gone. We treat anything other than active/idle as
-// not-eligible-for-DRS. If HA is not configured the call returns nothing
-// and DRS proceeds normally.
+// not-eligible-for-DRS.
 //
 // The relevant info lives on lrm:<node> entries (type "lrm"), not the
 // node/<node> entries (which only carry online/offline/fence — already
 // covered by the standard node status check). The lrm status is a
 // human-readable string of the form "<nodename> (<state>, <flags...>,
 // <timestamp>)", so we parse the state out of the parenthesized portion.
-func unhealthyHANodes(ctx context.Context, client *proxmox.Client, logger *slog.Logger, clusterID uuid.UUID) map[string]struct{} {
+//
+// A read failure is an error, not an empty skip set. It used to be swallowed
+// at Debug on the grounds that the error "might mean HA is not configured",
+// and that is wrong on the facts: /cluster/ha/status/current is core
+// pve-ha-manager, present since PVE 4 with no version gate, and the LRM runs on
+// every node whether or not a single HA resource is defined. An unconfigured
+// cluster answers with entries, not an error — so there is no benign-error case
+// to fold in here, unlike /cluster/ha/rules (absent before PVE 9.0) and
+// /cluster/ha/groups (soft-disabled after it). Nothing left over is anything
+// but a failure to read.
+//
+// Failing the evaluation is the deliberate choice over warning and proceeding,
+// because the two harms are not symmetric:
+//
+//   - Proceed on an empty set and every node looks eligible, including one
+//     Proxmox HA is actively evacuating for reboot. DRS in automatic mode then
+//     migrates guests ONTO it, HA migrates them straight back, and the next
+//     tick sees the same imbalance and does it again. That fight is not
+//     self-correcting — it burns migration bandwidth and produces exactly the
+//     "VM is locked (migrate)" contention that overlapping migrations cause.
+//   - Fail and one evaluation cycle is skipped. The scheduler logs it and
+//     retries at the cluster's configured interval, having written nothing.
+//
+// A skipped cycle is recoverable and leaves the cluster as it was; a guest
+// placed on a node that is about to reboot is not.
+//
+// It is also barely a new failure mode. GetNodes runs immediately above and
+// already hard-fails, so every transport-class failure — refused connection,
+// timeout, TLS mismatch, 401 — ends the evaluation before reaching here; and
+// importHARules below already fails on anything but a 501, over the same
+// pvedaemon, the same pinned endpoint and the same Sys.Audit privilege. What
+// this adds is the narrow slice where manager_status is unreadable while the
+// rules file is fine. It also fails CHEAPER than the old path did, landing
+// before workload collection instead of after it.
+func unhealthyHANodes(ctx context.Context, client *proxmox.Client, logger *slog.Logger, clusterID uuid.UUID) (map[string]struct{}, error) {
 	entries, err := client.GetHAStatus(ctx)
 	if err != nil {
-		// HA not configured or the endpoint failed — log at debug and
-		// fall through. DRS will continue with just the standard
-		// online/offline status check.
-		logger.Debug("DRS HA status unavailable, skipping HA node filter",
-			"cluster_id", clusterID,
-			"error", err,
-		)
-		return map[string]struct{}{}
+		return nil, fmt.Errorf("read HA status for maintenance filter: %w", err)
 	}
 	skip := classifyHAEntries(entries)
 	for node := range skip {
@@ -440,7 +470,7 @@ func unhealthyHANodes(ctx context.Context, client *proxmox.Client, logger *slog.
 			"node", node,
 		)
 	}
-	return skip
+	return skip, nil
 }
 
 // classifyHAEntries returns the set of nodes whose LRM state is anything

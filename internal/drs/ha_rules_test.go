@@ -36,6 +36,7 @@ const (
 	haRulesPath     = "/api2/json/cluster/ha/rules"
 	haGroupsPath    = "/api2/json/cluster/ha/groups"
 	haResourcesPath = "/api2/json/cluster/ha/resources"
+	haStatusPath    = "/api2/json/cluster/ha/status/current"
 )
 
 // haTestServer serves the Proxmox HA endpoints from handlers and records which

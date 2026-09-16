@@ -1,8 +1,12 @@
 package drs
 
 import (
+	"context"
 	"log/slog"
+	"net/http"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
@@ -413,7 +417,75 @@ func TestExtractLRMState(t *testing.T) {
 	}
 }
 
-func TestUnhealthyHANodes(t *testing.T) {
+// TestUnhealthyHANodes_SeparatesNoneFromUnreadable covers the half that talks
+// to Proxmox; TestClassifyHAEntries below covers the pure half. Nothing used to
+// cover this one, which is how a failed read returning an empty skip set —
+// indistinguishable from "no node is in HA maintenance" — went unnoticed.
+//
+// Why every status in the first subtest is an error, and why no version of PVE
+// is carved out here, is argued on unhealthyHANodes itself. Do not restate it.
+func TestUnhealthyHANodes_SeparatesNoneFromUnreadable(t *testing.T) {
+	statusEntries := func(entries []proxmox.HAStatusEntry) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) { haData(w, entries) }
+	}
+
+	t.Run("a status that could not be read stops the evaluation", func(t *testing.T) {
+		for _, status := range []int{
+			http.StatusInternalServerError, // the cluster could not answer
+			http.StatusServiceUnavailable,  // not quorate
+			http.StatusForbidden,           // token lacks the HA privilege
+			http.StatusNotFound,            // a reverse-proxy rewrite, not a PVE answer
+		} {
+			srv, _ := haTestServer(t, map[string]http.HandlerFunc{
+				haStatusPath: func(w http.ResponseWriter, _ *http.Request) {
+					http.Error(w, "nope", status)
+				},
+			})
+			skip, err := unhealthyHANodes(context.Background(), newHAClient(t, srv.URL), slog.Default(), uuid.New())
+			if err == nil {
+				t.Errorf("a %d on /cluster/ha/status/current read as a cluster with no node in maintenance (skip=%v); DRS would migrate onto a node HA is evacuating", status, keys(skip))
+			}
+			if skip != nil {
+				t.Errorf("skip = %v alongside the error, want nil", keys(skip))
+			}
+		}
+	})
+
+	t.Run("a cluster with nothing in maintenance is not an error", func(t *testing.T) {
+		srv, _ := haTestServer(t, map[string]http.HandlerFunc{
+			haStatusPath: statusEntries([]proxmox.HAStatusEntry{
+				{ID: "quorum", Type: "quorum", Status: "OK"},
+				{ID: "lrm:pve-01", Type: "lrm", Node: "pve-01", Status: "pve-01 (idle, Wed Apr 29 07:55:26 2026)"},
+				{ID: "lrm:pve-02", Type: "lrm", Node: "pve-02", Status: "pve-02 (active, watchdog active, Wed Apr 29 07:55:26 2026)"},
+			}),
+		})
+		skip, err := unhealthyHANodes(context.Background(), newHAClient(t, srv.URL), slog.Default(), uuid.New())
+		if err != nil {
+			t.Fatalf("unhealthyHANodes on a cluster with no node in maintenance: %v", err)
+		}
+		if len(skip) != 0 {
+			t.Errorf("skip = %v, want empty", keys(skip))
+		}
+	})
+
+	t.Run("a node in maintenance is still reported", func(t *testing.T) {
+		srv, _ := haTestServer(t, map[string]http.HandlerFunc{
+			haStatusPath: statusEntries([]proxmox.HAStatusEntry{
+				{ID: "lrm:pve-01", Type: "lrm", Node: "pve-01", Status: "pve-01 (active, watchdog active, ...)"},
+				{ID: "lrm:pve-02", Type: "lrm", Node: "pve-02", Status: "pve-02 (maintenance, watchdog active, ...)"},
+			}),
+		})
+		skip, err := unhealthyHANodes(context.Background(), newHAClient(t, srv.URL), slog.Default(), uuid.New())
+		if err != nil {
+			t.Fatalf("unhealthyHANodes: %v", err)
+		}
+		if _, ok := skip["pve-02"]; !ok || len(skip) != 1 {
+			t.Errorf("skip = %v, want exactly pve-02", keys(skip))
+		}
+	})
+}
+
+func TestClassifyHAEntries(t *testing.T) {
 	// Build a fake Proxmox client backed by a test HTTP server returning
 	// a real-shape /cluster/ha/status/current payload with one node in
 	// maintenance.

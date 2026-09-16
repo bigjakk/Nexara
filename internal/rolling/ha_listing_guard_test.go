@@ -49,15 +49,28 @@ func TestGuard_HAListingErrorsAreNotDiscarded(t *testing.T) {
 	guardedFuncs := map[string]bool{
 		"listHARules":       true,
 		"loadHAConstraints": true,
+		// internal/drs, called as a bare identifier from Evaluate. Its empty
+		// skip set reads as "no node is in HA maintenance", so a discarded
+		// error clears the filter that keeps DRS off a node HA is evacuating.
+		"unhealthyHANodes": true,
 	}
 	guardedMethods := map[string]bool{
 		"GetHARules":     true,
 		"GetHAResources": true,
 		"GetHAGroups":    true,
+		"GetHAStatus":    true,
 		// Reached as rolling.LoadHAConstraints / e.importHARules…, so these are
 		// selectors even though they are plain functions or methods at their
 		// definition. Listing them under guardedFuncs matches only a bare
 		// identifier and never fires.
+		//
+		// importHARulesLegacy is pre-emptive rather than active: its only use
+		// today is `return e.importHARulesLegacy(...)`, a ReturnStmt, which
+		// propagates by construction and which this AssignStmt matcher never
+		// sees. It is listed so that a future caller which assigns the result
+		// is covered from the start. That is a different thing from an entry
+		// that CANNOT fire — see the note above about scoping — so do not read
+		// its silence as proof the guard works.
 		"LoadHAConstraints":   true,
 		"importHARules":       true,
 		"importHARulesPVE9":   true,
