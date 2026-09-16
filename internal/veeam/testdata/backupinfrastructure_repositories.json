@@ -54,7 +54,7 @@
     {
       "hostId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
       "repository": {
-        "path": "C:\\Backup",
+        "path": "C:\\Backups\\repo-default-01",
         "taskLimitEnabled": true,
         "maxTaskCount": 4,
         "readWriteLimitEnabled": false,
@@ -81,7 +81,7 @@
       },
       "type": "WinLocal",
       "id": "88788f9e-d8f5-4eb4-bc4f-9b3f5403bcec",
-      "name": "Default Backup Repository",
+      "name": "repo-default-01",
       "description": "Created by Veeam Backup",
       "uniqueId": "88788f9ed8f54eb4bc4f9b3f5403bcec"
     },

@@ -16,11 +16,11 @@
     {
       "type": "WinLocal",
       "id": "88788f9e-d8f5-4eb4-bc4f-9b3f5403bcec",
-      "name": "Default Backup Repository",
+      "name": "repo-default-01",
       "description": "Created by Veeam Backup",
       "hostId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
       "hostName": "vbr01.example.com",
-      "path": "C:\\Backup",
+      "path": "C:\\Backups\\repo-default-01",
       "capacityGB": 329.9,
       "freeGB": 217.0,
       "usedSpaceGB": 0.4,

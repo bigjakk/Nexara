@@ -14,7 +14,7 @@ function orphan(over: Partial<VeeamOrphanedObject> = {}): VeeamOrphanedObject {
     object_type: "VM",
     platform_name: "cluster01",
     cluster_id: "c0000000-0000-4000-8000-000000000001",
-    cluster_name: "Ceph",
+    cluster_name: "cluster02",
     restore_points_count: 12,
     restore_point_bytes: 53687091200,
     latest_restore_point: "2026-08-20T22:00:00Z",

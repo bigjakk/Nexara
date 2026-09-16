@@ -615,7 +615,7 @@ func TestVeeamSync_FoldsDuplicateObjectRowsPerGuest(t *testing.T) {
 	dup := func(backupID string, count int, failed bool) veeam.BackupObject {
 		return veeam.BackupObject{
 			ID: testObjectID, ObjectID: "smbios-uuid", PlatformName: "Proxmox",
-			PlatformID: testPlatformID, Name: "automation", Type: "VM",
+			PlatformID: testPlatformID, Name: "linux01", Type: "VM",
 			BackupID: backupID, RestorePointsCount: count, Size: size,
 			LastRunFailed: failed,
 		}

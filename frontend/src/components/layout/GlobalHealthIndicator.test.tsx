@@ -89,7 +89,7 @@ describe("GlobalHealthIndicator", () => {
 
   it("surfaces an issue with its detail and singular grammar", async () => {
     setClusters([
-      makeCluster("c1", { name: "Ceph", issues: [cephIssue(MON_LOW)] }),
+      makeCluster("c1", { name: "cluster02", issues: [cephIssue(MON_LOW)] }),
     ]);
     renderWithProviders(<GlobalHealthIndicator />);
 
@@ -128,7 +128,7 @@ describe("GlobalHealthIndicator", () => {
 
   it("dismisses an issue, hides it, and offers Restore", async () => {
     setClusters([
-      makeCluster("c1", { name: "Ceph", issues: [cephIssue(MON_LOW)] }),
+      makeCluster("c1", { name: "cluster02", issues: [cephIssue(MON_LOW)] }),
     ]);
     renderWithProviders(<GlobalHealthIndicator />);
 
@@ -152,7 +152,7 @@ describe("GlobalHealthIndicator", () => {
 
   it("restores a dismissed issue", async () => {
     setClusters([
-      makeCluster("c1", { name: "Ceph", issues: [cephIssue(MON_LOW)] }),
+      makeCluster("c1", { name: "cluster02", issues: [cephIssue(MON_LOW)] }),
     ]);
     renderWithProviders(<GlobalHealthIndicator />);
 

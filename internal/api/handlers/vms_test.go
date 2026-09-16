@@ -146,7 +146,7 @@ func TestSnapshotBlockingVolumes(t *testing.T) {
 			name: "non-string and non-volume keys are ignored",
 			config: proxmox.VMConfig{
 				"cores":  float64(4),
-				"name":   "kali",
+				"name":   "linux01",
 				"scsihw": "virtio-scsi-pci",
 			},
 			want: []string{},

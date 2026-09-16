@@ -11,7 +11,7 @@ vi.mock("@/lib/api-client", () => ({
 
 const mockedList = vi.mocked(apiClient.list);
 
-const CEPH = "c0000000-0000-4000-8000-000000000001";
+const C02 = "c0000000-0000-4000-8000-000000000001";
 
 function platform(over: Partial<VeeamPlatform> = {}): VeeamPlatform {
   return {
@@ -36,8 +36,8 @@ function guest(
     host_name: "pve-01.example.com",
     is_disabled: false,
     is_online: false,
-    cluster_id: CEPH,
-    cluster_name: "Ceph",
+    cluster_id: C02,
+    cluster_name: "cluster02",
     vmid: 103,
     guest_name: "vbr01-worker01",
     last_seen_at: "2026-08-27T02:00:00Z",
@@ -48,7 +48,7 @@ function guest(
 describe("VeeamPlatformMapping", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedList.mockResolvedValue([{ id: CEPH, name: "Ceph" }]);
+    mockedList.mockResolvedValue([{ id: C02, name: "cluster02" }]);
   });
 
   it("warns that an unmapped connection is invisible, not merely untidy", () => {
@@ -70,7 +70,7 @@ describe("VeeamPlatformMapping", () => {
     renderWithProviders(
       <VeeamPlatformMapping
         serverId="srv-1"
-        platforms={[platform({ cluster_id: CEPH, cluster_name: "Ceph" })]}
+        platforms={[platform({ cluster_id: C02, cluster_name: "cluster02" })]}
         infrastructure={[]}
       />,
     );
@@ -90,18 +90,18 @@ describe("VeeamPlatformMapping", () => {
     renderWithProviders(
       <VeeamPlatformMapping
         serverId="srv-1"
-        platforms={[platform({ cluster_id: CEPH, cluster_name: "Ceph" })]}
+        platforms={[platform({ cluster_id: C02, cluster_name: "cluster02" })]}
         infrastructure={[]}
       />,
     );
-    expect(await screen.findByText("Ceph")).toBeInTheDocument();
+    expect(await screen.findByText("cluster02")).toBeInTheDocument();
   });
 
   it("lists the guests coverage excludes, so the exclusion can be inspected", () => {
     renderWithProviders(
       <VeeamPlatformMapping
         serverId="srv-1"
-        platforms={[platform({ cluster_id: CEPH, cluster_name: "Ceph" })]}
+        platforms={[platform({ cluster_id: C02, cluster_name: "cluster02" })]}
         infrastructure={[guest()]}
       />,
     );
@@ -109,14 +109,14 @@ describe("VeeamPlatformMapping", () => {
     // Twice by design: the name Veeam knows it by, and the guest it matched.
     expect(screen.getAllByText(/vbr01-worker01/)).toHaveLength(2);
     expect(screen.getByText("Worker")).toBeInTheDocument();
-    expect(screen.getByText("(Ceph #103)")).toBeInTheDocument();
+    expect(screen.getByText("(cluster02 #103)")).toBeInTheDocument();
   });
 
   it("flags a Veeam-owned machine that matched no guest", () => {
     renderWithProviders(
       <VeeamPlatformMapping
         serverId="srv-1"
-        platforms={[platform({ cluster_id: CEPH, cluster_name: "Ceph" })]}
+        platforms={[platform({ cluster_id: C02, cluster_name: "cluster02" })]}
         infrastructure={[
           guest({ vmid: null, cluster_id: null, cluster_name: "" }),
         ]}

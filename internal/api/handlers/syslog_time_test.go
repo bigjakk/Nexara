@@ -18,7 +18,7 @@ import (
 // Any node in a zone behind UTC hits this, so it is the ordinary case, not a
 // corner one.
 func TestNormalizeSyslogTime_RendersInNodeLocalTime(t *testing.T) {
-	const nodeOffset = -7 * time.Hour
+	const nodeOffset = -3 * time.Hour
 
 	got, err := normalizeSyslogTime("since", "1h", nodeOffset)
 	if err != nil {
@@ -36,7 +36,7 @@ func TestNormalizeSyslogTime_RendersInNodeLocalTime(t *testing.T) {
 	instant := parsed.Add(-nodeOffset)
 	delta := time.Since(instant)
 	if delta < 55*time.Minute || delta > 65*time.Minute {
-		t.Errorf("`1h` on a UTC-7 node resolved to %v ago in real terms, want ~1h.\n"+
+		t.Errorf("`1h` on a node behind UTC resolved to %v ago in real terms, want ~1h.\n"+
 			"rendered=%q — a value in the node's future is what produces '-- No entries --'",
 			delta.Round(time.Minute), got)
 	}

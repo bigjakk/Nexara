@@ -22,7 +22,7 @@ const mockedGet = vi.mocked(apiClient.get);
 
 const CLUSTER = {
   id: "cluster-1",
-  name: "Ceph",
+  name: "cluster02",
   api_url: "https://pve.example.com:8006",
   token_id: "nexara@pve!token",
   tls_fingerprint: "AA:BB:CC:DD",

@@ -54,7 +54,7 @@ const NOW_SEC = Math.floor(Date.now() / 1000);
 function makeRow(overrides: Partial<GuestSnapshotRow>): GuestSnapshotRow {
   return {
     cluster_id: "c1",
-    cluster_name: "ceph",
+    cluster_name: "cluster02",
     vmid: 100,
     guest_type: "qemu",
     vm_id: "vm-uuid-1",

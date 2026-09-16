@@ -25,7 +25,7 @@ function entry(over: Partial<AuditLogEntry>): AuditLogEntry {
     source: "nexara",
     user_email: "u@example.com",
     user_display_name: "U",
-    cluster_name: "ceph-prod",
+    cluster_name: "cluster01",
     resource_vmid: 0,
     resource_name: "",
     ...over,

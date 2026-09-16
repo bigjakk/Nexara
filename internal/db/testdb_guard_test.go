@@ -19,14 +19,14 @@ func TestAssertThrowawayDB(t *testing.T) {
 		url     string
 		wantErr bool
 	}{
-		{"local chaintest", "postgres://nexara:pw@172.19.0.3:5432/nexara_chaintest?sslmode=disable", false},
+		{"local chaintest", "postgres://nexara:pw@db:5432/nexara_chaintest?sslmode=disable", false},
 		{"ci test db", "postgres://nexara:nexara@localhost:5432/nexara_test?sslmode=disable", false},
 		{"freshtest precedent", "postgres://u:p@db:5432/nexara_freshtest", false},
 		{"uppercase", "postgres://u:p@db:5432/NEXARA_TEST", false},
 		{"postgresql scheme", "postgresql://u:p@db:5432/nexara_test", false},
 		{"dbname param names throwaway", "postgres://u:p@db:5432?dbname=nexara_chaintest", false},
 
-		{"live database — the incident", "postgres://nexara:pw@172.19.0.3:5432/nexara?sslmode=disable", true},
+		{"live database — the incident", "postgres://nexara:pw@db:5432/nexara?sslmode=disable", true},
 		{"live-shaped name", "postgres://u:p@db:5432/nexara_dev", true},
 		{"dbname param overrides safe path", "postgres://u:p@db:5432/nexara_test?dbname=nexara", true},
 		{"database param overrides safe path", "postgres://u:p@db:5432/nexara_test?database=nexara", true},
