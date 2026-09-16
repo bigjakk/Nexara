@@ -19,9 +19,13 @@ import (
 // and resumeDrain cannot be unit-tested — stubOrchestrator passes nil queries,
 // so failNode nil-derefs — and reverting the drain site to
 // `haRulesList, _ := listHARules(...)`, which is the exact bug this package was
-// fixed for, left the entire suite green. The same holds in internal/drs, where
-// there is no Evaluate test at all: reverting its importHARules call to discard
-// the error would restore unconstrained balancing with nothing going red.
+// fixed for, left the entire suite green. It held in internal/drs too, where
+// Evaluate had no test at all — reverting its importHARules call to discard the
+// error restored unconstrained balancing with nothing going red. That half is
+// now covered directly: internal/drs/evaluate_test.go reaches Evaluate through
+// a query/client seam and fails on a swallowed listing, discarded or not. This
+// guard still earns its keep for the internal/rolling sites, which remain
+// unreachable without a database.
 //
 // It watches two spellings, because the regression has two. Package-local
 // helpers are matched by name; anything reached through a selector — the raw

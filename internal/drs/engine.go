@@ -83,19 +83,47 @@ type EvalResult struct {
 
 // Engine is the DRS evaluation engine.
 type Engine struct {
+	// queries has exactly one use left: createClient's per-call client build
+	// below. Everything Evaluate reads goes through evalReads, and the
+	// migration history and audit writes belong to Executor, which is a
+	// separate struct holding its own handle.
 	queries       *db.Queries
 	encryptionKey string
 	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	logger        *slog.Logger
 	// veeamOwned is the single read the Veeam pin needs, behind its own
-	// interface so that decision can be tested without a database. Everything
-	// else on this engine goes through the concrete queries handle above.
+	// interface so that decision can be tested without a database.
 	veeamOwned veeamOwnedQueries
+	// evalReads is the same seam for the two reads Evaluate makes directly, and
+	// exists for the same reason: without it Evaluate cannot be called at all
+	// without a database, so its safety gates — the HA maintenance filter and
+	// the HA rule import, both of which must ABORT rather than proceed on an
+	// unreadable listing — had no test at the level that actually ships them.
+	//
+	// Unlike veeamOwned this one is NOT nil-guarded at its use site, and that
+	// is deliberate: there is no safe default for "what is this cluster's DRS
+	// config?", so falling back to one would disable DRS silently. NewEngine
+	// always assigns it, exactly as it always assigned the concrete handle
+	// this replaced, so the failure mode for a struct-literal Engine is
+	// unchanged — it was already a nil-deref panic on *db.Queries.
+	evalReads evalQueries
+	// newClient replaces createClient's cache-then-per-call construction when
+	// set. nil in production (NewEngine never assigns it) — it is the seam that
+	// lets an Evaluate test point the engine at an httptest Proxmox. A func
+	// rather than an interface because there is exactly one operation, and
+	// because *proxmox.Client is concrete the whole way down.
+	newClient func(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error)
 }
 
 // veeamOwnedQueries is the database surface pinVeeamInfrastructure uses.
 type veeamOwnedQueries interface {
 	ListVeeamInfrastructureGuestsForCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVeeamInfrastructureGuestsForClusterRow, error)
+}
+
+// evalQueries is the database surface Evaluate reads through directly.
+type evalQueries interface {
+	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (db.DrsConfig, error)
+	ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]db.DrsRule, error)
 }
 
 // NewEngine creates a new DRS engine.
@@ -105,6 +133,7 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger) *
 		encryptionKey: encryptionKey,
 		logger:        logger,
 		veeamOwned:    queries,
+		evalReads:     queries,
 	}
 }
 
@@ -125,7 +154,7 @@ func drsBlockedByNativeCRS(mode string, opts *proxmox.ClusterOptions) bool {
 
 // Evaluate runs DRS evaluation for a single cluster and returns recommendations.
 func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult, error) {
-	cfg, err := e.queries.GetDRSConfig(ctx, clusterID)
+	cfg, err := e.evalReads.GetDRSConfig(ctx, clusterID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -311,7 +340,7 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 		"threshold", cfg.ImbalanceThreshold)
 
 	// Load rules.
-	dbRules, err := e.queries.ListDRSRules(ctx, clusterID)
+	dbRules, err := e.evalReads.ListDRSRules(ctx, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("list DRS rules: %w", err)
 	}
@@ -583,6 +612,9 @@ func extractLRMState(status string) string {
 }
 
 func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
+	if e.newClient != nil {
+		return e.newClient(ctx, clusterID)
+	}
 	if e.cache != nil {
 		client, err := e.cache.Get(ctx, clusterID)
 		if err == nil {
