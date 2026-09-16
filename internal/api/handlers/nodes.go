@@ -576,17 +576,31 @@ func (h *NodeHandler) EvacuateNode(c fiber.Ctx) error {
 	}
 
 	// Fetch HA/DRS data for constraint-aware selection.
-	haResources, _ := pxClient.GetHAResources(ctx)
-	haGroups, _ := pxClient.GetHAGroups(ctx)
-	haRules, _ := pxClient.GetHARules(ctx)
-
-	resSID := make(map[string]proxmox.HAResource, len(haResources))
-	for _, r := range haResources {
-		resSID[r.SID] = r
-	}
-	groupMap := make(map[string]proxmox.HAGroup, len(haGroups))
-	for _, g := range haGroups {
-		groupMap[g.Group] = g
+	//
+	// These three listings used to be read with their errors discarded and the
+	// empty results handed to rolling.SelectTarget — the same function the
+	// rolling orchestrator drains through. SelectTarget scores an unread
+	// constraint set exactly as it scores an empty one, so an unreachable HA
+	// stack recommended a target as though no affinity rule applied, and this
+	// endpoint then migrated every guest on the node to it. LoadHAConstraints
+	// separates "this cluster has none" from "could not look" and returns the
+	// latter as an error.
+	//
+	// Loaded only when Nexara is the one choosing: an explicit target_node is
+	// the operator's own decision and is never scored, so a failed HA listing
+	// must not fail a request that would not have consulted it.
+	var ha rolling.HAConstraints
+	if req.TargetNode == "" {
+		ha, err = rolling.LoadHAConstraints(ctx, pxClient)
+		if err != nil {
+			// mapNamedOpError, not mapProxmoxError: the latter answers a 404
+			// with a bare "Resource not found on Proxmox", which on this
+			// endpoint reads as "that node does not exist". A 404 here is the
+			// reverse-proxy rewrite this whole design exists to surface — PVE
+			// itself answers 501 for a missing HA endpoint — so the operator
+			// has to be told which listing failed, or they debug the node.
+			return mapNamedOpError("read HA constraints", err)
+		}
 	}
 
 	dbRules, _ := h.queries.ListDRSRules(ctx, clusterID)
@@ -596,13 +610,17 @@ func (h *NodeHandler) EvacuateNode(c fiber.Ctx) error {
 	migrations := make([]evacuateMigration, 0, len(guests))
 	for _, guest := range guests {
 		target := req.TargetNode
+		// Same condition the constraints were loaded under, one derived from
+		// the other. If they ever drift the failure is fail-closed and loud —
+		// SelectTarget refuses an unloaded set, so every guest comes back with
+		// an error rather than a silently unconstrained placement.
 		if target == "" {
 			snapshot := rolling.GuestSnapshot{
 				VMID: guest.VMID,
 				Name: guest.Name,
 				Type: guest.Type,
 			}
-			t, err := rolling.SelectTarget(snapshot, nodeName, candidates, resSID, groupMap, haRules, drsRules, nodeWorkloads)
+			t, err := rolling.SelectTarget(snapshot, nodeName, candidates, ha, drsRules, nodeWorkloads)
 			if err != nil {
 				migrations = append(migrations, evacuateMigration{
 					VMID: guest.VMID, Name: guest.Name, Type: guest.Type,

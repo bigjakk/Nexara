@@ -337,12 +337,18 @@ func SelectTarget(
 	guest GuestSnapshot,
 	_ string,
 	candidates []string,
-	haResources map[string]proxmox.HAResource,
-	haGroups map[string]proxmox.HAGroup,
-	haRules []proxmox.HARuleEntry,
+	ha HAConstraints,
 	drsRules []drs.Rule,
 	nodeWorkloads map[string][]drs.Workload,
 ) (string, error) {
+	// The choke point, deliberately: every caller that picks a target goes
+	// through here, so the check belongs here rather than in each of them. A
+	// validator sitting in the callers is one the next caller silently skips —
+	// which is how the evacuate handler came to score against three listings
+	// whose errors it had thrown away.
+	if !ha.loaded {
+		return "", fmt.Errorf("HA constraints were never loaded: refusing to select a target that may violate an affinity rule")
+	}
 	if len(candidates) == 0 {
 		return "", fmt.Errorf("no candidate nodes available")
 	}
@@ -360,8 +366,8 @@ func SelectTarget(
 		s := 100
 
 		// HA group restricted check.
-		if res, ok := haResources[sid]; ok && res.Group != "" {
-			if grp, ok := haGroups[res.Group]; ok && grp.Restricted == 1 {
+		if res, ok := ha.resources[sid]; ok && res.Group != "" {
+			if grp, ok := ha.groups[res.Group]; ok && grp.Restricted == 1 {
 				groupNodes := parseHAGroupNodes(grp.Nodes)
 				if !groupNodes[candidate] {
 					s -= 1000 // Hard constraint — will be rejected by Proxmox.
@@ -370,7 +376,7 @@ func SelectTarget(
 		}
 
 		// HA rule checks.
-		for _, rule := range haRules {
+		for _, rule := range ha.rules {
 			if rule.Disable == 1 {
 				continue
 			}
@@ -592,12 +598,26 @@ func containsString(slice []string, val string) bool {
 	return false
 }
 
-// haConstraints is the HA state SelectTarget scores a candidate node against.
+// HAConstraints is the HA state SelectTarget scores a candidate node against.
 //
 // rules may be nil on success: a PVE older than 9.0 has no rules endpoint and
 // genuinely has none. resources and groups are always non-nil, so callers never
 // have to nil-check a map they are about to read.
-type haConstraints struct {
+//
+// Exported with UNEXPORTED fields on purpose. The type has to cross a package
+// boundary — internal/api/handlers evacuates a node through the same
+// SelectTarget the orchestrator drains with — but a populated value must come
+// from LoadHAConstraints and nowhere else. Exported fields would let a caller
+// assemble one from three separately-discarded listings, which is the exact bug
+// this type exists to make unspellable.
+type HAConstraints struct {
+	// loaded records that all three listings were actually read. Everything
+	// else in here is legally empty on success — a cluster with no HA
+	// configured at all reads as two empty maps and nil rules — so no other
+	// field can carry the distinction, and without it a zero value scores
+	// identically to a fully-read one. SelectTarget refuses a value with this
+	// unset rather than placing a guest against constraints nobody loaded.
+	loaded    bool
 	resources map[string]proxmox.HAResource
 	groups    map[string]proxmox.HAGroup
 	rules     []proxmox.HARuleEntry
@@ -722,12 +742,12 @@ func retryHAListing[T any](
 // It is a plain function rather than a method so the decision does not depend
 // on Orchestrator state — the tests build a client against a stub server and
 // call it directly.
-func loadHAConstraints(ctx context.Context, client *proxmox.Client, attempts int) (haConstraints, error) {
-	var ha haConstraints
+func loadHAConstraints(ctx context.Context, client *proxmox.Client, attempts int) (HAConstraints, error) {
+	var ha HAConstraints
 
 	resources, err := retryHAListing(ctx, attempts, client.GetHAResources, nil)
 	if err != nil {
-		return haConstraints{}, fmt.Errorf("list HA resources: %w", err)
+		return HAConstraints{}, fmt.Errorf("list HA resources: %w", err)
 	}
 	ha.resources = make(map[string]proxmox.HAResource, len(resources))
 	for _, r := range resources {
@@ -736,7 +756,7 @@ func loadHAConstraints(ctx context.Context, client *proxmox.Client, attempts int
 
 	groups, err := retryHAListing(ctx, attempts, client.GetHAGroups, proxmox.IsGroupsMigratedError)
 	if err != nil {
-		return haConstraints{}, fmt.Errorf("list HA groups: %w", err)
+		return HAConstraints{}, fmt.Errorf("list HA groups: %w", err)
 	}
 	ha.groups = make(map[string]proxmox.HAGroup, len(groups))
 	for _, g := range groups {
@@ -745,10 +765,31 @@ func loadHAConstraints(ctx context.Context, client *proxmox.Client, attempts int
 
 	ha.rules, err = listHARules(ctx, client, attempts)
 	if err != nil {
-		return haConstraints{}, err
+		return HAConstraints{}, err
 	}
 
+	// Last, and only on the success path: every early return above hands back
+	// a zero value, which SelectTarget rejects.
+	ha.loaded = true
 	return ha, nil
+}
+
+// LoadHAConstraints reads the HA state SelectTarget scores against, for callers
+// outside this package.
+//
+// It exists so that a caller which selects a migration target has no way to do
+// so without first deciding what to do about a listing it could not read. The
+// handler this was added for discarded all three errors and handed the empty
+// results straight to SelectTarget, so an unreachable HA stack recommended a
+// target as though no affinity rule applied to the guest.
+//
+// No attempts parameter: every caller out here is inside an HTTP request, and
+// the cached Proxmox client's timeout is minutes, so a retry multiplies how
+// long the request can hang before answering. Same reasoning as the pre-flight
+// above, which is request-scoped for the same reason. The retrying form stays
+// internal to the orchestrator, where a blip costs a whole multi-node job.
+func LoadHAConstraints(ctx context.Context, client *proxmox.Client) (HAConstraints, error) {
+	return loadHAConstraints(ctx, client, listingRetryOnce)
 }
 
 // listHARules reads the rule listing, folding the one PVE version that

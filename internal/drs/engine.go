@@ -249,8 +249,14 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 		}
 	}
 
-	// Auto-import HA pin rules.
-	haRules := e.importHARules(ctx, client, nodeWorkloads)
+	// Auto-import HA pin rules. A listing nobody could read stops the
+	// evaluation: planning against the empty rule set it would otherwise yield
+	// is how DRS migrates a guest off its node-affinity pin, or onto the node
+	// holding its anti-affinity partner, with no error anywhere.
+	haRules, err := e.importHARules(ctx, client, nodeWorkloads)
+	if err != nil {
+		return nil, fmt.Errorf("import HA rules: %w", err)
+	}
 
 	// Detect PCI/USB passthrough VMs and mark as pinned.
 	e.detectPassthrough(ctx, client, nodeWorkloads)
@@ -497,16 +503,32 @@ func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmo
 
 // importHARules fetches HA rules from Proxmox. It first tries the PVE 9+ rules API
 // (GET /cluster/ha/rules) which supports node-affinity and resource-affinity rules.
-// If that fails (PVE 8 or earlier), it falls back to the legacy HA resources + groups approach.
-func (e *Engine) importHARules(ctx context.Context, client *proxmox.Client, _ map[string][]Workload) []Rule {
+// If that endpoint does not exist (PVE 8 or earlier), it falls back to the legacy
+// HA resources + groups approach.
+//
+// An HA listing has three outcomes, not two: rules were read, this PVE
+// genuinely has none, or nobody could look. Only the middle one is a fallback.
+// This used to fall back on ANY error from the rules endpoint, and the legacy
+// path then returned nil rules — so a transient 500 produced an empty rule set,
+// which the planner cannot tell from a cluster with no affinity rules
+// configured. The result was DRS live-migrating guests with every node-affinity
+// pin and anti-affinity pairing invisible to it, unattended and with nothing in
+// the log above Debug. The third outcome is now an error, and both callers of
+// Evaluate already skip the cycle on one (the scheduler retries on the next
+// tick; the API handler 500s).
+func (e *Engine) importHARules(ctx context.Context, client *proxmox.Client, _ map[string][]Workload) ([]Rule, error) {
 	// Prefer the PVE 9+ rules API. It is authoritative whenever it responds —
 	// including when the cluster has zero rules defined — so we fall back to the
 	// deprecated groups API only when the rules endpoint is genuinely
 	// unavailable (PVE 8 or earlier). Falling back on an empty-but-available
 	// result would hit /cluster/ha/groups, which PVE 9 soft-disables with a
 	// "migrated to rules" 500 logged on every evaluation.
-	if rules, ok := e.importHARulesPVE9(ctx, client); ok {
-		return rules
+	rules, available, err := e.importHARulesPVE9(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	if available {
+		return rules, nil
 	}
 
 	// Fallback to legacy HA resources + groups (PVE 8).
@@ -515,14 +537,32 @@ func (e *Engine) importHARules(ctx context.Context, client *proxmox.Client, _ ma
 
 // importHARulesPVE9 reads HA rules from the PVE 9+ GET /cluster/ha/rules
 // endpoint and translates node-affinity / resource-affinity rules into DRS
-// rules. The bool result reports whether the rules API was available (PVE 9+);
-// it is true even when the cluster has no rules defined, so the caller does not
-// fall back to the deprecated groups API.
-func (e *Engine) importHARulesPVE9(ctx context.Context, client *proxmox.Client) ([]Rule, bool) {
+// rules.
+//
+// The bool result reports whether the rules API was available (PVE 9+); it is
+// true even when the cluster has no rules defined, so the caller does not fall
+// back to the deprecated groups API. It is false ONLY for a PVE too old to
+// route the path — every other failure comes back as an error, because the
+// caller's response to false is to carry on with whatever the legacy path
+// yields, and on a cluster that does have rules that means planning against
+// none of them.
+//
+// proxmox.IsHARulesUnsupportedError matches 501 alone. HA affinity rules
+// arrived in pve-ha-manager 5.0.2 (PVE 9.0); before that PVE's dispatcher
+// answers the unrouted path with HTTP 501 "not implemented", never 404. Widening
+// this to 404 is the tempting mistake and would be a real hole: checkStatus maps
+// every 404 to a bare ErrNotFound with the body discarded, and Nexara is
+// deployed behind nginx/Traefik/Caddy, so a proxy rewrite or a misrouted path
+// would arrive indistinguishable from "this PVE has no rules endpoint" — and
+// would place guests unconstrained on a cluster that has rules.
+func (e *Engine) importHARulesPVE9(ctx context.Context, client *proxmox.Client) ([]Rule, bool, error) {
 	haRules, err := client.GetHARules(ctx)
 	if err != nil {
-		e.logger.Debug("PVE 9 HA rules API not available, falling back to legacy", "error", err)
-		return nil, false
+		if proxmox.IsHARulesUnsupportedError(err) {
+			e.logger.Debug("PVE 9 HA rules API not available, falling back to legacy", "error", err)
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("list HA rules: %w", err)
 	}
 
 	var rules []Rule
@@ -573,29 +613,38 @@ func (e *Engine) importHARulesPVE9(ctx context.Context, client *proxmox.Client) 
 		}
 	}
 
-	return rules, true
+	return rules, true, nil
 }
 
 // importHARulesLegacy uses the PVE 8 HA resources + groups API to derive pin rules
 // for VMs in restricted HA groups.
-func (e *Engine) importHARulesLegacy(ctx context.Context, client *proxmox.Client) []Rule {
+//
+// It draws the same three-outcome line as the rules path above, for the same
+// reason: returning nil on a listing it could not read hands the planner an
+// empty rule set, and an empty rule set is what a cluster with no restricted
+// groups looks like. These used to be warned about and swallowed, which left
+// the migrations themselves indistinguishable from a correctly unconstrained
+// balance.
+//
+// "migrated to rules" stays benign — it is PVE saying there are no groups here,
+// which is a complete answer.
+func (e *Engine) importHARulesLegacy(ctx context.Context, client *proxmox.Client) ([]Rule, error) {
 	haResources, err := client.GetHAResources(ctx)
 	if err != nil {
-		e.logger.Warn("failed to fetch HA resources, skipping HA rule import", "error", err)
-		return nil
+		return nil, fmt.Errorf("list HA resources: %w", err)
 	}
 	haGroups, err := client.GetHAGroups(ctx)
 	if err != nil {
 		if proxmox.IsGroupsMigratedError(err) {
 			// PVE 9+: HA groups were replaced by rules (read via
-			// importHARulesPVE9). Reaching the legacy path means the rules API
-			// was momentarily unavailable; there are no groups to import, so
-			// skip quietly instead of warning on every evaluation.
+			// importHARulesPVE9). Reaching here means PVE answered 501 for the
+			// rules path yet still reports groups as migrated — there are no
+			// groups to import either way, so skip quietly instead of warning
+			// on every evaluation.
 			e.logger.Debug("HA groups migrated to rules; no legacy groups to import", "error", err)
-		} else {
-			e.logger.Warn("failed to fetch HA groups, skipping HA rule import", "error", err)
+			return nil, nil
 		}
-		return nil
+		return nil, fmt.Errorf("list HA groups: %w", err)
 	}
 
 	// Build group→nodes map for restricted groups only.
@@ -607,7 +656,7 @@ func (e *Engine) importHARulesLegacy(ctx context.Context, client *proxmox.Client
 	}
 
 	if len(restrictedGroups) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	rules := make([]Rule, 0, len(haResources))
@@ -636,7 +685,7 @@ func (e *Engine) importHARulesLegacy(ctx context.Context, client *proxmox.Client
 		})
 	}
 
-	return rules
+	return rules, nil
 }
 
 // pinVeeamInfrastructure marks the guests belonging to a Veeam deployment —

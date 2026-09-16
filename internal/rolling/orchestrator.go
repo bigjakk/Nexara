@@ -529,7 +529,7 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 		}
 
 		gs := GuestSnapshot{VMID: guest.VMID, Name: guest.Name, Type: guest.Type, Status: guest.Status}
-		target, err := SelectTarget(gs, node.NodeName, targets, ha.resources, ha.groups, ha.rules, drsRules, nodeWorkloads)
+		target, err := SelectTarget(gs, node.NodeName, targets, ha, drsRules, nodeWorkloads)
 		if err != nil {
 			o.failNode(ctx, job, node, fmt.Sprintf("no valid target for %s %d: %v", guest.Type, guest.VMID, err))
 			return
@@ -769,7 +769,7 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 		}
 
 		gs := GuestSnapshot{VMID: guest.VMID, Name: guest.Name, Type: guest.Type, Status: guest.Status}
-		target, err := SelectTarget(gs, node.NodeName, targets, ha.resources, ha.groups, ha.rules, drsRules, nodeWorkloads)
+		target, err := SelectTarget(gs, node.NodeName, targets, ha, drsRules, nodeWorkloads)
 		if err != nil {
 			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — no valid target for %s %d: %v", guest.Type, guest.VMID, err))
 			return

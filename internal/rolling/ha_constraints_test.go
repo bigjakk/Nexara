@@ -238,6 +238,12 @@ func TestLoadHAConstraints_DistinguishesNoneFromUnreadable(t *testing.T) {
 				if ha.resources != nil || ha.groups != nil || ha.rules != nil {
 					t.Errorf("returned %+v alongside the error, want the zero value", ha)
 				}
+				// The flag SelectTarget gates on. Every other field is legally
+				// empty on success, so this is the only one that can tell a
+				// caller which ignored the error what it is holding.
+				if ha.loaded {
+					t.Error("loaded = true alongside the error — SelectTarget would score against a constraint set that was never read")
+				}
 				return
 			}
 			if err != nil {
@@ -249,6 +255,9 @@ func TestLoadHAConstraints_DistinguishesNoneFromUnreadable(t *testing.T) {
 			// Maps are always usable, so callers never have to nil-check.
 			if ha.resources == nil || ha.groups == nil {
 				t.Errorf("resources=%v groups=%v — both must be non-nil on success", ha.resources, ha.groups)
+			}
+			if !ha.loaded {
+				t.Error("loaded = false on a successful read — SelectTarget would refuse a set it should accept, and a cluster with no HA configured would become undrainable")
 			}
 		})
 	}
@@ -598,4 +607,116 @@ func TestIsHARulesUnsupportedError(t *testing.T) {
 			t.Errorf("IsHARulesUnsupportedError(%v) = true, want false — an unreadable listing would be treated as an empty one", err)
 		}
 	}
+}
+
+// TestSelectTarget_RefusesConstraintsNobodyLoaded puts the check at the choke
+// point rather than in each caller.
+//
+// Every target choice — the drain, the resume, and the evacuate handler — runs
+// through SelectTarget, and the handler is the one that proved a per-caller
+// check is not enough: it read the three listings with their errors discarded
+// and handed the empty results straight in. A validator living in the callers
+// is one the next caller silently skips.
+//
+// The assertion is concrete rather than symbolic. The rule below forbids
+// pve-01; an unloaded set subtracts nothing from any candidate, so scoring one
+// returns the first candidate — pve-01, the forbidden node — and it does so
+// with a nil error, indistinguishable from a correct placement.
+func TestSelectTarget_RefusesConstraintsNobodyLoaded(t *testing.T) {
+	guest := GuestSnapshot{VMID: 100, Name: "linux01", Type: "qemu"}
+	candidates := []string{"pve-01", "pve-02"}
+
+	pinned := HAConstraints{
+		loaded:    true,
+		resources: map[string]proxmox.HAResource{},
+		groups:    map[string]proxmox.HAGroup{},
+		rules: []proxmox.HARuleEntry{
+			{Rule: "pin-100", Type: "node-affinity", Resources: "vm:100", Nodes: "pve-02", Strict: 1},
+		},
+	}
+	target, err := SelectTarget(guest, "pve-03", candidates, pinned, nil, nil)
+	if err != nil {
+		t.Fatalf("SelectTarget with loaded constraints: %v", err)
+	}
+	if target != "pve-02" {
+		t.Fatalf("target = %q, want pve-02 — the only node the strict node-affinity rule allows", target)
+	}
+
+	if target, err := SelectTarget(guest, "pve-03", candidates, HAConstraints{}, nil, nil); err == nil {
+		t.Fatalf("SelectTarget scored a constraint set nobody loaded and chose %q; an unread rule set must not read as an absent one", target)
+	}
+
+	// "There are none" is a different answer from "could not look", and it has
+	// to keep working: a cluster with no HA configured at all must stay
+	// drainable.
+	none := HAConstraints{
+		loaded:    true,
+		resources: map[string]proxmox.HAResource{},
+		groups:    map[string]proxmox.HAGroup{},
+	}
+	if _, err := SelectTarget(guest, "pve-03", candidates, none, nil, nil); err != nil {
+		t.Fatalf("SelectTarget on a cluster with no HA configured: %v", err)
+	}
+}
+
+// TestLoadHAConstraints_ExportedFormIsRequestScoped covers the entry point the
+// handlers package reaches for, which the unexported table above never touches.
+//
+// Two things it has to get right. It must mark the set loaded, or SelectTarget
+// rejects a perfectly good read and the evacuate endpoint stops working
+// entirely. And it must take a single attempt: every caller out here is inside
+// an HTTP request against a client whose timeout is minutes, so a retry
+// multiplies how long that request can hang before it answers.
+func TestLoadHAConstraints_ExportedFormIsRequestScoped(t *testing.T) {
+	shortenListingRetryBackoff(t)
+
+	t.Run("a good read is usable by SelectTarget", func(t *testing.T) {
+		stub := defaultHAStub()
+		_, client, closeStub := stubOrchestrator(t, stub.handler())
+		defer closeStub()
+
+		ha, err := LoadHAConstraints(context.Background(), client)
+		if err != nil {
+			t.Fatalf("LoadHAConstraints: %v", err)
+		}
+		guest := GuestSnapshot{VMID: 100, Name: "linux01", Type: "qemu"}
+		if _, err := SelectTarget(guest, "pve-03", []string{"pve-01", "pve-02"}, ha, nil, nil); err != nil {
+			t.Fatalf("SelectTarget refused a constraint set LoadHAConstraints returned: %v", err)
+		}
+	})
+
+	t.Run("an unreadable listing is an error, not an empty set", func(t *testing.T) {
+		// The attempt count is asserted HERE, not on the success path above.
+		// retryHAListing returns on the first success, so a stub that answers
+		// is listed exactly once whatever the budget is — counting calls there
+		// passes for attempts=1 and attempts=3 alike and proves nothing. Only a
+		// listing that keeps failing makes the budget observable.
+		var ruleCalls atomic.Int32
+		stub := defaultHAStub()
+		stub.rulesErr = httpStatus(http.StatusServiceUnavailable)
+		_, client, closeStub := stubOrchestrator(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api2/json/cluster/ha/rules" {
+				ruleCalls.Add(1)
+			}
+			stub.handler()(w, r)
+		})
+		defer closeStub()
+
+		ha, err := LoadHAConstraints(context.Background(), client)
+		if err == nil {
+			t.Fatal("LoadHAConstraints succeeded against an unreadable rules listing")
+		}
+		if got := ruleCalls.Load(); got != 1 {
+			t.Errorf("rules listed %d times, want 1 — a request-scoped caller must not use the orchestrator's retry budget", got)
+		}
+		if !strings.Contains(err.Error(), "list HA rules") {
+			t.Errorf("err = %v, want it to name the listing that failed", err)
+		}
+		// The belt to the error's braces: a handler that ignored the error
+		// still cannot get a target out of what it was handed.
+		guest := GuestSnapshot{VMID: 100, Name: "linux01", Type: "qemu"}
+		if target, selErr := SelectTarget(guest, "pve-03", []string{"pve-01", "pve-02"}, ha, nil, nil); selErr == nil {
+			t.Errorf("SelectTarget chose %q from a failed load", target)
+		}
+	})
 }
