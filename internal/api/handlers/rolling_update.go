@@ -269,8 +269,25 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 	}
 	for _, pj := range pendingJobs {
 		if released, _ := h.orchestrator.ReleaseJobState(c.Context(), pj.ID); !released {
+			// Deliberately does not name connectivity as the cause. Re-enabling
+			// an HA rule puts it back under PVE's feasibility assert, which it
+			// escaped while disabled, so a rule that conflicts with one created
+			// during the update fails here for good — retrying and waiting for
+			// the cluster to come back would never clear it.
+			//
+			// The remedy is named because this is the only place an operator
+			// meets the permanent case: repairing or deleting the conflicting
+			// rule lets the next attempt through, and deleting the stuck rule
+			// itself makes reenableHARules drop it from the record.
+			//
+			// It stops short of pointing at the audit log, which records only
+			// three of the five release paths — an unbuildable client, a CRS
+			// restore and the HA rules; the Nexara-DRS re-enable and the
+			// passthrough-guest restarts log at warn level and audit nothing.
+			// Sending the operator to a log that may be silent about their
+			// actual failure is worse than naming the likely cause.
 			return fiber.NewError(fiber.StatusConflict,
-				"A previous rolling update still holds cluster state (paused CRS auto-rebalance, disabled HA rules, or stopped guests) and it could not be released right now. Cleanup retries automatically — resolve cluster connectivity and try again.")
+				"A previous rolling update still holds cluster state (paused CRS auto-rebalance, disabled HA rules, or stopped guests) and it could not be released. Cleanup keeps retrying in the background, so a cluster that was briefly unreachable clears on its own. If it never clears, an HA rule is likely refusing to re-enable because another rule now conflicts with it — repair or delete that rule in Proxmox, or delete the stuck rule itself, and try again.")
 		}
 	}
 

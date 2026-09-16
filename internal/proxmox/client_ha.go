@@ -95,7 +95,31 @@ func (c *Client) UpdateHARule(ctx context.Context, ruleID string, ruleType strin
 		form.Set("comment", *params.Comment)
 	}
 	if params.Disable != nil {
-		form.Set("disable", strconv.Itoa(*params.Disable))
+		// Re-enabling has to unset the property, not send disable=0. This is
+		// the canonical explanation; ha.go and the rolling orchestrator point
+		// here rather than restating it.
+		//
+		// pve-ha-manager's update_rule runs `delete $param->{disable} if
+		// !$param->{disable}` before it reads the config, so a falsy disable
+		// never reaches the rule: PVE answers 200 and changes nothing. A rule
+		// can be switched off and never back on, and the caller has no error
+		// to notice — the rolling-update orchestrator's restore step looked
+		// like it worked for exactly this reason.
+		//
+		// Unsetting is also the only correct representation. The HA manager
+		// tests the flag with exists(), not truth, so a literal `disable 0`
+		// left in /etc/pve/ha/rules.cfg would still read as disabled.
+		//
+		// `delete` is SectionConfig's generic unset list, comma-separated. It
+		// must not carry a key that is also being set — delete_from_config
+		// dies with "cannot set and delete property" — hence the else. A
+		// second unsettable key has to join this one list rather than Set()
+		// over it.
+		if *params.Disable == 0 {
+			form.Set("delete", "disable")
+		} else {
+			form.Set("disable", strconv.Itoa(*params.Disable))
+		}
 	}
 	if params.Digest != "" {
 		form.Set("digest", params.Digest)

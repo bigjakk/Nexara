@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -249,6 +251,53 @@ func TestVerifyNodeDrained(t *testing.T) {
 	// Listing failure must be an error, not an empty (passing) result.
 	if _, err := o.verifyNodeDrained(context.Background(), client, "gone-node"); err == nil {
 		t.Error("verifyNodeDrained on a failing node listing returned nil error")
+	}
+}
+
+// TestReenableHARules_UnsetsDisableOnTheWire pins what the restore actually
+// puts on the wire, not just that it put something there.
+//
+// The restore was a silent no-op for as long as it sent `disable=0`: PVE's
+// update_rule drops a falsy disable before it reads the config, so every
+// rolling update answered 200, cleared its restore record and audited
+// "ha_rules_restored" while the rules stayed off. Counting PUTs cannot see
+// that — TestReenableHARules_DropsDeletedRules passed throughout — so the
+// form is the only thing worth asserting here.
+func TestReenableHARules_UnsetsDisableOnTheWire(t *testing.T) {
+	var mu sync.Mutex
+	var form url.Values
+	o, client, closeStub := stubOrchestrator(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/api2/json/cluster/ha/rules/ok-rule" {
+			_ = r.ParseForm()
+			mu.Lock()
+			form = r.PostForm
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":null}`))
+			return
+		}
+		http.NotFound(w, r)
+	})
+	defer closeStub()
+
+	rules := []DisabledHARule{{Rule: "ok-rule", Type: "resource-affinity"}}
+	if remaining := o.reenableHARules(context.Background(), client, rules); len(remaining) != 0 {
+		t.Fatalf("remaining = %+v, want none", remaining)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if form == nil {
+		t.Fatal("no PUT reached the rule")
+	}
+	if form.Get("delete") != "disable" {
+		t.Errorf("delete form param: want %q, got %q", "disable", form.Get("delete"))
+	}
+	if _, sent := form["disable"]; sent {
+		t.Errorf("disable=%q sent instead of unsetting it — PVE ignores a falsy disable", form.Get("disable"))
+	}
+	if form.Get("type") != "resource-affinity" {
+		t.Errorf("type form param: %q", form.Get("type"))
 	}
 }
 

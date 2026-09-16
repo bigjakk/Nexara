@@ -1183,26 +1183,131 @@ func TestUpdateHARule_SendsTypeAndDisable(t *testing.T) {
 	}
 }
 
-func TestSetHARuleDisabled_DelegatesToUpdate(t *testing.T) {
-	var gotForm url.Values
-	srv := newTestServer(t, map[string]http.HandlerFunc{
-		"/api2/json/cluster/ha/rules/r1": func(w http.ResponseWriter, r *http.Request) {
-			_ = r.ParseForm()
-			gotForm = r.PostForm
-			jsonResponse(w, map[string]string{})
+// TestUpdateHARule_DisableTranslation pins the asymmetry between switching an
+// HA rule off and switching it back on.
+//
+// pve-ha-manager's update_rule drops a falsy `disable` from the parameters
+// before it touches the config, so `disable=0` is a 200 that changes nothing —
+// the failure mode is silent, which is why it survived in both the HA tab
+// toggle and the rolling-update restore step. Unsetting the property with
+// SectionConfig's `delete` list is the only way back, and the two must never
+// travel together: delete_from_config dies with "cannot set and delete
+// property" if they do.
+func TestUpdateHARule_DisableTranslation(t *testing.T) {
+	ptr := func(i int) *int { return &i }
+	str := func(s string) *string { return &s }
+	tests := []struct {
+		name       string
+		params     UpdateHARuleParams
+		wantForm   map[string]string
+		wantAbsent []string
+	}{
+		{
+			name:       "disable=1 sets the flag",
+			params:     UpdateHARuleParams{Disable: ptr(1)},
+			wantForm:   map[string]string{"disable": "1"},
+			wantAbsent: []string{"delete"},
 		},
-	})
-	defer srv.Close()
-	c := newTestClient(t, srv.URL)
+		{
+			// The rest of the form has to survive the unset: a rule is often
+			// re-enabled and edited in the same save.
+			name:       "disable=0 unsets it without disturbing the other fields",
+			params:     UpdateHARuleParams{Disable: ptr(0), Comment: str("edited while re-enabling")},
+			wantForm:   map[string]string{"delete": "disable", "comment": "edited while re-enabling"},
+			wantAbsent: []string{"disable"},
+		},
+		{
+			// Otherwise editing a disabled rule's nodes would quietly switch
+			// it back on.
+			name:       "an update that never mentions disable unsets nothing",
+			params:     UpdateHARuleParams{Nodes: str("pve-01,pve-02")},
+			wantForm:   map[string]string{"nodes": "pve-01,pve-02"},
+			wantAbsent: []string{"delete", "disable"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotForm url.Values
+			srv := newTestServer(t, map[string]http.HandlerFunc{
+				"/api2/json/cluster/ha/rules/myrule": func(w http.ResponseWriter, r *http.Request) {
+					_ = r.ParseForm()
+					gotForm = r.PostForm
+					jsonResponse(w, map[string]string{})
+				},
+			})
+			defer srv.Close()
+			c := newTestClient(t, srv.URL)
 
-	if err := c.SetHARuleDisabled(context.Background(), "r1", "resource-affinity", true); err != nil {
-		t.Fatalf("SetHARuleDisabled: %v", err)
+			if err := c.UpdateHARule(context.Background(), "myrule", "node-affinity", tt.params); err != nil {
+				t.Fatalf("UpdateHARule: %v", err)
+			}
+			if gotForm.Get("type") != "node-affinity" {
+				t.Errorf("type form param: %q", gotForm.Get("type"))
+			}
+			for k, want := range tt.wantForm {
+				if got := gotForm.Get(k); got != want {
+					t.Errorf("%s form param: want %q, got %q", k, want, got)
+				}
+			}
+			for _, k := range tt.wantAbsent {
+				if _, ok := gotForm[k]; ok {
+					t.Errorf("%s form param should be absent, got %q", k, gotForm.Get(k))
+				}
+			}
+		})
 	}
-	if gotForm.Get("type") != "resource-affinity" {
-		t.Errorf("type: %q", gotForm.Get("type"))
+}
+
+func TestSetHARuleDisabled_DelegatesToUpdate(t *testing.T) {
+	tests := []struct {
+		name       string
+		disabled   bool
+		wantForm   map[string]string
+		wantAbsent []string
+	}{
+		{
+			name:       "disable sets the flag",
+			disabled:   true,
+			wantForm:   map[string]string{"type": "resource-affinity", "disable": "1"},
+			wantAbsent: []string{"delete"},
+		},
+		{
+			// The rolling-update orchestrator's restore path. It reported
+			// success off PVE's 200 while the rule stayed disabled, so every
+			// rolling update left the rules it drained around switched off.
+			name:       "enable unsets the flag",
+			disabled:   false,
+			wantForm:   map[string]string{"type": "resource-affinity", "delete": "disable"},
+			wantAbsent: []string{"disable"},
+		},
 	}
-	if gotForm.Get("disable") != "1" {
-		t.Errorf("disable: %q", gotForm.Get("disable"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotForm url.Values
+			srv := newTestServer(t, map[string]http.HandlerFunc{
+				"/api2/json/cluster/ha/rules/r1": func(w http.ResponseWriter, r *http.Request) {
+					_ = r.ParseForm()
+					gotForm = r.PostForm
+					jsonResponse(w, map[string]string{})
+				},
+			})
+			defer srv.Close()
+			c := newTestClient(t, srv.URL)
+
+			if err := c.SetHARuleDisabled(context.Background(), "r1", "resource-affinity", tt.disabled); err != nil {
+				t.Fatalf("SetHARuleDisabled: %v", err)
+			}
+			for k, want := range tt.wantForm {
+				if got := gotForm.Get(k); got != want {
+					t.Errorf("%s form param: want %q, got %q", k, want, got)
+				}
+			}
+			for _, k := range tt.wantAbsent {
+				if _, ok := gotForm[k]; ok {
+					t.Errorf("%s form param should be absent, got %q", k, gotForm.Get(k))
+				}
+			}
+		})
 	}
 }
 

@@ -592,8 +592,12 @@ func (h *HAHandler) DeleteGroup(c fiber.Ctx) error {
 // spelled "does not exist"; and update_rule's
 // delete_from_config can die "no such option '<k>'" (pve-common
 // SectionConfig.pm), which is why this set names "no such ha rule" in full
-// rather than "no such". UpdateHARuleParams has no delete field today, so that
-// one is out of reach — adding one brings it into range.
+// rather than "no such". That path is now reachable — UpdateHARule sends
+// `delete=disable` to re-enable a rule — but none of its four dies can fire
+// for `disable`, for four separate reasons: it is declared, it is optional,
+// it is not fixed, and UpdateHARule never sets and deletes it in one request.
+// See the comment on that translation in internal/proxmox/client_ha.go; a
+// second delete key has to clear all four again.
 var haRuleMissingPhrases = []string{"does not exist", "no such ha rule"}
 
 // mapHARuleError is the HA-rule half of mapMissingObjectError, in the same
