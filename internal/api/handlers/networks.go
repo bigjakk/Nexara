@@ -243,9 +243,6 @@ func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx) error {
 	if err := proxmox.ValidateEditableNetworkInterfaceType(req.Type); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
-	if err := proxmox.ValidateNetworkInterfaceDeleteKeys(req.Delete); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
-	}
 	if err := proxmox.ValidateNetworkInterfaceOptions(req.NetworkInterfaceOptions); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}

@@ -385,6 +385,9 @@ func (c *Client) UpdateNetworkInterface(ctx context.Context, node string, iface 
 	if err := validatePathSegment("interface name", iface); err != nil {
 		return err
 	}
+	if err := validateNetworkInterfaceDeleteKeys(params.Delete); err != nil {
+		return err
+	}
 	form := url.Values{}
 	form.Set("type", params.Type)
 	networkIfaceOptionsToForm(form, params.NetworkInterfaceOptions)
@@ -501,9 +504,14 @@ var deletableNetworkInterfaceKeys = map[string]bool{
 	"vlan-id": true, "vlan-raw-device": true,
 }
 
-// ValidateNetworkInterfaceDeleteKeys checks every entry of an update's Delete
+// validateNetworkInterfaceDeleteKeys checks every entry of an update's Delete
 // list against the allow-list above.
-func ValidateNetworkInterfaceDeleteKeys(keys []string) error {
+//
+// UpdateNetworkInterface calls this itself rather than leaving it to callers,
+// so it is a choke point none of them can bypass. It is unexported to keep it
+// one: an exported checker invites the opt-in shape it replaced, where a
+// second caller that forgets the call silently gets the unguarded behaviour.
+func validateNetworkInterfaceDeleteKeys(keys []string) error {
 	for _, k := range keys {
 		if !deletableNetworkInterfaceKeys[k] {
 			return fmt.Errorf("%w: %q is not a network setting that can be cleared", ErrInvalidInput, k)

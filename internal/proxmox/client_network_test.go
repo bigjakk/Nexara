@@ -197,18 +197,40 @@ func TestUpdateNetworkInterface_RejectsDotDot(t *testing.T) {
 	}
 }
 
-func TestValidateNetworkInterfaceDeleteKeys(t *testing.T) {
+func TestUpdateNetworkInterface_RejectsUndeletableKeys(t *testing.T) {
 	// `delete` takes raw Proxmox option names, so it is allow-listed: deleting
 	// `type` or `iface` would corrupt the interface definition.
-	if err := ValidateNetworkInterfaceDeleteKeys([]string{"gateway", "mtu", "bond-primary"}); err != nil {
-		t.Errorf("valid keys rejected: %v", err)
-	}
+	//
+	// Driven through UpdateNetworkInterface rather than the validator, because
+	// the point of the check living in the client is that no caller can skip
+	// it: a test that called the validator directly would still pass with the
+	// call site deleted, which is the bug this shape exists to prevent.
+	srv, seen := newFormCaptureServer(t)
+	c := newTestClient(t, srv.URL)
+
 	for _, key := range []string{"type", "iface", "", "gateway,type", "../"} {
-		if err := ValidateNetworkInterfaceDeleteKeys([]string{key}); err == nil {
-			t.Errorf("ValidateNetworkInterfaceDeleteKeys(%q) accepted, want rejection", key)
+		err := c.UpdateNetworkInterface(context.Background(), "pve1", "vmbr0", UpdateNetworkInterfaceParams{
+			Type:   "bridge",
+			Delete: []string{key},
+		})
+		if err == nil {
+			t.Errorf("UpdateNetworkInterface(delete=%q) accepted, want rejection", key)
 		} else if !errors.Is(err, ErrInvalidInput) {
-			t.Errorf("ValidateNetworkInterfaceDeleteKeys(%q) = %v, want ErrInvalidInput", key, err)
+			t.Errorf("UpdateNetworkInterface(delete=%q) = %v, want ErrInvalidInput", key, err)
 		}
+	}
+	// Rejected before the request is built, so nothing reaches the node.
+	if len(*seen) != 0 {
+		t.Errorf("issued %d request(s), want none", len(*seen))
+	}
+
+	// Allow-listed keys still go through: without this the test would pass
+	// just as well with every key rejected.
+	if err := c.UpdateNetworkInterface(context.Background(), "pve1", "vmbr0", UpdateNetworkInterfaceParams{
+		Type:   "bridge",
+		Delete: []string{"gateway", "mtu", "bond-primary"},
+	}); err != nil {
+		t.Errorf("valid keys rejected: %v", err)
 	}
 }
 
