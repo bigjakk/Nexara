@@ -406,6 +406,20 @@ func TestExtractLRMState(t *testing.T) {
 			status: "",
 			want:   "",
 		},
+		// The shapes a format change would arrive as. Each returns "",
+		// which classifyHAEntries fails open on and counts — see
+		// TestUnhealthyHANodes_UnparseableLRMStates for what the caller
+		// does once every entry looks like this.
+		{
+			name:   "bracketed instead of parenthesized",
+			status: "pve-01 [active, watchdog active]",
+			want:   "",
+		},
+		{
+			name:   "bare state token with no node prefix or parens",
+			status: "maintenance",
+			want:   "",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -490,9 +504,11 @@ func TestClassifyHAEntries(t *testing.T) {
 	// a real-shape /cluster/ha/status/current payload with one node in
 	// maintenance.
 	tests := []struct {
-		name    string
-		entries []proxmox.HAStatusEntry
-		want    map[string]struct{}
+		name            string
+		entries         []proxmox.HAStatusEntry
+		want            map[string]struct{}
+		wantUnparseable int
+		wantLRMTotal    int
 	}{
 		{
 			name: "all active",
@@ -500,7 +516,8 @@ func TestClassifyHAEntries(t *testing.T) {
 				{ID: "lrm:pve1", Type: "lrm", Node: "pve1", Status: "pve1 (active, watchdog active, Wed Apr 29 07:55:26 2026)"},
 				{ID: "lrm:pve2", Type: "lrm", Node: "pve2", Status: "pve2 (active, watchdog active, Wed Apr 29 07:55:26 2026)"},
 			},
-			want: map[string]struct{}{},
+			want:         map[string]struct{}{},
+			wantLRMTotal: 2,
 		},
 		{
 			name: "maintenance node skipped",
@@ -509,7 +526,8 @@ func TestClassifyHAEntries(t *testing.T) {
 				{ID: "lrm:pve2", Type: "lrm", Node: "pve2", Status: "pve2 (maintenance, watchdog active, ...)"},
 				{ID: "service:vm:100", Type: "service", Node: "pve2", Status: "vm:100 (pve2, started)"},
 			},
-			want: map[string]struct{}{"pve2": {}},
+			want:         map[string]struct{}{"pve2": {}},
+			wantLRMTotal: 2, // the service entry is not an lrm entry
 		},
 		{
 			name: "node-type entries are ignored (no LRM info there)",
@@ -518,11 +536,72 @@ func TestClassifyHAEntries(t *testing.T) {
 				{ID: "node/pve2", Type: "node", Node: "pve2", Status: "online"},
 			},
 			want: map[string]struct{}{},
+			// Zero lrm entries means zero unparseable ones. The caller
+			// must not read that as "everything is unparseable".
+			wantLRMTotal: 0,
+		},
+		{
+			// One node answering in a shape we don't recognise is not a
+			// format change. It stays out of the skip set — failing open
+			// per entry is deliberate — but it is counted, so the caller
+			// can say so instead of staying silent.
+			name: "one unparseable state is counted, not skipped",
+			entries: []proxmox.HAStatusEntry{
+				{ID: "lrm:pve-01", Type: "lrm", Node: "pve-01", Status: "pve-01 (active, watchdog active, ...)"},
+				{ID: "lrm:pve-02", Type: "lrm", Node: "pve-02", Status: "pve-02 active"},
+			},
+			want:            map[string]struct{}{},
+			wantUnparseable: 1,
+			wantLRMTotal:    2,
+		},
+		{
+			// An unparseable sibling must not cost the entries that DID
+			// parse: pve-02 is in maintenance and stays in the skip set.
+			name: "a maintenance node survives an unparseable sibling",
+			entries: []proxmox.HAStatusEntry{
+				{ID: "lrm:pve-01", Type: "lrm", Node: "pve-01", Status: "pve-01 (active, watchdog active, ...)"},
+				{ID: "lrm:pve-02", Type: "lrm", Node: "pve-02", Status: "pve-02 (maintenance, watchdog active, ...)"},
+				{ID: "lrm:pve-03", Type: "lrm", Node: "pve-03", Status: "pve-03 something unrecognised"},
+			},
+			want:            map[string]struct{}{"pve-02": {}},
+			wantUnparseable: 1,
+			wantLRMTotal:    3,
+		},
+		{
+			// The format-change signature. classifyHAEntries still fails
+			// open on every one of them — deciding what an all-unparseable
+			// listing means is the caller's job, and the counts are what
+			// let it decide.
+			name: "every state unparseable is still fail-open here, and fully counted",
+			entries: []proxmox.HAStatusEntry{
+				{ID: "lrm:pve-01", Type: "lrm", Node: "pve-01", Status: ""},
+				{ID: "lrm:pve-02", Type: "lrm", Node: "pve-02", Status: ""},
+				{ID: "lrm:pve-03", Type: "lrm", Node: "pve-03", Status: ""},
+			},
+			want:            map[string]struct{}{},
+			wantUnparseable: 3,
+			wantLRMTotal:    3,
+		},
+		{
+			// "node" renamed away is the same class of format change as
+			// "status" renamed away, and it arrives one field earlier. An
+			// lrm entry with no node must count as a state we could not
+			// read — dropping it uncounted would leave unparseable ==
+			// lrmTotal == 0 and make the caller's check vacuous, on a
+			// cluster where two nodes are in maintenance.
+			name: "lrm entries with no node attribution count as unparseable",
+			entries: []proxmox.HAStatusEntry{
+				{ID: "lrm:pve-01", Type: "lrm", Status: "pve-01 (maintenance, watchdog active, ...)"},
+				{ID: "lrm:pve-02", Type: "lrm", Status: "pve-02 (maintenance, watchdog active, ...)"},
+			},
+			want:            map[string]struct{}{},
+			wantUnparseable: 2,
+			wantLRMTotal:    2,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyHAEntries(tc.entries)
+			got, unparseable, lrmTotal := classifyHAEntries(tc.entries)
 			if len(got) != len(tc.want) {
 				t.Fatalf("got %d skipped, want %d (got=%v want=%v)", len(got), len(tc.want), keys(got), keys(tc.want))
 			}
@@ -531,8 +610,131 @@ func TestClassifyHAEntries(t *testing.T) {
 					t.Errorf("expected %q to be marked unhealthy", k)
 				}
 			}
+			if unparseable != tc.wantUnparseable {
+				t.Errorf("unparseable = %d, want %d", unparseable, tc.wantUnparseable)
+			}
+			if lrmTotal != tc.wantLRMTotal {
+				t.Errorf("lrmTotal = %d, want %d", lrmTotal, tc.wantLRMTotal)
+			}
 		})
 	}
+}
+
+// TestUnhealthyHANodes_UnparseableLRMStates covers the second route to the
+// collapse TestUnhealthyHANodes_SeparatesNoneFromUnreadable covers the first
+// of: the read succeeds, every entry decodes, and every state parses to "".
+// classifyHAEntries treats "" as healthy, so an all-unparseable listing
+// produces an empty skip set that is indistinguishable from a healthy cluster
+// — the maintenance filter passes everything and nothing is logged.
+//
+// The assertions here are deliberately three-way. Failing on any unparseable
+// entry would let one odd node strand DRS for the whole cluster; failing on
+// none of them is the silent collapse. Only "all of them" is unambiguous.
+func TestUnhealthyHANodes_UnparseableLRMStates(t *testing.T) {
+	statusEntries := func(entries []proxmox.HAStatusEntry) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) { haData(w, entries) }
+	}
+	// run returns the skip set, how many WARN-or-above records
+	// unhealthyHANodes emitted for this listing, and the error.
+	run := func(t *testing.T, entries []proxmox.HAStatusEntry) (map[string]struct{}, int, error) {
+		t.Helper()
+		srv, _ := haTestServer(t, map[string]http.HandlerFunc{haStatusPath: statusEntries(entries)})
+		warns := &warnCounter{}
+		skip, err := unhealthyHANodes(context.Background(), newHAClient(t, srv.URL), slog.New(warns), uuid.New())
+		warns.mu.Lock()
+		defer warns.mu.Unlock()
+		return skip, warns.warns, err
+	}
+
+	t.Run("every LRM state unparseable stops the evaluation", func(t *testing.T) {
+		// Four shapes of the same format change: the field this reads
+		// renamed away (so Status decodes empty), the state moved into
+		// HAStatusEntry.State — which has no Go reader, so it would
+		// decode fine and change nothing here — the status reshaped out
+		// of the "<node> (<state>, ...)" form, and the node attribution
+		// renamed away one field earlier.
+		for name, entries := range map[string][]proxmox.HAStatusEntry{
+			"status field renamed away": {
+				{ID: "quorum", Type: "quorum", Status: "OK"},
+				{ID: "lrm:pve-01", Type: "lrm", Node: "pve-01"},
+				{ID: "lrm:pve-02", Type: "lrm", Node: "pve-02"},
+			},
+			"state moved to the Go-unread State field": {
+				{ID: "lrm:pve-01", Type: "lrm", Node: "pve-01", State: "active"},
+				{ID: "lrm:pve-02", Type: "lrm", Node: "pve-02", State: "maintenance"},
+			},
+			"status is a bare token with no parens": {
+				{ID: "lrm:pve-01", Type: "lrm", Node: "pve-01", Status: "active"},
+				{ID: "lrm:pve-02", Type: "lrm", Node: "pve-02", Status: "maintenance"},
+			},
+			"node attribution renamed away": {
+				{ID: "lrm:pve-01", Type: "lrm", Status: "pve-01 (active, watchdog active, ...)"},
+				{ID: "lrm:pve-02", Type: "lrm", Status: "pve-02 (maintenance, watchdog active, ...)"},
+			},
+		} {
+			skip, warns, err := run(t, entries)
+			if err == nil {
+				t.Errorf("%s: read as a cluster with no node in maintenance (skip=%v); DRS would migrate onto a node HA is evacuating", name, keys(skip))
+			}
+			if skip != nil {
+				t.Errorf("%s: skip = %v alongside the error, want nil", name, keys(skip))
+			}
+			// The error is the report. Warning as well would say the
+			// nodes are "being treated as healthy" on a path that
+			// treats them as nothing at all.
+			if warns != 0 {
+				t.Errorf("%s: warns = %d on the error path, want 0", name, warns)
+			}
+		}
+	})
+
+	t.Run("some unparseable warns and proceeds", func(t *testing.T) {
+		skip, warns, err := run(t, []proxmox.HAStatusEntry{
+			{ID: "lrm:pve-01", Type: "lrm", Node: "pve-01", Status: "pve-01 (active, watchdog active, ...)"},
+			{ID: "lrm:pve-02", Type: "lrm", Node: "pve-02", Status: "pve-02 (maintenance, watchdog active, ...)"},
+			{ID: "lrm:pve-03", Type: "lrm", Node: "pve-03", Status: "pve-03 something unrecognised"},
+		})
+		if err != nil {
+			t.Fatalf("one unparseable entry stranded the whole evaluation: %v", err)
+		}
+		if _, ok := skip["pve-02"]; !ok || len(skip) != 1 {
+			t.Errorf("skip = %v, want exactly pve-02", keys(skip))
+		}
+		if warns == 0 {
+			t.Error("an unparseable LRM state was passed over silently; it must be logged at WARN")
+		}
+	})
+
+	t.Run("a listing with no LRM entries is not a format change", func(t *testing.T) {
+		// unparseable == lrmTotal == 0 here. Erroring on the bare
+		// equality would fail an evaluation that should have passed.
+		skip, warns, err := run(t, []proxmox.HAStatusEntry{
+			{ID: "quorum", Type: "quorum", Status: "OK"},
+			{ID: "node/pve-01", Type: "node", Node: "pve-01", Status: "online"},
+		})
+		if err != nil {
+			t.Fatalf("a listing with no lrm entries was read as a format change: %v", err)
+		}
+		if len(skip) != 0 {
+			t.Errorf("skip = %v, want empty", keys(skip))
+		}
+		if warns != 0 {
+			t.Errorf("warns = %d on a listing with nothing unparseable, want 0", warns)
+		}
+	})
+
+	t.Run("a fully parseable listing warns about nothing", func(t *testing.T) {
+		_, warns, err := run(t, []proxmox.HAStatusEntry{
+			{ID: "lrm:pve-01", Type: "lrm", Node: "pve-01", Status: "pve-01 (idle, Wed Apr 29 07:55:26 2026)"},
+			{ID: "lrm:pve-02", Type: "lrm", Node: "pve-02", Status: "pve-02 (maintenance mode, Wed Apr 29 07:55:26 2026)"},
+		})
+		if err != nil {
+			t.Fatalf("unhealthyHANodes: %v", err)
+		}
+		if warns != 0 {
+			t.Errorf("warns = %d on a fully parseable listing, want 0", warns)
+		}
+	})
 }
 
 func keys(m map[string]struct{}) []string {

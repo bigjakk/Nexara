@@ -458,12 +458,48 @@ func CalculateImbalance(scores map[string]NodeScore) float64 {
 // this adds is the narrow slice where manager_status is unreadable while the
 // rules file is fine. It also fails CHEAPER than the old path did, landing
 // before workload collection instead of after it.
+//
+// A status that parses as nothing is the second route to the same collapse,
+// and classifyHAEntries cannot be the one to judge it: an unparseable state
+// counts as healthy there, so all-unparseable would classify every node
+// healthy and hand back a filter that passes everything — silently, because
+// the empty state is logged nowhere. The count comes back up here instead,
+// where "some" and "all" can be told apart. See classifyHAEntries for why the
+// per-entry decision stays fail-open.
+//
+// The paragraph above says a cluster always answers with lrm entries, and that
+// is the steady state, not a guarantee to code against: a listing caught mid
+// startup, or a partial view, can carry none. That is why the all-unparseable
+// check below is written to distinguish zero from zero-out-of-zero.
 func unhealthyHANodes(ctx context.Context, client *proxmox.Client, logger *slog.Logger, clusterID uuid.UUID) (map[string]struct{}, error) {
 	entries, err := client.GetHAStatus(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read HA status for maintenance filter: %w", err)
 	}
-	skip := classifyHAEntries(entries)
+	skip, unparseable, lrmTotal := classifyHAEntries(entries)
+
+	// unparseable > 0 is load-bearing, not belt-and-braces: a listing that
+	// carried no lrm entries at all has unparseable == lrmTotal == 0, and
+	// without this the equality below would fire on it and fail an
+	// evaluation that should have passed.
+	if unparseable > 0 {
+		// Every lrm entry unparseable is the format-change signature —
+		// a field renamed or moved, not one node answering oddly. Fail
+		// the evaluation: classifying the whole cluster healthy off a
+		// status nobody could read is how DRS ends up migrating onto a
+		// node HA is evacuating. Some-but-not-all is the opposite case
+		// and stays a warning, because failing on it would let a single
+		// odd node strand DRS for the whole cluster.
+		if unparseable == lrmTotal {
+			return nil, fmt.Errorf(`read HA status for maintenance filter: none of the %d LRM entries had a parseable state (want "<node> (<state>, ...)"); the Proxmox HA status format may have changed`, lrmTotal)
+		}
+		logger.Warn("DRS could not parse some HA LRM states; those nodes are being treated as healthy",
+			"cluster_id", clusterID,
+			"unparseable", unparseable,
+			"lrm_entries", lrmTotal,
+		)
+	}
+
 	for node := range skip {
 		logger.Info("DRS marking node unhealthy from HA LRM state",
 			"cluster_id", clusterID,
@@ -473,25 +509,53 @@ func unhealthyHANodes(ctx context.Context, client *proxmox.Client, logger *slog.
 	return skip, nil
 }
 
-// classifyHAEntries returns the set of nodes whose LRM state is anything
-// other than active/idle. Pure function so it can be unit-tested without
-// a live Proxmox endpoint.
-func classifyHAEntries(entries []proxmox.HAStatusEntry) map[string]struct{} {
-	skip := make(map[string]struct{})
+// classifyHAEntries returns the set of nodes whose LRM state parsed as
+// something other than active/idle, along with how many lrm entries yielded
+// no usable state at all and how many lrm entries were seen. Pure function —
+// no logger, no error — so it can be unit-tested without a live Proxmox
+// endpoint; the caller decides what the counts mean.
+func classifyHAEntries(entries []proxmox.HAStatusEntry) (skip map[string]struct{}, unparseable, lrmTotal int) {
+	skip = make(map[string]struct{})
 	for _, entry := range entries {
-		if entry.Type != "lrm" || entry.Node == "" {
+		if entry.Type != "lrm" {
+			continue
+		}
+		lrmTotal++
+		if entry.Node == "" {
+			// An lrm entry we cannot attribute to a node is a state
+			// we could not read — we just can't say whose. Counting
+			// it here rather than skipping it uncounted is what
+			// keeps the caller's check honest: "node" renamed away
+			// is the same class of format change as "status"
+			// renamed away, and dropping these silently would leave
+			// unparseable == lrmTotal == 0 and the check vacuous.
+			unparseable++
 			continue
 		}
 		state := extractLRMState(entry.Status)
 		switch state {
-		case "active", "idle", "":
-			// healthy, or unparseable — fail open so a format
-			// change doesn't strand DRS.
+		case "active", "idle":
+			// Healthy.
+		case "":
+			// Unparseable. Fail open per entry — one node answering
+			// in a shape we don't recognise must not cost DRS the
+			// whole cluster — but this is a deferred decision, not
+			// a settled one, so count it and let unhealthyHANodes
+			// warn on it and fail when EVERY entry lands here.
+			//
+			// Worth knowing if that ever fires: the state is parsed
+			// out of HAStatusEntry.Status, and HAStatusEntry.State
+			// has no reader in Go — it is only passed through to
+			// the SPA by the HA status handler, which the HA tab
+			// renders. If Proxmox has moved the LRM state there,
+			// teach extractLRMState to read it rather than widening
+			// the fail-open.
+			unparseable++
 		default:
 			skip[entry.Node] = struct{}{}
 		}
 	}
-	return skip
+	return skip, unparseable, lrmTotal
 }
 
 // extractLRMState pulls the state token out of a Proxmox HA LRM status
