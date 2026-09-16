@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, RefreshCw, Trash2, ShieldCheck, ShieldOff } from "lucide-react";
+import { ApiClientError } from "@/lib/api-client";
+import { describeError } from "@/lib/api-error";
 import { useAuth } from "@/hooks/useAuth";
 import { Textarea } from "@/components/ui/textarea";
 import { useTaskLogStore } from "@/stores/task-log-store";
@@ -45,7 +47,10 @@ import {
   useNodeACMEConfig,
   useSetNodeACMEConfig,
 } from "@/features/acme/api/acme-queries";
-import type { ACMEChallengeSchema } from "@/features/acme/api/acme-queries";
+import type {
+  ACMEChallengeSchema,
+  NodeACMEConfig,
+} from "@/features/acme/api/acme-queries";
 import { useClusterNodes } from "../api/cluster-queries";
 
 interface ClusterACMETabProps {
@@ -540,7 +545,12 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
   const [editDomain, setEditDomain] = useState("");
   const [editPlugin, setEditPlugin] = useState("");
   const [editAlias, setEditAlias] = useState("");
+  // null while adding: an add has no slot until saveDomain picks one.
   const [editIndex, setEditIndex] = useState<number | null>(null);
+  // The digest an edit saves with, pinned when its dialog opened. Undefined
+  // for an add, which reads the live config at save time instead.
+  const [editDigest, setEditDigest] = useState<string | undefined>(undefined);
+  const [domainError, setDomainError] = useState("");
 
   const acmeConfig = acmeConfigQuery.data;
   const domainKeys = [
@@ -556,14 +566,43 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
     .filter((d) => d.value.length > 0);
 
   const hasDomains = configuredDomains.length > 0;
+  const addingDomain = editIndex === null;
+
+  // Bumped on every open, so an async callback can tell that a DIFFERENT
+  // dialog has opened since it started. (Not that its own is still open — a
+  // close without a reopen leaves this unchanged, which is harmless: both
+  // openers set the pin themselves, so nothing stale can survive into one.)
+  const domainDialogGen = useRef(0);
+
+  const openDomainDialog = () => {
+    domainDialogGen.current += 1;
+    setDomainError("");
+    setAcmeConfig.reset();
+    setDomainDialogOpen(true);
+  };
+
+  // Every close goes through here. Radix calls onOpenChange only for closes it
+  // initiates — Escape, the overlay, the X — so a Cancel button that sets the
+  // open prop directly would skip the clear and leave a dialog-scoped message
+  // stranded on the card behind it.
+  const closeDomainDialog = () => {
+    setDomainDialogOpen(false);
+    setDomainError("");
+  };
 
   const openAddDomain = () => {
     setEditDomain("");
     setEditPlugin("");
     setEditAlias("");
-    const nextIndex = domainKeys.findIndex((k) => !acmeConfig?.[k]);
-    setEditIndex(nextIndex >= 0 ? nextIndex : null);
-    setDomainDialogOpen(true);
+    setEditIndex(null);
+    setEditDigest(undefined);
+    // Refetch, because an add is based on nothing the operator can already see
+    // being out of date: saveDomain picks the slot from whatever this returns,
+    // so slot and digest still come from one read. Queries here hold for five
+    // minutes and do not refetch on window focus, so a tab left open all
+    // afternoon is the normal case rather than the unlucky one.
+    void acmeConfigQuery.refetch();
+    openDomainDialog();
   };
 
   const openEditDomain = (index: number, value: string) => {
@@ -572,24 +611,134 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
     setEditPlugin(parsed.plugin);
     setEditAlias(parsed.alias);
     setEditIndex(index);
-    setDomainDialogOpen(true);
+    // Pin the digest to the same read these fields came from, and do not
+    // refetch. Reading it live at save time instead would let ANY refetch
+    // landing while this dialog is open swap the digest under values that
+    // never move with it — and plenty do: a WebSocket reconnect invalidates
+    // every active query (stores/websocket-store.ts), ordering or renewing a
+    // certificate invalidates this cluster, and refetchOnReconnect is on. The
+    // save would then carry a digest matching a version of this slot the
+    // operator never saw, and the compare-and-swap would wave through exactly
+    // the overwrite it exists to catch. Pinned, a slot that moved since this
+    // read answers 409, which is the whole point.
+    setEditDigest(acmeConfig?.digest);
+    openDomainDialog();
   };
 
   const saveDomain = () => {
-    if (!editDomain || editIndex === null) return;
-    const entry = buildDomainEntry(editDomain, editPlugin, editAlias);
-    const key = domainKeys[editIndex];
+    if (!editDomain) return;
+    // The rule both branches serve: the digest must come from the same read as
+    // whatever the save is based on. An edit is based on the values the dialog
+    // was opened with, so it keeps that read's digest and its slot. An add is
+    // based on nothing but the operator's typing, so it takes the newest read
+    // — and therefore has to pick its slot HERE rather than at open time,
+    // because the refetch can reveal a slot someone else filled in between. A
+    // save aimed at the slot number chosen back then would carry a digest that
+    // now matches and land on top of their domain.
+    const index = editIndex ?? domainKeys.findIndex((k) => !acmeConfig?.[k]);
+    if (index < 0) {
+      setDomainError(
+        "All six ACME domain slots are in use. Remove one in Proxmox before adding another.",
+      );
+      return;
+    }
+    const key = domainKeys[index];
     if (!key) return;
-    const account = acmeConfig?.acme ?? "account=default";
+    setDomainError("");
+    const config: NodeACMEConfig = {
+      [key]: buildDomainEntry(editDomain, editPlugin, editAlias),
+    };
+    // Deliberately no `acme` key. It carries the ACME account, this dialog
+    // cannot change it, and sending the cached copy back wrote whatever the
+    // last read happened to see over whatever Proxmox actually had — on every
+    // domain save. PVE's set_options only assigns the keys present in the
+    // request, so omitting it leaves the account untouched.
+
+    // An add takes the live digest, read in the same breath as the slot above
+    // so the two cannot disagree; an edit takes the one pinned to the values
+    // it is showing.
+    const digest = addingDomain ? acmeConfig?.digest : editDigest;
+    if (digest) {
+      // Turns the write into a compare-and-swap. The digest covers the WHOLE
+      // node config, not just the ACME keys, so editing the node's Notes in
+      // the Proxmox UI conflicts with a pending save here too — which is why
+      // the 409 copy talks about the node's configuration rather than ACME.
+      config.digest = digest;
+    }
+    // No else. An add cannot get here without a config read, so the only way
+    // to have no digest is a PVE that answered without one. That is an
+    // unconditional write, as every save was before this — the check degrades
+    // rather than locking the operator out of their own node.
+    const gen = domainDialogGen.current;
     setAcmeConfig.mutate(
-      { node: certNode, config: { acme: account, [key]: entry } },
+      { node: certNode, config },
       {
-        onSuccess: () => {
-          setDomainDialogOpen(false);
+        onSuccess: closeDomainDialog,
+        onError: (err) => {
+          // Refetch so a deliberate retry carries the current digest, and
+          // re-pin it: a conflict this dialog was shown is the one thing that
+          // moves its pinned digest, or an edit could never be retried at all.
+          // Still not an automatic retry — when the conflict is another
+          // operator writing this same slot, retrying on their behalf performs
+          // exactly the overwrite that was just prevented.
+          if (!(err instanceof ApiClientError) || err.status !== 409) return;
+          void acmeConfigQuery.refetch().then((res) => {
+            // isSuccess, not res.data: a failed refetch RETAINS the last
+            // successful data, so testing the data alone is a guard that can
+            // never fail — it would move the pin onto a digest belonging to a
+            // change the operator has not seen, which is the overwrite the pin
+            // exists to prevent, reintroduced through the failure path.
+            if (!res.isSuccess || !res.data.digest) return;
+            // And only for the dialog that hit the conflict. Cancelling and
+            // opening another row while this refetch is in flight would
+            // otherwise land this digest on a pin that was just set to match
+            // different values.
+            if (domainDialogGen.current !== gen) return;
+            setEditDigest(res.data.digest);
+          });
         },
       },
     );
   };
+
+  // Rendered in the dialog while it is open and in the card once it closes —
+  // the card sits behind the open dialog rather than being unmounted by it, so
+  // an ungated second copy shows the same message twice.
+  //
+  // The fallback is load-bearing, not politeness. describeError returns "" for
+  // a TypeError, which is how a dropped connection rejects fetch, and the hook
+  // has opted out of the global toast — so without a floor here that failure
+  // renders as nothing at all, on both surfaces.
+  const domainSaveError =
+    domainError ||
+    (setAcmeConfig.isError
+      ? describeError(setAcmeConfig.error) ||
+        "The save request failed — check your connection and try again."
+      : "");
+
+  // The server's 409 copy says to reload and try again, but the dialog's own
+  // fields do not reload — only the table behind it does. Pressing Save again
+  // therefore overwrites rather than retries, and the operator should be told
+  // that rather than left to discover it.
+  const domainSaveConflicted =
+    setAcmeConfig.error instanceof ApiClientError &&
+    setAcmeConfig.error.status === 409;
+
+  // Only an add waits on the live config: it takes both its free slot and its
+  // digest from it, and unread, the slot scan answers 0 and the write goes out
+  // with no digest — a blind overwrite of acmedomain0, in precisely the state
+  // where the compare-and-swap is most needed. isFetching holds it shut while
+  // a refetch is in flight too, so a retry cannot re-send the digest it just
+  // lost on.
+  //
+  // An edit carries its own pinned slot, values and digest, so it needs none
+  // of that. Note this asks whether the data is THERE, not whether the query
+  // is `isSuccess`: a background refetch that fails flips the status to error
+  // while keeping the data, so gating on status would shut Save on an edit
+  // that has everything it needs, until some later refetch happened to
+  // succeed.
+  const domainSaveBlocked =
+    addingDomain && (!acmeConfig || acmeConfigQuery.isFetching);
 
   const formatDate = (ts?: number) => {
     if (!ts) return "—";
@@ -607,7 +756,13 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
       {/* Node selector */}
       <div className="flex items-center gap-2">
         {nodesQuery.data && nodesQuery.data.length > 0 && (
-          <Select value={certNode} onValueChange={setSelectedNode}>
+          <Select
+            value={certNode}
+            onValueChange={(node) => {
+              setSelectedNode(node);
+              setAcmeConfig.reset();
+            }}
+          >
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="Select node..." />
             </SelectTrigger>
@@ -626,12 +781,14 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">ACME Domain Configuration</CardTitle>
-          {canManage("certificate") && configuredDomains.length < 6 && (
-            <Button size="sm" variant="outline" onClick={openAddDomain}>
-              <Plus className="mr-1 h-4 w-4" />
-              Add Domain
-            </Button>
-          )}
+          {canManage("certificate") &&
+            certNode.length > 0 &&
+            configuredDomains.length < 6 && (
+              <Button size="sm" variant="outline" onClick={openAddDomain}>
+                <Plus className="mr-1 h-4 w-4" />
+                Add Domain
+              </Button>
+            )}
         </CardHeader>
         <CardContent>
           {acmeConfig?.acme && (
@@ -691,23 +848,24 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
               </TableBody>
             </Table>
           )}
-          {setAcmeConfig.isError && (
-            <p className="mt-2 text-sm text-destructive">
-              {setAcmeConfig.error.message}
-            </p>
+          {!domainDialogOpen && domainSaveError && (
+            <p className="mt-2 text-sm text-destructive">{domainSaveError}</p>
           )}
         </CardContent>
       </Card>
 
       {/* Domain add/edit dialog */}
-      <Dialog open={domainDialogOpen} onOpenChange={setDomainDialogOpen}>
+      <Dialog
+        open={domainDialogOpen}
+        onOpenChange={(open) => {
+          if (open) openDomainDialog();
+          else closeDomainDialog();
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {editIndex !== null &&
-              configuredDomains.some((d) => d.index === editIndex)
-                ? "Edit Domain"
-                : "Add ACME Domain"}
+              {addingDomain ? "Add ACME Domain" : "Edit Domain"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
@@ -764,7 +922,8 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
               <Select
                 value={acmeConfig?.acme?.replace("account=", "") ?? "default"}
                 onValueChange={() => {
-                  /* account is set on save */
+                  // Read-only: shown for context, changed in the Proxmox UI.
+                  // Domain saves leave the `acme` key alone — see saveDomain.
                 }}
                 disabled
               >
@@ -783,18 +942,31 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
                 </SelectContent>
               </Select>
             </div>
+            {domainSaveError && (
+              <p className="text-sm text-destructive">{domainSaveError}</p>
+            )}
+            {domainSaveConflicted && (
+              <p className="text-sm text-muted-foreground">
+                Saving again will overwrite the node's current configuration
+                with the values shown here.
+              </p>
+            )}
+            {domainSaveBlocked && (
+              <p className="text-sm text-muted-foreground">
+                {acmeConfigQuery.isError
+                  ? "This node's current configuration could not be read, so saving would risk overwriting a setting Nexara cannot see."
+                  : "Reading this node's current configuration…"}
+              </p>
+            )}
             <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setDomainDialogOpen(false);
-                }}
-              >
+              <Button variant="outline" onClick={closeDomainDialog}>
                 Cancel
               </Button>
               <Button
                 onClick={saveDomain}
-                disabled={!editDomain || setAcmeConfig.isPending}
+                disabled={
+                  !editDomain || setAcmeConfig.isPending || domainSaveBlocked
+                }
               >
                 {setAcmeConfig.isPending ? "Saving..." : "Save"}
               </Button>
