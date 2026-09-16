@@ -367,6 +367,12 @@ func (c *Client) CreateNetworkInterface(ctx context.Context, node string, params
 	if err := validateNodeName(node); err != nil {
 		return err
 	}
+	if err := validateCreatableNetworkInterfaceType(params.Type); err != nil {
+		return err
+	}
+	if err := validateNetworkInterfaceOptions(params.NetworkInterfaceOptions); err != nil {
+		return err
+	}
 	form := url.Values{}
 	form.Set("iface", params.Iface)
 	form.Set("type", params.Type)
@@ -385,6 +391,12 @@ func (c *Client) UpdateNetworkInterface(ctx context.Context, node string, iface 
 	if err := validatePathSegment("interface name", iface); err != nil {
 		return err
 	}
+	if err := validateEditableNetworkInterfaceType(params.Type); err != nil {
+		return err
+	}
+	if err := validateNetworkInterfaceOptions(params.NetworkInterfaceOptions); err != nil {
+		return err
+	}
 	if err := validateNetworkInterfaceDeleteKeys(params.Delete); err != nil {
 		return err
 	}
@@ -392,6 +404,12 @@ func (c *Client) UpdateNetworkInterface(ctx context.Context, node string, iface 
 	form.Set("type", params.Type)
 	networkIfaceOptionsToForm(form, params.NetworkInterfaceOptions)
 	if len(params.Delete) > 0 {
+		// No set-and-clear refusal here, unlike SetNodeACMEConfig. The two
+		// endpoints order it oppositely: PVE::API2::Network's update_network
+		// applies `delete` FIRST and assigns the parameters afterwards, so a
+		// key in both ends up set; PVE/API2/NodeConfig.pm's set_options deletes
+		// last, so there the set value is silently dropped and has to be
+		// refused.
 		form.Set("delete", strings.Join(params.Delete, ","))
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/network/" + url.PathEscape(iface)
@@ -472,18 +490,28 @@ var editableNetworkInterfaceTypes = func() map[string]bool {
 	return types
 }()
 
-// ValidateCreatableNetworkInterfaceType rejects a type POST cannot sensibly
-// create, so the caller gets a 400 naming the problem instead of a Proxmox
-// error surfacing as a 500.
-func ValidateCreatableNetworkInterfaceType(t string) error {
+// validateCreatableNetworkInterfaceType rejects a type POST cannot sensibly
+// create.
+//
+// Of the three checks here this is the one PVE will not make for you: eth,
+// alias, OVSPort, vnet, fabric and unknown are all in its own type enum
+// ($network_type_enum in PVE::API2::Network), so a POST carrying one passes
+// schema validation and create_network writes the stanza into the pending
+// config and answers 200. Nothing surfaces until someone reads the interfaces
+// back — or applies the pending config with the junk entry in it. OVSPort is
+// the one that does not go quietly: create_network dies early for any OVS*
+// type on a node without openvswitch-switch, which arrives as a 502.
+func validateCreatableNetworkInterfaceType(t string) error {
 	if !creatableNetworkInterfaceTypes[t] {
 		return fmt.Errorf("%w: %q is not a network interface type that can be created", ErrInvalidInput, t)
 	}
 	return nil
 }
 
-// ValidateEditableNetworkInterfaceType rejects a type PUT does not accept.
-func ValidateEditableNetworkInterfaceType(t string) error {
+// validateEditableNetworkInterfaceType rejects a type PUT does not accept. The
+// edit set is deliberately wider than the create set — a physical NIC can still
+// be given an address — but it is not open-ended.
+func validateEditableNetworkInterfaceType(t string) error {
 	if !editableNetworkInterfaceTypes[t] {
 		return fmt.Errorf("%w: %q is not a known network interface type", ErrInvalidInput, t)
 	}
@@ -520,17 +548,23 @@ func validateNetworkInterfaceDeleteKeys(keys []string) error {
 	return nil
 }
 
-// Proxmox's own bounds, echoed here so an out-of-range value fails as a 400
-// rather than reaching the node and coming back as a 500.
+// Proxmox's own bounds, echoed here so the value is rejected before the round
+// trip. Unlike the create-type check above, PVE does enforce these itself —
+// mtu carries minimum/maximum in the schema, so it answers 400 either way.
+// Checking here names the bound that was missed rather than relaying Proxmox's
+// wording for it.
 const (
 	minInterfaceMTU = 1280
 	maxInterfaceMTU = 65520
 	maxVLANTag      = 4094
 )
 
-// ValidateNetworkInterfaceOptions range-checks the numeric settings. Zero means
+// validateNetworkInterfaceOptions range-checks the numeric settings. Zero means
 // "not set" for all three and is always allowed.
-func ValidateNetworkInterfaceOptions(o NetworkInterfaceOptions) error {
+//
+// Create and update both carry these options, so both call it: a check only one
+// path ran would leave the other unguarded.
+func validateNetworkInterfaceOptions(o NetworkInterfaceOptions) error {
 	if o.MTU != 0 && (o.MTU < minInterfaceMTU || o.MTU > maxInterfaceMTU) {
 		return fmt.Errorf("%w: MTU %d is outside %d-%d", ErrInvalidInput, o.MTU, minInterfaceMTU, maxInterfaceMTU)
 	}

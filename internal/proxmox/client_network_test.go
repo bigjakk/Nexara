@@ -142,7 +142,7 @@ func TestEditableTypesCoverEveryCreatableType(t *testing.T) {
 	// A type you can create but not edit is a bug that only shows up long
 	// after the create path was verified.
 	for ifaceType := range creatableNetworkInterfaceTypes {
-		if err := ValidateEditableNetworkInterfaceType(ifaceType); err != nil {
+		if err := validateEditableNetworkInterfaceType(ifaceType); err != nil {
 			t.Errorf("creatable type %q is not editable: %v", ifaceType, err)
 		}
 	}
@@ -234,30 +234,66 @@ func TestUpdateNetworkInterface_RejectsUndeletableKeys(t *testing.T) {
 	}
 }
 
-func TestValidateCreatableNetworkInterfaceType(t *testing.T) {
-	for _, ok := range []string{"bridge", "bond", "vlan", "OVSBridge", "OVSBond", "OVSIntPort"} {
-		if err := ValidateCreatableNetworkInterfaceType(ok); err != nil {
-			t.Errorf("type %q rejected: %v", ok, err)
-		}
-	}
-	// eth and OVSPort exist but describe interfaces you don't create by hand.
+func TestCreateNetworkInterface_RejectsUncreatableType(t *testing.T) {
+	// eth, OVSPort, alias and unknown describe interfaces you don't create by
+	// hand — but they ARE in PVE's own type enum, so a POST carrying one is
+	// schema-valid and lands in the pending config. Nothing but this check
+	// stops it, which is why it has to be in the client and not in one caller.
+	srv, seen := newFormCaptureServer(t)
+	c := newTestClient(t, srv.URL)
+
 	for _, bad := range []string{"eth", "OVSPort", "alias", "unknown", "", "Bridge"} {
-		if err := ValidateCreatableNetworkInterfaceType(bad); err == nil {
-			t.Errorf("type %q accepted for create, want rejection", bad)
+		err := c.CreateNetworkInterface(context.Background(), "pve1", CreateNetworkInterfaceParams{
+			Iface: "vmbr9",
+			Type:  bad,
+		})
+		if err == nil {
+			t.Errorf("CreateNetworkInterface(type=%q) accepted, want rejection", bad)
+		} else if !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("CreateNetworkInterface(type=%q) = %v, want ErrInvalidInput", bad, err)
 		}
 	}
-	// The edit path is wider — a physical NIC can still be given an address.
-	for _, ok := range []string{"eth", "OVSPort", "bridge", "vlan"} {
-		if err := ValidateEditableNetworkInterfaceType(ok); err != nil {
-			t.Errorf("type %q rejected for edit: %v", ok, err)
-		}
+	if len(*seen) != 0 {
+		t.Errorf("issued %d request(s), want none", len(*seen))
 	}
-	if err := ValidateEditableNetworkInterfaceType("nonsense"); err == nil {
-		t.Error(`ValidateEditableNetworkInterfaceType("nonsense") accepted, want rejection`)
+
+	// The creatable set still goes through, or the check above would pass just
+	// as well with every type rejected.
+	for _, ok := range []string{"bridge", "bond", "vlan", "OVSBridge", "OVSBond", "OVSIntPort"} {
+		if err := c.CreateNetworkInterface(context.Background(), "pve1", CreateNetworkInterfaceParams{
+			Iface: "vmbr9",
+			Type:  ok,
+		}); err != nil {
+			t.Errorf("type %q rejected for create: %v", ok, err)
+		}
 	}
 }
 
-func TestValidateNetworkInterfaceOptions(t *testing.T) {
+func TestUpdateNetworkInterface_RejectsUnknownType(t *testing.T) {
+	srv, seen := newFormCaptureServer(t)
+	c := newTestClient(t, srv.URL)
+
+	for _, bad := range []string{"nonsense", "", "Bridge"} {
+		err := c.UpdateNetworkInterface(context.Background(), "pve1", "vmbr0", UpdateNetworkInterfaceParams{Type: bad})
+		if err == nil {
+			t.Errorf("UpdateNetworkInterface(type=%q) accepted, want rejection", bad)
+		} else if !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("UpdateNetworkInterface(type=%q) = %v, want ErrInvalidInput", bad, err)
+		}
+	}
+	if len(*seen) != 0 {
+		t.Errorf("issued %d request(s), want none", len(*seen))
+	}
+
+	// The edit path is wider — a physical NIC can still be given an address.
+	for _, ok := range []string{"eth", "OVSPort", "bridge", "vlan"} {
+		if err := c.UpdateNetworkInterface(context.Background(), "pve1", "vmbr0", UpdateNetworkInterfaceParams{Type: ok}); err != nil {
+			t.Errorf("type %q rejected for edit: %v", ok, err)
+		}
+	}
+}
+
+func TestNetworkInterfaceOptions_RangeCheckedOnBothWritePaths(t *testing.T) {
 	tests := []struct {
 		name    string
 		opts    NetworkInterfaceOptions
@@ -272,11 +308,38 @@ func TestValidateNetworkInterfaceOptions(t *testing.T) {
 		{"vlan tag above range", NetworkInterfaceOptions{VLANID: 4095}, true},
 		{"ovs tag negative", NetworkInterfaceOptions{OVSTag: -1}, true},
 	}
+	// Create and update both carry these options, so both are driven here: a
+	// check only one path ran would leave the other unguarded, and a test that
+	// called the validator directly would pass with either call site deleted.
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateNetworkInterfaceOptions(tt.opts)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateNetworkInterfaceOptions() error = %v, wantErr %v", err, tt.wantErr)
+			srv, seen := newFormCaptureServer(t)
+			c := newTestClient(t, srv.URL)
+
+			errs := map[string]error{
+				"create": c.CreateNetworkInterface(context.Background(), "pve1", CreateNetworkInterfaceParams{
+					Iface:                   "vmbr9",
+					Type:                    "bridge",
+					NetworkInterfaceOptions: tt.opts,
+				}),
+				"update": c.UpdateNetworkInterface(context.Background(), "pve1", "vmbr0", UpdateNetworkInterfaceParams{
+					Type:                    "bridge",
+					NetworkInterfaceOptions: tt.opts,
+				}),
+			}
+			for op, err := range errs {
+				if (err != nil) != tt.wantErr {
+					t.Errorf("%s error = %v, wantErr %v", op, err, tt.wantErr)
+				}
+				if err != nil && !errors.Is(err, ErrInvalidInput) {
+					t.Errorf("%s error = %v, want ErrInvalidInput", op, err)
+				}
+			}
+			switch {
+			case tt.wantErr && len(*seen) != 0:
+				t.Errorf("issued %d request(s) for rejected options, want none", len(*seen))
+			case !tt.wantErr && len(*seen) != 2:
+				t.Errorf("issued %d request(s), want 2 (create + update)", len(*seen))
 			}
 		})
 	}

@@ -189,12 +189,6 @@ func (h *NetworkHandler) CreateNetworkInterface(c fiber.Ctx) error {
 	if req.Iface == "" || req.Type == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "iface and type are required")
 	}
-	if err := proxmox.ValidateCreatableNetworkInterfaceType(req.Type); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
-	}
-	if err := proxmox.ValidateNetworkInterfaceOptions(req.NetworkInterfaceOptions); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
-	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -239,12 +233,6 @@ func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx) error {
 
 	if req.Type == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "type is required")
-	}
-	if err := proxmox.ValidateEditableNetworkInterfaceType(req.Type); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
-	}
-	if err := proxmox.ValidateNetworkInterfaceOptions(req.NetworkInterfaceOptions); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
