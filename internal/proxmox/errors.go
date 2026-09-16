@@ -69,6 +69,38 @@ func IsGroupsMigratedError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "migrated to rules")
 }
 
+// IsHARulesUnsupportedError reports whether err is a PVE too old to have
+// /cluster/ha/rules at all. HA affinity rules arrived in pve-ha-manager 5.0.2
+// (PVE 9.0); before that the path is unrouted, and PVE's dispatcher answers an
+// unrouted path with 501 and "Method 'GET /cluster/ha/rules' not implemented".
+// The same 501 is recorded elsewhere in this package, from a real incident —
+// see CreateCephPool's note on the singular pool path.
+//
+// It is the counterpart to IsGroupsMigratedError at the other end of the same
+// migration: one version range has groups and no rules, the next has rules and
+// soft-disabled groups. Both mean "there are none of these here", which is a
+// different answer from "the listing failed" — and callers that cannot tell the
+// two apart treat an unreachable cluster as a cluster with no HA rules.
+//
+// Matched on 501 alone, deliberately. The rolling orchestrator uses this to
+// decide whether to drain a node with no HA constraints loaded, so every widening
+// is a way for a failure to read as "this cluster has no HA rules":
+//
+//   - not the message, or a 503 from a proxy whose body happens to say the words
+//     would pass;
+//   - not ErrNotFound either, tempting as it looks. checkStatus maps any 404 to
+//     that sentinel and discards the body, and Nexara is explicitly deployed
+//     behind nginx/Traefik/Caddy — so a proxy rewrite, a misrouted path or an
+//     auth gateway answering 404 would be indistinguishable from PVE 8. No real
+//     PVE answers 404 here, so the branch would only ever admit impostors.
+func IsHARulesUnsupportedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotImplemented
+}
+
 // IsGuestNotRunningError reports whether err is the Proxmox response for a
 // console-proxy call (vncproxy/termproxy) against a guest that is not running,
 // e.g. "VM 105 not running" or "CT 105 not running".

@@ -623,8 +623,10 @@ func (h *HAHandler) ListRules(c fiber.Ctx) error {
 	}
 	rules, err := pxClient.GetHARules(c.Context())
 	if err != nil {
-		// Older PVE without rules support — return empty list
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404") {
+		// Older PVE without rules support — return empty list. The predicate
+		// is shared with the rolling orchestrator, which has to draw the same
+		// line and must not draw it differently.
+		if proxmox.IsHARulesUnsupportedError(err) {
 			return RespondItems(c, []proxmox.HARuleEntry{})
 		}
 		return mapProxmoxError(err)

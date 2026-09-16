@@ -296,7 +296,23 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 	// HA resource state stops VMs. Rules already disabled (by the admin, or by
 	// an earlier node of this job) are left alone and stay unrecorded.
 	var toDisable []DisabledHARule
-	haRulesList, _ := client.GetHARules(ctx)
+	// The listing is the only way to know which rules exist, so a failure is
+	// "could not look", not "there are none". Ignoring it drained the node with
+	// every affinity rule still armed — and silently, because an empty list and
+	// an unreadable one produced the same empty toDisable.
+	//
+	// Stopping is not cheap: failNode fails the whole job, and a failed job is
+	// recreated rather than resumed. That is why listHARules retries before it
+	// gives up — the blip has to be persistent to cost the operator a job, and
+	// draining unconstrained is the worse of the two outcomes.
+	haRulesList, err := listHARules(ctx, client, listingRetryAttempts)
+	if err != nil {
+		if o.interrupted(err) {
+			return
+		}
+		o.failNode(ctx, job, node, fmt.Sprintf("before disabling HA rules: %v", err))
+		return
+	}
 	for _, rule := range haRulesList {
 		if rule.Disable == 1 {
 			continue // Already disabled.
@@ -404,17 +420,14 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 	}
 
 	// Build HA constraint data for smart target selection.
-	haResources, _ := client.GetHAResources(ctx)
-	haResMap := make(map[string]proxmox.HAResource, len(haResources))
-	for _, r := range haResources {
-		haResMap[r.SID] = r
+	ha, haErr := loadHAConstraints(ctx, client, listingRetryAttempts)
+	if haErr != nil {
+		if o.interrupted(haErr) {
+			return
+		}
+		o.failNode(ctx, job, node, fmt.Sprintf("read HA constraints for target selection: %v", haErr))
+		return
 	}
-	haGroups, _ := client.GetHAGroups(ctx)
-	haGrpMap := make(map[string]proxmox.HAGroup, len(haGroups))
-	for _, g := range haGroups {
-		haGrpMap[g.Group] = g
-	}
-	haRules, _ := client.GetHARules(ctx)
 	dbRules, _ := o.queries.ListDRSRules(ctx, job.ClusterID)
 	drsRules := drs.ParseDBRules(dbRules)
 
@@ -516,7 +529,7 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 		}
 
 		gs := GuestSnapshot{VMID: guest.VMID, Name: guest.Name, Type: guest.Type, Status: guest.Status}
-		target, err := SelectTarget(gs, node.NodeName, targets, haResMap, haGrpMap, haRules, drsRules, nodeWorkloads)
+		target, err := SelectTarget(gs, node.NodeName, targets, ha.resources, ha.groups, ha.rules, drsRules, nodeWorkloads)
 		if err != nil {
 			o.failNode(ctx, job, node, fmt.Sprintf("no valid target for %s %d: %v", guest.Type, guest.VMID, err))
 			return
@@ -672,17 +685,14 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 		return
 	}
 
-	haResources, _ := client.GetHAResources(ctx)
-	haResMap := make(map[string]proxmox.HAResource, len(haResources))
-	for _, r := range haResources {
-		haResMap[r.SID] = r
+	ha, haErr := loadHAConstraints(ctx, client, listingRetryAttempts)
+	if haErr != nil {
+		if o.interrupted(haErr) {
+			return
+		}
+		o.failNode(ctx, job, node, fmt.Sprintf("resume drain — read HA constraints for target selection: %v", haErr))
+		return
 	}
-	haGroups, _ := client.GetHAGroups(ctx)
-	haGrpMap := make(map[string]proxmox.HAGroup, len(haGroups))
-	for _, g := range haGroups {
-		haGrpMap[g.Group] = g
-	}
-	haRules, _ := client.GetHARules(ctx)
 	dbRules, _ := o.queries.ListDRSRules(ctx, job.ClusterID)
 	drsRules := drs.ParseDBRules(dbRules)
 	nodeWorkloads := BuildNodeWorkloads(ctx, client, clusterNodes)
@@ -759,7 +769,7 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 		}
 
 		gs := GuestSnapshot{VMID: guest.VMID, Name: guest.Name, Type: guest.Type, Status: guest.Status}
-		target, err := SelectTarget(gs, node.NodeName, targets, haResMap, haGrpMap, haRules, drsRules, nodeWorkloads)
+		target, err := SelectTarget(gs, node.NodeName, targets, ha.resources, ha.groups, ha.rules, drsRules, nodeWorkloads)
 		if err != nil {
 			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — no valid target for %s %d: %v", guest.Type, guest.VMID, err))
 			return
@@ -1045,7 +1055,7 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 		// re-launch the upgrade — apt is idempotent (a re-run after
 		// completion is a no-op), and if dpkg is still running it'll
 		// block on the dpkg lock and report so via exit code.
-		if errors.Is(err, context.Canceled) || o.shutdownCtx.Err() != nil {
+		if o.interrupted(err) {
 			o.logger.Info("SSH upgrade interrupted by shutdown — dpkg may still be running on remote; next leader will resume",
 				"node", node.NodeName)
 			return
@@ -2365,12 +2375,15 @@ func (o *Orchestrator) restartStoppedPassthrough(ctx context.Context, client *pr
 // persistent error).
 func (o *Orchestrator) verifyNodeDrained(ctx context.Context, client *proxmox.Client, nodeName string) ([]string, error) {
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	// Same budget as the HA listings, named rather than repeated: the two are
+	// one policy — "a safety-critical listing should not be downgraded to
+	// advisory by a single blip" — and two hardcoded copies is how they drift.
+	for attempt := 0; attempt < listingRetryAttempts; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-o.shutdownCtx.Done():
 				return nil, lastErr
-			case <-time.After(2 * time.Second):
+			case <-time.After(listingRetryBackoff):
 			}
 		}
 		var violations []string
@@ -2410,6 +2423,29 @@ func formatGuestList(guests []string) string {
 		return strings.Join(guests, ", ")
 	}
 	return fmt.Sprintf("%s, and %d more", strings.Join(guests[:maxListed], ", "), len(guests)-maxListed)
+}
+
+// interrupted reports whether err is this process losing the job rather than
+// the cluster failing it.
+//
+// Two different cancellations land here and neither is a node failure. A
+// graceful shutdown cancels shutdownCtx; a lost leadership heartbeat cancels
+// the tick ctx, which failNode's own shutdown guard cannot see. Both leave the
+// node on its current step for the next leader to resume, and failing it
+// instead would terminate a job that nothing is actually wrong with — which
+// matters more now that a failed listing stops the drain rather than silently
+// proceeding.
+//
+// Be precise about what the first half catches. api_client.go wraps a transport
+// failure as fmt.Errorf("%w: %s", ErrConnectionFailed, err), so a cancellation
+// that happened inside the HTTP call is flattened into text and errors.Is
+// cannot see it — unlike the SSH path at the upgrade site, which wraps with %w
+// and returns ctx.Err() directly. What reaches here as context.Canceled is what
+// retryHAListing returns from its own ctx checks. That covers the handover
+// window, and the second half still covers shutdown, but this is not a general
+// "was anything cancelled" test.
+func (o *Orchestrator) interrupted(err error) bool {
+	return errors.Is(err, context.Canceled) || o.shutdownCtx.Err() != nil
 }
 
 func (o *Orchestrator) failNode(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode, reason string) {

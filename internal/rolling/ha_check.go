@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -44,34 +45,33 @@ func AnalyzeHAConstraints(
 		Conflicts: []HAConflict{},
 	}
 
-	// Fetch HA data from Proxmox.
-	haResources, err := client.GetHAResources(ctx)
+	// These used to be nilled on error as "non-fatal — cluster may not have HA
+	// configured". They are not the same thing, and the difference lands on the
+	// gate: this report feeds `haPolicy == "strict"`, which refuses the job when
+	// it finds conflicts. A listing that failed produced an empty rule set,
+	// therefore no conflicts, therefore a green light — the strict gate
+	// answering "all clear" precisely because it could not look.
+	//
+	// loadHAConstraints keeps the genuinely-empty versions non-fatal and turns
+	// everything else into an error, which both callers surface. One attempt,
+	// not three: this runs inside an HTTP request against a client whose
+	// timeout is minutes.
+	//
+	// Note what is lost when it fails: the passthrough, DRS-rule and no-targets
+	// checks below never needed the HA listings and used to survive one
+	// failing. Most are informational — every DRS conflict is severity
+	// "warning" and none sets HasErrors — but no_targets is an error-severity
+	// conflict, so this does drop a blocking finding on the floor. The gate
+	// outcome is unchanged either way, because foldPreflight substitutes an
+	// error-severity preflight_unavailable; what the operator loses is the more
+	// specific reason.
+	ha, err := loadHAConstraints(ctx, client, listingRetryOnce)
 	if err != nil {
-		// Non-fatal — cluster may not have HA configured.
-		haResources = nil
+		return nil, err
 	}
-
-	haGroups, err := client.GetHAGroups(ctx)
-	if err != nil {
-		haGroups = nil
-	}
-
-	// PVE 9+ HA rules — may not exist on older versions.
-	haRules, err := client.GetHARules(ctx)
-	if err != nil {
-		haRules = nil
-	}
-
-	// Build lookup maps.
-	groupMap := make(map[string]proxmox.HAGroup, len(haGroups))
-	for _, g := range haGroups {
-		groupMap[g.Group] = g
-	}
-
-	resSID := make(map[string]proxmox.HAResource, len(haResources))
-	for _, r := range haResources {
-		resSID[r.SID] = r
-	}
+	haRules := ha.rules
+	groupMap := ha.groups
+	resSID := ha.resources
 
 	// Fetch DRS rules from Nexara DB.
 	dbRules, err := queries.ListDRSRules(ctx, clusterID)
@@ -590,4 +590,179 @@ func containsString(slice []string, val string) bool {
 		}
 	}
 	return false
+}
+
+// haConstraints is the HA state SelectTarget scores a candidate node against.
+//
+// rules may be nil on success: a PVE older than 9.0 has no rules endpoint and
+// genuinely has none. resources and groups are always non-nil, so callers never
+// have to nil-check a map they are about to read.
+type haConstraints struct {
+	resources map[string]proxmox.HAResource
+	groups    map[string]proxmox.HAGroup
+	rules     []proxmox.HARuleEntry
+}
+
+// listingRetryAttempts and listingRetryBackoff bound the retry for any listing
+// the orchestrator cannot safely guess at — the HA constraints here, and
+// verifyNodeDrained's guest listing, which is why the names are not
+// HA-specific. There is no retry above this — failNode fails the whole job, and
+// a failed job is recreated rather than resumed — so one blip must not cost the
+// operator a multi-node update.
+//
+// Vars, not consts, only so the tests can shorten the wait; nothing in
+// production reassigns them.
+var (
+	listingRetryAttempts = 3
+	listingRetryBackoff  = 2 * time.Second
+)
+
+// listingRetryOnce is the attempt count for a request-scoped caller. The cached
+// Proxmox client's timeout is minutes, not seconds, so retrying inside an HTTP
+// handler multiplies how long the request can hang before it answers; a
+// pre-flight that cannot read the cluster is better reported than waited on.
+const listingRetryOnce = 1
+
+// retryHAListing runs a listing up to attempts times, returning the first
+// success. Errors the caller considers benign are that caller's business: the
+// predicate runs inside, so "this PVE has none" stops the retry immediately
+// rather than burning the budget on an answer that will not change.
+//
+// A cancelled ctx returns ctx.Err() rather than the listing's own error, so a
+// caller can tell "this process is no longer running the job" — a leadership
+// handover or a shutdown — from "the cluster failed to answer". A benign error
+// still wins over that, which is right: "this PVE has none" is a complete
+// answer and does not become unknown because the caller went away. Only one
+// context is taken: the orchestrator's tick ctx descends from the app's, so
+// selecting on it covers both.
+func retryHAListing[T any](
+	ctx context.Context,
+	attempts int,
+	list func(context.Context) (T, error),
+	benign func(error) bool,
+) (T, error) {
+	var zero T
+	var lastErr error
+	if attempts < 1 {
+		// A zero budget would run no attempts and return (zero, nil) — success
+		// with nothing read, which is the one answer this function exists to
+		// never give. No caller passes it today; the guard is here so none can.
+		attempts = 1
+	}
+	for attempt := range attempts {
+		if attempt > 0 {
+			// The ctx case here is latency, not correctness: the post-call
+			// check below catches a cancellation too, because a cancelled ctx
+			// makes the next call fail before it reaches the network. What this
+			// saves is sitting out a full backoff after the job has already
+			// moved on. Replacing it with a plain sleep passes every test —
+			// deliberately, since the outcome is identical — so do not read
+			// that as evidence it is dead.
+			select {
+			case <-ctx.Done():
+				return zero, ctx.Err()
+			case <-time.After(listingRetryBackoff):
+			}
+		}
+		v, err := list(ctx)
+		if err == nil {
+			return v, nil
+		}
+		if benign != nil && benign(err) {
+			return zero, nil
+		}
+		// A cancellation during the call itself surfaces as the client's own
+		// connection error — api_client.go wraps the transport error with %s,
+		// not %w, so errors.Is cannot see context.Canceled through it. Ask the
+		// context directly, or a handover during the final attempt would be
+		// reported as a cluster failure and terminally fail the job.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return zero, ctxErr
+		}
+		lastErr = err
+	}
+	return zero, lastErr
+}
+
+// loadHAConstraints reads the three listings SelectTarget needs and separates
+// "there are none" from "could not look".
+//
+// SelectTarget cannot tell those apart: an empty map and an unread one both
+// score as no constraint, so the guest is placed as if nothing applied to it.
+// That is how a failed listing used to move a guest onto a node an active
+// anti-affinity rule forbids — the co-location those rules exist to prevent,
+// arrived at silently, during an unattended job.
+//
+// This closes the HA half only. BuildNodeWorkloads, called on the next line and
+// feeding the same SelectTarget, still swallows a per-node guest listing and
+// leaves that node with an empty workload list — which SelectTarget reads both
+// as "no negatively-affine peer here" and as "fewest workloads", so the node
+// whose listing failed is not merely unconstrained but actively preferred. The
+// same scenario, through the other input. Fixing it needs a signature change
+// and is tracked separately.
+//
+// Two of the three do have a version where an error genuinely means none, and
+// failing on those would stop every rolling update on the releases either side
+// of PVE's groups-to-rules migration:
+//
+//   - /cluster/ha/groups 500s once groups have "been migrated to rules", which
+//     PVE 9 reports for any cluster whose group config is empty — i.e. the
+//     common case on 9.x, not a post-migration edge
+//   - /cluster/ha/rules does not exist before PVE 9.0
+//
+// /cluster/ha/resources has no such case — the HA stack ships with every PVE,
+// and an unconfigured cluster answers with an empty list, not an error.
+//
+// startNode must call it AFTER its disable step, never before: SelectTarget
+// skips rules with Disable == 1, so reading once up front would score against
+// rules this job has just switched off and over-constrain every target choice.
+// That is why startNode reads twice. It does not apply to the pre-flight, which
+// runs before anything is disabled and should report the rules as they stand.
+//
+// It is a plain function rather than a method so the decision does not depend
+// on Orchestrator state — the tests build a client against a stub server and
+// call it directly.
+func loadHAConstraints(ctx context.Context, client *proxmox.Client, attempts int) (haConstraints, error) {
+	var ha haConstraints
+
+	resources, err := retryHAListing(ctx, attempts, client.GetHAResources, nil)
+	if err != nil {
+		return haConstraints{}, fmt.Errorf("list HA resources: %w", err)
+	}
+	ha.resources = make(map[string]proxmox.HAResource, len(resources))
+	for _, r := range resources {
+		ha.resources[r.SID] = r
+	}
+
+	groups, err := retryHAListing(ctx, attempts, client.GetHAGroups, proxmox.IsGroupsMigratedError)
+	if err != nil {
+		return haConstraints{}, fmt.Errorf("list HA groups: %w", err)
+	}
+	ha.groups = make(map[string]proxmox.HAGroup, len(groups))
+	for _, g := range groups {
+		ha.groups[g.Group] = g
+	}
+
+	ha.rules, err = listHARules(ctx, client, attempts)
+	if err != nil {
+		return haConstraints{}, err
+	}
+
+	return ha, nil
+}
+
+// listHARules reads the rule listing, folding the one PVE version that
+// legitimately has none into an empty result and leaving every other failure as
+// a failure.
+//
+// Shared by loadHAConstraints and by the drain's disable step, which both have
+// to draw the same line and would be a silent safety hole if they drew it
+// differently: an empty list means "nothing to disable, nothing to score
+// against", and an unread one has to mean "stop".
+func listHARules(ctx context.Context, client *proxmox.Client, attempts int) ([]proxmox.HARuleEntry, error) {
+	rules, err := retryHAListing(ctx, attempts, client.GetHARules, proxmox.IsHARulesUnsupportedError)
+	if err != nil {
+		return nil, fmt.Errorf("list HA rules: %w", err)
+	}
+	return rules, nil
 }

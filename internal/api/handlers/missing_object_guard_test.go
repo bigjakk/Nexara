@@ -122,3 +122,72 @@ func TestGuard_DieStringEndpointsMapPastThe502(t *testing.T) {
 		}
 	}
 }
+
+// preflightFolders guards a different contract from dieStringMappers above: not
+// "map PVE's die string to a status", but "a pre-flight check that could not
+// run must not read as one that passed". foldPreflight is what turns a failed
+// check into a blocking conflict, and without it the check contributes nothing
+// and the strict policy waves the job through.
+//
+// It has its own map because the consequence is different — a gate that passes,
+// not a 502 — and because these are internal/rolling analyzers rather than
+// Proxmox client methods, so none of dieStringMappers' phrase-set reasoning
+// applies to them.
+//
+// The swallow has been reintroduced twice, once in each handler, while every
+// unit test stayed green: foldPreflight is exhaustively tested as a pure
+// function and nothing proved it was called.
+//
+// KNOWN FALSE NEGATIVES, named rather than left to be inferred. It checks that
+// foldPreflight is called somewhere in the same function, so all of these pass:
+// passing a literal nil where the analyzer's error belongs (which reinstates
+// the original bug exactly); discarding the hasErrors it returns; folding and
+// never assigning the result; or a token call with all-nil arguments. What it
+// does catch is the whole call being removed or reverted, which is what
+// happened both times.
+var preflightFolders = map[string]string{
+	"AnalyzeHAConstraints": "foldPreflight",
+	"AnalyzeCapacity":      "foldPreflight",
+}
+
+func TestGuard_PreflightChecksAreFolded(t *testing.T) {
+	_, files := parseGoFiles(t, ".")
+
+	seen := map[string]bool{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			called := map[string]bool{}
+			folded := map[string]bool{}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				switch node := n.(type) {
+				case *ast.SelectorExpr:
+					if _, guarded := preflightFolders[node.Sel.Name]; guarded {
+						called[node.Sel.Name] = true
+					}
+				case *ast.CallExpr:
+					if ident, ok := node.Fun.(*ast.Ident); ok {
+						folded[ident.Name] = true
+					}
+				}
+				return true
+			})
+			for analyzer := range called {
+				want := preflightFolders[analyzer]
+				seen[analyzer] = true
+				if !folded[want] {
+					t.Errorf("%s calls %s but never %s — a pre-flight that could not run would read as one that passed, and the strict policy would let the job through",
+						qualifiedFuncName(fn), analyzer, want)
+				}
+			}
+		}
+	}
+	for analyzer := range preflightFolders {
+		if !seen[analyzer] {
+			t.Errorf("no handler calls %s; drop it from preflightFolders or wire its caller", analyzer)
+		}
+	}
+}

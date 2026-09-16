@@ -365,7 +365,7 @@ function HAWarningsCard({
                 <div>
                   <p>{w.message}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Node: {w.node} | Source: {w.source}
+                    {w.node ? `Node: ${w.node} | ` : ""}Source: {w.source}
                     {w.rule_name ? ` (${w.rule_name})` : ""}
                   </p>
                 </div>

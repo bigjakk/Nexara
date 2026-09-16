@@ -1547,10 +1547,25 @@ type HARuleEntry struct {
 	Type      string `json:"type"`      // "node-affinity" or "resource-affinity"
 	Resources string `json:"resources"` // "vm:100,ct:101"
 	Nodes     string `json:"nodes"`     // node-affinity only
-	Strict    int    `json:"strict"`
-	Affinity  string `json:"affinity"` // resource-affinity: "positive" or "negative"
-	Comment   string `json:"comment"`
-	Disable   int    `json:"disable"`
+	// Strict and Disable are plain ints rather than FlexBool on purpose,
+	// checked against upstream rather than assumed:
+	// PVE::SectionConfig::check_value numifies a boolean (`return $value + 0`)
+	// before it is ever serialised, pve-manager passes no return-schema
+	// verification, and the formatter is a plain to_json with no
+	// convert_blessed — so these arrive as JSON 0/1, never true/false or
+	// "0"/"1". An absent key stays absent: PVE::HA::Rules::set_rule_defaults
+	// tests `!$properties->{$prop}->{default}`, so a default of 0 is never
+	// injected, and Go's zero value says the same thing.
+	//
+	// FlexBool would not be free insurance either: it has no MarshalJSON, so
+	// it would re-serialise as true/false and break the SPA, which tests
+	// `r.disable !== 1`. If PVE ever did change shape, an int fails loudly at
+	// Unmarshal — and the callers that used to discard that error now stop
+	// rather than treating an unreadable listing as an empty one.
+	Strict   int    `json:"strict"`
+	Affinity string `json:"affinity"` // resource-affinity: "positive" or "negative"
+	Comment  string `json:"comment"`
+	Disable  int    `json:"disable"`
 }
 
 // CreateHARuleParams holds parameters for creating an HA rule via POST /cluster/ha/rules/{type}.

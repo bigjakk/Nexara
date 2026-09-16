@@ -330,23 +330,12 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 	var haWarningsJSON json.RawMessage
 	client, clientErr := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 	if clientErr == nil && drainGuests {
-		var allConflicts []rolling.HAConflict
-		preflightHasErrors := false
-
 		// HA/DRS constraint check.
-		report, err := rolling.AnalyzeHAConstraints(c.Context(), client, h.queries, clusterID, req.Nodes)
-		if err == nil && report != nil {
-			allConflicts = append(allConflicts, report.Conflicts...)
-			preflightHasErrors = preflightHasErrors || report.HasErrors
-		}
-
+		report, haErr := rolling.AnalyzeHAConstraints(c.Context(), client, h.queries, clusterID, req.Nodes)
 		// Capacity feasibility check — verifies remaining nodes can absorb
 		// the workload when each batch of nodes is drained.
 		capConflicts, capHasErrors, capErr := rolling.AnalyzeCapacity(c.Context(), client, req.Nodes, req.Parallelism)
-		if capErr == nil && len(capConflicts) > 0 {
-			allConflicts = append(allConflicts, capConflicts...)
-			preflightHasErrors = preflightHasErrors || capHasErrors
-		}
+		allConflicts, preflightHasErrors := foldPreflight(report, haErr, capConflicts, capHasErrors, capErr)
 
 		if haPolicy == "strict" && preflightHasErrors {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
@@ -788,18 +777,23 @@ func (h *RollingUpdateHandler) PreflightHA(c fiber.Ctx) error {
 
 	report, err := rolling.AnalyzeHAConstraints(c.Context(), client, h.queries, clusterID, req.Nodes)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to analyze HA constraints")
+		// The status is what improves: a blanket 500 said "Nexara is broken"
+		// for what is usually an unreachable or non-quorate cluster, and this
+		// answers 502/403/404 accordingly. The message is carried for the API
+		// and the logs — the wizard discards the body and renders a fixed
+		// string (usePreflightHA has no onError), so do not read this as
+		// something the operator sees.
+		return mapProxmoxError(fmt.Errorf("analyze HA constraints: %w", err))
 	}
 	if report == nil {
 		report = &rolling.HAPreFlightReport{Conflicts: []rolling.HAConflict{}}
 	}
 
-	// Capacity feasibility check.
 	capConflicts, capHasErrors, capErr := rolling.AnalyzeCapacity(c.Context(), client, req.Nodes, req.Parallelism)
-	if capErr == nil && len(capConflicts) > 0 {
-		report.Conflicts = append(report.Conflicts, capConflicts...)
-		report.HasErrors = report.HasErrors || capHasErrors
-	}
+	// haErr is nil here on purpose: an HA failure already returned above, so
+	// only the capacity half can still be unavailable at this point.
+	conflicts, hasErrors := foldPreflight(report, nil, capConflicts, capHasErrors, capErr)
+	report.Conflicts, report.HasErrors = conflicts, hasErrors
 
 	return c.JSON(report)
 }
@@ -1308,4 +1302,65 @@ func (h *RollingUpdateHandler) decryptSSHCredentials(creds db.ClusterSshCredenti
 		privateKey = k
 	}
 	return password, privateKey, nil
+}
+
+// preflightUnavailable is what a pre-flight check that could not run records.
+//
+// It is an error-severity conflict rather than a silent omission because the
+// strict policy exists to refuse a job the pre-flight cannot vouch for, and a
+// check that failed has vouched for nothing. Recording it also makes the
+// failure visible under the permissive policies, where the job proceeds.
+func preflightUnavailable(source string, err error) rolling.HAConflict {
+	return rolling.HAConflict{
+		Source:   source,
+		Type:     "preflight_unavailable",
+		Severity: "error",
+		Message:  fmt.Sprintf("%s pre-flight could not run: %v", source, err),
+	}
+}
+
+// foldPreflight combines the two pre-flight checks into the conflict list and
+// the single boolean the strict gate reads.
+//
+// Extracted because both call sites got this wrong in the same way, twice. The
+// original was `if err == nil && report != nil`, so a check that failed
+// contributed nothing and left hasErrors false — the gate answering "all clear"
+// precisely when it had learned nothing. The first fix moved the swallow from
+// the analyzer into this caller without removing it. A pure function is what
+// lets a test say which of those is in force.
+func foldPreflight(
+	report *rolling.HAPreFlightReport,
+	haErr error,
+	capConflicts []rolling.HAConflict,
+	capHasErrors bool,
+	capErr error,
+) (conflicts []rolling.HAConflict, hasErrors bool) {
+	// Non-nil from the start, never a bare `var`. PreflightHA assigns the
+	// result straight onto report.Conflicts and serialises it, and the wizard
+	// reads `preflightReport.conflicts.length` with no null guard — so a nil
+	// here is a crash on the clean-cluster path, which is the common answer.
+	conflicts = []rolling.HAConflict{}
+	switch {
+	case haErr != nil:
+		conflicts = append(conflicts, preflightUnavailable("HA constraint", haErr))
+		hasErrors = true
+	case report != nil:
+		conflicts = append(conflicts, report.Conflicts...)
+		hasErrors = report.HasErrors
+	}
+
+	switch {
+	case capErr != nil:
+		conflicts = append(conflicts, preflightUnavailable("Capacity", capErr))
+		hasErrors = true
+	case len(capConflicts) > 0:
+		conflicts = append(conflicts, capConflicts...)
+	}
+	// Unconditional, deliberately. Reading the gate boolean only when the
+	// conflict list happens to be non-empty is the same shape as the bug this
+	// function exists to remove: a check's verdict discarded because of an
+	// unrelated emptiness. AnalyzeCapacity always sets them together today;
+	// this does not depend on that staying true.
+	hasErrors = hasErrors || capHasErrors
+	return conflicts, hasErrors
 }
