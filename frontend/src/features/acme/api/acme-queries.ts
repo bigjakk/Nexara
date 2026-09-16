@@ -178,6 +178,16 @@ export interface NodeACMEConfig {
   acmedomain3?: string;
   acmedomain4?: string;
   acmedomain5?: string;
+  /**
+   * Keys to clear, on PUT only. Omitting a field leaves it as it was and there
+   * is no value that means "remove", so removing a domain means naming its key
+   * here. The server accepts `acme` and `acmedomain0`..`acmedomain5`, and
+   * rejects a key that is also being given a value in the same request.
+   */
+  delete?: string[];
+  /** SHA1 of the node config, returned by GET. Send it back on PUT to make the
+   * write a compare-and-swap; omit it to overwrite unconditionally. */
+  digest?: string;
   [key: string]: unknown;
 }
 

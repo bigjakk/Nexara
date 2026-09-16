@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 func (c *Client) GetNodes(ctx context.Context) ([]NodeListEntry, error) {
@@ -675,37 +676,115 @@ func (c *Client) GetNodeACMEConfig(ctx context.Context, node string) (*NodeACMEC
 	}
 	return &cfg, nil
 }
+
+// nodeACMESetting binds a node config key to the field that carries it.
+//
+// One table drives the write form, the set-and-clear check, the delete
+// allow-list and the audit detail. Before it there were three parallel lists of
+// the same seven keys, and dropping a row from any one of them was invisible:
+// the key silently stopped being sent, and — because the conflict check read
+// the same list — its delete guard silently stopped firing too.
+// TestNodeACMESettingsCoverTheStruct holds this table against the struct.
+type nodeACMESetting struct {
+	key   string
+	value func(NodeACMEConfig) string
+}
+
+var nodeACMESettings = []nodeACMESetting{
+	{"acme", func(c NodeACMEConfig) string { return c.ACME }},
+	{"acmedomain0", func(c NodeACMEConfig) string { return c.ACMEDomain0 }},
+	{"acmedomain1", func(c NodeACMEConfig) string { return c.ACMEDomain1 }},
+	{"acmedomain2", func(c NodeACMEConfig) string { return c.ACMEDomain2 }},
+	{"acmedomain3", func(c NodeACMEConfig) string { return c.ACMEDomain3 }},
+	{"acmedomain4", func(c NodeACMEConfig) string { return c.ACMEDomain4 }},
+	{"acmedomain5", func(c NodeACMEConfig) string { return c.ACMEDomain5 }},
+}
+
+// deletableNodeACMEKeys is exactly the settable keys and nothing else: this
+// method may clear what it may write, which is the whole of the ACME config.
+//
+// The allow-list matters more here than it does for network interfaces.
+// PUT /nodes/{node}/config takes `delete` as a raw list of option names and
+// applies it to the WHOLE node config — `description`, `location`,
+// `wakeonlan`, `startall-onboot-delay` and `ballooning-target` live in the
+// same file and would go the same way — and the handler binds NodeACMEConfig
+// straight from the request body, so `delete` is caller-supplied all the way
+// from the HTTP client. Validating here rather than in the handler makes it a
+// choke point no future caller can forget.
+//
+// acmedomain0..5 is the complete set: $MAXDOMAINS is 5 in PVE::NodeConfig.
+var deletableNodeACMEKeys = func() map[string]bool {
+	m := make(map[string]bool, len(nodeACMESettings))
+	for _, s := range nodeACMESettings {
+		m[s.key] = true
+	}
+	return m
+}()
+
+// NodeACMESetKeys names the settings a config would write, without their
+// values. The audit log takes the names only: the values are ACME domains and
+// view:audit is granted to every Viewer by default.
+func NodeACMESetKeys(cfg NodeACMEConfig) []string {
+	keys := make([]string, 0, len(nodeACMESettings))
+	for _, s := range nodeACMESettings {
+		if s.value(cfg) != "" {
+			keys = append(keys, s.key)
+		}
+	}
+	return keys
+}
+
+// SetNodeACMEConfig writes the node's ACME settings.
+//
+// An empty field means "leave alone": every ACME key is optional in PVE's
+// schema, so there is no value that means "remove" and omitting the key is how
+// an unchanged setting is expressed. Clearing one goes through cfg.Delete.
+//
+// Note that clearing "acme" is not "turn ACME off", and it is the one delete
+// here that can lose data. PVE's get_acme_conf reads the account with
+// `$res->{account} //= 'default'`, so removing the key leaves every
+// acmedomainN entry active and reverts the account to default rather than
+// disabling anything. It is also a property string that may carry its own
+// `domains=a;b` list, which get_acme_conf parses into standalone domains —
+// those go with it. The acmedomainN keys hold one domain each and lose only
+// that one.
 func (c *Client) SetNodeACMEConfig(ctx context.Context, node string, cfg NodeACMEConfig) error {
 	if err := validateNodeName(node); err != nil {
 		return err
 	}
 	form := url.Values{}
-	if cfg.ACME != "" {
-		form.Set("acme", cfg.ACME)
+	values := make(map[string]string, len(nodeACMESettings))
+	for _, s := range nodeACMESettings {
+		v := s.value(cfg)
+		values[s.key] = v
+		if v != "" {
+			form.Set(s.key, v)
+		}
 	}
-	if cfg.ACMEDomain0 != "" {
-		form.Set("acmedomain0", cfg.ACMEDomain0)
+	for _, k := range cfg.Delete {
+		if !deletableNodeACMEKeys[k] {
+			return fmt.Errorf("%w: %q is not an ACME setting that can be cleared", ErrInvalidInput, k)
+		}
+		// PVE applies `delete` *after* the assignments (set_options in
+		// PVE/API2/NodeConfig.pm), so a key in both wins as a delete and the
+		// value is silently dropped — no error, and a caller that meant to
+		// replace a domain would find it gone. Refuse instead.
+		if values[k] != "" {
+			return fmt.Errorf("%w: %q cannot be set and cleared in the same request", ErrInvalidInput, k)
+		}
 	}
-	if cfg.ACMEDomain1 != "" {
-		form.Set("acmedomain1", cfg.ACMEDomain1)
+	if len(cfg.Delete) > 0 {
+		form.Set("delete", strings.Join(cfg.Delete, ","))
 	}
-	if cfg.ACMEDomain2 != "" {
-		form.Set("acmedomain2", cfg.ACMEDomain2)
-	}
-	if cfg.ACMEDomain3 != "" {
-		form.Set("acmedomain3", cfg.ACMEDomain3)
-	}
-	if cfg.ACMEDomain4 != "" {
-		form.Set("acmedomain4", cfg.ACMEDomain4)
-	}
-	if cfg.ACMEDomain5 != "" {
-		form.Set("acmedomain5", cfg.ACMEDomain5)
+	if cfg.Digest != "" {
+		form.Set("digest", cfg.Digest)
 	}
 	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/config", form, nil); err != nil {
 		return fmt.Errorf("set node %s ACME config: %w", node, err)
 	}
 	return nil
 }
+
 func (c *Client) GetNodeCertificates(ctx context.Context, node string) ([]NodeCertificate, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err

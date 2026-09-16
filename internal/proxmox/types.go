@@ -2101,6 +2101,19 @@ type NodeACMEConfig struct {
 	ACMEDomain3 string `json:"acmedomain3,omitempty"`
 	ACMEDomain4 string `json:"acmedomain4,omitempty"`
 	ACMEDomain5 string `json:"acmedomain5,omitempty"`
+
+	// Delete names the settings to clear. An empty string in the fields above
+	// means "leave alone", not "remove" — every one of them is optional in
+	// PVE's node config schema, so the only way to take a value out is to name
+	// its key here. Write-only: PUT /nodes/{node}/config accepts it, GET never
+	// returns it.
+	Delete []string `json:"delete,omitempty"`
+
+	// Digest is the node config's SHA1, returned by GET and accepted by PUT,
+	// where PVE runs assert_if_modified against it. Passing back the digest a
+	// read returned turns a blind overwrite into a compare-and-swap; leaving it
+	// empty disables the check (PVE skips it unless both sides are set).
+	Digest string `json:"digest,omitempty"`
 }
 
 // NodeCertificate represents a certificate from GET /nodes/{node}/certificates/info.

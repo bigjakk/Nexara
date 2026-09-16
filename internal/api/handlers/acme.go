@@ -27,6 +27,25 @@ func (h *ACMEHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*pr
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
+// staleDigestPhrases is PVE::Tools::assert_if_modified's die string, which is
+// the only thing a digest mismatch produces: a plain 500 with no rejection map,
+// so mapProxmoxError can only call it a gateway failure. It is not one — the
+// node config changed under the caller, which is what 409 says, and it is the
+// answer the compare-and-swap exists to give. Two operators editing one node's
+// ACME settings produce it routinely.
+//
+// Note the digest covers the WHOLE node config file, not just the ACME keys, so
+// an operator editing the node's Notes in the PVE UI can trigger this too. The
+// message says "changed" rather than naming ACME for that reason.
+var staleDigestPhrases = []string{"detected modified configuration"}
+
+// mapNodeConfigError adds the digest-mismatch case to the shared mapping.
+func mapNodeConfigError(err error) error {
+	return mapProxmoxDieError(fiber.StatusConflict,
+		"The node's configuration changed since it was read — reload and try again.",
+		staleDigestPhrases, err)
+}
+
 // --- ACME Accounts ---
 
 // ListAccounts handles GET /clusters/:cluster_id/acme/accounts.
@@ -382,9 +401,27 @@ func (h *ACMEHandler) SetNodeACMEConfig(c fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.SetNodeACMEConfig(c.Context(), node, req); err != nil {
-		return mapProxmoxError(err)
+		return mapNodeConfigError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"node": node})
+	// Names only, never values — networks.go splits its row the same way,
+	// though its helper is unexported and local while this one has to live in
+	// internal/proxmox beside the table it reads, so the key list stays single.
+	// Without these the row says "updated" and names nothing, and for a clear
+	// the settings it removed are exactly the ones no later read can recover.
+	// Values are ACME domains and view:audit is granted to every Viewer.
+	//
+	// Both keys are non-nil slices so "nothing set" and "nothing cleared" read
+	// as [] rather than one of them being null: a reader filtering on the row
+	// should not have to handle two spellings of empty.
+	cleared := req.Delete
+	if cleared == nil {
+		cleared = []string{}
+	}
+	details, _ := json.Marshal(map[string]any{
+		"node":     node,
+		"settings": proxmox.NodeACMESetKeys(req),
+		"cleared":  cleared,
+	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_config", node, "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }

@@ -133,9 +133,23 @@ func mapDuplicateNameError(conflict string, err error) error {
 // mapDuplicateNameError for what a phrase that has quietly stopped matching
 // costs.
 //
-// Phrases must be lowercase, and are matched against Proxmox's own message —
-// the JSON envelope included, since that is where the die() sentence sits.
+// See mapProxmoxDieError for the phrase contract this shares.
 func mapMissingObjectError(missing string, phrases []string, err error) error {
+	return mapProxmoxDieError(fiber.StatusNotFound, missing, phrases, err)
+}
+
+// mapProxmoxDieError scans Proxmox's own die() sentence for a caller-supplied
+// phrase and answers the status that phrase justifies. It is the shared body of
+// mapMissingObjectError (404, "the object is not there") and of the 409 mappers
+// like mapNodeConfigError in acme.go ("the config moved under you"); the
+// precedence reasoning below is subtle enough to be worth having once rather
+// than once per status.
+//
+// Phrases must be lowercase, and are matched against Proxmox's own message —
+// the JSON envelope included, since that is where the die() sentence sits. The
+// contract lives here, on the function that enforces it, because a caller can
+// reach this directly without going through the 404 wrapper.
+func mapProxmoxDieError(status int, message string, phrases []string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -174,7 +188,7 @@ func mapMissingObjectError(missing string, phrases []string, err error) error {
 	msg := strings.ToLower(apiErr.Message)
 	for _, phrase := range phrases {
 		if strings.Contains(msg, phrase) {
-			return fiber.NewError(fiber.StatusNotFound, missing)
+			return fiber.NewError(status, message)
 		}
 	}
 	return mapped

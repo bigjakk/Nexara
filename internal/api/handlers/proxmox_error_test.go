@@ -600,32 +600,44 @@ func TestMissingObjectPhraseSets_RejectEachOthersNegatives(t *testing.T) {
 		"haRuleMissingPhrases":       haRuleMissingPhrases,
 		"metricServerMissingPhrases": metricServerMissingPhrases,
 		"firewallRuleMissingPhrases": firewallRuleMissingPhrases,
+		// Answers 409 rather than 404, but it reaches the same scan through
+		// mapProxmoxDieError and so has the same two ways to be wrong.
+		"staleDigestPhrases": staleDigestPhrases,
 	}
-	negatives := []string{
+	// ownedBy names the set a fixture is a legitimate positive for, so the
+	// matrix can carry one set's die as every other set's negative without the
+	// owner failing against itself. Empty means no set should ever match it.
+	negatives := []struct{ msg, ownedBy string }{
+		// PVE::Tools::assert_if_modified. A 404 or a widened phrase elsewhere
+		// would turn "someone else edited this" into "it is gone".
+		{"detected modified configuration - file changed by other user? try again.", "staleDigestPhrases"},
 		// SectionConfig delete_from_config — the operator's own delete= param.
-		"no such option 'bogus'",
+		{"no such option 'bogus'", ""},
 		// A neighbouring firewall object; guards a shortening to "no such".
-		"no such alias",
+		{"no such alias", ""},
 		// Guards a shortening of "no rule at position" to "no rule".
-		"no rule with that name",
+		{"no rule with that name", ""},
 		// Rules.pm, a real cluster state rather than a stale list.
-		"cannot update ha rule: ha groups have not been migrated yet",
+		{"cannot update ha rule: ha groups have not been migrated yet", ""},
 		// Rules.pm's two param validators. The rule is right there; only the
 		// node or the resource is wrong, so a 404 naming the rule would be
 		// actively misleading. The first guards "does not exist" being widened
 		// to "exist"; the second is pinned because it is the sibling check on
 		// the same PUT and the likeliest place for PVE to reword into range.
-		"cannot use non-existent node(s) pve-01.",
-		"cannot use unmanaged resource(s) vm:999.",
+		{"cannot use non-existent node(s) pve-01.", ""},
+		{"cannot use unmanaged resource(s) vm:999.", ""},
 		// SectionConfig lookup's *other* branch: a defined but unknown type is
 		// a real config problem, not a missing id.
-		"unknown section type 'influxdb'",
+		{"unknown section type 'influxdb'", ""},
 	}
 
 	for name, phrases := range sets {
-		for _, msg := range negatives {
-			t.Run(name+"/"+msg, func(t *testing.T) {
-				err := &proxmox.APIError{StatusCode: 500, Message: msg}
+		for _, neg := range negatives {
+			if neg.ownedBy == name {
+				continue // its own positive, covered by that mapper's own test
+			}
+			t.Run(name+"/"+neg.msg, func(t *testing.T) {
+				err := &proxmox.APIError{StatusCode: 500, Message: neg.msg}
 
 				var fe *fiber.Error
 				if !errors.As(mapMissingObjectError("should not be used", phrases, err), &fe) {
@@ -755,6 +767,9 @@ func TestMissingObjectPhrasesAreLowercase(t *testing.T) {
 		"haRuleMissingPhrases":       haRuleMissingPhrases,
 		"metricServerMissingPhrases": metricServerMissingPhrases,
 		"firewallRuleMissingPhrases": firewallRuleMissingPhrases,
+		// Answers 409 rather than 404, but it reaches the same scan through
+		// mapProxmoxDieError and so has the same two ways to be wrong.
+		"staleDigestPhrases": staleDigestPhrases,
 	}
 	for name, phrases := range sets {
 		if len(phrases) == 0 {
