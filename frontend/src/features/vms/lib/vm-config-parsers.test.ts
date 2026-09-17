@@ -13,6 +13,10 @@ import {
   parseDisk,
   parseCPU,
   buildCPU,
+  parseWatchdog,
+  buildWatchdog,
+  parseSMBIOS,
+  buildSMBIOS,
 } from "./vm-config-parsers";
 
 describe("parseKVString / buildKVString", () => {
@@ -316,5 +320,114 @@ describe("parseCPU / buildCPU", () => {
     const c = parseCPU("host,flags=+aes");
     c.flags = {};
     expect(buildCPU(c)).toBe("host");
+  });
+});
+
+describe("parseWatchdog / buildWatchdog", () => {
+  it("treats an empty field as no watchdog device", () => {
+    expect(parseWatchdog("")).toEqual({ model: "", action: "" });
+    expect(buildWatchdog({ model: "", action: "" })).toBe("");
+  });
+
+  it("parses the bare default_key model form", () => {
+    expect(parseWatchdog("i6300esb")).toEqual({
+      model: "i6300esb",
+      action: "",
+    });
+  });
+
+  it("parses model and action", () => {
+    expect(parseWatchdog("model=i6300esb,action=reset")).toEqual({
+      model: "i6300esb",
+      action: "reset",
+    });
+  });
+
+  it("treats a model-less watchdog as PVE's default device, not as none", () => {
+    // `watchdog: action=reset` is legal — PVE's model is optional and
+    // defaults to i6300esb. Reporting model "" would claim the VM has no
+    // watchdog and leave the action stranded behind a disabled control.
+    expect(parseWatchdog("action=reset")).toEqual({
+      model: "i6300esb",
+      action: "reset",
+    });
+  });
+
+  it("normalises a model-less watchdog to the same string on both sides", () => {
+    // The panel compares buildWatchdog(state) against
+    // buildWatchdog(parseWatchdog(original)), so normalising must not make an
+    // untouched VM look dirty.
+    const raw = "action=reset";
+    const normalized = buildWatchdog(parseWatchdog(raw));
+    expect(normalized).toBe("model=i6300esb,action=reset");
+    expect(buildWatchdog(parseWatchdog(normalized))).toBe(normalized);
+  });
+
+  it("normalises the bare form to model= on build", () => {
+    expect(buildWatchdog(parseWatchdog("i6300esb"))).toBe("model=i6300esb");
+  });
+
+  it("drops the action when none is set", () => {
+    expect(buildWatchdog({ model: "ib700", action: "" })).toBe("model=ib700");
+  });
+
+  it("removes the device when the model is cleared, even with an action", () => {
+    expect(buildWatchdog({ model: "", action: "reset" })).toBe("");
+  });
+});
+
+describe("parseSMBIOS / buildSMBIOS", () => {
+  it("treats an empty field as empty values", () => {
+    const p = parseSMBIOS("");
+    expect(p.uuid).toBe("");
+    expect(p.values.manufacturer).toBe("");
+    expect(buildSMBIOS(p)).toBe("");
+  });
+
+  it("decodes text fields only when base64=1 is set", () => {
+    // "RGVsbA==" is "Dell"
+    const encoded = parseSMBIOS("manufacturer=RGVsbA==,base64=1");
+    expect(encoded.values.manufacturer).toBe("Dell");
+  });
+
+  it("leaves plain values alone when base64 is absent", () => {
+    // Without the flag this is literal text that merely looks like base64 —
+    // decoding it would turn a real manufacturer name into mojibake.
+    const plain = parseSMBIOS("manufacturer=Dell");
+    expect(plain.values.manufacturer).toBe("Dell");
+  });
+
+  it("keeps the uuid unencoded", () => {
+    const u = "00000000-0000-4000-8000-000000000001";
+    const p = parseSMBIOS(`uuid=${u},base64=1`);
+    expect(p.uuid).toBe(u);
+    expect(buildSMBIOS(p)).toBe(`uuid=${u}`);
+  });
+
+  it("always encodes text on write and flags it", () => {
+    const p = parseSMBIOS("");
+    p.values.manufacturer = "Dell";
+    expect(buildSMBIOS(p)).toBe("manufacturer=RGVsbA==,base64=1");
+  });
+
+  it("encodes values Proxmox's plain grammar could not carry", () => {
+    const p = parseSMBIOS("");
+    p.values.product = "PowerEdge R740, Gen 2";
+    const built = buildSMBIOS(p);
+    expect(built).toContain("base64=1");
+    // The comma must survive inside the encoded value, not split the string.
+    expect(parseSMBIOS(built).values.product).toBe("PowerEdge R740, Gen 2");
+  });
+
+  it("round-trips non-ASCII text", () => {
+    const p = parseSMBIOS("");
+    p.values.family = "Bäckerei";
+    expect(parseSMBIOS(buildSMBIOS(p)).values.family).toBe("Bäckerei");
+  });
+
+  it("omits base64=1 when only a uuid is set", () => {
+    const p = parseSMBIOS("");
+    p.uuid = "00000000-0000-4000-8000-000000000001";
+    expect(buildSMBIOS(p)).not.toContain("base64");
   });
 });

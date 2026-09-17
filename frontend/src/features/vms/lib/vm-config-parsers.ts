@@ -703,3 +703,144 @@ export function buildCPU(parsed: ParsedCPU): string {
   for (const [k, v] of parsed.extra) parts.push(`${k}=${v}`);
   return parts.join(",");
 }
+
+// ---------------------------------------------------------------------------
+// watchdog
+// ---------------------------------------------------------------------------
+
+export interface ParsedWatchdog {
+  /** "" when no watchdog device is configured. */
+  model: string;
+  action: string;
+}
+
+/** PVE's watchdog_fmt marks `model` optional with this default. */
+const DEFAULT_WATCHDOG_MODEL = "i6300esb";
+
+/**
+ * Parse watchdog: "i6300esb", "model=i6300esb,action=reset", or — since PVE
+ * makes the model optional — "action=reset" alone, which still means a real
+ * i6300ESB device. Reporting no model for that would tell the user the VM has
+ * no watchdog when it has one, and hide the action behind a disabled control.
+ */
+export function parseWatchdog(raw: string): ParsedWatchdog {
+  if (!raw.trim()) return { model: "", action: "" };
+  let model = "";
+  let action = "";
+  for (const segment of raw.split(",")) {
+    const seg = segment.trim();
+    if (!seg) continue;
+    const idx = seg.indexOf("=");
+    if (idx === -1) {
+      model = seg;
+      continue;
+    }
+    const key = seg.slice(0, idx).trim();
+    const value = seg.slice(idx + 1).trim();
+    if (key === "model") model = value;
+    else if (key === "action") action = value;
+  }
+  // A non-empty watchdog field always describes a device, so fill in the model
+  // PVE would have used rather than reporting "none".
+  return { model: model || DEFAULT_WATCHDOG_MODEL, action };
+}
+
+export function buildWatchdog(parsed: ParsedWatchdog): string {
+  if (!parsed.model) return "";
+  const parts = [`model=${parsed.model}`];
+  if (parsed.action) parts.push(`action=${parsed.action}`);
+  return parts.join(",");
+}
+
+// ---------------------------------------------------------------------------
+// smbios1
+// ---------------------------------------------------------------------------
+
+/** The base64-encoded string fields of smbios1. `uuid` is never encoded. */
+export const SMBIOS_TEXT_FIELDS = [
+  "manufacturer",
+  "product",
+  "version",
+  "serial",
+  "sku",
+  "family",
+] as const;
+
+export type SMBIOSTextField = (typeof SMBIOS_TEXT_FIELDS)[number];
+
+export interface ParsedSMBIOS {
+  uuid: string;
+  /** Decoded plain text, keyed by field name. */
+  values: Record<SMBIOSTextField, string>;
+}
+
+function decodeBase64(value: string): string {
+  try {
+    // Proxmox encodes UTF-8 bytes; atob yields latin1, so re-decode.
+    const binary = atob(value);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    // Not decodable — show the raw value rather than losing it.
+    return value;
+  }
+}
+
+function encodeBase64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+function emptySMBIOSValues(): Record<SMBIOSTextField, string> {
+  return {
+    manufacturer: "",
+    product: "",
+    version: "",
+    serial: "",
+    sku: "",
+    family: "",
+  };
+}
+
+/**
+ * Parse smbios1. Values are base64 only when the string carries `base64=1` —
+ * an older config may hold plain text that happens to look like base64, and
+ * decoding that would turn "Dell" into mojibake.
+ */
+export function parseSMBIOS(raw: string): ParsedSMBIOS {
+  const result: ParsedSMBIOS = { uuid: "", values: emptySMBIOSValues() };
+  if (!raw.trim()) return result;
+
+  const kv = parseKVString(raw);
+  const isBase64 = kv.get("base64") === "1";
+  result.uuid = kv.get("uuid") ?? "";
+  for (const field of SMBIOS_TEXT_FIELDS) {
+    const v = kv.get(field);
+    if (v == null || v === "") continue;
+    result.values[field] = isBase64 ? decodeBase64(v) : v;
+  }
+  return result;
+}
+
+/**
+ * Build smbios1, always base64-encoding the text fields and flagging it.
+ * Proxmox's own schema constrains those fields to the base64 alphabet, so a
+ * plain value containing a space or comma is rejected outright; encoding
+ * unconditionally is what its web UI does too.
+ */
+export function buildSMBIOS(parsed: ParsedSMBIOS): string {
+  const parts: string[] = [];
+  if (parsed.uuid) parts.push(`uuid=${parsed.uuid}`);
+  let hasText = false;
+  for (const field of SMBIOS_TEXT_FIELDS) {
+    const v = parsed.values[field];
+    if (!v) continue;
+    parts.push(`${field}=${encodeBase64(v)}`);
+    hasText = true;
+  }
+  if (parts.length === 0) return "";
+  if (hasText) parts.push("base64=1");
+  return parts.join(",");
+}

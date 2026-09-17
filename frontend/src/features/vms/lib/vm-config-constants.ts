@@ -174,6 +174,52 @@ export const cpuFlags: { name: string; description: string }[] = [
   },
 ];
 
+/** watchdog model — PVE's $watchdog_fmt, default i6300esb. */
+export const watchdogModels = [
+  { value: "i6300esb", label: "Intel 6300ESB (default)" },
+  { value: "ib700", label: "iBASE 700" },
+];
+
+/** watchdog action taken when the guest stops polling the device. */
+export const watchdogActions = [
+  { value: "", label: "Default (none)" },
+  { value: "reset", label: "Reset" },
+  { value: "shutdown", label: "Shutdown" },
+  { value: "poweroff", label: "Power off" },
+  { value: "pause", label: "Pause" },
+  { value: "debug", label: "Debug" },
+  { value: "none", label: "None" },
+];
+
+/** VNC server keyboard layout. Proxmox's enum, in its own order. */
+export const keyboardLayouts = [
+  "de",
+  "de-ch",
+  "da",
+  "en-gb",
+  "en-us",
+  "es",
+  "fi",
+  "fr",
+  "fr-be",
+  "fr-ca",
+  "fr-ch",
+  "hu",
+  "is",
+  "it",
+  "ja",
+  "lt",
+  "mk",
+  "nl",
+  "no",
+  "pl",
+  "pt",
+  "pt-br",
+  "sv",
+  "sl",
+  "tr",
+];
+
 export const scsiControllers = [
   { value: "virtio-scsi-pci", label: "VirtIO SCSI" },
   { value: "virtio-scsi-single", label: "VirtIO SCSI Single" },

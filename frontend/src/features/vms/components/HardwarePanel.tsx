@@ -36,6 +36,9 @@ import { AddDeviceMenu } from "./hardware/AddDeviceMenu";
 import {
   cpuTypes as fallbackCpuTypes,
   cpuFlags as fallbackCpuFlags,
+  watchdogModels,
+  watchdogActions,
+  keyboardLayouts,
   scsiControllers,
   netModels,
   vgaTypes,
@@ -73,8 +76,13 @@ import {
   parseTPMState,
   parseCPU,
   buildCPU,
+  parseWatchdog,
+  buildWatchdog,
+  parseSMBIOS,
+  buildSMBIOS,
+  SMBIOS_TEXT_FIELDS,
 } from "../lib/vm-config-parsers";
-import type { CPUFlagState } from "../lib/vm-config-parsers";
+import type { CPUFlagState, SMBIOSTextField } from "../lib/vm-config-parsers";
 import type { VMConfig } from "../types/vm";
 
 const selectClass =
@@ -90,6 +98,18 @@ const DISK_KEY_RE = /^(scsi|ide|sata|virtio|efidisk|tpmstate|unused)\d+$/;
  * silently upgrades the guest-visible CPU model.
  */
 const DEFAULT_CPU_TYPE = "x86-64-v2-AES";
+
+/** All smbios1 text fields blank — the shape parseSMBIOS/buildSMBIOS expect. */
+function emptySmbios(): Record<SMBIOSTextField, string> {
+  return {
+    manufacturer: "",
+    product: "",
+    version: "",
+    serial: "",
+    sku: "",
+    family: "",
+  };
+}
 
 /** Canonical form of a raw `cpu` value, with the placeholder model applied. */
 function normalizeCPU(raw: string): string {
@@ -138,6 +158,24 @@ interface NICEdit {
   rateLimit: string;
   mtu: string;
   linkDown: boolean;
+}
+
+/**
+ * A <select> whose configured value may not be in the option list — an
+ * inactive storage, a keyboard layout Proxmox added later. Without this a
+ * controlled select gets selectedIndex -1 and renders BLANK, which looks
+ * identical to the "" option ("Automatic"/"None") while state still holds the
+ * real value; one click then silently reassigns it.
+ */
+function CurrentValueOption({
+  value,
+  known,
+}: {
+  value: string;
+  known: string[];
+}) {
+  if (!value || known.includes(value)) return null;
+  return <option value={value}>{value} (current)</option>;
 }
 
 interface SectionProps {
@@ -334,12 +372,14 @@ export function HardwarePanel({
   }, [cpuFlagList, original]);
   const [numa, setNuma] = useState(false);
   const [cpulimit, setCpulimit] = useState("");
+  const [vcpus, setVcpus] = useState("");
   const [cpuunits, setCpuunits] = useState("");
 
   // --- Memory ---
   const [memory, setMemory] = useState("2048");
   const [balloon, setBalloon] = useState("");
   const [shares, setShares] = useState("");
+  const [allowKsm, setAllowKsm] = useState(true);
 
   // --- System ---
   const [bios, setBios] = useState("seabios");
@@ -363,6 +403,19 @@ export function HardwarePanel({
   const [startupOrder, setStartupOrder] = useState("");
   const [startupUp, setStartupUp] = useState("");
   const [startupDown, setStartupDown] = useState("");
+  const [freeze, setFreeze] = useState(false);
+  const [reboot, setReboot] = useState(true);
+  const [tdf, setTdf] = useState(false);
+  const [startdate, setStartdate] = useState("");
+  const [keyboard, setKeyboard] = useState("");
+  const [vmstatestorage, setVmstatestorage] = useState("");
+  const [migrateDowntime, setMigrateDowntime] = useState("");
+  const [migrateSpeed, setMigrateSpeed] = useState("");
+  const [watchdogModel, setWatchdogModel] = useState("");
+  const [watchdogAction, setWatchdogAction] = useState("");
+  const [smbiosUuid, setSmbiosUuid] = useState("");
+  const [smbios, setSmbios] =
+    useState<Record<SMBIOSTextField, string>>(emptySmbios);
 
   // --- Network is handled by nicEdits state ---
 
@@ -558,12 +611,16 @@ export function HardwarePanel({
     setCpuExtra(parsedCPU.extra);
     setNuma(bool01(config["numa"]));
     setCpulimit(config["cpulimit"] != null ? str(config["cpulimit"]) : "");
+    setVcpus(config["vcpus"] != null ? str(config["vcpus"]) : "");
     setCpuunits(config["cpuunits"] != null ? str(config["cpuunits"]) : "");
 
     // Memory
     setMemory(str(config["memory"] ?? 2048));
     setBalloon(config["balloon"] != null ? str(config["balloon"]) : "");
     setShares(config["shares"] != null ? str(config["shares"]) : "");
+    setAllowKsm(
+      config["allow-ksm"] != null ? bool01(config["allow-ksm"]) : true,
+    );
 
     // System
     setBios(str(config["bios"] ?? "seabios"));
@@ -629,6 +686,24 @@ export function HardwarePanel({
     setStartupOrder(startup.order);
     setStartupUp(startup.up);
     setStartupDown(startup.down);
+    setFreeze(bool01(config["freeze"]));
+    setReboot(config["reboot"] != null ? bool01(config["reboot"]) : true);
+    setTdf(bool01(config["tdf"]));
+    setStartdate(str(config["startdate"] ?? ""));
+    setKeyboard(str(config["keyboard"] ?? ""));
+    setVmstatestorage(str(config["vmstatestorage"] ?? ""));
+    setMigrateDowntime(
+      config["migrate_downtime"] != null ? str(config["migrate_downtime"]) : "",
+    );
+    setMigrateSpeed(
+      config["migrate_speed"] != null ? str(config["migrate_speed"]) : "",
+    );
+    const wd = parseWatchdog(str(config["watchdog"] ?? ""));
+    setWatchdogModel(wd.model);
+    setWatchdogAction(wd.action);
+    const sm = parseSMBIOS(str(config["smbios1"] ?? ""));
+    setSmbiosUuid(sm.uuid);
+    setSmbios({ ...sm.values });
 
     // Network (multi-NIC)
     const nics: Record<string, NICEdit> = {};
@@ -929,6 +1004,14 @@ export function HardwarePanel({
     const origLocaltime = bool01(original["localtime"]);
     if (localtime !== origLocaltime)
       fields["localtime"] = localtime ? "1" : "0";
+    for (const f of optionalScalars) {
+      if (f.value === f.was) continue;
+      if (f.value) fields[f.key] = f.value;
+      else deleteFields.push(f.key);
+    }
+    for (const b of optionalBooleans) {
+      if (b.value !== b.was) fields[b.key] = b.value ? "1" : "0";
+    }
     // Boot order
     const origBootDevices = parseBootOrder(str(original["boot"] ?? ""));
     const enabledDevices = bootOrder
@@ -1065,6 +1148,83 @@ export function HardwarePanel({
     );
   }
 
+  /**
+   * Optional scalar options: one description of each, consumed by both the
+   * pending-change diff in handleSave and the dirty check in hasChanges.
+   * Those two are otherwise hand-maintained twins, and a field added to one
+   * but not the other either never saves or never marks the panel dirty.
+   * An empty value means "clear it", which Proxmox expresses as a delete.
+   */
+  const optionalScalars = useMemo(() => {
+    if (!original) return [];
+    const o = (k: string) => (original[k] != null ? str(original[k]) : "");
+    return [
+      { key: "vcpus", value: vcpus, was: o("vcpus") },
+      { key: "startdate", value: startdate, was: o("startdate") },
+      { key: "keyboard", value: keyboard, was: o("keyboard") },
+      {
+        key: "vmstatestorage",
+        value: vmstatestorage,
+        was: o("vmstatestorage"),
+      },
+      {
+        key: "migrate_downtime",
+        value: migrateDowntime,
+        was: o("migrate_downtime"),
+      },
+      { key: "migrate_speed", value: migrateSpeed, was: o("migrate_speed") },
+      {
+        key: "watchdog",
+        value: buildWatchdog({ model: watchdogModel, action: watchdogAction }),
+        was: buildWatchdog(parseWatchdog(o("watchdog"))),
+      },
+      {
+        key: "smbios1",
+        value: buildSMBIOS({ uuid: smbiosUuid, values: smbios }),
+        was: buildSMBIOS(parseSMBIOS(o("smbios1"))),
+      },
+    ];
+  }, [
+    original,
+    vcpus,
+    startdate,
+    keyboard,
+    vmstatestorage,
+    migrateDowntime,
+    migrateSpeed,
+    watchdogModel,
+    watchdogAction,
+    smbiosUuid,
+    smbios,
+  ]);
+
+  /**
+   * The SMBIOS UUID as loaded. Changing or clearing it changes the guest's
+   * SMBIOS UUID on next boot, which can deactivate Windows and — because
+   * Veeam's Proxmox objectId IS the smbios1 uuid (see internal/veeam
+   * inventory) — silently drops the guest out of Nexara's own backup
+   * correlation. Warn before that lands rather than hiding it.
+   */
+  const originalSmbiosUuid = useMemo(
+    () => parseSMBIOS(str(original?.["smbios1"] ?? "")).uuid,
+    [original],
+  );
+  const smbiosUuidChanged =
+    originalSmbiosUuid !== "" && smbiosUuid !== originalSmbiosUuid;
+
+  /** Booleans Proxmox defaults to a specific value when the key is absent. */
+  const optionalBooleans = useMemo(() => {
+    if (!original) return [];
+    const ob = (k: string, dflt: boolean) =>
+      original[k] != null ? bool01(original[k]) : dflt;
+    return [
+      { key: "freeze", value: freeze, was: ob("freeze", false) },
+      { key: "reboot", value: reboot, was: ob("reboot", true) },
+      { key: "tdf", value: tdf, was: ob("tdf", false) },
+      { key: "allow-ksm", value: allowKsm, was: ob("allow-ksm", true) },
+    ];
+  }, [original, freeze, reboot, tdf, allowKsm]);
+
   const hasChanges = useMemo(() => {
     if (!original) return false;
     if (cores !== str(original["cores"] ?? 1)) return true;
@@ -1116,6 +1276,8 @@ export function HardwarePanel({
     if (ostype !== str(original["ostype"] ?? "l26")) return true;
     if (protection !== bool01(original["protection"])) return true;
     if (localtime !== bool01(original["localtime"])) return true;
+    if (optionalScalars.some((f) => f.value !== f.was)) return true;
+    if (optionalBooleans.some((b) => b.value !== b.was)) return true;
     const origBootDevices = parseBootOrder(str(original["boot"] ?? ""));
     const currentEnabled = bootOrder
       .filter((b) => b.enabled)
@@ -1199,6 +1361,8 @@ export function HardwarePanel({
     ostype,
     protection,
     localtime,
+    optionalScalars,
+    optionalBooleans,
     bootOrder,
     startupOrder,
     startupUp,
@@ -1355,8 +1519,22 @@ export function HardwarePanel({
                 NUMA
               </Label>
             </div>
+            <div className="flex items-center gap-1.5">
+              <Label className="text-xs whitespace-nowrap">Hotplug vCPUs</Label>
+              <Input
+                type="number"
+                min={1}
+                max={Math.max(1, num(cores) * num(sockets))}
+                value={vcpus}
+                onChange={(e) => {
+                  setVcpus(e.target.value);
+                }}
+                placeholder={`all (${String(num(cores) * num(sockets))})`}
+                className="h-8 w-28 text-xs"
+              />
+            </div>
             <span className="text-[10px] text-muted-foreground">
-              vCPUs: {num(cores) * num(sockets)}
+              Total vCPUs: {num(cores) * num(sockets)}
             </span>
           </div>
 
@@ -1492,6 +1670,18 @@ export function HardwarePanel({
                 className="h-8 text-xs"
               />
             </div>
+          </div>
+          <div className="mt-2 flex items-center gap-1.5">
+            <Checkbox
+              id="hw-allow-ksm"
+              checked={allowKsm}
+              onCheckedChange={(v) => {
+                setAllowKsm(v === true);
+              }}
+            />
+            <Label htmlFor="hw-allow-ksm" className="cursor-pointer text-xs">
+              Allow KSM page merging
+            </Label>
           </div>
         </Section>
 
@@ -1841,6 +2031,223 @@ export function HardwarePanel({
               />
             </div>
           </div>
+        </Section>
+
+        {/* Advanced Options */}
+        <Section title="Advanced Options" defaultOpen={false}>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">RTC Start Date</Label>
+              <Input
+                value={startdate}
+                onChange={(e) => {
+                  setStartdate(e.target.value);
+                }}
+                placeholder="now"
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Keyboard Layout</Label>
+              <select
+                className={compactSelect}
+                value={keyboard}
+                onChange={(e) => {
+                  setKeyboard(e.target.value);
+                }}
+              >
+                <option value="">Default (guest-handled)</option>
+                <CurrentValueOption value={keyboard} known={keyboardLayouts} />
+                {keyboardLayouts.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="col-span-2 space-y-1">
+              <Label className="text-xs">VM State Storage</Label>
+              <select
+                className={compactSelect}
+                value={vmstatestorage}
+                onChange={(e) => {
+                  setVmstatestorage(e.target.value);
+                }}
+              >
+                <option value="">Automatic</option>
+                <CurrentValueOption
+                  value={vmstatestorage}
+                  known={diskStorages.map((st) => st.storage)}
+                />
+                {diskStorages.map((st) => (
+                  <option key={st.id} value={st.storage}>
+                    {st.storage} ({st.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Migrate Downtime (s)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={0.1}
+                value={migrateDowntime}
+                onChange={(e) => {
+                  setMigrateDowntime(e.target.value);
+                }}
+                placeholder="0.1 (default)"
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Migrate Speed (MB/s)</Label>
+              <Input
+                type="number"
+                min={0}
+                value={migrateSpeed}
+                onChange={(e) => {
+                  setMigrateSpeed(e.target.value);
+                }}
+                placeholder="0 (unlimited)"
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <Checkbox
+                id="hw-reboot"
+                checked={reboot}
+                onCheckedChange={(v) => {
+                  setReboot(v === true);
+                }}
+              />
+              <Label htmlFor="hw-reboot" className="cursor-pointer text-xs">
+                Allow reboot
+              </Label>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Checkbox
+                id="hw-tdf"
+                checked={tdf}
+                onCheckedChange={(v) => {
+                  setTdf(v === true);
+                }}
+              />
+              <Label htmlFor="hw-tdf" className="cursor-pointer text-xs">
+                Time drift fix
+              </Label>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Checkbox
+                id="hw-freeze"
+                checked={freeze}
+                onCheckedChange={(v) => {
+                  setFreeze(v === true);
+                }}
+              />
+              <Label htmlFor="hw-freeze" className="cursor-pointer text-xs">
+                Freeze CPU at startup
+              </Label>
+            </div>
+          </div>
+
+          <div className="mt-3 border-t pt-2">
+            <Label className="text-xs font-medium">Watchdog</Label>
+            <div className="mt-1 grid grid-cols-2 gap-2">
+              <select
+                className={compactSelect}
+                value={watchdogModel}
+                aria-label="Watchdog device"
+                onChange={(e) => {
+                  setWatchdogModel(e.target.value);
+                }}
+              >
+                <option value="">None</option>
+                <CurrentValueOption
+                  value={watchdogModel}
+                  known={watchdogModels.map((m) => m.value)}
+                />
+                {watchdogModels.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                className={compactSelect}
+                value={watchdogAction}
+                aria-label="Watchdog action"
+                disabled={!watchdogModel}
+                onChange={(e) => {
+                  setWatchdogAction(e.target.value);
+                }}
+              >
+                <CurrentValueOption
+                  value={watchdogAction}
+                  known={watchdogActions.map((a) => a.value)}
+                />
+                {watchdogActions.map((a) => (
+                  <option key={a.value} value={a.value}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <details className="mt-3 border-t pt-2">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+              SMBIOS (type 1)
+            </summary>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <div className="col-span-2 space-y-1">
+                <Label className="text-xs">UUID</Label>
+                <Input
+                  value={smbiosUuid}
+                  onChange={(e) => {
+                    setSmbiosUuid(e.target.value);
+                  }}
+                  placeholder={
+                    originalSmbiosUuid
+                      ? originalSmbiosUuid
+                      : "auto-generated on first boot"
+                  }
+                  className="h-8 font-mono text-xs"
+                />
+                {smbiosUuidChanged && (
+                  <p className="flex items-start gap-1.5 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] leading-snug text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+                    <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+                    <span>
+                      {smbiosUuid
+                        ? "Changing the SMBIOS UUID"
+                        : "Clearing this removes the SMBIOS UUID, and Proxmox will generate a new one"}
+                      {
+                        " — the guest sees different hardware on next boot. This can deactivate Windows, and it breaks Veeam backup correlation, which matches Proxmox guests on exactly this value."
+                      }
+                    </span>
+                  </p>
+                )}
+              </div>
+              {SMBIOS_TEXT_FIELDS.map((field) => (
+                <div key={field} className="space-y-1">
+                  <Label className="text-xs capitalize">{field}</Label>
+                  <Input
+                    value={smbios[field]}
+                    onChange={(e) => {
+                      setSmbios((prev) => ({
+                        ...prev,
+                        [field]: e.target.value,
+                      }));
+                    }}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              ))}
+            </div>
+          </details>
         </Section>
 
         {/* Network (multi-NIC) */}
