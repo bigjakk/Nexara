@@ -398,41 +398,27 @@ func TestMountRegistryRefusesToMountWithoutAuthentication(t *testing.T) {
 	mountRegistry(fiber.New(), reg, nil)
 }
 
-// TestSetupRoutesMountsTheRegistry pins the only production wiring this
-// phase adds: the mountRegistry call at the top of setupRoutes.
+// TestSetupRoutesMountsTheRegistry pins the production wiring: the
+// buildRegistry + mountRegistry pair at the top of setupRoutes.
 //
-// It has to put something IN the registry to test that, because the
-// package registry is empty until Phase 4 — and an assertion made against
-// an empty registry holds whether or not the call exists, which is no
-// assertion at all. So it swaps in a registry holding one probe endpoint,
-// runs the real setupRoutes through newRouteStubServer, and looks for the
-// probe in the route table.
+// It asserts against a REAL migrated endpoint rather than a probe swapped
+// into a global, because there is no global left to swap — the registry is
+// built per Server from that Server's own handlers (see buildRegistry).
+// The route it picks is the disk attach, which is the one this phase
+// exists for.
 func TestSetupRoutesMountsTheRegistry(t *testing.T) {
-	const probePath = "/api/v1/registry-mount-probe"
-
-	saved := endpoints
-	t.Cleanup(func() { endpoints = saved })
-
-	cap := &capture{}
-	endpoints = NewRegistry()
-	endpoints.Register(Endpoint{
-		Method:      fiber.MethodGet,
-		Path:        probePath,
-		Description: "Probe that setupRoutes mounts the registry.",
-		Group:       "Widgets",
-		Permissions: Permissions{Check: &Check{Action: "view", Resource: "widget", Scope: ScopeGlobal}},
-		Parameters:  apischema.Properties{},
-		Handler:     cap.handler(),
-	})
+	const attachPath = "/api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach"
 
 	s := newRouteStubServer(t)
 
-	got := chainNames(t, s.app, fiber.MethodGet, probePath)
+	got := chainNames(t, s.app, fiber.MethodPost, attachPath)
 	want := []string{
 		// setupRoutes passes s.authRequired(), so the real production
 		// authentication middleware is what lands here.
 		"internal/api.(*Server).authRequired",
-		"internal/api/handlers.RequirePermission",
+		// From Permissions{Check: manage:vm, ScopeCluster} — nothing in
+		// the handler body places this any more.
+		"internal/api/handlers.RequireClusterPermission",
 		"internal/api.Endpoint.serve",
 	}
 	if len(got) != len(want) {
@@ -445,41 +431,133 @@ func TestSetupRoutesMountsTheRegistry(t *testing.T) {
 	}
 }
 
-// TestPackageRegistryIsStillEmpty is the Phase 4 tripwire. Nothing is
-// migrated yet, so mounting the registry must change the route table not
-// at all — which is what makes migrating one route at a time safe.
+// TestGuard_EveryDeclaredGateIsMountedAsMiddleware closes the gap
+// between "declared" and "actually gated".
 //
-// Phase 3 added the guards that supersede pieces of this test once Phase 4
-// starts registering endpoints: registryEnforcementGaps,
-// registryPublicRouteKeys and registrySelfServiceRouteKeys
-// (registry_rbac_guard_test.go) take over permission-coverage checking, and
-// registryLegacyRouteConflicts (registry_shadow_guard_test.go) is a strict
-// superset of the exact-duplicate check below — it reports the identical
-// case as a "duplicates" finding AND catches a registry :param route that
-// captures a legacy route under a DIFFERENT literal path, which two equal
-// "METHOD path" strings can never do. It does this on purpose rather than
-// deferring to the check below: that check stops running — and needs
-// deleting or rewriting — the moment Phase 4 registers anything at all,
-// while registryLegacyRouteConflicts does not expire. legacyRouteRatchetViolations
-// (legacy_route_ratchet_test.go) tracks which routes remain legacy at all.
-// This test still guards the one thing none of those do: that the registry
-// is empty, which is the precondition Phase 4 removes.
-func TestPackageRegistryIsStillEmpty(t *testing.T) {
-	if endpoints.Len() != 0 {
-		t.Fatalf("the package-level registry holds %d endpoint(s); this test assumes it is still empty "+
-			"and must be taught to check them once Phase 4 starts migrating routes", endpoints.Len())
+// registryEnforcementGaps treats Check and Alternatives as structurally
+// satisfied — Permissions.middleware is a pure function of the
+// declaration, so there is nothing to statically infer — and every other
+// guard in this package reads the declaration too. That leaves ONE thing
+// nobody checks: whether mountRegistry put the gate on the route. A
+// method-conditional, an early `continue`, a reordering that dropped the
+// permission link, and all 33 routes would still declare manage:vm while
+// serving every authenticated caller, with every guard green.
+//
+// TestRegistryChainOrder and TestSetupRoutesMountsTheRegistry each pin
+// ONE chain end to end. This walks all of them.
+func TestGuard_EveryDeclaredGateIsMountedAsMiddleware(t *testing.T) {
+	s := newRouteStubServer(t)
+
+	declared := s.registry.Endpoints()
+	if len(declared) == 0 {
+		t.Fatal("the server declared no registry endpoints, so this guard would check nothing")
 	}
 
-	s := newRouteStubServer(t)
-	seen := map[string]bool{}
+	chains := map[string][]string{}
 	for _, r := range s.app.GetRoutes(true) {
 		if r.Method == "USE" || len(r.Handlers) == 0 {
 			continue
 		}
-		key := r.Method + " " + r.Path
-		if seen[key] {
-			t.Errorf("route %s is registered twice — the registry and a legacy block both claim it", key)
+		names := make([]string, 0, len(r.Handlers))
+		for _, h := range r.Handlers {
+			names = append(names, handlerName(h))
 		}
-		seen[key] = true
+		chains[r.Method+" "+normalizeRoutePath(r.Path)] = names
+	}
+
+	var gated int
+	for _, e := range declared {
+		key := e.Method + " " + normalizeRoutePath(e.Path)
+		chain, mounted := chains[key]
+		if !mounted {
+			// Reported by TestGuard_EveryDeclaredEndpointIsMountedExactlyOnce;
+			// skipped here so one fault does not produce two failures.
+			continue
+		}
+
+		if e.Permissions.authenticated() && !containsFragment(chain, "internal/api.(*Server).authRequired") {
+			t.Errorf("%s declares %q, which requires a session, but its mounted chain has no authentication "+
+				"middleware: %v", key, e.Permissions.Describe(), chain)
+		}
+
+		if e.Permissions.Check == nil && len(e.Permissions.Alternatives) == 0 {
+			// Deferred, Advisory, Public and SelfService install no gate by
+			// design; registryEnforcementGaps is what holds the first two
+			// to reaching a permission leaf inside the handler.
+			continue
+		}
+		gated++
+		if !containsFragment(chain, "/handlers.Require") {
+			t.Errorf("%s declares the gate %q but no handlers.Require* middleware is mounted on it — "+
+				"the declaration says it is authorized and nothing enforces that: %v",
+				key, e.Permissions.Describe(), chain)
+		}
+	}
+
+	if gated == 0 {
+		t.Fatal("no endpoint declared a Check or Alternatives, so the gate half of this guard checked nothing")
+	}
+}
+
+// containsFragment reports whether any entry in names contains fragment.
+// Runtime handler names carry the full import path plus a .funcN suffix,
+// so a substring match is what identifies a middleware.
+func containsFragment(names []string, fragment string) bool {
+	for _, n := range names {
+		if strings.Contains(n, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestGuard_EveryDeclaredEndpointIsMountedExactlyOnce replaces
+// TestPackageRegistryIsStillEmpty, the Phase 4 tripwire that asserted the
+// registry held nothing and said in its own failure message that it "must
+// be taught to check them once Phase 4 starts migrating routes". This is
+// that check.
+//
+// It keeps the half of the old test that never depended on emptiness — no
+// "METHOD path" may appear twice in the mounted route table — and that
+// half is NOT subsumed by registryLegacyRouteConflicts, which only ever
+// compares registry declarations against legacy routes: two LEGACY blocks
+// claiming one path, or one endpoint mounted twice, are invisible to it
+// and visible here.
+//
+// What it adds is the coverage the old test could not have: every
+// endpoint the registry declares must actually appear in the route table.
+// A declaration that never mounts is a route nobody serves and every
+// declaration-reading guard in this package still passes on — the exact
+// shape of failure a registry makes possible and an imperative
+// registration cannot.
+func TestGuard_EveryDeclaredEndpointIsMountedExactlyOnce(t *testing.T) {
+	s := newRouteStubServer(t)
+
+	declared := s.registry.Endpoints()
+	if len(declared) == 0 {
+		t.Fatal("the server declared no registry endpoints, so neither half of this guard would check anything")
+	}
+
+	mounted := map[string]int{}
+	for _, r := range s.app.GetRoutes(true) {
+		if r.Method == "USE" || len(r.Handlers) == 0 {
+			continue
+		}
+		mounted[r.Method+" "+normalizeRoutePath(r.Path)]++
+	}
+
+	for key, n := range mounted {
+		if n > 1 {
+			t.Errorf("route %s is registered %d times — two blocks claim it, and Fiber serves whichever "+
+				"was registered first while the other is dead code", key, n)
+		}
+	}
+
+	for _, e := range declared {
+		key := e.Method + " " + normalizeRoutePath(e.Path)
+		if mounted[key] == 0 {
+			t.Errorf("endpoint %s is declared in the registry but is not in the mounted route table — "+
+				"nothing serves it, and every guard that reads the declaration passes anyway", key)
+		}
 	}
 }

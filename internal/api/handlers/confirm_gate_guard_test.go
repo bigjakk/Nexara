@@ -30,7 +30,7 @@ func TestGuard_RequireGatesDoNotWriteResponses(t *testing.T) {
 	for _, file := range files {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil || !strings.HasPrefix(fn.Name.Name, "require") {
+			if !ok || fn.Body == nil || !isRequireGateName(fn.Name.Name) {
 				continue
 			}
 
@@ -56,6 +56,44 @@ func TestGuard_RequireGatesDoNotWriteResponses(t *testing.T) {
 					"site with renderConfirmRequired.", pos, fn.Name.Name, sel.Sel.Name)
 				return true
 			})
+		}
+	}
+}
+
+// isRequireGateName reports whether a function name is a require* gate.
+//
+// The match is case-INSENSITIVE on the prefix, because this package now
+// has both spellings: the unexported requireClusterPerm and friends, and
+// the exported RequirePermission / RequireClusterPermission /
+// RequireAnyPermission that the declarative registry attaches as route
+// middleware. A case-sensitive "require" prefix saw only the first set,
+// so the three functions that decide authorization for every registry
+// route sat outside the guard that exists to catch a gate writing its own
+// response and returning nil.
+//
+// They are, if anything, the ones that matter most: a middleware that
+// answers 403 by writing the response and returning nil would call
+// c.Next() — or fall through to it — and run the handler anyway, with the
+// caller already looking at a refusal.
+func isRequireGateName(name string) bool {
+	return len(name) >= len("require") && strings.EqualFold(name[:len("require")], "require")
+}
+
+// TestIsRequireGateName pins the case-insensitivity, and that the guard
+// reaches the exported middleware constructors specifically — which is
+// the gap this check was widened to close.
+func TestIsRequireGateName(t *testing.T) {
+	for _, name := range []string{
+		"requireClusterPerm", "requirePerm", "requireLDAPTransportAck",
+		"RequirePermission", "RequireClusterPermission", "RequireAnyPermission",
+	} {
+		if !isRequireGateName(name) {
+			t.Errorf("%s is a require* gate but the guard does not see it", name)
+		}
+	}
+	for _, name := range []string{"resolveVM", "req", "Requir", "", "renderConfirmRequired"} {
+		if isRequireGateName(name) {
+			t.Errorf("%s is not a require* gate but the guard treats it as one", name)
 		}
 	}
 }

@@ -6,7 +6,14 @@ func (s *Server) setupRoutes() {
 	// registry is mounted ahead of them because Fiber matches in
 	// registration order: a migrated literal path would otherwise be
 	// shadowed by whichever legacy :param route still matches it.
-	mountRegistry(s.app, endpoints, s.authRequired())
+	//
+	// The registry is built from this Server's handler instances rather
+	// than read off a package-level global; see the note above Register
+	// in registry.go for why it cannot be one. It is kept on the Server
+	// so the guard tests can read the declarations the running route
+	// table was actually built from.
+	s.registry = s.buildRegistry()
+	mountRegistry(s.app, s.registry, s.authRequired())
 
 	// Health probe — not rate-limited, not behind /api/v1.
 	s.app.Get("/healthz", s.handleHealthz)
@@ -150,32 +157,13 @@ func (s *Server) setupRoutes() {
 			// Node bulk operations.
 			clusters.Post("/:cluster_id/nodes/:node_name/evacuate", s.nodeHandler.EvacuateNode)
 		}
-		if s.vmHandler != nil {
-			clusters.Get("/:cluster_id/vms", s.vmHandler.ListByCluster)
-			clusters.Post("/:cluster_id/vms", s.vmHandler.CreateVM)
-			clusters.Get("/:cluster_id/vms/:vm_id", s.vmHandler.GetVM)
-			clusters.Post("/:cluster_id/vms/:vm_id/status", s.vmHandler.PerformAction)
-			clusters.Post("/:cluster_id/vms/:vm_id/clone", s.vmHandler.CloneVM)
-			clusters.Post("/:cluster_id/vms/:vm_id/convert-to-template", s.vmHandler.ConvertToTemplate)
-			clusters.Post("/:cluster_id/vms/:vm_id/clone-to-template", s.vmHandler.CloneToTemplate)
-			clusters.Post("/:cluster_id/vms/:vm_id/migrate", s.vmHandler.MigrateVM)
-			clusters.Delete("/:cluster_id/vms/:vm_id", s.vmHandler.DestroyVM)
-			clusters.Get("/:cluster_id/vms/:vm_id/snapshot-capability", s.vmHandler.GetSnapshotCapability)
-			clusters.Get("/:cluster_id/vms/:vm_id/snapshots", s.vmHandler.ListSnapshots)
-			clusters.Post("/:cluster_id/vms/:vm_id/snapshots", s.vmHandler.CreateSnapshot)
-			clusters.Delete("/:cluster_id/vms/:vm_id/snapshots/:snap_name", s.vmHandler.DeleteSnapshot)
-			clusters.Post("/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback", s.vmHandler.RollbackSnapshot)
-			clusters.Get("/:cluster_id/vms/:vm_id/config", s.vmHandler.GetVMConfig)
-			clusters.Put("/:cluster_id/vms/:vm_id/config", s.vmHandler.SetVMConfig)
-			clusters.Get("/:cluster_id/vms/:vm_id/agent", s.vmHandler.GetGuestAgentInfo)
-			if s.veeamHandler != nil {
-				// The VM detail page's Veeam card. Gated on view:veeam for the
-				// cluster, not view:vm — a caller who may see the guest is not
-				// thereby entitled to its backup posture.
-				clusters.Get("/:cluster_id/vms/:vm_id/veeam", s.veeamHandler.GetGuestVeeamProtection)
-			}
-			clusters.Get("/:cluster_id/tasks/:upid", s.vmHandler.GetTaskStatus)
-			clusters.Get("/:cluster_id/tasks/:upid/log", s.vmHandler.GetTaskLog)
+		// The VM detail page's Veeam card. Gated on view:veeam for the
+		// cluster, not view:vm — a caller who may see the guest is not
+		// thereby entitled to its backup posture. The vmHandler condition
+		// is kept from when this sat inside the VM block: the card belongs
+		// to a page that does not exist without the VM routes.
+		if s.vmHandler != nil && s.veeamHandler != nil {
+			clusters.Get("/:cluster_id/vms/:vm_id/veeam", s.veeamHandler.GetGuestVeeamProtection)
 		}
 		if s.guestSnapshotHandler != nil {
 			clusters.Post("/:cluster_id/guest-snapshots/resync", s.guestSnapshotHandler.Resync)
@@ -199,22 +187,6 @@ func (s *Server) setupRoutes() {
 			clusters.Put("/:cluster_id/containers/:ct_id/config", s.containerHandler.SetContainerConfig)
 			clusters.Post("/:cluster_id/containers/:ct_id/disks/resize", s.containerHandler.ResizeDisk)
 			clusters.Post("/:cluster_id/containers/:ct_id/volumes/move", s.containerHandler.MoveVolume)
-		}
-		if s.vmHandler != nil {
-			clusters.Post("/:cluster_id/vms/:vm_id/disks/resize", s.vmHandler.ResizeDisk)
-			clusters.Post("/:cluster_id/vms/:vm_id/disks/move", s.vmHandler.MoveDisk)
-			clusters.Post("/:cluster_id/vms/:vm_id/disks/attach", s.vmHandler.AttachDisk)
-			clusters.Post("/:cluster_id/vms/:vm_id/disks/detach", s.vmHandler.DetachDisk)
-			clusters.Get("/:cluster_id/nodes/:node_name/bridges", s.vmHandler.ListBridges)
-			clusters.Get("/:cluster_id/nodes/:node_name/hardware/usb", s.vmHandler.ListNodeUSBDevices)
-			clusters.Get("/:cluster_id/nodes/:node_name/hardware/pci", s.vmHandler.ListNodePCIDevices)
-			clusters.Get("/:cluster_id/nodes/:node_name/machine-types", s.vmHandler.ListMachineTypes)
-			clusters.Get("/:cluster_id/nodes/:node_name/cpu-models", s.vmHandler.ListCPUModels)
-			clusters.Get("/:cluster_id/nodes/:node_name/cpu-flags", s.vmHandler.ListCPUFlags)
-			clusters.Get("/:cluster_id/nodes/:node_name/isos", s.vmHandler.ListNodeISOs)
-			clusters.Post("/:cluster_id/vms/:vm_id/media", s.vmHandler.ChangeMedia)
-			clusters.Put("/:cluster_id/vms/:vm_id/pool", s.vmHandler.SetVMPool)
-			clusters.Get("/:cluster_id/pools", s.vmHandler.ListResourcePools)
 		}
 		if s.vmFoldersHandler != nil {
 			clusters.Get("/:cluster_id/vm-folders", s.vmFoldersHandler.List)

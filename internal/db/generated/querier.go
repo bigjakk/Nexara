@@ -1241,6 +1241,13 @@ type Querier interface {
 	// publish an inventory_change event, so external edits (Proxmox UI, qm/pct)
 	// become visible to the frontend within one tick.
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error)
+	// DISCLOSURE, DELIBERATE FOR NOW: the vms table holds both guest kinds, so
+	// this returns container rows to a caller holding only view:vm, which is
+	// what GET /clusters/:cluster_id/vms is gated on. Not narrowed with
+	// `AND type = 'qemu'` because the inventory UI reads this one list and
+	// renders both kinds; splitting it is a bigger change than a WHERE clause.
+	// MUTATING a container through a /vms/ route is separate and IS gated —
+	// see requireGuestKindPerm in internal/api/handlers/vms.go.
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
 	ListVeeamBackupObjectsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamBackupObject, error)

@@ -163,18 +163,27 @@ func TestSnapshotBlockingVolumes(t *testing.T) {
 	}
 }
 
-func TestValidVMActions(t *testing.T) {
-	valid := []string{"start", "stop", "shutdown", "reboot", "reset", "suspend", "resume"}
-	for _, action := range valid {
-		if !validVMActions[action] {
-			t.Errorf("expected %q to be valid", action)
-		}
+// TestVMStatusActions pins the list POST .../vms/:vm_id/status accepts.
+// It is now the endpoint's declared enum as well as the set PerformAction
+// switches on, so an entry added here without a matching switch case
+// would dispatch nothing and track a task with no UPID.
+func TestVMStatusActions(t *testing.T) {
+	valid := map[string]bool{}
+	for _, action := range VMStatusActions {
+		valid[action] = true
 	}
 
-	invalid := []string{"delete", "migrate", "snapshot", ""}
-	for _, action := range invalid {
-		if validVMActions[action] {
-			t.Errorf("expected %q to be invalid", action)
+	for _, action := range []string{"start", "stop", "shutdown", "reboot", "reset", "suspend", "resume"} {
+		if !valid[action] {
+			t.Errorf("expected %q to be a valid status action", action)
 		}
+	}
+	for _, action := range []string{"delete", "migrate", "snapshot", ""} {
+		if valid[action] {
+			t.Errorf("expected %q not to be a valid status action", action)
+		}
+	}
+	if len(VMStatusActions) != 7 {
+		t.Errorf("VMStatusActions has %d entries, want 7 — add the switch case in PerformAction too", len(VMStatusActions))
 	}
 }

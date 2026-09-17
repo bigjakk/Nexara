@@ -131,8 +131,43 @@ var endpointMeta = map[string]APIEndpoint{
 	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback": {Description: "Rollback to snapshot", Permission: "execute:vm", Group: "Virtual Machines"},
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/config":                         {Description: "Get VM configuration", Permission: "view:vm", Group: "Virtual Machines"},
 	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/config":                         {Description: "Update VM configuration", Permission: "manage:vm", Group: "Virtual Machines"},
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize":                  {Description: "Resize VM disk", Permission: "manage:vm", Group: "Virtual Machines"},
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/move":                    {Description: "Move VM disk to another storage", Permission: "manage:vm", Group: "Virtual Machines"},
+	// Both of these serve either guest kind through a /vms/ path — Nexara
+	// keeps VMs and containers in one inventory table — so converting a
+	// CONTAINER through them needs container rights as well. The
+	// Permission field carries only the statically-required half; the
+	// conditional half is in the description, because an operator building
+	// a role needs to read it and the field has no vocabulary for "and, if
+	// it is a container, also".
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/convert-to-template": {Description: "Convert a stopped VM or container into a template. Irreversible in Proxmox. Converting a container additionally requires manage:container", Permission: "manage:vm", Group: "Virtual Machines"},
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template":   {Description: "Clone a guest and convert the clone into a template once it settles. Cloning a container additionally requires manage:container", Permission: "manage:vm", Group: "Virtual Machines"},
+	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/agent":                {Description: "Read the guest agent's reported OS and network interfaces. Answers running=false when no agent responds", Permission: "view:vm", Group: "Virtual Machines"},
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize":        {Description: `Grow a VM disk. Takes Proxmox's resize format: "64G" to grow to, "+8G" to grow by. Proxmox cannot shrink a disk`, Permission: "manage:vm", Group: "Virtual Machines"},
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/move":          {Description: "Move a VM disk onto another storage, optionally converting its format", Permission: "manage:vm", Group: "Virtual Machines"},
+	// The description this endpoint did NOT have is what an external
+	// consumer went without before destroying a VM's boot disk through it:
+	// they omitted index, got slot 0, and overwrote scsi0. Every rule the
+	// endpoint now enforces is stated here, and size's accepted spellings
+	// most of all — "500G" used to be a parse error on the Proxmox side and
+	// "512000" used to allocate 500 TiB.
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach": {Description: `Allocate a new disk and attach it. Omit index to take the lowest FREE slot on the bus; an explicitly named slot that is occupied, or that the VM boots from, is refused. size accepts 500, "500", "500G", "512M" or "1T" and may not exceed the target pool's total capacity`, Permission: "manage:vm", Group: "Virtual Machines"},
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/detach": {Description: "Detach a disk. Proxmox keeps the volume as an unused disk rather than deleting it", Permission: "manage:vm", Group: "Virtual Machines"},
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/media":        {Description: `Mount an ISO on the VM's CD-ROM device, or eject it with volid "none"`, Permission: "execute:vm", Group: "Virtual Machines"},
+	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/pool":          {Description: "Move a guest into a Proxmox resource pool, or out of its current one with an empty pool", Permission: "manage:pool", Group: "Virtual Machines"},
+	// Filed under Virtual Machines rather than a section of its own, and
+	// the endpoint's own Group in internal/api/registry_vms.go says the
+	// same: GetDocs renders the section from THIS map, so a declaration
+	// that disagreed would put the route in one section while documenting
+	// it as belonging to another, with nothing to catch the drift.
+	"GET /api/v1/clusters/:cluster_id/pools": {Description: "List the cluster's Proxmox resource pools", Permission: "view:cluster", Group: "Virtual Machines"},
+
+	// ── Node hardware, for the VM dialogs ─────────────────────────────
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/bridges":       {Description: "List a node's network bridges, for picking a VM's NIC", Permission: "view:node", Group: "Nodes"},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/usb":  {Description: "List a node's USB devices, for passthrough", Permission: "view:node", Group: "Nodes"},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/pci":  {Description: "List a node's PCI devices, for passthrough", Permission: "view:node", Group: "Nodes"},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/machine-types": {Description: "List the QEMU machine types a node offers", Permission: "view:node", Group: "Nodes"},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/cpu-models":    {Description: "List the CPU models a node offers. Empty on Proxmox versions without the endpoint", Permission: "view:node", Group: "Nodes"},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/cpu-flags":     {Description: "List the CPU flags a node offers, with which nodes support each", Permission: "view:node", Group: "Nodes"},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/isos":          {Description: "List every ISO on a node's ISO-capable storages", Permission: "view:node", Group: "Nodes"},
 
 	// ── Containers ────────────────────────────────────────────────────
 	"GET /api/v1/clusters/:cluster_id/containers":                                       {Description: "List all containers", Permission: "view:container", Group: "Containers"},

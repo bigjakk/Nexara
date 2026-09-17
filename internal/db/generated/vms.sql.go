@@ -365,6 +365,13 @@ const listVMsByCluster = `-- name: ListVMsByCluster :many
 SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype, lock_state FROM vms WHERE cluster_id = $1 ORDER BY vmid
 `
 
+// DISCLOSURE, DELIBERATE FOR NOW: the vms table holds both guest kinds, so
+// this returns container rows to a caller holding only view:vm, which is
+// what GET /clusters/:cluster_id/vms is gated on. Not narrowed with
+// `AND type = 'qemu'` because the inventory UI reads this one list and
+// renders both kinds; splitting it is a bigger change than a WHERE clause.
+// MUTATING a container through a /vms/ route is separate and IS gated —
+// see requireGuestKindPerm in internal/api/handlers/vms.go.
 func (q *Queries) ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error) {
 	rows, err := q.db.Query(ctx, listVMsByCluster, clusterID)
 	if err != nil {

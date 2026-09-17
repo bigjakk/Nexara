@@ -23,7 +23,12 @@ import (
 
 // Server is the API server that holds all dependencies.
 type Server struct {
-	app                    *fiber.App
+	app *fiber.App
+
+	// registry holds the declaratively registered endpoints setupRoutes
+	// mounted, bound to this Server's own handlers. See buildRegistry.
+	registry *Registry
+
 	config                 *config.Config
 	db                     *pgxpool.Pool
 	queries                *db.Queries

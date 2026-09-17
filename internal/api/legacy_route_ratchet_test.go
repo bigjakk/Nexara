@@ -85,9 +85,7 @@ var legacyRouteBaseline = map[string]bool{
 	"DELETE /api/v1/clusters/:cluster_id/storage/:storage_id/content/*":                    true,
 	"DELETE /api/v1/clusters/:cluster_id/vm-folders/:folder_id":                            true,
 	"DELETE /api/v1/clusters/:cluster_id/vm-import-sources/:storage":                       true,
-	"DELETE /api/v1/clusters/:cluster_id/vms/:vm_id":                                       true,
 	"DELETE /api/v1/clusters/:cluster_id/vms/:vm_id/firewall/rules/:pos":                   true,
-	"DELETE /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name":                  true,
 	"DELETE /api/v1/clusters/:id":                                                          true,
 	"DELETE /api/v1/favorites":                                                             true,
 	"DELETE /api/v1/firewall-templates/:id":                                                true,
@@ -213,9 +211,6 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_id/metrics":                              true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_id/network-interfaces":                   true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_id/pci-devices":                          true,
-	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/bridges":                            true,
-	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/cpu-flags":                          true,
-	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/cpu-models":                         true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/directory":                    true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/list":                         true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm":                          true,
@@ -225,11 +220,7 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/dns":                                true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/log":                       true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules":                     true,
-	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/pci":                       true,
-	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/usb":                       true,
-	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/isos":                               true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/journal":                            true,
-	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/machine-types":                      true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/report":                             true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/sensors":                            true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/services":                           true,
@@ -237,7 +228,6 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/time":                               true,
 	"GET /api/v1/clusters/:cluster_id/options":                                             true,
 	"GET /api/v1/clusters/:cluster_id/pbs-servers":                                         true,
-	"GET /api/v1/clusters/:cluster_id/pools":                                               true,
 	"GET /api/v1/clusters/:cluster_id/pools/:pool_id":                                      true,
 	"GET /api/v1/clusters/:cluster_id/query-url-metadata":                                  true,
 	"GET /api/v1/clusters/:cluster_id/replication":                                         true,
@@ -262,8 +252,6 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/storage/:storage_id/config":                          true,
 	"GET /api/v1/clusters/:cluster_id/storage/:storage_id/content":                         true,
 	"GET /api/v1/clusters/:cluster_id/tags":                                                true,
-	"GET /api/v1/clusters/:cluster_id/tasks/:upid":                                         true,
-	"GET /api/v1/clusters/:cluster_id/tasks/:upid/log":                                     true,
 	"GET /api/v1/clusters/:cluster_id/virtio-win/config":                                   true,
 	"GET /api/v1/clusters/:cluster_id/virtio-win/downloads":                                true,
 	"GET /api/v1/clusters/:cluster_id/vm-folders":                                          true,
@@ -271,14 +259,8 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/vm-import-sources/content":                           true,
 	"GET /api/v1/clusters/:cluster_id/vm-imports":                                          true,
 	"GET /api/v1/clusters/:cluster_id/vm-imports/:id":                                      true,
-	"GET /api/v1/clusters/:cluster_id/vms":                                                 true,
-	"GET /api/v1/clusters/:cluster_id/vms/:vm_id":                                          true,
-	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/agent":                                    true,
-	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/config":                                   true,
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/firewall/rules":                           true,
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics":                                  true,
-	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshot-capability":                      true,
-	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots":                                true,
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/veeam":                                    true,
 	"GET /api/v1/clusters/:id":                                                             true,
 	"GET /api/v1/favorites":                                                                true,
@@ -463,20 +445,7 @@ var legacyRouteBaseline = map[string]bool{
 	"POST /api/v1/clusters/:cluster_id/vm-import-sources/esxi":                             true,
 	"POST /api/v1/clusters/:cluster_id/vm-imports":                                         true,
 	"POST /api/v1/clusters/:cluster_id/vm-imports/:id/cancel":                              true,
-	"POST /api/v1/clusters/:cluster_id/vms":                                                true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone":                                   true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template":                       true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/convert-to-template":                     true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach":                            true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/detach":                            true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/move":                              true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize":                            true,
 	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/firewall/rules":                          true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/media":                                   true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/migrate":                                 true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots":                               true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback":           true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/status":                                  true,
 	"POST /api/v1/clusters/:id/verify-certificate":                                         true,
 	"POST /api/v1/clusters/fetch-fingerprint":                                              true,
 	"POST /api/v1/favorites":                                                               true,
@@ -564,10 +533,8 @@ var legacyRouteBaseline = map[string]bool{
 	"PUT /api/v1/clusters/:cluster_id/storage/:storage_id":                                 true,
 	"PUT /api/v1/clusters/:cluster_id/tags":                                                true,
 	"PUT /api/v1/clusters/:cluster_id/virtio-win/config":                                   true,
-	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/config":                                   true,
 	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/firewall/rules/:pos":                      true,
 	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/folder":                                   true,
-	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/pool":                                     true,
 	"PUT /api/v1/clusters/:id":                                                             true,
 	"PUT /api/v1/firewall-templates/:id":                                                   true,
 	"PUT /api/v1/ldap/configs/:id":                                                         true,
@@ -606,7 +573,7 @@ func legacyRouteRatchetViolations(actual []string, baseline map[string]bool) []s
 
 // TestGuard_LegacyRouteSetOnlyShrinks is the production guard.
 func TestGuard_LegacyRouteSetOnlyShrinks(t *testing.T) {
-	actual := legacyRouteKeys(t)
+	actual := legacyRouteKeys(t, newRouteStubServer(t))
 
 	for _, key := range legacyRouteRatchetViolations(actual, legacyRouteBaseline) {
 		t.Errorf("route %s is registered as legacy but is not in legacyRouteBaseline — "+
@@ -666,7 +633,7 @@ func TestDumpLegacyRouteKeys(t *testing.T) {
 	if os.Getenv("NEXARA_DUMP_LEGACY_ROUTES") == "" {
 		t.Skip("set NEXARA_DUMP_LEGACY_ROUTES=1 to print the current legacy route set")
 	}
-	for _, key := range legacyRouteKeys(t) {
+	for _, key := range legacyRouteKeys(t, newRouteStubServer(t)) {
 		fmt.Printf("\t%q: true,\n", key)
 	}
 }

@@ -1132,11 +1132,39 @@ type NetworkInterface struct {
 
 // DiskAttachParams holds parameters for attaching a new disk to a VM.
 type DiskAttachParams struct {
-	Bus     string `json:"bus"`     // "scsi", "sata", "virtio", "ide"
-	Index   int    `json:"index"`   // 0, 1, 2...
+	Bus   string `json:"bus"`   // "scsi", "sata", "virtio", "ide"
+	Index int    `json:"index"` // 0, 1, 2… — bounded per bus by MaxDiskIndex
+
 	Storage string `json:"storage"` // storage pool
-	Size    string `json:"size"`    // "20G"
-	Format  string `json:"format"`  // "raw", "qcow2" (optional)
+
+	// Size is a BARE GiB COUNT, e.g. "20" for 20 GiB. It goes into
+	// Proxmox's "storage:N" allocation form, where N is an integer number
+	// of gigabytes and nothing else: "20G" is a parse error on the PVE
+	// side, and a value meant as megabytes ("512000") silently allocates
+	// that many GIGAbytes. Normalize with apischema's "disk-size" format,
+	// which accepts 500/"500"/"500G"/"1T"/"512M" and returns exactly this
+	// form. This comment used to read `// "20G"`, and an external consumer
+	// followed it into a failed attach and then into a 500 TiB one.
+	Size string `json:"size"`
+
+	Format string `json:"format"` // "raw", "qcow2", "vmdk" (optional)
+
+	// Digest is the SHA-1 Proxmox returned with the configuration this
+	// attach was planned against, and it is REQUIRED.
+	//
+	// Choosing a disk slot means reading the config, deciding which slot
+	// is free, and then writing it back — three steps with two round trips
+	// in between. Two attaches that both omit an index read the same
+	// config, both see scsi1 free, and both write scsi1; the second write
+	// does not fail, it REPLACES the first one's line, and that guest's
+	// new volume is orphaned rather than attached. Passing the digest
+	// makes Proxmox refuse the second write, so the caller retries onto
+	// the next free slot instead of silently taking over.
+	//
+	// It is required rather than optional so that the read and the write
+	// cannot come apart: an optional CAS token is one the next caller
+	// forgets, which is the whole failure this field exists to prevent.
+	Digest string `json:"digest"`
 }
 
 // NodeUSBDevice represents a USB device from GET /nodes/{node}/hardware/usb.

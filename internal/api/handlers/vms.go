@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -82,27 +83,25 @@ func toVMResponse(v db.Vm) vmResponse {
 	}
 }
 
-// validVMActions is the set of allowed VM status actions.
-var validVMActions = map[string]bool{
-	"start":    true,
-	"stop":     true,
-	"shutdown": true,
-	"reboot":   true,
-	"reset":    true,
-	"suspend":  true,
-	"resume":   true,
-}
+// VMStatusActions is the set of power actions POST .../vms/:vm_id/status
+// accepts, in the order the API documentation lists them.
+//
+// It is exported so that the endpoint's declaration in
+// internal/api/registry_vms.go can use it as the parameter's enum: the
+// list that validates the request and the list the switch in
+// PerformAction covers are then the same list, and a new action cannot be
+// accepted by one and dropped by the other.
+var VMStatusActions = []string{"start", "stop", "shutdown", "reboot", "reset", "suspend", "resume"}
 
-type vmActionRequest struct {
-	Action string `json:"action"`
-}
-
-type vmCloneRequest struct {
-	NewID   int    `json:"new_id"`
-	Name    string `json:"name"`
-	Target  string `json:"target"`
-	Full    bool   `json:"full"`
-	Storage string `json:"storage"`
+// vmCloneParams reads the body shared by clone and clone-to-template.
+func vmCloneParams(p *apischema.Params) proxmox.CloneParams {
+	return proxmox.CloneParams{
+		NewID:   int(p.Int("new_id")),
+		Name:    p.String("name"),
+		Target:  p.String("target"),
+		Full:    p.Bool("full"),
+		Storage: p.String("storage"),
+	}
 }
 
 type vmActionResponse struct {
@@ -121,13 +120,22 @@ type taskStatusResponse struct {
 	Progress   *float64 `json:"progress,omitempty"`
 }
 
+// Every handler in this file is a registry endpoint: it is declared in
+// internal/api/registry_vms.go, which states its parameters and its
+// permission, and it receives the validated parameters instead of
+// re-parsing the request.
+//
+// Two things that used to be at the top of each of these functions are
+// deliberately absent. The require*Perm call now runs as route
+// middleware, attached from the declaration — a handler that forgets it
+// can no longer ship. And the body bind is gone: apischema has already
+// coerced, format-checked and default-filled every parameter, and
+// rejected any the endpoint does not declare.
+
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/vms.
-func (h *VMHandler) ListByCluster(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
 		return err
 	}
 
@@ -144,55 +152,55 @@ func (h *VMHandler) ListByCluster(c fiber.Ctx) error {
 	return RespondItems(c, resp)
 }
 
-// GetVM handles GET /api/v1/clusters/:cluster_id/vms/:vm_id.
-func (h *VMHandler) GetVM(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
+// guestInCluster loads a guest row and refuses one that belongs to a
+// different cluster than the path named.
+//
+// The permission gate authorizes the cluster in the PATH, and nothing
+// about a guest uuid says which cluster it belongs to — so a caller
+// holding a grant on cluster A can put A in the path and B's guest id in
+// it and, without this, be served B's row. resolveVM has always made this
+// check; the two handlers that look a guest up directly did not, which
+// was invisible while the permission check sat inline above them.
+func (h *VMHandler) guestInCluster(c fiber.Ctx, clusterID, vmID uuid.UUID) (db.Vm, error) {
 	vm, err := h.queries.GetVM(c.Context(), vmID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusNotFound, "VM not found")
+			return db.Vm{}, fiber.NewError(fiber.StatusNotFound, "VM not found")
 		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get VM")
+		return db.Vm{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to get VM")
+	}
+	if vm.ClusterID != clusterID {
+		// 404 rather than 403, matching resolveVM: whether a guest exists
+		// in a cluster the caller has no grant on is not theirs to learn.
+		return db.Vm{}, fiber.NewError(fiber.StatusNotFound, "VM not found in this cluster")
+	}
+	return vm, nil
+}
+
+// GetVM handles GET /api/v1/clusters/:cluster_id/vms/:vm_id.
+func (h *VMHandler) GetVM(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
+	if err != nil {
+		return err
+	}
+
+	vm, err := h.guestInCluster(c, clusterID, vmID)
+	if err != nil {
+		return err
 	}
 
 	return c.JSON(toVMResponse(vm))
 }
 
 // PerformAction handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/status.
-func (h *VMHandler) PerformAction(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) PerformAction(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "execute", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req vmActionRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if !validVMActions[req.Action] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid action; must be one of: start, stop, shutdown, reboot, reset, suspend, resume")
-	}
+	// The schema's enum is VMStatusActions, the same list the switch below
+	// covers, so an unknown action never reaches here.
+	action := p.String("action")
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {
@@ -200,7 +208,7 @@ func (h *VMHandler) PerformAction(c fiber.Ctx) error {
 	}
 
 	var upid string
-	switch req.Action {
+	switch action {
 	case "start":
 		upid, err = pxClient.StartVM(c.Context(), node.Name, int(vm.Vmid))
 	case "stop":
@@ -226,21 +234,48 @@ func (h *VMHandler) PerformAction(c fiber.Ctx) error {
 		ResourceType: "vm",
 		ResourceID:   vm.ID.String(),
 		ResourceName: vm.Name,
-		Action:       req.Action,
+		Action:       action,
 		UPID:         upid,
-		Description:  guestActionDesc(req.Action, vm),
+		Description:  guestActionDesc(action, vm),
 		Extra:        map[string]any{"vmid": vm.Vmid},
 	})
 
 	// Watch the task in the background and update the DB when it completes.
 	// The watcher publishes a vm_state_change event only after the DB is updated
 	// with the real status, avoiding premature refetches of stale data.
-	watchTaskAndUpdateStatus(h.queries, h.eventPub, pxClient, node.Name, upid, vm.ID, cluster.ID, req.Action, "vm")
+	watchTaskAndUpdateStatus(h.queries, h.eventPub, pxClient, node.Name, upid, vm.ID, cluster.ID, action, "vm")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
 		Status: "dispatched",
 	})
+}
+
+// requireGuestKindPerm re-checks the permission for what the guest
+// ACTUALLY is, on the two routes that serve both kinds through one path.
+//
+// POST .../vms/:vm_id/convert-to-template and .../clone-to-template both
+// branch on vm.Type and call the LXC client method for a container, so a
+// route documented and gated as manage:vm can irreversibly convert a
+// container — and manage:container is a separate permission row that a
+// cluster-scoped or custom role can withhold. The path spells "vms"
+// because Nexara's inventory keeps both kinds in one table, not because
+// the object is a VM.
+//
+// This is why both routes declare Permissions.Deferred: the resource
+// cannot be known until the guest row is loaded, and a gate that ran
+// before the lookup would have to guess. The static half (manage:vm) is
+// still checked first, in the handler, so the route is never reachable on
+// container rights alone.
+//
+// It is NOT expressed as Alternatives: "manage:vm OR manage:container"
+// would widen the route where it needs narrowing — the point is that a
+// container conversion demands container rights, not that either will do.
+func requireGuestKindPerm(c fiber.Ctx, action, guestType string, clusterID uuid.UUID) error {
+	if guestType != "lxc" {
+		return nil
+	}
+	return requireClusterPerm(c, action, "container", clusterID)
 }
 
 // guestActionDesc builds a concise task description for a guest (VM/CT) action,
@@ -253,41 +288,19 @@ func guestActionDesc(action string, vm db.Vm) string {
 }
 
 // CloneVM handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone.
-func (h *VMHandler) CloneVM(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) CloneVM(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req vmCloneRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.NewID <= 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "new_id is required and must be positive")
-	}
+	clone := vmCloneParams(p)
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {
 		return err
 	}
 
-	upid, err := pxClient.CloneVM(c.Context(), node.Name, int(vm.Vmid), proxmox.CloneParams{
-		NewID:   req.NewID,
-		Name:    req.Name,
-		Target:  req.Target,
-		Full:    req.Full,
-		Storage: req.Storage,
-	})
+	upid, err := pxClient.CloneVM(c.Context(), node.Name, int(vm.Vmid), clone)
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -301,7 +314,7 @@ func (h *VMHandler) CloneVM(c fiber.Ctx) error {
 		Action:       "clone",
 		UPID:         upid,
 		Description:  guestActionDesc("clone", vm),
-		Extra:        map[string]any{"vmid": vm.Vmid, "new_id": req.NewID},
+		Extra:        map[string]any{"vmid": vm.Vmid, "new_id": clone.NewID},
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "clone")
 
@@ -313,8 +326,8 @@ func (h *VMHandler) CloneVM(c fiber.Ctx) error {
 
 // ConvertToTemplate handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/convert-to-template.
 // This converts a stopped VM to a template. The operation is irreversible in Proxmox.
-func (h *VMHandler) ConvertToTemplate(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ConvertToTemplate(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
@@ -322,13 +335,11 @@ func (h *VMHandler) ConvertToTemplate(c fiber.Ctx) error {
 		return err
 	}
 
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {
+		return err
+	}
+	if err := requireGuestKindPerm(c, "manage", vm.Type, clusterID); err != nil {
 		return err
 	}
 
@@ -371,52 +382,30 @@ func (h *VMHandler) ConvertToTemplate(c fiber.Ctx) error {
 
 // CloneToTemplate handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template.
 // This clones a VM/CT and then automatically converts the clone to a template.
-func (h *VMHandler) CloneToTemplate(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) CloneToTemplate(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
 	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
 		return err
 	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req vmCloneRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.NewID <= 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "new_id is required and must be positive")
-	}
+	clone := vmCloneParams(p)
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {
+		return err
+	}
+	if err := requireGuestKindPerm(c, "manage", vm.Type, clusterID); err != nil {
 		return err
 	}
 
 	// Step 1: Clone the VM/CT
 	var cloneUpid string
 	if vm.Type == "lxc" {
-		cloneUpid, err = pxClient.CloneCT(c.Context(), node.Name, int(vm.Vmid), proxmox.CloneParams{
-			NewID:   req.NewID,
-			Name:    req.Name,
-			Target:  req.Target,
-			Full:    req.Full,
-			Storage: req.Storage,
-		})
+		cloneUpid, err = pxClient.CloneCT(c.Context(), node.Name, int(vm.Vmid), clone)
 	} else {
-		cloneUpid, err = pxClient.CloneVM(c.Context(), node.Name, int(vm.Vmid), proxmox.CloneParams{
-			NewID:   req.NewID,
-			Name:    req.Name,
-			Target:  req.Target,
-			Full:    req.Full,
-			Storage: req.Storage,
-		})
+		cloneUpid, err = pxClient.CloneVM(c.Context(), node.Name, int(vm.Vmid), clone)
 	}
 	if err != nil {
 		return mapProxmoxError(err)
@@ -431,16 +420,16 @@ func (h *VMHandler) CloneToTemplate(c fiber.Ctx) error {
 		Action:       "clone-to-template",
 		UPID:         cloneUpid,
 		Description:  guestActionDesc("clone-to-template", vm),
-		Extra:        map[string]any{"vmid": vm.Vmid, "new_id": req.NewID, "clone_to_template": true},
+		Extra:        map[string]any{"vmid": vm.Vmid, "new_id": clone.NewID, "clone_to_template": true},
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "clone-to-template")
 
 	// Step 2: Background goroutine polls clone task then converts clone to template
 	targetNode := node.Name
-	if req.Target != "" {
-		targetNode = req.Target
+	if clone.Target != "" {
+		targetNode = clone.Target
 	}
-	go h.convertCloneToTemplate(pxClient, targetNode, req.NewID, vm.Type, cluster.ID.String()) //nolint:gosec // G118: intentionally detached — clone→template conversion must outlive the request (Fiber recycles the request context)
+	go h.convertCloneToTemplate(pxClient, targetNode, clone.NewID, vm.Type, cluster.ID.String()) //nolint:gosec // G118: intentionally detached — clone→template conversion must outlive the request (Fiber recycles the request context)
 
 	return c.JSON(vmActionResponse{
 		UPID:   cloneUpid,
@@ -521,18 +510,10 @@ func (h *VMHandler) convertCloneToTemplate(pxClient *proxmox.Client, node string
 }
 
 // DestroyVM handles DELETE /api/v1/clusters/:cluster_id/vms/:vm_id.
-func (h *VMHandler) DestroyVM(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) DestroyVM(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "delete", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
 	}
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
@@ -564,32 +545,36 @@ func (h *VMHandler) DestroyVM(c fiber.Ctx) error {
 	})
 }
 
-// GetTaskStatus handles GET /api/v1/clusters/:cluster_id/tasks/:upid.
-func (h *VMHandler) GetTaskStatus(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "task", clusterID); err != nil {
-		return err
-	}
-
-	rawUPID := c.Params("upid")
-	if rawUPID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "UPID is required")
-	}
-	// Fiber (fasthttp) doesn't auto-decode route params; the frontend
-	// URL-encodes the UPID so colons arrive as %3A, etc.
-	upid, err := url.PathUnescape(rawUPID)
-	if err != nil {
-		upid = rawUPID // fall back to raw value
+// taskUPID reads the :upid path parameter and the node it names.
+//
+// The schema deliberately puts no pattern on it: the frontend
+// percent-encodes the UPID's colons, Fiber does not decode path
+// parameters, and the only check worth making is that a node name falls
+// out of the decoded form — which is what this does.
+func taskUPID(p *apischema.Params) (upid, node string, err error) {
+	raw := p.String("upid")
+	upid, unescapeErr := url.PathUnescape(raw)
+	if unescapeErr != nil {
+		upid = raw // fall back to raw value
 	}
 
-	// We need a node name to query task status. Extract it from the UPID.
 	// UPID format: UPID:<node>:<pid_hex>:<pstart_hex>:<starttime_hex>:<type>:<id>:<user>@<realm>:
-	nodeName := extractNodeFromUPID(upid)
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Could not extract node from UPID")
+	node = extractNodeFromUPID(upid)
+	if node == "" {
+		return "", "", fiber.NewError(fiber.StatusBadRequest, "Could not extract node from UPID")
+	}
+	return upid, node, nil
+}
+
+// GetTaskStatus handles GET /api/v1/clusters/:cluster_id/tasks/:upid.
+func (h *VMHandler) GetTaskStatus(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+	upid, nodeName, err := taskUPID(p)
+	if err != nil {
+		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -652,27 +637,14 @@ func (h *VMHandler) GetTaskStatus(c fiber.Ctx) error {
 }
 
 // GetTaskLog returns the log lines for a Proxmox task.
-func (h *VMHandler) GetTaskLog(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) GetTaskLog(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "task", clusterID); err != nil {
-		return err
-	}
-
-	rawUPID := c.Params("upid")
-	if rawUPID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "UPID is required")
-	}
-	upid, err := url.PathUnescape(rawUPID)
+	upid, nodeName, err := taskUPID(p)
 	if err != nil {
-		upid = rawUPID
-	}
-
-	nodeName := extractNodeFromUPID(upid)
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Could not extract node from UPID")
+		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -697,41 +669,11 @@ func (h *VMHandler) GetTaskLog(c fiber.Ctx) error {
 	return RespondItems(c, result)
 }
 
-type diskResizeRequest struct {
-	Disk string `json:"disk"`
-	Size string `json:"size"`
-}
-
-type diskMoveRequest struct {
-	Disk    string `json:"disk"`
-	Storage string `json:"storage"`
-	Format  string `json:"format"`
-	Delete  bool   `json:"delete"`
-	BWLimit int    `json:"bwlimit_kib"`
-}
-
 // ResizeDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize.
-func (h *VMHandler) ResizeDisk(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ResizeDisk(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req diskResizeRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Disk == "" || req.Size == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "disk and size are required")
 	}
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
@@ -740,8 +682,8 @@ func (h *VMHandler) ResizeDisk(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.ResizeDisk(c.Context(), node.Name, int(vm.Vmid), proxmox.DiskResizeParams{
-		Disk: req.Disk,
-		Size: req.Size,
+		Disk: p.String("disk"),
+		Size: p.String("size"),
 	}); err != nil {
 		return mapProxmoxError(err)
 	}
@@ -763,32 +705,22 @@ func withVMID(extra map[string]any, vmid int32) map[string]any {
 }
 
 // MoveDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/move.
-func (h *VMHandler) MoveDisk(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) MoveDisk(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req diskMoveRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
 	spec := proxmox.DiskMoveSpec{
-		Disk:          req.Disk,
-		TargetStorage: req.Storage,
-		Format:        req.Format,
-		DeleteSource:  req.Delete,
-		BWLimitKiB:    req.BWLimit,
+		Disk:          p.String("disk"),
+		TargetStorage: p.String("storage"),
+		Format:        p.String("format"),
+		DeleteSource:  p.Bool("delete"),
+		BWLimitKiB:    int(p.Int("bwlimit_kib")),
 	}
+	// Still validated here, not only in the schema: the format vocabulary
+	// lives in proxmox.ValidImageFormat, and this is the choke point every
+	// caller of MoveDisk goes through.
 	if err := spec.Validate(); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
@@ -826,45 +758,29 @@ func (h *VMHandler) MoveDisk(c fiber.Ctx) error {
 
 // --- Disk Attach/Detach ---
 
-type diskAttachRequest struct {
-	Bus     string `json:"bus"`
-	Index   int    `json:"index"`
-	Storage string `json:"storage"`
-	Size    string `json:"size"`
-	Format  string `json:"format"`
-}
-
-type diskDetachRequest struct {
-	Disk string `json:"disk"`
-}
-
 // AttachDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach.
-func (h *VMHandler) AttachDisk(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+//
+// The decisions live in planDiskAttach (vm_disk_attach.go), which is
+// where the reasoning for each of them is written down; this function is
+// the wiring. Note what it does NOT do: it never reads an index without
+// also asking whether the caller supplied one. That single distinction is
+// what separates "attach a disk" from "silently replace the boot disk",
+// and it is only expressible because the schema declares index as
+// Optional with no default.
+//
+// It records an AuditLog rather than a TrackTask, and that is correct:
+// AttachDisk writes the VM's config with a synchronous PUT and Proxmox
+// returns no UPID, so there is no task to track. See the TrackTask rule
+// in internal/api/CLAUDE.md, enforced by tracktask_guard_test.go.
+func (h *VMHandler) AttachDisk(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
-		return err
-	}
 
-	vmID, err := uuid.Parse(c.Params("vm_id"))
+	req, err := diskAttachRequestFrom(p)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req diskAttachRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Bus == "" || req.Storage == "" || req.Size == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "bus, storage, and size are required")
-	}
-
-	validBus := map[string]bool{"scsi": true, "sata": true, "virtio": true, "ide": true}
-	if !validBus[req.Bus] {
-		return fiber.NewError(fiber.StatusBadRequest, "bus must be one of: scsi, sata, virtio, ide")
+		return err
 	}
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
@@ -872,47 +788,43 @@ func (h *VMHandler) AttachDisk(c fiber.Ctx) error {
 		return err
 	}
 
-	if err := pxClient.AttachDisk(c.Context(), node.Name, int(vm.Vmid), proxmox.DiskAttachParams{
-		Bus:     req.Bus,
-		Index:   req.Index,
-		Storage: req.Storage,
-		Size:    req.Size,
-		Format:  req.Format,
-	}); err != nil {
+	attach, err := planDiskAttach(c.Context(), pxClient, node.Name, int(vm.Vmid), req)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.AttachDisk(c.Context(), node.Name, int(vm.Vmid), attach); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), "disk_attach", nil)
+	// The slot, the storage and the size are recorded because the incident
+	// that motivated this endpoint's rewrite left no record of WHICH slot
+	// had been written — only that a disk_attach had happened. None of
+	// these is a secret (view:audit is granted to every Viewer by default;
+	// see the note on Params.Raw), and all three are what the next reader
+	// needs.
+	attachDetails, _ := json.Marshal(map[string]any{
+		"disk":      attach.DiskKey(),
+		"storage":   attach.Storage,
+		"size_gib":  req.SizeGiB,
+		"slot_auto": !req.HasIndex,
+		"vmid":      vm.Vmid,
+	})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), "disk_attach", attachDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_attach")
 
-	return c.JSON(vmActionResponse{
-		UPID:   "",
-		Status: "completed",
+	return c.JSON(fiber.Map{
+		"upid":   "",
+		"status": "completed",
+		"disk":   attach.DiskKey(),
 	})
 }
 
 // DetachDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/detach.
-func (h *VMHandler) DetachDisk(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) DetachDisk(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req diskDetachRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Disk == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "disk is required")
 	}
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
@@ -920,7 +832,7 @@ func (h *VMHandler) DetachDisk(c fiber.Ctx) error {
 		return err
 	}
 
-	if err := pxClient.DetachDisk(c.Context(), node.Name, int(vm.Vmid), req.Disk); err != nil {
+	if err := pxClient.DetachDisk(c.Context(), node.Name, int(vm.Vmid), p.String("disk")); err != nil {
 		return mapProxmoxError(err)
 	}
 
@@ -1077,12 +989,6 @@ func parseSizeToBytes(s string) float64 {
 
 // --- Snapshot handlers ---
 
-type snapshotRequest struct {
-	SnapName    string `json:"snap_name"`
-	Description string `json:"description"`
-	VMState     bool   `json:"vmstate"`
-}
-
 type snapshotResponse struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -1176,18 +1082,10 @@ func storageTypesByName(c fiber.Ctx, queries *db.Queries, clusterID uuid.UUID) m
 }
 
 // GetSnapshotCapability handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshot-capability.
-func (h *VMHandler) GetSnapshotCapability(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) GetSnapshotCapability(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
 	}
 
 	vm, node, _, pxClient, err := h.resolveVM(c, clusterID, vmID)
@@ -1210,18 +1108,10 @@ func (h *VMHandler) GetSnapshotCapability(c fiber.Ctx) error {
 }
 
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
-func (h *VMHandler) ListSnapshots(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ListSnapshots(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
 	}
 
 	vm, node, _, pxClient, err := h.resolveVM(c, clusterID, vmID)
@@ -1252,25 +1142,18 @@ func (h *VMHandler) ListSnapshots(c fiber.Ctx) error {
 }
 
 // CreateSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
-func (h *VMHandler) CreateSnapshot(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) CreateSnapshot(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "execute", "vm", clusterID); err != nil {
-		return err
-	}
 
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req snapshotRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if err := validateSnapshotName(req.SnapName); err != nil {
+	// The schema's "pve-configid" format covers the shape; this covers the
+	// one rule that is not a shape — Proxmox reserves the name "current"
+	// for the live state, and a snapshot called that can never be rolled
+	// back to.
+	snapName := p.String("snap_name")
+	if err := validateSnapshotName(snapName); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
@@ -1280,9 +1163,9 @@ func (h *VMHandler) CreateSnapshot(c fiber.Ctx) error {
 	}
 
 	upid, err := pxClient.CreateVMSnapshot(c.Context(), node.Name, int(vm.Vmid), proxmox.SnapshotParams{
-		SnapName:    req.SnapName,
-		Description: req.Description,
-		VMState:     req.VMState,
+		SnapName:    snapName,
+		Description: p.String("description"),
+		VMState:     p.Bool("vmstate"),
 	})
 	if err != nil {
 		return mapProxmoxError(err)
@@ -1297,7 +1180,7 @@ func (h *VMHandler) CreateSnapshot(c fiber.Ctx) error {
 		Action:       "snapshot_create",
 		UPID:         upid,
 		Description:  guestActionDesc("snapshot_create", vm),
-		Extra:        map[string]any{"vmid": vm.Vmid, "snap_name": req.SnapName},
+		Extra:        map[string]any{"vmid": vm.Vmid, "snap_name": snapName},
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "snapshot_create")
 
@@ -1308,24 +1191,12 @@ func (h *VMHandler) CreateSnapshot(c fiber.Ctx) error {
 }
 
 // DeleteSnapshot handles DELETE /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name.
-func (h *VMHandler) DeleteSnapshot(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) DeleteSnapshot(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "delete", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	snapName := c.Params("snap_name")
-	if snapName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Snapshot name is required")
-	}
+	snapName := p.String("snap_name")
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {
@@ -1357,24 +1228,12 @@ func (h *VMHandler) DeleteSnapshot(c fiber.Ctx) error {
 }
 
 // RollbackSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback.
-func (h *VMHandler) RollbackSnapshot(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) RollbackSnapshot(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "execute", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	snapName := c.Params("snap_name")
-	if snapName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Snapshot name is required")
-	}
+	snapName := p.String("snap_name")
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {
@@ -1407,132 +1266,75 @@ func (h *VMHandler) RollbackSnapshot(c fiber.Ctx) error {
 
 // --- Create VM handler ---
 
-type createVMRequest struct {
-	VMID    int    `json:"vmid"`
-	Name    string `json:"name"`
-	Node    string `json:"node"`
-	Memory  int    `json:"memory"`
-	Cores   int    `json:"cores"`
-	Sockets int    `json:"sockets"`
-	SCSI0   string `json:"scsi0"`
-	IDE2    string `json:"ide2"`
-	Net0    string `json:"net0"`
-	OSType  string `json:"ostype"`
-	Boot    string `json:"boot"`
-	CDRom   string `json:"cdrom"`
-	Start   bool   `json:"start"`
-
-	// System
-	BIOS      string `json:"bios,omitempty"`
-	Machine   string `json:"machine,omitempty"`
-	ScsiHW    string `json:"scsihw,omitempty"`
-	EFIDisk0  string `json:"efidisk0,omitempty"`
-	TPMState0 string `json:"tpmstate0,omitempty"`
-	Agent     string `json:"agent,omitempty"`
-
-	// CPU
-	CPUType string `json:"cpu,omitempty"`
-	Numa    *bool  `json:"numa,omitempty"`
-
-	// Memory
-	Balloon *int `json:"balloon,omitempty"`
-
-	// Display
-	VGA string `json:"vga,omitempty"`
-
-	// Boot / Options
-	OnBoot  *bool  `json:"onboot,omitempty"`
-	Hotplug string `json:"hotplug,omitempty"`
-	Tablet  *bool  `json:"tablet,omitempty"`
-
-	// Cloud-Init
-	CIUser       string `json:"ciuser,omitempty"`
-	CIPassword   string `json:"cipassword,omitempty"`
-	SSHKeys      string `json:"sshkeys,omitempty"`
-	IPConfig0    string `json:"ipconfig0,omitempty"`
-	Nameserver   string `json:"nameserver,omitempty"`
-	Searchdomain string `json:"searchdomain,omitempty"`
-
-	// Meta
-	Description string `json:"description,omitempty"`
-	Tags        string `json:"tags,omitempty"`
-	Pool        string `json:"pool,omitempty"`
-
-	// Extra allows arbitrary additional Proxmox config fields (e.g. scsi1, ide0, sata0).
-	Extra map[string]string `json:"extra,omitempty"`
-}
-
 // CreateVM handles POST /api/v1/clusters/:cluster_id/vms.
-func (h *VMHandler) CreateVM(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) CreateVM(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+
+	// extra carries whatever Proxmox config keys the schema does not name
+	// — further disks, CD-ROM slots — as a flat object.
+	extra, err := stringMap("extra", p.Object("extra"))
+	if err != nil {
 		return err
 	}
 
-	var req createVMRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.VMID <= 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "vmid is required and must be positive")
-	}
-	if req.Node == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node is required")
-	}
+	vmid := int(p.Int("vmid"))
+	node := p.String("node")
+	name := p.String("name")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 
-	upid, err := pxClient.CreateVM(c.Context(), req.Node, proxmox.CreateVMParams{
-		VMID:    req.VMID,
-		Name:    req.Name,
-		Memory:  req.Memory,
-		Cores:   req.Cores,
-		Sockets: req.Sockets,
-		SCSI0:   req.SCSI0,
-		IDE2:    req.IDE2,
-		Net0:    req.Net0,
-		OSType:  req.OSType,
-		Boot:    req.Boot,
-		CDRom:   req.CDRom,
-		Start:   req.Start,
+	upid, err := pxClient.CreateVM(c.Context(), node, proxmox.CreateVMParams{
+		VMID:    vmid,
+		Name:    name,
+		Memory:  int(p.Int("memory")),
+		Cores:   int(p.Int("cores")),
+		Sockets: int(p.Int("sockets")),
+		SCSI0:   p.String("scsi0"),
+		IDE2:    p.String("ide2"),
+		Net0:    p.String("net0"),
+		OSType:  p.String("ostype"),
+		Boot:    p.String("boot"),
+		CDRom:   p.String("cdrom"),
+		Start:   p.Bool("start"),
 		// System
-		BIOS:      req.BIOS,
-		Machine:   req.Machine,
-		ScsiHW:    req.ScsiHW,
-		EFIDisk0:  req.EFIDisk0,
-		TPMState0: req.TPMState0,
-		Agent:     req.Agent,
-		// CPU
-		CPUType: req.CPUType,
-		Numa:    req.Numa,
+		BIOS:      p.String("bios"),
+		Machine:   p.String("machine"),
+		ScsiHW:    p.String("scsihw"),
+		EFIDisk0:  p.String("efidisk0"),
+		TPMState0: p.String("tpmstate0"),
+		Agent:     p.String("agent"),
+		// CPU. Numa, OnBoot and Tablet are *bool because "the caller did
+		// not mention it" and "the caller said false" are different
+		// instructions to Proxmox, and optBoolPtr keeps them apart.
+		CPUType: p.String("cpu"),
+		Numa:    optBoolPtr(p.OptBool("numa")),
 		// Memory
-		Balloon: req.Balloon,
+		Balloon: optIntPtr(p.OptInt("balloon")),
 		// Display
-		VGA: req.VGA,
+		VGA: p.String("vga"),
 		// Boot / Options
-		OnBoot:  req.OnBoot,
-		Hotplug: req.Hotplug,
-		Tablet:  req.Tablet,
+		OnBoot:  optBoolPtr(p.OptBool("onboot")),
+		Hotplug: p.String("hotplug"),
+		Tablet:  optBoolPtr(p.OptBool("tablet")),
 		// Cloud-Init
-		CIUser:       req.CIUser,
-		CIPassword:   req.CIPassword,
-		SSHKeys:      req.SSHKeys,
-		IPConfig0:    req.IPConfig0,
-		Nameserver:   req.Nameserver,
-		Searchdomain: req.Searchdomain,
+		CIUser:       p.String("ciuser"),
+		CIPassword:   p.String("cipassword"),
+		SSHKeys:      p.String("sshkeys"),
+		IPConfig0:    p.String("ipconfig0"),
+		Nameserver:   p.String("nameserver"),
+		Searchdomain: p.String("searchdomain"),
 		// Meta
-		Description: req.Description,
-		Tags:        req.Tags,
-		Pool:        req.Pool,
+		Description: p.String("description"),
+		Tags:        p.String("tags"),
+		Pool:        p.String("pool"),
 		// Extra (additional disks, CD-ROMs, etc.)
-		Extra: req.Extra,
+		Extra: extra,
 	})
 	if err != nil {
 		return mapProxmoxError(err)
@@ -1540,16 +1342,16 @@ func (h *VMHandler) CreateVM(c fiber.Ctx) error {
 
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
-		Node:         req.Node,
+		Node:         node,
 		ResourceType: "vm",
-		ResourceID:   strconv.Itoa(req.VMID),
-		ResourceName: req.Name,
+		ResourceID:   strconv.Itoa(vmid),
+		ResourceName: name,
 		Action:       "create",
 		UPID:         upid,
-		Description:  "create VM " + strconv.Itoa(req.VMID),
-		Extra:        map[string]any{"vmid": req.VMID},
+		Description:  "create VM " + strconv.Itoa(vmid),
+		Extra:        map[string]any{"vmid": vmid},
 	})
-	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "vm", strconv.Itoa(req.VMID), "create")
+	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "vm", strconv.Itoa(vmid), "create")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -1560,18 +1362,10 @@ func (h *VMHandler) CreateVM(c fiber.Ctx) error {
 // --- VM Config handlers (Cloud-Init) ---
 
 // GetVMConfig handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/config.
-func (h *VMHandler) GetVMConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) GetVMConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
 	}
 
 	vm, node, _, pxClient, err := h.resolveVM(c, clusterID, vmID)
@@ -1587,30 +1381,22 @@ func (h *VMHandler) GetVMConfig(c fiber.Ctx) error {
 	return c.JSON(config)
 }
 
-type setVMConfigRequest struct {
-	Fields map[string]string `json:"fields"`
-}
-
 // SetVMConfig handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/config.
-func (h *VMHandler) SetVMConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) SetVMConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+
+	fields, err := stringMap("fields", p.Object("fields"))
+	if err != nil {
 		return err
 	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req setVMConfigRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if len(req.Fields) == 0 {
+	// The schema requires the parameter; it cannot require the object to
+	// hold anything, and a config write with nothing in it would be a
+	// no-op Proxmox round trip that still writes an audit row claiming a
+	// change.
+	if len(fields) == 0 {
 		return fiber.NewError(fiber.StatusBadRequest, "fields map is required")
 	}
 
@@ -1619,11 +1405,11 @@ func (h *VMHandler) SetVMConfig(c fiber.Ctx) error {
 		return err
 	}
 
-	if err := pxClient.SetVMConfig(c.Context(), node.Name, int(vm.Vmid), req.Fields); err != nil {
+	if err := pxClient.SetVMConfig(c.Context(), node.Name, int(vm.Vmid), fields); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	configDetails, _ := json.Marshal(map[string]interface{}{"fields": req.Fields})
+	configDetails, _ := json.Marshal(map[string]interface{}{"fields": fields})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), "config_update", configDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "config_update")
 
@@ -1638,19 +1424,12 @@ type machineTypeResponse struct {
 }
 
 // ListMachineTypes handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/machine-types.
-func (h *VMHandler) ListMachineTypes(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ListMachineTypes(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-
-	nodeName := c.Params("node_name")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
-	}
+	nodeName := p.String("node_name")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1682,19 +1461,12 @@ type cpuModelResponse struct {
 }
 
 // ListCPUModels handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/cpu-models.
-func (h *VMHandler) ListCPUModels(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ListCPUModels(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-
-	nodeName := c.Params("node_name")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
-	}
+	nodeName := p.String("node_name")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1738,19 +1510,12 @@ type cpuFlagResponse struct {
 }
 
 // ListCPUFlags handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/cpu-flags.
-func (h *VMHandler) ListCPUFlags(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ListCPUFlags(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-
-	nodeName := c.Params("node_name")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
-	}
+	nodeName := p.String("node_name")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1789,12 +1554,9 @@ type resourcePoolResponse struct {
 }
 
 // ListResourcePools handles GET /api/v1/clusters/:cluster_id/pools.
-func (h *VMHandler) ListResourcePools(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ListResourcePools(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 
@@ -1829,19 +1591,12 @@ type networkBridgeResponse struct {
 }
 
 // ListBridges handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/bridges.
-func (h *VMHandler) ListBridges(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ListBridges(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-
-	nodeName := c.Params("node_name")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
-	}
+	nodeName := p.String("node_name")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1877,18 +1632,10 @@ type guestAgentResponse struct {
 }
 
 // GetGuestAgentInfo handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/agent.
-func (h *VMHandler) GetGuestAgentInfo(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) GetGuestAgentInfo(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
 	}
 
 	vm, node, _, pxClient, err := h.resolveVM(c, clusterID, vmID)
@@ -1928,19 +1675,12 @@ type isoResponse struct {
 }
 
 // ListNodeISOs aggregates ISO images from all ISO-capable storage pools on a node.
-func (h *VMHandler) ListNodeISOs(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ListNodeISOs(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-
-	nodeName := c.Params("node_name")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
-	}
+	nodeName := p.String("node_name")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1983,10 +1723,6 @@ func (h *VMHandler) ListNodeISOs(c fiber.Ctx) error {
 	return RespondItems(c, isos)
 }
 
-type changeMediaRequest struct {
-	Volid string `json:"volid"` // "local:iso/file.iso" or "none" to eject
-}
-
 // ChangeMedia mounts or ejects a CD-ROM ISO on a VM.
 // It detects the existing CD-ROM device from the VM config and writes the
 // change synchronously, so the "ok" it answers with means the media really
@@ -1994,27 +1730,12 @@ type changeMediaRequest struct {
 // than as a 200 followed by a task nobody opened. A running guest sees the
 // change without a reboot either way: hotplug is a property of the config
 // update, not of the verb that asked for it.
-func (h *VMHandler) ChangeMedia(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ChangeMedia(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "execute", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req changeMediaRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Volid == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "volid is required")
-	}
+	volid := p.String("volid")
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {
@@ -2040,7 +1761,7 @@ func (h *VMHandler) ChangeMedia(c fiber.Ctx) error {
 	}
 
 	// If no existing CD-ROM device and ejecting, nothing to do.
-	if cdromKey == "" && req.Volid == "none" {
+	if cdromKey == "" && volid == "none" {
 		return c.JSON(fiber.Map{"status": "ok"})
 	}
 
@@ -2050,10 +1771,10 @@ func (h *VMHandler) ChangeMedia(c fiber.Ctx) error {
 	}
 
 	var value string
-	if req.Volid == "none" {
+	if volid == "none" {
 		value = "none,media=cdrom"
 	} else {
-		value = req.Volid + ",media=cdrom"
+		value = volid + ",media=cdrom"
 	}
 
 	// Synchronous: a media change is a config edit, not a long-running job, so
@@ -2067,12 +1788,12 @@ func (h *VMHandler) ChangeMedia(c fiber.Ctx) error {
 
 	// Audit log.
 	action := "media_mount"
-	if req.Volid == "none" {
+	if volid == "none" {
 		action = "media_eject"
 	}
 	mediaDetails, _ := json.Marshal(map[string]interface{}{
 		"device": cdromKey,
-		"volid":  req.Volid,
+		"volid":  volid,
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), action, mediaDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), action)
@@ -2080,33 +1801,13 @@ func (h *VMHandler) ChangeMedia(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok", "device": cdromKey})
 }
 
-type vmMigrateRequest struct {
-	Target string `json:"target"`
-	Online bool   `json:"online"`
-}
-
 // MigrateVM handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/migrate.
-func (h *VMHandler) MigrateVM(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) MigrateVM(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "execute", "vm", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var req vmMigrateRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Target == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "target node is required")
-	}
+	target := p.String("target")
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {
@@ -2114,8 +1815,8 @@ func (h *VMHandler) MigrateVM(c fiber.Ctx) error {
 	}
 
 	upid, err := pxClient.MigrateVM(c.Context(), node.Name, int(vm.Vmid), proxmox.MigrateParams{
-		Target: req.Target,
-		Online: req.Online,
+		Target: target,
+		Online: p.Bool("online"),
 	})
 	if err != nil {
 		return mapProxmoxError(err)
@@ -2130,8 +1831,8 @@ func (h *VMHandler) MigrateVM(c fiber.Ctx) error {
 		Action:       "migrate",
 		UPID:         upid,
 		TaskType:     "qmigrate",
-		Description:  "Migrate VM " + strconv.Itoa(int(vm.Vmid)) + " → " + req.Target,
-		Extra:        map[string]any{"vmid": vm.Vmid, "target": req.Target},
+		Description:  "Migrate VM " + strconv.Itoa(int(vm.Vmid)) + " → " + target,
+		Extra:        map[string]any{"vmid": vm.Vmid, "target": target},
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindMigrationUpdate, "vm", vm.ID.String(), "migrate")
 
@@ -2142,19 +1843,12 @@ func (h *VMHandler) MigrateVM(c fiber.Ctx) error {
 }
 
 // ListNodeUSBDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/usb.
-func (h *VMHandler) ListNodeUSBDevices(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ListNodeUSBDevices(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-
-	nodeName := c.Params("node_name")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
-	}
+	nodeName := p.String("node_name")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -2170,19 +1864,12 @@ func (h *VMHandler) ListNodeUSBDevices(c fiber.Ctx) error {
 }
 
 // ListNodePCIDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/pci.
-func (h *VMHandler) ListNodePCIDevices(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) ListNodePCIDevices(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-
-	nodeName := c.Params("node_name")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
-	}
+	nodeName := p.String("node_name")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -2199,33 +1886,23 @@ func (h *VMHandler) ListNodePCIDevices(c fiber.Ctx) error {
 
 // SetVMPool handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/pool.
 // Moves a VM/CT into a pool (or removes from current pool if pool is empty).
-func (h *VMHandler) SetVMPool(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMHandler) SetVMPool(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "pool", clusterID); err != nil {
+	// An EMPTY pool is the meaningful value here — it removes the guest
+	// from whatever pool it is in — so the parameter carries no format;
+	// every registered format rejects the empty string.
+	newPool := strings.TrimSpace(p.String("pool"))
+
+	// In this cluster, specifically. The VMID read off this row is sent to
+	// the PATH cluster's Proxmox below, so a guest resolved from another
+	// cluster would have its number applied to whatever guest happens to
+	// carry it here.
+	vm, err := h.guestInCluster(c, clusterID, vmID)
+	if err != nil {
 		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-
-	var body struct {
-		Pool string `json:"pool"`
-	}
-	if err := c.Bind().Body(&body); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	vm, err := h.queries.GetVM(c.Context(), vmID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusNotFound, "VM not found")
-		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up VM")
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -2234,7 +1911,6 @@ func (h *VMHandler) SetVMPool(c fiber.Ctx) error {
 	}
 
 	vmidStr := strconv.Itoa(int(vm.Vmid))
-	newPool := strings.TrimSpace(body.Pool)
 	oldPool := vm.Pool
 
 	// Remove from old pool if it had one.

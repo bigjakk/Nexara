@@ -501,7 +501,7 @@ func TestGuard_EveryRouteEnforcesPermission(t *testing.T) {
 	graph := buildCallGraph(t)
 
 	public := publicRouteKeys(t)
-	registryKeys := registryRouteKeySet(endpoints.Endpoints())
+	registryKeys := registryRouteKeySet(s.registry.Endpoints())
 
 	var unguarded []string
 	for _, r := range s.app.GetRoutes(true) {
@@ -538,7 +538,7 @@ func TestGuard_EveryRouteEnforcesPermission(t *testing.T) {
 	// nothing above the loop ever routes them through routeHandlerKey —
 	// they need the declaration-based check instead. See
 	// registry_rbac_guard_test.go.
-	unguarded = append(unguarded, registryEnforcementGaps(endpoints.Endpoints(), graph)...)
+	unguarded = append(unguarded, registryEnforcementGaps(s.registry.Endpoints(), graph)...)
 
 	sort.Strings(unguarded)
 	for _, u := range unguarded {
@@ -581,7 +581,7 @@ func TestGuard_PublicRoutesAreExpected(t *testing.T) {
 	// source-level parse of router.go, so a registry endpoint declaring
 	// Permissions{Public: "..."} needs its own way into `actual` — see
 	// registryPublicRouteKeys.
-	for key := range registryPublicRouteKeys(endpoints.Endpoints()) {
+	for key := range registryPublicRouteKeys(s.registry.Endpoints()) {
 		if registered[key] {
 			actual[key] = true
 		}
@@ -652,7 +652,7 @@ func TestGuard_DocumentedPermissionMatchesEnforcement(t *testing.T) {
 
 	graph := buildCallGraph(t)
 	meta := handlers.EndpointMetaPermissions()
-	registryByKey := registryEndpointsByKey(endpoints.Endpoints())
+	registryByKey := registryEndpointsByKey(s.registry.Endpoints())
 
 	for _, r := range s.app.GetRoutes(true) {
 		if r.Method == "USE" || len(r.Handlers) == 0 {
@@ -681,6 +681,15 @@ func TestGuard_DocumentedPermissionMatchesEnforcement(t *testing.T) {
 		var enforced map[string]bool
 		var handlerDescription string
 		if e, isRegistry := registryByKey[key]; isRegistry {
+			// A registry route's RESOURCE is a literal in the declaration,
+			// so unlike a legacy one it can be compared exactly rather than
+			// approximated. The action-only comparison below still runs —
+			// it is what the two paths share — but this is the one that
+			// catches a route documented manage:vm while declaring
+			// Resource: "cluster".
+			if msg := registryDocumentedPermissionViolation(key, declared, e.Permissions); msg != "" {
+				t.Error(msg)
+			}
 			enforced = registryEnforcedActions(e.Permissions)
 			handlerDescription = "registry endpoint (" + e.Permissions.Describe() + ")"
 		} else {

@@ -1,0 +1,541 @@
+package api
+
+import (
+	"net/http"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/gofiber/fiber/v3"
+
+	"github.com/bigjakk/nexara/internal/proxmox"
+)
+
+// These tests drive the REAL declarations — the ones setupRoutes mounts —
+// rather than a fixture shaped like them, so a change to registry_vms.go
+// that quietly loosened a parameter would show up here.
+
+const (
+	testVMID          = "8a1d2ab3-3f0e-4b4c-9f8a-000000000001"
+	attachRoutePath   = "/api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach"
+	attachRouteTarget = "/api/v1/clusters/" + testClusterID + "/vms/" + testVMID + "/disks/attach"
+)
+
+// declaredEndpoint returns the production declaration for one route, and
+// fails if the registry does not have it.
+func declaredEndpoint(t *testing.T, method, path string) Endpoint {
+	t.Helper()
+	s := newRouteStubServer(t)
+	for _, e := range s.registry.Endpoints() {
+		if e.Method == method && e.Path == path {
+			return e
+		}
+	}
+	t.Fatalf("%s %s is not declared in the registry", method, path)
+	return Endpoint{}
+}
+
+// probeEndpoint is a declared endpoint with its handler swapped for a
+// capture, so a test can see exactly what the schema handed over without
+// needing the handler's database and Proxmox client.
+func probeEndpoint(t *testing.T, method, path string, cap *capture) Endpoint {
+	t.Helper()
+	e := declaredEndpoint(t, method, path)
+	e.Handler = cap.handler()
+	// The real declaration gates on manage:vm; these tests are about the
+	// parameters, and the gate is exercised by TestRegistryChainOrder and
+	// TestSetupRoutesMountsTheRegistry.
+	e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
+	return e
+}
+
+// TestAttachDiskSizeAcceptsEveryIncidentSpelling drives the four size
+// values the API consumer tried, through the declared schema, in one
+// place.
+//
+// Before this endpoint carried a format, each one failed differently and
+// none of them said so: "500G" reached Proxmox verbatim and came back as
+// a parse error, the JSON number 500 was refused by the struct binder,
+// "500" worked, and "512000" provisioned 500 TiB without complaint. All
+// four now mean the same thing and arrive as the bare GiB count Proxmox's
+// "storage:N" form requires.
+func TestAttachDiskSizeAcceptsEveryIncidentSpelling(t *testing.T) {
+	tests := []struct {
+		name string
+		size string // as it appears in the JSON body, quoting included
+		want string
+	}{
+		{name: "the suffixed form the old comment recommended", size: `"500G"`, want: "500"},
+		{name: "a JSON number the old binder rejected", size: `500`, want: "500"},
+		{name: "the one spelling that used to work", size: `"500"`, want: "500"},
+		{name: "the megabyte-shaped value that meant gigabytes", size: `"512000"`, want: "512000"},
+		{name: "terabytes", size: `"1T"`, want: "1024"},
+		{name: "a sub-gigabyte size rounds up rather than to zero", size: `"512M"`, want: "1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cap := &capture{}
+			app := newRegistryApp(t, noAuth(), probeEndpoint(t, fiber.MethodPost, attachRoutePath, cap))
+
+			body := `{"bus":"scsi","storage":"store01","size":` + tt.size + `}`
+			status, env := send(t, app, jsonRequest(http.MethodPost, attachRouteTarget, body))
+			if status != fiber.StatusNoContent {
+				t.Fatalf("status = %d (%q), want 204", status, env.Message)
+			}
+			got := cap.params.String("size")
+			if got != tt.want {
+				t.Errorf("size = %q, want %q", got, tt.want)
+			}
+			// The seam between the schema and the handler: AttachDisk
+			// parses this string with strconv.ParseInt to capacity-check
+			// it. If the format ever stopped normalizing, that parse would
+			// 500 every request rather than silently pass a suffixed size
+			// through — but it is cheaper to notice here.
+			gib, err := strconv.ParseInt(got, 10, 64)
+			if err != nil {
+				t.Fatalf("size %q is not the bare GiB count the handler parses: %v", got, err)
+			}
+			if gib <= 0 {
+				t.Errorf("size parsed to %d GiB, want a positive count", gib)
+			}
+		})
+	}
+}
+
+// TestAttachDiskSizeRejectsWhatProxmoxWould pins the other half: values
+// that used to be forwarded and fail somewhere downstream now fail here,
+// naming the field.
+func TestAttachDiskSizeRejectsWhatProxmoxWould(t *testing.T) {
+	for _, size := range []string{`""`, `"0"`, `"-5"`, `"big"`, `"20 GB please"`, `"2P"`} {
+		t.Run(size, func(t *testing.T) {
+			cap := &capture{}
+			app := newRegistryApp(t, noAuth(), probeEndpoint(t, fiber.MethodPost, attachRoutePath, cap))
+
+			body := `{"bus":"scsi","storage":"store01","size":` + size + `}`
+			status, env := send(t, app, jsonRequest(http.MethodPost, attachRouteTarget, body))
+			if status != fiber.StatusBadRequest {
+				t.Fatalf("status = %d (%q), want 400", status, env.Message)
+			}
+			if !strings.HasPrefix(env.Message, "size:") {
+				t.Errorf("message = %q, want it to name the size field", env.Message)
+			}
+			if cap.called {
+				t.Error("the handler ran for a request the schema rejected")
+			}
+		})
+	}
+}
+
+// TestAttachDiskIndexIsThreeState is the declaration this whole phase
+// turns on. index must be Optional with NO default, so that omitting it
+// is distinguishable from asking for slot 0 — the ambiguity that let an
+// omitted index overwrite a boot disk.
+func TestAttachDiskIndexIsThreeState(t *testing.T) {
+	e := declaredEndpoint(t, fiber.MethodPost, attachRoutePath)
+	index, ok := e.Parameters["index"]
+	if !ok {
+		t.Fatal("the attach endpoint declares no index parameter")
+	}
+	if !index.Optional {
+		t.Error("index is required; the caller must be able to omit it and let the handler pick a free slot")
+	}
+	if index.Default != nil {
+		t.Errorf("index declares a default (%v); a default makes an omitted index indistinguishable from an "+
+			"explicit one, which is the ambiguity this endpoint was rewritten to remove", index.Default)
+	}
+
+	tests := []struct {
+		name         string
+		body         string
+		wantSupplied bool
+		wantValue    int64
+	}{
+		{
+			name:         "omitted",
+			body:         `{"bus":"scsi","storage":"store01","size":"32"}`,
+			wantSupplied: false,
+			wantValue:    0,
+		},
+		{
+			name: "explicitly zero",
+			// Identical to the row above once read as a plain int, and the
+			// whole reason OptInt exists.
+			body:         `{"bus":"scsi","storage":"store01","size":"32","index":0}`,
+			wantSupplied: true,
+			wantValue:    0,
+		},
+		{
+			name:         "explicitly non-zero",
+			body:         `{"bus":"scsi","storage":"store01","size":"32","index":3}`,
+			wantSupplied: true,
+			wantValue:    3,
+		},
+		{
+			name:         "explicitly null means omitted",
+			body:         `{"bus":"scsi","storage":"store01","size":"32","index":null}`,
+			wantSupplied: false,
+			wantValue:    0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cap := &capture{}
+			app := newRegistryApp(t, noAuth(), probeEndpoint(t, fiber.MethodPost, attachRoutePath, cap))
+
+			status, env := send(t, app, jsonRequest(http.MethodPost, attachRouteTarget, tt.body))
+			if status != fiber.StatusNoContent {
+				t.Fatalf("status = %d (%q), want 204", status, env.Message)
+			}
+			value, supplied := cap.params.OptInt("index")
+			if supplied != tt.wantSupplied {
+				t.Errorf("supplied = %v, want %v", supplied, tt.wantSupplied)
+			}
+			if value != tt.wantValue {
+				t.Errorf("index = %d, want %d", value, tt.wantValue)
+			}
+		})
+	}
+}
+
+// TestAttachDiskRejectsMalformedRequests covers the rest of the declared
+// contract at the edge of the request.
+func TestAttachDiskRejectsMalformedRequests(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantField string
+	}{
+		{name: "missing bus", body: `{"storage":"store01","size":"32"}`, wantField: "bus:"},
+		{name: "missing storage", body: `{"bus":"scsi","size":"32"}`, wantField: "storage:"},
+		{name: "missing size", body: `{"bus":"scsi","storage":"store01"}`, wantField: "size:"},
+		{name: "unknown bus", body: `{"bus":"nvme","storage":"store01","size":"32"}`, wantField: "bus:"},
+		{
+			name:      "index past the widest bus",
+			body:      `{"bus":"scsi","storage":"store01","size":"32","index":31}`,
+			wantField: "index:",
+		},
+		{
+			name:      "negative index",
+			body:      `{"bus":"scsi","storage":"store01","size":"32","index":-1}`,
+			wantField: "index:",
+		},
+		{
+			// A storage id that would restructure the volume spec. The
+			// client refuses it too, but the schema should not have let it
+			// travel that far.
+			name:      "storage carrying a colon",
+			body:      `{"bus":"scsi","storage":"store01:vm-9-disk-0","size":"32"}`,
+			wantField: "storage:",
+		},
+		{
+			// PVE's additionalProperties => 0. A misspelled parameter used
+			// to be silently dropped, so a request could "succeed" while
+			// doing something other than what was asked.
+			name:      "a misspelled parameter",
+			body:      `{"bus":"scsi","storage":"store01","size":"32","idx":1}`,
+			wantField: "idx:",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cap := &capture{}
+			app := newRegistryApp(t, noAuth(), probeEndpoint(t, fiber.MethodPost, attachRoutePath, cap))
+
+			status, env := send(t, app, jsonRequest(http.MethodPost, attachRouteTarget, tt.body))
+			if status != fiber.StatusBadRequest {
+				t.Fatalf("status = %d (%q), want 400", status, env.Message)
+			}
+			if !strings.HasPrefix(env.Message, tt.wantField) {
+				t.Errorf("message = %q, want it to start with %q", env.Message, tt.wantField)
+			}
+			if cap.called {
+				t.Error("the handler ran for a request the schema rejected")
+			}
+		})
+	}
+}
+
+// TestAttachDiskIsGatedByItsDeclaration proves the permission the
+// declaration states is the permission the route enforces, end to end, on
+// a REAL endpoint rather than a synthetic one.
+//
+// It matters more here than on most routes: the manage:vm check used to
+// be the first two statements of AttachDisk's body, and this change
+// deleted them. If the declaration and the middleware ever disagreed,
+// every guard in this package would still pass — they read the
+// declaration — and the route would ship authenticated but ungated.
+func TestAttachDiskIsGatedByItsDeclaration(t *testing.T) {
+	e := declaredEndpoint(t, fiber.MethodPost, attachRoutePath)
+	if e.Permissions.Describe() != "manage:vm" {
+		t.Fatalf("the attach endpoint declares %q, want manage:vm", e.Permissions.Describe())
+	}
+
+	cap := &capture{}
+	gated := e
+	gated.Handler = cap.handler()
+	body := `{"bus":"scsi","storage":"store01","size":"32"}`
+
+	t.Run("a caller holding only view:vm is refused", func(t *testing.T) {
+		app := newRegistryApp(t, stubAuth(map[string]bool{"view:vm": true}), gated)
+		req := jsonRequest(http.MethodPost, attachRouteTarget, body)
+		req.Header.Set("X-Test-User", "yes")
+		status, _ := send(t, app, req)
+		if status != fiber.StatusForbidden {
+			t.Fatalf("status = %d, want 403", status)
+		}
+		if cap.called {
+			t.Error("the handler ran for a caller without the declared permission")
+		}
+	})
+
+	t.Run("a caller holding manage:vm gets through", func(t *testing.T) {
+		cap.called = false
+		app := newRegistryApp(t, stubAuth(map[string]bool{"manage:vm": true}), gated)
+		req := jsonRequest(http.MethodPost, attachRouteTarget, body)
+		req.Header.Set("X-Test-User", "yes")
+		status, env := send(t, app, req)
+		if status != fiber.StatusNoContent {
+			t.Fatalf("status = %d (%q), want 204", status, env.Message)
+		}
+		if !cap.called {
+			t.Error("the handler did not run for a caller holding the declared permission")
+		}
+	})
+
+	t.Run("an anonymous caller is refused before the gate", func(t *testing.T) {
+		cap.called = false
+		app := newRegistryApp(t, stubAuth(map[string]bool{"manage:vm": true}), gated)
+		status, _ := send(t, app, jsonRequest(http.MethodPost, attachRouteTarget, body))
+		if status != fiber.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", status)
+		}
+		if cap.called {
+			t.Error("the handler ran for a request carrying no session")
+		}
+	})
+}
+
+// vmRoutesWithDeferredPermission are the only two VM routes whose
+// permission is NOT statically known, listed here so that a third one
+// cannot appear without this decision being re-made.
+//
+// Both serve either guest kind through a /vms/ path and pick the Proxmox
+// client method off the loaded row's Type, so the RESOURCE half of the
+// permission is unknowable until after the lookup — which is after any
+// middleware would have run. Nexara keeps VMs and containers in one
+// inventory table, which is why the path says "vms" for an object that
+// may be a container.
+var vmRoutesWithDeferredPermission = map[string]string{
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/convert-to-template": "converts a container with ConvertCTToTemplate when the row is lxc",
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template":   "clones a container with CloneCT when the row is lxc",
+}
+
+// TestVMRoutesDeclareACheck records what the survey of these 33 handlers
+// found: all but two resolved the cluster from the path and then made one
+// static requireClusterPerm call, so all but two are declarable as a
+// plain Check. None needed Advisory (a listing filtered rather than
+// gated).
+//
+// It is a record rather than a rule: a VM route that genuinely computes
+// its permission SHOULD declare Deferred, and this test is where that
+// gets noticed and re-justified instead of slipping through. That is
+// exactly how the two exceptions got here — they were declared as plain
+// manage:vm Checks first, and a security review found that a caller with
+// manage:vm and no container rights could irreversibly convert a
+// container through them.
+func TestVMRoutesDeclareACheck(t *testing.T) {
+	s := newRouteStubServer(t)
+	endpoints := s.registry.Endpoints()
+	if len(endpoints) != 33 {
+		t.Errorf("the registry holds %d endpoints, want the 33 VMHandler routes Phase 4 migrated", len(endpoints))
+	}
+
+	seenDeferred := map[string]bool{}
+	for _, e := range endpoints {
+		key := e.Method + " " + e.Path
+		if why, expected := vmRoutesWithDeferredPermission[key]; expected {
+			seenDeferred[key] = true
+			if e.Permissions.Deferred == "" {
+				t.Errorf("%s declares %q, but it %s — it needs Deferred, because the resource is not "+
+					"knowable before the guest row is read", key, e.Permissions.Describe(), why)
+				continue
+			}
+			// The reason has to name the permission the handler adds, or
+			// it documents nothing an operator could act on.
+			if !strings.Contains(e.Permissions.Deferred, "manage:container") {
+				t.Errorf("%s: the Deferred reason does not name manage:container, which is the permission "+
+					"the handler checks for a container: %q", key, e.Permissions.Deferred)
+			}
+			continue
+		}
+
+		if e.Permissions.Check == nil {
+			t.Errorf("%s declares %q rather than a Check — if that is deliberate, add it to "+
+				"vmRoutesWithDeferredPermission with the reason", key, e.Permissions.Describe())
+			continue
+		}
+		if e.Permissions.Check.Scope != ScopeCluster {
+			t.Errorf("%s is %s-scoped; every route in this family acts on one cluster",
+				key, e.Permissions.Check.Scope)
+		}
+	}
+
+	for key := range vmRoutesWithDeferredPermission {
+		if !seenDeferred[key] {
+			t.Errorf("vmRoutesWithDeferredPermission lists %s but no such route is declared — "+
+				"drop the stale entry, or a list of exceptions stops being a review surface", key)
+		}
+	}
+}
+
+// TestVMRoutesDeclareEveryPathParameter is checkPathParams' rule read
+// from the other side: Register already refuses a :param with no entry in
+// Parameters, so this asserts the converse — that no declaration carries
+// a path parameter the path does not name, which Register catches too but
+// only for the exact spelling.
+func TestVMRoutesDeclareEveryPathParameter(t *testing.T) {
+	s := newRouteStubServer(t)
+	for _, e := range s.registry.Endpoints() {
+		for _, name := range pathParamNames(e.Path) {
+			prop, ok := e.Parameters[name]
+			if !ok {
+				t.Errorf("%s %s has :%s with no entry in Parameters", e.Method, e.Path, name)
+				continue
+			}
+			if prop.Optional {
+				t.Errorf("%s %s declares the path parameter %q optional; a URL segment is always present",
+					e.Method, e.Path, name)
+			}
+		}
+	}
+}
+
+// TestCloneParametersTolerateTheEmptySentinel guards the compatibility
+// decision behind emptyOrStorageID and emptyOrNodeName: the clone dialog
+// sends storage:"" for a linked clone, and apischema treats "" as a
+// supplied value that every registered format rejects. Borrowing the
+// storage-id format here would 400 a request that has always worked.
+func TestCloneParametersTolerateTheEmptySentinel(t *testing.T) {
+	for _, path := range []string{
+		"/api/v1/clusters/:cluster_id/vms/:vm_id/clone",
+		"/api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template",
+	} {
+		t.Run(path, func(t *testing.T) {
+			cap := &capture{}
+			app := newRegistryApp(t, noAuth(), probeEndpoint(t, fiber.MethodPost, path, cap))
+
+			target := strings.NewReplacer(
+				":cluster_id", testClusterID,
+				":vm_id", testVMID,
+			).Replace(path)
+			body := `{"new_id":9001,"name":"","target":"","full":false,"storage":""}`
+
+			status, env := send(t, app, jsonRequest(http.MethodPost, target, body))
+			if status != fiber.StatusNoContent {
+				t.Fatalf("status = %d (%q), want 204 — the clone dialog sends every key, empty ones included",
+					status, env.Message)
+			}
+			for _, key := range []string{"name", "target", "storage"} {
+				if got := cap.params.String(key); got != "" {
+					t.Errorf("%s = %q, want the empty sentinel to survive", key, got)
+				}
+			}
+		})
+	}
+
+	// A non-empty value is still held to its shape.
+	cap := &capture{}
+	app := newRegistryApp(t, noAuth(),
+		probeEndpoint(t, fiber.MethodPost, "/api/v1/clusters/:cluster_id/vms/:vm_id/clone", cap))
+	body := `{"new_id":9001,"storage":"store01:vm-9-disk-0"}`
+	target := "/api/v1/clusters/" + testClusterID + "/vms/" + testVMID + "/clone"
+	if status, env := send(t, app, jsonRequest(http.MethodPost, target, body)); status != fiber.StatusBadRequest {
+		t.Errorf("status = %d (%q), want 400 for a storage id carrying a colon", status, env.Message)
+	}
+}
+
+// TestResizeKeepsProxmoxDeltaSyntax pins that the resize endpoint did NOT
+// borrow the attach endpoint's disk-size format. They look alike and are
+// not: "+8G" means "grow by 8 GiB", and normalizing it to a bare count
+// would turn it into "grow to 8 GiB" — a shrink Proxmox refuses, or worse
+// on a disk already smaller than that.
+func TestResizeKeepsProxmoxDeltaSyntax(t *testing.T) {
+	const path = "/api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize"
+	e := declaredEndpoint(t, fiber.MethodPost, path)
+	if e.Parameters["size"].Format != "" {
+		t.Errorf("resize declares format %q; the delta form cannot survive normalization", e.Parameters["size"].Format)
+	}
+
+	target := "/api/v1/clusters/" + testClusterID + "/vms/" + testVMID + "/disks/resize"
+	accepted := []string{"+8G", "64G", "1T", "512M", "100"}
+	for _, size := range accepted {
+		cap := &capture{}
+		app := newRegistryApp(t, noAuth(), probeEndpoint(t, fiber.MethodPost, path, cap))
+		body := `{"disk":"scsi0","size":"` + size + `"}`
+		status, env := send(t, app, jsonRequest(http.MethodPost, target, body))
+		if status != fiber.StatusNoContent {
+			t.Errorf("size %q: status = %d (%q), want 204", size, status, env.Message)
+			continue
+		}
+		if got := cap.params.String("size"); got != size {
+			t.Errorf("size %q reached the handler as %q; it must be passed through untouched", size, got)
+		}
+	}
+
+	for _, size := range []string{"-8G", "8 G", "8GB", ""} {
+		cap := &capture{}
+		app := newRegistryApp(t, noAuth(), probeEndpoint(t, fiber.MethodPost, path, cap))
+		body := `{"disk":"scsi0","size":"` + size + `"}`
+		if status, _ := send(t, app, jsonRequest(http.MethodPost, target, body)); status != fiber.StatusBadRequest {
+			t.Errorf("size %q: status = %d, want 400", size, status)
+		}
+	}
+}
+
+// TestBusEnumMatchesTheClient keeps the declared bus vocabulary and the
+// client's slot ceilings from drifting apart: a bus the schema accepts
+// but proxmox.MaxDiskIndex does not know would pass validation and then
+// produce a config key Proxmox rejects.
+//
+// The length assertion is a real comparison rather than a slice against
+// itself: the declaration clones proxmox.DiskBuses, so this catches
+// someone replacing it with a hand-written literal — which is the drift
+// worth catching, since that is how the two lists would part ways.
+func TestBusEnumMatchesTheClient(t *testing.T) {
+	e := declaredEndpoint(t, fiber.MethodPost, attachRoutePath)
+	bus := e.Parameters["bus"]
+	if len(bus.Enum) == 0 {
+		t.Fatal("bus declares no enum")
+	}
+	for _, name := range bus.Enum {
+		if _, ok := proxmox.MaxDiskIndex(name); !ok {
+			t.Errorf("the schema accepts bus %q but the client has no slot ceiling for it", name)
+		}
+	}
+	if len(bus.Enum) != len(proxmox.DiskBuses) {
+		t.Errorf("bus enum has %d entries, proxmox.DiskBuses has %d", len(bus.Enum), len(proxmox.DiskBuses))
+	}
+}
+
+// TestEveryVMEndpointCompiles is belt and braces around Register, which
+// compiles each schema as it is declared: if buildRegistry were ever
+// changed to report rather than panic, this would still fail.
+func TestEveryVMEndpointCompiles(t *testing.T) {
+	s := newRouteStubServer(t)
+	for _, e := range s.registry.Endpoints() {
+		if err := e.Parameters.Compile(); err != nil {
+			t.Errorf("%s %s: %v", e.Method, e.Path, err)
+		}
+		if strings.TrimSpace(e.Description) == "" {
+			t.Errorf("%s %s has no description; the declaration IS the documentation", e.Method, e.Path)
+		}
+		for name, prop := range e.Parameters {
+			if strings.TrimSpace(prop.Description) == "" {
+				t.Errorf("%s %s: parameter %q has no description", e.Method, e.Path, name)
+			}
+		}
+	}
+}

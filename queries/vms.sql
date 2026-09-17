@@ -18,6 +18,13 @@ ON CONFLICT (cluster_id, vmid) DO UPDATE SET
     last_seen_at = now()
 RETURNING *;
 
+-- DISCLOSURE, DELIBERATE FOR NOW: the vms table holds both guest kinds, so
+-- this returns container rows to a caller holding only view:vm, which is
+-- what GET /clusters/:cluster_id/vms is gated on. Not narrowed with
+-- `AND type = 'qemu'` because the inventory UI reads this one list and
+-- renders both kinds; splitting it is a bigger change than a WHERE clause.
+-- MUTATING a container through a /vms/ route is separate and IS gated —
+-- see requireGuestKindPerm in internal/api/handlers/vms.go.
 -- name: ListVMsByCluster :many
 SELECT * FROM vms WHERE cluster_id = $1 ORDER BY vmid;
 

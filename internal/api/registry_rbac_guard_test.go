@@ -263,6 +263,53 @@ func documentedPermissionViolation(key, declared, handlerDescription string, enf
 		key, declared, handlerDescription, sortedKeys(enforced))
 }
 
+// normalizePermissionList renders a "a:b|c:d" permission string in a
+// comparable form: entries trimmed, sorted and rejoined, so that
+// Describe()'s " | " separator and endpointMeta's "|" agree and the order
+// two authors happened to write the alternatives in does not matter.
+func normalizePermissionList(s string) string {
+	parts := strings.Split(s, "|")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return strings.Join(out, "|")
+}
+
+// registryDocumentedPermissionViolation compares a registry route's FULL
+// declared permission — action AND RESOURCE — against its curated
+// endpointMeta entry.
+//
+// documentedPermissionViolation compares only the action half, because
+// for a legacy route the resource is frequently computed and a call-graph
+// walk cannot recover it. A registry route has no such excuse: the
+// resource is a literal in the declaration. Without this, a VM route
+// declared Resource: "cluster" while documented "manage:vm" passes every
+// guard in the package — the action matches, and nothing else looks — and
+// an operator building a role from the docs grants a permission that does
+// not open the route.
+//
+// Shapes with no static permission (Deferred, Advisory, Public,
+// SelfService) are skipped: Describe() renders them as "deferred" and the
+// like, which is not a permission an endpointMeta entry could restate.
+// Their review surface is the reason string each one is required to
+// carry, plus the exemption lists in rbac_route_guard_test.go.
+func registryDocumentedPermissionViolation(key, declared string, p Permissions) string {
+	if p.Check == nil && len(p.Alternatives) == 0 {
+		return ""
+	}
+	if normalizePermissionList(declared) == normalizePermissionList(p.Describe()) {
+		return ""
+	}
+	return fmt.Sprintf("%s: API docs promise permission %q but the registry declares %q — "+
+		"the RESOURCE has to match too, not just the action; update endpointMeta in "+
+		"internal/api/handlers/api_docs.go, or the declaration, so they say the same thing",
+		key, declared, p.Describe())
+}
+
 // selfServiceReviewViolations reports every key in declared that is not
 // also a key in reviewed — the pure comparison
 // TestGuard_RegistrySelfServiceRoutesAreReviewed drives against the real
@@ -580,6 +627,114 @@ func TestDocumentedPermissionViolation_CatchesADriftedAction(t *testing.T) {
 	})
 }
 
+// TestRegistryDocumentedPermissionViolation covers the half the action
+// comparison above cannot see: a declared RESOURCE that disagrees with
+// the documented one while the action matches perfectly.
+//
+// That shape is not hypothetical bookkeeping. An operator builds a role
+// from endpointMeta; if the docs say manage:vm and the route gates
+// manage:cluster, the grant they make does not open the route, and the
+// grant that does is one they were never told to make.
+func TestRegistryDocumentedPermissionViolation(t *testing.T) {
+	const key = "GET /api/v1/clusters/:cluster_id/pools"
+
+	tests := []struct {
+		name      string
+		declared  string
+		perms     Permissions
+		wantFinds bool
+	}{
+		{
+			name:     "resource drifts while the action matches",
+			declared: "view:cluster",
+			perms: Permissions{Check: &Check{
+				Action: "view", Resource: "vm", Scope: ScopeCluster,
+			}},
+			wantFinds: true,
+		},
+		{
+			name:      "action drifts too",
+			declared:  "view:cluster",
+			perms:     Permissions{Check: &Check{Action: "manage", Resource: "cluster", Scope: ScopeCluster}},
+			wantFinds: true,
+		},
+		{
+			name:     "they agree",
+			declared: "view:cluster",
+			perms:    Permissions{Check: &Check{Action: "view", Resource: "cluster", Scope: ScopeCluster}},
+		},
+		{
+			name:     "alternatives agree regardless of the order they are written in",
+			declared: "view:container|view:vm",
+			perms: Permissions{Alternatives: []Check{
+				{Action: "view", Resource: "vm", Scope: ScopeCluster},
+				{Action: "view", Resource: "container", Scope: ScopeCluster},
+			}},
+		},
+		{
+			name:     "alternatives that lost one entry",
+			declared: "view:vm|view:container",
+			perms: Permissions{Alternatives: []Check{
+				{Action: "view", Resource: "vm", Scope: ScopeCluster},
+				{Action: "view", Resource: "node", Scope: ScopeCluster},
+			}},
+			wantFinds: true,
+		},
+		{
+			// Describe() renders these as "deferred", "public" and so on,
+			// which no endpointMeta entry could restate. Their review
+			// surface is the reason string each carries.
+			name:     "deferred has no static permission to compare",
+			declared: "manage:vm",
+			perms:    Permissions{Deferred: "the resource depends on the guest's type"},
+		},
+		{
+			name:     "advisory has none either",
+			declared: "view:cluster",
+			perms: Permissions{Advisory: &AdvisoryCheck{
+				Check:  Check{Action: "view", Resource: "cluster", Scope: ScopeCluster},
+				Reason: "accessibleClusters filters the listing",
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := registryDocumentedPermissionViolation(key, tt.declared, tt.perms)
+			if tt.wantFinds {
+				if msg == "" {
+					t.Fatalf("want a violation: docs say %q, the declaration says %q", tt.declared, tt.perms.Describe())
+				}
+				if !strings.Contains(msg, tt.declared) || !strings.Contains(msg, tt.perms.Describe()) {
+					t.Errorf("message = %q, want it to name both sides", msg)
+				}
+				return
+			}
+			if msg != "" {
+				t.Errorf(`message = %q, want ""`, msg)
+			}
+		})
+	}
+}
+
+func TestNormalizePermissionList(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"view:vm", "view:vm"},
+		{"view:vm|view:container", "view:container|view:vm"},
+		{"view:container | view:vm", "view:container|view:vm"},
+		{"", ""},
+		{"|view:vm|", "view:vm"},
+	}
+	for _, tt := range tests {
+		if got := normalizePermissionList(tt.in); got != tt.want {
+			t.Errorf("normalizePermissionList(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 // TestGuard_RegistrySelfServiceRoutesAreReviewed is the production guard:
 // every registered registry endpoint declaring Permissions.SelfService
 // must also be listed in selfServiceRoutes. It iterates zero times today —
@@ -596,7 +751,7 @@ func TestGuard_RegistrySelfServiceRoutesAreReviewed(t *testing.T) {
 	}
 
 	declared := map[string]bool{}
-	for key := range registrySelfServiceRouteKeys(endpoints.Endpoints()) {
+	for key := range registrySelfServiceRouteKeys(s.registry.Endpoints()) {
 		// Only routes that actually registered — router.go gates several
 		// blocks on a handler being non-nil; mirrors
 		// TestGuard_PublicRoutesAreExpected.

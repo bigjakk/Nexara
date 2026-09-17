@@ -547,7 +547,7 @@ other's common case.
 | GET | `/clusters/:id/vms/:vm_id/agent` | Get QEMU guest agent info |
 | POST | `/clusters/:id/vms/:vm_id/disks/resize` | Resize a disk |
 | POST | `/clusters/:id/vms/:vm_id/disks/move` | Move a disk to another storage |
-| POST | `/clusters/:id/vms/:vm_id/disks/attach` | Attach a disk |
+| POST | `/clusters/:id/vms/:vm_id/disks/attach` | Allocate and attach a disk. Omit `index` to take the lowest free slot on the bus; an occupied slot, or one the VM boots from, is refused. `size` takes `500`, `"500"`, `"500G"`, `"512M"` or `"1T"` and may not exceed the target pool's total capacity |
 | POST | `/clusters/:id/vms/:vm_id/disks/detach` | Detach a disk |
 | POST | `/clusters/:id/vms/:vm_id/media` | Change CD/DVD media |
 | PUT | `/clusters/:id/vms/:vm_id/pool` | Set VM resource pool |

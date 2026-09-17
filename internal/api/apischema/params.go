@@ -85,6 +85,25 @@ func (p *Params) Strings(key string) []string {
 	return out
 }
 
+// Object returns the value of an object parameter, or nil when the
+// caller supplied none.
+//
+// The map is the request's own, not a copy: an Object value is carried
+// through unvalidated (there is no nested-properties field), so this is
+// the only way to read one, and copying it on every call would be paid
+// for by every handler that just forwards it. A handler that KEEPS the
+// map beyond the request should copy it itself.
+//
+// Its element values are whatever JSON produced — a string, a
+// json.Number, a bool — so a handler that needs a uniform type has to
+// convert. Use Has to tell "the caller sent {}" from "the caller sent
+// nothing"; both read back as an empty map here.
+func (p *Params) Object(key string) map[string]any {
+	p.mustProp("Object", key, Object)
+	v, _ := p.values[key].(map[string]any)
+	return v
+}
+
 // OptString returns a string parameter and whether the caller supplied
 // it. supplied is false when the value came from the schema's default.
 func (p *Params) OptString(key string) (string, bool) {

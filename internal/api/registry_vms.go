@@ -1,0 +1,762 @@
+package api
+
+import (
+	"maps"
+	"slices"
+
+	"github.com/gofiber/fiber/v3"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/api/handlers"
+	"github.com/bigjakk/nexara/internal/proxmox"
+)
+
+// buildRegistry declares every migrated endpoint against a fresh registry
+// bound to THIS Server's handlers.
+//
+// It mirrors router.go's nil-gating: setupRoutes skips a legacy block
+// whose handler is nil, and a registry endpoint whose Handler were nil
+// would panic in Register instead. The stub server every guard test
+// builds fills all of them, so the gate never hides a route from the
+// guards — see requireAllHandlersStubbed.
+func (s *Server) buildRegistry() *Registry {
+	reg := NewRegistry()
+	if s.vmHandler != nil {
+		registerVMEndpoints(reg, s.vmHandler)
+	}
+	return reg
+}
+
+// clusterScope is the path prefix every cluster-scoped route hangs off.
+// :cluster_id is the FIRST path parameter on purpose — see namesACluster
+// in permissions.go, which refuses a cluster-scoped Check that cannot
+// resolve the cluster the route acts on.
+const clusterScope = pathPrefix + "clusters/:cluster_id"
+
+// clusterCheck is the shorthand for the shape almost every route here
+// has: one action on one resource, resolved against the cluster in the
+// path.
+func clusterCheck(action, resource string) Permissions {
+	return Permissions{Check: &Check{Action: action, Resource: resource, Scope: ScopeCluster}}
+}
+
+// withParams merges extra into base, so a route can state its own
+// parameters without repeating the path parameters every route in its
+// family carries. base is never mutated.
+func withParams(base, extra apischema.Properties) apischema.Properties {
+	out := make(apischema.Properties, len(base)+len(extra))
+	maps.Copy(out, base)
+	maps.Copy(out, extra)
+	return out
+}
+
+// clusterParams is the path parameter a cluster-scoped route carries.
+func clusterParams(extra apischema.Properties) apischema.Properties {
+	return withParams(apischema.Properties{
+		"cluster_id": apischema.StdOption("cluster-id"),
+	}, extra)
+}
+
+// vmParams is the two path parameters every per-VM route carries.
+func vmParams(extra apischema.Properties) apischema.Properties {
+	return withParams(apischema.Properties{
+		"cluster_id": apischema.StdOption("cluster-id"),
+		"vm_id":      apischema.StdOption("vm-id"),
+	}, extra)
+}
+
+// nodeParams is the pair a per-node route carries. node_name is the
+// Proxmox node NAME, not Nexara's node row id — the two are different
+// identifiers and the routes below are the ones that take the former.
+func nodeParams(extra apischema.Properties) apischema.Properties {
+	return withParams(apischema.Properties{
+		"cluster_id": apischema.StdOption("cluster-id"),
+		"node_name":  apischema.StdOption("node-name"),
+	}, extra)
+}
+
+// snapshotNameParam is the snapshot name as a PATH parameter, on the
+// routes that act on a snapshot that already exists.
+//
+// It is deliberately looser than the pve-configid format the CREATE body
+// uses: Proxmox's own configid allows a single character, and Nexara's
+// create rule (validateSnapshotName) requires two. A snapshot made
+// outside Nexara can therefore carry a name our own create would refuse,
+// and rejecting it here would make an existing snapshot undeletable. The
+// length cap is generous for the same reason: it is here to bound the
+// path segment, not to re-state whatever limit the Proxmox of the day
+// enforced when the snapshot was taken.
+var snapshotNameParam = apischema.Property{
+	Type:        apischema.String,
+	Pattern:     `^[A-Za-z][A-Za-z0-9_-]*$`,
+	MaxLength:   apischema.Ptr(128),
+	Typetext:    "<name>",
+	Description: "Snapshot name.",
+}
+
+// These endpoints have always read the EMPTY STRING as "leave it unset":
+// the clone dialog sends storage:"" for a linked clone, and the pool
+// selector sends pool:"" to remove a guest from its pool. apischema
+// treats "" as a value the caller SUPPLIED rather than as an absent one
+// (see present() in validate.go), and every registered format rejects it,
+// so an optional parameter with that sentinel has to spell its rule as a
+// pattern instead of borrowing a standard option's format. Tightening it
+// to the format would turn a working request into a 400 — and would do it
+// to every external consumer at once, not just to our own dialog.
+const (
+	emptyOrNodeName  = `^$|^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`
+	emptyOrStorageID = `^$|^[A-Za-z][A-Za-z0-9._-]*$`
+)
+
+// cloneParams are the body parameters shared by clone and
+// clone-to-template, which take the same Proxmox call.
+func cloneParams() apischema.Properties {
+	return apischema.Properties{
+		"new_id": {
+			Type:        apischema.Integer,
+			Minimum:     apischema.Ptr(1.0),
+			Maximum:     apischema.Ptr(999999999.0),
+			Typetext:    "<integer>",
+			Description: "VMID for the new guest.",
+		},
+		"name": {
+			Type:        apischema.String,
+			Optional:    true,
+			MaxLength:   apischema.Ptr(255),
+			Typetext:    "<string>",
+			Description: "Name for the new guest. Proxmox names the clone after the source when omitted.",
+		},
+		"target": {
+			Type:        apischema.String,
+			Optional:    true,
+			Pattern:     emptyOrNodeName,
+			MaxLength:   apischema.Ptr(63),
+			Typetext:    "<name>",
+			Description: "Node to place the clone on. Empty or omitted keeps it on the source node.",
+		},
+		"full": optFlag("Make a full copy rather than a linked clone."),
+		"storage": {
+			Type:        apischema.String,
+			Optional:    true,
+			Pattern:     emptyOrStorageID,
+			MaxLength:   apischema.Ptr(100),
+			Typetext:    "<storage>",
+			Description: "Storage for the clone's disks. Empty or omitted lets Proxmox choose.",
+		},
+	}
+}
+
+// imageFormatParam is the optional disk image format.
+//
+// It carries no Enum, and that is deliberate rather than an omission:
+// three of the four callers send format:"" for "let the storage decide",
+// which an Enum would reject, and proxmox.ValidImageFormat already
+// enforces the vocabulary at the choke point every one of these routes
+// passes through (DiskMoveSpec.Validate, DiskAttachParams.Validate). A
+// second copy here would be one that drifts and one that has to grow a
+// sentinel member to stay correct.
+func imageFormatParam(description string) apischema.Property {
+	return apischema.Property{
+		Type:        apischema.String,
+		Optional:    true,
+		MaxLength:   apischema.Ptr(16),
+		Typetext:    "<qcow2|raw|vmdk>",
+		Description: description,
+	}
+}
+
+// optFlag is an optional boolean that defaults to false, which is how
+// every flag on these endpoints is spelled: omitting it means "no".
+//
+// The Default is stated rather than left implicit even though false is
+// also the zero value, because the declaration IS the documentation and
+// "what happens if I leave this out" is the question it has to answer.
+// Anything whose omission must stay distinguishable from an explicit
+// false takes optTristateBool instead — see its doc comment.
+func optFlag(description string) apischema.Property {
+	return apischema.Property{
+		Type:        apischema.Boolean,
+		Optional:    true,
+		Default:     false,
+		Typetext:    "<boolean>",
+		Description: description,
+	}
+}
+
+// bothGuestKindsReason is the Deferred justification shared by the two
+// routes that act on either guest kind through one /vms/ path.
+//
+// Both branch on the loaded row's Type and call the LXC client method for
+// a container, so the RESOURCE half of the permission is not knowable
+// until the guest has been read — which is after any middleware would
+// have run. The handlers check manage:vm first and then, for a container,
+// manage:container as well (requireGuestKindPerm in handlers/vms.go);
+// registryEnforcementGaps holds them to reaching a real permission leaf.
+const bothGuestKindsReason = "the resource depends on the guest's type, which is only known once the row is " +
+	"loaded: a container converted through this route needs manage:container as well as manage:vm " +
+	"(see requireGuestKindPerm)"
+
+// registerVMEndpoints declares the VM, task, node-hardware and resource
+// pool routes served by VMHandler.
+//
+// Every one of them is the uniform shape the legacy handlers had —
+// resolve the cluster from the path, then one static
+// requireClusterPerm — so all but two declare a plain Check and the
+// hand-placed call is gone from the handler body.
+//
+// The two exceptions are convert-to-template and clone-to-template, which
+// serve BOTH guest kinds through a /vms/ path and pick the client method
+// off the loaded row's Type. Their resource is not knowable before the
+// lookup, so they are Deferred and keep their checks in the handler — see
+// bothGuestKindsReason. None is Advisory: none of these filters a listing
+// through accessibleClusters instead of gating it.
+func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
+	// ── Virtual machines ──────────────────────────────────────────────
+	reg.Register(Endpoint{
+		Method:      fiber.MethodGet,
+		Path:        clusterScope + "/vms",
+		Description: "List every VM Nexara has collected for this cluster.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("view", "vm"),
+		Parameters:  clusterParams(nil),
+		Handler:     h.ListByCluster,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms",
+		Description: "Create a VM on a named node.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("manage", "vm"),
+		Parameters:  clusterParams(createVMParams()),
+		Handler:     h.CreateVM,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodGet,
+		Path:        clusterScope + "/vms/:vm_id",
+		Description: "Get one VM's collected inventory row.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("view", "vm"),
+		Parameters:  vmParams(nil),
+		Handler:     h.GetVM,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodDelete,
+		Path:        clusterScope + "/vms/:vm_id",
+		Description: "Destroy a VM and its disks. Irreversible.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("delete", "vm"),
+		Parameters:  vmParams(nil),
+		Handler:     h.DestroyVM,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/status",
+		Description: "Change a VM's power state.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("execute", "vm"),
+		Parameters: vmParams(apischema.Properties{
+			"action": {
+				Type: apischema.String,
+				// Cloned rather than aliased: Property.Enum is only
+				// deep-copied on the StdOption path, so sharing the
+				// package-level slice would give every Server's schema the
+				// same backing array.
+				Enum:        slices.Clone(handlers.VMStatusActions),
+				Typetext:    "<start|stop|shutdown|reboot|reset|suspend|resume>",
+				Description: "Power action to dispatch.",
+			},
+		}),
+		Handler: h.PerformAction,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/clone",
+		Description: "Clone a VM, full or linked.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("manage", "vm"),
+		Parameters:  vmParams(cloneParams()),
+		Handler:     h.CloneVM,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/convert-to-template",
+		Description: "Convert a stopped VM or container into a template. Irreversible in Proxmox.",
+		Group:       "Virtual Machines",
+		Permissions: Permissions{Deferred: bothGuestKindsReason},
+		Parameters:  vmParams(nil),
+		Handler:     h.ConvertToTemplate,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/clone-to-template",
+		Description: "Clone a guest and convert the clone into a template once it settles.",
+		Group:       "Virtual Machines",
+		Permissions: Permissions{Deferred: bothGuestKindsReason},
+		Parameters:  vmParams(cloneParams()),
+		Handler:     h.CloneToTemplate,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/migrate",
+		Description: "Migrate a VM to another node in the same cluster.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("execute", "vm"),
+		Parameters: vmParams(apischema.Properties{
+			"target": requiredNode("Node to migrate onto."),
+			"online": optFlag("Migrate without stopping the guest. Requires shared storage or a live-migratable disk set."),
+		}),
+		Handler: h.MigrateVM,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodGet,
+		Path:        clusterScope + "/vms/:vm_id/agent",
+		Description: "Read the guest agent's reported OS and network interfaces. Answers running=false when no agent responds.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("view", "vm"),
+		Parameters:  vmParams(nil),
+		Handler:     h.GetGuestAgentInfo,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/media",
+		Description: "Mount an ISO on the VM's CD-ROM device, or eject it with volid=none.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("execute", "vm"),
+		Parameters: vmParams(apischema.Properties{
+			"volid": {
+				Type:        apischema.String,
+				MinLength:   apischema.Ptr(1),
+				MaxLength:   apischema.Ptr(512),
+				Typetext:    "<volume id>|none",
+				Description: `Volume id of the ISO ("store01:iso/debian.iso"), or "none" to eject.`,
+			},
+		}),
+		Handler: h.ChangeMedia,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPut,
+		Path:        clusterScope + "/vms/:vm_id/pool",
+		Description: "Move a guest into a Proxmox resource pool, or out of its current one with an empty pool.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("manage", "pool"),
+		Parameters: vmParams(apischema.Properties{
+			"pool": {
+				Type:      apischema.String,
+				Optional:  true,
+				MaxLength: apischema.Ptr(64),
+				Typetext:  "<pool>",
+				// No format: the EMPTY string is the meaningful value that
+				// removes the guest from its pool, and every format in the
+				// registry rejects it.
+				Description: "Target pool id. An empty value removes the guest from its current pool.",
+			},
+		}),
+		Handler: h.SetVMPool,
+	})
+
+	// ── Configuration ─────────────────────────────────────────────────
+	reg.Register(Endpoint{
+		Method:      fiber.MethodGet,
+		Path:        clusterScope + "/vms/:vm_id/config",
+		Description: "Read a VM's live Proxmox configuration.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("view", "vm"),
+		Parameters:  vmParams(nil),
+		Handler:     h.GetVMConfig,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPut,
+		Path:        clusterScope + "/vms/:vm_id/config",
+		Description: "Write Proxmox configuration keys on a VM.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("manage", "vm"),
+		Parameters: vmParams(apischema.Properties{
+			"fields": {
+				Type:        apischema.Object,
+				Typetext:    "<object>",
+				Description: "Proxmox config keys to set, as a flat object of string values.",
+			},
+		}),
+		Handler: h.SetVMConfig,
+	})
+
+	// ── Snapshots ─────────────────────────────────────────────────────
+	reg.Register(Endpoint{
+		Method:      fiber.MethodGet,
+		Path:        clusterScope + "/vms/:vm_id/snapshot-capability",
+		Description: "Report whether this VM's disks support snapshots, and which volumes block it if not.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("view", "vm"),
+		Parameters:  vmParams(nil),
+		Handler:     h.GetSnapshotCapability,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodGet,
+		Path:        clusterScope + "/vms/:vm_id/snapshots",
+		Description: "List a VM's snapshots, excluding the synthetic \"current\" row.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("view", "vm"),
+		Parameters:  vmParams(nil),
+		Handler:     h.ListSnapshots,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/snapshots",
+		Description: "Take a snapshot of a VM, optionally including its RAM.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("execute", "vm"),
+		Parameters: vmParams(apischema.Properties{
+			"snap_name": {
+				Type:        apischema.String,
+				Format:      "pve-configid",
+				Typetext:    "<name>",
+				Description: `Snapshot name: 2-40 characters, starting with a letter. "current" is reserved by Proxmox.`,
+			},
+			"description": {
+				Type:        apischema.String,
+				Optional:    true,
+				MaxLength:   apischema.Ptr(4096),
+				Typetext:    "<string>",
+				Description: "Free-text note stored with the snapshot.",
+			},
+			"vmstate": optFlag("Include the running guest's RAM, so the rollback resumes rather than boots."),
+		}),
+		Handler: h.CreateSnapshot,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodDelete,
+		Path:        clusterScope + "/vms/:vm_id/snapshots/:snap_name",
+		Description: "Delete one of a VM's snapshots.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("delete", "vm"),
+		Parameters:  vmParams(apischema.Properties{"snap_name": snapshotNameParam}),
+		Handler:     h.DeleteSnapshot,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/snapshots/:snap_name/rollback",
+		Description: "Roll a VM back to one of its snapshots, discarding everything written since.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("execute", "vm"),
+		Parameters:  vmParams(apischema.Properties{"snap_name": snapshotNameParam}),
+		Handler:     h.RollbackSnapshot,
+	})
+
+	// ── Disks ─────────────────────────────────────────────────────────
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/disks/resize",
+		Description: "Grow one of a VM's disks. Proxmox cannot shrink a disk.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("manage", "vm"),
+		Parameters: vmParams(apischema.Properties{
+			"disk": diskKeyParam("Config key of the disk to resize, e.g. scsi0."),
+			"size": {
+				Type: apischema.String,
+				// Proxmox's own resize format, which is NOT the disk-size
+				// format the attach endpoint takes: a leading "+" means
+				// "grow by", and its absence means "grow to". Normalizing
+				// it to bare GiB would silently turn a delta into an
+				// absolute size.
+				Pattern:     `^\+?\d+(\.\d+)?[KMGTkmgt]?$`,
+				Typetext:    "<+size|size><K|M|G|T>",
+				Description: `New size, or a "+" delta to grow by, e.g. "+8G" or "64G".`,
+			},
+		}),
+		Handler: h.ResizeDisk,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/disks/move",
+		Description: "Move one of a VM's disks onto another storage, optionally converting its format.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("manage", "vm"),
+		Parameters: vmParams(apischema.Properties{
+			"disk":    diskKeyParam("Config key of the disk to move, e.g. scsi0."),
+			"storage": requiredStorage("Storage to move the disk onto."),
+			"format":  imageFormatParam("Convert the image on the way over. Only meaningful for file-backed targets; leave unset for block storage."),
+			"delete":  optFlag("Delete the source volume once the copy completes."),
+			"bwlimit_kib": {
+				Type:        apischema.Integer,
+				Optional:    true,
+				Minimum:     apischema.Ptr(0.0),
+				Typetext:    "<integer> (KiB/s, 0 for unlimited)",
+				Description: "Cap the copy's bandwidth in KiB/s. 0 means no limit.",
+			},
+		}),
+		Handler: h.MoveDisk,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPost,
+		Path:   clusterScope + "/vms/:vm_id/disks/attach",
+		Description: "Allocate a new disk on a storage and attach it to a free slot on the chosen bus. " +
+			"Refuses to overwrite an occupied slot or the VM's boot disk, and refuses a size the target pool cannot hold.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("manage", "vm"),
+		Parameters: vmParams(apischema.Properties{
+			"bus": {
+				Type:        apischema.String,
+				Enum:        slices.Clone(proxmox.DiskBuses),
+				Typetext:    "<scsi|sata|virtio|ide>",
+				Description: "Controller to attach the disk to.",
+			},
+			"index": {
+				Type:     apischema.Integer,
+				Optional: true,
+				// NO Default, and that is the whole point of this
+				// endpoint's declaration. A default would make every
+				// request that omitted the index look identical to one
+				// that explicitly asked for slot 0 — and slot 0 on a VM
+				// with a disk is its boot disk. Left defaultless,
+				// p.OptInt("index") answers supplied=false and the handler
+				// picks the lowest FREE slot instead.
+				Minimum:  apischema.Ptr(0.0),
+				Maximum:  apischema.Ptr(30.0),
+				Typetext: "<integer>",
+				Description: "Slot on the bus. Omit to take the lowest free one. " +
+					"Per-bus ceilings: ide 3, sata 5, virtio 15, scsi 30.",
+			},
+			"storage": requiredStorage("Storage to allocate the new volume on."),
+			"size": {
+				Type: apischema.String,
+				// The format both validates and NORMALIZES: 500, "500",
+				// "500G" and "1T" all reach Proxmox as the bare GiB count
+				// its "storage:N" allocation form requires. Free text here
+				// is how "512000" once meant 500 TiB.
+				Format:      "disk-size",
+				Typetext:    "<number><K|M|G|T|P>",
+				Description: `Size of the new disk. A bare number is GiB; "512M", "500G" and "1T" are all accepted.`,
+			},
+			"format": imageFormatParam("Image format. Leave unset to let the storage decide, which is the only valid choice for block storage."),
+		}),
+		Handler: h.AttachDisk,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodPost,
+		Path:        clusterScope + "/vms/:vm_id/disks/detach",
+		Description: "Detach a disk from a VM. Proxmox keeps the volume as an unused disk rather than deleting it.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("manage", "vm"),
+		Parameters: vmParams(apischema.Properties{
+			"disk": diskKeyParam("Config key of the disk to detach, e.g. scsi1."),
+		}),
+		Handler: h.DetachDisk,
+	})
+
+	// ── Proxmox tasks ─────────────────────────────────────────────────
+	reg.Register(Endpoint{
+		Method:      fiber.MethodGet,
+		Path:        clusterScope + "/tasks/:upid",
+		Description: "Get a Proxmox task's status, with progress parsed out of its log while it runs.",
+		Group:       "Tasks",
+		Permissions: clusterCheck("view", "task"),
+		Parameters:  clusterParams(apischema.Properties{"upid": upidParam}),
+		Handler:     h.GetTaskStatus,
+	})
+	reg.Register(Endpoint{
+		Method:      fiber.MethodGet,
+		Path:        clusterScope + "/tasks/:upid/log",
+		Description: "Read a Proxmox task's log lines.",
+		Group:       "Tasks",
+		Permissions: clusterCheck("view", "task"),
+		Parameters:  clusterParams(apischema.Properties{"upid": upidParam}),
+		Handler:     h.GetTaskLog,
+	})
+
+	// ── Node hardware and inventory, for the VM dialogs ───────────────
+	for _, r := range []struct {
+		suffix      string
+		description string
+		handler     Handler
+	}{
+		{"/bridges", "List a node's network bridges, for picking a VM's NIC.", h.ListBridges},
+		{"/hardware/usb", "List a node's USB devices, for passthrough.", h.ListNodeUSBDevices},
+		{"/hardware/pci", "List a node's PCI devices, for passthrough.", h.ListNodePCIDevices},
+		{"/machine-types", "List the QEMU machine types a node offers.", h.ListMachineTypes},
+		{"/cpu-models", "List the CPU models a node offers. Empty on Proxmox versions without the endpoint.", h.ListCPUModels},
+		{"/cpu-flags", "List the CPU flags a node offers, with which nodes support each.", h.ListCPUFlags},
+		{"/isos", "List every ISO on a node's ISO-capable storages.", h.ListNodeISOs},
+	} {
+		reg.Register(Endpoint{
+			Method:      fiber.MethodGet,
+			Path:        clusterScope + "/nodes/:node_name" + r.suffix,
+			Description: r.description,
+			Group:       "Nodes",
+			Permissions: clusterCheck("view", "node"),
+			Parameters:  nodeParams(nil),
+			Handler:     r.handler,
+		})
+	}
+
+	// ── Resource pools ────────────────────────────────────────────────
+	reg.Register(Endpoint{
+		Method:      fiber.MethodGet,
+		Path:        clusterScope + "/pools",
+		Description: "List the cluster's Proxmox resource pools.",
+		// "Virtual Machines" rather than a section of its own, matching
+		// this route's endpointMeta entry: GetDocs renders from that map,
+		// so two different Group values would put the route in one section
+		// and document it as belonging to another.
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("view", "cluster"),
+		Parameters:  clusterParams(nil),
+		Handler:     h.ListResourcePools,
+	})
+}
+
+// upidParam is a Proxmox task id as it arrives in a URL.
+//
+// It carries no pattern on purpose: the frontend percent-encodes the
+// UPID's colons, Fiber does not decode path parameters, and a pattern
+// written against the decoded form would reject every real request while
+// one written against the encoded form would depend on which client did
+// the encoding. The handler unescapes it and then requires
+// extractNodeFromUPID to find a node in it, which is the check that
+// actually means something.
+var upidParam = apischema.Property{
+	Type:        apischema.String,
+	MinLength:   apischema.Ptr(1),
+	MaxLength:   apischema.Ptr(512),
+	Typetext:    "<UPID>",
+	Description: "Proxmox task id (UPID), percent-encoded.",
+}
+
+// diskKeyParam is a guest config key naming a volume — "scsi0", "rootfs",
+// "mp0".
+func diskKeyParam(description string) apischema.Property {
+	return apischema.Property{
+		Type:        apischema.String,
+		Pattern:     `^[a-z]+[0-9]*$`,
+		MaxLength:   apischema.Ptr(32),
+		Typetext:    "<config key>",
+		Description: description,
+	}
+}
+
+func requiredStorage(description string) apischema.Property {
+	p := apischema.StdOption("storage-id")
+	p.Description = description
+	return p
+}
+
+func requiredNode(description string) apischema.Property {
+	p := apischema.StdOption("node-name")
+	p.Description = description
+	return p
+}
+
+// optString is a plain optional string parameter with a length cap.
+//
+// Most of the VM-create body is this shape, and deliberately so: the
+// values below are Proxmox's own configuration vocabulary — machine
+// types, SCSI controller models, VGA kinds, cloud-init fields — which
+// Proxmox owns, versions and rejects with a message of its own. Copying
+// those vocabularies into an Enum here would date on the next PVE release
+// and would reject a value the cluster in front of the operator actually
+// accepts. What the schema IS doing for this body is closing the
+// parameter SET: an unknown key now comes back as "unknown parameter"
+// rather than being silently dropped, which is how a typo'd field used to
+// create a VM that quietly ignored half the request.
+func optString(maxLen int, typetext, description string) apischema.Property {
+	return apischema.Property{
+		Type:        apischema.String,
+		Optional:    true,
+		MaxLength:   apischema.Ptr(maxLen),
+		Typetext:    typetext,
+		Description: description,
+	}
+}
+
+// optCount is an optional non-negative integer.
+func optCount(maxValue float64, description string) apischema.Property {
+	return apischema.Property{
+		Type:        apischema.Integer,
+		Optional:    true,
+		Minimum:     apischema.Ptr(0.0),
+		Maximum:     apischema.Ptr(maxValue),
+		Typetext:    "<integer>",
+		Description: description,
+	}
+}
+
+// optTristateBool is an optional boolean with NO default, so that
+// p.OptBool reports whether the caller chose at all.
+//
+// The three parameters that use it are the three the handler passes to
+// Proxmox as *bool: leaving one out means "do not send this key", which
+// is different from sending it as false. A Default here would collapse
+// those two and start writing numa=0 onto every VM whose creator never
+// mentioned NUMA.
+func optTristateBool(description string) apischema.Property {
+	return apischema.Property{
+		Type:        apischema.Boolean,
+		Optional:    true,
+		Typetext:    "<boolean>",
+		Description: description,
+	}
+}
+
+// createVMParams is the body of POST /clusters/:cluster_id/vms.
+func createVMParams() apischema.Properties {
+	return apischema.Properties{
+		"vmid": {
+			Type:        apischema.Integer,
+			Minimum:     apischema.Ptr(1.0),
+			Maximum:     apischema.Ptr(999999999.0),
+			Typetext:    "<integer>",
+			Description: "VMID for the new VM.",
+		},
+		"node": requiredNode("Node to create the VM on."),
+		"name": optString(255, "<string>", "VM name, as Proxmox records it."),
+
+		// Hardware.
+		"memory":  optCount(4194304, "RAM in MiB."),
+		"cores":   optCount(1024, "Cores per socket."),
+		"sockets": optCount(16, "CPU sockets."),
+		"cpu":     optString(256, "<cputype>", "CPU model, e.g. x86-64-v2-AES or host."),
+		"numa":    optTristateBool("Expose a NUMA topology to the guest."),
+		"balloon": optCount(4194304, "Minimum RAM in MiB when ballooning; 0 disables the balloon device."),
+
+		// Devices written as raw Proxmox device strings.
+		"scsi0":     optString(512, "<volume>", "First SCSI disk, as a Proxmox device string."),
+		"ide2":      optString(512, "<volume>", "IDE2 device, conventionally the installer CD-ROM."),
+		"net0":      optString(512, "<model>=<mac>,bridge=<bridge>", "First network device."),
+		"efidisk0":  optString(512, "<volume>", "EFI vars disk. Required alongside bios=ovmf."),
+		"tpmstate0": optString(512, "<volume>", "TPM state volume."),
+		"cdrom":     optString(512, "<volume>", "CD-ROM device string."),
+
+		// System and boot.
+		"ostype":  optString(64, "<ostype>", "Guest OS type, which sets Proxmox's device defaults."),
+		"bios":    optString(64, "<seabios|ovmf>", "Firmware."),
+		"machine": optString(128, "<type>", "QEMU machine type."),
+		"scsihw":  optString(128, "<model>", "SCSI controller model."),
+		"agent":   optString(128, "<agent spec>", "QEMU guest agent setting, e.g. \"1\" or \"enabled=1,fstrim_cloned_disks=1\"."),
+		"boot":    optString(512, "<order=dev;dev>", "Boot order."),
+		"vga":     optString(128, "<type>", "Display adapter."),
+		"hotplug": optString(256, "<features>", "Hot-pluggable device classes, e.g. \"network,disk,usb\"."),
+		"onboot":  optTristateBool("Start the VM when its node boots."),
+		"tablet":  optTristateBool("Attach a USB tablet pointer."),
+		"start":   optFlag("Start the VM once it is created."),
+
+		// Cloud-init.
+		"ciuser":       optString(255, "<user>", "Cloud-init user to create."),
+		"cipassword":   optString(1024, "<password>", "Cloud-init password. Proxmox stores it hashed in the guest's config."),
+		"sshkeys":      optString(32768, "<keys>", "Cloud-init SSH public keys, URL-encoded as Proxmox expects."),
+		"ipconfig0":    optString(512, "<ipconfig>", "Cloud-init network config for net0."),
+		"nameserver":   optString(512, "<addresses>", "Cloud-init DNS servers."),
+		"searchdomain": optString(512, "<domains>", "Cloud-init DNS search domains."),
+
+		// Metadata.
+		"description": optString(8192, "<string>", "Free-text note stored on the VM."),
+		"tags":        optString(1024, "<tags>", "Semicolon-separated Proxmox tags."),
+		"pool":        optString(64, "<pool>", "Resource pool to place the VM in."),
+
+		"extra": {
+			Type:     apischema.Object,
+			Optional: true,
+			Typetext: "<object>",
+			Description: "Additional Proxmox config keys as a flat object of string values — " +
+				"further disks (scsi1, sata0, virtio0), CD-ROM slots and anything else this schema does not name.",
+		},
+	}
+}

@@ -39,9 +39,8 @@ import (
 // for the "skip at most one occurrence per registry key" rule this
 // applies, and why plain set-membership filtering would hide a leftover
 // legacy duplicate.
-func legacyRouteKeys(t *testing.T) []string {
+func legacyRouteKeys(t *testing.T, s *Server) []string {
 	t.Helper()
-	s := newRouteStubServer(t)
 
 	var allKeys []string
 	for _, r := range s.app.GetRoutes(true) {
@@ -50,7 +49,7 @@ func legacyRouteKeys(t *testing.T) []string {
 		}
 		allKeys = append(allKeys, r.Method+" "+normalizeRoutePath(r.Path))
 	}
-	return budgetedLegacyKeys(allKeys, registryRouteKeySet(endpoints.Endpoints()))
+	return budgetedLegacyKeys(allKeys, registryRouteKeySet(s.registry.Endpoints()))
 }
 
 // budgetedLegacyKeys is the pure comparison legacyRouteKeys drives against
@@ -240,8 +239,9 @@ func TestBudgetedLegacyKeys_MigratedRouteLeavesTheSetCleanly(t *testing.T) {
 // guard: every declared registry endpoint against every route a legacy
 // block in router.go still registers.
 func TestGuard_RegistryDoesNotConflictWithLegacyRoutes(t *testing.T) {
-	legacy := legacyRouteKeys(t)
-	for _, msg := range registryLegacyRouteConflicts(endpoints.Endpoints(), legacy) {
+	s := newRouteStubServer(t)
+	legacy := legacyRouteKeys(t, s)
+	for _, msg := range registryLegacyRouteConflicts(s.registry.Endpoints(), legacy) {
 		t.Error(msg)
 	}
 }

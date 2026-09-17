@@ -124,12 +124,24 @@ func NewRegistry() *Registry {
 	return &Registry{seen: make(map[string]struct{})}
 }
 
-// endpoints is the registry setupRoutes mounts.
-var endpoints = NewRegistry()
-
-// Register declares an endpoint on the package-level registry. It panics
-// on a malformed declaration — see (*Registry).Register.
-func Register(e Endpoint) { endpoints.Register(e) }
+// There is deliberately NO package-level registry, and this note is here
+// because the obvious shape — a global populated from init() the way
+// PVE's register_method is — cannot work in this codebase and would fail
+// in a way that is easy to miss.
+//
+// An Endpoint's Handler is a bound method value: s.vmHandler.AttachDisk,
+// carrying the queries, the encryption key and the event publisher that
+// handler was built with. Those exist only once a Server does, so a
+// registry populated at package init could only ever hold handlers bound
+// to nothing. Declaring endpoints per Server (see buildRegistry) is what
+// makes the binding honest — and it also removes the alternative's
+// quieter hazard, where a second Server in the same process mounts the
+// first one's handlers because the global was already populated.
+//
+// The guards read the Server's registry (Server.registry, set by
+// setupRoutes) for the same reason: a declaration nobody built is a
+// declaration no guard can check, and a guard reading an empty global
+// passes vacuously.
 
 // Register declares an endpoint. It PANICS rather than returning an
 // error, and that is the load-bearing decision of this whole file.

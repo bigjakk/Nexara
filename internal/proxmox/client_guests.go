@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -334,6 +335,83 @@ func (c *Client) MoveCTVolume(ctx context.Context, node string, vmid int, params
 	}
 	return upid, nil
 }
+
+// DiskBuses are the VM disk buses Proxmox exposes, in the order the UI
+// offers them.
+var DiskBuses = []string{"scsi", "sata", "virtio", "ide"}
+
+// maxDiskIndex is the highest slot index each bus has, i.e. the
+// controller's slot count minus one.
+var maxDiskIndex = map[string]int{
+	"ide":    3,
+	"sata":   5,
+	"virtio": 15,
+	"scsi":   30,
+}
+
+// MaxDiskIndex reports the highest index Proxmox accepts on bus, and
+// whether bus is a disk bus at all.
+//
+// It is exported because the API layer picks a free slot before calling
+// AttachDisk and has to agree with this package about where each bus ends
+// — two copies of "scsi goes up to 30" is one copy too many.
+func MaxDiskIndex(bus string) (int, bool) {
+	limit, ok := maxDiskIndex[bus]
+	return limit, ok
+}
+
+// bareGiBRe matches the only spelling of a size Proxmox's "storage:N"
+// allocation form accepts: a bare integer count of gibibytes.
+var bareGiBRe = regexp.MustCompile(`^[1-9]\d*$`)
+
+// Validate rejects every DiskAttachParams that would produce a volume
+// spec other than the one the caller meant.
+//
+// It lives HERE, at the choke point, rather than in the handler that
+// happens to call AttachDisk today: a validator placed in one caller is a
+// validator the next caller silently skips. The handler still makes the
+// decisions this layer cannot — which slot is free, whether the target
+// slot already holds the boot disk, whether the pool is big enough —
+// because none of those are answerable from the parameters alone.
+//
+// The shape checks matter because Size, Storage and Format are
+// concatenated into "storage:size[,format=fmt]", where a stray ":" or ","
+// does not fail: it re-parses into a DIFFERENT, valid spec. "20G" is the
+// one this package documented for years, and PVE answers it with a parse
+// error; a value meant as megabytes is worse, because PVE accepts it and
+// allocates gigabytes.
+func (p DiskAttachParams) Validate() error {
+	maxIndex, known := MaxDiskIndex(p.Bus)
+	if !known {
+		return fmt.Errorf("%w: bus must be one of: %s", ErrInvalidInput, strings.Join(DiskBuses, ", "))
+	}
+	if p.Index < 0 || p.Index > maxIndex {
+		return fmt.Errorf("%w: %s index must be between 0 and %d", ErrInvalidInput, p.Bus, maxIndex)
+	}
+	if p.Storage == "" {
+		return fmt.Errorf("%w: storage is required", ErrInvalidInput)
+	}
+	if strings.ContainsAny(p.Storage, ":,=") {
+		return fmt.Errorf("%w: storage %q contains a character that would restructure the volume spec", ErrInvalidInput, p.Storage)
+	}
+	if !bareGiBRe.MatchString(p.Size) {
+		return fmt.Errorf("%w: size must be a bare count of gibibytes such as \"20\", not %q", ErrInvalidInput, p.Size)
+	}
+	if !ValidImageFormat(p.Format) {
+		return fmt.Errorf("%w: format must be one of: %s", ErrInvalidInput, strings.Join(ImageFormats, ", "))
+	}
+	if p.Digest == "" {
+		return fmt.Errorf("%w: digest is required — pass the digest from the GET /config that chose this slot, "+
+			"so Proxmox refuses the write if the configuration changed underneath it", ErrInvalidInput)
+	}
+	return nil
+}
+
+// DiskKey is the VM config key this attach writes, e.g. "scsi1".
+func (p DiskAttachParams) DiskKey() string {
+	return p.Bus + strconv.Itoa(p.Index)
+}
+
 func (c *Client) AttachDisk(ctx context.Context, node string, vmid int, params DiskAttachParams) error {
 	if err := validateNodeName(node); err != nil {
 		return err
@@ -341,19 +419,24 @@ func (c *Client) AttachDisk(ctx context.Context, node string, vmid int, params D
 	if err := validateVMID(vmid); err != nil {
 		return err
 	}
-	if params.Bus == "" || params.Storage == "" || params.Size == "" {
-		return fmt.Errorf("bus, storage, and size are required")
+	if err := params.Validate(); err != nil {
+		return err
 	}
 
-	// Build the volume spec: "storage:size[,format=fmt]"
+	// Build the volume spec: "storage:size[,format=fmt]", where size is a
+	// bare GiB count — see DiskAttachParams.Size.
 	volume := params.Storage + ":" + params.Size
 	if params.Format != "" {
 		volume += ",format=" + params.Format
 	}
 
-	diskKey := params.Bus + strconv.Itoa(params.Index)
+	// "digest" is not a config key: PVE reads it off the config PUT as the
+	// compare-and-swap token for the whole file, and answers 400 if the
+	// configuration has changed since it was read. See
+	// DiskAttachParams.Digest for what that prevents.
 	fields := map[string]string{
-		diskKey: volume,
+		params.DiskKey(): volume,
+		"digest":         params.Digest,
 	}
 
 	return c.SetVMConfig(ctx, node, vmid, fields)

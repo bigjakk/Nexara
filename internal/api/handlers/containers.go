@@ -43,6 +43,16 @@ type ctActionRequest struct {
 	Action string `json:"action"`
 }
 
+// snapshotRequest is the container snapshot body. It used to be shared
+// with the VM snapshot handler; that one now takes its parameters from
+// the endpoint's declared schema, so this is the only remaining user and
+// it lives here until the container routes are migrated too.
+type snapshotRequest struct {
+	SnapName    string `json:"snap_name"`
+	Description string `json:"description"`
+	VMState     bool   `json:"vmstate"`
+}
+
 type ctCloneRequest struct {
 	NewID   int    `json:"new_id"`
 	Name    string `json:"name"`
@@ -107,6 +117,17 @@ func (h *ContainerHandler) GetContainer(c fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusNotFound, "Container not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get container")
+	}
+	// A container id says nothing about which cluster it is in, while the
+	// permission above authorized the cluster in the PATH — so without
+	// this, a caller holding view:container on one cluster reads another
+	// cluster's inventory row by pairing its own cluster id with a foreign
+	// container id. resolveCT makes the same check for every handler that
+	// goes through it; this one looks the row up directly.
+	if ct.ClusterID != clusterID {
+		// 404 rather than 403: whether a container exists in a cluster the
+		// caller cannot see is not theirs to learn.
+		return fiber.NewError(fiber.StatusNotFound, "Container not found in this cluster")
 	}
 
 	return c.JSON(toVMResponse(ct))
