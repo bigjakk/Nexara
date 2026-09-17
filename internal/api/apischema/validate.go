@@ -28,8 +28,33 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string { return e.Field + ": " + e.Message }
 
+// maxFieldRunes caps the parameter name a ValidationError echoes back.
+//
+// Field is usually one of the schema's own names, which are a handful of
+// characters — but the unknown-parameter rejection puts the CALLER's key
+// there, and that key's size is bounded only by the request body limit.
+// Echoing a multi-megabyte key back would allocate and JSON-encode it for
+// whoever sent it, which on a public endpoint is an unauthenticated
+// amplification. No real parameter comes close to this, so the cap never
+// touches a name anyone meant to write.
+const maxFieldRunes = 64
+
 func newErr(field, message string) *ValidationError {
-	return &ValidationError{Field: field, Message: message}
+	return &ValidationError{Field: truncateField(field), Message: message}
+}
+
+// truncateField cuts field to maxFieldRunes without materializing it as
+// a []rune — the whole point is not to allocate a second copy of
+// something that may be megabytes long.
+func truncateField(field string) string {
+	n := 0
+	for i := range field {
+		if n == maxFieldRunes {
+			return field[:i] + "…"
+		}
+		n++
+	}
+	return field
 }
 
 // regexCache keeps compiled patterns keyed by their source, so a pattern

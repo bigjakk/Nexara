@@ -1,6 +1,13 @@
 package api
 
 func (s *Server) setupRoutes() {
+	// Declaratively registered endpoints first. They and the legacy
+	// blocks below coexist — a route belongs to exactly one — and the
+	// registry is mounted ahead of them because Fiber matches in
+	// registration order: a migrated literal path would otherwise be
+	// shadowed by whichever legacy :param route still matches it.
+	mountRegistry(s.app, endpoints, s.authRequired())
+
 	// Health probe — not rate-limited, not behind /api/v1.
 	s.app.Get("/healthz", s.handleHealthz)
 

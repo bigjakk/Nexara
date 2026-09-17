@@ -7,6 +7,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // wantValidationError asserts that err is a *ValidationError naming field
@@ -615,4 +616,51 @@ func TestCoerceGoNativeNumericTypes(t *testing.T) {
 			t.Errorf("Strings = %q, want \"true,false\"", got)
 		}
 	})
+}
+
+// TestValidationErrorFieldIsBounded covers the one place a *caller*
+// chooses what lands in ValidationError.Field: the unknown-parameter
+// rejection echoes the key they sent. Its size is bounded only by the
+// HTTP body limit, so without a cap the API allocates and JSON-encodes a
+// multi-megabyte key back to whoever sent it — on a public endpoint,
+// unauthenticated amplification.
+//
+// The cap must never touch a real parameter name, so the second half
+// pins that a name at the limit comes back whole.
+func TestValidationErrorFieldIsBounded(t *testing.T) {
+	huge := strings.Repeat("a", 1<<20)
+	props := Properties{"v": {Type: String, Optional: true}}
+
+	_, err := props.Validate(map[string]any{huge: "x"})
+	var ve *ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("error %v is %T, want *ValidationError", err, err)
+	}
+	if n := utf8.RuneCountInString(ve.Field); n > maxFieldRunes+1 {
+		t.Errorf("Field is %d runes, want it truncated to %d plus an ellipsis", n, maxFieldRunes)
+	}
+	if !strings.HasPrefix(ve.Field, "aaa") || !strings.HasSuffix(ve.Field, "…") {
+		t.Errorf("Field = %q, want the caller's key truncated with an ellipsis", ve.Field)
+	}
+
+	// A name exactly at the cap is not a caller attack; it survives whole.
+	atCap := strings.Repeat("b", maxFieldRunes)
+	_, err = props.Validate(map[string]any{atCap: "x"})
+	if !errors.As(err, &ve) {
+		t.Fatalf("error %v is %T, want *ValidationError", err, err)
+	}
+	if ve.Field != atCap {
+		t.Errorf("Field = %q, want the %d-rune name unchanged", ve.Field, maxFieldRunes)
+	}
+
+	// Truncation counts RUNES, not bytes, so a multi-byte name is never
+	// cut mid-character.
+	wide := strings.Repeat("é", maxFieldRunes*2)
+	_, err = props.Validate(map[string]any{wide: "x"})
+	if !errors.As(err, &ve) {
+		t.Fatalf("error %v is %T, want *ValidationError", err, err)
+	}
+	if !utf8.ValidString(ve.Field) {
+		t.Errorf("Field = %q is not valid UTF-8 — truncation cut a character in half", ve.Field)
+	}
 }
