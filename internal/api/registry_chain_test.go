@@ -448,6 +448,22 @@ func TestSetupRoutesMountsTheRegistry(t *testing.T) {
 // TestPackageRegistryIsStillEmpty is the Phase 4 tripwire. Nothing is
 // migrated yet, so mounting the registry must change the route table not
 // at all — which is what makes migrating one route at a time safe.
+//
+// Phase 3 added the guards that supersede pieces of this test once Phase 4
+// starts registering endpoints: registryEnforcementGaps,
+// registryPublicRouteKeys and registrySelfServiceRouteKeys
+// (registry_rbac_guard_test.go) take over permission-coverage checking, and
+// registryLegacyRouteConflicts (registry_shadow_guard_test.go) is a strict
+// superset of the exact-duplicate check below — it reports the identical
+// case as a "duplicates" finding AND catches a registry :param route that
+// captures a legacy route under a DIFFERENT literal path, which two equal
+// "METHOD path" strings can never do. It does this on purpose rather than
+// deferring to the check below: that check stops running — and needs
+// deleting or rewriting — the moment Phase 4 registers anything at all,
+// while registryLegacyRouteConflicts does not expire. legacyRouteRatchetViolations
+// (legacy_route_ratchet_test.go) tracks which routes remain legacy at all.
+// This test still guards the one thing none of those do: that the registry
+// is empty, which is the precondition Phase 4 removes.
 func TestPackageRegistryIsStillEmpty(t *testing.T) {
 	if endpoints.Len() != 0 {
 		t.Fatalf("the package-level registry holds %d endpoint(s); this test assumes it is still empty "+

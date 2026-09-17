@@ -501,6 +501,7 @@ func TestGuard_EveryRouteEnforcesPermission(t *testing.T) {
 	graph := buildCallGraph(t)
 
 	public := publicRouteKeys(t)
+	registryKeys := registryRouteKeySet(endpoints.Endpoints())
 
 	var unguarded []string
 	for _, r := range s.app.GetRoutes(true) {
@@ -517,6 +518,11 @@ func TestGuard_EveryRouteEnforcesPermission(t *testing.T) {
 		if _, ok := instanceSharedRoutes[key]; ok {
 			continue
 		}
+		if registryKeys[key] {
+			continue // registry route: its terminal handler is api.Endpoint.serve, not a
+			// handlers-package function, so it is checked from the DECLARATION instead —
+			// see registryEnforcementGaps below.
+		}
 
 		handlerKey := routeHandlerKey(r.Handlers[len(r.Handlers)-1])
 		if handlerKey == "" {
@@ -527,14 +533,23 @@ func TestGuard_EveryRouteEnforcesPermission(t *testing.T) {
 		}
 	}
 
+	// Registry routes install no middleware for four of their six
+	// Permissions shapes (Deferred, Advisory, Public, SelfService), so
+	// nothing above the loop ever routes them through routeHandlerKey —
+	// they need the declaration-based check instead. See
+	// registry_rbac_guard_test.go.
+	unguarded = append(unguarded, registryEnforcementGaps(endpoints.Endpoints(), graph)...)
+
 	sort.Strings(unguarded)
 	for _, u := range unguarded {
 		t.Errorf("authenticated route performs no RBAC check: %s", u)
 	}
 	if len(unguarded) > 0 {
-		t.Logf("%d unguarded route(s). Add a require*Perm call to the handler, or — "+
-			"only if the route acts solely on the caller's own identity taken from the "+
-			"session — list it in selfServiceRoutes with a reason.", len(unguarded))
+		t.Logf("%d unguarded route(s). For a legacy route (key → handlers.X): add a require*Perm "+
+			"call to the handler, or — only if it acts solely on the caller's own identity taken "+
+			"from the session — list it in selfServiceRoutes with a reason. For a registry route "+
+			"(METHOD path: ...): fix its Permissions declaration in the registry (see "+
+			"registryEnforcementGaps in registry_rbac_guard_test.go).", len(unguarded))
 	}
 }
 
@@ -558,6 +573,15 @@ func TestGuard_PublicRoutesAreExpected(t *testing.T) {
 	for key := range publicRouteKeys(t) {
 		// Only routes that actually registered — router.go gates several
 		// blocks on a handler being non-nil.
+		if registered[key] {
+			actual[key] = true
+		}
+	}
+	// mountRegistry's single bare call is invisible to publicRouteKeys'
+	// source-level parse of router.go, so a registry endpoint declaring
+	// Permissions{Public: "..."} needs its own way into `actual` — see
+	// registryPublicRouteKeys.
+	for key := range registryPublicRouteKeys(endpoints.Endpoints()) {
 		if registered[key] {
 			actual[key] = true
 		}
@@ -628,6 +652,7 @@ func TestGuard_DocumentedPermissionMatchesEnforcement(t *testing.T) {
 
 	graph := buildCallGraph(t)
 	meta := handlers.EndpointMetaPermissions()
+	registryByKey := registryEndpointsByKey(endpoints.Endpoints())
 
 	for _, r := range s.app.GetRoutes(true) {
 		if r.Method == "USE" || len(r.Handlers) == 0 {
@@ -645,32 +670,33 @@ func TestGuard_DocumentedPermissionMatchesEnforcement(t *testing.T) {
 			continue
 		}
 
-		handlerKey := routeHandlerKey(r.Handlers[len(r.Handlers)-1])
-		if handlerKey == "" {
-			continue
-		}
-		enforced := graph.literalActionsFor(handlerKey)
-		if len(enforced) == 0 {
-			continue // fully dynamic action; cannot verify statically
-		}
-
-		// The declared permission may offer alternatives ("view:vm|view:node").
-		// At least one declared action must be among those enforced.
-		matched := false
-		for _, alt := range strings.Split(declared, "|") {
-			action, _, found := strings.Cut(strings.TrimSpace(alt), ":")
-			if !found {
+		// GetDocs (internal/api/handlers/api_docs.go) overlays endpointMeta
+		// onto EVERY /api/v1/ route it serves, registry ones included — it
+		// never reads Permissions.Describe — so a registry route's curated
+		// entry can drift from what it actually enforces exactly the way a
+		// legacy one can (the console-token incident this test's own doc
+		// comment names). The two paths differ only in how "what it
+		// enforces" is discovered: exactly, from the declaration itself,
+		// rather than approximated from a call graph.
+		var enforced map[string]bool
+		var handlerDescription string
+		if e, isRegistry := registryByKey[key]; isRegistry {
+			enforced = registryEnforcedActions(e.Permissions)
+			handlerDescription = "registry endpoint (" + e.Permissions.Describe() + ")"
+		} else {
+			handlerKey := routeHandlerKey(r.Handlers[len(r.Handlers)-1])
+			if handlerKey == "" {
 				continue
 			}
-			if enforced[action] {
-				matched = true
-				break
-			}
+			enforced = graph.literalActionsFor(handlerKey)
+			handlerDescription = "handlers." + handlerKey
 		}
-		if !matched {
-			t.Errorf("%s: API docs promise permission %q but handlers.%s gates on action(s) %v — "+
-				"update endpointMeta in internal/api/handlers/api_docs.go to match the code",
-				key, declared, handlerKey, sortedKeys(enforced))
+		if len(enforced) == 0 {
+			continue // fully dynamic action, or a shape with no static action (Deferred/Advisory/Public/SelfService); cannot verify statically
+		}
+
+		if msg := documentedPermissionViolation(key, declared, handlerDescription, enforced); msg != "" {
+			t.Error(msg)
 		}
 	}
 }
