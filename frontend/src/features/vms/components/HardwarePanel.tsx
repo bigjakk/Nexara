@@ -13,6 +13,7 @@ import {
   Network,
   Disc,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1566,12 +1567,12 @@ export function HardwarePanel({
                         ? "here"
                         : "elsewhere";
                 return (
-                  <div
-                    key={flag.name}
-                    className="flex items-start justify-between gap-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
+                  <div key={flag.name} className="space-y-0.5">
+                    {/* Name and control share one row; the description spans
+                        the full width beneath, so a long one does not squeeze
+                        the name into a one-word-per-line column. */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                         <code className="text-xs">{flag.name}</code>
                         {support === "elsewhere" && (
                           <span
@@ -1590,35 +1591,37 @@ export function HardwarePanel({
                           </span>
                         )}
                       </div>
-                      {flag.description && (
-                        <p className="text-[10px] leading-snug text-muted-foreground">
-                          {flag.description}
-                        </p>
-                      )}
+                      <select
+                        // cn(), not concatenation: compactSelect carries
+                        // w-full, and only tailwind-merge lets w-24 win.
+                        className={cn(compactSelect, "w-24 shrink-0")}
+                        value={state}
+                        aria-label={`${flag.name} CPU flag`}
+                        onChange={(e) => {
+                          const v = e.target.value as CPUFlagState;
+                          setCpuFlagStates((prev) => {
+                            // Rebuilt by filter rather than delete: "default"
+                            // means absent from flags=, not a stored value.
+                            const next = Object.fromEntries(
+                              Object.entries(prev).filter(
+                                ([name]) => name !== flag.name,
+                              ),
+                            );
+                            if (v !== "default") next[flag.name] = v;
+                            return next;
+                          });
+                        }}
+                      >
+                        <option value="default">Default</option>
+                        <option value="on">On</option>
+                        <option value="off">Off</option>
+                      </select>
                     </div>
-                    <select
-                      className={compactSelect + " w-24 shrink-0"}
-                      value={state}
-                      aria-label={`${flag.name} CPU flag`}
-                      onChange={(e) => {
-                        const v = e.target.value as CPUFlagState;
-                        setCpuFlagStates((prev) => {
-                          // Rebuilt by filter rather than delete: "default"
-                          // means absent from flags=, not a stored value.
-                          const next = Object.fromEntries(
-                            Object.entries(prev).filter(
-                              ([name]) => name !== flag.name,
-                            ),
-                          );
-                          if (v !== "default") next[flag.name] = v;
-                          return next;
-                        });
-                      }}
-                    >
-                      <option value="default">Default</option>
-                      <option value="on">On</option>
-                      <option value="off">Off</option>
-                    </select>
+                    {flag.description && (
+                      <p className="text-[10px] leading-snug text-muted-foreground">
+                        {flag.description}
+                      </p>
+                    )}
                   </div>
                 );
               })}
