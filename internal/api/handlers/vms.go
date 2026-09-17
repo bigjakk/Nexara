@@ -1725,6 +1725,62 @@ func (h *VMHandler) ListCPUModels(c fiber.Ctx) error {
 	return RespondItems(c, result)
 }
 
+// --- CPU flags ---
+
+type cpuFlagResponse struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Pointer so the three outcomes stay distinct: a node list, an empty list
+	// (Proxmox checked and no node supports the flag), and null (Proxmox did
+	// not report support at all). Collapsing the last two would let the UI
+	// claim a flag is unsupported everywhere when it simply does not know.
+	SupportedOn *[]string `json:"supported_on"`
+}
+
+// ListCPUFlags handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/cpu-flags.
+func (h *VMHandler) ListCPUFlags(c fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
+		return err
+	}
+
+	nodeName := c.Params("node_name")
+	if nodeName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	flags, err := pxClient.GetCPUFlags(c.Context(), nodeName)
+	if err != nil {
+		// Graceful fallback, matching ListCPUModels: Proxmox versions without
+		// the capabilities/qemu/cpu-flags endpoint answer 501. Return an empty
+		// list so the frontend falls back to its built-in flag list.
+		var apiErr *proxmox.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 501 {
+			return RespondItems(c, []cpuFlagResponse{})
+		}
+		return mapProxmoxError(err)
+	}
+
+	result := make([]cpuFlagResponse, 0, len(flags))
+	for _, f := range flags {
+		result = append(result, cpuFlagResponse{
+			Name:        f.Name,
+			Description: f.Description,
+			SupportedOn: f.SupportedOn,
+		})
+	}
+
+	return RespondItems(c, result)
+}
+
 // --- Resource pools ---
 
 type resourcePoolResponse struct {

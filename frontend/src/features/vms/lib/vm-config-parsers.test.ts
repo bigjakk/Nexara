@@ -11,6 +11,8 @@ import {
   parseBootOrder,
   buildBootOrder,
   parseDisk,
+  parseCPU,
+  buildCPU,
 } from "./vm-config-parsers";
 
 describe("parseKVString / buildKVString", () => {
@@ -242,5 +244,77 @@ describe("parseDisk", () => {
     const d = parseDisk("none,media=cdrom");
     expect(d.volume).toBe("none");
     expect(d.storage).toBe("");
+  });
+});
+
+describe("parseCPU / buildCPU", () => {
+  it("parses a bare model", () => {
+    const c = parseCPU("host");
+    expect(c.model).toBe("host");
+    expect(c.flags).toEqual({});
+    expect(c.extra.size).toBe(0);
+  });
+
+  it("parses the cputype= form to the same shape as the bare form", () => {
+    expect(parseCPU("cputype=host").model).toBe("host");
+  });
+
+  it("parses +/- flags", () => {
+    const c = parseCPU("host,flags=+nested-virt;-pcid;+aes");
+    expect(c.flags).toEqual({ "nested-virt": "on", pcid: "off", aes: "on" });
+  });
+
+  it("keeps options it has no UI for", () => {
+    const c = parseCPU("host,flags=+aes,hidden=1,phys-bits=host");
+    expect(c.extra.get("hidden")).toBe("1");
+    expect(c.extra.get("phys-bits")).toBe("host");
+  });
+
+  it("treats an empty field as no model", () => {
+    expect(parseCPU("").model).toBe("");
+    expect(buildCPU(parseCPU(""))).toBe("");
+  });
+
+  it("round-trips a model with flags and extras without dropping either", () => {
+    const raw = "host,flags=+aes;+nested-virt,hidden=1";
+    expect(buildCPU(parseCPU(raw))).toBe(raw);
+  });
+
+  it("emits flags in a stable order so an untouched config is not dirty", () => {
+    const a = buildCPU(parseCPU("host,flags=+nested-virt;+aes"));
+    const b = buildCPU(parseCPU("host,flags=+aes;+nested-virt"));
+    expect(a).toBe(b);
+  });
+
+  it("changing the model preserves the flags (the drop bug)", () => {
+    const c = parseCPU("x86-64-v2-AES,flags=+nested-virt");
+    c.model = "host";
+    expect(buildCPU(c)).toBe("host,flags=+nested-virt");
+  });
+
+  it("a VM with no cpu line normalises the same on both sides of a diff", () => {
+    // Regression: the panel defaulted the model when loading but not when
+    // building the comparison baseline, so every VM without a `cpu:` line
+    // looked dirty at mount and any save rewrote its CPU model — Proxmox's
+    // real default for an absent cpu is kvm64, not this placeholder.
+    const DEFAULT = "x86-64-v2-AES";
+    const normalize = (raw: string) => {
+      const p = parseCPU(raw);
+      return buildCPU({ ...p, model: p.model || DEFAULT });
+    };
+    const loaded = parseCPU("");
+    const asDisplayed = buildCPU({
+      model: loaded.model || DEFAULT,
+      flags: loaded.flags,
+      extra: loaded.extra,
+    });
+    expect(normalize("")).toBe(asDisplayed);
+    expect(normalize(DEFAULT)).toBe(asDisplayed);
+  });
+
+  it("drops the flags= segment entirely when no flag is set", () => {
+    const c = parseCPU("host,flags=+aes");
+    c.flags = {};
+    expect(buildCPU(c)).toBe("host");
   });
 });

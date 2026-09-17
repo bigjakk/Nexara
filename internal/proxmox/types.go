@@ -652,6 +652,17 @@ type CPUModel struct {
 	Custom int    `json:"custom"` // Proxmox uses 0/1 integer booleans
 }
 
+// CPUFlag represents a VM-specific CPU flag from
+// GET /nodes/{node}/capabilities/qemu/cpu-flags.
+type CPUFlag struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// SupportedOn lists the cluster nodes on which the flag is available with
+	// the queried acceleration type. An empty list means Proxmox checked and no
+	// node supports it; nil means Proxmox did not report the field at all.
+	SupportedOn *[]string `json:"supported-on,omitempty"`
+}
+
 // ResourcePool represents a resource pool from GET /pools.
 type ResourcePool struct {
 	PoolID  string `json:"poolid"`

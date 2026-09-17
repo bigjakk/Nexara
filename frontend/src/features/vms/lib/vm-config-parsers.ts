@@ -630,3 +630,76 @@ export function buildNet(parsed: ParsedNet & { linkDown: boolean }): string {
   if (parsed.linkDown) s += ",link_down=1";
   return s;
 }
+
+// ---------------------------------------------------------------------------
+// cpu
+// ---------------------------------------------------------------------------
+
+/** Flag state in a Proxmox `flags=` list: forced on, forced off, or unset. */
+export type CPUFlagState = "default" | "on" | "off";
+
+export interface ParsedCPU {
+  /** Bare CPU model, e.g. "host" or "x86-64-v2-AES". */
+  model: string;
+  /** Only flags explicitly present as +flag / -flag. */
+  flags: Record<string, Exclude<CPUFlagState, "default">>;
+  /**
+   * Every other key=value segment (hidden, hv-vendor-id, phys-bits,
+   * guest-phys-bits, level, reported-model), preserved verbatim so a
+   * round-trip through the editor cannot drop options it has no UI for.
+   */
+  extra: Map<string, string>;
+}
+
+/**
+ * Parse the `cpu` field. Proxmox accepts the model either bare or as
+ * `cputype=`:
+ *   "host"
+ *   "cputype=host,flags=+nested-virt;-pcid"
+ *   "x86-64-v2-AES,flags=+aes,hidden=1"
+ *
+ * The model is normalised to its bare form; `buildCPU` emits it the same way.
+ */
+export function parseCPU(raw: string): ParsedCPU {
+  const parsed: ParsedCPU = { model: "", flags: {}, extra: new Map() };
+  if (!raw.trim()) return parsed;
+
+  for (const segment of raw.split(",")) {
+    const seg = segment.trim();
+    if (!seg) continue;
+    const idx = seg.indexOf("=");
+    if (idx === -1) {
+      // Bare segment — the model in its short form.
+      parsed.model = seg;
+      continue;
+    }
+    const key = seg.slice(0, idx).trim();
+    const value = seg.slice(idx + 1).trim();
+    if (key === "cputype") {
+      parsed.model = value;
+    } else if (key === "flags") {
+      for (const flag of value.split(";")) {
+        const f = flag.trim();
+        if (f.startsWith("+")) parsed.flags[f.slice(1)] = "on";
+        else if (f.startsWith("-")) parsed.flags[f.slice(1)] = "off";
+      }
+    } else {
+      parsed.extra.set(key, value);
+    }
+  }
+  return parsed;
+}
+
+export function buildCPU(parsed: ParsedCPU): string {
+  if (!parsed.model) return "";
+  const parts = [parsed.model];
+  // Sorted so an unchanged selection always rebuilds to the same string and
+  // does not register as a pending change.
+  const flagNames = Object.keys(parsed.flags).sort();
+  const flags = flagNames.map(
+    (n) => (parsed.flags[n] === "on" ? "+" : "-") + n,
+  );
+  if (flags.length > 0) parts.push(`flags=${flags.join(";")}`);
+  for (const [k, v] of parsed.extra) parts.push(`${k}=${v}`);
+  return parts.join(",");
+}

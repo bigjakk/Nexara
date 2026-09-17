@@ -103,6 +103,77 @@ export const cpuTypes = [
   "486",
 ] as const;
 
+/**
+ * Fallback list of VM-specific CPU flags, used only when a cluster's Proxmox
+ * is too old to serve /nodes/{node}/capabilities/qemu/cpu-flags (it answers
+ * 501 and the handler returns an empty list). Mirrors the curated set in
+ * PVE's QemuServer/CPUFlags.pm; the live endpoint is authoritative and also
+ * reports per-node support, which this list cannot.
+ */
+export const cpuFlags: { name: string; description: string }[] = [
+  {
+    name: "nested-virt",
+    description:
+      "Controls nested virtualization — 'svm' on AMD CPUs, 'vmx' on Intel. Use a CPU model similar to the host, with the same vendor, not x86-64-vX.",
+  },
+  {
+    name: "aes",
+    description: "Activate AES instruction set for HW acceleration.",
+  },
+  {
+    name: "amd-no-ssb",
+    description:
+      "Notifies guest OS that host is not vulnerable for Spectre on AMD CPUs.",
+  },
+  {
+    name: "amd-ssbd",
+    description:
+      "Improves Spectre mitigation performance with AMD CPUs, best used with 'virt-ssbd'.",
+  },
+  {
+    name: "hv-evmcs",
+    description:
+      "Improve performance for nested virtualization. Only supported on Intel CPUs.",
+  },
+  {
+    name: "hv-tlbflush",
+    description:
+      "Improve performance in overcommitted Windows guests. May lead to guest bluescreens on old CPUs.",
+  },
+  {
+    name: "ibpb",
+    description: "Allows improved Spectre mitigation with AMD CPUs.",
+  },
+  {
+    name: "md-clear",
+    description:
+      "Required to let the guest OS know if MDS is mitigated correctly.",
+  },
+  {
+    name: "pcid",
+    description:
+      "Meltdown fix cost reduction on Westmere, Sandy-, and IvyBridge Intel CPUs.",
+  },
+  {
+    name: "pdpe1gb",
+    description:
+      "Allow guest OS to use 1GB size pages, if host HW supports it.",
+  },
+  {
+    name: "spec-ctrl",
+    description: "Allows improved Spectre mitigation with Intel CPUs.",
+  },
+  {
+    name: "ssbd",
+    description: "Protection for 'Speculative Store Bypass' for Intel models.",
+  },
+  {
+    name: "virt-ssbd",
+    description:
+      "Basis for 'Speculative Store Bypass' protection for AMD models.",
+  },
+];
+
 export const scsiControllers = [
   { value: "virtio-scsi-pci", label: "VirtIO SCSI" },
   { value: "virtio-scsi-single", label: "VirtIO SCSI Single" },

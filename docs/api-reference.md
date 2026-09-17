@@ -418,6 +418,7 @@ leaves provenance intact.
 | GET | `/clusters/:id/nodes/:node/hardware/pci` | List PCI devices |
 | GET | `/clusters/:id/nodes/:node/machine-types` | List available machine types |
 | GET | `/clusters/:id/nodes/:node/cpu-models` | List available CPU models |
+| GET | `/clusters/:id/nodes/:node/cpu-flags` | List available VM CPU flags, with the nodes supporting each |
 | GET | `/clusters/:id/nodes/:node/isos` | List ISO images |
 | GET | `/clusters/:id/nodes/:node/packages` | Preview available package updates |
 | GET | `/clusters/:id/nodes/:node_id/disks` | List node disks (model, size, health, wearout) |

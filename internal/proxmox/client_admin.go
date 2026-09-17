@@ -17,6 +17,21 @@ func (c *Client) GetCPUModels(ctx context.Context, node string) ([]CPUModel, err
 	}
 	return models, nil
 }
+
+// GetCPUFlags returns the VM-specific CPU flags Proxmox understands, together
+// with the nodes each one is usable on. Requires PVE with the
+// capabilities/qemu/cpu-flags endpoint; older versions answer 501.
+func (c *Client) GetCPUFlags(ctx context.Context, node string) ([]CPUFlag, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var flags []CPUFlag
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/capabilities/qemu/cpu-flags", &flags); err != nil {
+		return nil, fmt.Errorf("get CPU flags on %s: %w", node, err)
+	}
+	return flags, nil
+}
+
 func (c *Client) GetResourcePools(ctx context.Context) ([]ResourcePool, error) {
 	var pools []ResourcePool
 	if err := c.do(ctx, "/pools", &pools); err != nil {

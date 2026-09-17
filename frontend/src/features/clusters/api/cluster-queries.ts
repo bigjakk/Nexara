@@ -89,6 +89,28 @@ export function useCPUModels(clusterId: string, nodeName: string) {
   });
 }
 
+export interface CPUFlagResponse {
+  name: string;
+  description?: string;
+  /**
+   * Cluster nodes on which the flag is usable. An empty array means Proxmox
+   * checked and no node supports it; null means Proxmox did not report it.
+   */
+  supported_on: string[] | null;
+}
+
+export function useCPUFlags(clusterId: string, nodeName: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeName, "cpu-flags"],
+    queryFn: () =>
+      apiClient.list<CPUFlagResponse>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/cpu-flags`,
+      ),
+    enabled: clusterId.length > 0 && nodeName.length > 0,
+    staleTime: 300_000,
+  });
+}
+
 export function useNodeDisks(clusterId: string, nodeId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeId, "disks"],

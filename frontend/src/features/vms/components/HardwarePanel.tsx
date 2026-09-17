@@ -35,6 +35,7 @@ import { MoveDiskDialog } from "@/features/storage/components/DiskActions";
 import { AddDeviceMenu } from "./hardware/AddDeviceMenu";
 import {
   cpuTypes as fallbackCpuTypes,
+  cpuFlags as fallbackCpuFlags,
   scsiControllers,
   netModels,
   vgaTypes,
@@ -47,6 +48,7 @@ import {
 } from "../lib/vm-config-constants";
 import {
   useCPUModels,
+  useCPUFlags,
   useMachineTypes,
 } from "@/features/clusters/api/cluster-queries";
 import {
@@ -69,13 +71,31 @@ import {
   parseVirtioFS,
   parseEFIDisk,
   parseTPMState,
+  parseCPU,
+  buildCPU,
 } from "../lib/vm-config-parsers";
+import type { CPUFlagState } from "../lib/vm-config-parsers";
 import type { VMConfig } from "../types/vm";
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 const DISK_KEY_RE = /^(scsi|ide|sata|virtio|efidisk|tpmstate|unused)\d+$/;
+
+/**
+ * Shown when a VM config carries no `cpu:` line. Proxmox's real default there
+ * is kvm64 (get_default_cpu_type), so this is only a UI placeholder — never
+ * write it back for a VM that never had it. normalizeCPU applies it to both
+ * sides of every comparison so an untouched VM is not dirty and no save
+ * silently upgrades the guest-visible CPU model.
+ */
+const DEFAULT_CPU_TYPE = "x86-64-v2-AES";
+
+/** Canonical form of a raw `cpu` value, with the placeholder model applied. */
+function normalizeCPU(raw: string): string {
+  const parsed = parseCPU(raw);
+  return buildCPU({ ...parsed, model: parsed.model || DEFAULT_CPU_TYPE });
+}
 
 const diskBusTypes = [
   { value: "scsi", label: "SCSI", max: 30 },
@@ -223,6 +243,28 @@ export function HardwarePanel({
       .map((m) => m.name);
   }, [rawCpuModels]);
 
+  // Dynamic CPU flags from Proxmox. Falls back to the built-in list when the
+  // cluster predates the cpu-flags endpoint (handler returns an empty list).
+  const { data: rawCpuFlags } = useCPUFlags(clusterId, nodeName);
+  const cpuFlagList = useMemo(() => {
+    if (!rawCpuFlags || rawCpuFlags.length === 0)
+      // Fallback list: nothing is known about per-node support, which is not
+      // the same as knowing no node supports the flag — hence null.
+      return fallbackCpuFlags.map((f) => ({
+        name: f.name,
+        description: f.description,
+        supportedOn: null as string[] | null,
+      }));
+    // Deliberately not re-sorted. Proxmox hoists nested-virt to the front and
+    // pushes flags no node supports to the back (query_available_cpu_flags);
+    // sorting by name here would throw both signals away.
+    return rawCpuFlags.map((f) => ({
+      name: f.name,
+      description: f.description ?? "",
+      supportedOn: f.supported_on,
+    }));
+  }, [rawCpuFlags]);
+
   // Dynamic machine types from Proxmox
   const { data: rawMachineTypes } = useMachineTypes(clusterId, nodeName);
   const machineTypes = useMemo(() => {
@@ -263,11 +305,36 @@ export function HardwarePanel({
   // --- CPU ---
   const [cores, setCores] = useState("1");
   const [sockets, setSockets] = useState("1");
-  const [cpuType, setCpuType] = useState("x86-64-v2-AES");
+  const [cpuType, setCpuType] = useState(DEFAULT_CPU_TYPE);
+  // Only explicitly-set flags live here; anything absent is Proxmox's default.
+  const [cpuFlagStates, setCpuFlagStates] = useState<
+    Record<string, Exclude<CPUFlagState, "default">>
+  >({});
+  // cpu= options with no UI (hidden, phys-bits, hv-vendor-id, …), carried
+  // through untouched so editing the model or a flag cannot drop them.
+  const [cpuExtra, setCpuExtra] = useState<Map<string, string>>(new Map());
+
+  const setCpuFlagCount = Object.keys(cpuFlagStates).length;
+
+  // A flag the config sets but Proxmox no longer lists still needs a control,
+  // or saving any other CPU change would silently strip it. Derived from the
+  // loaded config rather than current state, so setting such a flag back to
+  // Default does not make its own row disappear mid-edit.
+  const cpuFlagRows = useMemo(() => {
+    const known = new Set(cpuFlagList.map((f) => f.name));
+    const extras = Object.keys(parseCPU(str(original?.["cpu"] ?? "")).flags)
+      .filter((n) => !known.has(n))
+      .sort()
+      .map((name) => ({
+        name,
+        description: "",
+        supportedOn: null as string[] | null,
+      }));
+    return [...cpuFlagList, ...extras];
+  }, [cpuFlagList, original]);
   const [numa, setNuma] = useState(false);
   const [cpulimit, setCpulimit] = useState("");
   const [cpuunits, setCpuunits] = useState("");
-  const [affinity, setAffinity] = useState("");
 
   // --- Memory ---
   const [memory, setMemory] = useState("2048");
@@ -485,11 +552,13 @@ export function HardwarePanel({
     // CPU
     setCores(str(config["cores"] ?? 1));
     setSockets(str(config["sockets"] ?? 1));
-    setCpuType(str(config["cpu"] ?? "x86-64-v2-AES"));
+    const parsedCPU = parseCPU(str(config["cpu"] ?? ""));
+    setCpuType(parsedCPU.model || DEFAULT_CPU_TYPE);
+    setCpuFlagStates(parsedCPU.flags);
+    setCpuExtra(parsedCPU.extra);
     setNuma(bool01(config["numa"]));
     setCpulimit(config["cpulimit"] != null ? str(config["cpulimit"]) : "");
     setCpuunits(config["cpuunits"] != null ? str(config["cpuunits"]) : "");
-    setAffinity(str(config["affinity"] ?? ""));
 
     // Memory
     setMemory(str(config["memory"] ?? 2048));
@@ -743,8 +812,13 @@ export function HardwarePanel({
     // CPU
     if (cores !== str(original["cores"] ?? 1)) fields["cores"] = cores;
     if (sockets !== str(original["sockets"] ?? 1)) fields["sockets"] = sockets;
-    if (cpuType !== str(original["cpu"] ?? "x86-64-v2-AES"))
-      fields["cpu"] = cpuType;
+    const newCPU = buildCPU({
+      model: cpuType,
+      flags: cpuFlagStates,
+      extra: cpuExtra,
+    });
+    if (newCPU !== normalizeCPU(str(original["cpu"] ?? "")))
+      fields["cpu"] = newCPU;
     const origNuma = bool01(original["numa"]);
     if (numa !== origNuma) fields["numa"] = numa ? "1" : "0";
     const origCpulimit =
@@ -757,13 +831,6 @@ export function HardwarePanel({
         fields["cpuunits"] = cpuunits;
       } else {
         deleteFields.push("cpuunits");
-      }
-    }
-    if (affinity !== str(original["affinity"] ?? "")) {
-      if (affinity) {
-        fields["affinity"] = affinity;
-      } else {
-        deleteFields.push("affinity");
       }
     }
 
@@ -1002,7 +1069,11 @@ export function HardwarePanel({
     if (!original) return false;
     if (cores !== str(original["cores"] ?? 1)) return true;
     if (sockets !== str(original["sockets"] ?? 1)) return true;
-    if (cpuType !== str(original["cpu"] ?? "x86-64-v2-AES")) return true;
+    if (
+      buildCPU({ model: cpuType, flags: cpuFlagStates, extra: cpuExtra }) !==
+      normalizeCPU(str(original["cpu"] ?? ""))
+    )
+      return true;
     if (numa !== bool01(original["numa"])) return true;
     if (
       cpulimit !==
@@ -1014,7 +1085,6 @@ export function HardwarePanel({
       (original["cpuunits"] != null ? str(original["cpuunits"]) : "")
     )
       return true;
-    if (affinity !== str(original["affinity"] ?? "")) return true;
     if (memory !== str(original["memory"] ?? 2048)) return true;
     if (
       balloon !== (original["balloon"] != null ? str(original["balloon"]) : "")
@@ -1108,10 +1178,11 @@ export function HardwarePanel({
     cores,
     sockets,
     cpuType,
+    cpuFlagStates,
+    cpuExtra,
     numa,
     cpulimit,
     cpuunits,
-    affinity,
     memory,
     balloon,
     shares,
@@ -1270,17 +1341,6 @@ export function HardwarePanel({
                 className="h-8 text-xs"
               />
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Affinity</Label>
-              <Input
-                value={affinity}
-                onChange={(e) => {
-                  setAffinity(e.target.value);
-                }}
-                placeholder="e.g. 0,5,8-11"
-                className="h-8 text-xs"
-              />
-            </div>
           </div>
           <div className="mt-2 flex items-center gap-4">
             <div className="flex items-center gap-1.5">
@@ -1299,6 +1359,93 @@ export function HardwarePanel({
               vCPUs: {num(cores) * num(sockets)}
             </span>
           </div>
+
+          <details className="mt-3 border-t pt-2">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+              CPU Flags
+              {setCpuFlagCount > 0 && (
+                <Badge
+                  variant="secondary"
+                  className="ml-2 h-4 px-1 text-[10px]"
+                >
+                  {setCpuFlagCount}
+                </Badge>
+              )}
+            </summary>
+            <div className="mt-2 space-y-1.5">
+              {cpuFlagRows.map((flag) => {
+                const state = cpuFlagStates[flag.name] ?? "default";
+                // Three outcomes, not two: null is "Proxmox did not say"
+                // (old cluster or the fallback list), an empty list is
+                // "checked, and no node supports it", and a list without this
+                // node is "supported in the cluster, but not here".
+                const support: "unknown" | "nowhere" | "elsewhere" | "here" =
+                  flag.supportedOn === null
+                    ? "unknown"
+                    : flag.supportedOn.length === 0
+                      ? "nowhere"
+                      : flag.supportedOn.includes(nodeName)
+                        ? "here"
+                        : "elsewhere";
+                return (
+                  <div
+                    key={flag.name}
+                    className="flex items-start justify-between gap-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <code className="text-xs">{flag.name}</code>
+                        {support === "elsewhere" && (
+                          <span
+                            className="text-[10px] text-amber-600 dark:text-amber-500"
+                            title={`Not supported on ${nodeName}. Available on: ${(flag.supportedOn ?? []).join(", ")}`}
+                          >
+                            unsupported here
+                          </span>
+                        )}
+                        {support === "nowhere" && (
+                          <span
+                            className="text-[10px] text-red-600 dark:text-red-500"
+                            title={`No node in this cluster reports supporting ${flag.name}.`}
+                          >
+                            unsupported on any node
+                          </span>
+                        )}
+                      </div>
+                      {flag.description && (
+                        <p className="text-[10px] leading-snug text-muted-foreground">
+                          {flag.description}
+                        </p>
+                      )}
+                    </div>
+                    <select
+                      className={compactSelect + " w-24 shrink-0"}
+                      value={state}
+                      aria-label={`${flag.name} CPU flag`}
+                      onChange={(e) => {
+                        const v = e.target.value as CPUFlagState;
+                        setCpuFlagStates((prev) => {
+                          // Rebuilt by filter rather than delete: "default"
+                          // means absent from flags=, not a stored value.
+                          const next = Object.fromEntries(
+                            Object.entries(prev).filter(
+                              ([name]) => name !== flag.name,
+                            ),
+                          );
+                          if (v !== "default") next[flag.name] = v;
+                          return next;
+                        });
+                      }}
+                    >
+                      <option value="default">Default</option>
+                      <option value="on">On</option>
+                      <option value="off">Off</option>
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
         </Section>
 
         {/* Memory */}
