@@ -19,20 +19,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useExpandedRows } from "@/hooks/useExpandedRows";
 import type { APIEndpoint } from "@/types/api";
 import { useAPIDocs } from "../api/api-docs-queries";
+import { APIEndpointRow } from "../components/APIEndpointRow";
 
-const METHOD_COLORS: Record<string, string> = {
-  GET: "text-emerald-600 border-emerald-300 dark:text-emerald-400 dark:border-emerald-700",
-  POST: "text-blue-600 border-blue-300 dark:text-blue-400 dark:border-blue-700",
-  PUT: "text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-700",
-  DELETE: "text-red-600 border-red-300 dark:text-red-400 dark:border-red-700",
-  PATCH:
-    "text-purple-600 border-purple-300 dark:text-purple-400 dark:border-purple-700",
-};
-
-function getMethodColor(method: string): string {
-  return METHOD_COLORS[method.toUpperCase()] ?? "text-muted-foreground";
+/** Stable identity for one endpoint, for the expanded-row set. */
+function endpointKey(ep: APIEndpoint): string {
+  return `${ep.method} ${ep.path}`;
 }
 
 export function APIDocsPage() {
@@ -42,6 +36,7 @@ export function APIDocsPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(),
   );
+  const { expanded, toggle } = useExpandedRows();
 
   const filtered = useMemo(() => {
     if (!endpoints) return [];
@@ -51,7 +46,11 @@ export function APIDocsPage() {
       (ep) =>
         ep.path.toLowerCase().includes(q) ||
         ep.description.toLowerCase().includes(q) ||
-        ep.group.toLowerCase().includes(q),
+        ep.group.toLowerCase().includes(q) ||
+        // Parameter names too, or filtering HIDES the endpoint whose only
+        // match is the parameter being searched for — which is the search
+        // someone reaches this page to run.
+        (ep.parameters ?? []).some((p) => p.name.toLowerCase().includes(q)),
     );
   }, [endpoints, search]);
 
@@ -90,11 +89,16 @@ export function APIDocsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-6">
+    // max-w-6xl rather than the old max-w-4xl: an expanded row carries a
+    // five-column parameter table, and at 4xl the description column was
+    // narrower than the sentences it holds.
+    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">API Reference</h1>
         <p className="text-muted-foreground">
-          Complete reference of all available Nexara REST API endpoints
+          Complete reference of all available Nexara REST API endpoints.
+          Endpoints with a chevron publish a parameter schema — expand one to
+          see the request it accepts.
         </p>
       </div>
 
@@ -147,7 +151,7 @@ export function APIDocsPage() {
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          placeholder="Filter endpoints by path, description, or group..."
+          placeholder="Filter endpoints by path, description, group, or parameter..."
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
@@ -189,31 +193,19 @@ export function APIDocsPage() {
                 {!isCollapsed && (
                   <CardContent className="pt-0">
                     <div className="divide-y">
-                      {eps.map((ep) => (
-                        <div
-                          key={`${ep.method}-${ep.path}`}
-                          className="flex flex-wrap items-center gap-2 py-2.5"
-                        >
-                          <Badge
-                            variant="outline"
-                            className={`w-16 justify-center font-mono text-xs ${getMethodColor(ep.method)}`}
-                          >
-                            {ep.method}
-                          </Badge>
-                          <span className="font-mono text-sm">{ep.path}</span>
-                          <span className="text-sm text-muted-foreground">
-                            {ep.description}
-                          </span>
-                          {ep.permission && (
-                            <Badge
-                              variant="outline"
-                              className="ml-auto text-xs text-muted-foreground"
-                            >
-                              {ep.permission}
-                            </Badge>
-                          )}
-                        </div>
-                      ))}
+                      {eps.map((ep) => {
+                        const key = endpointKey(ep);
+                        return (
+                          <APIEndpointRow
+                            key={key}
+                            endpoint={ep}
+                            expanded={expanded.has(key)}
+                            onToggle={() => {
+                              toggle(key);
+                            }}
+                          />
+                        );
+                      })}
                     </div>
                   </CardContent>
                 )}

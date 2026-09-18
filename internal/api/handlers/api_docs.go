@@ -11,10 +11,20 @@ import (
 // auto-discovered from Fiber's registered route table at request time
 // so the docs cannot drift away from what the server actually serves.
 //
-// Permission / description / group are looked up from `endpointMeta`
-// (a hand-curated overlay keyed on `METHOD<space>path`); routes that
-// have no overlay entry get an auto-derived group and empty
-// description, which is the signal that a curator should fill them in.
+// Each route's prose comes from one of two places, in this order:
+//
+//   - the DECLARATION, for a route the endpoint registry owns. The
+//     registry states a route's description, group, permission and full
+//     parameter schema next to the route itself, so the declaration is
+//     the single source of truth and nothing here can disagree with it.
+//     Package `api` pushes those declarations in via
+//     [APIDocsHandler.SetDeclaredEndpoints] — see the note on that
+//     method for why they arrive rather than being read.
+//   - `endpointMeta`, the hand-curated overlay keyed on
+//     `METHOD<space>path`, for the routes still registered imperatively
+//     in router.go. Routes in neither get an auto-derived group and an
+//     empty description, which is the signal that a curator should fill
+//     them in — or, better, that the route should be migrated.
 //
 // Phase 5.8: previously a 134-entry hand-typed list that had drifted
 // (~50% of registered routes were missing). Auto-generation from the
@@ -23,6 +33,11 @@ import (
 // scripting against the API.
 type APIDocsHandler struct {
 	app *fiber.App
+
+	// declared holds the registry's declarations, keyed "METHOD path"
+	// exactly as the route is registered. Written once at startup,
+	// read-only from then on, like app.
+	declared map[string]APIEndpoint
 }
 
 // NewAPIDocsHandler creates a new API docs handler. The app reference
@@ -35,6 +50,49 @@ func NewAPIDocsHandler() *APIDocsHandler { return &APIDocsHandler{} }
 // Called by the server once all routes are registered.
 func (h *APIDocsHandler) SetApp(app *fiber.App) { h.app = app }
 
+// SetDeclaredEndpoints hands the handler the endpoint registry's
+// declarations. It is the same shape as SetApp and exists for the same
+// structural reason: the registry lives in package `api`, which already
+// imports this package, so `handlers` cannot import it back. The
+// dependency is inverted instead — this package DEFINES the payload and
+// package `api` FILLS it, at startup, from router.go's registry block.
+//
+// Passing the already-rendered payload rather than the Endpoint values
+// also keeps the docs free of the registry's internals: nothing here has
+// to know what a Permissions declaration is or how a parameter's source
+// is resolved.
+//
+// eps is keyed internally on "METHOD path"; a duplicate key would be a
+// registry that registered the same route twice, which Register already
+// refuses.
+func (h *APIDocsHandler) SetDeclaredEndpoints(eps []APIEndpoint) {
+	m := make(map[string]APIEndpoint, len(eps))
+	for _, e := range eps {
+		// Keyed through the SAME normalisation GetDocs applies to the
+		// route-table path before it looks a declaration up. Keying on
+		// the raw path instead is a silent miss for any declaration
+		// mounted at ".../foo/": the lookup would ask for ".../foo",
+		// find nothing, fall through to endpointMeta, find nothing
+		// there either, and render the endpoint blank.
+		m[e.Method+" "+NormalizeDocPath(e.Path)] = e
+	}
+	h.declared = m
+}
+
+// DeclaredEndpointKeys returns the sorted "METHOD path" keys the
+// registry declared. It mirrors EndpointMetaKeys and exists for the same
+// guard test in internal/api: a declaration whose path does not match a
+// registered route renders nothing, silently, exactly as a stale
+// endpointMeta key does.
+func (h *APIDocsHandler) DeclaredEndpointKeys() []string {
+	keys := make([]string, 0, len(h.declared))
+	for k := range h.declared {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // APIEndpoint describes a single API endpoint.
 type APIEndpoint struct {
 	Method      string `json:"method"`
@@ -42,15 +100,120 @@ type APIEndpoint struct {
 	Description string `json:"description"`
 	Permission  string `json:"permission"`
 	Group       string `json:"group"`
+
+	// Parameters is the route's full request contract — path, query and
+	// body alike. It is empty for a legacy route, and that emptiness is
+	// honest rather than a placeholder: the route genuinely has no
+	// machine-readable schema, and the gap is what tells a reader which
+	// endpoints have been migrated.
+	Parameters []APIParameter `json:"parameters,omitempty"`
 }
 
-// endpointMeta is the curated overlay: rich descriptions + permission +
-// group for routes that have them. The handler pulls the canonical
-// route list from `app.GetRoutes()` and decorates entries from this
-// map. Routes not present here get auto-derived metadata — `Group`
-// from the second `/api/v1/...` segment, blank description, blank
-// permission. New endpoints inherit those defaults until a curator
-// adds an entry here.
+// APIParameter is one parameter of a declared endpoint, rendered as what
+// a caller needs in order to form a request.
+//
+// Optional and Default are two separate facts and must stay that way.
+// "Optional, no default" means the endpoint does something else when the
+// caller says nothing — disks/attach picks the lowest free slot when
+// `index` is omitted — while "optional, default 0" means it behaves as
+// if the caller had asked for slot 0, i.e. the boot disk. Collapsing the
+// two is precisely the ambiguity that destroyed a live VM's boot disk,
+// and it is why Default is omitted from the JSON when absent rather than
+// rendered as a zero value. There is no third state to encode: apischema
+// refuses a declaration that is required AND carries a default.
+//
+// The same absent-versus-zero rule governs every bound below, and for
+// the same reason: `minimum: 0` is a real floor, `minimum` absent is no
+// floor, and a caller cannot tell them apart if the zero value stands in
+// for both.
+type APIParameter struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+
+	// Source is where the value goes on the wire: "path", "query" or
+	// "body". Nothing documented it before, which is why every
+	// query-string parameter in this API was invisible to a reader.
+	Source string `json:"source"`
+
+	Optional bool `json:"optional"`
+
+	// Default is omitted entirely when the parameter has none. Test
+	// TestAPIParameterJSON_OptionalWithAndWithoutDefault pins that,
+	// including for a `false` / `0` default, which must still render.
+	Default any `json:"default,omitempty"`
+
+	Enum        []string `json:"enum,omitempty"`
+	Format      string   `json:"format,omitempty"`
+	Typetext    string   `json:"typetext,omitempty"`
+	Description string   `json:"description,omitempty"`
+
+	// Pattern is the regex a string value must match. Undocumented, it is
+	// the same failure the disk-attach incident was: `snap_name` may not
+	// start with a digit, and a caller sending "1abc" got a 400 nothing in
+	// the docs let them predict.
+	Pattern string `json:"pattern,omitempty"`
+
+	// The bounds are POINTERS for the reason Default is omitted when
+	// absent: a minimum of 0 is a real bound and must not be
+	// indistinguishable from "no bound". omitempty on a pointer drops it
+	// only when nil, so *0 renders as `"minimum": 0` and an absent bound
+	// renders as nothing at all.
+	Minimum   *float64 `json:"minimum,omitempty"`
+	Maximum   *float64 `json:"maximum,omitempty"`
+	MinLength *int     `json:"min_length,omitempty"`
+	MaxLength *int     `json:"max_length,omitempty"`
+
+	// Alias is a second name the endpoint also accepts for this
+	// parameter. Omitting it from the docs is worse than merely
+	// incomplete: it documents the endpoint as REJECTING input it
+	// accepts.
+	Alias string `json:"alias,omitempty"`
+
+	// Items is the element schema when Type is "array". Without it the
+	// table says "array" and stops, which does not tell a caller what to
+	// put in one.
+	Items *APIItems `json:"items,omitempty"`
+
+	// Requires names the parameters a caller must supply ALONGSIDE this
+	// one. A companion carrying only its default does not satisfy it.
+	Requires []string `json:"requires,omitempty"`
+}
+
+// APIItems is an array parameter's element schema.
+//
+// It is a type of its own rather than a nested APIParameter, because an
+// element is not a parameter and the schema engine says so: apischema's
+// compileItems accepts only scalar element types and REFUSES an element
+// that declares a name's worth of context — optionality, a default, a
+// source, an alias or a requires. A nested APIParameter would carry all
+// six as fields that can only ever be empty, and would invite a reader to
+// fill one in.
+type APIItems struct {
+	Type        string   `json:"type"`
+	Enum        []string `json:"enum,omitempty"`
+	Format      string   `json:"format,omitempty"`
+	Pattern     string   `json:"pattern,omitempty"`
+	Typetext    string   `json:"typetext,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Minimum     *float64 `json:"minimum,omitempty"`
+	Maximum     *float64 `json:"maximum,omitempty"`
+	MinLength   *int     `json:"min_length,omitempty"`
+	MaxLength   *int     `json:"max_length,omitempty"`
+}
+
+// endpointMeta is the curated overlay for the routes router.go still
+// registers imperatively: rich descriptions + permission + group for
+// routes that have them. The handler pulls the canonical route list from
+// `app.GetRoutes()` and decorates entries from this map. Routes not
+// present here get auto-derived metadata — `Group` from the second
+// `/api/v1/...` segment, blank description, blank permission. New
+// endpoints inherit those defaults until a curator adds an entry here.
+//
+// A route the endpoint registry declares does NOT read this map: its
+// declaration wins outright (see GetDocs). Entries here for a migrated
+// route are the leftover second copy, kept in step by
+// TestGuard_DocumentedPermissionMatchesEnforcement until they are
+// removed.
 //
 // Key format: "METHOD path" exactly as the route is registered (e.g.
 // "GET /api/v1/clusters/:id"). The path is matched against
@@ -155,9 +318,10 @@ var endpointMeta = map[string]APIEndpoint{
 	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/pool":          {Description: "Move a guest into a Proxmox resource pool, or out of its current one with an empty pool", Permission: "manage:pool", Group: "Virtual Machines"},
 	// Filed under Virtual Machines rather than a section of its own, and
 	// the endpoint's own Group in internal/api/registry_vms.go says the
-	// same: GetDocs renders the section from THIS map, so a declaration
-	// that disagreed would put the route in one section while documenting
-	// it as belonging to another, with nothing to catch the drift.
+	// same. The declaration is now what GetDocs renders, so this entry no
+	// longer decides the section — it is the shadow copy, and it is kept
+	// saying the same thing so that removing it is a deletion rather than
+	// a behaviour change.
 	"GET /api/v1/clusters/:cluster_id/pools": {Description: "List the cluster's Proxmox resource pools", Permission: "view:cluster", Group: "Virtual Machines"},
 
 	// ── Node hardware, for the VM dialogs ─────────────────────────────
@@ -408,6 +572,24 @@ func EndpointMetaPermissions() map[string]string {
 	return out
 }
 
+// NormalizeDocPath is the single spelling of a route's path used for
+// every docs lookup: the route table's own path, the curated
+// endpointMeta keys, and the registry's declarations.
+//
+// Fiber's Group(...) + .Post("/") produces a trailing-slash path like
+// "/api/v1/api-keys/". Trimming it keeps the rendered docs readable and
+// spares curators the convention — but the reason it is a FUNCTION, and
+// exported, is that the two sides of a map lookup have to agree. Keying
+// declarations one way and looking them up another is a miss that
+// renders a blank endpoint and reports nothing, so the guard test in
+// internal/api calls this rather than re-deriving the rule.
+func NormalizeDocPath(path string) string {
+	if len(path) > len("/api/v1/") && strings.HasSuffix(path, "/") {
+		return strings.TrimSuffix(path, "/")
+	}
+	return path
+}
+
 // groupFromPath derives a Group label from a path when the curated
 // `endpointMeta` map has no entry for it. The second segment after
 // `/api/v1/` is the natural carve-up (e.g. `/api/v1/ldap/...` →
@@ -436,6 +618,17 @@ func groupFromPath(path string) string {
 }
 
 // GetDocs returns the auto-generated API endpoint catalog.
+//
+// The route table is the canonical list — an endpoint nobody serves is
+// not documented, and an endpoint nobody documented still appears. What
+// each entry SAYS comes from the declaration when the registry owns the
+// route, and from endpointMeta otherwise; see the type comment.
+//
+// The declaration is taken whole rather than field-by-field. Register
+// already refuses a declaration with no Description, no Group or no
+// Permissions, so there is no blank field for the overlay to fill —
+// and a per-field merge would quietly resurrect a stale endpointMeta
+// value the moment a declaration legitimately said something shorter.
 func (h *APIDocsHandler) GetDocs(c fiber.Ctx) error {
 	if h.app == nil {
 		// SetApp wasn't called yet — surface the failure rather than
@@ -458,21 +651,17 @@ func (h *APIDocsHandler) GetDocs(c fiber.Ctx) error {
 		if r.Method == fiber.MethodHead || r.Method == fiber.MethodOptions || r.Method == fiber.MethodTrace {
 			continue
 		}
-		// Fiber's Group(...) + .Post("/") produces a trailing-slash
-		// path like "/api/v1/api-keys/". Normalise to the no-trailing
-		// form so curators don't have to memorise the convention and
-		// the rendered docs read cleanly.
-		path := r.Path
-		if len(path) > len("/api/v1/") && strings.HasSuffix(path, "/") {
-			path = strings.TrimSuffix(path, "/")
-		}
+		path := NormalizeDocPath(r.Path)
 		key := r.Method + " " + path
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
 
-		ep := endpointMeta[key]
+		ep, declared := h.declared[key]
+		if !declared {
+			ep = endpointMeta[key]
+		}
 		ep.Method = r.Method
 		ep.Path = path
 		if ep.Group == "" {

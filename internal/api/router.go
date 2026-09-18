@@ -864,6 +864,15 @@ func (s *Server) setupRoutes() {
 
 	// API documentation.
 	if s.apiDocsHandler != nil {
+		// Hand the docs handler the registry's declarations. It happens
+		// HERE, in the same function that builds the registry, rather than
+		// alongside SetApp in New: every path that registers routes is
+		// this one, so a Server built by a test documents the same
+		// contract a Server built by New does, and the push cannot be
+		// forgotten by a future caller that registers routes some other
+		// way. See internal/api/api_docs.go for why the payload is pushed
+		// rather than pulled.
+		s.apiDocsHandler.SetDeclaredEndpoints(docEndpoints(s.registry))
 		v1.Get("/api-docs", s.authRequired(), s.apiDocsHandler.GetDocs)
 	}
 

@@ -278,18 +278,29 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 		Handler:     h.CloneVM,
 	})
 	reg.Register(Endpoint{
-		Method:      fiber.MethodPost,
-		Path:        clusterScope + "/vms/:vm_id/convert-to-template",
-		Description: "Convert a stopped VM or container into a template. Irreversible in Proxmox.",
+		Method: fiber.MethodPost,
+		Path:   clusterScope + "/vms/:vm_id/convert-to-template",
+		// The permission requirement is stated in the DESCRIPTION because
+		// the Permissions field has no vocabulary for "and, if it is a
+		// container, also" — a Deferred route renders as the bare word
+		// "deferred", and an operator building a role would be told
+		// nothing. The route's endpointMeta entry carried the same
+		// sentence for the same reason; now that the declaration is what
+		// the docs render, it has to carry it instead.
+		Description: "Convert a stopped VM or container into a template. Irreversible in Proxmox. " +
+			"Requires manage:vm, and manage:container as well when the guest is a container.",
 		Group:       "Virtual Machines",
 		Permissions: Permissions{Deferred: bothGuestKindsReason},
 		Parameters:  vmParams(nil),
 		Handler:     h.ConvertToTemplate,
 	})
 	reg.Register(Endpoint{
-		Method:      fiber.MethodPost,
-		Path:        clusterScope + "/vms/:vm_id/clone-to-template",
-		Description: "Clone a guest and convert the clone into a template once it settles.",
+		Method: fiber.MethodPost,
+		Path:   clusterScope + "/vms/:vm_id/clone-to-template",
+		// See convert-to-template above for why the permission is spelled
+		// out here rather than left to the Permissions field.
+		Description: "Clone a guest and convert the clone into a template once it settles. " +
+			"Requires manage:vm, and manage:container as well when the guest is a container.",
 		Group:       "Virtual Machines",
 		Permissions: Permissions{Deferred: bothGuestKindsReason},
 		Parameters:  vmParams(cloneParams()),
@@ -593,10 +604,9 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 		Method:      fiber.MethodGet,
 		Path:        clusterScope + "/pools",
 		Description: "List the cluster's Proxmox resource pools.",
-		// "Virtual Machines" rather than a section of its own, matching
-		// this route's endpointMeta entry: GetDocs renders from that map,
-		// so two different Group values would put the route in one section
-		// and document it as belonging to another.
+		// "Virtual Machines" rather than a section of its own. This is now
+		// the value GetDocs renders — the matching endpointMeta entry is
+		// the shadow copy — so the section a reader sees is decided here.
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("view", "cluster"),
 		Parameters:  clusterParams(nil),

@@ -1075,12 +1075,93 @@ export interface AptRepositoryError {
   error: string;
 }
 
+/**
+ * One parameter of an endpoint the server declares a schema for.
+ *
+ * `optional` and `default` are two separate facts and the UI must keep them
+ * apart. "Optional, no default" means the endpoint does something else when
+ * the caller stays silent — `index` on the disk-attach endpoint takes the
+ * lowest FREE slot — while "optional, default 0" would mean it behaves as if
+ * slot 0 had been asked for, which on a VM with a disk is its boot disk.
+ * Collapsing the two is how an external consumer destroyed one.
+ *
+ * The server omits `default` entirely when there is none, so the absence of
+ * the key is the signal — not a null, and not a zero value. A `false` or `0`
+ * default IS sent and must render.
+ */
+export interface APIParameter {
+  name: string;
+  type: string;
+  /** Where the value goes on the wire. */
+  source: "path" | "query" | "body";
+  optional: boolean;
+  /** Present only when the parameter declares one. */
+  default?: unknown;
+  enum?: string[];
+  /** Named validation+normalisation rule, e.g. "uuid", "disk-size". */
+  format?: string;
+  /** Human-readable value shape, e.g. "<number><K|M|G|T|P>". */
+  typetext?: string;
+  description?: string;
+  /** Parameters the caller must send alongside this one. */
+  requires?: string[];
+  /** Regex a string value must match. */
+  pattern?: string;
+  /**
+   * Bounds. Absent means "no bound" — and a bound of 0 is a real bound, so
+   * every read must test for `undefined` rather than for falsiness. `if
+   * (p.minimum)` silently drops a floor of 0, which is the same
+   * absent-versus-zero trap as `default`.
+   */
+  minimum?: number;
+  maximum?: number;
+  min_length?: number;
+  max_length?: number;
+  /**
+   * A second name the endpoint also accepts for this parameter. Omitting it
+   * from the table documents the endpoint as rejecting input it accepts.
+   */
+  alias?: string;
+  /** Element schema when `type` is "array". */
+  items?: APIItems;
+}
+
+/**
+ * An array parameter's element schema.
+ *
+ * Deliberately narrower than APIParameter: the server's schema engine allows
+ * only scalar element types and forbids an element from being optional,
+ * carrying a default, naming a source, declaring an alias or requiring a
+ * companion — so there are no such fields to render, and an element can never
+ * itself be an array.
+ */
+export interface APIItems {
+  type: string;
+  enum?: string[];
+  format?: string;
+  pattern?: string;
+  typetext?: string;
+  description?: string;
+  minimum?: number;
+  maximum?: number;
+  min_length?: number;
+  max_length?: number;
+}
+
 export interface APIEndpoint {
   method: string;
   path: string;
   description: string;
   permission: string;
   group: string;
+  /**
+   * Absent for a route the server has not migrated to the declarative
+   * registry, and absent from an older server that predates the field —
+   * which is why it is optional rather than an empty array. Render nothing
+   * in that case; the gap is honest, and it marks which endpoints publish a
+   * contract.
+   */
+  parameters?: APIParameter[];
 }
 
 // VM folder organisation (used by the "VMs & Templates" tree perspective).

@@ -670,14 +670,17 @@ func TestGuard_DocumentedPermissionMatchesEnforcement(t *testing.T) {
 			continue
 		}
 
-		// GetDocs (internal/api/handlers/api_docs.go) overlays endpointMeta
-		// onto EVERY /api/v1/ route it serves, registry ones included — it
-		// never reads Permissions.Describe — so a registry route's curated
-		// entry can drift from what it actually enforces exactly the way a
-		// legacy one can (the console-token incident this test's own doc
-		// comment names). The two paths differ only in how "what it
-		// enforces" is discovered: exactly, from the declaration itself,
-		// rather than approximated from a call graph.
+		// GetDocs (internal/api/handlers/api_docs.go) now renders a registry
+		// route from its DECLARATION and falls back to endpointMeta only for
+		// the legacy ones, so a curated entry for a migrated route is no
+		// longer what an operator reads. It is still checked here, and must
+		// be: the entry is the second copy this migration has not finished
+		// deleting, and a second copy that nothing compares is a second copy
+		// that silently rots — which is how the console-token endpoint came
+		// to document view:vm long after it moved to console:vm. The two
+		// paths differ only in how "what it enforces" is discovered:
+		// exactly, from the declaration itself, rather than approximated
+		// from a call graph.
 		var enforced map[string]bool
 		var handlerDescription string
 		if e, isRegistry := registryByKey[key]; isRegistry {
