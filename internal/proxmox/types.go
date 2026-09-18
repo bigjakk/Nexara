@@ -130,14 +130,20 @@ type DiskSMARTData struct {
 }
 
 // SMARTAttribute represents a single S.M.A.R.T. attribute.
+//
+// ID is a FlexInt, the rest of the numbers are plain ints, and that split
+// mirrors PVE exactly: Diskmanage.pm's get_smart_data builds value, worst
+// and threshold with "+ 0" so they serialise as JSON numbers, but assigns
+// the ID# capture straight across, so it serialises as a space-padded
+// string ("  1"). Decoding it as an int is what made this endpoint 500.
 type SMARTAttribute struct {
-	ID        int    `json:"id"`
-	Name      string `json:"name"`
-	Value     int    `json:"value"`
-	Worst     int    `json:"worst"`
-	Threshold int    `json:"threshold"`
-	Raw       string `json:"raw"`
-	Flags     string `json:"flags"`
+	ID        FlexInt `json:"id"`
+	Name      string  `json:"name"`
+	Value     int     `json:"value"`
+	Worst     int     `json:"worst"`
+	Threshold int     `json:"threshold"`
+	Raw       string  `json:"raw"`
+	Flags     string  `json:"flags"`
 }
 
 // ZFSPool represents a ZFS pool from GET /nodes/{node}/disks/zfs.
@@ -378,7 +384,14 @@ func (fi *FlexInt) UnmarshalJSON(b []byte) error {
 	// Try string.
 	var s string
 	if err := json.Unmarshal(b, &s); err == nil {
-		parsed, err := strconv.Atoi(s)
+		// Trim before parsing: PVE pads some numeric strings to a fixed
+		// column width. A SMART attribute id arrives as "  1" / " 12" /
+		// "194" because Diskmanage.pm captures smartctl's three-character
+		// ID# column verbatim and, unlike value/worst/threshold, never
+		// coerces it with "+ 0". strconv.Atoi rejects surrounding spaces,
+		// so without the trim every id below 100 would fall through to the
+		// non-numeric branch and silently decode as 0.
+		parsed, err := strconv.Atoi(strings.TrimSpace(s))
 		if err != nil {
 			// Non-numeric string (e.g. CRUSH tree node names) — default to 0.
 			*fi = 0
@@ -1168,18 +1181,23 @@ type DiskAttachParams struct {
 }
 
 // NodeUSBDevice represents a USB device from GET /nodes/{node}/hardware/usb.
+//
+// Port is a FlexString because PVE declares it "type": "integer" while both
+// this API's JSON and the SPA's NodeUSBDevice have always typed it as a
+// string. Decoding it as a plain string failed the whole response; FlexString
+// accepts the number PVE sends and re-emits it as the string callers expect.
 type NodeUSBDevice struct {
-	Busnum       int    `json:"busnum"`
-	Devnum       int    `json:"devnum"`
-	Port         string `json:"port"`
-	Prodid       string `json:"prodid"`
-	Vendid       string `json:"vendid"`
-	Product      string `json:"product"`
-	Manufacturer string `json:"manufacturer"`
-	Speed        string `json:"speed"`
-	Class        int    `json:"class"`
-	Usbpath      string `json:"usbpath"`
-	Level        int    `json:"level"`
+	Busnum       int        `json:"busnum"`
+	Devnum       int        `json:"devnum"`
+	Port         FlexString `json:"port"`
+	Prodid       string     `json:"prodid"`
+	Vendid       string     `json:"vendid"`
+	Product      string     `json:"product"`
+	Manufacturer string     `json:"manufacturer"`
+	Speed        string     `json:"speed"`
+	Class        int        `json:"class"`
+	Usbpath      string     `json:"usbpath"`
+	Level        int        `json:"level"`
 }
 
 // NodePCIDevice represents a PCI device from GET /nodes/{node}/hardware/pci.
