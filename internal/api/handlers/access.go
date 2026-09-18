@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -19,6 +20,10 @@ import (
 //
 // Everything here is a synchronous proxy — no /access/* endpoint returns a
 // UPID — so these handlers use AuditLog and never TrackTask.
+//
+// All 25 routes are declared in internal/api/registry_access.go, which states
+// their permission and their parameters; nothing below re-checks either. What
+// stays here is what the declaration cannot see.
 //
 // Two invariants run through the whole file:
 //
@@ -44,10 +49,15 @@ func (h *AccessHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
-// accessResource is the RBAC resource name for this whole family.
+// AccessResource is the RBAC resource name for this whole family.
 // manage:access can mint an Administrator token, so it is Admin-only by
 // default — see migrations/000085_access_permissions.up.sql.
-const accessResource = "access"
+//
+// It is exported so that the route declarations in
+// internal/api/registry_access.go name the same symbol rather than repeating
+// the string: a second spelling is a copy that diverges silently the day the
+// resource is renamed.
+const AccessResource = "access"
 
 // publishAccessChange emits the WS event that invalidates the cluster's access
 // queries in connected browsers.
@@ -146,32 +156,56 @@ func accessUpdateAffectsAccess(req proxmox.UpdateAccessUserParams) bool {
 	return req.Groups != nil
 }
 
-// forceRequested reports whether the caller passed ?force=true.
-func forceRequested(c fiber.Ctx) bool {
-	v := strings.ToLower(c.Query("force"))
-	return v == "1" || v == "true"
-}
-
-// accessParam reads a path parameter and percent-decodes it.
+// accessParam percent-decodes an /access/* path parameter that the caller has
+// already read with a Params accessor.
 //
-// Fiber v3 does NOT decode path params — c.Params returns the raw segment. That
-// matters more here than for most resources because these identifiers legally
-// contain characters a correct client must encode: a PVE user id is
-// "name@realm", so encodeURIComponent sends "nexara%40pve". Without decoding,
-// every user, token, group, role and realm lookup would fail validation on the
-// stray "%" and 400 — from a client doing exactly the right thing.
+// Fiber v3 does NOT decode path params, and the registry hands the handler what
+// Fiber matched — the raw segment. That matters more here than for most
+// resources because these identifiers legally contain characters a correct
+// client must encode: a PVE user id is "name@realm", so encodeURIComponent sends
+// "nexara%40pve". Without decoding, every user, token, group, role and realm
+// lookup would fail validation on the stray "%" and 400 — from a client doing
+// exactly the right thing.
 //
-// Decoding here is safe because validation happens afterwards, in the proxmox
-// client: "%2e%2e" becomes ".." and is then rejected outright, and the outbound
-// path is re-escaped with url.PathEscape. Decoding without that ordering would
-// reintroduce the traversal the validators exist to stop.
-func accessParam(c fiber.Ctx, name string) (string, error) {
-	raw := c.Params(name)
-	decoded, err := url.PathUnescape(raw)
+// Decoding here is safe because validation happens AFTERWARDS, in the proxmox
+// client: "%2e%2e" becomes ".." and is then rejected outright by
+// validateUserID and friends, and the outbound path is re-escaped with
+// url.PathEscape. Decoding without that ordering would reintroduce the
+// traversal the validators exist to stop. The declarations additionally refuse a
+// raw "." or ".." before the handler runs, but they cannot see through an
+// escape, which is why the client-side checks remain the anchor of record.
+//
+// name is passed alongside the value so the rejection can say which parameter
+// it was; it is not used to READ the value, because a key the guard in
+// registry_paramkey_guard_test.go cannot see as a literal at the accessor call
+// is a key it cannot check.
+func accessParam(value, name string) (string, error) {
+	decoded, err := url.PathUnescape(value)
 	if err != nil {
 		return "", fiber.NewError(fiber.StatusBadRequest, "Malformed "+name+" in path")
 	}
 	return decoded, nil
+}
+
+// accessUserFieldsFromParams reads the mutable account attributes shared by user
+// create and update.
+//
+// Every field is a TRISTATE and the pointers are what carry it: a nil omits the
+// key from the Proxmox form (leave the stored value alone), a pointer to the
+// empty string clears it. optStringPtr draws exactly that line — see its doc
+// comment — so an omitted `comment` and a `"comment": ""` stay distinguishable
+// all the way from the wire to the outbound form.
+func accessUserFieldsFromParams(p *apischema.Params) proxmox.AccessUserFields {
+	return proxmox.AccessUserFields{
+		Comment:   optStringPtr(p.OptString("comment")),
+		Email:     optStringPtr(p.OptString("email")),
+		FirstName: optStringPtr(p.OptString("firstname")),
+		LastName:  optStringPtr(p.OptString("lastname")),
+		Groups:    optStringPtr(p.OptString("groups")),
+		Keys:      optStringPtr(p.OptString("keys")),
+		Enable:    optBoolPtr(p.OptBool("enable")),
+		Expire:    optInt64Ptr(p.OptInt("expire")),
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -179,12 +213,9 @@ func accessParam(c fiber.Ctx, name string) (string, error) {
 // ---------------------------------------------------------------------------
 
 // ListUsers handles GET /clusters/:cluster_id/access/users.
-func (h *AccessHandler) ListUsers(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) ListUsers(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -199,19 +230,16 @@ func (h *AccessHandler) ListUsers(c fiber.Ctx) error {
 }
 
 // GetUser handles GET /clusters/:cluster_id/access/users/:userid.
-func (h *AccessHandler) GetUser(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) GetUser(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	userid, err := accessParam(c, "userid")
+	userid, err := accessParam(p.String("userid"), "userid")
 	if err != nil {
 		return err
 	}
@@ -223,20 +251,15 @@ func (h *AccessHandler) GetUser(c fiber.Ctx) error {
 }
 
 // CreateUser handles POST /clusters/:cluster_id/access/users.
-func (h *AccessHandler) CreateUser(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) CreateUser(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	var req proxmox.CreateAccessUserParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.UserID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "User ID is required")
+	req := proxmox.CreateAccessUserParams{
+		AccessUserFields: accessUserFieldsFromParams(p),
+		UserID:           p.String("userid"),
+		Password:         p.String("password"),
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -250,12 +273,12 @@ func (h *AccessHandler) CreateUser(c fiber.Ctx) error {
 	// passwordless @pve user cannot log in interactively at all — but the
 	// password itself must never appear. Derived here, as a bool, so the
 	// marshalled map never reads the field.
-	hasPassword := req.Password != ""
+	hasPassword := p.String("password") != ""
 	details, _ := json.Marshal(map[string]any{
 		"userid":       req.UserID,
 		"has_password": hasPassword,
-		"groups":       derefString(req.Groups),
-		"comment":      derefString(req.Comment),
+		"groups":       p.String("groups"),
+		"comment":      p.String("comment"),
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_user", req.UserID, "created", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_user", req.UserID, "created")
@@ -263,21 +286,18 @@ func (h *AccessHandler) CreateUser(c fiber.Ctx) error {
 }
 
 // UpdateUser handles PUT /clusters/:cluster_id/access/users/:userid.
-func (h *AccessHandler) UpdateUser(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) UpdateUser(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	userid, err := accessParam(c, "userid")
+	userid, err := accessParam(p.String("userid"), "userid")
 	if err != nil {
 		return err
 	}
-	var req proxmox.UpdateAccessUserParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	req := proxmox.UpdateAccessUserParams{
+		AccessUserFields: accessUserFieldsFromParams(p),
+		Append:           p.Bool("append"),
 	}
 	// An update can sever Nexara's access just as thoroughly as a delete, so
 	// the same guard applies. PVE checks the owning user's enabled/expired
@@ -286,7 +306,7 @@ func (h *AccessHandler) UpdateUser(c fiber.Ctx) error {
 	// exists. Rewriting groups can drop the group-derived ACLs the token
 	// depends on. A comment or email change cannot, so those pass freely.
 	if accessUpdateAffectsAccess(req) {
-		if err := h.guardSelfCredential(c, clusterID, userid, "", forceRequested(c)); err != nil {
+		if err := h.guardSelfCredential(c, clusterID, userid, "", p.Bool("force")); err != nil {
 			return err
 		}
 	}
@@ -304,19 +324,16 @@ func (h *AccessHandler) UpdateUser(c fiber.Ctx) error {
 }
 
 // DeleteUser handles DELETE /clusters/:cluster_id/access/users/:userid.
-func (h *AccessHandler) DeleteUser(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) DeleteUser(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	userid, err := accessParam(c, "userid")
+	userid, err := accessParam(p.String("userid"), "userid")
 	if err != nil {
 		return err
 	}
-	force := forceRequested(c)
+	force := p.Bool("force")
 	if err := h.guardSelfCredential(c, clusterID, userid, "", force); err != nil {
 		return err
 	}
@@ -338,19 +355,16 @@ func (h *AccessHandler) DeleteUser(c fiber.Ctx) error {
 // ---------------------------------------------------------------------------
 
 // ListTokens handles GET /clusters/:cluster_id/access/users/:userid/tokens.
-func (h *AccessHandler) ListTokens(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) ListTokens(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	userid, err := accessParam(c, "userid")
+	userid, err := accessParam(p.String("userid"), "userid")
 	if err != nil {
 		return err
 	}
@@ -362,23 +376,20 @@ func (h *AccessHandler) ListTokens(c fiber.Ctx) error {
 }
 
 // GetToken handles GET /clusters/:cluster_id/access/users/:userid/tokens/:tokenid.
-func (h *AccessHandler) GetToken(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) GetToken(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	userid, err := accessParam(c, "userid")
+	userid, err := accessParam(p.String("userid"), "userid")
 	if err != nil {
 		return err
 	}
-	tokenid, err := accessParam(c, "tokenid")
+	tokenid, err := accessParam(p.String("tokenid"), "tokenid")
 	if err != nil {
 		return err
 	}
@@ -395,26 +406,27 @@ func (h *AccessHandler) GetToken(c fiber.Ctx) error {
 // outside the cluster's own config — Proxmox has no read-back endpoint — so the
 // caller must surface it to the operator immediately. It is deliberately kept
 // out of the audit row.
-func (h *AccessHandler) CreateToken(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) CreateToken(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	userid, err := accessParam(c, "userid")
+	userid, err := accessParam(p.String("userid"), "userid")
 	if err != nil {
 		return err
 	}
-	tokenid, err := accessParam(c, "tokenid")
+	tokenid, err := accessParam(p.String("tokenid"), "tokenid")
 	if err != nil {
 		return err
 	}
 
-	var req proxmox.CreateAccessTokenParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	req := proxmox.CreateAccessTokenParams{
+		Comment: p.String("comment"),
+		Expire:  optInt64Ptr(p.OptInt("expire")),
+		// No default, so an omitted key leaves PrivSep nil and the outbound
+		// form carries no privsep at all — which is how Proxmox's own default
+		// (privilege separation ON) stays in force.
+		PrivSep: optBoolPtr(p.OptBool("privsep")),
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -440,28 +452,27 @@ func (h *AccessHandler) CreateToken(c fiber.Ctx) error {
 //
 // With regenerate set, the response carries a fresh secret and the old one
 // stops working immediately — hence the self-credential guard.
-func (h *AccessHandler) UpdateToken(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) UpdateToken(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	userid, err := accessParam(c, "userid")
+	userid, err := accessParam(p.String("userid"), "userid")
 	if err != nil {
 		return err
 	}
-	tokenid, err := accessParam(c, "tokenid")
+	tokenid, err := accessParam(p.String("tokenid"), "tokenid")
 	if err != nil {
 		return err
 	}
 
-	var req proxmox.UpdateAccessTokenParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	req := proxmox.UpdateAccessTokenParams{
+		Comment:    optStringPtr(p.OptString("comment")),
+		Expire:     optInt64Ptr(p.OptInt("expire")),
+		PrivSep:    optBoolPtr(p.OptBool("privsep")),
+		Regenerate: p.Bool("regenerate"),
 	}
-	force := forceRequested(c)
+	force := p.Bool("force")
 	if req.Regenerate {
 		if err := h.guardSelfCredential(c, clusterID, userid, tokenid, force); err != nil {
 			return err
@@ -492,23 +503,20 @@ func (h *AccessHandler) UpdateToken(c fiber.Ctx) error {
 }
 
 // DeleteToken handles DELETE /clusters/:cluster_id/access/users/:userid/tokens/:tokenid.
-func (h *AccessHandler) DeleteToken(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) DeleteToken(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	userid, err := accessParam(c, "userid")
+	userid, err := accessParam(p.String("userid"), "userid")
 	if err != nil {
 		return err
 	}
-	tokenid, err := accessParam(c, "tokenid")
+	tokenid, err := accessParam(p.String("tokenid"), "tokenid")
 	if err != nil {
 		return err
 	}
-	force := forceRequested(c)
+	force := p.Bool("force")
 	if err := h.guardSelfCredential(c, clusterID, userid, tokenid, force); err != nil {
 		return err
 	}
@@ -529,21 +537,10 @@ func (h *AccessHandler) DeleteToken(c fiber.Ctx) error {
 // Groups
 // ---------------------------------------------------------------------------
 
-// accessGroupRequest is the body for group create and update.
-// Comment is a pointer on update so an omitted field leaves the existing
-// comment alone rather than clearing it.
-type accessGroupRequest struct {
-	GroupID string  `json:"groupid"`
-	Comment *string `json:"comment"`
-}
-
 // ListGroups handles GET /clusters/:cluster_id/access/groups.
-func (h *AccessHandler) ListGroups(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) ListGroups(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -558,19 +555,16 @@ func (h *AccessHandler) ListGroups(c fiber.Ctx) error {
 }
 
 // GetGroup handles GET /clusters/:cluster_id/access/groups/:groupid.
-func (h *AccessHandler) GetGroup(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) GetGroup(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	groupid, err := accessParam(c, "groupid")
+	groupid, err := accessParam(p.String("groupid"), "groupid")
 	if err != nil {
 		return err
 	}
@@ -582,74 +576,60 @@ func (h *AccessHandler) GetGroup(c fiber.Ctx) error {
 }
 
 // CreateGroup handles POST /clusters/:cluster_id/access/groups.
-func (h *AccessHandler) CreateGroup(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) CreateGroup(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	var req accessGroupRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.GroupID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Group ID is required")
-	}
+	groupID := p.String("groupid")
+	comment := p.String("comment")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	if err := pxClient.CreateAccessGroup(c.Context(), req.GroupID, derefString(req.Comment)); err != nil {
+	if err := pxClient.CreateAccessGroup(c.Context(), groupID, comment); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"groupid": req.GroupID, "comment": derefString(req.Comment)})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_group", req.GroupID, "created", details)
-	h.publishAccessChange(c.Context(), clusterID, "pve_group", req.GroupID, "created")
+	details, _ := json.Marshal(map[string]any{"groupid": groupID, "comment": comment})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_group", groupID, "created", details)
+	h.publishAccessChange(c.Context(), clusterID, "pve_group", groupID, "created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
 // UpdateGroup handles PUT /clusters/:cluster_id/access/groups/:groupid.
-func (h *AccessHandler) UpdateGroup(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) UpdateGroup(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	groupid, err := accessParam(c, "groupid")
+	groupid, err := accessParam(p.String("groupid"), "groupid")
 	if err != nil {
 		return err
-	}
-	var req accessGroupRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	if err := pxClient.UpdateAccessGroup(c.Context(), groupid, proxmox.UpdateAccessGroupParams{Comment: req.Comment}); err != nil {
+	// A nil Comment leaves the stored one alone; a pointer to "" clears it.
+	// Sending it unconditionally would mean a client that PUTs {} silently
+	// wipes the comment.
+	comment := optStringPtr(p.OptString("comment"))
+	if err := pxClient.UpdateAccessGroup(c.Context(), groupid, proxmox.UpdateAccessGroupParams{Comment: comment}); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"groupid": groupid, "comment": derefString(req.Comment)})
+	details, _ := json.Marshal(map[string]any{"groupid": groupid, "comment": p.String("comment")})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_group", groupid, "updated", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_group", groupid, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 // DeleteGroup handles DELETE /clusters/:cluster_id/access/groups/:groupid.
-func (h *AccessHandler) DeleteGroup(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) DeleteGroup(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	groupid, err := accessParam(c, "groupid")
+	groupid, err := accessParam(p.String("groupid"), "groupid")
 	if err != nil {
 		return err
 	}
@@ -670,25 +650,14 @@ func (h *AccessHandler) DeleteGroup(c fiber.Ctx) error {
 // Roles
 // ---------------------------------------------------------------------------
 
-// accessRoleRequest is the body for role create and update. Privs is a
-// comma-separated privilege list, matching what Proxmox accepts and returns.
-type accessRoleRequest struct {
-	RoleID string  `json:"roleid"`
-	Privs  *string `json:"privs"`
-	Append bool    `json:"append"`
-}
-
 // ListRoles handles GET /clusters/:cluster_id/access/roles.
 //
 // The built-in Administrator role's privilege list is Proxmox's complete set of
 // valid privileges, so a client can build a privilege picker from this response
 // without hardcoding one that drifts as Proxmox adds privileges.
-func (h *AccessHandler) ListRoles(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) ListRoles(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -703,19 +672,16 @@ func (h *AccessHandler) ListRoles(c fiber.Ctx) error {
 }
 
 // GetRole handles GET /clusters/:cluster_id/access/roles/:roleid.
-func (h *AccessHandler) GetRole(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) GetRole(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	roleid, err := accessParam(c, "roleid")
+	roleid, err := accessParam(p.String("roleid"), "roleid")
 	if err != nil {
 		return err
 	}
@@ -727,77 +693,66 @@ func (h *AccessHandler) GetRole(c fiber.Ctx) error {
 }
 
 // CreateRole handles POST /clusters/:cluster_id/access/roles.
-func (h *AccessHandler) CreateRole(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) CreateRole(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	var req accessRoleRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.RoleID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Role ID is required")
-	}
+	roleID := p.String("roleid")
+	privs := p.String("privs")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	if err := pxClient.CreateAccessRole(c.Context(), req.RoleID, derefString(req.Privs)); err != nil {
+	if err := pxClient.CreateAccessRole(c.Context(), roleID, privs); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"roleid": req.RoleID, "privs": derefString(req.Privs)})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_role", req.RoleID, "created", details)
-	h.publishAccessChange(c.Context(), clusterID, "pve_role", req.RoleID, "created")
+	details, _ := json.Marshal(map[string]any{"roleid": roleID, "privs": privs})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_role", roleID, "created", details)
+	h.publishAccessChange(c.Context(), clusterID, "pve_role", roleID, "created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
 // UpdateRole handles PUT /clusters/:cluster_id/access/roles/:roleid.
-func (h *AccessHandler) UpdateRole(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) UpdateRole(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	roleid, err := accessParam(c, "roleid")
+	roleid, err := accessParam(p.String("roleid"), "roleid")
 	if err != nil {
 		return err
-	}
-	var req accessRoleRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
+	// privs is declared REQUIRED, so this is never the nil that
+	// proxmox.UpdateAccessRole refuses — an EMPTY value still reaches it and
+	// still clears the role, which is the deliberate spelling of "remove every
+	// privilege". That refusal stays in the client: it is the choke point every
+	// caller goes through, and this route is only one of them.
+	privs := p.String("privs")
+	appendPrivs := p.Bool("append")
 	if err := pxClient.UpdateAccessRole(c.Context(), roleid, proxmox.UpdateAccessRoleParams{
-		Privs:  req.Privs,
-		Append: req.Append,
+		Privs:  &privs,
+		Append: appendPrivs,
 	}); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"roleid": roleid, "privs": derefString(req.Privs), "append": req.Append})
+	details, _ := json.Marshal(map[string]any{"roleid": roleid, "privs": privs, "append": appendPrivs})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_role", roleid, "updated", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_role", roleid, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 // DeleteRole handles DELETE /clusters/:cluster_id/access/roles/:roleid.
-func (h *AccessHandler) DeleteRole(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) DeleteRole(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	roleid, err := accessParam(c, "roleid")
+	roleid, err := accessParam(p.String("roleid"), "roleid")
 	if err != nil {
 		return err
 	}
@@ -819,12 +774,9 @@ func (h *AccessHandler) DeleteRole(c fiber.Ctx) error {
 // ---------------------------------------------------------------------------
 
 // ListACL handles GET /clusters/:cluster_id/access/acl.
-func (h *AccessHandler) ListACL(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) ListACL(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -842,22 +794,30 @@ func (h *AccessHandler) ListACL(c fiber.Ctx) error {
 //
 // Proxmox uses one endpoint for grant and revoke; the request's delete flag
 // selects which. The audit action follows suit so the trail reads correctly.
-func (h *AccessHandler) UpdateACL(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) UpdateACL(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", accessResource, clusterID); err != nil {
-		return err
-	}
-	var req proxmox.UpdateAccessACLParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	req := proxmox.UpdateAccessACLParams{
+		Path:   p.String("path"),
+		Roles:  p.String("roles"),
+		Users:  p.String("users"),
+		Groups: p.String("groups"),
+		Tokens: p.String("tokens"),
+		// Tri-state: omitted leaves Proxmox's own propagate default in force.
+		Propagate: optBoolPtr(p.OptBool("propagate")),
+		Delete:    p.Bool("delete"),
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
+	// validateACLPath, the "at least one role" rule and the "at least one
+	// subject" rule all live in proxmox.UpdateAccessACL. The last of the three
+	// is a cross-field requirement apischema cannot state — Requires names a
+	// companion a parameter ALWAYS needs, not one of a set — so all three stay
+	// at the choke point rather than being half-copied here.
 	if err := pxClient.UpdateAccessACL(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
@@ -887,12 +847,9 @@ func (h *AccessHandler) UpdateACL(c fiber.Ctx) error {
 // Read-only: realm create/update/delete needs the Realm.Allocate privilege,
 // which Proxmox places in its root privilege tier — no built-in role except
 // Administrator carries it.
-func (h *AccessHandler) ListDomains(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) ListDomains(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -907,19 +864,16 @@ func (h *AccessHandler) ListDomains(c fiber.Ctx) error {
 }
 
 // GetDomain handles GET /clusters/:cluster_id/access/domains/:realm.
-func (h *AccessHandler) GetDomain(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) GetDomain(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	realm, err := accessParam(c, "realm")
+	realm, err := accessParam(p.String("realm"), "realm")
 	if err != nil {
 		return err
 	}
@@ -942,12 +896,9 @@ func (h *AccessHandler) GetDomain(c fiber.Ctx) error {
 // submit. That matters here because two common setups fall short —
 // a privilege-separated token has no User.Modify unless explicitly granted,
 // and PVEAdmin lacks both Sys.Modify (role management) and Realm.Allocate.
-func (h *AccessHandler) GetPermissions(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AccessHandler) GetPermissions(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", accessResource, clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -959,12 +910,4 @@ func (h *AccessHandler) GetPermissions(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	return c.JSON(perms)
-}
-
-// derefString returns the pointed-to string, or "" for a nil pointer.
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

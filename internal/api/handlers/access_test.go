@@ -1,142 +1,29 @@
 package handlers
 
 import (
-	"bytes"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
-	"github.com/gofiber/fiber/v3"
-	"github.com/google/uuid"
 )
 
-func newAccessTestApp(t *testing.T) *fiber.App {
-	t.Helper()
-
-	handler := NewAccessHandler(nil, testEncryptionKey, nil)
-
-	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
-	app.Use(func(c fiber.Ctx) error {
-		role := c.Get("X-Test-Role")
-		if role != "" {
-			c.Locals("role", role)
-			c.Locals("user_id", uuid.New())
-		}
-		return c.Next()
-	})
-	installStubEngineMiddleware(app)
-
-	g := app.Group("/clusters/:cluster_id/access")
-	g.Get("/users", handler.ListUsers)
-	g.Post("/users", handler.CreateUser)
-	g.Get("/users/:userid", handler.GetUser)
-	g.Delete("/users/:userid", handler.DeleteUser)
-	g.Post("/users/:userid/tokens/:tokenid", handler.CreateToken)
-	g.Get("/groups", handler.ListGroups)
-	g.Post("/groups", handler.CreateGroup)
-	g.Post("/roles", handler.CreateRole)
-	g.Put("/acl", handler.UpdateACL)
-	g.Get("/permissions", handler.GetPermissions)
-
-	return app
-}
-
-func doAccessReq(t *testing.T, app *fiber.App, method, path, role, body string) *http.Response {
-	t.Helper()
-	var req *http.Request
-	if body == "" {
-		req = httptest.NewRequest(method, path, nil)
-	} else {
-		req = httptest.NewRequest(method, path, bytes.NewBufferString(body))
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if role != "" {
-		req.Header.Set("X-Test-Role", role)
-	}
-	resp, err := app.Test(req, fiber.TestConfig{Timeout: 5_000_000_000})
-	if err != nil {
-		t.Fatalf("%s %s: %v", method, path, err)
-	}
-	return resp
-}
-
-// TestAccessRoutesRequirePermission covers the gate every route shares. The
-// stub engine grants everything to "admin" and nothing to anyone else, so a
-// non-admin role must be refused before the handler reaches Proxmox or the DB.
-func TestAccessRoutesRequirePermission(t *testing.T) {
-	app := newAccessTestApp(t)
-	cid := uuid.New().String()
-	base := "/clusters/" + cid + "/access"
-
-	routes := []struct {
-		method string
-		path   string
-		body   string
-	}{
-		{http.MethodGet, base + "/users", ""},
-		{http.MethodPost, base + "/users", `{"userid":"a@pve"}`},
-		{http.MethodGet, base + "/users/a@pve", ""},
-		{http.MethodDelete, base + "/users/a@pve", ""},
-		{http.MethodPost, base + "/users/a@pve/tokens/tok", `{}`},
-		{http.MethodGet, base + "/groups", ""},
-		{http.MethodPost, base + "/groups", `{"groupid":"g"}`},
-		{http.MethodPost, base + "/roles", `{"roleid":"r"}`},
-		{http.MethodPut, base + "/acl", `{"path":"/","roles":"PVEAdmin","users":"a@pve"}`},
-		{http.MethodGet, base + "/permissions", ""},
-	}
-
-	for _, r := range routes {
-		t.Run(r.method+" "+r.path, func(t *testing.T) {
-			resp := doAccessReq(t, app, r.method, r.path, "viewer", r.body)
-			if resp.StatusCode != fiber.StatusForbidden {
-				t.Errorf("status = %d, want 403 for a non-admin role", resp.StatusCode)
-			}
-		})
-	}
-}
-
-// TestAccessValidationRejectsBeforeProxmox pins the validation that runs before
-// any Proxmox client is built. With nil queries, reaching the client would
-// panic or 5xx — a 400 proves the handler stopped at validation.
-func TestAccessValidationRejectsBeforeProxmox(t *testing.T) {
-	app := newAccessTestApp(t)
-	cid := uuid.New().String()
-	base := "/clusters/" + cid + "/access"
-
-	tests := []struct {
-		name   string
-		method string
-		path   string
-		body   string
-	}{
-		{"user without userid", http.MethodPost, base + "/users", `{"comment":"x"}`},
-		{"group without groupid", http.MethodPost, base + "/groups", `{"comment":"x"}`},
-		{"role without roleid", http.MethodPost, base + "/roles", `{"privs":"VM.Audit"}`},
-		{"malformed user body", http.MethodPost, base + "/users", `{"userid":`},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			resp := doAccessReq(t, app, tc.method, tc.path, "admin", tc.body)
-			if resp.StatusCode != fiber.StatusBadRequest {
-				t.Errorf("status = %d, want 400", resp.StatusCode)
-			}
-		})
-	}
-}
-
-func TestAccessRejectsInvalidClusterID(t *testing.T) {
-	app := newAccessTestApp(t)
-	resp := doAccessReq(t, app, http.MethodGet, "/clusters/not-a-uuid/access/users", "admin", "")
-	if resp.StatusCode != fiber.StatusBadRequest {
-		t.Errorf("status = %d, want 400 for a malformed cluster id", resp.StatusCode)
-	}
-}
+// The 25 access routes are declared endpoints now
+// (internal/api/registry_access.go), so what used to be tested here splits in
+// two, the same way the Veeam and PBS routes did.
+//
+// The PERMISSION each route enforces is a middleware Check attached from its
+// declaration, and the parameter rules — a required userid, a malformed body, a
+// cluster id that is not a UUID — are the schema's. Both are tested against the
+// REAL declarations in internal/api/registry_access_test.go; a bare handler
+// mount here could not exercise a gate that no longer sits inside the handler,
+// and a test that mounted one anyway would pass while proving nothing.
+//
+// What stays here is what is still this file's own: the percent-decode of a
+// path identifier, the self-credential guard's decision, which user edits count
+// as capable of severing access, and the static audit-detail guard.
 
 func TestSplitFullTokenID(t *testing.T) {
 	tests := []struct {
@@ -192,27 +79,6 @@ func TestSelfCredentialSubject(t *testing.T) {
 				t.Errorf("subject = %q, want %q", subject, tc.wantSubject)
 			}
 		})
-	}
-}
-
-func TestForceRequested(t *testing.T) {
-	app := fiber.New()
-	var got []bool
-	app.Get("/x", func(c fiber.Ctx) error {
-		got = append(got, forceRequested(c))
-		return c.SendStatus(fiber.StatusOK)
-	})
-
-	for _, q := range []string{"", "?force=true", "?force=TRUE", "?force=1", "?force=0", "?force=no"} {
-		if _, err := app.Test(httptest.NewRequest(http.MethodGet, "/x"+q, nil)); err != nil {
-			t.Fatalf("Test(%q): %v", q, err)
-		}
-	}
-	want := []bool{false, true, true, true, false, false}
-	for i, w := range want {
-		if got[i] != w {
-			t.Errorf("case %d: forceRequested = %v, want %v", i, got[i], w)
-		}
 	}
 }
 
@@ -298,32 +164,49 @@ func TestGuard_AccessAuditDetailsCarryNoSecrets(t *testing.T) {
 	}
 }
 
+// TestGuard_AccessAuditDetailsNeverReadTheRawParams is the other half of the
+// guard above, and it exists because the migration to declared parameters
+// created a NEW way to leak the same secret.
+//
+// apischema.Params.Raw() returns every validated parameter, including
+// `password` on the user-create route, and handing it to json.Marshal would
+// write that password into a row every Viewer can read — which is exactly what
+// Raw's own doc comment warns against. No call site does this today; the guard
+// is here so none appears.
+func TestGuard_AccessAuditDetailsNeverReadTheRawParams(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "access.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse access.go: %v", err)
+	}
+
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || callName(call) != "Raw" {
+			return true
+		}
+		t.Errorf("access.go:%d: calls Params.Raw() — it carries every declared parameter, "+
+			"including the create route's password, and this file's audit rows are readable by every Viewer",
+			fset.Position(call.Pos()).Line)
+		return true
+	})
+}
+
 // TestAccessParamDecodesPercentEncoding is a regression test for a
 // feature-breaking bug.
 //
-// Fiber v3 does not percent-decode path params: c.Params returns the raw
-// segment. A PVE user id is "name@realm", so any correct client sends
-// encodeURIComponent("nexara@pve") = "nexara%40pve". Reading c.Params directly
-// handed the validator a string containing "%" and no "@", which it rejected —
-// so every user, token, group, role and realm lookup 400'd for clients doing
-// exactly the right thing.
+// Fiber v3 does not percent-decode path params, and the registry hands the
+// handler what Fiber matched. A PVE user id is "name@realm", so any correct
+// client sends encodeURIComponent("nexara@pve") = "nexara%40pve". Using that
+// raw value handed the validator a string containing "%" and no "@", which it
+// rejected — so every user, token, group, role and realm lookup 400'd for
+// clients doing exactly the right thing.
 //
 // The decode must stay paired with validation happening afterwards: "%2e%2e"
 // decodes to ".." and is rejected by the proxmox client's validators, and the
 // outbound path is re-escaped. This test pins the decode; the traversal half is
 // pinned by TestAccessMethodsRejectInjectionWithoutIssuingRequest.
 func TestAccessParamDecodesPercentEncoding(t *testing.T) {
-	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
-	var got string
-	app.Get("/u/:userid", func(c fiber.Ctx) error {
-		v, err := accessParam(c, "userid")
-		if err != nil {
-			return err
-		}
-		got = v
-		return c.SendStatus(fiber.StatusOK)
-	})
-
 	tests := []struct {
 		raw  string
 		want string
@@ -339,13 +222,9 @@ func TestAccessParamDecodesPercentEncoding(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.raw, func(t *testing.T) {
-			got = ""
-			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/u/"+tc.raw, nil))
+			got, err := accessParam(tc.raw, "userid")
 			if err != nil {
-				t.Fatalf("Test: %v", err)
-			}
-			if resp.StatusCode != fiber.StatusOK {
-				t.Fatalf("status = %d, want 200", resp.StatusCode)
+				t.Fatalf("accessParam(%q) returned %v", tc.raw, err)
 			}
 			if got != tc.want {
 				t.Errorf("accessParam(%q) = %q, want %q", tc.raw, got, tc.want)
@@ -353,10 +232,15 @@ func TestAccessParamDecodesPercentEncoding(t *testing.T) {
 		})
 	}
 
-	// The malformed-escape branch (url.PathUnescape returning an error) is not
-	// exercised here: httptest.NewRequest panics on a URL like "/u/nexara%zz", and
-	// for the same reason Go's http.Server rejects it before routing. The branch
-	// stays as defence in depth, not because a request can reach it today.
+	// The malformed-escape branch. The declared patterns admit only a
+	// well-formed "%XX", so no request can reach this today — it stays as
+	// defence in depth, and naming the parameter is what makes the 400
+	// actionable when something else starts calling this.
+	if _, err := accessParam("nexara%zz", "userid"); err == nil {
+		t.Error("accessParam accepted a malformed percent-escape")
+	} else if !strings.Contains(err.Error(), "userid") {
+		t.Errorf("the rejection does not name the parameter: %v", err)
+	}
 }
 
 // TestAccessUpdateAffectsAccess covers which user edits are treated as capable

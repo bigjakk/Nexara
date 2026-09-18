@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -22,6 +22,15 @@ import (
 )
 
 // RollingUpdateHandler handles rolling update API endpoints.
+//
+// All 19 routes are declared in internal/api/registry_rolling_update.go, which
+// states their permission — view/manage:rolling_update for the jobs,
+// manage:ssh_credentials for the credential and host-key routes — and their
+// parameters. Nothing below re-checks either.
+//
+// What the declaration CANNOT check, and what every route carrying an :id keeps
+// in the handler, is that the job or host-key row named in the path belongs to
+// the cluster the permission was resolved against. See jobInCluster.
 type RollingUpdateHandler struct {
 	queries       *db.Queries
 	encryptionKey string
@@ -161,29 +170,63 @@ func toRollingNodeResponse(n db.RollingUpdateNode) rollingUpdateNodeResponse {
 	}
 }
 
+// rollingIDs reads the two path parameters every route in this domain that
+// names ONE row carries: the cluster the permission was resolved against, and
+// the row itself.
+//
+// The second is a job id on the eight job routes and a pinned-host-key id on the
+// delete; both are spelled :id, and neither handler needs to tell them apart
+// here because what they do with the value differs entirely.
+func rollingIDs(p *apischema.Params) (clusterID, rowID uuid.UUID, err error) {
+	clusterID, err = parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	rowID, err = parseParamUUID(p.String("id"))
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	return clusterID, rowID, nil
+}
+
+// jobInCluster loads a rolling update job and refuses one that belongs to a
+// different cluster.
+//
+// This is the check that makes the declared permission mean what it says. Every
+// route here is gated cluster-scoped on the cluster in the PATH, and
+// GetRollingUpdateJob selects on the id ALONE — so without this a caller holding
+// manage:rolling_update on cluster A could name a job belonging to cluster B and
+// start, pause, resume, confirm or skip it. CancelJob was the only one that
+// checked; the other six now do.
+//
+// It cannot be hoisted into middleware: the cluster a job belongs to is a column
+// on the row, and middleware runs before any query.
+//
+// Both outcomes answer the SAME 404 with the same message, deliberately.
+// Distinguishing "no such job" from "that job is another cluster's" would hand a
+// caller an existence oracle over every job on the install.
+func (h *RollingUpdateHandler) jobInCluster(c fiber.Ctx, jobID, clusterID uuid.UUID) (db.RollingUpdateJob, error) {
+	job, err := h.queries.GetRollingUpdateJob(c.Context(), jobID)
+	if err != nil {
+		return db.RollingUpdateJob{}, fiber.NewError(fiber.StatusNotFound, "Rolling update job not found")
+	}
+	if job.ClusterID != clusterID {
+		return db.RollingUpdateJob{}, fiber.NewError(fiber.StatusNotFound, "Rolling update job not found")
+	}
+	return job, nil
+}
+
 // ListJobs returns rolling update jobs for a cluster.
-func (h *RollingUpdateHandler) ListJobs(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) ListJobs(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "rolling_update", clusterID); err != nil {
-		return err
-	}
-
-	limit, _ := strconv.Atoi(c.Query("limit", "20"))
-	offset, _ := strconv.Atoi(c.Query("offset", "0"))
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
 	}
 
 	jobs, err := h.queries.ListRollingUpdateJobs(c.Context(), db.ListRollingUpdateJobsParams{
 		ClusterID: clusterID,
-		Limit:     safeconv.Int32(limit),
-		Offset:    safeconv.Int32(offset),
+		Limit:     safeconv.Int32(int(p.Int("limit"))),
+		Offset:    safeconv.Int32(int(p.Int("offset"))),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list rolling update jobs")
@@ -197,54 +240,22 @@ func (h *RollingUpdateHandler) ListJobs(c fiber.Ctx) error {
 	return RespondItems(c, result)
 }
 
-type createRollingUpdateRequest struct {
-	Nodes             []string `json:"nodes"`
-	Parallelism       int32    `json:"parallelism"`
-	RebootAfterUpdate *bool    `json:"reboot_after_update"`
-	AutoRestoreGuests *bool    `json:"auto_restore_guests"`
-	PackageExcludes   []string `json:"package_excludes"`
-	HAPolicy          string   `json:"ha_policy"`
-	AutoUpgrade       *bool    `json:"auto_upgrade"`
-	NotifyChannelID   *string  `json:"notify_channel_id"`
-	// DrainGuests false upgrades each node in place, leaving its guests
-	// running. Pointer so an older client that omits it keeps the drained
-	// behaviour, which is the only one that existed before.
-	DrainGuests *bool `json:"drain_guests"`
-}
-
 // CreateJob creates a new rolling update job.
-func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
-		return err
-	}
 
-	var req createRollingUpdateRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if len(req.Nodes) == 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "At least one node is required")
-	}
-	if len(req.Nodes) > 64 {
-		return fiber.NewError(fiber.StatusBadRequest, "Too many nodes (max 64)")
-	}
-	if req.Parallelism <= 0 {
-		req.Parallelism = 1
-	}
-	if req.Parallelism > safeconv.Int32(len(req.Nodes)) {
-		req.Parallelism = safeconv.Int32(len(req.Nodes))
-	}
-
-	// Validate node names.
-	for _, n := range req.Nodes {
-		if n == "" || len(n) > 128 {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid node name")
-		}
+	// The node list's own bounds — at least one, at most 64, each one a valid
+	// node name — are the declaration's now. What stays here is the CROSS-FIELD
+	// clamp: parallelism above the number of nodes named is lowered rather than
+	// refused, and apischema has no way to say "at most the length of that other
+	// parameter".
+	nodes := p.Strings("nodes")
+	parallelism := safeconv.Int32(int(p.Int("parallelism")))
+	if parallelism > safeconv.Int32(len(nodes)) {
+		parallelism = safeconv.Int32(len(nodes))
 	}
 
 	// Prevent concurrent jobs for the same cluster.
@@ -293,29 +304,23 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
-	rebootAfter := false
-	if req.RebootAfterUpdate != nil {
-		rebootAfter = *req.RebootAfterUpdate
-	}
-	autoRestore := true
-	if req.AutoRestoreGuests != nil {
-		autoRestore = *req.AutoRestoreGuests
-	}
-	if req.PackageExcludes == nil {
-		req.PackageExcludes = []string{}
+	rebootAfter := p.Bool("reboot_after_update")
+	autoRestore := p.Bool("auto_restore_guests")
+	drainGuests := p.Bool("drain_guests")
+
+	// A non-nil slice, because package_excludes is a NOT NULL jsonb column and
+	// an omitted list must reach it as [] rather than as null.
+	packageExcludes := p.Strings("package_excludes")
+	if packageExcludes == nil {
+		packageExcludes = []string{}
 	}
 
-	drainGuests := true
-	if req.DrainGuests != nil {
-		drainGuests = *req.DrainGuests
-	}
-
-	haPolicy := req.HAPolicy
+	// The EMPTY string is what a caller sends for "unspecified" and has always
+	// meant warn; the enum owns the rest of the vocabulary now, so there is no
+	// third value left to refuse here.
+	haPolicy := p.String("ha_policy")
 	if haPolicy == "" {
 		haPolicy = "warn"
-	}
-	if haPolicy != "strict" && haPolicy != "warn" {
-		return fiber.NewError(fiber.StatusBadRequest, "ha_policy must be 'strict' or 'warn'")
 	}
 
 	// Run pre-flight checks: HA constraints + capacity analysis.
@@ -331,10 +336,10 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 	client, clientErr := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 	if clientErr == nil && drainGuests {
 		// HA/DRS constraint check.
-		report, haErr := rolling.AnalyzeHAConstraints(c.Context(), client, h.queries, clusterID, req.Nodes)
+		report, haErr := rolling.AnalyzeHAConstraints(c.Context(), client, h.queries, clusterID, nodes)
 		// Capacity feasibility check — verifies remaining nodes can absorb
 		// the workload when each batch of nodes is drained.
-		capConflicts, capHasErrors, capErr := rolling.AnalyzeCapacity(c.Context(), client, req.Nodes, req.Parallelism)
+		capConflicts, capHasErrors, capErr := rolling.AnalyzeCapacity(c.Context(), client, nodes, parallelism)
 		allConflicts, preflightHasErrors := foldPreflight(report, haErr, capConflicts, capHasErrors, capErr)
 
 		if haPolicy == "strict" && preflightHasErrors {
@@ -350,31 +355,33 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 		haWarningsJSON = json.RawMessage(`[]`)
 	}
 
-	autoUpgrade := false
-	if req.AutoUpgrade != nil && *req.AutoUpgrade {
+	autoUpgrade := p.Bool("auto_upgrade")
+	if autoUpgrade {
 		// Verify SSH credentials exist for this cluster.
 		hasCreds, err := h.queries.HasClusterSSHCredentials(c.Context(), clusterID)
 		if err != nil || !hasCreds {
 			return fiber.NewError(fiber.StatusBadRequest, "Auto upgrade requires SSH credentials to be configured for this cluster")
 		}
-		autoUpgrade = true
 	}
 
 	var notifyChannelID pgtype.UUID
-	if req.NotifyChannelID != nil && *req.NotifyChannelID != "" {
-		parsed, parseErr := uuid.Parse(*req.NotifyChannelID)
+	// The EMPTY string is the sentinel for "no channel"; the declaration's
+	// empty-or-uuid pattern is what keeps it expressible, because every
+	// registered format rejects "".
+	if channel := p.String("notify_channel_id"); channel != "" {
+		parsed, parseErr := parseParamUUID(channel)
 		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid notify_channel_id")
+			return parseErr
 		}
 		notifyChannelID = pgtype.UUID{Bytes: parsed, Valid: true}
 	}
 
 	job, err := h.queries.InsertRollingUpdateJob(c.Context(), db.InsertRollingUpdateJobParams{
 		ClusterID:         clusterID,
-		Parallelism:       req.Parallelism,
+		Parallelism:       parallelism,
 		RebootAfterUpdate: rebootAfter,
 		AutoRestoreGuests: autoRestore,
-		PackageExcludes:   req.PackageExcludes,
+		PackageExcludes:   packageExcludes,
 		HaPolicy:          haPolicy,
 		HaWarnings:        haWarningsJSON,
 		AutoUpgrade:       autoUpgrade,
@@ -392,7 +399,7 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 		client, clientErr = CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 	}
 
-	for i, nodeName := range req.Nodes {
+	for i, nodeName := range nodes {
 		var packagesJSON json.RawMessage
 		if clientErr == nil {
 			updates, err := client.GetNodeAptUpdates(c.Context(), nodeName)
@@ -421,46 +428,30 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 }
 
 // GetJob returns a single rolling update job with node counts.
-func (h *RollingUpdateHandler) GetJob(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) GetJob(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, jobID, err := rollingIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "rolling_update", clusterID); err != nil {
+
+	job, err := h.jobInCluster(c, jobID, clusterID)
+	if err != nil {
 		return err
-	}
-
-	jobID, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid job ID")
-	}
-
-	job, err := h.queries.GetRollingUpdateJob(c.Context(), jobID)
-	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, "Rolling update job not found")
 	}
 
 	return c.JSON(toJobResponse(job))
 }
 
 // StartJob starts a pending rolling update job.
-func (h *RollingUpdateHandler) StartJob(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) StartJob(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, jobID, err := rollingIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
+
+	job, err := h.jobInCluster(c, jobID, clusterID)
+	if err != nil {
 		return err
-	}
-
-	jobID, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid job ID")
-	}
-
-	job, err := h.queries.GetRollingUpdateJob(c.Context(), jobID)
-	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, "Rolling update job not found")
 	}
 	if job.Status != "pending" {
 		return fiber.NewError(fiber.StatusBadRequest, "Job is not in pending status")
@@ -481,28 +472,14 @@ func (h *RollingUpdateHandler) StartJob(c fiber.Ctx) error {
 }
 
 // CancelJob cancels a rolling update job.
-func (h *RollingUpdateHandler) CancelJob(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) CancelJob(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, jobID, err := rollingIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
+
+	if _, err := h.jobInCluster(c, jobID, clusterID); err != nil {
 		return err
-	}
-
-	jobID, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid job ID")
-	}
-
-	job, err := h.queries.GetRollingUpdateJob(c.Context(), jobID)
-	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, "Rolling update job not found")
-	}
-	if job.ClusterID != clusterID {
-		// The permission check above covered the URL cluster; make sure the
-		// job actually belongs to it.
-		return fiber.NewError(fiber.StatusNotFound, "Rolling update job not found")
 	}
 
 	rows, err := h.queries.CancelRollingUpdateJob(c.Context(), jobID)
@@ -539,18 +516,14 @@ func (h *RollingUpdateHandler) CancelJob(c fiber.Ctx) error {
 }
 
 // PauseJob pauses a running rolling update job.
-func (h *RollingUpdateHandler) PauseJob(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) PauseJob(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, jobID, err := rollingIDs(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
-	jobID, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid job ID")
+	if _, err := h.jobInCluster(c, jobID, clusterID); err != nil {
+		return err
 	}
 
 	if err := h.queries.PauseRollingUpdateJob(c.Context(), jobID); err != nil {
@@ -567,18 +540,14 @@ func (h *RollingUpdateHandler) PauseJob(c fiber.Ctx) error {
 }
 
 // ResumeJob resumes a paused rolling update job.
-func (h *RollingUpdateHandler) ResumeJob(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) ResumeJob(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, jobID, err := rollingIDs(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
-	jobID, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid job ID")
+	if _, err := h.jobInCluster(c, jobID, clusterID); err != nil {
+		return err
 	}
 
 	if err := h.queries.ResumeRollingUpdateJob(c.Context(), jobID); err != nil {
@@ -595,18 +564,14 @@ func (h *RollingUpdateHandler) ResumeJob(c fiber.Ctx) error {
 }
 
 // ListNodes returns nodes for a rolling update job.
-func (h *RollingUpdateHandler) ListNodes(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) ListNodes(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, jobID, err := rollingIDs(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
-	jobID, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid job ID")
+	if _, err := h.jobInCluster(c, jobID, clusterID); err != nil {
+		return err
 	}
 
 	nodes, err := h.queries.ListRollingUpdateNodes(c.Context(), jobID)
@@ -623,28 +588,20 @@ func (h *RollingUpdateHandler) ListNodes(c fiber.Ctx) error {
 }
 
 // ConfirmUpgrade confirms that manual upgrade is done on a node.
-func (h *RollingUpdateHandler) ConfirmUpgrade(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) ConfirmUpgrade(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, jobID, err := rollingIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
+
+	nodeID, err := parseParamUUID(p.String("node_id"))
+	if err != nil {
 		return err
 	}
 
-	jobID, err := uuid.Parse(c.Params("id"))
+	job, err := h.jobInCluster(c, jobID, clusterID)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid job ID")
-	}
-
-	nodeID, err := uuid.Parse(c.Params("node_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid node ID")
-	}
-
-	job, err := h.queries.GetRollingUpdateJob(c.Context(), jobID)
-	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, "Rolling update job not found")
+		return err
 	}
 
 	node, err := h.queries.GetRollingUpdateNode(c.Context(), nodeID)
@@ -667,23 +624,22 @@ func (h *RollingUpdateHandler) ConfirmUpgrade(c fiber.Ctx) error {
 }
 
 // SkipNode skips a pending node in a rolling update job.
-func (h *RollingUpdateHandler) SkipNode(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) SkipNode(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, jobID, err := rollingIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
+
+	nodeID, err := parseParamUUID(p.String("node_id"))
+	if err != nil {
 		return err
 	}
 
-	jobID, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid job ID")
-	}
-
-	nodeID, err := uuid.Parse(c.Params("node_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid node ID")
+	// The job is loaded for its CLUSTER rather than for its contents: without
+	// it, "the node belongs to this job" is satisfied by any job on the
+	// install, including one in a cluster the caller holds nothing on.
+	if _, err := h.jobInCluster(c, jobID, clusterID); err != nil {
+		return err
 	}
 
 	node, err := h.queries.GetRollingUpdateNode(c.Context(), nodeID)
@@ -722,18 +678,10 @@ func (h *RollingUpdateHandler) SkipNode(c fiber.Ctx) error {
 }
 
 // PreviewPackages returns pending apt packages for a specific node.
-func (h *RollingUpdateHandler) PreviewPackages(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) PreviewPackages(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "rolling_update", clusterID); err != nil {
-		return err
-	}
-
-	nodeName := c.Params("node")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
 	}
 
 	client, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
@@ -741,7 +689,7 @@ func (h *RollingUpdateHandler) PreviewPackages(c fiber.Ctx) error {
 		return err
 	}
 
-	updates, err := client.GetNodeAptUpdates(c.Context(), nodeName)
+	updates, err := client.GetNodeAptUpdates(c.Context(), p.String("node"))
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -750,32 +698,21 @@ func (h *RollingUpdateHandler) PreviewPackages(c fiber.Ctx) error {
 }
 
 // PreflightHA analyzes HA/DRS constraints and capacity feasibility for a proposed set of nodes.
-func (h *RollingUpdateHandler) PreflightHA(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) PreflightHA(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "rolling_update", clusterID); err != nil {
-		return err
-	}
 
-	var req struct {
-		Nodes       []string `json:"nodes"`
-		Parallelism int32    `json:"parallelism"`
-	}
-	if err := c.Bind().Body(&req); err != nil || len(req.Nodes) == 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "nodes array is required")
-	}
-	if req.Parallelism <= 0 {
-		req.Parallelism = 1
-	}
+	nodes := p.Strings("nodes")
+	parallelism := safeconv.Int32(int(p.Int("parallelism")))
 
 	client, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to connect to cluster")
 	}
 
-	report, err := rolling.AnalyzeHAConstraints(c.Context(), client, h.queries, clusterID, req.Nodes)
+	report, err := rolling.AnalyzeHAConstraints(c.Context(), client, h.queries, clusterID, nodes)
 	if err != nil {
 		// The status is what improves: a blanket 500 said "Nexara is broken"
 		// for what is usually an unreachable or non-quorate cluster, and this
@@ -789,7 +726,7 @@ func (h *RollingUpdateHandler) PreflightHA(c fiber.Ctx) error {
 		report = &rolling.HAPreFlightReport{Conflicts: []rolling.HAConflict{}}
 	}
 
-	capConflicts, capHasErrors, capErr := rolling.AnalyzeCapacity(c.Context(), client, req.Nodes, req.Parallelism)
+	capConflicts, capHasErrors, capErr := rolling.AnalyzeCapacity(c.Context(), client, nodes, parallelism)
 	// haErr is nil here on purpose: an HA failure already returned above, so
 	// only the capacity half can still be unavailable at this point.
 	conflicts, hasErrors := foldPreflight(report, nil, capConflicts, capHasErrors, capErr)
@@ -811,12 +748,9 @@ type sshCredentialResponse struct {
 }
 
 // GetSSHCredentials returns SSH credential metadata (never returns the secret).
-func (h *RollingUpdateHandler) GetSSHCredentials(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) GetSSHCredentials(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
 		return err
 	}
 
@@ -836,57 +770,53 @@ func (h *RollingUpdateHandler) GetSSHCredentials(c fiber.Ctx) error {
 	})
 }
 
-type upsertSSHCredentialRequest struct {
-	Username   string `json:"username"`
-	Port       int32  `json:"port"`
-	AuthType   string `json:"auth_type"`
-	Password   string `json:"password"`
-	PrivateKey string `json:"private_key"`
-}
-
 // UpsertSSHCredentials creates or updates SSH credentials for a cluster.
-func (h *RollingUpdateHandler) UpsertSSHCredentials(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) UpsertSSHCredentials(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
-		return err
+
+	// A DEFAULT only fills an ABSENT value, and the form sends "" when the
+	// username field is cleared — so this normalisation stays here even though
+	// the declaration states root as the default.
+	username := p.String("username")
+	if username == "" {
+		username = "root"
+	}
+	// Likewise the port: the form's number input sends 0 for a cleared field,
+	// which has always meant 22. The UPPER bound is the declaration's now, and
+	// it refuses rather than substituting, because nobody clears a field to
+	// 70000 and answering "we used 22 instead" without saying so is the silent
+	// substitution this migration removes elsewhere.
+	port := safeconv.Int32(int(p.Int("port")))
+	if port <= 0 {
+		port = 22
 	}
 
-	var req upsertSSHCredentialRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Username == "" {
-		req.Username = "root"
-	}
-	if len(req.Username) > 64 {
-		return fiber.NewError(fiber.StatusBadRequest, "Username too long (max 64)")
-	}
-	if req.Port <= 0 || req.Port > 65535 {
-		req.Port = 22
-	}
-	if req.AuthType != "password" && req.AuthType != "key" {
-		return fiber.NewError(fiber.StatusBadRequest, "auth_type must be 'password' or 'key'")
-	}
-	if req.AuthType == "password" && req.Password == "" {
+	// WHICH secret is required depends on auth_type, and apischema cannot state
+	// that: Requires names a companion a parameter ALWAYS needs, not one it
+	// needs only when a sibling holds a particular value. The vocabulary of
+	// auth_type itself IS the declaration's, as an enum.
+	authType := p.String("auth_type")
+	password := p.String("password")
+	privateKey := p.String("private_key")
+	if authType == "password" && password == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Password is required for password auth")
 	}
-	if req.AuthType == "key" && req.PrivateKey == "" {
+	if authType == "key" && privateKey == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Private key is required for key auth")
 	}
 
 	var encPassword, encKey string
-	if req.Password != "" {
-		encPassword, err = crypto.Encrypt(req.Password, h.encryptionKey)
+	if password != "" {
+		encPassword, err = crypto.Encrypt(password, h.encryptionKey)
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt credentials")
 		}
 	}
-	if req.PrivateKey != "" {
-		encKey, err = crypto.Encrypt(req.PrivateKey, h.encryptionKey)
+	if privateKey != "" {
+		encKey, err = crypto.Encrypt(privateKey, h.encryptionKey)
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt credentials")
 		}
@@ -894,9 +824,9 @@ func (h *RollingUpdateHandler) UpsertSSHCredentials(c fiber.Ctx) error {
 
 	creds, err := h.queries.UpsertClusterSSHCredentials(c.Context(), db.UpsertClusterSSHCredentialsParams{
 		ClusterID:           clusterID,
-		Username:            req.Username,
-		Port:                req.Port,
-		AuthType:            req.AuthType,
+		Username:            username,
+		Port:                port,
+		AuthType:            authType,
 		EncryptedPassword:   encPassword,
 		EncryptedPrivateKey: encKey,
 	})
@@ -918,12 +848,9 @@ func (h *RollingUpdateHandler) UpsertSSHCredentials(c fiber.Ctx) error {
 }
 
 // DeleteSSHCredentials removes SSH credentials for a cluster.
-func (h *RollingUpdateHandler) DeleteSSHCredentials(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) DeleteSSHCredentials(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
 		return err
 	}
 
@@ -946,22 +873,19 @@ func (h *RollingUpdateHandler) DeleteSSHCredentials(c fiber.Ctx) error {
 //     match the presented one; UI should warn and offer re-pin.
 //   - {success: false, message: "..."} — connection or auth failure for
 //     reasons unrelated to host-key trust.
-func (h *RollingUpdateHandler) TestSSHConnection(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) TestSSHConnection(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
-		return err
-	}
 
-	var req struct {
-		NodeName string `json:"node_name"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if err := validateNodeName(req.NodeName); err != nil {
+	// The declaration states the node-name format, which is the tightest of the
+	// four spellings of this check in the tree. validateNodeName STAYS: it
+	// guards the value at the point where it is about to be resolved to an
+	// address and dialled, and an exported validator with a single caller is
+	// exactly the opt-in-guard shape this codebase has been bitten by.
+	nodeName := p.String("node_name")
+	if err := validateNodeName(nodeName); err != nil {
 		return err
 	}
 
@@ -970,7 +894,7 @@ func (h *RollingUpdateHandler) TestSSHConnection(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "SSH credentials not configured for this cluster")
 	}
 
-	sshHost, hostErr := h.resolveNodeAddress(c, clusterID, req.NodeName)
+	sshHost, hostErr := h.resolveNodeAddress(c, clusterID, nodeName)
 	if hostErr != nil {
 		return hostErr
 	}
@@ -1071,12 +995,9 @@ type sshKnownHostResponse struct {
 }
 
 // ListSSHKnownHosts returns the pinned host keys for a cluster.
-func (h *RollingUpdateHandler) ListSSHKnownHosts(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) ListSSHKnownHosts(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
 		return err
 	}
 
@@ -1103,41 +1024,33 @@ func (h *RollingUpdateHandler) ListSSHKnownHosts(c fiber.Ctx) error {
 	return RespondItems(c, out)
 }
 
-type pinSSHHostKeyRequest struct {
-	NodeName            string `json:"node_name"`
-	ExpectedFingerprint string `json:"expected_fingerprint"`
-}
-
 // PinSSHHostKey runs a fresh host-key scan and stores the result, but only
 // after verifying the freshly-scanned fingerprint matches the one the user
 // confirmed in the UI. This closes the TOCTOU window between the test
 // response and the pin call.
-func (h *RollingUpdateHandler) PinSSHHostKey(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) PinSSHHostKey(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
-		return err
-	}
 
-	var req pinSSHHostKeyRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if err := validateNodeName(req.NodeName); err != nil {
+	// Same reasoning as TestSSHConnection: the declaration states the format,
+	// and validateNodeName stays at the point of use. The fingerprint\'s own
+	// "required, at most 128 characters" rule IS the declaration\'s now — it is
+	// a bound on a string, which a schema can state exactly — and what remains
+	// here is the check no schema could make: that a fresh scan agrees with it.
+	nodeName := p.String("node_name")
+	if err := validateNodeName(nodeName); err != nil {
 		return err
 	}
-	if req.ExpectedFingerprint == "" || len(req.ExpectedFingerprint) > 128 {
-		return fiber.NewError(fiber.StatusBadRequest, "expected_fingerprint is required (and must be ≤ 128 chars)")
-	}
+	expectedFingerprint := p.String("expected_fingerprint")
 
 	creds, err := h.queries.GetClusterSSHCredentials(c.Context(), clusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "SSH credentials not configured for this cluster")
 	}
 
-	sshHost, hostErr := h.resolveNodeAddress(c, clusterID, req.NodeName)
+	sshHost, hostErr := h.resolveNodeAddress(c, clusterID, nodeName)
 	if hostErr != nil {
 		return hostErr
 	}
@@ -1150,9 +1063,9 @@ func (h *RollingUpdateHandler) PinSSHHostKey(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to scan host key: "+scanErr.Error())
 	}
 	scannedFP := sshpkg.FingerprintSHA256(key)
-	if scannedFP != req.ExpectedFingerprint {
+	if scannedFP != expectedFingerprint {
 		return fiber.NewError(fiber.StatusConflict,
-			"Host key changed between confirmation and pin (expected "+req.ExpectedFingerprint+
+			"Host key changed between confirmation and pin (expected "+expectedFingerprint+
 				", scanned "+scannedFP+"). Re-test the connection and confirm the new fingerprint.")
 	}
 
@@ -1176,7 +1089,7 @@ func (h *RollingUpdateHandler) PinSSHHostKey(c fiber.Ctx) error {
 	details, _ := json.Marshal(fiber.Map{
 		"host":        sshHost,
 		"fingerprint": scannedFP,
-		"node_name":   req.NodeName,
+		"node_name":   nodeName,
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", row.ID.String(), "ssh_host_key_pinned", details)
 
@@ -1196,17 +1109,13 @@ func (h *RollingUpdateHandler) PinSSHHostKey(c fiber.Ctx) error {
 
 // DeleteSSHKnownHost removes a pinned host key entry. The next connection
 // to that host will fail closed until re-pinned.
-func (h *RollingUpdateHandler) DeleteSSHKnownHost(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *RollingUpdateHandler) DeleteSSHKnownHost(c fiber.Ctx, p *apischema.Params) error {
+	// The delete is already scoped to the cluster in the WHERE clause — see
+	// DeleteSSHKnownHostByID — so an entry belonging to another cluster matches
+	// nothing. That is why this route needs no jobInCluster equivalent.
+	clusterID, id, err := rollingIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
-		return err
-	}
-	id, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid id")
 	}
 
 	if err := h.queries.DeleteSSHKnownHostByID(c.Context(), db.DeleteSSHKnownHostByIDParams{

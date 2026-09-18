@@ -88,6 +88,15 @@ func (s *Server) buildRegistry() *Registry {
 	if s.alertHandler != nil {
 		registerAlertEndpoints(reg, s.alertHandler)
 	}
+	if s.accessHandler != nil {
+		registerAccessEndpoints(reg, s.accessHandler)
+	}
+	if s.acmeHandler != nil {
+		registerACMEEndpoints(reg, s.acmeHandler)
+	}
+	if s.rollingUpdateHandler != nil {
+		registerRollingUpdateEndpoints(reg, s.rollingUpdateHandler)
+	}
 	if s.networkHandler != nil {
 		// One handler, four declaration files: see the file comment in
 		// registry_networks.go for the split.

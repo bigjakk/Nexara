@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"errors"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -11,53 +9,17 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// `delete` has to survive Fiber's binder as a []string before the client ever
-// sees it. Nothing else proves that link: the client tests build the struct in
-// Go, and if the binder dropped the list the handler would send a perfectly
-// valid request that clears nothing — the same silent no-op the delete support
-// was added to fix.
+// The `delete` list used to be pinned here as a Fiber-binder test: nothing else
+// proved that the list survived the bind, and a dropped one would have sent a
+// perfectly valid request that cleared nothing.
 //
-// The struct is shared with the GET response, so this also pins that `digest`
-// round-trips: read it from the config, hand it back on the write.
-//
-// Scope: this exercises the struct and the binder, not SetNodeACMEConfig. A
-// handler that stopped binding into proxmox.NodeACMEConfig would leave this
-// green — the static guard in missing_object_guard_test.go is what watches the
-// handler's own wiring.
-func TestBindBody_PromotesNodeACMEDeleteList(t *testing.T) {
-	app := fiber.New()
-	var got proxmox.NodeACMEConfig
-	app.Put("/t", func(c fiber.Ctx) error {
-		if err := c.Bind().Body(&got); err != nil {
-			return err
-		}
-		return c.SendStatus(fiber.StatusOK)
-	})
-
-	req := httptest.NewRequest(fiber.MethodPut, "/t", strings.NewReader(
-		`{"acmedomain0":"node.example.com","delete":["acmedomain1","acmedomain2"],`+
-			`"digest":"da39a3ee5e6b4b0d3255bfef95601890afd80709"}`))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("app.Test: %v", err)
-	}
-	// Checked first so a binder failure reads as one error rather than three
-	// field mismatches.
-	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d, want 200 — the body failed to bind", resp.StatusCode)
-	}
-
-	if got.ACMEDomain0 != "node.example.com" {
-		t.Errorf("ACMEDomain0 = %q", got.ACMEDomain0)
-	}
-	if len(got.Delete) != 2 || got.Delete[0] != "acmedomain1" || got.Delete[1] != "acmedomain2" {
-		t.Errorf("Delete = %v, want [acmedomain1 acmedomain2]", got.Delete)
-	}
-	if got.Digest != "da39a3ee5e6b4b0d3255bfef95601890afd80709" {
-		t.Errorf("Digest = %q", got.Digest)
-	}
-}
+// SetNodeACMEConfig no longer binds a struct — the route is declared
+// (internal/api/registry_acme.go) and the list arrives through the parameter
+// schema — so that link has moved with it.
+// TestNodeACMEDeleteListReachesTheHandlerAsAList in
+// internal/api/registry_acme_test.go drives the REAL declaration end to end and
+// asserts the same thing about the same three fields, including that `digest`
+// round-trips from the GET into the PUT.
 
 // mapNodeConfigError turns PVE's digest-mismatch die into a 409. Everything
 // else has to keep the status mapProxmoxError gave it — the phrase list is the

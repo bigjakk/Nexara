@@ -207,32 +207,10 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/audit-log", s.auditHandler.ListByCluster)
 		}
 
-		// Rolling update routes.
-		if s.rollingUpdateHandler != nil {
-			clusters.Get("/:cluster_id/rolling-updates", s.rollingUpdateHandler.ListJobs)
-			clusters.Post("/:cluster_id/rolling-updates", s.rollingUpdateHandler.CreateJob)
-			clusters.Get("/:cluster_id/rolling-updates/:id", s.rollingUpdateHandler.GetJob)
-			clusters.Post("/:cluster_id/rolling-updates/:id/start", s.rollingUpdateHandler.StartJob)
-			clusters.Post("/:cluster_id/rolling-updates/:id/cancel", s.rollingUpdateHandler.CancelJob)
-			clusters.Post("/:cluster_id/rolling-updates/:id/pause", s.rollingUpdateHandler.PauseJob)
-			clusters.Post("/:cluster_id/rolling-updates/:id/resume", s.rollingUpdateHandler.ResumeJob)
-			clusters.Get("/:cluster_id/rolling-updates/:id/nodes", s.rollingUpdateHandler.ListNodes)
-			clusters.Post("/:cluster_id/rolling-updates/:id/nodes/:node_id/confirm-upgrade", s.rollingUpdateHandler.ConfirmUpgrade)
-			clusters.Post("/:cluster_id/rolling-updates/:id/nodes/:node_id/skip", s.rollingUpdateHandler.SkipNode)
-			clusters.Post("/:cluster_id/rolling-updates/preflight-ha", s.rollingUpdateHandler.PreflightHA)
-			clusters.Get("/:cluster_id/nodes/:node/packages", s.rollingUpdateHandler.PreviewPackages)
-
-			// SSH credential management.
-			clusters.Get("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.GetSSHCredentials)
-			clusters.Put("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.UpsertSSHCredentials)
-			clusters.Delete("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.DeleteSSHCredentials)
-			clusters.Post("/:cluster_id/ssh-credentials/test", s.rollingUpdateHandler.TestSSHConnection)
-
-			// SSH known-host (pinned host key) management.
-			clusters.Get("/:cluster_id/ssh-known-hosts", s.rollingUpdateHandler.ListSSHKnownHosts)
-			clusters.Post("/:cluster_id/ssh-known-hosts", s.rollingUpdateHandler.PinSSHHostKey)
-			clusters.Delete("/:cluster_id/ssh-known-hosts/:id", s.rollingUpdateHandler.DeleteSSHKnownHost)
-		}
+		// The 19 rolling-update routes — 12 for the jobs and the node package
+		// preview, 7 for the SSH credentials and pinned host keys they run
+		// with — are declared in internal/api/registry_rolling_update.go and
+		// mounted by mountRegistry above, so there is no block for them here.
 
 		// The 9 cluster option, tag and corosync routes are declared in
 		// internal/api/registry_cluster_options.go and mounted by
@@ -250,63 +228,20 @@ func (s *Server) setupRoutes() {
 			clusters.Delete("/:cluster_id/pools/:pool_id", s.poolHandler.DeletePool)
 		}
 
-		// Proxmox access control: PVE users, API tokens, groups, roles, ACLs.
-		// Realms are read-only — realm writes need Realm.Allocate, which no
-		// built-in PVE role except Administrator carries.
-		if s.accessHandler != nil {
-			access := clusters.Group("/:cluster_id/access")
-			access.Get("/users", s.accessHandler.ListUsers)
-			access.Post("/users", s.accessHandler.CreateUser)
-			access.Get("/users/:userid", s.accessHandler.GetUser)
-			access.Put("/users/:userid", s.accessHandler.UpdateUser)
-			access.Delete("/users/:userid", s.accessHandler.DeleteUser)
-			access.Get("/users/:userid/tokens", s.accessHandler.ListTokens)
-			access.Get("/users/:userid/tokens/:tokenid", s.accessHandler.GetToken)
-			access.Post("/users/:userid/tokens/:tokenid", s.accessHandler.CreateToken)
-			access.Put("/users/:userid/tokens/:tokenid", s.accessHandler.UpdateToken)
-			access.Delete("/users/:userid/tokens/:tokenid", s.accessHandler.DeleteToken)
-			access.Get("/groups", s.accessHandler.ListGroups)
-			access.Post("/groups", s.accessHandler.CreateGroup)
-			access.Get("/groups/:groupid", s.accessHandler.GetGroup)
-			access.Put("/groups/:groupid", s.accessHandler.UpdateGroup)
-			access.Delete("/groups/:groupid", s.accessHandler.DeleteGroup)
-			access.Get("/roles", s.accessHandler.ListRoles)
-			access.Post("/roles", s.accessHandler.CreateRole)
-			access.Get("/roles/:roleid", s.accessHandler.GetRole)
-			access.Put("/roles/:roleid", s.accessHandler.UpdateRole)
-			access.Delete("/roles/:roleid", s.accessHandler.DeleteRole)
-			access.Get("/acl", s.accessHandler.ListACL)
-			access.Put("/acl", s.accessHandler.UpdateACL)
-			access.Get("/domains", s.accessHandler.ListDomains)
-			access.Get("/domains/:realm", s.accessHandler.GetDomain)
-			access.Get("/permissions", s.accessHandler.GetPermissions)
-		}
+		// The 25 Proxmox access-control routes — PVE users, API tokens,
+		// groups, roles, ACLs and the read-only realm listing — are declared
+		// in internal/api/registry_access.go and mounted by mountRegistry
+		// above, so there is no block for them here.
 
 		// The 8 replication routes are declared in
 		// internal/api/registry_replication.go and mounted by
 		// mountRegistry above, so there is no block for them here.
 
-		// ACME certificate routes.
-		if s.acmeHandler != nil {
-			clusters.Get("/:cluster_id/acme/accounts", s.acmeHandler.ListAccounts)
-			clusters.Post("/:cluster_id/acme/accounts", s.acmeHandler.CreateAccount)
-			clusters.Get("/:cluster_id/acme/accounts/:name", s.acmeHandler.GetAccount)
-			clusters.Put("/:cluster_id/acme/accounts/:name", s.acmeHandler.UpdateAccount)
-			clusters.Delete("/:cluster_id/acme/accounts/:name", s.acmeHandler.DeleteAccount)
-			clusters.Get("/:cluster_id/acme/plugins", s.acmeHandler.ListPlugins)
-			clusters.Post("/:cluster_id/acme/plugins", s.acmeHandler.CreatePlugin)
-			clusters.Put("/:cluster_id/acme/plugins/:plugin_id", s.acmeHandler.UpdatePlugin)
-			clusters.Delete("/:cluster_id/acme/plugins/:plugin_id", s.acmeHandler.DeletePlugin)
-			clusters.Get("/:cluster_id/acme/challenge-schema", s.acmeHandler.ListChallengeSchema)
-			clusters.Get("/:cluster_id/acme/directories", s.acmeHandler.ListDirectories)
-			clusters.Get("/:cluster_id/acme/tos", s.acmeHandler.GetTOS)
-			clusters.Get("/:cluster_id/nodes/:node/acme-config", s.acmeHandler.GetNodeACMEConfig)
-			clusters.Put("/:cluster_id/nodes/:node/acme-config", s.acmeHandler.SetNodeACMEConfig)
-			clusters.Get("/:cluster_id/nodes/:node/certificates", s.acmeHandler.ListNodeCertificates)
-			clusters.Post("/:cluster_id/nodes/:node/certificates/order", s.acmeHandler.OrderNodeCertificate)
-			clusters.Put("/:cluster_id/nodes/:node/certificates/renew", s.acmeHandler.RenewNodeCertificate)
-			clusters.Delete("/:cluster_id/nodes/:node/certificates/revoke", s.acmeHandler.RevokeNodeCertificate)
-		}
+		// The 18 ACME routes — accounts, challenge plugins, the directory and
+		// challenge-schema catalogues, and the per-node certificate and
+		// acme-config routes — are declared in internal/api/registry_acme.go
+		// and mounted by mountRegistry above, so there is no block for them
+		// here.
 
 		// APT repository management routes.
 		if s.aptRepositoryHandler != nil {

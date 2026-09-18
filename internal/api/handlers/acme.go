@@ -6,12 +6,17 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // ACMEHandler handles ACME certificate management endpoints.
+//
+// All 18 routes are declared in internal/api/registry_acme.go, which states
+// their permission (view:certificate for the eight reads, manage:certificate for
+// the ten writes) and their parameters. Nothing below re-checks either.
 type ACMEHandler struct {
 	queries       *db.Queries
 	encryptionKey string
@@ -49,12 +54,9 @@ func mapNodeConfigError(err error) error {
 // --- ACME Accounts ---
 
 // ListAccounts handles GET /clusters/:cluster_id/acme/accounts.
-func (h *ACMEHandler) ListAccounts(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) ListAccounts(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -69,20 +71,16 @@ func (h *ACMEHandler) ListAccounts(c fiber.Ctx) error {
 }
 
 // CreateAccount handles POST /clusters/:cluster_id/acme/accounts.
-func (h *ACMEHandler) CreateAccount(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) CreateAccount(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
-		return err
-	}
-	var req proxmox.CreateACMEAccountParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Contact == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Contact email is required")
+	req := proxmox.CreateACMEAccountParams{
+		Name:      p.String("name"),
+		Contact:   p.String("contact"),
+		Directory: p.String("directory"),
+		TOSUrl:    p.String("tos_url"),
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -107,15 +105,12 @@ func (h *ACMEHandler) CreateAccount(c fiber.Ctx) error {
 }
 
 // GetAccount handles GET /clusters/:cluster_id/acme/accounts/:name.
-func (h *ACMEHandler) GetAccount(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) GetAccount(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
-		return err
-	}
-	name := c.Params("name")
+	name := p.String("name")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -128,19 +123,13 @@ func (h *ACMEHandler) GetAccount(c fiber.Ctx) error {
 }
 
 // UpdateAccount handles PUT /clusters/:cluster_id/acme/accounts/:name.
-func (h *ACMEHandler) UpdateAccount(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) UpdateAccount(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
-		return err
-	}
-	name := c.Params("name")
-	var req proxmox.UpdateACMEAccountParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	name := p.String("name")
+	req := proxmox.UpdateACMEAccountParams{Contact: p.String("contact")}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -155,15 +144,12 @@ func (h *ACMEHandler) UpdateAccount(c fiber.Ctx) error {
 }
 
 // DeleteAccount handles DELETE /clusters/:cluster_id/acme/accounts/:name.
-func (h *ACMEHandler) DeleteAccount(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) DeleteAccount(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
-		return err
-	}
-	name := c.Params("name")
+	name := p.String("name")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -180,12 +166,9 @@ func (h *ACMEHandler) DeleteAccount(c fiber.Ctx) error {
 // --- ACME Plugins ---
 
 // ListPlugins handles GET /clusters/:cluster_id/acme/plugins.
-func (h *ACMEHandler) ListPlugins(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) ListPlugins(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -205,20 +188,21 @@ func (h *ACMEHandler) ListPlugins(c fiber.Ctx) error {
 }
 
 // CreatePlugin handles POST /clusters/:cluster_id/acme/plugins.
-func (h *ACMEHandler) CreatePlugin(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) CreatePlugin(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
-		return err
-	}
-	var req proxmox.CreateACMEPluginParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.ID == "" || req.Type == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "ID and type are required")
+	req := proxmox.CreateACMEPluginParams{
+		// plugin_id, not "id": the declaration renames it and keeps "id" as an
+		// alias, because a body parameter called "id" is a name the permission
+		// middleware also reads. See createACMEPluginParams.
+		ID:   p.String("plugin_id"),
+		Type: p.String("type"),
+		API:  p.String("api"),
+		Data: p.String("data"),
+		// Tri-state: omitted leaves Proxmox's own validation delay in force.
+		ValidationDelay: optIntPtr(p.OptInt("validation-delay")),
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -234,18 +218,17 @@ func (h *ACMEHandler) CreatePlugin(c fiber.Ctx) error {
 }
 
 // UpdatePlugin handles PUT /clusters/:cluster_id/acme/plugins/:plugin_id.
-func (h *ACMEHandler) UpdatePlugin(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) UpdatePlugin(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
-		return err
-	}
-	pluginID := c.Params("plugin_id")
-	var req proxmox.UpdateACMEPluginParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	pluginID := p.String("plugin_id")
+	req := proxmox.UpdateACMEPluginParams{
+		API:             p.String("api"),
+		Data:            p.String("data"),
+		ValidationDelay: optIntPtr(p.OptInt("validation-delay")),
+		Digest:          p.String("digest"),
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -261,15 +244,12 @@ func (h *ACMEHandler) UpdatePlugin(c fiber.Ctx) error {
 }
 
 // DeletePlugin handles DELETE /clusters/:cluster_id/acme/plugins/:plugin_id.
-func (h *ACMEHandler) DeletePlugin(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) DeletePlugin(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
-		return err
-	}
-	pluginID := c.Params("plugin_id")
+	pluginID := p.String("plugin_id")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -286,12 +266,9 @@ func (h *ACMEHandler) DeletePlugin(c fiber.Ctx) error {
 // --- ACME Challenge Schema, Directories & TOS ---
 
 // ListChallengeSchema handles GET /clusters/:cluster_id/acme/challenge-schema.
-func (h *ACMEHandler) ListChallengeSchema(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) ListChallengeSchema(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -314,12 +291,9 @@ func (h *ACMEHandler) ListChallengeSchema(c fiber.Ctx) error {
 }
 
 // ListDirectories handles GET /clusters/:cluster_id/acme/directories.
-func (h *ACMEHandler) ListDirectories(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) ListDirectories(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -334,12 +308,9 @@ func (h *ACMEHandler) ListDirectories(c fiber.Ctx) error {
 }
 
 // GetTOS handles GET /clusters/:cluster_id/acme/tos.
-func (h *ACMEHandler) GetTOS(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) GetTOS(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -356,18 +327,12 @@ func (h *ACMEHandler) GetTOS(c fiber.Ctx) error {
 // --- Node ACME Config ---
 
 // GetNodeACMEConfig handles GET /clusters/:cluster_id/nodes/:node/acme-config.
-func (h *ACMEHandler) GetNodeACMEConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) GetNodeACMEConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
-		return err
-	}
-	node := c.Params("node")
-	if node == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
-	}
+	node := p.String("node")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -380,26 +345,32 @@ func (h *ACMEHandler) GetNodeACMEConfig(c fiber.Ctx) error {
 }
 
 // SetNodeACMEConfig handles PUT /clusters/:cluster_id/nodes/:node/acme-config.
-func (h *ACMEHandler) SetNodeACMEConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) SetNodeACMEConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
-		return err
-	}
-	node := c.Params("node")
-	if node == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
-	}
-	var req proxmox.NodeACMEConfig
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	node := p.String("node")
+	req := proxmox.NodeACMEConfig{
+		ACME:        p.String("acme"),
+		ACMEDomain0: p.String("acmedomain0"),
+		ACMEDomain1: p.String("acmedomain1"),
+		ACMEDomain2: p.String("acmedomain2"),
+		ACMEDomain3: p.String("acmedomain3"),
+		ACMEDomain4: p.String("acmedomain4"),
+		ACMEDomain5: p.String("acmedomain5"),
+		Delete:      p.Strings("delete"),
+		Digest:      p.String("digest"),
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
+	// The delete allow-list and the "set and cleared in one request" refusal
+	// live in proxmox.SetNodeACMEConfig, not here. They are choke-point checks
+	// that protect every caller of the client — see deletableNodeACMEKeys — and
+	// the schema deliberately does not restate either: it bounds the list, it
+	// does not decide what may be in it.
 	if err := pxClient.SetNodeACMEConfig(c.Context(), node, req); err != nil {
 		return mapNodeConfigError(err)
 	}
@@ -429,18 +400,12 @@ func (h *ACMEHandler) SetNodeACMEConfig(c fiber.Ctx) error {
 // --- Node Certificates ---
 
 // ListNodeCertificates handles GET /clusters/:cluster_id/nodes/:node/certificates.
-func (h *ACMEHandler) ListNodeCertificates(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) ListNodeCertificates(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
-		return err
-	}
-	node := c.Params("node")
-	if node == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
-	}
+	node := p.String("node")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -453,24 +418,17 @@ func (h *ACMEHandler) ListNodeCertificates(c fiber.Ctx) error {
 }
 
 // OrderNodeCertificate handles POST /clusters/:cluster_id/nodes/:node/certificates/order.
-func (h *ACMEHandler) OrderNodeCertificate(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) OrderNodeCertificate(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
-		return err
-	}
-	node := c.Params("node")
-	var req struct {
-		Force bool `json:"force"`
-	}
-	_ = c.Bind().Body(&req)
+	node := p.String("node")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	upid, err := pxClient.OrderNodeCertificate(c.Context(), node, req.Force)
+	upid, err := pxClient.OrderNodeCertificate(c.Context(), node, p.Bool("force"))
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -488,24 +446,17 @@ func (h *ACMEHandler) OrderNodeCertificate(c fiber.Ctx) error {
 }
 
 // RenewNodeCertificate handles PUT /clusters/:cluster_id/nodes/:node/certificates/renew.
-func (h *ACMEHandler) RenewNodeCertificate(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) RenewNodeCertificate(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
-		return err
-	}
-	node := c.Params("node")
-	var req struct {
-		Force bool `json:"force"`
-	}
-	_ = c.Bind().Body(&req)
+	node := p.String("node")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	upid, err := pxClient.RenewNodeCertificate(c.Context(), node, req.Force)
+	upid, err := pxClient.RenewNodeCertificate(c.Context(), node, p.Bool("force"))
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -523,15 +474,12 @@ func (h *ACMEHandler) RenewNodeCertificate(c fiber.Ctx) error {
 }
 
 // RevokeNodeCertificate handles DELETE /clusters/:cluster_id/nodes/:node/certificates/revoke.
-func (h *ACMEHandler) RevokeNodeCertificate(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ACMEHandler) RevokeNodeCertificate(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
-		return err
-	}
-	node := c.Params("node")
+	node := p.String("node")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err

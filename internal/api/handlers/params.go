@@ -63,6 +63,19 @@ func optIntPtr(value int64, supplied bool) *int {
 	return &n
 }
 
+// optInt64Ptr is optIntPtr for a parameter whose Proxmox struct field is a
+// *int64 rather than a *int — an expiry, which is a Unix timestamp.
+//
+// It is a separate function rather than a generic one because the two exist to
+// produce two DIFFERENT types, and a caller picking the wrong width silently
+// truncates on a 32-bit build.
+func optInt64Ptr(value int64, supplied bool) *int64 {
+	if !supplied {
+		return nil
+	}
+	return &value
+}
+
 // optStringPtr is optBoolPtr for a string parameter, read the same way:
 // optStringPtr(p.OptString("comment")).
 //

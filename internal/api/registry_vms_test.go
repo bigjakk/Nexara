@@ -404,6 +404,9 @@ var registryDomainRouteCounts = map[string]int{
 	"registerReportEndpoints":         reportRouteCount,
 	"registerVeeamEndpoints":          veeamRouteCount,
 	"registerAlertEndpoints":          alertRouteCount,
+	"registerAccessEndpoints":         accessRouteCount,
+	"registerACMEEndpoints":           acmeRouteCount,
+	"registerRollingUpdateEndpoints":  rollingRouteCount,
 	// NetworkHandler's 66 routes are declared across four files and four
 	// functions rather than one, so each group carries its own count here —
 	// see the file comment in registry_networks.go.
@@ -448,6 +451,9 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 		"registerReportEndpoints":         0,
 		"registerVeeamEndpoints":          0,
 		"registerAlertEndpoints":          0,
+		"registerAccessEndpoints":         0,
+		"registerACMEEndpoints":           0,
+		"registerRollingUpdateEndpoints":  0,
 
 		"registerNetworkInterfaceEndpoints": 0,
 		"registerFirewallEndpoints":         0,
@@ -531,6 +537,18 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	before = reg.Len()
 	registerAlertEndpoints(reg, s.alertHandler)
 	declared["registerAlertEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerAccessEndpoints(reg, s.accessHandler)
+	declared["registerAccessEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerACMEEndpoints(reg, s.acmeHandler)
+	declared["registerACMEEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerRollingUpdateEndpoints(reg, s.rollingUpdateHandler)
+	declared["registerRollingUpdateEndpoints"] = reg.Len() - before
 
 	before = reg.Len()
 	registerNetworkInterfaceEndpoints(reg, s.networkHandler)

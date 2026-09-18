@@ -188,6 +188,14 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 // The seven VM-dialog hardware listings share the node prefix and are
 // declared in registry_vms.go, so they are named explicitly rather than
 // skipped by a looser prefix rule that would also swallow a real omission.
+//
+// Two OTHER domains also mount routes under this prefix, and they are
+// deferred to rather than re-listed: the six ACME certificate and
+// acme-config routes carry their own tally in registry_acme_test.go, and
+// the rolling-update package preview carries its own in
+// registry_rolling_update_test.go. Deferring keeps every route in exactly
+// one tally — copying them here would create a second list to keep in step,
+// which is the failure this test exists to prevent.
 func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 	vmDialogRoutes := map[string]bool{
 		"GET " + clusterScope + "/nodes/:node_name/bridges":       true,
@@ -206,11 +214,15 @@ func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 			continue
 		}
 		seen++
-		if _, listed := nodeLegacyPermissions[key]; listed || vmDialogRoutes[key] {
+		_, inNodeTally := nodeLegacyPermissions[key]
+		_, inACMETally := acmeLegacyPermissions[key]
+		_, inRollingTally := rollingLegacyPermissions[key]
+		if inNodeTally || inACMETally || inRollingTally || vmDialogRoutes[key] {
 			continue
 		}
-		t.Errorf("%s is declared under the node scope but is in neither nodeLegacyPermissions nor the "+
-			"VM-dialog hardware set — add it to the tally, or the tally stops being a review surface", key)
+		t.Errorf("%s is declared under the node scope but is in none of nodeLegacyPermissions, "+
+			"acmeLegacyPermissions, rollingLegacyPermissions or the VM-dialog hardware set — add it "+
+			"to its domain's tally, or the tally stops being a review surface", key)
 	}
 	if seen == 0 {
 		t.Fatal("no declared route matched the node scope; this guard would pass vacuously")
