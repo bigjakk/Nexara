@@ -259,9 +259,15 @@ func nodeParams(extra apischema.Properties) apischema.Properties {
 // length cap is generous for the same reason: it is here to bound the
 // path segment, not to re-state whatever limit the Proxmox of the day
 // enforced when the snapshot was taken.
+//
+// The rule is the catalogue's pve-configid-existing, shared with
+// haConfigIDParam (registry_ha.go), which is looser than pve-configid for
+// exactly this reason and records the difference against upstream. It is a
+// Pattern and not a Format on purpose — see the guard in the container
+// snapshot tests.
 var snapshotNameParam = apischema.Property{
 	Type:        apischema.String,
-	Pattern:     `^[A-Za-z][A-Za-z0-9_-]*$`,
+	Pattern:     apischema.Rule("pve-configid-existing"),
 	MaxLength:   apischema.Ptr(128),
 	Typetext:    "<name>",
 	Description: "Snapshot name.",
@@ -276,17 +282,21 @@ var snapshotNameParam = apischema.Property{
 // pattern instead of borrowing a standard option's format. Tightening it
 // to the format would turn a working request into a 400 — and would do it
 // to every external consumer at once, not just to our own dialog.
-const (
-	emptyOrNodeName  = `^$|^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`
-	emptyOrStorageID = `^$|^[A-Za-z][A-Za-z0-9._-]*$`
-	// PVE's own pve-poolid format, transcribed from verify_poolname in
-	// pve-access-control (src/PVE/AccessControl.pm), plus the empty
-	// alternative this block exists for. Copied rather than tightened:
-	// the segment charset really does allow a leading dot or dash, and
-	// pools really do nest up to three levels ("infra/prod/db"), so the
-	// tidier-looking `^[A-Za-z0-9][A-Za-z0-9._-]*$` would 400 pool names
-	// Proxmox itself accepts and this API has always forwarded.
-	emptyOrPoolID = `^$|^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+){0,2}$`
+//
+// Each of the three is DERIVED in the catalogue from the very rule it is
+// the sentinel twin of — node-name, storage-id and pve-poolid — rather than
+// hand-written beside it. That is what keeps the twin honest: these were
+// three transcriptions of rules defined elsewhere, and a transcription only
+// has to be corrected once to be wrong. pve-poolid is the one that proves
+// it: the segment charset really does allow a leading dot or dash, and
+// pools really do nest up to three levels ("infra/prod/db"), so the
+// tidier-looking `^[A-Za-z0-9][A-Za-z0-9._-]*$` a reader invents instead
+// would 400 pool names Proxmox itself accepts and this API has always
+// forwarded.
+var (
+	emptyOrNodeName  = apischema.Rule("node-name-or-empty")
+	emptyOrStorageID = apischema.Rule("storage-id-or-empty")
+	emptyOrPoolID    = apischema.Rule("pve-poolid-or-empty")
 )
 
 // optPoolID is the `pool` body parameter, wherever a request names a
@@ -674,12 +684,13 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 			"disk": diskKeyParam("Config key of the disk to resize, e.g. scsi0."),
 			"size": {
 				Type: apischema.String,
-				// Proxmox's own resize format, which is NOT the disk-size
+				// Proxmox's own resize rule, which is NOT the disk-size
 				// format the attach endpoint takes: a leading "+" means
 				// "grow by", and its absence means "grow to". Normalizing
 				// it to bare GiB would silently turn a delta into an
-				// absolute size.
-				Pattern:     `^\+?\d+(\.\d+)?[KMGTkmgt]?$`,
+				// absolute size — which is why this stays a Pattern.
+				// Shared with the container route through the catalogue.
+				Pattern:     apischema.Rule("disk-resize"),
 				Typetext:    "<+size|size><K|M|G|T>",
 				Description: `New size, or a "+" delta to grow by, e.g. "+8G" or "64G".`,
 			},

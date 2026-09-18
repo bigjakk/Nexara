@@ -90,13 +90,22 @@ type Property struct {
 	Optional    bool // PVE uses `optional`, NOT `required` — match that
 	Default     any
 	Enum        []string
-	Pattern     string // regex, compiled once at registration
-	Minimum     *float64
-	Maximum     *float64
-	MinLength   *int
-	MaxLength   *int
-	Format      string // key into the format registry
-	Typetext    string // human-readable form for docs, e.g. "<number><G|T>"
+	// Pattern is a regex, compiled once at registration, that checks the
+	// value's shape and never rewrites it. A regex more than one
+	// declaration wants belongs in the rule catalogue (catalogue.go) and
+	// is spelled Pattern: Rule("<name>") — see the note there on why a
+	// second hand-written copy is the mistake it exists to stop.
+	Pattern   string
+	Minimum   *float64
+	Maximum   *float64
+	MinLength *int
+	MaxLength *int
+	// Format is a key into the format registry. A format validates AND
+	// normalizes; what each one permits, and where its rule came from, is
+	// in the catalogue (catalogue.go). Reach for Pattern instead when the
+	// value must survive untouched.
+	Format   string
+	Typetext string // human-readable form for docs, e.g. "<number><G|T>"
 	// Requires names parameters the CALLER must supply alongside this
 	// one. A companion that merely carries its default does not satisfy
 	// it, and Compile rejects a Requires naming a non-optional parameter,

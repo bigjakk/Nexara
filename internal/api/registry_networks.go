@@ -52,14 +52,10 @@ const networkScope = clusterScope + "/networks"
 // an operation that silently does something else is not a thing to leave
 // declarable.
 //
-// Requiring a leading alphanumeric is what keeps "." and ".." out, which RE2
-// cannot express as a negative lookahead; the class excludes both
-// separators. It is deliberately WIDER than Proxmox's own formats for these
-// ids (pve-fw-alias-name is [A-Za-z][A-Za-z0-9_-]*, pve-sdn-zone-id is
-// [a-z][a-z0-9]* capped at 8) — every one of them is a subset of this, so
-// nothing Proxmox would accept is refused here, and an object created
-// outside Nexara cannot become undeletable through it.
-const pveObjectNamePattern = `^[A-Za-z0-9][A-Za-z0-9._-]*$`
+// The rule itself is the catalogue's pve-object-id (apischema/catalogue.go),
+// which carries why the leading alphanumeric is the anchor and which Proxmox
+// formats it is deliberately a superset of. The PVE backup job id and the
+// metric server section id take the same rule from the same entry.
 
 // pveObjectNameParam is one such name, with a description of its own.
 //
@@ -73,7 +69,7 @@ const pveObjectNamePattern = `^[A-Za-z0-9][A-Za-z0-9._-]*$`
 func pveObjectNameParam(description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.String,
-		Pattern:     pveObjectNamePattern,
+		Pattern:     apischema.Rule("pve-object-id"),
 		MaxLength:   apischema.Ptr(64),
 		Typetext:    "<name>",
 		Description: description,
@@ -92,9 +88,13 @@ func pveObjectNameParam(description string) apischema.Property {
 // proxmox.DeleteNetworkInterface and UpdateNetworkInterface still run
 // validatePathSegment on the value; this states the rule one layer earlier
 // and names the field.
+//
+// The rule is the catalogue's pve-object-id-colon, shared with
+// sdnSubnetIDParam (registry_sdn.go) — the two had the same regex written
+// out twice. Narrowing it now has to answer for both.
 var ifaceParam = apischema.Property{
 	Type:        apischema.String,
-	Pattern:     `^[A-Za-z0-9][A-Za-z0-9.:_-]*$`,
+	Pattern:     apischema.Rule("pve-object-id-colon"),
 	MaxLength:   apischema.Ptr(64),
 	Typetext:    "<name>",
 	Description: "Interface name as the node reports it, e.g. vmbr0, bond0 or vmbr0.100.",

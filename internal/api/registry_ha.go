@@ -47,10 +47,14 @@ var haSIDParam = apischema.Property{
 // create rule. What it does enforce is the shape — a leading letter, then
 // letters, digits, underscore and dash — which keeps "..", "%2e%2e" and a
 // slash out of a path both proxmox client methods build by concatenation.
+//
+// The rule is the catalogue's pve-configid-existing, shared with
+// snapshotNameParam (registry_vms.go), which is looser than pve-configid by
+// the same one character and for the same reason.
 func haConfigIDParam(description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.String,
-		Pattern:     `^[A-Za-z][A-Za-z0-9_-]*$`,
+		Pattern:     apischema.Rule("pve-configid-existing"),
 		MaxLength:   apischema.Ptr(128),
 		Typetext:    "<name>",
 		Description: description,

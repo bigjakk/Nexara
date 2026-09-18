@@ -20,11 +20,15 @@ const metricServerScope = clusterScope + "/metric-servers"
 // section may have been created outside Nexara, and a format this API refuses
 // would make an existing server un-gettable, un-editable and un-deletable. The
 // bound matches the section-config ceiling Proxmox applies generally.
+//
+// The rule is the catalogue's pve-object-id, the same one the firewall and
+// SDN object names take; its entry records that PVE's own rule for this id
+// is pve-configid, which this is a superset of.
 func metricServerIDParam(source apischema.Source, description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.String,
 		Source:      source,
-		Pattern:     `^[A-Za-z0-9][A-Za-z0-9._-]*$`,
+		Pattern:     apischema.Rule("pve-object-id"),
 		MaxLength:   apischema.Ptr(100),
 		Typetext:    "<id>",
 		Description: description,

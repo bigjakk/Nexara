@@ -13,6 +13,13 @@ import (
 	"sync"
 )
 
+// What each registered format PERMITS, and which Proxmox validator its rule
+// was transcribed from, is in the rule catalogue — catalogue.go. A format
+// with no entry there cannot be registered at all: RegisterFormat panics on
+// it, at startup, from whichever file's init tried. Add the entry with the
+// format, not after it — a format name states that a rule exists without
+// stating what it is, and the catalogue is the half that makes it readable.
+
 // FormatFunc validates one string value and returns its normalized form.
 // Normalization is the half that PVE's register_format gives us for free
 // and that hand-rolled checks never do: "500G" and "500" and the JSON
@@ -26,10 +33,41 @@ var (
 	formats  = map[string]FormatFunc{}
 )
 
-// RegisterFormat registers fn under name. It panics on a duplicate name
-// or an empty/nil argument: formats are registered from init functions
-// and a collision is a programming error, not a runtime condition.
+// RegisterFormat registers fn under name. It panics on a duplicate name, on
+// an empty/nil argument, and on a name with no KindFormat entry in the rule
+// catalogue: formats are registered from init functions, so all three are
+// programming errors rather than runtime conditions.
+//
+// The catalogue requirement is the load-bearing one, and it is a PANIC
+// rather than a test for a specific reason. The previous shape asked a test
+// to compare the registry against a set snapshotted at the end of this
+// file's own init — and package init functions run in FILENAME order, so a
+// format registered from any file sorting after "format.go" (params.go,
+// schema.go, stdoption.go, validate.go all do) was live in the registry,
+// absent from the snapshot, and invisible to both guards. Deciding
+// membership here, at the moment of registration, has no order to get
+// wrong: a format without an entry cannot reach the registry from anywhere,
+// in any file, and the process says so at startup instead of serving a
+// format nobody can look up.
 func RegisterFormat(name string, fn FormatFunc) {
+	if d, ok := catalogue[name]; !ok || d.Kind != KindFormat {
+		panic(fmt.Sprintf("apischema: RegisterFormat(%q) has no format entry in the rule catalogue "+
+			"(catalogue.go). A format name states that a rule exists without stating what it is; add "+
+			"the entry — what it permits, where the rule came from, and its witnesses — with the format.",
+			name))
+	}
+	registerFormat(name, fn)
+}
+
+// registerFormat is RegisterFormat without the catalogue requirement.
+//
+// It exists for ONE caller: the test that exercises RegisterFormat's own
+// duplicate, empty-name and nil-function panics, which needs a name the
+// catalogue does not carry and could not get one otherwise — every
+// catalogued format name is already registered. Production code must not
+// call it, and TestOnlyTestsBypassTheCatalogueRequirement holds that line,
+// because a bypass used in earnest reopens exactly the hole above.
+func registerFormat(name string, fn FormatFunc) {
 	if name == "" {
 		panic("apischema: RegisterFormat with an empty name")
 	}
@@ -72,11 +110,18 @@ var diskSizeUnits = map[byte]float64{
 	'P': 1024 * 1024,
 }
 
+// The four shape checks that ARE their format's whole rule are compiled
+// from the catalogue rather than written out again here. That is what makes
+// catalogue.go the single definition of them: an entry a reader consults to
+// learn what "storage-id" permits is the same string this regex enforces,
+// so the two cannot drift. The rest are components of a larger check and
+// stay here; their catalogue entries state the rule in prose and pin it
+// with witnesses instead.
 var (
-	storageIDRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._-]*$`)
-	nodeNameRe  = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
-	configIDRe  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{1,39}$`)
-	uuidRe      = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	storageIDRe = ruleRegexp("storage-id")
+	nodeNameRe  = ruleRegexp("node-name")
+	configIDRe  = ruleRegexp("pve-configid")
+	uuidRe      = ruleRegexp("uuid")
 	fpColonRe   = regexp.MustCompile(`^[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){31}$`)
 	fpBareRe    = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 	nonNegIntRe = regexp.MustCompile(`^\d+$`)
@@ -100,6 +145,10 @@ var (
 	errEmail        = errors.New("expected an email address such as user@example.com")
 )
 
+// There is no list of "the built-in formats" anywhere. RegisterFormat
+// refuses a name the catalogue does not carry, so the catalogue's KindFormat
+// entries ARE the registered set — one definition, and no snapshot whose
+// accuracy depends on which file's init ran first.
 func init() {
 	RegisterFormat("disk-size", formatDiskSize)
 	RegisterFormat("storage-id", formatStorageID)

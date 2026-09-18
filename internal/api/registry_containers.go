@@ -263,12 +263,13 @@ func registerContainerEndpoints(reg *Registry, h *handlers.ContainerHandler) {
 			"disk": diskKeyParam("Config key of the volume to resize, e.g. rootfs or mp0."),
 			"size": {
 				Type: apischema.String,
-				// Proxmox's resize form, identical to the VM route's and
-				// deliberately NOT the disk-size format: a leading "+"
-				// means "grow by", and its absence means "grow to", so
-				// normalizing to a bare GiB count would turn a delta into
-				// an absolute size.
-				Pattern:     `^\+?\d+(\.\d+)?[KMGTkmgt]?$`,
+				// Proxmox's resize rule, the VM route's own — the two were
+				// the same regex written out twice and now share the
+				// catalogue's disk-resize. Deliberately NOT the disk-size
+				// format: a leading "+" means "grow by", and its absence
+				// means "grow to", so normalizing to a bare GiB count
+				// would turn a delta into an absolute size.
+				Pattern:     apischema.Rule("disk-resize"),
 				Typetext:    "<+size|size><K|M|G|T>",
 				Description: `New size, or a "+" delta to grow by, e.g. "+8G" or "64G".`,
 			},

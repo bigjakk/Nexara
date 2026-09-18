@@ -26,7 +26,7 @@ const pbsBackupScope = pbsScope + "/:pbs_id"
 // becomes a SEGMENT of a PBS request path — a datastore name, a sync job id,
 // a verify job id.
 //
-// It exists for the reason pveObjectNamePattern (registry_networks.go) does.
+// It exists for the reason the catalogue's pve-object-id does.
 // internal/proxmox/pbs_client.go builds those paths by concatenation with
 // url.PathEscape, and PathEscape escapes "/" but leaves "." and ".." alone,
 // so an un-anchored value resolves upward once the server normalises the
@@ -34,22 +34,23 @@ const pbsBackupScope = pbsScope + "/:pbs_id"
 // and POST /admin/sync/../run is not the job the caller named. The handlers
 // only ever checked that the segment was non-empty, which ".." satisfies.
 //
-// The leading character is what keeps "." and ".." out — RE2 has no negative
-// lookahead — and the class is a superset of PBS's own PROXMOX_SAFE_ID
-// format (`[A-Za-z0-9_][A-Za-z0-9._\-]*`), so nothing PBS would accept is
+// The rule is the catalogue's pbs-safe-id, which is PBS's own
+// PROXMOX_SAFE_ID character for character — so nothing PBS would accept is
 // refused here and a datastore created outside Nexara cannot become
 // unmanageable through it.
-const pbsSafeIDPattern = `^[A-Za-z0-9_][A-Za-z0-9._-]*$`
+var pbsSafeIDPattern = apischema.Rule("pbs-safe-id")
 
 // emptyOrPBSSafeID is pbsSafeIDPattern with the empty string allowed, for
 // the two QUERY parameters where "" has always meant "do not filter" —
 // ListSnapshots branches on `datastore != ""` and filterPruneJobsByStore on
-// `store == ""`. It is spelled out rather than built from the constant above
-// because BOTH branches of the alternation have to carry their own anchors:
-// Go's regexp is a substring search, so `^$|[A-Za-z0-9_]...$` would match
-// "..foo" from index 2 and let the traversal straight back in. The same
-// reasoning is on emptyOrNodeName in registry_vms.go.
-const emptyOrPBSSafeID = `^$|^[A-Za-z0-9_][A-Za-z0-9._-]*$`
+// `store == ""`.
+//
+// The catalogue DERIVES it from pbs-safe-id rather than restating it, which
+// is what stops the pair from parting company, and keeps the anchor on BOTH
+// branches of the alternation: Go's regexp is a substring search, so
+// `^$|[A-Za-z0-9_]...$` would match "..foo" from index 2 and let the
+// traversal straight back in.
+var emptyOrPBSSafeID = apischema.Rule("pbs-safe-id-or-empty")
 
 // pbsDatastoreParam is a PBS datastore name as a PATH parameter.
 //
@@ -105,10 +106,12 @@ var pbsTaskUPIDParam = apischema.Property{
 // /cluster/backup/<id> and /cluster/backup/<id>/run with url.PathEscape, and
 // the handlers only checked the segment was non-empty. PVE assigns these ids
 // itself (a "backup-" prefix and a uuid), so the class is far wider than
-// anything PVE produces — it is a traversal anchor, not a format.
+// anything PVE produces — it is a traversal anchor, not a format. The rule
+// is the catalogue's pve-object-id, shared with the firewall, SDN and
+// metric-server ids that are anchored for the same reason.
 var pveBackupJobIDParam = apischema.Property{
 	Type:        apischema.String,
-	Pattern:     `^[A-Za-z0-9][A-Za-z0-9._-]*$`,
+	Pattern:     apischema.Rule("pve-object-id"),
 	MaxLength:   apischema.Ptr(128),
 	Typetext:    "<job id>",
 	Description: "PVE backup job id, as GET /clusters/{cluster_id}/backup-jobs reports it.",

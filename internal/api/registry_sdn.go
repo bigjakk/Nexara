@@ -33,12 +33,16 @@ const maxVXLANVNI = 16777215
 // in this domain where the shared anchor is too tight. An IPv6 subnet's
 // derived id carries the address's colons, and refusing them would make an
 // existing IPv6 subnet un-editable and un-deletable through this API —
-// exactly the failure pveObjectNamePattern's own comment says it exists to
+// exactly the failure the pve-object-id entry says the anchor exists to
 // avoid. A colon is not a path separator and cannot introduce a traversal,
 // and the leading-alphanumeric anchor still keeps "." and ".." out.
+//
+// The widened rule is the catalogue's pve-object-id-colon, shared with
+// ifaceParam (registry_networks.go), which reaches the same class from the
+// other direction — an alias interface is named "eth0:0".
 var sdnSubnetIDParam = apischema.Property{
 	Type:        apischema.String,
-	Pattern:     `^[A-Za-z0-9][A-Za-z0-9.:_-]*$`,
+	Pattern:     apischema.Rule("pve-object-id-colon"),
 	MaxLength:   apischema.Ptr(96),
 	Typetext:    "<id>",
 	Description: "Subnet id, as the subnet listing reports it — Proxmox derives it from the CIDR.",

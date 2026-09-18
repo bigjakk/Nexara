@@ -2,6 +2,8 @@ package apischema
 
 import (
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -209,11 +211,11 @@ var formatCorpus = map[string]formatCases{
 	},
 }
 
-// builtinFormats is every format this package registers in its init.
-var builtinFormats = []string{
-	"disk-size", "storage-id", "node-name", "pve-configid", "uuid",
-	"email", "ip", "cidr", "mac-addr", "fingerprint-sha256", "bwlimit",
-}
+// The list of built-in formats is NOT restated here. RegisterFormat refuses
+// a format the catalogue does not carry, so the catalogue's KindFormat
+// entries are the registered set, and TestEveryFormatHasACorpus drives off
+// them — which is the "two hand-written copies of one fact" the catalogue
+// exists to remove, applied to this file.
 
 // mustFormat looks a format up or fails the test.
 func mustFormat(t *testing.T, name string) FormatFunc {
@@ -285,18 +287,29 @@ func TestDiskSizeCeilingIsExported(t *testing.T) {
 	}
 }
 
-func TestBuiltinFormatsAreRegistered(t *testing.T) {
-	for _, name := range builtinFormats {
-		if _, ok := LookupFormat(name); !ok {
-			t.Errorf("built-in format %q is not registered", name)
+// TestEveryFormatHasACorpus drives off the CATALOGUE, which RegisterFormat
+// makes equal to the registered set.
+//
+// It deliberately does not assert that each of those names is registered:
+// that is RegisterFormat's own panic, and the registry has no unregister, so
+// a test asking it here could never fail. A check that cannot fail reads
+// like coverage and is not — the previous shape of this test looped a
+// snapshot OF the registry asking whether each member was in the registry.
+func TestEveryFormatHasACorpus(t *testing.T) {
+	catalogued := make(map[string]bool)
+	for _, d := range Catalogue() {
+		if d.Kind != KindFormat {
+			continue
 		}
-		if _, ok := formatCorpus[name]; !ok {
-			t.Errorf("built-in format %q has no corpus, so nothing checks it or its idempotence", name)
+		catalogued[d.Name] = true
+		if _, ok := formatCorpus[d.Name]; !ok {
+			t.Errorf("format %q has no corpus, so nothing checks its normalization or its idempotence", d.Name)
 		}
 	}
 	for name := range formatCorpus {
-		if !slices.Contains(builtinFormats, name) {
-			t.Errorf("corpus lists %q, which is not a built-in format", name)
+		if !catalogued[name] {
+			t.Errorf("corpus lists %q, which is not a catalogued format; it checks a rule no declaration "+
+				"can name", name)
 		}
 	}
 	if _, ok := LookupFormat("no-such-format"); ok {
@@ -304,9 +317,29 @@ func TestBuiltinFormatsAreRegistered(t *testing.T) {
 	}
 }
 
+// TestRegisterFormatRequiresACatalogueEntry pins the gate that makes the
+// catalogue's coverage independent of init order. registerFormat — the
+// unchecked half — is what the panic cases below need, because every
+// catalogued format name is already taken and RegisterFormat would now
+// reject any name that is not.
+func TestRegisterFormatRequiresACatalogueEntry(t *testing.T) {
+	mustPanic(t, "no format entry in the rule catalogue", func() {
+		RegisterFormat("apischema-uncatalogued-format", func(v string) (string, error) { return v, nil })
+	})
+	// A PATTERN rule is catalogued but is not a format, and reaching it
+	// through the format registry would apply it while dropping the
+	// Pattern/Format distinction the catalogue draws.
+	mustPanic(t, "no format entry in the rule catalogue", func() {
+		RegisterFormat("pve-object-id", func(v string) (string, error) { return v, nil })
+	})
+	if _, ok := LookupFormat("apischema-uncatalogued-format"); ok {
+		t.Error("the refused format reached the registry anyway")
+	}
+}
+
 func TestRegisterFormat(t *testing.T) {
 	name := "apischema-test-format"
-	RegisterFormat(name, func(v string) (string, error) { return strings.ToUpper(v), nil })
+	registerFormat(name, func(v string) (string, error) { return strings.ToUpper(v), nil })
 
 	fn := mustFormat(t, name)
 	got, err := fn("abc")
@@ -315,12 +348,51 @@ func TestRegisterFormat(t *testing.T) {
 	}
 
 	mustPanic(t, "already registered", func() {
-		RegisterFormat(name, func(v string) (string, error) { return v, nil })
+		registerFormat(name, func(v string) (string, error) { return v, nil })
 	})
 	mustPanic(t, "empty name", func() {
-		RegisterFormat("", func(v string) (string, error) { return v, nil })
+		registerFormat("", func(v string) (string, error) { return v, nil })
 	})
 	mustPanic(t, "nil function", func() {
-		RegisterFormat("apischema-test-nil-format", nil)
+		registerFormat("apischema-test-nil-format", nil)
 	})
+}
+
+// TestOnlyTestsBypassTheCatalogueRequirement reads this package's own source
+// so that registerFormat stays the test hook it is documented to be.
+//
+// Without it the bypass is one call away from reopening the hole
+// RegisterFormat's panic closes: a production init that reaches for the
+// unchecked half puts a format in the registry that no catalogue entry
+// describes, and every guard here would still pass.
+func TestOnlyTestsBypassTheCatalogueRequirement(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("globbing this package: %v", err)
+	}
+	if len(files) < 5 {
+		t.Fatalf("found %d files, want this package's sources; the glob is wrong and this test would "+
+			"pass by looking at nothing", len(files))
+	}
+
+	var offenders []string
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") || name == "format.go" {
+			// format.go DEFINES registerFormat and calls it from
+			// RegisterFormat, which is the checked path.
+			continue
+		}
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if strings.Contains(string(src), "registerFormat(") {
+			offenders = append(offenders, name)
+		}
+	}
+	if len(offenders) > 0 {
+		t.Errorf("%s call registerFormat, the unchecked bypass. Production registration must go through "+
+			"RegisterFormat, which refuses a format the catalogue does not describe.",
+			strings.Join(offenders, ", "))
+	}
 }

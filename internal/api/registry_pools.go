@@ -30,11 +30,15 @@ import (
 // pattern this carries, and the fix is the query form PVE moved to
 // ("PUT /pools?poolid=…"), not a looser rule here. Hence poolCreateIDParam
 // below, which is not bound by either constraint.
+//
+// The catalogue carries the pair — pve-poolid and pve-poolid-segment — side
+// by side, so that the narrowing reads as the URL-shape concession it is
+// rather than as a claim about what a pool may be called.
 func poolIDParam(source apischema.Source, description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.String,
 		Source:      source,
-		Pattern:     `^[A-Za-z0-9._-]+$`,
+		Pattern:     apischema.Rule("pve-poolid-segment"),
 		MaxLength:   apischema.Ptr(100),
 		Typetext:    "<poolid>",
 		Description: description,
@@ -54,7 +58,7 @@ func poolIDParam(source apischema.Source, description string) apischema.Property
 // one helper looks like it should serve both.
 func poolCreateIDParam(description string) apischema.Property {
 	p := poolIDParam(apischema.SourceAuto, description)
-	p.Pattern = `^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+){0,2}$`
+	p.Pattern = apischema.Rule("pve-poolid")
 	return p
 }
 

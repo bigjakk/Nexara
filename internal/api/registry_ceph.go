@@ -56,9 +56,13 @@ func osdParams(extra apischema.Properties) apischema.Properties {
 // proxmox.DeleteCephPool also runs validatePathSegment on the value; this
 // is the same refusal made earlier, with a message that names the
 // parameter.
+//
+// The rule is the catalogue's ceph-pool-name, shared with the create body
+// below. Its entry records that PVE's own rule for this field is far wider
+// than this one.
 var cephPoolNameParam = apischema.Property{
 	Type:        apischema.String,
-	Pattern:     `^\.?[A-Za-z0-9][A-Za-z0-9._-]*$`,
+	Pattern:     apischema.Rule("ceph-pool-name"),
 	MaxLength:   apischema.Ptr(128),
 	Typetext:    "<pool>",
 	Description: "Ceph pool name.",
@@ -231,11 +235,12 @@ func createCephPoolParams() apischema.Properties {
 	return apischema.Properties{
 		"name": {
 			Type: apischema.String,
-			// Same shape as the path parameter, for the same reason: a
-			// pool created here has to stay deletable through
-			// cephPoolNameParam, and a create rule looser than the delete
-			// rule would produce a pool this API could not remove.
-			Pattern:     `^\.?[A-Za-z0-9][A-Za-z0-9._-]*$`,
+			// Same rule as the path parameter, and from the same catalogue
+			// entry so that it stays the same one: a pool created here has
+			// to stay deletable through cephPoolNameParam, and a create
+			// rule looser than the delete rule would produce a pool this
+			// API could not remove.
+			Pattern:     apischema.Rule("ceph-pool-name"),
 			MaxLength:   apischema.Ptr(128),
 			Typetext:    "<pool>",
 			Description: "Name for the new pool.",

@@ -18,12 +18,17 @@ const pbsScope = pathPrefix + "pbs-servers"
 
 // emptyOrUUID is the canonical UUID form, or nothing.
 //
-// It exists for ONE parameter — the cluster a PBS server is attached to,
+// It arrived for ONE parameter — the cluster a PBS server is attached to,
 // on the CREATE body — where the empty string has always meant "this
 // server is standalone". apischema treats "" as a value the caller
 // supplied and the uuid format rejects it, so the create rule has to be a
 // pattern. See pbsAttachedClusterParam.
-const emptyOrUUID = `^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+//
+// FIVE other files now reach for it — alerts, ldap, oidc, reports and
+// rolling_update — each for its own "" sentinel, which is why the rule
+// itself lives in the catalogue and is DERIVED there from the uuid format
+// rather than transcribed beside it.
+var emptyOrUUID = apischema.Rule("uuid-or-empty")
 
 // pbsServerIDParam is a PBS server's Nexara row id as a PATH parameter.
 //
