@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -30,26 +31,6 @@ func NewPBSHandler(queries *db.Queries, encryptionKey string, eventPub *events.P
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
 	}
-}
-
-type createPBSRequest struct {
-	Name                string  `json:"name"`
-	APIURL              string  `json:"api_url"`
-	TokenID             string  `json:"token_id"`
-	TokenSecret         string  `json:"token_secret"`
-	TLSFingerprint      string  `json:"tls_fingerprint"`
-	ClusterID           *string `json:"cluster_id"`
-	AllowPrivateAddress bool    `json:"allow_private_address,omitempty"`
-}
-
-type updatePBSRequest struct {
-	Name                *string `json:"name"`
-	APIURL              *string `json:"api_url"`
-	TokenID             *string `json:"token_id"`
-	TokenSecret         *string `json:"token_secret"`
-	TLSFingerprint      *string `json:"tls_fingerprint"`
-	ClusterID           *string `json:"cluster_id"`
-	AllowPrivateAddress bool    `json:"allow_private_address,omitempty"`
 }
 
 type pbsResponse struct {
@@ -82,23 +63,26 @@ func toPBSResponse(p db.PbsServer) pbsResponse {
 }
 
 // Create handles POST /api/v1/pbs-servers.
-func (h *PBSHandler) Create(c fiber.Ctx) error {
-	var req createPBSRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	// Permission gate runs against the cluster_id in the body when present
-	// (so an operator with manage:pbs only on cluster X can attach a PBS to
-	// cluster X), or globally otherwise.
-	if req.ClusterID != nil && *req.ClusterID != "" {
-		parsed, err := uuid.Parse(*req.ClusterID)
+//
+// Declared Deferred: the cluster to authorize is named in the BODY, which
+// no middleware can read, and an absent one means the server is standalone
+// and needs the instance-wide grant instead.
+func (h *PBSHandler) Create(c fiber.Ctx, p *apischema.Params) error {
+	// Permission gate runs against the cluster in the body when present (so
+	// an operator with manage:pbs only on cluster X can attach a PBS to
+	// cluster X), or globally otherwise. The EMPTY string means standalone
+	// here, which is why the parameter carries a pattern rather than the
+	// uuid format — see pbsAttachedClusterParam.
+	var clusterID pgtype.UUID
+	if raw := p.String("attached_cluster_id"); raw != "" {
+		parsed, err := parseParamUUID(raw)
 		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id format")
+			return err
 		}
 		if err := requireClusterPerm(c, "manage", "pbs", parsed); err != nil {
 			return err
 		}
+		clusterID = pgtype.UUID{Bytes: parsed, Valid: true}
 	} else {
 		// Standalone PBS server — gate behind global manage:pbs.
 		if err := requirePerm(c, "manage", "pbs"); err != nil {
@@ -106,39 +90,30 @@ func (h *PBSHandler) Create(c fiber.Ctx) error {
 		}
 	}
 
-	if req.Name == "" || req.APIURL == "" || req.TokenID == "" || req.TokenSecret == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "name, api_url, token_id, and token_secret are required")
-	}
-
-	if len(req.Name) > 255 {
-		return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
-	}
-
-	if err := validateURLFormat(req.APIURL); err != nil {
+	// The four "x is required" checks and the 255-character name cap are the
+	// schema's now. What stays here is the URL policy: validateURLFormat
+	// owns the https/host/no-credentials rule, and enforceURLAddressPolicy
+	// is a DNS-resolving SSRF check no parameter schema could make.
+	apiURL := p.String("api_url")
+	if err := validateURLFormat(apiURL); err != nil {
 		return err
 	}
-	if err := enforceURLAddressPolicy(c.Context(), req.APIURL, req.AllowPrivateAddress); err != nil {
+	if err := enforceURLAddressPolicy(c.Context(), apiURL, p.Bool("allow_private_address")); err != nil {
 		return renderAddressPolicyError(c, err)
 	}
 
-	var clusterID pgtype.UUID
-	if req.ClusterID != nil && *req.ClusterID != "" {
-		parsed, _ := uuid.Parse(*req.ClusterID)
-		clusterID = pgtype.UUID{Bytes: parsed, Valid: true}
-	}
-
-	encrypted, err := crypto.Encrypt(req.TokenSecret, h.encryptionKey)
+	encrypted, err := crypto.Encrypt(p.String("token_secret"), h.encryptionKey)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt token secret")
 	}
 
 	pbs, err := h.queries.CreatePBSServer(c.Context(), db.CreatePBSServerParams{
-		Name:                 req.Name,
-		ApiUrl:               req.APIURL,
-		TokenID:              req.TokenID,
+		Name:                 p.String("name"),
+		ApiUrl:               apiURL,
+		TokenID:              p.String("token_id"),
 		TokenSecretEncrypted: encrypted,
 		ClusterID:            clusterID,
-		TlsFingerprint:       req.TLSFingerprint,
+		TlsFingerprint:       p.String("tls_fingerprint"),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create PBS server")
@@ -152,7 +127,11 @@ func (h *PBSHandler) Create(c fiber.Ctx) error {
 }
 
 // List handles GET /api/v1/pbs-servers.
-func (h *PBSHandler) List(c fiber.Ctx) error {
+//
+// Declared Advisory: nothing gates this listing, and the permission is
+// applied as a per-row FILTER instead — cluster-scoped for a server
+// attached to one, instance-wide for a standalone one.
+func (h *PBSHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "pbs")
 	if err != nil {
 		return err
@@ -181,12 +160,12 @@ func (h *PBSHandler) List(c fiber.Ctx) error {
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/pbs-servers.
-func (h *PBSHandler) ListByCluster(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+//
+// The one route in this domain whose subject is the cluster in its own
+// path, and therefore the one whose permission hoists into middleware.
+func (h *PBSHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "pbs", clusterID); err != nil {
 		return err
 	}
 
@@ -204,10 +183,14 @@ func (h *PBSHandler) ListByCluster(c fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/pbs-servers/:id.
-func (h *PBSHandler) Get(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+//
+// Declared Deferred: the scope depends on a DB lookup — the row says
+// whether this server belongs to a cluster, and therefore whether the
+// grant is cluster-scoped or instance-wide.
+func (h *PBSHandler) Get(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
+		return err
 	}
 
 	pbs, err := h.queries.GetPBSServer(c.Context(), id)
@@ -230,15 +213,14 @@ func (h *PBSHandler) Get(c fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/pbs-servers/:id.
-func (h *PBSHandler) Update(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+//
+// Declared Deferred for the reason Get gives, plus one of its own: moving
+// the server to another cluster needs manage:pbs on the TARGET as well,
+// and the target is named in the body.
+func (h *PBSHandler) Update(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
-	}
-
-	var req updatePBSRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+		return err
 	}
 
 	// An explicit "" is not a way to say "keep the current secret" — omitting
@@ -247,8 +229,10 @@ func (h *PBSHandler) Update(c fiber.Ctx) error {
 	// the column stays non-empty and nothing downstream notices), which is a
 	// one-request way to break this server's collection. It also reads to the
 	// redirect check below as "no secret supplied", so the caller would be
-	// told to re-enter a secret they did in fact send.
-	if req.TokenSecret != nil && *req.TokenSecret == "" {
+	// told to re-enter a secret they did in fact send. Kept here rather than
+	// expressed as a MinLength so the message can say what to do instead.
+	suppliedSecret, secretSupplied := p.OptString("token_secret")
+	if secretSupplied && suppliedSecret == "" {
 		return fiber.NewError(fiber.StatusBadRequest,
 			"token_secret must not be empty — omit the field to keep the stored secret")
 	}
@@ -268,16 +252,6 @@ func (h *PBSHandler) Update(c fiber.Ctx) error {
 	} else if err := requirePerm(c, "manage", "pbs"); err != nil {
 		return err
 	}
-	// If the user is moving the PBS server to a different cluster, also require
-	// manage:pbs on the target cluster.
-	if req.ClusterID != nil {
-		parsed, perr := uuid.Parse(*req.ClusterID)
-		if perr == nil {
-			if err := requireClusterPerm(c, "manage", "pbs", parsed); err != nil {
-				return err
-			}
-		}
-	}
 
 	params := db.UpdatePBSServerParams{
 		ID:                   id,
@@ -289,40 +263,50 @@ func (h *PBSHandler) Update(c fiber.Ctx) error {
 		TlsFingerprint:       existing.TlsFingerprint,
 	}
 
-	if req.Name != nil {
-		if len(*req.Name) > 255 {
-			return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
+	// If the user is moving the PBS server to a different cluster, also require
+	// manage:pbs on the target cluster.
+	//
+	// The parse and the check are one branch rather than two, which closes a
+	// fail-open gap: the check used to sit behind `if perr == nil`, so a
+	// cluster_id that did not parse SKIPPED it and was refused only later,
+	// by a second parse further down. The schema's uuid format means an
+	// unparsable value never reaches here at all, and the move is now
+	// authorized and applied from the same read.
+	if raw, supplied := p.OptString("attached_cluster_id"); supplied {
+		parsed, perr := parseParamUUID(raw)
+		if perr != nil {
+			return perr
 		}
-		params.Name = *req.Name
-	}
-	if req.APIURL != nil {
-		if err := validateURLFormat(*req.APIURL); err != nil {
+		if err := requireClusterPerm(c, "manage", "pbs", parsed); err != nil {
 			return err
 		}
-		if err := enforceURLAddressPolicy(c.Context(), *req.APIURL, req.AllowPrivateAddress); err != nil {
+		params.ClusterID = pgtype.UUID{Bytes: parsed, Valid: true}
+	}
+
+	if name, supplied := p.OptString("name"); supplied {
+		params.Name = name
+	}
+	if apiURL, supplied := p.OptString("api_url"); supplied {
+		if err := validateURLFormat(apiURL); err != nil {
+			return err
+		}
+		if err := enforceURLAddressPolicy(c.Context(), apiURL, p.Bool("allow_private_address")); err != nil {
 			return renderAddressPolicyError(c, err)
 		}
-		params.ApiUrl = *req.APIURL
+		params.ApiUrl = apiURL
 	}
-	if req.TokenID != nil {
-		params.TokenID = *req.TokenID
+	if tokenID, supplied := p.OptString("token_id"); supplied {
+		params.TokenID = tokenID
 	}
-	if req.TokenSecret != nil {
-		encrypted, err := crypto.Encrypt(*req.TokenSecret, h.encryptionKey)
+	if secretSupplied {
+		encrypted, err := crypto.Encrypt(suppliedSecret, h.encryptionKey)
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt token secret")
 		}
 		params.TokenSecretEncrypted = encrypted
 	}
-	if req.ClusterID != nil {
-		parsed, err := uuid.Parse(*req.ClusterID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id format")
-		}
-		params.ClusterID = pgtype.UUID{Bytes: parsed, Valid: true}
-	}
-	if req.TLSFingerprint != nil {
-		params.TlsFingerprint = *req.TLSFingerprint
+	if fingerprint, supplied := p.OptString("tls_fingerprint"); supplied {
+		params.TlsFingerprint = fingerprint
 	}
 
 	// Refuse to re-point a stored token at an address the operator never
@@ -330,10 +314,6 @@ func (h *PBSHandler) Update(c fiber.Ctx) error {
 	// handler, so the delivery is deferred: the collector rebuilds a client
 	// from this row on its next sync (internal/proxmox/cache.go), which is
 	// what makes the row worth refusing rather than merely warning about.
-	suppliedSecret := ""
-	if req.TokenSecret != nil {
-		suppliedSecret = *req.TokenSecret
-	}
 	if credentialRedirected(params.ApiUrl, existing.ApiUrl, existing.TokenSecretEncrypted, suppliedSecret) {
 		// Audited, because this is the one request that is unambiguously an
 		// attempt to point a stored credential somewhere new. Refusing it
@@ -366,10 +346,12 @@ func (h *PBSHandler) Update(c fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/pbs-servers/:id.
-func (h *PBSHandler) Delete(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+//
+// Declared Deferred for the reason Get gives: the scope comes off the row.
+func (h *PBSHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
+		return err
 	}
 
 	existing, err := h.queries.GetPBSServer(c.Context(), id)

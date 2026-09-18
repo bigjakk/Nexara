@@ -95,9 +95,11 @@ func (s *Server) setupRoutes() {
 		clusters.Delete("/:id", s.clusterHandler.Delete)
 
 		// Nested resources by cluster.
-		if s.pbsHandler != nil {
-			clusters.Get("/:cluster_id/pbs-servers", s.pbsHandler.ListByCluster)
-		}
+		//
+		// The per-cluster PBS listing is declared in
+		// internal/api/registry_pbs.go alongside the five global PBS routes
+		// and mounted by mountRegistry above, so there is no block for it
+		// here.
 		if s.nodeHandler != nil {
 			clusters.Get("/:cluster_id/nodes", s.nodeHandler.ListByCluster)
 			clusters.Get("/:cluster_id/nodes/:node_id/disks", s.nodeHandler.ListNodeDisks)
@@ -193,22 +195,14 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/appliances", s.storageHandler.ListAppliances)
 			clusters.Get("/:cluster_id/scan/iscsi", s.storageHandler.ScanISCSI)
 		}
-		if s.guestToolsHandler != nil {
-			clusters.Get("/:cluster_id/guest-tools/config", s.guestToolsHandler.GetConfig)
-			clusters.Put("/:cluster_id/guest-tools/config", s.guestToolsHandler.UpdateConfig)
-			clusters.Get("/:cluster_id/guest-tools/guests", s.guestToolsHandler.ListFleet)
-			clusters.Put("/:cluster_id/guest-tools/guests/:vmid/policy", s.guestToolsHandler.SetPolicy)
-			clusters.Post("/:cluster_id/guest-tools/guests/:vmid/detect", s.guestToolsHandler.Detect)
-			clusters.Post("/:cluster_id/guest-tools/guests/:vmid/update", s.guestToolsHandler.StageUpdate)
-			clusters.Delete("/:cluster_id/guest-tools/guests/:vmid/update", s.guestToolsHandler.CancelUpdate)
-		}
-		if s.virtioWinHandler != nil {
-			clusters.Get("/:cluster_id/virtio-win/config", s.virtioWinHandler.GetConfig)
-			clusters.Put("/:cluster_id/virtio-win/config", s.virtioWinHandler.UpdateConfig)
-			clusters.Post("/:cluster_id/virtio-win/check", s.virtioWinHandler.CheckNow)
-			clusters.Post("/:cluster_id/virtio-win/download", s.virtioWinHandler.Download)
-			clusters.Get("/:cluster_id/virtio-win/downloads", s.virtioWinHandler.ListDownloads)
-		}
+		// The 7 guest tools routes are declared in
+		// internal/api/registry_guest_tools.go and mounted by mountRegistry
+		// above, so there is no block for them here.
+
+		// The 5 per-cluster virtio-win routes are declared in
+		// internal/api/registry_virtio_win.go alongside the 3 instance-wide
+		// ones and mounted by mountRegistry above, so there is no block for
+		// them here.
 		if s.vmImportHandler != nil {
 			clusters.Post("/:cluster_id/import-metadata", s.vmImportHandler.GetImportMetadata)
 			clusters.Get("/:cluster_id/query-url-metadata", s.vmImportHandler.QueryURLMetadata)
@@ -320,10 +314,10 @@ func (s *Server) setupRoutes() {
 		// and mounted by mountRegistry above, so there is no block for
 		// them here.
 
-		// Migration routes under clusters.
-		if s.migrationHandler != nil {
-			clusters.Get("/:cluster_id/migrations", s.migrationHandler.ListByCluster)
-		}
+		// The per-cluster migration listing is declared in
+		// internal/api/registry_migrations.go alongside the six global
+		// migration routes and mounted by mountRegistry above, so there is
+		// no block for it here.
 
 		// Restore and backup job routes under clusters.
 		if s.backupHandler != nil {
@@ -376,18 +370,9 @@ func (s *Server) setupRoutes() {
 			clusters.Delete("/:cluster_id/ssh-known-hosts/:id", s.rollingUpdateHandler.DeleteSSHKnownHost)
 		}
 
-		// Cluster options, tags, and config routes.
-		if s.clusterOptionsHandler != nil {
-			clusters.Get("/:cluster_id/options", s.clusterOptionsHandler.GetOptions)
-			clusters.Put("/:cluster_id/options", s.clusterOptionsHandler.UpdateOptions)
-			clusters.Get("/:cluster_id/description", s.clusterOptionsHandler.GetDescription)
-			clusters.Put("/:cluster_id/description", s.clusterOptionsHandler.UpdateDescription)
-			clusters.Get("/:cluster_id/tags", s.clusterOptionsHandler.GetTags)
-			clusters.Put("/:cluster_id/tags", s.clusterOptionsHandler.UpdateTags)
-			clusters.Get("/:cluster_id/config", s.clusterOptionsHandler.GetClusterConfig)
-			clusters.Get("/:cluster_id/config/join", s.clusterOptionsHandler.GetJoinInfo)
-			clusters.Get("/:cluster_id/config/nodes", s.clusterOptionsHandler.ListCorosyncNodes)
-		}
+		// The 9 cluster option, tag and corosync routes are declared in
+		// internal/api/registry_cluster_options.go and mounted by
+		// mountRegistry above, so there is no block for them here.
 
 		// The 17 HA routes are declared in internal/api/registry_ha.go
 		// and mounted by mountRegistry above, so there is no block for
@@ -486,16 +471,9 @@ func (s *Server) setupRoutes() {
 		templates.Delete("/:id", s.networkHandler.DeleteTemplate)
 	}
 
-	// Migration routes.
-	if s.migrationHandler != nil {
-		migrations := v1.Group("/migrations", s.authRequired())
-		migrations.Post("/", s.migrationHandler.Create)
-		migrations.Get("/", s.migrationHandler.List)
-		migrations.Get("/:id", s.migrationHandler.Get)
-		migrations.Post("/:id/check", s.migrationHandler.RunCheck)
-		migrations.Post("/:id/execute", s.migrationHandler.Execute)
-		migrations.Post("/:id/cancel", s.migrationHandler.Cancel)
-	}
+	// The 7 migration routes are declared in
+	// internal/api/registry_migrations.go and mounted by mountRegistry
+	// above, so there is no block for them here.
 
 	// Alert routes.
 	if s.alertHandler != nil {
@@ -550,13 +528,13 @@ func (s *Server) setupRoutes() {
 	}
 
 	// PBS server routes.
+	//
+	// The 6 PBSHandler routes are declared in internal/api/registry_pbs.go
+	// and mounted by mountRegistry above. The group survives for the 19
+	// backup routes nested under it, which gate through
+	// BackupHandler.requirePBSPerm and are not migrated.
 	if s.pbsHandler != nil {
 		pbs := v1.Group("/pbs-servers", s.authRequired())
-		pbs.Post("/", s.pbsHandler.Create)
-		pbs.Get("/", s.pbsHandler.List)
-		pbs.Get("/:id", s.pbsHandler.Get)
-		pbs.Put("/:id", s.pbsHandler.Update)
-		pbs.Delete("/:id", s.pbsHandler.Delete)
 
 		// Backup management routes nested under PBS servers.
 		if s.backupHandler != nil {
@@ -702,16 +680,10 @@ func (s *Server) setupRoutes() {
 		snaps.Get("/", s.guestSnapshotHandler.List)
 	}
 
-	// Upstream virtio-win release catalog and the download source that fills
-	// it. Both global rather than per-cluster: every cluster pins against the
-	// same published set of versions, and being cut off from fedorapeople.org
-	// is a property of the install, not of one cluster.
-	if s.virtioWinHandler != nil {
-		virtioWin := v1.Group("/virtio-win", s.authRequired())
-		virtioWin.Get("/releases", s.virtioWinHandler.ListReleases)
-		virtioWin.Get("/mirror", s.virtioWinHandler.GetMirror)
-		virtioWin.Put("/mirror", s.virtioWinHandler.SetMirror)
-	}
+	// The 8 virtio-win routes — the instance-wide catalog and download
+	// source, and the 5 per-cluster policy routes — are declared in
+	// internal/api/registry_virtio_win.go and mounted by mountRegistry
+	// above, so there is no block for them here.
 
 	// RBAC routes.
 	if s.rbacHandler != nil {

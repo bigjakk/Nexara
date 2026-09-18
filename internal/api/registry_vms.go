@@ -42,6 +42,21 @@ func (s *Server) buildRegistry() *Registry {
 	if s.replicationHandler != nil {
 		registerReplicationEndpoints(reg, s.replicationHandler)
 	}
+	if s.migrationHandler != nil {
+		registerMigrationEndpoints(reg, s.migrationHandler)
+	}
+	if s.clusterOptionsHandler != nil {
+		registerClusterOptionsEndpoints(reg, s.clusterOptionsHandler)
+	}
+	if s.guestToolsHandler != nil {
+		registerGuestToolsEndpoints(reg, s.guestToolsHandler)
+	}
+	if s.virtioWinHandler != nil {
+		registerVirtioWinEndpoints(reg, s.virtioWinHandler)
+	}
+	if s.pbsHandler != nil {
+		registerPBSEndpoints(reg, s.pbsHandler)
+	}
 	return reg
 }
 
@@ -56,6 +71,20 @@ const clusterScope = pathPrefix + "clusters/:cluster_id"
 // path.
 func clusterCheck(action, resource string) Permissions {
 	return Permissions{Check: &Check{Action: action, Resource: resource, Scope: ScopeCluster}}
+}
+
+// globalCheck is clusterCheck for a route whose subject is the INSTALL
+// rather than one cluster — the virtio-win catalog and its download
+// source, which every cluster shares.
+//
+// It is a separate helper rather than a scope argument on clusterCheck so
+// that "this route needs an instance-wide grant" is a deliberate word at
+// the call site: ScopeGlobal short-circuits the per-cluster grant lookup
+// (internal/auth/rbac.go), so writing it by accident on a cluster-scoped
+// route would refuse every operator who holds the permission on exactly
+// the cluster they are acting on.
+func globalCheck(action, resource string) Permissions {
+	return Permissions{Check: &Check{Action: action, Resource: resource, Scope: ScopeGlobal}}
 }
 
 // withParams merges extra into base, so a route can state its own

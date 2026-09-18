@@ -8,6 +8,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/guesttools"
@@ -34,16 +35,6 @@ func NewGuestToolsHandler(queries *db.Queries, eventPub *events.Publisher, engin
 }
 
 // --- Request / Response types ---
-
-type guestToolsConfigRequest struct {
-	Mode          string `json:"mode"`
-	TargetVersion string `json:"target_version"`
-	MaxConcurrent int32  `json:"max_concurrent"`
-	// A POINTER: this is the rollback for a driver swap that can leave a guest
-	// unbootable, so an absent key must preserve the stored value rather than
-	// reading as false. See UpsertGuestToolsConfig.
-	SnapshotBefore *bool `json:"snapshot_before"`
-}
 
 type guestToolsConfigResponse struct {
 	ClusterID      uuid.UUID `json:"cluster_id"`
@@ -92,12 +83,9 @@ type guestToolsGuestResponse struct {
 // --- Handlers ---
 
 // GetConfig returns a cluster's guest tools policy, defaulting to disabled.
-func (h *GuestToolsHandler) GetConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *GuestToolsHandler) GetConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "guest_tools", clusterID); err != nil {
 		return err
 	}
 
@@ -137,40 +125,37 @@ func (h *GuestToolsHandler) configResponse(c fiber.Ctx, clusterID uuid.UUID, cfg
 }
 
 // UpdateConfig writes a cluster's guest tools policy.
-func (h *GuestToolsHandler) UpdateConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *GuestToolsHandler) UpdateConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "guest_tools", clusterID); err != nil {
-		return err
-	}
 
-	var req guestToolsConfigRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
-	}
-	switch req.Mode {
-	case "disabled", "report", "staged":
-	default:
-		return fiber.NewError(fiber.StatusBadRequest, "mode must be disabled, report or staged")
-	}
-	if req.TargetVersion != "" && !virtiowin.ValidVersion(req.TargetVersion) {
+	// mode's vocabulary is the schema's Enum now; the version vocabulary
+	// stays here, because virtiowin.ValidVersion owns it and "" is a
+	// meaningful value the schema cannot express as a format.
+	targetVersion := p.String("target_version")
+	if targetVersion != "" && !virtiowin.ValidVersion(targetVersion) {
 		return fiber.NewError(fiber.StatusBadRequest, "target_version is not a valid virtio-win version")
 	}
-	if req.MaxConcurrent <= 0 {
-		req.MaxConcurrent = guesttools.DefaultMaxConcurrent
-	}
-	if req.MaxConcurrent > 100 {
-		return fiber.NewError(fiber.StatusBadRequest, "max_concurrent must be 100 or less")
+	// 0 still means "use the default": the policy card sends it for a
+	// cleared field, and the schema bounds the parameter at 0..100 rather
+	// than 1..100 so that spelling keeps working. The upper bound is the
+	// schema's, so the hand-written "must be 100 or less" is gone.
+	maxConcurrent := safeconv.Int32(int(p.Int("max_concurrent")))
+	if maxConcurrent <= 0 {
+		maxConcurrent = guesttools.DefaultMaxConcurrent
 	}
 
 	cfg, err := h.queries.UpsertGuestToolsConfig(c.Context(), db.UpsertGuestToolsConfigParams{
-		ClusterID:      clusterID,
-		Mode:           req.Mode,
-		TargetVersion:  req.TargetVersion,
-		MaxConcurrent:  req.MaxConcurrent,
-		SnapshotBefore: optionalBool(req.SnapshotBefore),
+		ClusterID:     clusterID,
+		Mode:          p.String("mode"),
+		TargetVersion: targetVersion,
+		MaxConcurrent: maxConcurrent,
+		// A *bool, so that omitting the key means "keep the stored value"
+		// rather than "set it to false" — the distinction the schema carries
+		// by declaring no default.
+		SnapshotBefore: optionalBool(optBoolPtr(p.OptBool("snapshot_before"))),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to save guest tools config")
@@ -190,12 +175,9 @@ func (h *GuestToolsHandler) UpdateConfig(c fiber.Ctx) error {
 // ListFleet returns every Windows guest in the cluster with its guest tools
 // state, including guests that have never been probed and guests that are
 // excluded — an exclusion nobody can see is one nobody can audit.
-func (h *GuestToolsHandler) ListFleet(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *GuestToolsHandler) ListFleet(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "guest_tools", clusterID); err != nil {
 		return err
 	}
 
@@ -256,41 +238,29 @@ func (h *GuestToolsHandler) ListFleet(c fiber.Ctx) error {
 	return RespondItems(c, out)
 }
 
-type guestToolsPolicyRequest struct {
-	TargetVersion string `json:"target_version"`
-	Note          string `json:"note"`
-	// A POINTER: an exclusion is the operator saying "never touch this guest",
-	// and a client that simply does not know about the field must not clear it.
-	Excluded *bool `json:"excluded"`
-}
-
 // SetPolicy writes a per-guest override.
-func (h *GuestToolsHandler) SetPolicy(c fiber.Ctx) error {
-	clusterID, vmid, err := clusterAndVMIDFromParams(c)
+func (h *GuestToolsHandler) SetPolicy(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmid, err := guestToolsIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "guest_tools", clusterID); err != nil {
-		return err
-	}
 
-	var req guestToolsPolicyRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
-	}
-	if req.TargetVersion != "" && !virtiowin.ValidVersion(req.TargetVersion) {
+	targetVersion := p.String("target_version")
+	if targetVersion != "" && !virtiowin.ValidVersion(targetVersion) {
 		return fiber.NewError(fiber.StatusBadRequest, "target_version is not a valid virtio-win version")
-	}
-	if len(req.Note) > 500 {
-		return fiber.NewError(fiber.StatusBadRequest, "note must be 500 characters or fewer")
 	}
 
 	policy, err := h.queries.UpsertGuestToolsPolicy(c.Context(), db.UpsertGuestToolsPolicyParams{
-		ClusterID:     clusterID,
-		Vmid:          safeconv.Int32(vmid),
-		Excluded:      optionalBool(req.Excluded),
-		TargetVersion: req.TargetVersion,
-		Note:          req.Note,
+		ClusterID: clusterID,
+		Vmid:      safeconv.Int32(vmid),
+		// A *bool: an exclusion is the operator saying "never touch this
+		// guest", and a client that does not know about the field must not
+		// clear it. The schema declares no default, so an omitted key reads
+		// back as not supplied.
+		Excluded:      optionalBool(optBoolPtr(p.OptBool("excluded"))),
+		TargetVersion: targetVersion,
+		// The note's length cap is the schema's now.
+		Note: p.String("note"),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to save guest policy")
@@ -313,12 +283,9 @@ func (h *GuestToolsHandler) SetPolicy(c fiber.Ctx) error {
 }
 
 // Detect probes one guest on demand.
-func (h *GuestToolsHandler) Detect(c fiber.Ctx) error {
-	clusterID, vmid, err := clusterAndVMIDFromParams(c)
+func (h *GuestToolsHandler) Detect(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmid, err := guestToolsIDs(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "guest_tools", clusterID); err != nil {
 		return err
 	}
 	if h.engine == nil {
@@ -340,31 +307,17 @@ func (h *GuestToolsHandler) Detect(c fiber.Ctx) error {
 	})
 }
 
-type guestToolsUpdateRequest struct {
-	// RunNow starts the installer immediately instead of waiting for the
-	// guest's next boot.
-	RunNow bool `json:"run_now"`
-}
-
 // StageUpdate stages a guest tools update, optionally running it immediately.
-func (h *GuestToolsHandler) StageUpdate(c fiber.Ctx) error {
-	clusterID, vmid, err := clusterAndVMIDFromParams(c)
+func (h *GuestToolsHandler) StageUpdate(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmid, err := guestToolsIDs(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "execute", "guest_tools", clusterID); err != nil {
 		return err
 	}
 	if h.engine == nil {
 		return fiber.NewError(fiber.StatusServiceUnavailable, "guest tools engine is not available")
 	}
 
-	var req guestToolsUpdateRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
-	}
-
-	result, err := h.engine.StageOne(c.Context(), clusterID, vmid, req.RunNow)
+	result, err := h.engine.StageOne(c.Context(), clusterID, vmid, p.Bool("run_now"))
 	if err != nil {
 		switch {
 		case errors.Is(err, guesttools.ErrNotEligible), errors.Is(err, guesttools.ErrNoCDROMSlot):
@@ -419,12 +372,9 @@ func (h *GuestToolsHandler) StageUpdate(c fiber.Ctx) error {
 }
 
 // CancelUpdate clears a staged update from a guest.
-func (h *GuestToolsHandler) CancelUpdate(c fiber.Ctx) error {
-	clusterID, vmid, err := clusterAndVMIDFromParams(c)
+func (h *GuestToolsHandler) CancelUpdate(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmid, err := guestToolsIDs(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "execute", "guest_tools", clusterID); err != nil {
 		return err
 	}
 	if h.engine == nil {
@@ -439,10 +389,8 @@ func (h *GuestToolsHandler) CancelUpdate(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "cancelled", "vmid": vmid})
 }
 
-// maxProxmoxVMID is the largest VMID Proxmox will assign.
-const maxProxmoxVMID = 999999999
-
-// clusterAndVMIDFromParams reads the cluster UUID and the Proxmox VMID.
+// guestToolsIDs reads the two identifiers every per-guest guest tools
+// route carries in its path.
 //
 // The VMID is the stable Proxmox identity, deliberately not a vms.id UUID: the
 // collector mints a new UUID whenever it churns a guest row, and per-guest state
@@ -450,19 +398,22 @@ const maxProxmoxVMID = 999999999
 // Returned as an int because that is what every consumer here wants — the
 // engine's methods, strconv.Itoa and the audit payloads. Only the sqlc params
 // are int32, and those narrow at the call.
-func clusterAndVMIDFromParams(c fiber.Ctx) (uuid.UUID, int, error) {
-	clusterID, err := clusterIDFromParam(c)
+//
+// The bounds that used to live here are the schema's (see guestVMIDParams
+// in internal/api/registry_guest_tools.go), including the upper one, which
+// is load-bearing rather than cosmetic: SetPolicy writes to a table with
+// no FK on vmid, so an out-of-range value would be clamped by safeconv at
+// the sqlc param while the audit row still recorded what the caller typed —
+// an audit entry naming a guest that was never written.
+//
+// It is a guest-tools-specific helper rather than a shared one for the
+// reason containerIDs' doc comment gives: registry_paramkey_guard_test.go
+// walks a handler's callees for literal accessor keys and checks them
+// against THAT endpoint's schema, so the keys have to be literals here.
+func guestToolsIDs(p *apischema.Params) (uuid.UUID, int, error) {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return uuid.Nil, 0, err
 	}
-	// Bounded at both ends. The upper bound is Proxmox's own maximum VMID, and
-	// it is load-bearing rather than cosmetic: SetPolicy writes to a table with
-	// no FK on vmid, so an out-of-range value would be clamped by safeconv at
-	// the sqlc param while the audit row still recorded what the caller typed —
-	// an audit entry naming a guest that was never written.
-	vmid, convErr := strconv.Atoi(c.Params("vmid"))
-	if convErr != nil || vmid <= 0 || vmid > maxProxmoxVMID {
-		return uuid.Nil, 0, fiber.NewError(fiber.StatusBadRequest, "vmid must be a positive integer")
-	}
-	return clusterID, vmid, nil
+	return clusterID, int(p.Int("vmid")), nil
 }

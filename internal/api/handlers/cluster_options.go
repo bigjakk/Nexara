@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -28,12 +29,9 @@ func (h *ClusterOptionsHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.
 }
 
 // GetOptions handles GET /clusters/:cluster_id/options.
-func (h *ClusterOptionsHandler) GetOptions(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ClusterOptionsHandler) GetOptions(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -48,17 +46,37 @@ func (h *ClusterOptionsHandler) GetOptions(c fiber.Ctx) error {
 }
 
 // UpdateOptions handles PUT /clusters/:cluster_id/options.
-func (h *ClusterOptionsHandler) UpdateOptions(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+//
+// Every property is read as a POINTER, so that omitting a key means "do
+// not send this property to Proxmox" and sending it empty means "send it
+// empty" — the distinction the bound struct expressed with *string and the
+// schema now expresses by declaring no default. The names are the wire
+// names Proxmox itself uses, hyphens and all.
+func (h *ClusterOptionsHandler) UpdateOptions(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "cluster", clusterID); err != nil {
-		return err
-	}
-	var req proxmox.UpdateClusterOptionsParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	req := proxmox.UpdateClusterOptionsParams{
+		Console:        optStringPtr(p.OptString("console")),
+		Keyboard:       optStringPtr(p.OptString("keyboard")),
+		Language:       optStringPtr(p.OptString("language")),
+		EmailFrom:      optStringPtr(p.OptString("email_from")),
+		HTTPProxy:      optStringPtr(p.OptString("http_proxy")),
+		MacPrefix:      optStringPtr(p.OptString("mac_prefix")),
+		Migration:      optStringPtr(p.OptString("migration")),
+		MigrationType:  optStringPtr(p.OptString("migration_type")),
+		BWLimit:        optStringPtr(p.OptString("bwlimit")),
+		NextID:         optStringPtr(p.OptString("next-id")),
+		HA:             optStringPtr(p.OptString("ha")),
+		Fencing:        optStringPtr(p.OptString("fencing")),
+		CRS:            optStringPtr(p.OptString("crs")),
+		MaxWorkers:     optIntPtr(p.OptInt("max_workers")),
+		Description:    optStringPtr(p.OptString("description")),
+		RegisteredTags: optStringPtr(p.OptString("registered-tags")),
+		UserTagAccess:  optStringPtr(p.OptString("user-tag-access")),
+		TagStyle:       optStringPtr(p.OptString("tag-style")),
+		Delete:         p.String("delete"),
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -73,12 +91,9 @@ func (h *ClusterOptionsHandler) UpdateOptions(c fiber.Ctx) error {
 }
 
 // GetDescription handles GET /clusters/:cluster_id/description.
-func (h *ClusterOptionsHandler) GetDescription(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ClusterOptionsHandler) GetDescription(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -93,26 +108,24 @@ func (h *ClusterOptionsHandler) GetDescription(c fiber.Ctx) error {
 }
 
 // UpdateDescription handles PUT /clusters/:cluster_id/description.
-func (h *ClusterOptionsHandler) UpdateDescription(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+//
+// The description is forwarded unconditionally rather than as a tri-state:
+// this route exists to SET it, and an omitted key has always cleared it
+// because the bound struct's zero value was an empty string whose address
+// was taken regardless. The schema's Default of "" states that rather than
+// changing it.
+func (h *ClusterOptionsHandler) UpdateDescription(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "cluster", clusterID); err != nil {
-		return err
-	}
-	var req struct {
-		Description string `json:"description"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	description := p.String("description")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 	if err := pxClient.SetClusterOptions(c.Context(), proxmox.UpdateClusterOptionsParams{
-		Description: &req.Description,
+		Description: &description,
 	}); err != nil {
 		return mapProxmoxError(err)
 	}
@@ -122,12 +135,9 @@ func (h *ClusterOptionsHandler) UpdateDescription(c fiber.Ctx) error {
 }
 
 // GetTags handles GET /clusters/:cluster_id/tags.
-func (h *ClusterOptionsHandler) GetTags(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ClusterOptionsHandler) GetTags(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -146,30 +156,23 @@ func (h *ClusterOptionsHandler) GetTags(c fiber.Ctx) error {
 }
 
 // UpdateTags handles PUT /clusters/:cluster_id/tags.
-func (h *ClusterOptionsHandler) UpdateTags(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+//
+// The three parameters keep their UNDERSCORED wire names, which are not
+// the hyphenated ones Proxmox uses and the options endpoint forwards. The
+// client translates; renaming them here would break every existing caller.
+func (h *ClusterOptionsHandler) UpdateTags(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "manage", "cluster", clusterID); err != nil {
-		return err
-	}
-	var req struct {
-		RegisteredTags *string `json:"registered_tags"`
-		UserTagAccess  *string `json:"user_tag_access"`
-		TagStyle       *string `json:"tag_style"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 	if err := pxClient.SetClusterOptions(c.Context(), proxmox.UpdateClusterOptionsParams{
-		RegisteredTags: req.RegisteredTags,
-		UserTagAccess:  req.UserTagAccess,
-		TagStyle:       req.TagStyle,
+		RegisteredTags: optStringPtr(p.OptString("registered_tags")),
+		UserTagAccess:  optStringPtr(p.OptString("user_tag_access")),
+		TagStyle:       optStringPtr(p.OptString("tag_style")),
 	}); err != nil {
 		return mapProxmoxError(err)
 	}
@@ -179,12 +182,9 @@ func (h *ClusterOptionsHandler) UpdateTags(c fiber.Ctx) error {
 }
 
 // GetClusterConfig handles GET /clusters/:cluster_id/config.
-func (h *ClusterOptionsHandler) GetClusterConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ClusterOptionsHandler) GetClusterConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -199,12 +199,9 @@ func (h *ClusterOptionsHandler) GetClusterConfig(c fiber.Ctx) error {
 }
 
 // GetJoinInfo handles GET /clusters/:cluster_id/config/join.
-func (h *ClusterOptionsHandler) GetJoinInfo(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ClusterOptionsHandler) GetJoinInfo(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -219,12 +216,9 @@ func (h *ClusterOptionsHandler) GetJoinInfo(c fiber.Ctx) error {
 }
 
 // ListCorosyncNodes handles GET /clusters/:cluster_id/config/nodes.
-func (h *ClusterOptionsHandler) ListCorosyncNodes(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ClusterOptionsHandler) ListCorosyncNodes(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)

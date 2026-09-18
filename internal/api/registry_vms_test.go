@@ -1,6 +1,7 @@
 package api
 
 import (
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -333,6 +334,35 @@ var vmRoutesWithDeferredPermission = map[string]string{
 	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template":   "clones a container with CloneCT when the row is lxc",
 }
 
+// routesOutsideTheClusterCheckShape names every declared route that is
+// deliberately NOT a plain cluster-scoped Check, with the reason, merged
+// from the per-domain tables each migration writes.
+//
+// TestVMRoutesDeclareACheck holds "a declared route is a cluster-scoped
+// Check unless it is listed here" across the whole registry, and up to
+// Phase 6b every route in it was one — the two VM exceptions above were
+// still cluster-scoped, just Deferred. Phase 6c is the first batch with
+// routes whose subject is not a cluster at all (a migration job, a PBS
+// server, the instance-wide virtio-win catalog), so the exception surface
+// has to be able to say that. It stays an enumerated list with a reason
+// per entry for the same purpose it always had: a shape nobody listed is a
+// shape nobody re-reads.
+//
+// The check runs in both directions — an entry whose route IS a plain
+// cluster Check is reported as stale, so this cannot rot into a blanket
+// waiver.
+var routesOutsideTheClusterCheckShape = func() map[string]string {
+	out := map[string]string{}
+	for _, m := range []map[string]string{
+		migrationRoutesOutsideTheClusterCheckShape,
+		virtioWinRoutesOutsideTheClusterCheckShape,
+		pbsRoutesOutsideTheClusterCheckShape,
+	} {
+		maps.Copy(out, m)
+	}
+	return out
+}()
+
 // vmRouteCount is how many endpoints registerVMEndpoints declares.
 //
 // It is stated per domain, and summed by registryRouteCount, so that a
@@ -349,13 +379,18 @@ const vmRouteCount = 33
 // breakdown, so "the registry holds 68, want 51" says WHICH domain is
 // unaccounted for instead of leaving the reader to subtract.
 var registryDomainRouteCounts = map[string]int{
-	"registerVMEndpoints":          vmRouteCount,
-	"registerContainerEndpoints":   containerRouteCount,
-	"registerCephEndpoints":        cephRouteCount,
-	"registerHAEndpoints":          haRouteCount,
-	"registerDRSEndpoints":         drsRouteCount,
-	"registerCVEEndpoints":         cveRouteCount,
-	"registerReplicationEndpoints": replicationRouteCount,
+	"registerVMEndpoints":             vmRouteCount,
+	"registerContainerEndpoints":      containerRouteCount,
+	"registerCephEndpoints":           cephRouteCount,
+	"registerHAEndpoints":             haRouteCount,
+	"registerDRSEndpoints":            drsRouteCount,
+	"registerCVEEndpoints":            cveRouteCount,
+	"registerReplicationEndpoints":    replicationRouteCount,
+	"registerMigrationEndpoints":      migrationRouteCount,
+	"registerClusterOptionsEndpoints": clusterOptionsRouteCount,
+	"registerGuestToolsEndpoints":     guestToolsRouteCount,
+	"registerVirtioWinEndpoints":      virtioWinRouteCount,
+	"registerPBSEndpoints":            pbsRouteCount,
 }
 
 // registryRouteCount is the total the registry must hold.
@@ -374,13 +409,18 @@ func registryRouteCount() int {
 // tables wrong.
 func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	declared := map[string]int{
-		"registerVMEndpoints":          0,
-		"registerContainerEndpoints":   0,
-		"registerCephEndpoints":        0,
-		"registerHAEndpoints":          0,
-		"registerDRSEndpoints":         0,
-		"registerCVEEndpoints":         0,
-		"registerReplicationEndpoints": 0,
+		"registerVMEndpoints":             0,
+		"registerContainerEndpoints":      0,
+		"registerCephEndpoints":           0,
+		"registerHAEndpoints":             0,
+		"registerDRSEndpoints":            0,
+		"registerCVEEndpoints":            0,
+		"registerReplicationEndpoints":    0,
+		"registerMigrationEndpoints":      0,
+		"registerClusterOptionsEndpoints": 0,
+		"registerGuestToolsEndpoints":     0,
+		"registerVirtioWinEndpoints":      0,
+		"registerPBSEndpoints":            0,
 	}
 	reg := NewRegistry()
 	s := newRouteStubServer(t)
@@ -411,6 +451,26 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	before = reg.Len()
 	registerReplicationEndpoints(reg, s.replicationHandler)
 	declared["registerReplicationEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerMigrationEndpoints(reg, s.migrationHandler)
+	declared["registerMigrationEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerClusterOptionsEndpoints(reg, s.clusterOptionsHandler)
+	declared["registerClusterOptionsEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerGuestToolsEndpoints(reg, s.guestToolsHandler)
+	declared["registerGuestToolsEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerVirtioWinEndpoints(reg, s.virtioWinHandler)
+	declared["registerVirtioWinEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerPBSEndpoints(reg, s.pbsHandler)
+	declared["registerPBSEndpoints"] = reg.Len() - before
 
 	if len(declared) != len(registryDomainRouteCounts) {
 		t.Fatalf("this test drives %d domains but registryDomainRouteCounts names %d — "+
@@ -458,8 +518,11 @@ func TestVMRoutesDeclareACheck(t *testing.T) {
 	}
 
 	seenDeferred := map[string]bool{}
+	seenOutside := map[string]bool{}
 	for _, e := range endpoints {
 		key := e.Method + " " + e.Path
+		isClusterCheck := e.Permissions.Check != nil && e.Permissions.Check.Scope == ScopeCluster
+
 		if why, expected := vmRoutesWithDeferredPermission[key]; expected {
 			seenDeferred[key] = true
 			if e.Permissions.Deferred == "" {
@@ -476,20 +539,43 @@ func TestVMRoutesDeclareACheck(t *testing.T) {
 			continue
 		}
 
+		if why, listed := routesOutsideTheClusterCheckShape[key]; listed {
+			seenOutside[key] = true
+			if strings.TrimSpace(why) == "" {
+				t.Errorf("%s is listed in routesOutsideTheClusterCheckShape with a blank reason; "+
+					"an exemption nobody justified is one nobody re-reads", key)
+			}
+			// The other direction: an entry whose route IS the ordinary
+			// shape is stale, and leaving it would quietly exempt a route
+			// that no longer needs exempting.
+			if isClusterCheck {
+				t.Errorf("%s declares a plain cluster-scoped Check but is still listed in "+
+					"routesOutsideTheClusterCheckShape (%q) — drop the stale entry", key, why)
+			}
+			continue
+		}
+
 		if e.Permissions.Check == nil {
 			t.Errorf("%s declares %q rather than a Check — if that is deliberate, add it to "+
-				"vmRoutesWithDeferredPermission with the reason", key, e.Permissions.Describe())
+				"vmRoutesWithDeferredPermission (a guest-kind Deferred) or to "+
+				"routesOutsideTheClusterCheckShape, with the reason", key, e.Permissions.Describe())
 			continue
 		}
 		if e.Permissions.Check.Scope != ScopeCluster {
-			t.Errorf("%s is %s-scoped; every route in this family acts on one cluster",
-				key, e.Permissions.Check.Scope)
+			t.Errorf("%s is %s-scoped; a route that does not act on one cluster belongs in "+
+				"routesOutsideTheClusterCheckShape with the reason", key, e.Permissions.Check.Scope)
 		}
 	}
 
 	for key := range vmRoutesWithDeferredPermission {
 		if !seenDeferred[key] {
 			t.Errorf("vmRoutesWithDeferredPermission lists %s but no such route is declared — "+
+				"drop the stale entry, or a list of exceptions stops being a review surface", key)
+		}
+	}
+	for key := range routesOutsideTheClusterCheckShape {
+		if !seenOutside[key] {
+			t.Errorf("routesOutsideTheClusterCheckShape lists %s but no such route is declared — "+
 				"drop the stale entry, or a list of exceptions stops being a review surface", key)
 		}
 	}

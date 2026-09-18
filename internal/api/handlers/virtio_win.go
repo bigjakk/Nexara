@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/safeconv"
@@ -39,24 +40,6 @@ func NewVirtioWinHandler(queries *db.Queries, eventPub *events.Publisher, engine
 }
 
 // --- Request / Response types ---
-
-type virtioWinConfigRequest struct {
-	Enabled       bool   `json:"enabled"`
-	Storage       string `json:"storage"`
-	Node          string `json:"node"`
-	TargetVersion string `json:"target_version"`
-	// A POINTER because prune DELETES ISOs. Absent must mean "leave the stored
-	// value alone", not false: a plain bool would let a client that predates
-	// the field disarm an operator's pruning on its next save, and coercing
-	// absent to true would arm destructive behaviour nobody asked for. See
-	// UpsertVirtioWinConfig, which does the preserving.
-	PruneEnabled *bool `json:"prune_enabled"`
-	// CheckSchedule is a five-field cron expression; empty means every six
-	// hours. CheckTimezone is the IANA zone it is read in; empty means server
-	// time, which in a container is all but always UTC.
-	CheckSchedule string `json:"check_schedule"`
-	CheckTimezone string `json:"check_timezone"`
-}
 
 type virtioWinConfigResponse struct {
 	ClusterID     uuid.UUID `json:"cluster_id"`
@@ -184,10 +167,7 @@ func (h *VirtioWinHandler) toVirtioWinConfigResponse(c fiber.Ctx, cfg db.VirtioW
 //
 // The catalog is global rather than per-cluster, so this is gated on the
 // instance-wide view:storage rather than a cluster permission.
-func (h *VirtioWinHandler) ListReleases(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "storage"); err != nil {
-		return err
-	}
+func (h *VirtioWinHandler) ListReleases(c fiber.Ctx, _ *apischema.Params) error {
 	releases, err := h.queries.ListVirtioWinReleases(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to list virtio-win releases")
@@ -205,12 +185,9 @@ func (h *VirtioWinHandler) ListReleases(c fiber.Ctx) error {
 }
 
 // GetConfig returns a cluster's auto-download policy, defaulting to disabled.
-func (h *VirtioWinHandler) GetConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VirtioWinHandler) GetConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "storage", clusterID); err != nil {
 		return err
 	}
 
@@ -230,45 +207,52 @@ func (h *VirtioWinHandler) GetConfig(c fiber.Ctx) error {
 }
 
 // UpdateConfig writes a cluster's auto-download policy.
-func (h *VirtioWinHandler) UpdateConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VirtioWinHandler) UpdateConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
-		return err
-	}
 
-	var req virtioWinConfigRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
-	}
-	if req.Enabled && req.Storage == "" {
+	enabled := p.Bool("enabled")
+	storage := p.String("storage")
+	targetVersion := p.String("target_version")
+	checkSchedule := p.String("check_schedule")
+	checkTimezone := p.String("check_timezone")
+
+	// Cross-field: a storage is only required once the cycle is switched
+	// on, which no per-parameter rule can express.
+	if enabled && storage == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "storage is required when auto-download is enabled")
 	}
-	if req.TargetVersion != "" && !virtiowin.ValidVersion(req.TargetVersion) {
+	// Both vocabularies stay here, where the packages that own them live.
+	// Each also treats the empty string as a real value, which no schema
+	// format can express.
+	if targetVersion != "" && !virtiowin.ValidVersion(targetVersion) {
 		return fiber.NewError(fiber.StatusBadRequest, "target_version is not a valid virtio-win version")
 	}
 	// Rejected here rather than stored, because the scheduler's fallback for an
 	// unparseable expression is the six-hourly default: a typo would otherwise
 	// be silently ignored instead of reported.
-	if err := virtiowin.ValidateSchedule(req.CheckSchedule, req.CheckTimezone); err != nil {
+	if err := virtiowin.ValidateSchedule(checkSchedule, checkTimezone); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
 	cfg, err := h.queries.UpsertVirtioWinConfig(c.Context(), db.UpsertVirtioWinConfigParams{
 		ClusterID:     clusterID,
-		Enabled:       req.Enabled,
-		Storage:       req.Storage,
-		Node:          req.Node,
-		TargetVersion: req.TargetVersion,
-		PruneEnabled:  optionalBool(req.PruneEnabled),
-		CheckSchedule: req.CheckSchedule,
-		CheckTimezone: req.CheckTimezone,
+		Enabled:       enabled,
+		Storage:       storage,
+		Node:          p.String("node"),
+		TargetVersion: targetVersion,
+		// A *bool, because prune DELETES ISOs: omitting the key means "leave
+		// the stored value alone", which the schema carries by declaring no
+		// default. See UpsertVirtioWinConfig, which does the preserving.
+		PruneEnabled:  optionalBool(optBoolPtr(p.OptBool("prune_enabled"))),
+		CheckSchedule: checkSchedule,
+		CheckTimezone: checkTimezone,
 		// Only applied when the schedule or its zone actually changed; the
 		// statement decides, so a save that touches neither cannot push the
 		// pending check out. See UpsertVirtioWinConfig.
-		NextCheckAt: virtiowin.NextCheck(req.CheckSchedule, req.CheckTimezone, time.Now()),
+		NextCheckAt: virtiowin.NextCheck(checkSchedule, checkTimezone, time.Now()),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to save virtio-win config")
@@ -298,27 +282,15 @@ func (h *VirtioWinHandler) UpdateConfig(c fiber.Ctx) error {
 	return c.JSON(h.toVirtioWinConfigResponse(c, cfg))
 }
 
-type virtioWinDownloadRequest struct {
-	Version string `json:"version"`
-}
-
 // Download dispatches an immediate download of one version to the cluster's
 // configured storage.
-func (h *VirtioWinHandler) Download(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VirtioWinHandler) Download(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
 		return err
 	}
 	if h.engine == nil {
 		return fiber.NewError(fiber.StatusServiceUnavailable, "virtio-win engine is not available")
-	}
-
-	var req virtioWinDownloadRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
 
 	cfg, err := h.queries.GetVirtioWinConfig(c.Context(), clusterID)
@@ -331,7 +303,7 @@ func (h *VirtioWinHandler) Download(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "configure a target ISO storage for this cluster first")
 	}
 
-	version := req.Version
+	version := p.String("version")
 	if version == "" {
 		target, err := h.engine.ResolveTarget(c.Context(), cfg)
 		if err != nil {
@@ -397,23 +369,18 @@ func (h *VirtioWinHandler) trackDownload(c fiber.Ctx, clusterID uuid.UUID, downl
 }
 
 // ListDownloads returns a cluster's download history, most recent first.
-func (h *VirtioWinHandler) ListDownloads(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VirtioWinHandler) ListDownloads(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "storage", clusterID); err != nil {
-		return err
-	}
-
-	limit := int32(50)
-	if l := fiber.Query[int](c, "limit", 50); l > 0 && l <= 500 {
-		limit = safeconv.Int32(l)
 	}
 
 	rows, err := h.queries.ListVirtioWinDownloadsByCluster(c.Context(), db.ListVirtioWinDownloadsByClusterParams{
 		ClusterID: clusterID,
-		Limit:     limit,
+		// The schema bounds and defaults this, so the clamp that answered
+		// ?limit=5000 with 50 rows is gone: an out-of-range value is now a
+		// 400 that names the field.
+		Limit: safeconv.Int32(int(p.Int("limit"))),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to list virtio-win downloads")
@@ -440,12 +407,9 @@ func (h *VirtioWinHandler) ListDownloads(c fiber.Ctx) error {
 // specific version; this answers "is there anything new, and is my storage in
 // line" — which is the only way an operator can tell whether the schedule and
 // the source they just configured actually work, without waiting for 03:00.
-func (h *VirtioWinHandler) CheckNow(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VirtioWinHandler) CheckNow(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
 		return err
 	}
 	if h.engine == nil {
@@ -512,20 +476,6 @@ func (h *VirtioWinHandler) CheckNow(c fiber.Ctx) error {
 // it; TestVirtioWinMirrorSettingKeyMatches keeps the two in step.
 const virtioWinMirrorSettingKey = "virtio_win.mirror"
 
-type virtioWinMirrorRequest struct {
-	// BaseURL replaces the upstream download root. Empty clears the override.
-	BaseURL string `json:"base_url"`
-	// AllowPrivateAddress confirms a base that resolves to a private or
-	// loopback address — which an internal mirror always does. Same
-	// warn-then-confirm shape as adding a cluster or a PBS server.
-	AllowPrivateAddress bool `json:"allow_private_address,omitempty"`
-	// AllowInsecure confirms a plain-http base. Separate from the address
-	// confirmation because it is a different risk: a private address exposes
-	// nothing, whereas http means the driver media a Windows guest installs
-	// arrives unauthenticated over the wire.
-	AllowInsecure bool `json:"allow_insecure,omitempty"`
-}
-
 type virtioWinMirrorResponse struct {
 	// BaseURL is the configured override, empty when following upstream.
 	BaseURL string `json:"base_url"`
@@ -552,10 +502,7 @@ func mirrorResponse(base string) virtioWinMirrorResponse {
 // Read is gated on view:storage — the same permission that already shows every
 // release's iso_url — rather than on manage:settings, so the operator reading a
 // failed check on the cluster page can see where it was pointed.
-func (h *VirtioWinHandler) GetMirror(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "storage"); err != nil {
-		return err
-	}
+func (h *VirtioWinHandler) GetMirror(c fiber.Ctx, _ *apischema.Params) error {
 	base := ""
 	row, err := h.queries.GetSetting(c.Context(), db.GetSettingParams{
 		Key:     virtioWinMirrorSettingKey,
@@ -581,17 +528,8 @@ func (h *VirtioWinHandler) GetMirror(c fiber.Ctx) error {
 // broader blast radius than a storage operator has anywhere else. The value is
 // not a credential — nothing authenticates to it — so this is about scope of
 // effect, not secrecy.
-func (h *VirtioWinHandler) SetMirror(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "settings"); err != nil {
-		return err
-	}
-
-	var req virtioWinMirrorRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
-	}
-
-	base, err := virtiowin.NormalizeBase(req.BaseURL)
+func (h *VirtioWinHandler) SetMirror(c fiber.Ctx, p *apischema.Params) error {
+	base, err := virtiowin.NormalizeBase(p.String("base_url"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
@@ -601,7 +539,7 @@ func (h *VirtioWinHandler) SetMirror(c fiber.Ctx) error {
 		// publishes no checksum to fall back on, so an unauthenticated fetch is
 		// worth one deliberate click. There is no second line of defence: the
 		// transport is the only thing authenticating that ISO.
-		if strings.HasPrefix(base, "http://") && !req.AllowInsecure {
+		if strings.HasPrefix(base, "http://") && !p.Bool("allow_insecure") {
 			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 				"error": "insecure_source_confirm_required",
 				"message": "This source uses plain HTTP, so the ISO is fetched without integrity or authenticity " +
@@ -612,7 +550,7 @@ func (h *VirtioWinHandler) SetMirror(c fiber.Ctx) error {
 		// this is the expected path, not an edge case. Always-blocked classes
 		// (cloud metadata and friends) are still refused outright, and
 		// netguard's dial guard re-checks at connect time.
-		if err := enforceURLAddressPolicy(c.Context(), base, req.AllowPrivateAddress); err != nil {
+		if err := enforceURLAddressPolicy(c.Context(), base, p.Bool("allow_private_address")); err != nil {
 			return renderAddressPolicyError(c, err)
 		}
 	}

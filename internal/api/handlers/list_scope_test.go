@@ -9,6 +9,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
 // TestClusterScopeFilter pins the contract every scoped list endpoint depends
@@ -103,10 +105,47 @@ func newListScopeTestApp(t *testing.T) *fiber.App {
 	installTestRoleMiddleware(app)
 	app.Get("/alert-rules", alerts.ListRules)
 	app.Get("/alerts", alerts.ListAlerts)
-	app.Get("/migrations", migrations.List)
+	// The migration listing is a registry endpoint now, so it takes its
+	// validated parameters rather than reading the query itself. The scope
+	// gate this test is about runs before either is consulted, so an
+	// all-defaults Params is the honest stand-in for the request.
+	app.Get("/migrations", withParams(t, migrationListMirror(t), migrations.List))
 	app.Get("/report-schedules", reports.ListSchedules)
 	app.Get("/report-runs", reports.ListRuns)
 	return app
+}
+
+// migrationListMirror is a local copy of the limit/offset half of the
+// migration listing's declaration (internal/api/registry_migrations.go).
+//
+// It is a mirror rather than the real thing because package api imports
+// this package, not the other way round — the same reason
+// TestDiskAttachRequestFrom keeps its own copy. Nothing here depends on
+// the bounds matching: the handler under test reads both keys and never
+// reaches them, so what this has to get right is only that both ARE
+// declared with a default.
+func migrationListMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	props := apischema.Properties{
+		"limit":  {Type: apischema.Integer, Optional: true, Default: 50},
+		"offset": {Type: apischema.Integer, Optional: true, Default: 0},
+	}
+	if err := props.Compile(); err != nil {
+		t.Fatalf("the mirror schema is itself invalid: %v", err)
+	}
+	return props
+}
+
+// withParams adapts a registry-shaped handler to a fiber.Handler by
+// validating an EMPTY request against props, so every declared parameter
+// arrives carrying its declared default.
+func withParams(t *testing.T, props apischema.Properties, h func(fiber.Ctx, *apischema.Params) error) fiber.Handler {
+	t.Helper()
+	params, err := props.Validate(map[string]any{})
+	if err != nil {
+		t.Fatalf("validating an empty request against the mirror schema: %v", err)
+	}
+	return func(c fiber.Ctx) error { return h(c, params) }
 }
 
 func TestListEndpoints_ScopeGatesBeforeDB(t *testing.T) {

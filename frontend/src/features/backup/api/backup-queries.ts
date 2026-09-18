@@ -315,6 +315,11 @@ export function useUpdatePBSServer() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    // `id` is destructured OUT of the payload on purpose, not for tidiness:
+    // the endpoint declares it as a PATH parameter, so the server rejects it
+    // in the body with "id: must be sent in the request path". The edit
+    // dialog builds its object with `id` included, so passing the whole
+    // thing through would 400 every PBS edit.
     mutationFn: ({ id, ...body }: UpdatePBSServerRequest & { id: string }) =>
       apiClient.put<PBSServer>(`/api/v1/pbs-servers/${id}`, body),
     onSuccess: () => {
