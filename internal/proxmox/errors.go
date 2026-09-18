@@ -101,6 +101,34 @@ func IsHARulesUnsupportedError(err error) bool {
 	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotImplemented
 }
 
+// IsNotInClusterError reports whether err is PVE's answer for
+// GET /cluster/config/join on a node that is not part of a cluster.
+//
+// It is a distinct outcome from "the call failed", and the distinction is
+// load-bearing: a standalone node is a perfectly healthy configuration
+// that the SPA has a purpose-built empty state for ("No corosync nodes
+// found. This may be a standalone node."). Treating the response as an
+// error puts a red banner over a working install.
+//
+// Matched on 424 alone, for the reason IsHARulesUnsupportedError gives at
+// length about 501: the message would match a proxy whose body happened to
+// contain the words, and 424 is a status nothing between Nexara and PVE
+// has a reason to invent. The raise is in pve-cluster,
+// src/PVE/API2/ClusterConfig.pm:
+//
+//	PVE::Exception::raise('node is not in a cluster, no join info available!',
+//	    code => HTTP::Status::HTTP_FAILED_DEPENDENCY) if !($conf && $conf->{main});
+//
+// Its own FIXME proposes returning an empty object in a later release, so
+// a caller must tolerate both this status and an empty answer.
+func IsNotInClusterError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusFailedDependency
+}
+
 // IsGuestNotRunningError reports whether err is the Proxmox response for a
 // console-proxy call (vncproxy/termproxy) against a guest that is not running,
 // e.g. "VM 105 not running" or "CT 105 not running".

@@ -210,6 +210,18 @@ func (h *ClusterOptionsHandler) GetJoinInfo(c fiber.Ctx, p *apischema.Params) er
 	}
 	info, err := pxClient.GetClusterJoinInfo(c.Context())
 	if err != nil {
+		// A node that is not in a cluster is not a failure. PVE answers
+		// 424 for it, which mapProxmoxError would render as a 502 and the
+		// SPA as an error banner — hiding its own empty state for exactly
+		// this case ("No join info available. This may be a standalone
+		// node.", ClusterOptionsTab.tsx), which is gated on !isError.
+		//
+		// The two sibling routes under /config handle it the same way, in
+		// the client; this one is handled here because GetClusterJoinInfo
+		// is where they detect it, so it must keep returning the error.
+		if proxmox.IsNotInClusterError(err) {
+			return c.JSON(&proxmox.ClusterJoinInfo{})
+		}
 		return mapProxmoxError(err)
 	}
 	return c.JSON(info)

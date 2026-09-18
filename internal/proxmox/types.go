@@ -2310,8 +2310,14 @@ type ClusterJoinInfo struct {
 
 // CorosyncNode represents a corosync node.
 // Proxmox returns nodeid and quorum_votes as strings, not integers.
+//
+// Node is the id property that GET /cluster/config/nodes stamps onto each
+// entry (hash_to_array($nodelist, 'node')). It duplicates Name there and is
+// absent from /cluster/config/join, so it is only a fallback key — see
+// corosyncNodeName in client_cluster.go.
 type CorosyncNode struct {
 	Name      string      `json:"name"`
+	Node      string      `json:"node,omitempty"`
 	NodeID    interface{} `json:"nodeid,omitempty"`
 	PVEAddr   string      `json:"pve_addr,omitempty"`
 	PVEFP     string      `json:"pve_fp,omitempty"`
