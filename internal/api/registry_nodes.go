@@ -714,15 +714,18 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 				Type:     apischema.Integer,
 				Optional: true,
 				Default:  500,
-				// 0 is meaningful to Proxmox — it means "no limit" — so the floor
-				// is 0 rather than 1. What it does close is a NEGATIVE limit,
-				// which strconv.Atoi passed straight through.
+				// The floor is 0 rather than 1 because 0 was always reachable:
+				// the hand-rolled default only applied to an absent key. It does
+				// NOT mean "no limit" — proxmox.GetNodeFirewallLog writes the key
+				// only when it is positive, so 0 omits it and Proxmox applies its
+				// own default. What the floor closes is a NEGATIVE limit, which
+				// strconv.Atoi passed straight through.
 				Minimum: apischema.Ptr(0.0),
 				// The ceiling the handler clamped to; see the syslog limit for
 				// why a bound is better than a silent substitution.
 				Maximum:     apischema.Ptr(5000.0),
 				Typetext:    "<integer>",
-				Description: "Maximum entries to return. 0 means no limit.",
+				Description: "Maximum entries to return. 0 or omitted leaves Proxmox's own default.",
 			},
 			"start": {
 				Type:     apischema.Integer,
@@ -738,94 +741,21 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 	})
 }
 
-// firewallRulePosParam is a rule's position in the node's ruleset, as a
-// PATH parameter.
-//
-// Declared as an integer rather than a string so the schema rejects "abc"
-// and "-1" before the handler reaches strconv — which is what the
-// hand-rolled parse used to do for the first, and never did for the
-// second. The ceiling is the int32 range the value is narrowed into rather
-// than a policy: Proxmox's own rule lists are far shorter.
-var firewallRulePosParam = apischema.Property{
-	Type:        apischema.Integer,
-	Minimum:     apischema.Ptr(0.0),
-	Maximum:     apischema.Ptr(2147483647.0),
-	Typetext:    "<integer>",
-	Description: "Rule position, counted from 0 at the top of the node's ruleset.",
-}
-
 // createNodeFirewallRuleParams and updateNodeFirewallRuleParams are the two
 // bodies of the node firewall rule routes. They differ in exactly two ways,
 // and both differences are what the handlers already enforced rather than
-// anything introduced here.
+// anything introduced here: the create route requires type and action, and
+// the update route additionally carries :pos.
+//
+// The rule body itself is firewallRuleBody in registry_firewall.go — the
+// same twelve fields the cluster, guest and security-group rule routes take,
+// declared once so the five rule surfaces cannot drift apart.
 func createNodeFirewallRuleParams() apischema.Properties {
-	return nodeFirewallRuleBody(false)
+	return firewallRuleBody(false)
 }
 
 func updateNodeFirewallRuleParams() apischema.Properties {
-	p := nodeFirewallRuleBody(true)
+	p := firewallRuleBody(true)
 	p["pos"] = firewallRulePosParam
 	return p
-}
-
-// nodeFirewallRuleBody is the Proxmox rule shape both routes take.
-//
-// optional makes type and action optional, which is the update route's
-// spelling: CreateNodeFirewallRule refused an empty either, and
-// UpdateNodeFirewallRule refused neither, because firewallRuleToForm drops
-// an empty field rather than sending it and Proxmox then keeps the rule's
-// current value. Making them required on update as well would look tidier
-// and would reject a request that has always worked.
-//
-// Nothing here carries an Enum. The rule vocabulary — macros especially —
-// is Proxmox's, it grows with every release, and a copy in this schema
-// would reject a macro the cluster in front of the operator accepts. The
-// values are relayed as form fields, never as path segments, so what the
-// schema owes them is a length bound and a closed parameter SET: a typo'd
-// key now comes back as "unknown parameter" instead of silently creating a
-// rule that ignores half the request.
-func nodeFirewallRuleBody(optional bool) apischema.Properties {
-	return apischema.Properties{
-		"type": {
-			Type:        apischema.String,
-			Optional:    optional,
-			MaxLength:   apischema.Ptr(32),
-			Typetext:    "<in|out|group>",
-			Description: "Direction the rule matches, or group to include a security group.",
-		},
-		"action": {
-			Type:      apischema.String,
-			Optional:  optional,
-			MaxLength: apischema.Ptr(64),
-			Typetext:  "<ACCEPT|DROP|REJECT|group name>",
-			Description: "What to do with a matching packet, or the security group to include when " +
-				"type is group.",
-		},
-		"source":  optString(512, "<address>", "Source address, CIDR, alias or IP set. Empty matches any."),
-		"dest":    optString(512, "<address>", "Destination address, CIDR, alias or IP set. Empty matches any."),
-		"sport":   optString(128, "<port|range|list>", "Source port, range or comma-separated list. Empty matches any."),
-		"dport":   optString(128, "<port|range|list>", "Destination port, range or comma-separated list. Empty matches any."),
-		"proto":   optString(64, "<protocol>", "IP protocol name or number. Empty matches any."),
-		"macro":   optString(128, "<macro>", "Proxmox firewall macro to expand into this rule, e.g. SSH."),
-		"comment": optString(512, "<string>", "Free-text note stored with the rule."),
-		"log":     optString(32, "<nolog|emerg|alert|crit|err|warning|notice|info|debug>", "Log level for matching packets."),
-		"iface":   optString(64, "<interface>", "Network interface the rule applies to. Empty applies it to all."),
-		"enable": {
-			Type:     apischema.Integer,
-			Optional: true,
-			// An INTEGER rather than a boolean, because that is what the wire
-			// shape has always been and what the rule list returns: Proxmox
-			// treats the field as a counter, where 0 disables and anything
-			// higher enables. Declaring it as a boolean would reject the value
-			// the listing hands back, which is what an edit form sends
-			// straight back in.
-			Default:  0,
-			Minimum:  apischema.Ptr(0.0),
-			Maximum:  apischema.Ptr(2147483647.0),
-			Typetext: "<integer>",
-			Description: "0 disables the rule; any higher value enables it. Unlike every other field " +
-				"here it is ALWAYS sent to Proxmox (firewallRuleToForm), so omitting it on an update " +
-				"disables the rule rather than leaving it as it was.",
-		},
-	}
 }

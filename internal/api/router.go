@@ -173,76 +173,15 @@ func (s *Server) setupRoutes() {
 		// internal/api/registry_ceph.go and mounted by mountRegistry
 		// above, so there is no block for them here.
 
-		// Network, Firewall, SDN routes.
-		if s.networkHandler != nil {
-			clusters.Get("/:cluster_id/networks", s.networkHandler.ListNetworkInterfaces)
-			clusters.Get("/:cluster_id/networks/:node_name", s.networkHandler.ListNodeNetworkInterfaces)
-			clusters.Post("/:cluster_id/networks/:node_name", s.networkHandler.CreateNetworkInterface)
-			clusters.Put("/:cluster_id/networks/:node_name/:iface", s.networkHandler.UpdateNetworkInterface)
-			clusters.Delete("/:cluster_id/networks/:node_name/:iface", s.networkHandler.DeleteNetworkInterface)
-			clusters.Post("/:cluster_id/networks/:node_name/apply", s.networkHandler.ApplyNetworkConfig)
-			clusters.Post("/:cluster_id/networks/:node_name/revert", s.networkHandler.RevertNetworkConfig)
-
-			clusters.Get("/:cluster_id/firewall/rules", s.networkHandler.ListClusterFirewallRules)
-			clusters.Post("/:cluster_id/firewall/rules", s.networkHandler.CreateClusterFirewallRule)
-			clusters.Put("/:cluster_id/firewall/rules/:pos", s.networkHandler.UpdateClusterFirewallRule)
-			clusters.Delete("/:cluster_id/firewall/rules/:pos", s.networkHandler.DeleteClusterFirewallRule)
-			clusters.Get("/:cluster_id/firewall/options", s.networkHandler.GetFirewallOptions)
-			clusters.Put("/:cluster_id/firewall/options", s.networkHandler.SetFirewallOptions)
-
-			clusters.Get("/:cluster_id/vms/:vm_id/firewall/rules", s.networkHandler.ListVMFirewallRules)
-			clusters.Post("/:cluster_id/vms/:vm_id/firewall/rules", s.networkHandler.CreateVMFirewallRule)
-			clusters.Put("/:cluster_id/vms/:vm_id/firewall/rules/:pos", s.networkHandler.UpdateVMFirewallRule)
-			clusters.Delete("/:cluster_id/vms/:vm_id/firewall/rules/:pos", s.networkHandler.DeleteVMFirewallRule)
-
-			clusters.Get("/:cluster_id/sdn/zones", s.networkHandler.ListSDNZones)
-			clusters.Post("/:cluster_id/sdn/zones", s.networkHandler.CreateSDNZone)
-			clusters.Put("/:cluster_id/sdn/zones/:zone", s.networkHandler.UpdateSDNZone)
-			clusters.Delete("/:cluster_id/sdn/zones/:zone", s.networkHandler.DeleteSDNZone)
-			clusters.Get("/:cluster_id/sdn/vnets", s.networkHandler.ListSDNVNets)
-			clusters.Post("/:cluster_id/sdn/vnets", s.networkHandler.CreateSDNVNet)
-			clusters.Put("/:cluster_id/sdn/vnets/:vnet", s.networkHandler.UpdateSDNVNet)
-			clusters.Delete("/:cluster_id/sdn/vnets/:vnet", s.networkHandler.DeleteSDNVNet)
-			clusters.Get("/:cluster_id/sdn/vnets/:vnet/subnets", s.networkHandler.ListSDNSubnets)
-			clusters.Post("/:cluster_id/sdn/vnets/:vnet/subnets", s.networkHandler.CreateSDNSubnet)
-			clusters.Put("/:cluster_id/sdn/vnets/:vnet/subnets/:subnet", s.networkHandler.UpdateSDNSubnet)
-			clusters.Delete("/:cluster_id/sdn/vnets/:vnet/subnets/:subnet", s.networkHandler.DeleteSDNSubnet)
-			clusters.Put("/:cluster_id/sdn/apply", s.networkHandler.ApplySDN)
-			clusters.Get("/:cluster_id/sdn/controllers", s.networkHandler.ListSDNControllers)
-			clusters.Post("/:cluster_id/sdn/controllers", s.networkHandler.CreateSDNController)
-			clusters.Put("/:cluster_id/sdn/controllers/:controller", s.networkHandler.UpdateSDNController)
-			clusters.Delete("/:cluster_id/sdn/controllers/:controller", s.networkHandler.DeleteSDNController)
-			clusters.Get("/:cluster_id/sdn/ipams", s.networkHandler.ListSDNIPAMs)
-			clusters.Post("/:cluster_id/sdn/ipams", s.networkHandler.CreateSDNIPAM)
-			clusters.Put("/:cluster_id/sdn/ipams/:ipam", s.networkHandler.UpdateSDNIPAM)
-			clusters.Delete("/:cluster_id/sdn/ipams/:ipam", s.networkHandler.DeleteSDNIPAM)
-			clusters.Get("/:cluster_id/sdn/dns", s.networkHandler.ListSDNDNS)
-			clusters.Post("/:cluster_id/sdn/dns", s.networkHandler.CreateSDNDNS)
-			clusters.Put("/:cluster_id/sdn/dns/:dns", s.networkHandler.UpdateSDNDNS)
-			clusters.Delete("/:cluster_id/sdn/dns/:dns", s.networkHandler.DeleteSDNDNS)
-
-			clusters.Post("/:cluster_id/firewall-templates/:id/apply", s.networkHandler.ApplyTemplate)
-
-			// Firewall extras (aliases, IPsets, security groups, log).
-			clusters.Get("/:cluster_id/firewall/aliases", s.networkHandler.ListFirewallAliases)
-			clusters.Post("/:cluster_id/firewall/aliases", s.networkHandler.CreateFirewallAlias)
-			clusters.Put("/:cluster_id/firewall/aliases/:name", s.networkHandler.UpdateFirewallAlias)
-			clusters.Delete("/:cluster_id/firewall/aliases/:name", s.networkHandler.DeleteFirewallAlias)
-			clusters.Get("/:cluster_id/firewall/ipset", s.networkHandler.ListFirewallIPSets)
-			clusters.Post("/:cluster_id/firewall/ipset", s.networkHandler.CreateFirewallIPSet)
-			clusters.Delete("/:cluster_id/firewall/ipset/:name", s.networkHandler.DeleteFirewallIPSet)
-			clusters.Get("/:cluster_id/firewall/ipset/:name/entries", s.networkHandler.ListFirewallIPSetEntries)
-			clusters.Post("/:cluster_id/firewall/ipset/:name/entries", s.networkHandler.AddFirewallIPSetEntry)
-			clusters.Delete("/:cluster_id/firewall/ipset/:name/entries/:cidr", s.networkHandler.DeleteFirewallIPSetEntry)
-			clusters.Get("/:cluster_id/firewall/groups", s.networkHandler.ListSecurityGroups)
-			clusters.Post("/:cluster_id/firewall/groups", s.networkHandler.CreateSecurityGroup)
-			clusters.Delete("/:cluster_id/firewall/groups/:group", s.networkHandler.DeleteSecurityGroup)
-			clusters.Get("/:cluster_id/firewall/groups/:group/rules", s.networkHandler.ListSecurityGroupRules)
-			clusters.Post("/:cluster_id/firewall/groups/:group/rules", s.networkHandler.CreateSecurityGroupRule)
-			clusters.Put("/:cluster_id/firewall/groups/:group/rules/:pos", s.networkHandler.UpdateSecurityGroupRule)
-			clusters.Delete("/:cluster_id/firewall/groups/:group/rules/:pos", s.networkHandler.DeleteSecurityGroupRule)
-			clusters.Get("/:cluster_id/firewall/log", s.networkHandler.GetFirewallLog)
-		}
+		// 64 of NetworkHandler's 66 routes are declared across four files and
+		// mounted by mountRegistry above, so there is no block for any of them
+		// here: the 7 node-interface routes in
+		// internal/api/registry_networks.go, the 28 firewall ones in
+		// internal/api/registry_firewall.go, the 25 SDN ones in
+		// internal/api/registry_sdn.go, and 4 of the 6 firewall-template
+		// routes — including the cluster-scoped apply — in
+		// internal/api/registry_firewall_templates.go. The other two template
+		// routes are the block further down.
 
 		// The 10 CVE and security-posture routes are declared in
 		// internal/api/registry_cve.go and mounted by mountRegistry
@@ -410,13 +349,22 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Firewall template routes (not cluster-scoped).
+	//
+	// Four of the six are declared in
+	// internal/api/registry_firewall_templates.go and mounted by
+	// mountRegistry above. These TWO stay here because the registry cannot
+	// express them: their body carries `rules`, a JSON array of OBJECTS, and
+	// apischema's Property.Items is restricted to scalar element types
+	// (compileItems, "only scalar element types are supported"). Declaring
+	// them without `rules` is not an option either — an undeclared key is a
+	// 400, which would break the one request these endpoints exist for. Both
+	// keep their hand-placed manage:network check, and
+	// TestFirewallTemplateWritesAreStillLegacy pins that it is a decision
+	// rather than a gap.
 	if s.networkHandler != nil {
 		templates := v1.Group("/firewall-templates", s.authRequired())
-		templates.Get("/", s.networkHandler.ListTemplates)
 		templates.Post("/", s.networkHandler.CreateTemplate)
-		templates.Get("/:id", s.networkHandler.GetTemplate)
 		templates.Put("/:id", s.networkHandler.UpdateTemplate)
-		templates.Delete("/:id", s.networkHandler.DeleteTemplate)
 	}
 
 	// The 7 migration routes are declared in

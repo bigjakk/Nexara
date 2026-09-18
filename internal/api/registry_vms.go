@@ -63,6 +63,14 @@ func (s *Server) buildRegistry() *Registry {
 	if s.pbsHandler != nil {
 		registerPBSEndpoints(reg, s.pbsHandler)
 	}
+	if s.networkHandler != nil {
+		// One handler, four declaration files: see the file comment in
+		// registry_networks.go for the split.
+		registerNetworkInterfaceEndpoints(reg, s.networkHandler)
+		registerFirewallEndpoints(reg, s.networkHandler)
+		registerSDNEndpoints(reg, s.networkHandler)
+		registerFirewallTemplateEndpoints(reg, s.networkHandler)
+	}
 	return reg
 }
 

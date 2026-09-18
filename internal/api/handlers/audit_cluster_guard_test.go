@@ -102,9 +102,9 @@ var auditClusterExempt = map[string]string{
 	// different resource and audits with its cluster.
 	"veeam_servers.go.audit": "veeam_servers spans clusters and has no cluster_id column; gated on global manage/delete:veeam",
 
-	"networks.go.CreateTemplate": "firewall_templates has no cluster_id column",
-	"networks.go.UpdateTemplate": "firewall_templates has no cluster_id column",
-	"networks.go.DeleteTemplate": "firewall_templates has no cluster_id column",
+	"firewall_templates.go.CreateTemplate": "firewall_templates has no cluster_id column",
+	"firewall_templates.go.UpdateTemplate": "firewall_templates has no cluster_id column",
+	"firewall_templates.go.DeleteTemplate": "firewall_templates has no cluster_id column",
 
 	// Deleting a cluster. audit_log.cluster_id is ON DELETE CASCADE, so a row
 	// naming the cluster it records the deletion of cannot survive: written

@@ -3,7 +3,9 @@ package proxmox
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -532,6 +534,33 @@ var deletableNetworkInterfaceKeys = map[string]bool{
 	"vlan-id": true, "vlan-raw-device": true,
 }
 
+// CreatableNetworkInterfaceTypes, EditableNetworkInterfaceTypes and
+// DeletableNetworkInterfaceKeys are the three sets above in the sorted slice
+// form an API parameter schema declares as an Enum.
+//
+// They are DERIVED from the maps rather than restated, so the declaration a
+// request is rejected by and the check this package makes cannot drift apart
+// — adding a creatable type widens both at once. The create and edit sets
+// stay separate for the reason their maps do: a physical NIC can be given an
+// address but cannot be created, so a single unified list would either make
+// eth creatable or make it uneditable.
+//
+// What is exported is the VOCABULARY, not the checks:
+// validateCreatableNetworkInterfaceType and its two siblings stay unexported
+// and stay the choke point inside CreateNetworkInterface /
+// UpdateNetworkInterface, so a caller that skips the schema still cannot skip
+// them.
+var (
+	CreatableNetworkInterfaceTypes = sortedSetKeys(creatableNetworkInterfaceTypes)
+	EditableNetworkInterfaceTypes  = sortedSetKeys(editableNetworkInterfaceTypes)
+	DeletableNetworkInterfaceKeys  = sortedSetKeys(deletableNetworkInterfaceKeys)
+)
+
+// sortedSetKeys returns a set's keys in a stable order. Sorted rather than
+// map order because the result is rendered into the API documentation, and a
+// list that reshuffles on every process start reads as a change.
+func sortedSetKeys(set map[string]bool) []string { return slices.Sorted(maps.Keys(set)) }
+
 // validateNetworkInterfaceDeleteKeys checks every entry of an update's Delete
 // list against the allow-list above.
 //
@@ -553,10 +582,16 @@ func validateNetworkInterfaceDeleteKeys(keys []string) error {
 // mtu carries minimum/maximum in the schema, so it answers 400 either way.
 // Checking here names the bound that was missed rather than relaying Proxmox's
 // wording for it.
+//
+// They are exported so the route declarations can state the same ceiling
+// rather than a second copy of the number. Only the CEILINGS transfer: the
+// MTU floor cannot become a schema Minimum, because 0 means "not set" here
+// and a Minimum of 1280 would reject it — see the note on the mtu parameter
+// in internal/api/registry_networks.go.
 const (
-	minInterfaceMTU = 1280
-	maxInterfaceMTU = 65520
-	maxVLANTag      = 4094
+	MinInterfaceMTU = 1280
+	MaxInterfaceMTU = 65520
+	MaxVLANTag      = 4094
 )
 
 // validateNetworkInterfaceOptions range-checks the numeric settings. Zero means
@@ -565,15 +600,15 @@ const (
 // Create and update both carry these options, so both call it: a check only one
 // path ran would leave the other unguarded.
 func validateNetworkInterfaceOptions(o NetworkInterfaceOptions) error {
-	if o.MTU != 0 && (o.MTU < minInterfaceMTU || o.MTU > maxInterfaceMTU) {
-		return fmt.Errorf("%w: MTU %d is outside %d-%d", ErrInvalidInput, o.MTU, minInterfaceMTU, maxInterfaceMTU)
+	if o.MTU != 0 && (o.MTU < MinInterfaceMTU || o.MTU > MaxInterfaceMTU) {
+		return fmt.Errorf("%w: MTU %d is outside %d-%d", ErrInvalidInput, o.MTU, MinInterfaceMTU, MaxInterfaceMTU)
 	}
 	for _, tag := range []struct {
 		name  string
 		value int
 	}{{"ovs_tag", o.OVSTag}, {"vlan-id", o.VLANID}} {
-		if tag.value != 0 && (tag.value < 1 || tag.value > maxVLANTag) {
-			return fmt.Errorf("%w: %s %d is outside 1-%d", ErrInvalidInput, tag.name, tag.value, maxVLANTag)
+		if tag.value != 0 && (tag.value < 1 || tag.value > MaxVLANTag) {
+			return fmt.Errorf("%w: %s %d is outside 1-%d", ErrInvalidInput, tag.name, tag.value, MaxVLANTag)
 		}
 	}
 	return nil

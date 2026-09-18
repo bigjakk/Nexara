@@ -23,19 +23,30 @@ import (
 // 6b moved the 62 routes of five cluster-scoped domains — Ceph 17, HA 17,
 // DRS 10, CVE 10 and replication 8 — then at 402 after Phase 6c moved
 // 37 more: migrations 7, cluster options 9, guest tools 7, virtio-win 8
-// and PBS servers 6. It is now at 352 after Phase 6d moved 50: all 38
-// NodeHandler routes and 12 of the 13 StorageHandler ones.
+// and PBS servers 6, then at 352 after Phase 6d moved 50: all 38
+// NodeHandler routes and 12 of the 13 StorageHandler ones. It is now at
+// 288 after Phase 6e moved 64 of NetworkHandler's 66: 7 node-interface, 28
+// firewall, 25 SDN and 4 of the 6 firewall-template routes.
 //
 // TestGuard_LegacyRouteSetOnlyShrinks compares the live legacy set
 // against it and fails if anything NEW shows up — a route that is not
 // here must be added through the registry, not through router.go.
 //
-// The thirteenth storage route, DELETE .../storage/:storage_id/content/*,
-// is still here on purpose: its volume id is a greedy WILDCARD segment,
-// which checkPathParams refuses outright because a parameter schema cannot
-// describe one. See registerStorageEndpoints in
-// internal/api/registry_storage.go, and TestStorageDeleteContentIsStillLegacy,
-// which pins both halves of that so it stays a decision rather than a gap.
+// THREE routes in this list are here because the registry CANNOT express
+// them, not because nobody got to them, and each is pinned by a test so it
+// stays a decision rather than a gap:
+//
+//   - DELETE .../storage/:storage_id/content/* takes its volume id as a
+//     greedy WILDCARD segment, which checkPathParams refuses outright
+//     because a parameter schema cannot describe one. See
+//     registerStorageEndpoints in internal/api/registry_storage.go and
+//     TestStorageDeleteContentIsStillLegacy.
+//   - POST /api/v1/firewall-templates and PUT /api/v1/firewall-templates/:id
+//     carry `rules`, a JSON array of OBJECTS, and apischema's Property.Items
+//     is restricted to scalar element types. See
+//     registerFirewallTemplateEndpoints in
+//     internal/api/registry_firewall_templates.go and
+//     TestFirewallTemplateWritesAreStillLegacy.
 //
 // Regenerate after migrating routes into the registry (the set should
 // only ever need entries REMOVED, never added):
@@ -61,33 +72,18 @@ var legacyRouteBaseline = map[string]bool{
 	"DELETE /api/v1/clusters/:cluster_id/acme/accounts/:name":                              true,
 	"DELETE /api/v1/clusters/:cluster_id/acme/plugins/:plugin_id":                          true,
 	"DELETE /api/v1/clusters/:cluster_id/backup-jobs/:job_id":                              true,
-	"DELETE /api/v1/clusters/:cluster_id/firewall/aliases/:name":                           true,
-	"DELETE /api/v1/clusters/:cluster_id/firewall/groups/:group":                           true,
-	"DELETE /api/v1/clusters/:cluster_id/firewall/groups/:group/rules/:pos":                true,
-	"DELETE /api/v1/clusters/:cluster_id/firewall/ipset/:name":                             true,
-	"DELETE /api/v1/clusters/:cluster_id/firewall/ipset/:name/entries/:cidr":               true,
-	"DELETE /api/v1/clusters/:cluster_id/firewall/rules/:pos":                              true,
 	"DELETE /api/v1/clusters/:cluster_id/maintenance-windows/:id":                          true,
 	"DELETE /api/v1/clusters/:cluster_id/metric-servers/:server_id":                        true,
-	"DELETE /api/v1/clusters/:cluster_id/networks/:node_name/:iface":                       true,
 	"DELETE /api/v1/clusters/:cluster_id/nodes/:node/certificates/revoke":                  true,
 	"DELETE /api/v1/clusters/:cluster_id/pools/:pool_id":                                   true,
 	"DELETE /api/v1/clusters/:cluster_id/schedules/:id":                                    true,
-	"DELETE /api/v1/clusters/:cluster_id/sdn/controllers/:controller":                      true,
-	"DELETE /api/v1/clusters/:cluster_id/sdn/dns/:dns":                                     true,
-	"DELETE /api/v1/clusters/:cluster_id/sdn/ipams/:ipam":                                  true,
-	"DELETE /api/v1/clusters/:cluster_id/sdn/vnets/:vnet":                                  true,
-	"DELETE /api/v1/clusters/:cluster_id/sdn/vnets/:vnet/subnets/:subnet":                  true,
-	"DELETE /api/v1/clusters/:cluster_id/sdn/zones/:zone":                                  true,
 	"DELETE /api/v1/clusters/:cluster_id/ssh-credentials":                                  true,
 	"DELETE /api/v1/clusters/:cluster_id/ssh-known-hosts/:id":                              true,
 	"DELETE /api/v1/clusters/:cluster_id/storage/:storage_id/content/*":                    true,
 	"DELETE /api/v1/clusters/:cluster_id/vm-folders/:folder_id":                            true,
 	"DELETE /api/v1/clusters/:cluster_id/vm-import-sources/:storage":                       true,
-	"DELETE /api/v1/clusters/:cluster_id/vms/:vm_id/firewall/rules/:pos":                   true,
 	"DELETE /api/v1/clusters/:id":                                                          true,
 	"DELETE /api/v1/favorites":                                                             true,
-	"DELETE /api/v1/firewall-templates/:id":                                                true,
 	"DELETE /api/v1/ldap/configs/:id":                                                      true,
 	"DELETE /api/v1/notification-channels/:id":                                             true,
 	"DELETE /api/v1/notification-dlq/:id":                                                  true,
@@ -148,20 +144,10 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/alerts/count":                                        true,
 	"GET /api/v1/clusters/:cluster_id/audit-log":                                           true,
 	"GET /api/v1/clusters/:cluster_id/backup-jobs":                                         true,
-	"GET /api/v1/clusters/:cluster_id/firewall/aliases":                                    true,
-	"GET /api/v1/clusters/:cluster_id/firewall/groups":                                     true,
-	"GET /api/v1/clusters/:cluster_id/firewall/groups/:group/rules":                        true,
-	"GET /api/v1/clusters/:cluster_id/firewall/ipset":                                      true,
-	"GET /api/v1/clusters/:cluster_id/firewall/ipset/:name/entries":                        true,
-	"GET /api/v1/clusters/:cluster_id/firewall/log":                                        true,
-	"GET /api/v1/clusters/:cluster_id/firewall/options":                                    true,
-	"GET /api/v1/clusters/:cluster_id/firewall/rules":                                      true,
 	"GET /api/v1/clusters/:cluster_id/maintenance-windows":                                 true,
 	"GET /api/v1/clusters/:cluster_id/metric-servers":                                      true,
 	"GET /api/v1/clusters/:cluster_id/metric-servers/:server_id":                           true,
 	"GET /api/v1/clusters/:cluster_id/metrics":                                             true,
-	"GET /api/v1/clusters/:cluster_id/networks":                                            true,
-	"GET /api/v1/clusters/:cluster_id/networks/:node_name":                                 true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node/acme-config":                             true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node/apt/repositories":                        true,
 	"GET /api/v1/clusters/:cluster_id/nodes/:node/certificates":                            true,
@@ -173,12 +159,6 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/rolling-updates/:id":                                 true,
 	"GET /api/v1/clusters/:cluster_id/rolling-updates/:id/nodes":                           true,
 	"GET /api/v1/clusters/:cluster_id/schedules":                                           true,
-	"GET /api/v1/clusters/:cluster_id/sdn/controllers":                                     true,
-	"GET /api/v1/clusters/:cluster_id/sdn/dns":                                             true,
-	"GET /api/v1/clusters/:cluster_id/sdn/ipams":                                           true,
-	"GET /api/v1/clusters/:cluster_id/sdn/vnets":                                           true,
-	"GET /api/v1/clusters/:cluster_id/sdn/vnets/:vnet/subnets":                             true,
-	"GET /api/v1/clusters/:cluster_id/sdn/zones":                                           true,
 	"GET /api/v1/clusters/:cluster_id/ssh-credentials":                                     true,
 	"GET /api/v1/clusters/:cluster_id/ssh-known-hosts":                                     true,
 	"GET /api/v1/clusters/:cluster_id/vm-folders":                                          true,
@@ -186,13 +166,10 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/vm-import-sources/content":                           true,
 	"GET /api/v1/clusters/:cluster_id/vm-imports":                                          true,
 	"GET /api/v1/clusters/:cluster_id/vm-imports/:id":                                      true,
-	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/firewall/rules":                           true,
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics":                                  true,
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/veeam":                                    true,
 	"GET /api/v1/clusters/:id":                                                             true,
 	"GET /api/v1/favorites":                                                                true,
-	"GET /api/v1/firewall-templates":                                                       true,
-	"GET /api/v1/firewall-templates/:id":                                                   true,
 	"GET /api/v1/guest-snapshots":                                                          true,
 	"GET /api/v1/ldap/configs":                                                             true,
 	"GET /api/v1/ldap/configs/:id":                                                         true,
@@ -279,20 +256,10 @@ var legacyRouteBaseline = map[string]bool{
 	"POST /api/v1/clusters/:cluster_id/backup":                                             true,
 	"POST /api/v1/clusters/:cluster_id/backup-jobs":                                        true,
 	"POST /api/v1/clusters/:cluster_id/backup-jobs/:job_id/run":                            true,
-	"POST /api/v1/clusters/:cluster_id/firewall-templates/:id/apply":                       true,
-	"POST /api/v1/clusters/:cluster_id/firewall/aliases":                                   true,
-	"POST /api/v1/clusters/:cluster_id/firewall/groups":                                    true,
-	"POST /api/v1/clusters/:cluster_id/firewall/groups/:group/rules":                       true,
-	"POST /api/v1/clusters/:cluster_id/firewall/ipset":                                     true,
-	"POST /api/v1/clusters/:cluster_id/firewall/ipset/:name/entries":                       true,
-	"POST /api/v1/clusters/:cluster_id/firewall/rules":                                     true,
 	"POST /api/v1/clusters/:cluster_id/guest-snapshots/resync":                             true,
 	"POST /api/v1/clusters/:cluster_id/import-metadata":                                    true,
 	"POST /api/v1/clusters/:cluster_id/maintenance-windows":                                true,
 	"POST /api/v1/clusters/:cluster_id/metric-servers":                                     true,
-	"POST /api/v1/clusters/:cluster_id/networks/:node_name":                                true,
-	"POST /api/v1/clusters/:cluster_id/networks/:node_name/apply":                          true,
-	"POST /api/v1/clusters/:cluster_id/networks/:node_name/revert":                         true,
 	"POST /api/v1/clusters/:cluster_id/nodes/:node/apt/repositories":                       true,
 	"POST /api/v1/clusters/:cluster_id/nodes/:node/certificates/order":                     true,
 	"POST /api/v1/clusters/:cluster_id/pools":                                              true,
@@ -306,12 +273,6 @@ var legacyRouteBaseline = map[string]bool{
 	"POST /api/v1/clusters/:cluster_id/rolling-updates/:id/start":                          true,
 	"POST /api/v1/clusters/:cluster_id/rolling-updates/preflight-ha":                       true,
 	"POST /api/v1/clusters/:cluster_id/schedules":                                          true,
-	"POST /api/v1/clusters/:cluster_id/sdn/controllers":                                    true,
-	"POST /api/v1/clusters/:cluster_id/sdn/dns":                                            true,
-	"POST /api/v1/clusters/:cluster_id/sdn/ipams":                                          true,
-	"POST /api/v1/clusters/:cluster_id/sdn/vnets":                                          true,
-	"POST /api/v1/clusters/:cluster_id/sdn/vnets/:vnet/subnets":                            true,
-	"POST /api/v1/clusters/:cluster_id/sdn/zones":                                          true,
 	"POST /api/v1/clusters/:cluster_id/ssh-credentials/test":                               true,
 	"POST /api/v1/clusters/:cluster_id/ssh-known-hosts":                                    true,
 	"POST /api/v1/clusters/:cluster_id/vm-folders":                                         true,
@@ -319,7 +280,6 @@ var legacyRouteBaseline = map[string]bool{
 	"POST /api/v1/clusters/:cluster_id/vm-import-sources/esxi":                             true,
 	"POST /api/v1/clusters/:cluster_id/vm-imports":                                         true,
 	"POST /api/v1/clusters/:cluster_id/vm-imports/:id/cancel":                              true,
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/firewall/rules":                          true,
 	"POST /api/v1/clusters/:id/verify-certificate":                                         true,
 	"POST /api/v1/clusters/fetch-fingerprint":                                              true,
 	"POST /api/v1/favorites":                                                               true,
@@ -363,27 +323,14 @@ var legacyRouteBaseline = map[string]bool{
 	"PUT /api/v1/clusters/:cluster_id/acme/accounts/:name":                                 true,
 	"PUT /api/v1/clusters/:cluster_id/acme/plugins/:plugin_id":                             true,
 	"PUT /api/v1/clusters/:cluster_id/backup-jobs/:job_id":                                 true,
-	"PUT /api/v1/clusters/:cluster_id/firewall/aliases/:name":                              true,
-	"PUT /api/v1/clusters/:cluster_id/firewall/groups/:group/rules/:pos":                   true,
-	"PUT /api/v1/clusters/:cluster_id/firewall/options":                                    true,
-	"PUT /api/v1/clusters/:cluster_id/firewall/rules/:pos":                                 true,
 	"PUT /api/v1/clusters/:cluster_id/maintenance-windows/:id":                             true,
 	"PUT /api/v1/clusters/:cluster_id/metric-servers/:server_id":                           true,
-	"PUT /api/v1/clusters/:cluster_id/networks/:node_name/:iface":                          true,
 	"PUT /api/v1/clusters/:cluster_id/nodes/:node/acme-config":                             true,
 	"PUT /api/v1/clusters/:cluster_id/nodes/:node/apt/repositories":                        true,
 	"PUT /api/v1/clusters/:cluster_id/nodes/:node/certificates/renew":                      true,
 	"PUT /api/v1/clusters/:cluster_id/pools/:pool_id":                                      true,
 	"PUT /api/v1/clusters/:cluster_id/schedules/:id":                                       true,
-	"PUT /api/v1/clusters/:cluster_id/sdn/apply":                                           true,
-	"PUT /api/v1/clusters/:cluster_id/sdn/controllers/:controller":                         true,
-	"PUT /api/v1/clusters/:cluster_id/sdn/dns/:dns":                                        true,
-	"PUT /api/v1/clusters/:cluster_id/sdn/ipams/:ipam":                                     true,
-	"PUT /api/v1/clusters/:cluster_id/sdn/vnets/:vnet":                                     true,
-	"PUT /api/v1/clusters/:cluster_id/sdn/vnets/:vnet/subnets/:subnet":                     true,
-	"PUT /api/v1/clusters/:cluster_id/sdn/zones/:zone":                                     true,
 	"PUT /api/v1/clusters/:cluster_id/ssh-credentials":                                     true,
-	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/firewall/rules/:pos":                      true,
 	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/folder":                                   true,
 	"PUT /api/v1/clusters/:id":                                                             true,
 	"PUT /api/v1/firewall-templates/:id":                                                   true,

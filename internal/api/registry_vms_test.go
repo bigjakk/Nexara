@@ -358,6 +358,7 @@ var routesOutsideTheClusterCheckShape = func() map[string]string {
 		storageRoutesOutsideTheClusterCheckShape,
 		virtioWinRoutesOutsideTheClusterCheckShape,
 		pbsRoutesOutsideTheClusterCheckShape,
+		firewallTemplateRoutesOutsideTheClusterCheckShape,
 	} {
 		maps.Copy(out, m)
 	}
@@ -394,6 +395,13 @@ var registryDomainRouteCounts = map[string]int{
 	"registerGuestToolsEndpoints":     guestToolsRouteCount,
 	"registerVirtioWinEndpoints":      virtioWinRouteCount,
 	"registerPBSEndpoints":            pbsRouteCount,
+	// NetworkHandler's 66 routes are declared across four files and four
+	// functions rather than one, so each group carries its own count here —
+	// see the file comment in registry_networks.go.
+	"registerNetworkInterfaceEndpoints": networkInterfaceRouteCount,
+	"registerFirewallEndpoints":         firewallRouteCount,
+	"registerSDNEndpoints":              sdnRouteCount,
+	"registerFirewallTemplateEndpoints": firewallTemplateRouteCount,
 }
 
 // registryRouteCount is the total the registry must hold.
@@ -426,6 +434,11 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 		"registerGuestToolsEndpoints":     0,
 		"registerVirtioWinEndpoints":      0,
 		"registerPBSEndpoints":            0,
+
+		"registerNetworkInterfaceEndpoints": 0,
+		"registerFirewallEndpoints":         0,
+		"registerSDNEndpoints":              0,
+		"registerFirewallTemplateEndpoints": 0,
 	}
 	reg := NewRegistry()
 	s := newRouteStubServer(t)
@@ -484,6 +497,22 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	before = reg.Len()
 	registerPBSEndpoints(reg, s.pbsHandler)
 	declared["registerPBSEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerNetworkInterfaceEndpoints(reg, s.networkHandler)
+	declared["registerNetworkInterfaceEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerFirewallEndpoints(reg, s.networkHandler)
+	declared["registerFirewallEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerSDNEndpoints(reg, s.networkHandler)
+	declared["registerSDNEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerFirewallTemplateEndpoints(reg, s.networkHandler)
+	declared["registerFirewallTemplateEndpoints"] = reg.Len() - before
 
 	if len(declared) != len(registryDomainRouteCounts) {
 		t.Fatalf("this test drives %d domains but registryDomainRouteCounts names %d — "+
