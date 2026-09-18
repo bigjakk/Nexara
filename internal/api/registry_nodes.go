@@ -144,10 +144,20 @@ func syslogTimeParam(description string) apischema.Property {
 //     disclosure of the host — storage backing paths, network layout, the
 //     package inventory and every guest's config — so it sits with the
 //     operator actions rather than with the telemetry. See GetNodeReport.
-//   - the five firewall routes are view/manage:FIREWALL, not :node. The
-//     node's ruleset is the firewall resource that lives on it, and an
-//     operator trusted to reboot a node is not thereby trusted to open a
-//     port on it.
+//   - the five firewall routes are view/manage:NETWORK, not :node. The
+//     node's ruleset is a firewall object, and every other firewall route
+//     in the API — all 28 of them in registry_firewall.go — gates on
+//     :network, as does the catalogue entry itself
+//     ("View networks, firewall, SDN", migrations/000016_rbac.up.sql).
+//     These five asked for :firewall instead, a resource the catalogue has
+//     never contained, so from the day they shipped (c129078, 2026-03-23)
+//     they answered 403 to every caller including Admin — HasPermission
+//     can only match a row that exists. Repointing them widens nothing in
+//     practice: a Viewer already holds view:network and an Operator
+//     manage:network, and those already carry the cluster-wide and
+//     per-guest firewall rules, which are strictly broader than one node's.
+//     TestGuard_DeclaredPermissionsExistInTheCatalogue now fails on any
+//     declaration naming a resource the migrations do not seed.
 //
 // The node hardware listings the VM dialogs use (/bridges, /hardware/*,
 // /machine-types, /cpu-models, /cpu-flags, /isos) are NOT here: they are
@@ -668,18 +678,18 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,
 		Path:        nodeScope + "/:node_name/firewall/rules",
-		Description: "List a node's firewall rules in evaluation order. Requires view:firewall, not view:node.",
+		Description: "List a node's firewall rules in evaluation order. Requires view:network, not view:node — see the resource note above.",
 		Group:       "Nodes",
-		Permissions: clusterCheck("view", "firewall"),
+		Permissions: clusterCheck("view", "network"),
 		Parameters:  nodeParams(nil),
 		Handler:     h.ListNodeFirewallRules,
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodPost,
 		Path:        nodeScope + "/:node_name/firewall/rules",
-		Description: "Add a firewall rule to a node, at the top of its list. Requires manage:firewall, not manage:node.",
+		Description: "Add a firewall rule to a node, at the top of its list. Requires manage:network, not manage:node — see the resource note above.",
 		Group:       "Nodes",
-		Permissions: clusterCheck("manage", "firewall"),
+		Permissions: clusterCheck("manage", "network"),
 		Parameters:  nodeParams(createNodeFirewallRuleParams()),
 		Handler:     h.CreateNodeFirewallRule,
 	})
@@ -688,27 +698,27 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 		Path:   nodeScope + "/:node_name/firewall/rules/:pos",
 		Description: "Change one of a node's firewall rules. A field left out is not sent, so Proxmox keeps " +
 			"its current value — except enable, which is always written and therefore resets to 0 when the " +
-			"body omits it. Requires manage:firewall, not manage:node.",
+			"body omits it. Requires manage:network, not manage:node — see the resource note above.",
 		Group:       "Nodes",
-		Permissions: clusterCheck("manage", "firewall"),
+		Permissions: clusterCheck("manage", "network"),
 		Parameters:  nodeParams(updateNodeFirewallRuleParams()),
 		Handler:     h.UpdateNodeFirewallRule,
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodDelete,
 		Path:        nodeScope + "/:node_name/firewall/rules/:pos",
-		Description: "Delete one of a node's firewall rules by position. Requires manage:firewall, not manage:node.",
+		Description: "Delete one of a node's firewall rules by position. Requires manage:network, not manage:node — see the resource note above.",
 		Group:       "Nodes",
-		Permissions: clusterCheck("manage", "firewall"),
+		Permissions: clusterCheck("manage", "network"),
 		Parameters:  nodeParams(apischema.Properties{"pos": firewallRulePosParam}),
 		Handler:     h.DeleteNodeFirewallRule,
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,
 		Path:        nodeScope + "/:node_name/firewall/log",
-		Description: "Read a node's firewall log. Requires view:firewall, not view:node.",
+		Description: "Read a node's firewall log. Requires view:network, not view:node — see the resource note above.",
 		Group:       "Nodes",
-		Permissions: clusterCheck("view", "firewall"),
+		Permissions: clusterCheck("view", "network"),
 		Parameters: nodeParams(apischema.Properties{
 			"limit": {
 				Type:     apischema.Integer,

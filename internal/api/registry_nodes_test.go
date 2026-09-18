@@ -53,8 +53,21 @@ func nodeRoute(path string) string {
 //
 // The two entries that are NOT :node are the point of writing the table
 // out: the support bundle is manage:node rather than view:node, and the
-// five firewall routes gate on the firewall resource rather than the node
-// one. Both are deliberate and are restated in the declarations' prose.
+// five firewall routes gated on a :firewall resource rather than the node
+// one.
+//
+// This table is a HISTORICAL RECORD of what the handlers enforced, not a
+// statement of what the registry should declare, and the five firewall
+// rows are why that distinction now matters: :firewall was never in the
+// permission catalogue, so those five routes 403'd every caller from the
+// day they shipped. They have since been repointed to :network. The rows
+// below still say :firewall because that is what the code did; the
+// intended divergence is recorded in nodeIntendedPermissionChanges, and
+// the comparison below consults both.
+//
+// Rewriting a row here to match a new declaration would be the exact
+// failure this repo has hit before — freezing a regression under the name
+// of the test meant to catch it. Add to the divergence map instead.
 var nodeLegacyPermissions = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/nodes":                                        "view:node",
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_id/disks":                         "view:node",
@@ -94,6 +107,47 @@ var nodeLegacyPermissions = map[string]string{
 	"PUT /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules/:pos":         "manage:firewall",
 	"DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules/:pos":      "manage:firewall",
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/log":                "view:firewall",
+}
+
+// nodeIntendedPermissionChanges are the routes whose declaration is
+// DELIBERATELY not what the handler enforced before the migration, each
+// with the permission it now declares and the reason it moved.
+//
+// Every entry must also appear in nodeLegacyPermissions, so the pair reads
+// as "was X, is now Y, because Z" rather than as an unexplained edit. A
+// route declaring neither its legacy permission nor its intended one is a
+// drift and fails.
+//
+// What no test here can judge is whether the new permission is the RIGHT
+// one. An entry moving a route from manage:node to view:cluster would
+// satisfy every check in this file and
+// TestGuard_DeclaredPermissionsExistInTheCatalogue too, since that one
+// checks existence, not appropriateness. Adding an entry is a review
+// decision; the map exists to make sure there is something to review.
+var nodeIntendedPermissionChanges = map[string]struct {
+	now    string
+	reason string
+}{
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules": {
+		"view:network",
+		"the :firewall resource is not in the permission catalogue",
+	},
+	"POST /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules": {
+		"manage:network",
+		"the :firewall resource is not in the permission catalogue",
+	},
+	"PUT /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules/:pos": {
+		"manage:network",
+		"the :firewall resource is not in the permission catalogue",
+	},
+	"DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules/:pos": {
+		"manage:network",
+		"the :firewall resource is not in the permission catalogue",
+	},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/log": {
+		"view:network",
+		"the :firewall resource is not in the permission catalogue",
+	},
 }
 
 // declaredNodeEndpoints returns every declaration in this domain, keyed
@@ -138,6 +192,24 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 			len(nodeLegacyPermissions), nodeRouteCount)
 	}
 
+	// The divergence map only means anything against the legacy record: an
+	// entry naming a route that was never enforced, or claiming a "change"
+	// to the permission the handler already used, is a stale exemption.
+	for key, changed := range nodeIntendedPermissionChanges {
+		was, ok := nodeLegacyPermissions[key]
+		if !ok {
+			t.Errorf("nodeIntendedPermissionChanges names %s, which is not in the legacy table", key)
+			continue
+		}
+		if was == changed.now {
+			t.Errorf("nodeIntendedPermissionChanges says %s moved to %q, but that is what it already enforced",
+				key, changed.now)
+		}
+		if changed.reason == "" {
+			t.Errorf("nodeIntendedPermissionChanges[%s] has no reason", key)
+		}
+	}
+
 	byPermission := map[string]int{}
 	for key, want := range nodeLegacyPermissions {
 		e, ok := declared[key]
@@ -150,30 +222,52 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 				key, e.Permissions.Describe())
 			continue
 		}
-		if got := e.Permissions.Describe(); got != want {
+		got := e.Permissions.Describe()
+		if changed, intended := nodeIntendedPermissionChanges[key]; intended {
+			if got != changed.now {
+				t.Errorf("%s was enforced as %q and is meant to declare %q (%s), but declares %q",
+					key, want, changed.now, changed.reason, got)
+			}
+		} else if got != want {
 			t.Errorf("%s declares %q but the handler enforced %q before the migration", key, got, want)
 		}
 		if e.Permissions.Check.Scope != ScopeCluster {
 			t.Errorf("%s is %s-scoped; requireClusterPerm resolved the cluster from the path",
 				key, e.Permissions.Check.Scope)
 		}
-		byPermission[want]++
+		byPermission[got]++
 	}
 
 	// The per-permission breakdown, so a failure says WHICH pair drifted
-	// rather than only that the total moved. Derived from `git show HEAD:`
-	// over the six NodeHandler files at commit be1379f.
+	// rather than only that the total moved.
+	//
+	// Tallied over what each route DECLARES, not over the legacy table.
+	// Counting the legacy value was right while the two were identical,
+	// but once nodeIntendedPermissionChanges existed it made this loop a
+	// comparison of one hand-written map against hand-written constants —
+	// true by construction, incapable of noticing a declaration drift,
+	// which is the one thing it is here for.
+	//
+	// The legacy shape, from `git show HEAD:` over the six NodeHandler
+	// files at commit be1379f, was: view:node 16, manage:node 17,
+	// view:firewall 2, manage:firewall 3. The last two moved to :network.
 	for _, tt := range []struct {
 		permission string
 		calls      int
 	}{
 		{"view:node", 16},
 		{"manage:node", 17},
-		{"view:firewall", 2},
-		{"manage:firewall", 3},
+		{"view:network", 2},
+		{"manage:network", 3},
 	} {
 		if byPermission[tt.permission] != tt.calls {
 			t.Errorf("%d routes declare %s, want %d", byPermission[tt.permission], tt.permission, tt.calls)
+		}
+	}
+	for _, gone := range []string{"view:firewall", "manage:firewall"} {
+		if byPermission[gone] != 0 {
+			t.Errorf("%d routes still declare %s, a resource no migration seeds",
+				byPermission[gone], gone)
 		}
 	}
 

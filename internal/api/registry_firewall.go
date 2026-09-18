@@ -205,11 +205,14 @@ var firewallIPSetEntryCIDRParam = apischema.Property{
 // Two things about the permissions are worth naming because neither is the
 // obvious one, and both are preserved rather than chosen:
 //
-//   - The resource is :network throughout, NOT :firewall. The node firewall
-//     routes (registry_nodes.go) use view/manage:firewall for the same verbs
-//     on the same kind of object. Nothing here changes that split; it is
-//     recorded in the tally so that a future decision to unify them is a
-//     decision rather than a drift.
+//   - The resource is :network throughout, and as of the repoint in
+//     registry_nodes.go so are the five node firewall routes, which asked
+//     for a :firewall resource the permission catalogue never seeded and
+//     so answered 403 to everyone for six months. There is no longer a
+//     split: every firewall route in the API gates on :network, which is
+//     what the catalogue entry describes ("View networks, firewall, SDN").
+//     The tally below still records each route's permission so a future
+//     divergence is a decision rather than a drift.
 //   - delete:network is used by exactly two of the twenty-eight — removing a
 //     cluster rule and removing a guest rule. Deleting an ALIAS, an IP SET,
 //     an IP set ENTRY, a SECURITY GROUP or a security-group RULE is

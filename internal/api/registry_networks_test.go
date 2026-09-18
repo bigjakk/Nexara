@@ -72,9 +72,10 @@ func declaredNetworkEndpoints(t *testing.T, tally map[string]string) map[string]
 // middleware with the SAME action and the SAME resource.
 //
 // It compares the rendered permission rather than only the action, because
-// checking the action alone would let a route drift from :network onto
-// :firewall — the resource the node firewall routes use for the same verb —
-// and still pass.
+// checking the action alone would let a route drift onto another resource
+// entirely and still pass — which is not hypothetical: the five node
+// firewall routes spent six months on a :firewall resource that the
+// permission catalogue never contained, and every one of them 403'd.
 //
 // scope is the scope every route in the table must declare, so that a
 // cluster-scoped batch cannot quietly acquire a global route (which would
