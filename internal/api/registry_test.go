@@ -562,3 +562,62 @@ func TestPermissionsDescribe(t *testing.T) {
 		})
 	}
 }
+
+// An alias is a second spelling the CALLER chooses, so the gate-name
+// refusal has to cover it too — otherwise a parameter honestly named
+// target_cluster_id that also answers to "cluster_id" walks past a check
+// that only matches declared names.
+//
+// The rule is deliberately narrow, and both halves of that narrowness are
+// load-bearing: "id" stays legal (registry_replication.go ships it), and
+// a route with no cluster gate has nothing to diverge from (the four
+// current cluster_id aliases are all Deferred).
+func TestRegisterRefusesAClusterIDAliasOnlyWhereAGateRuns(t *testing.T) {
+	h := func(c fiber.Ctx, p *apischema.Params) error { return nil }
+	clusterCheck := Permissions{Check: &Check{Action: "manage", Resource: "vm", Scope: ScopeCluster}}
+	deferred := Permissions{Deferred: "the handler resolves the cluster from the row it loads"}
+
+	// The path parameter differs per case on purpose: apischema already
+	// refuses an alias that collides with a DECLARED name, so aliasing to
+	// "id" requires a path that does not declare one. That is exactly
+	// replication's shape — :cluster_id in the path, "id" as a body alias
+	// — and it is why the gate there never reaches its fallback.
+	aliased := func(pathParam, alias string) apischema.Properties {
+		p := apischema.Property{Type: apischema.String, Format: "uuid", Optional: true, Alias: alias}
+		return apischema.Properties{
+			pathParam:           apischema.StdOption("cluster-id"),
+			"target_cluster_id": p,
+		}
+	}
+
+	tests := []struct {
+		name       string
+		perms      Permissions
+		pathParam  string
+		params     apischema.Properties
+		wantRefuse bool
+	}{
+		{"cluster_id alias behind a cluster gate is the escalation", clusterCheck, "id", aliased("id", "cluster_id"), true},
+		{"cluster_id alias with no gate has nothing to diverge from", deferred, "id", aliased("id", "cluster_id"), false},
+		{"an id alias stays legal — replication ships one", clusterCheck, "cluster_id", aliased("cluster_id", "id"), false},
+		{"an unrelated alias is untouched", clusterCheck, "id", aliased("id", "target"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ep := Endpoint{
+				Method: "POST", Path: "/api/v1/clusters/:" + tt.pathParam + "/thing",
+				Description: "Test.", Group: "Test",
+				Permissions: tt.perms, Parameters: tt.params, Handler: h,
+			}
+			var refused bool
+			func() {
+				defer func() { refused = recover() != nil }()
+				NewRegistry().Register(ep)
+			}()
+			if refused != tt.wantRefuse {
+				t.Errorf("refused = %v, want %v", refused, tt.wantRefuse)
+			}
+		})
+	}
+}

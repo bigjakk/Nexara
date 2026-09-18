@@ -308,8 +308,52 @@ func checkPathParams(e Endpoint) error {
 				"act on different clusters; name it something else if it means a different cluster",
 				e.Method, e.Path, name, src)
 		}
+
+		// The same divergence reached through an ALIAS. The loop above
+		// matches declared names, so a parameter honestly called
+		// target_cluster_id that ALSO answers to "cluster_id" walks past
+		// it — and the caller, not the declaration, chooses which spelling
+		// to send.
+		//
+		// The reachable escalation is on a /api/v1/clusters/:id path:
+		// clusterIDFromParam finds no "cluster_id" segment, falls back to
+		// c.Params("id") and authorizes cluster A, while the body's
+		// "cluster_id" binds through the alias and the handler acts on
+		// cluster B. A caller holding manage on A alone then operates on B.
+		//
+		// Only "cluster_id" is refused, and only where a cluster-scoped
+		// gate actually runs. The narrowness is deliberate on both counts:
+		//   - "id" stays legal as an alias because it does not claim to
+		//     mean a cluster. registry_replication.go ships job_id with
+		//     Alias "id", which is safe — :cluster_id is in that path, so
+		//     the gate never reaches the fallback — and a blanket refusal
+		//     would break an API spelling callers already use.
+		//   - Deferred/Advisory/Public/SelfService install no middleware,
+		//     so there is no gate to diverge from; the four current
+		//     cluster_id aliases are all on such routes.
+		if strings.EqualFold(prop.Alias, "cluster_id") && src != apischema.SourcePath && e.runsClusterGate() {
+			return fmt.Errorf("endpoint %s %s declares parameter %q with the alias %q, which a caller may send "+
+				"as a %s value — but the permission middleware resolves the cluster from the path, so the gate "+
+				"and the handler would act on different clusters; choose an alias that does not claim to name a cluster",
+				e.Method, e.Path, name, prop.Alias, src)
+		}
 	}
 	return nil
+}
+
+// runsClusterGate reports whether this endpoint mounts middleware that
+// resolves a cluster out of the path. Only then can a body or query value
+// disagree with what was authorized.
+func (e Endpoint) runsClusterGate() bool {
+	if e.Permissions.Check != nil && e.Permissions.Check.Scope == ScopeCluster {
+		return true
+	}
+	for _, alt := range e.Permissions.Alternatives {
+		if alt.Scope == ScopeCluster {
+			return true
+		}
+	}
+	return false
 }
 
 // pathParamNames returns the :param names in path, in order. Fiber allows
