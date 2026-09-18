@@ -326,13 +326,27 @@ func TestScheduleCreateRequiresOnlyWhatTheHandlerDid(t *testing.T) {
 		}
 	}
 	sort.Strings(got)
-	want := []string{"name", "report_cluster_id", "report_type", "schedule", "time_range_hours"}
+	want := []string{"name", "report_cluster_id", "report_type", "time_range_hours"}
 	if !slices.Equal(got, want) {
 		t.Errorf("required parameters = %v, want %v", got, want)
 	}
-	// Required but EMPTY-able: a schedule that never fires on its own is a
-	// working row, and the handler validated the expression only when it was
-	// non-empty.
+
+	// schedule is OPTIONAL and empty-able, and those are two separate
+	// concessions to the same old behaviour.
+	//
+	// This assertion is here because its earlier version got the answer
+	// wrong in a way that is worth not repeating. It listed "schedule" in
+	// the required set, which pinned a REGRESSION rather than catching one:
+	// the old handler ran `if schedule != ""` before validating, so a body
+	// that OMITTED the key inserted a manual-only row and answered 201.
+	// Declaring it required turned that into a 400 naming a parameter the
+	// caller had never needed to send, and the test then froze it.
+	//
+	// A required-set test only protects the callers it remembers. The old
+	// one remembered the empty-string caller and forgot the absent-key one.
+	if prop := e.Parameters["schedule"]; !prop.Optional {
+		t.Error("schedule is required; omitting it used to insert a manual-only schedule and answer 201")
+	}
 	if min := e.Parameters["schedule"].MinLength; min != nil {
 		t.Errorf("schedule declares minimum length %d; the empty string is a schedule that never fires", *min)
 	}
@@ -589,5 +603,42 @@ func TestReportRoutesRefuseAnUndeclaredQueryParameter(t *testing.T) {
 		if cap.called {
 			t.Errorf("%s: the handler ran for a request carrying a parameter it does not declare", path)
 		}
+	}
+}
+
+// The regression this pins was a 400 on an OMITTED key, and the declaration
+// test that was supposed to catch it asserted on the declaration alone. So
+// this one goes through the validator instead: a body with no "schedule" at
+// all must reach the handler, and must reach it indistinguishable from one
+// that sent "".
+//
+// Both halves matter. Absent had to work because the old value-typed struct
+// field made an omitted key a "" the handler then skipped validating; empty
+// had to keep working because the schedule form sends it on every save of a
+// manual-only schedule.
+func TestScheduleCreateAcceptsAnOmittedSchedule(t *testing.T) {
+	path := reportScope + "/schedules"
+	base := `"name":"nightly","report_type":"cluster_digest","cluster_id":"` + testClusterID +
+		`","time_range_hours":168`
+
+	for _, tt := range []struct {
+		name string
+		body string
+	}{
+		{"omitted entirely", "{" + base + "}"},
+		{"sent as the empty string", "{" + base + `,"schedule":""}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cap := &capture{}
+			app := newRegistryApp(t, noAuth(), probeReportEndpoint(t, fiber.MethodPost, path, cap))
+			status, env := send(t, app, jsonRequest(http.MethodPost, path, tt.body))
+			if status != fiber.StatusNoContent {
+				t.Fatalf("status = %d (%q), want 204 — this inserted a manual-only schedule and answered 201 "+
+					"before the migration", status, env.Message)
+			}
+			if got := cap.params.String("schedule"); got != "" {
+				t.Errorf("schedule = %q, want \"\" — the handler skips cron validation and next_run_at on it", got)
+			}
+		})
 	}
 }

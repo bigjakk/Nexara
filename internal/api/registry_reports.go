@@ -331,14 +331,13 @@ func registerReportEndpoints(reg *Registry, h *handlers.ReportHandler) {
 
 // createScheduleParams is the body of POST /api/v1/reports/schedules.
 //
-// FIVE parameters are required, and the set is pinned to what the handler
+// FOUR parameters are required, and the set is pinned to what the handler
 // refused rather than to what reads as a sensible minimum:
 //
 //	name             1–200 characters
 //	report_type      a member of the catalogue
 //	cluster_id       a uuid, and the cluster the gate authorizes
 //	time_range_hours 1–8760
-//	schedule         the cron, which may be EMPTY for a manual-only schedule
 //
 // time_range_hours is the one worth spelling out. The handler carries
 // `if req.TimeRangeHours == 0 { req.TimeRangeHours = 168 }`, which looks like
@@ -348,9 +347,18 @@ func registerReportEndpoints(reg *Registry, h *handlers.ReportHandler) {
 // default of 168 would therefore be a behaviour change dressed as tidying.
 // The schedule form sends it on every save.
 //
-// `schedule` is required but may be empty, which is the same distinction:
-// the handler validated it only when non-empty, so "" is a schedule that
-// never fires on its own.
+// `schedule` is OPTIONAL and empty-able, and it was briefly listed above as
+// the fifth required parameter — which was wrong, and is worth recording
+// because the mistake is an easy one to make twice.
+//
+// The handler validated the cron only when non-empty AND computed
+// next_run_at only when non-empty, so BOTH an omitted key and an empty
+// value produced a manual-only row and a 201. Reading "may be EMPTY" as
+// "required, but the empty string is allowed" preserves half of that and
+// turns the other half into a 400 naming a parameter the caller never had
+// to send. Optional with no Default is what reproduces it: an absent key
+// and "" are then indistinguishable to the handler, which is precisely
+// what the old value-typed struct field gave it.
 func createScheduleParams() apischema.Properties {
 	return apischema.Properties{
 		"name": {
@@ -377,9 +385,16 @@ func createScheduleParams() apischema.Properties {
 		},
 		"schedule": {
 			Type: apischema.String,
-			// No MinLength: the empty string is a schedule that never fires on
-			// its own, and the handler validated the expression only when it was
-			// non-empty.
+			// Optional AND no MinLength, which are two different concessions to
+			// the same old behaviour and both are load-bearing.
+			//
+			// The handler ran `if schedule != ""` before validating, so BOTH an
+			// empty value and an ABSENT key produced a schedule that never fires
+			// on its own — inserted with a NULL next_run_at and answered 201.
+			// Declaring the key required preserved the empty case and broke the
+			// absent one: a caller that had always omitted it got a 400 naming a
+			// parameter it had never needed to send.
+			Optional:  true,
 			MaxLength: apischema.Ptr(256),
 			Typetext:  "<cron>",
 			Description: "When the schedule runs, as a cron expression. Empty means it never fires on " +
