@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -12,7 +13,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
@@ -62,28 +65,27 @@ func nodeMaintenanceCommand(enable bool, nodeName string) string {
 // this runs `ha-manager crm-command node-maintenance enable|disable <node>` over
 // SSH using the cluster's stored credentials. Clusters without SSH configured can
 // use the REST "Evacuate" action instead.
-func (h *NodeHandler) SetNodeMaintenance(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) SetNodeMaintenance(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
+	// Kept, although the route's node_name now carries apischema's node-name
+	// format, which is STRICTER than this on every axis: it bars the
+	// underscore this allows, requires an alphanumeric at both ends, and caps
+	// the length. The check stays because it is what the command builder's
+	// own contract names (see nodeMaintenanceCommand), and a guard whose
+	// caller-side twin is one refactor away from moving is a guard worth
+	// keeping at the point of use.
 	if !nodeMaintenanceNameRe.MatchString(nodeName) {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid node name")
 	}
-	var req struct {
-		Enable bool `json:"enable"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	enable := p.Bool("enable")
 
 	ctx, cancel := context.WithTimeout(c.Context(), 45*time.Second)
 	defer cancel()
 
-	result, err := rolling.RunNodeCommand(ctx, h.queries, h.encryptionKey, clusterID, nodeName, nodeMaintenanceCommand(req.Enable, nodeName))
+	result, err := rolling.RunNodeCommand(ctx, h.queries, h.encryptionKey, clusterID, nodeName, nodeMaintenanceCommand(enable, nodeName))
 	if err != nil {
 		// Engine errors embed node IPs / SSH host-key / decrypt detail — log
 		// server-side, return a generic message.
@@ -99,10 +101,10 @@ func (h *NodeHandler) SetNodeMaintenance(c fiber.Ctx) error {
 	}
 
 	action := "node_maintenance_exit"
-	if req.Enable {
+	if enable {
 		action = "node_maintenance_enter"
 	}
-	details, _ := json.Marshal(map[string]any{"enable": req.Enable})
+	details, _ := json.Marshal(map[string]any{"enable": enable})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, action, details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -181,12 +183,9 @@ func toNodeResponse(n db.Node) nodeResponse {
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/nodes.
-func (h *NodeHandler) ListByCluster(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *NodeHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 
@@ -251,18 +250,69 @@ type nodePCIDeviceResponse struct {
 	SubsystemVendor string    `json:"subsystem_vendor"`
 }
 
+// nodeInCluster resolves a Nexara node row id against the cluster the
+// permission gate authorized, and refuses one that belongs to a different
+// cluster.
+//
+// The three listings below key their query on node_id ALONE, so without
+// this a caller holding view:node on any cluster could read the disks,
+// interfaces and PCI devices of a node in a cluster they hold nothing on —
+// the gate authorizes the cluster in the path and the query never consults
+// it. MetricsHandler.GetNodeHistorical, on a sibling route with the same
+// two path parameters, has always made this check; these three did not.
+//
+// It answers 404 rather than 403 for the same reason the container and CVE
+// routes do: whether a node exists in some other cluster is not the
+// caller's to learn.
+func (h *NodeHandler) nodeInCluster(c fiber.Ctx, clusterID, nodeID uuid.UUID) error {
+	node, err := h.queries.GetNode(c.Context(), nodeID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusNotFound, "Node not found in this cluster")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up node")
+	}
+	if node.ClusterID != clusterID {
+		return fiber.NewError(fiber.StatusNotFound, "Node not found in this cluster")
+	}
+	return nil
+}
+
+// resolveNodeRow reads the two path parameters the three by-row-id
+// listings carry, checks the node against the cluster, and returns the
+// node id their queries key on.
+//
+// It returns only the NODE id: the cluster id is what the check consumes,
+// and every caller keys its query on the node alone — which is precisely
+// the reason the check has to exist here rather than in each of them.
+//
+// It is a separate helper from clusterAndNodeName because the two spell
+// their second parameter differently — :node_id is Nexara's row id,
+// :node_name is what Proxmox calls the host — and
+// registry_paramkey_guard_test.go walks a handler's callees for accessor
+// keys and checks them against THAT endpoint's schema, so a shared helper
+// reading whichever of the two it was told to would read a key half its
+// routes do not declare.
+func (h *NodeHandler) resolveNodeRow(c fiber.Ctx, p *apischema.Params) (uuid.UUID, error) {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return uuid.Nil, err
+	}
+	nodeID, err := parseParamUUID(p.String("node_id"))
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if err := h.nodeInCluster(c, clusterID, nodeID); err != nil {
+		return uuid.Nil, err
+	}
+	return nodeID, nil
+}
+
 // ListNodeDisks handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/disks.
-func (h *NodeHandler) ListNodeDisks(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *NodeHandler) ListNodeDisks(c fiber.Ctx, p *apischema.Params) error {
+	nodeID, err := h.resolveNodeRow(c, p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-	nodeID, err := uuid.Parse(c.Params("node_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid node ID")
 	}
 	disks, err := h.queries.ListNodeDisksByNode(c.Context(), nodeID)
 	if err != nil {
@@ -280,17 +330,10 @@ func (h *NodeHandler) ListNodeDisks(c fiber.Ctx) error {
 }
 
 // ListNodeNetworkInterfaces handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/network-interfaces.
-func (h *NodeHandler) ListNodeNetworkInterfaces(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *NodeHandler) ListNodeNetworkInterfaces(c fiber.Ctx, p *apischema.Params) error {
+	nodeID, err := h.resolveNodeRow(c, p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-	nodeID, err := uuid.Parse(c.Params("node_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid node ID")
 	}
 	ifaces, err := h.queries.ListNodeNetworkInterfacesByNode(c.Context(), nodeID)
 	if err != nil {
@@ -311,17 +354,10 @@ func (h *NodeHandler) ListNodeNetworkInterfaces(c fiber.Ctx) error {
 }
 
 // ListNodePCIDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/pci-devices.
-func (h *NodeHandler) ListNodePCIDevices(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *NodeHandler) ListNodePCIDevices(c fiber.Ctx, p *apischema.Params) error {
+	nodeID, err := h.resolveNodeRow(c, p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-	nodeID, err := uuid.Parse(c.Params("node_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid node ID")
 	}
 	devs, err := h.queries.ListNodePCIDevicesByNode(c.Context(), nodeID)
 	if err != nil {
@@ -342,26 +378,28 @@ func (h *NodeHandler) ListNodePCIDevices(c fiber.Ctx) error {
 
 // --- Node management endpoints (DNS, Time, Power) ---
 
-// resolveNodeName looks up a node by cluster_id and node name param, returns the Proxmox node name.
-func (h *NodeHandler) resolveNodeName(c fiber.Ctx) (uuid.UUID, string, error) {
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+// clusterAndNodeName reads the two path parameters every per-node registry
+// route carries: the cluster's Nexara id and the PROXMOX node name.
+//
+// Both arrive validated — cluster_id through apischema's uuid format,
+// node_name through its node-name format, which is the tightest of the four
+// incompatible node-name checks in this tree (it bars the underscore and the
+// leading dot that nodeMaintenanceNameRe, rolling_update.go's validateNodeName
+// and proxmox.validateNodeName each allow, and caps the length at 63). Those
+// three stay where they are: each guards a different sink, and none of them
+// can see which route reached it.
+func clusterAndNodeName(p *apischema.Params) (uuid.UUID, string, error) {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return uuid.Nil, "", fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+		return uuid.Nil, "", err
 	}
-	nodeName := c.Params("node_name")
-	if nodeName == "" {
-		return uuid.Nil, "", fiber.NewError(fiber.StatusBadRequest, "Node name is required")
-	}
-	return clusterID, nodeName, nil
+	return clusterID, p.String("node_name"), nil
 }
 
 // GetNodeDNS handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/dns.
-func (h *NodeHandler) GetNodeDNS(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) GetNodeDNS(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -375,48 +413,37 @@ func (h *NodeHandler) GetNodeDNS(c fiber.Ctx) error {
 	return c.JSON(dns)
 }
 
-type setNodeDNSRequest struct {
-	Search string `json:"search"`
-	DNS1   string `json:"dns1"`
-	DNS2   string `json:"dns2"`
-	DNS3   string `json:"dns3"`
-}
-
 // SetNodeDNS handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/dns.
-func (h *NodeHandler) SetNodeDNS(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) SetNodeDNS(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	var req setNodeDNSRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if strings.TrimSpace(req.Search) == "" {
+	search := p.String("search")
+	// The schema's MinLength keeps an empty search out; this keeps a
+	// whitespace-only one out, which no length bound can express.
+	if strings.TrimSpace(search) == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Search domain is required")
 	}
+	dns1, dns2, dns3 := p.String("dns1"), p.String("dns2"), p.String("dns3")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	if err := pxClient.SetNodeDNS(c.Context(), nodeName, req.Search, req.DNS1, req.DNS2, req.DNS3); err != nil {
+	if err := pxClient.SetNodeDNS(c.Context(), nodeName, search, dns1, dns2, dns3); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(req)
+	details, _ := json.Marshal(map[string]string{
+		"search": search, "dns1": dns1, "dns2": dns2, "dns3": dns3,
+	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "set_dns", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 // GetNodeTime handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/time.
-func (h *NodeHandler) GetNodeTime(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) GetNodeTime(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -430,45 +457,34 @@ func (h *NodeHandler) GetNodeTime(c fiber.Ctx) error {
 	return c.JSON(t)
 }
 
-type setNodeTimezoneRequest struct {
-	Timezone string `json:"timezone"`
-}
-
 // SetNodeTimezone handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/time.
-func (h *NodeHandler) SetNodeTimezone(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) SetNodeTimezone(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	var req setNodeTimezoneRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if strings.TrimSpace(req.Timezone) == "" {
+	timezone := p.String("timezone")
+	// As on the DNS write: the schema bounds the length, this rejects the
+	// whitespace-only value a length bound accepts.
+	if strings.TrimSpace(timezone) == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Timezone is required")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	if err := pxClient.SetNodeTimezone(c.Context(), nodeName, req.Timezone); err != nil {
+	if err := pxClient.SetNodeTimezone(c.Context(), nodeName, timezone); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(req)
+	details, _ := json.Marshal(map[string]string{"timezone": timezone})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "set_timezone", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 // ShutdownNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/shutdown.
-func (h *NodeHandler) ShutdownNode(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) ShutdownNode(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -483,12 +499,9 @@ func (h *NodeHandler) ShutdownNode(c fiber.Ctx) error {
 }
 
 // RebootNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/reboot.
-func (h *NodeHandler) RebootNode(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) RebootNode(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -502,10 +515,6 @@ func (h *NodeHandler) RebootNode(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-type evacuateRequest struct {
-	TargetNode string `json:"target_node"` // optional: if set, all guests go to this node
-}
-
 type evacuateMigration struct {
 	VMID       int    `json:"vmid"`
 	Name       string `json:"name"`
@@ -517,18 +526,15 @@ type evacuateMigration struct {
 
 // EvacuateNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/evacuate.
 // Distributes guests across available nodes using DRS-aware target selection.
-func (h *NodeHandler) EvacuateNode(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) EvacuateNode(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	var req evacuateRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	// The empty string is the meaningful value here — "let Nexara score a
+	// target per guest" — which is why the schema declares a pattern rather
+	// than the node-name format. Every branch below tests it directly.
+	requestedTarget := p.String("target_node")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -562,16 +568,16 @@ func (h *NodeHandler) EvacuateNode(c fiber.Ctx) error {
 	}
 
 	// If a single target is specified, skip DRS selection.
-	if req.TargetNode != "" {
+	if requestedTarget != "" {
 		found := false
 		for _, c := range candidates {
-			if c == req.TargetNode {
+			if c == requestedTarget {
 				found = true
 				break
 			}
 		}
 		if !found {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Target node %q is not available", req.TargetNode))
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Target node %q is not available", requestedTarget))
 		}
 	}
 
@@ -590,7 +596,7 @@ func (h *NodeHandler) EvacuateNode(c fiber.Ctx) error {
 	// the operator's own decision and is never scored, so a failed HA listing
 	// must not fail a request that would not have consulted it.
 	var ha rolling.HAConstraints
-	if req.TargetNode == "" {
+	if requestedTarget == "" {
 		ha, err = rolling.LoadHAConstraints(ctx, pxClient)
 		if err != nil {
 			// mapNamedOpError, not mapProxmoxError: the latter answers a 404
@@ -609,7 +615,7 @@ func (h *NodeHandler) EvacuateNode(c fiber.Ctx) error {
 	// Assign targets and kick off migrations.
 	migrations := make([]evacuateMigration, 0, len(guests))
 	for _, guest := range guests {
-		target := req.TargetNode
+		target := requestedTarget
 		// Same condition the constraints were loaded under, one derived from
 		// the other. If they ever drift the failure is fail-closed and loud —
 		// SelectTarget refuses an unloaded set, so every guest comes back with

@@ -10,18 +10,25 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // --- Node Services ---
 
+// NodeServiceActions is the set of service actions
+// POST .../nodes/:node_name/services/:service/:action accepts, in the order
+// an operator reaches for them.
+//
+// Exported because the route's parameter schema declares it as the :action
+// enum (internal/api/registry_nodes.go): one list, so the schema and the
+// handler cannot drift on what "a valid action" means.
+var NodeServiceActions = []string{"start", "stop", "restart", "reload"}
+
 // ListNodeServices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/services.
-func (h *NodeHandler) ListNodeServices(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) ListNodeServices(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -36,25 +43,14 @@ func (h *NodeHandler) ListNodeServices(c fiber.Ctx) error {
 }
 
 // ServiceAction handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/services/:service/:action.
-func (h *NodeHandler) ServiceAction(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) ServiceAction(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	service := c.Params("service")
-	action := c.Params("action")
-	if service == "" || action == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "service and action are required")
-	}
-	switch action {
-	case "start", "stop", "restart", "reload":
-		// valid
-	default:
-		return fiber.NewError(fiber.StatusBadRequest, "action must be start, stop, restart, or reload")
-	}
+	// The schema's enum is NodeServiceActions, so an action outside the four
+	// is a 400 that names the parameter before this handler runs.
+	service, action := p.String("service"), p.String("action")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -303,35 +299,25 @@ func defaultSyslogSince() string {
 }
 
 // GetNodeSyslog handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/syslog.
-func (h *NodeHandler) GetNodeSyslog(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) GetNodeSyslog(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-	// Default start to -1 (fetch newest entries) unless explicitly provided.
-	startStr := c.Query("start")
-	start := -1
-	if startStr != "" {
-		start, _ = strconv.Atoi(startStr)
-	}
-	// Clamped at both ends: Atoi maps a non-numeric value to 0, and a negative
-	// one passed straight through to Proxmox.
-	limit, err := strconv.Atoi(c.Query("limit", "500"))
-	if err != nil || limit < 1 {
-		limit = 500
-	} else if limit > maxSyslogEntries {
-		limit = maxSyslogEntries
-	}
+	// Both bounds now live in the route's parameter schema: start defaults to
+	// -1 (Proxmox's "newest entries") and floors there, limit defaults to 500
+	// and is capped at MaxSyslogEntries. They used to be CLAMPED here, so
+	// ?limit=50000 answered with a page size the caller never asked for and
+	// could not tell from their own — see the declaration for the trade.
+	start := int(p.Int("start"))
+	limit := int(p.Int("limit"))
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 
-	rawSince, rawUntil := c.Query("since"), c.Query("until")
+	rawSince, rawUntil := p.String("since"), p.String("until")
 
 	// The node's UTC offset is only needed to render an absolute instant as the
 	// wall clock that node would show. A caller who wrote a wall clock already
@@ -365,7 +351,7 @@ func (h *NodeHandler) GetNodeSyslog(c fiber.Ctx) error {
 			return err
 		}
 	}
-	service := c.Query("service")
+	service := p.String("service")
 
 	entries, total, err := pxClient.GetNodeSyslog(c.Context(), nodeName, start, limit, since, until, service)
 	if err != nil {
@@ -384,41 +370,40 @@ func (h *NodeHandler) GetNodeSyslog(c fiber.Ctx) error {
 // "just show me the last N lines", which is the common ask. Its since/until are
 // unix timestamps, so unlike syslog they carry no dependence on the node's
 // timezone; relative offsets are accepted and converted here.
-func (h *NodeHandler) GetNodeJournal(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) GetNodeJournal(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 
 	var opts proxmox.JournalOptions
-	if v := c.Query("since"); v != "" {
+	if v := p.String("since"); v != "" {
 		if opts.Since, err = parseJournalTime("since", v); err != nil {
 			return err
 		}
 	}
-	if v := c.Query("until"); v != "" {
+	if v := p.String("until"); v != "" {
 		if opts.Until, err = parseJournalTime("until", v); err != nil {
 			return err
 		}
 	}
-	if v := c.Query("lastentries"); v != "" {
-		n, convErr := strconv.Atoi(v)
-		if convErr != nil || n < 1 {
-			return fiber.NewError(fiber.StatusBadRequest, "invalid \"lastentries\": expected a positive integer")
-		}
-		opts.LastEntries = min(n, maxJournalEntries)
+	// Read with OptInt rather than Int because the parameter deliberately
+	// carries NO default: 1..MaxJournalEntries is the schema's business, but
+	// "the caller named no line count" is what the fallback below turns on,
+	// and a default would make every windowed or cursor-paged request look
+	// like one that asked for 500 lines.
+	if n, supplied := p.OptInt("lastentries"); supplied {
+		opts.LastEntries = int(n)
 	}
-	if opts.Since == 0 && opts.Until == 0 && opts.LastEntries == 0 && c.Query("startcursor") == "" && c.Query("endcursor") == "" {
+	opts.StartCursor = p.String("startcursor")
+	opts.EndCursor = p.String("endcursor")
+	if opts.Since == 0 && opts.Until == 0 && opts.LastEntries == 0 &&
+		opts.StartCursor == "" && opts.EndCursor == "" {
 		// Unbounded, this walks the node's entire journal. The syslog endpoint
 		// defaults to a time window for the same reason; here the natural
 		// bound is a line count.
 		opts.LastEntries = defaultJournalEntries
 	}
-	opts.StartCursor = c.Query("startcursor")
-	opts.EndCursor = c.Query("endcursor")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -432,10 +417,25 @@ func (h *NodeHandler) GetNodeJournal(c fiber.Ctx) error {
 	return RespondItems(c, lines)
 }
 
+// The line-count bounds the syslog and journal routes carry.
+//
+// Three of the four are EXPORTED because the routes' parameter schemas
+// declare them (internal/api/registry_nodes.go): the bound and the
+// handler's own notion of it are one constant, so a future change cannot
+// move the cap in one place and leave the docs stating the other.
+// defaultJournalEntries stays unexported because it is not a per-parameter
+// default — it is the fallback for a request that bounded itself no other
+// way, which is a cross-field rule the schema deliberately does not carry.
 const (
 	defaultJournalEntries = 500
-	maxJournalEntries     = 5000
-	maxSyslogEntries      = 5000
+
+	// MaxJournalEntries caps ?lastentries= on the journal route.
+	MaxJournalEntries = 5000
+	// MaxSyslogEntries caps ?limit= on the syslog route.
+	MaxSyslogEntries = 5000
+	// DefaultSyslogLimit is the page size the syslog route uses when the
+	// caller names none.
+	DefaultSyslogLimit = 500
 )
 
 // parseJournalTime resolves one journal since/until to a unix timestamp,

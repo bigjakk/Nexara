@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -95,12 +96,9 @@ type deleteContentResponse struct {
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/storage.
-func (h *StorageHandler) ListByCluster(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *StorageHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "storage", clusterID); err != nil {
 		return err
 	}
 
@@ -109,25 +107,20 @@ func (h *StorageHandler) ListByCluster(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list storage pools")
 	}
 
+	// `pool`, not `p`: the handler's own p is the *apischema.Params, and a
+	// loop variable that shadows it is the name registry_paramkey_guard_test
+	// scans for.
 	resp := make([]storageResponse, len(pools))
-	for i, p := range pools {
-		resp[i] = toStorageResponse(p)
+	for i, pool := range pools {
+		resp[i] = toStorageResponse(pool)
 	}
 
 	return RespondItems(c, resp)
 }
 
 // GetContent handles GET /api/v1/clusters/:cluster_id/storage/:storage_id/content.
-func (h *StorageHandler) GetContent(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "storage", clusterID); err != nil {
-		return err
-	}
-
-	pool, pxClient, err := h.resolveStorage(c)
+func (h *StorageHandler) GetContent(c fiber.Ctx, p *apischema.Params) error {
+	pool, pxClient, err := h.resolveStorage(c, p)
 	if err != nil {
 		return err
 	}
@@ -181,14 +174,17 @@ func uploadContentAllowed(content string, canStorage, canImport bool) bool {
 // multipart stream directly and pipe the file part to Proxmox.
 //
 // The frontend must send form fields in order: content, filesize, file.
-func (h *StorageHandler) UploadFile(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	// Coarse gate: ISO/CT-template uploads require manage:storage; OVA (import) uploads are
-	// also reachable with manage:vm_import. The exact content type only arrives inside the
-	// multipart stream, so resolve both grants up front and enforce per-content below.
+	// The route declares Permissions{Deferred} and installs no middleware, so
+	// this IS the gate. Coarse first: ISO/CT-template uploads require
+	// manage:storage; OVA (import) uploads are also reachable with
+	// manage:vm_import. The exact content type only arrives inside the
+	// multipart stream, so resolve both grants up front and enforce
+	// per-content below.
 	canStorage, err := hasClusterPerm(c, "manage", "storage", clusterID)
 	if err != nil {
 		return err
@@ -201,7 +197,7 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
 	}
 
-	pool, pxClient, err := h.resolveStorage(c)
+	pool, pxClient, err := h.resolveStorage(c, p)
 	if err != nil {
 		return err
 	}
@@ -320,11 +316,14 @@ func (h *StorageHandler) DeleteContent(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	// Still hand-placed, and it has to be: this is the one storage route the
+	// registry cannot declare, because its volume id is a greedy wildcard
+	// segment (see registerStorageEndpoints in internal/api/registry_storage.go).
 	if err := requireClusterPerm(c, "delete", "storage", clusterID); err != nil {
 		return err
 	}
 
-	pool, pxClient, err := h.resolveStorage(c)
+	pool, pxClient, err := h.resolveStorageLegacy(c)
 	if err != nil {
 		return err
 	}
@@ -372,25 +371,36 @@ type storageConfigResponse struct {
 	proxmox.StorageConfig
 }
 
-// validStorageTypes defines all Proxmox-supported storage plugin types.
-var validStorageTypes = map[string]bool{
-	"dir": true, "nfs": true, "cifs": true, "lvm": true, "lvmthin": true,
-	"zfspool": true, "iscsi": true, "iscsidirect": true,
-	"rbd": true, "cephfs": true, "glusterfs": true, "btrfs": true, "pbs": true,
+// StorageTypes are the Proxmox storage plugin types POST
+// /clusters/:cluster_id/storage accepts, in the order the storage dialog
+// offers them.
+//
+// Exported so the route's declaration in internal/api/registry_storage.go
+// can use it as the `type` enum: the list that validates the request and
+// the list the dialog can fill settings in for are then the same list. It
+// replaced a map whose only reader was the hand-rolled "Invalid storage
+// type" check the schema now makes.
+//
+// This vocabulary is Nexara's own to close, unlike a ZFS raid level or an
+// image format: STORAGE_TYPE_FIELDS in the frontend has to know a plugin's
+// settings before the dialog can create one, so a type nothing here lists
+// is a type this API could not usefully accept anyway.
+var StorageTypes = []string{
+	"dir", "btrfs", "nfs", "cifs", "glusterfs",
+	"lvm", "lvmthin", "zfspool",
+	"iscsi", "iscsidirect", "rbd", "cephfs", "pbs",
 }
+
+// StorageDownloadContents are the content kinds POST
+// .../storage/:storage_id/download-url accepts. Exported for the same
+// reason, and it is the same three the upload route's per-content
+// permission decision switches on (see uploadContentAllowed).
+var StorageDownloadContents = []string{"iso", "vztmpl", "import"}
 
 // GetConfig handles GET /api/v1/clusters/:cluster_id/storage/:storage_id/config.
 // Returns the Proxmox-level storage configuration (paths, servers, etc.).
-func (h *StorageHandler) GetConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "storage", clusterID); err != nil {
-		return err
-	}
-
-	pool, pxClient, err := h.resolveStorage(c)
+func (h *StorageHandler) GetConfig(c fiber.Ctx, p *apischema.Params) error {
+	pool, pxClient, err := h.resolveStorage(c, p)
 	if err != nil {
 		return err
 	}
@@ -422,16 +432,16 @@ type iscsiTargetResponse struct {
 // result, but reachability is not guaranteed on a segmented network — a portal
 // only some nodes can see reports no targets, and manual entry stays available
 // for exactly that case.
-func (h *StorageHandler) ScanISCSI(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *StorageHandler) ScanISCSI(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
-		return err
-	}
 
-	portal := strings.TrimSpace(c.Query("portal"))
+	// Trimmed here rather than in the schema: apischema does not normalize a
+	// plain string, and ValidateISCSIPortal owns the rest of the rule — no
+	// whitespace, no control characters, no "/?#".
+	portal := strings.TrimSpace(p.String("portal"))
 	if err := proxmox.ValidateISCSIPortal(portal); err != nil {
 		return mapProxmoxError(err)
 	}
@@ -453,43 +463,43 @@ func (h *StorageHandler) ScanISCSI(c fiber.Ctx) error {
 	return RespondItems(c, resp)
 }
 
-// createStorageRequest is the JSON body for creating a new storage pool.
-type createStorageRequest struct {
-	Storage string            `json:"storage"`
-	Type    string            `json:"type"`
-	Params  map[string]string `json:"params"`
-}
-
-// Create handles POST /api/v1/clusters/:cluster_id/storage.
-func (h *StorageHandler) Create(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
-		return err
-	}
-
-	var req createStorageRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Storage == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "storage name is required")
-	}
-	if !validStorageTypes[req.Type] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid storage type: "+req.Type)
-	}
-
+// storagePluginForm flattens a validated `params` object into the Proxmox
+// form fields a storage create or update sends.
+//
+// "storage" and "type" are dropped because both bodies name them
+// separately (and Proxmox marks the backend-identifying options of several
+// plugins fixed, refusing a PUT that carries them). An EMPTY value is
+// dropped rather than sent, which is what the storage dialog relies on to
+// mean "leave this setting alone" — sending "" would clear it instead.
+func storagePluginForm(params map[string]string) url.Values {
 	form := url.Values{}
-	form.Set("storage", req.Storage)
-	form.Set("type", req.Type)
-	for k, v := range req.Params {
+	for k, v := range params {
 		if k != "storage" && k != "type" && v != "" {
 			form.Set(k, v)
 		}
 	}
+	return form
+}
+
+// Create handles POST /api/v1/clusters/:cluster_id/storage.
+func (h *StorageHandler) Create(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+
+	// The schema's enum is StorageTypes and its storage-id format refuses an
+	// empty name, so the two hand-rolled checks the handler used to make are
+	// both gone — and each now answers with the field it is about.
+	storage, storageType := p.String("storage"), p.String("type")
+	params, err := stringMap("params", p.Object("params"))
+	if err != nil {
+		return err
+	}
+
+	form := storagePluginForm(params)
+	form.Set("storage", storage)
+	form.Set("type", storageType)
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -500,49 +510,29 @@ func (h *StorageHandler) Create(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]string{"storage": req.Storage, "type": req.Type})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", req.Storage, "create", details)
+	details, _ := json.Marshal(map[string]string{"storage": storage, "type": storageType})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", storage, "create", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"status":  "created",
-		"storage": req.Storage,
+		"storage": storage,
 	})
 }
 
-// updateStorageRequest is the JSON body for updating a storage pool.
-type updateStorageRequest struct {
-	Params map[string]string `json:"params"`
-	Delete string            `json:"delete,omitempty"` // comma-separated params to remove
-}
-
 // Update handles PUT /api/v1/clusters/:cluster_id/storage/:storage_id.
-func (h *StorageHandler) Update(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
-		return err
-	}
-
-	pool, pxClient, err := h.resolveStorage(c)
+func (h *StorageHandler) Update(c fiber.Ctx, p *apischema.Params) error {
+	pool, pxClient, err := h.resolveStorage(c, p)
 	if err != nil {
 		return err
 	}
 
-	var req updateStorageRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	params, err := stringMap("params", p.Object("params"))
+	if err != nil {
+		return err
 	}
-
-	form := url.Values{}
-	for k, v := range req.Params {
-		if k != "storage" && k != "type" && v != "" {
-			form.Set(k, v)
-		}
-	}
-	if req.Delete != "" {
-		form.Set("delete", req.Delete)
+	form := storagePluginForm(params)
+	if del := p.String("delete"); del != "" {
+		form.Set("delete", del)
 	}
 
 	if err := pxClient.UpdateStorage(c.Context(), pool.Storage, form); err != nil {
@@ -558,16 +548,8 @@ func (h *StorageHandler) Update(c fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/clusters/:cluster_id/storage/:storage_id.
-func (h *StorageHandler) Delete(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "delete", "storage", clusterID); err != nil {
-		return err
-	}
-
-	pool, pxClient, err := h.resolveStorage(c)
+func (h *StorageHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
+	pool, pxClient, err := h.resolveStorage(c, p)
 	if err != nil {
 		return err
 	}
@@ -591,19 +573,52 @@ func (h *StorageHandler) Delete(c fiber.Ctx) error {
 	})
 }
 
-// resolveStorage loads the storage pool from the DB and creates a Proxmox client.
-func (h *StorageHandler) resolveStorage(c fiber.Ctx) (db.StoragePool, *proxmox.Client, error) {
-	var zero db.StoragePool
+// resolveStorage loads the storage pool named by a registry route's path
+// parameters and creates a Proxmox client for its cluster.
+//
+// Both ids arrive validated — cluster_id and storage_id are declared with
+// apischema's uuid format — so a parse failure here means the declaration
+// and this call disagree, which is what parseParamUUID reports as a 500.
+func (h *StorageHandler) resolveStorage(c fiber.Ctx, p *apischema.Params) (db.StoragePool, *proxmox.Client, error) {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return db.StoragePool{}, nil, err
+	}
+	storageID, err := parseParamUUID(p.String("storage_id"))
+	if err != nil {
+		return db.StoragePool{}, nil, err
+	}
+	return h.resolveStorageByID(c, clusterID, storageID)
+}
 
+// resolveStorageLegacy is resolveStorage for the ONE storage route still
+// registered in router.go: DELETE .../storage/:storage_id/content/*, whose
+// greedy wildcard the parameter schema cannot describe. See
+// registerStorageEndpoints in internal/api/registry_storage.go for why it
+// is not declared. It reads the same two ids straight off the context, the
+// way every handler in this file did before Phase 6d.
+func (h *StorageHandler) resolveStorageLegacy(c fiber.Ctx) (db.StoragePool, *proxmox.Client, error) {
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
 	if err != nil {
-		return zero, nil, fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+		return db.StoragePool{}, nil, fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
 	}
-
 	storageID, err := uuid.Parse(c.Params("storage_id"))
 	if err != nil {
-		return zero, nil, fiber.NewError(fiber.StatusBadRequest, "Invalid storage ID")
+		return db.StoragePool{}, nil, fiber.NewError(fiber.StatusBadRequest, "Invalid storage ID")
 	}
+	return h.resolveStorageByID(c, clusterID, storageID)
+}
+
+// resolveStorageByID is the half both spellings share.
+//
+// The cluster check is the load-bearing line: the permission gate
+// authorizes the cluster in the PATH, while GetStoragePool keys on the
+// storage id alone, so without it a pool from another cluster would be
+// reachable by anyone holding the grant anywhere. It answers 404 rather
+// than 403 for the same reason the container and CVE routes do — whether a
+// pool exists elsewhere is not the caller's to learn.
+func (h *StorageHandler) resolveStorageByID(c fiber.Ctx, clusterID, storageID uuid.UUID) (db.StoragePool, *proxmox.Client, error) {
+	var zero db.StoragePool
 
 	pool, err := h.queries.GetStoragePool(c.Context(), storageID)
 	if err != nil {

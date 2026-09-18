@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
 // nodeReportTimeout bounds the Proxmox call behind GetNodeReport on the
@@ -33,12 +35,9 @@ const nodeReportTimeout = 3 * time.Minute
 // read-only account that can legitimately watch a node's CPU graph has no
 // business exporting all of that, so this sits with the other operator actions
 // (evacuate, reboot, shutdown) that migration 000044 defined manage:node for.
-func (h *NodeHandler) GetNodeReport(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) GetNodeReport(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 

@@ -355,6 +355,7 @@ var routesOutsideTheClusterCheckShape = func() map[string]string {
 	out := map[string]string{}
 	for _, m := range []map[string]string{
 		migrationRoutesOutsideTheClusterCheckShape,
+		storageRoutesOutsideTheClusterCheckShape,
 		virtioWinRoutesOutsideTheClusterCheckShape,
 		pbsRoutesOutsideTheClusterCheckShape,
 	} {
@@ -381,6 +382,8 @@ const vmRouteCount = 33
 var registryDomainRouteCounts = map[string]int{
 	"registerVMEndpoints":             vmRouteCount,
 	"registerContainerEndpoints":      containerRouteCount,
+	"registerNodeEndpoints":           nodeRouteCount,
+	"registerStorageEndpoints":        storageRouteCount,
 	"registerCephEndpoints":           cephRouteCount,
 	"registerHAEndpoints":             haRouteCount,
 	"registerDRSEndpoints":            drsRouteCount,
@@ -411,6 +414,8 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	declared := map[string]int{
 		"registerVMEndpoints":             0,
 		"registerContainerEndpoints":      0,
+		"registerNodeEndpoints":           0,
+		"registerStorageEndpoints":        0,
 		"registerCephEndpoints":           0,
 		"registerHAEndpoints":             0,
 		"registerDRSEndpoints":            0,
@@ -431,6 +436,14 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	before := reg.Len()
 	registerContainerEndpoints(reg, s.containerHandler)
 	declared["registerContainerEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerNodeEndpoints(reg, s.nodeHandler)
+	declared["registerNodeEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerStorageEndpoints(reg, s.storageHandler)
+	declared["registerStorageEndpoints"] = reg.Len() - before
 
 	before = reg.Len()
 	registerCephEndpoints(reg, s.cephHandler)

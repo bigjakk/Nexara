@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/rolling"
 )
@@ -253,14 +254,13 @@ func (c *nodeSensorsCache) fetch(key string, read func() nodeSensorsResponse) no
 // row per call would bury the log it shares with the actions worth reviewing,
 // and it neither mutates anything nor discloses more than the numbers it
 // returns.
-func (h *NodeHandler) GetNodeSensors(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) GetNodeSensors(c fiber.Ctx, p *apischema.Params) error {
+	// The permission gate runs as route-attached middleware, ahead of this
+	// handler and therefore ahead of the cache: a cached entry must never be
+	// served to a caller who could not have fetched it themselves. See the
+	// route's declaration in internal/api/registry_nodes.go.
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	// Permission check before the cache is consulted: a cached entry must never
-	// be served to a caller who could not have fetched it themselves.
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 

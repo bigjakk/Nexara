@@ -1,8 +1,10 @@
 package handlers
 
 import (
-	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/gofiber/fiber/v3"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // --- Live Disk List (from Proxmox, not DB) ---
@@ -21,12 +23,9 @@ type liveDiskResponse struct {
 
 // ListLiveDisks handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/list.
 // Returns fresh disk data directly from Proxmox (includes "used" field).
-func (h *NodeHandler) ListLiveDisks(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) ListLiveDisks(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -57,23 +56,16 @@ func (h *NodeHandler) ListLiveDisks(c fiber.Ctx) error {
 // --- Disk SMART ---
 
 // GetDiskSMART handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/smart?disk=...
-func (h *NodeHandler) GetDiskSMART(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) GetDiskSMART(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
-		return err
-	}
-	disk := c.Query("disk")
-	if disk == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "disk query parameter is required")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	smart, err := pxClient.GetDiskSMART(c.Context(), nodeName, disk)
+	smart, err := pxClient.GetDiskSMART(c.Context(), nodeName, p.String("disk"))
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -83,12 +75,9 @@ func (h *NodeHandler) GetDiskSMART(c fiber.Ctx) error {
 // --- ZFS Pools ---
 
 // ListZFSPools handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/zfs.
-func (h *NodeHandler) ListZFSPools(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) ListZFSPools(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -102,40 +91,25 @@ func (h *NodeHandler) ListZFSPools(c fiber.Ctx) error {
 	return RespondItems(c, pools)
 }
 
-type createZFSPoolRequest struct {
-	Name        string `json:"name"`
-	RaidLevel   string `json:"raidlevel"`
-	Devices     string `json:"devices"`
-	Compression string `json:"compression"`
-	Ashift      int    `json:"ashift"`
-}
-
 // CreateZFSPool handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/zfs.
-func (h *NodeHandler) CreateZFSPool(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) CreateZFSPool(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	var req createZFSPoolRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Name == "" || req.RaidLevel == "" || req.Devices == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "name, raidlevel, and devices are required")
-	}
+	name, raidLevel := p.String("name"), p.String("raidlevel")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 	upid, err := pxClient.CreateNodeZFSPool(c.Context(), nodeName, proxmox.CreateZFSPoolParams{
-		Name:        req.Name,
-		RaidLevel:   req.RaidLevel,
-		Devices:     req.Devices,
-		Compression: req.Compression,
-		Ashift:      req.Ashift,
+		Name:        name,
+		RaidLevel:   raidLevel,
+		Devices:     p.String("devices"),
+		Compression: p.String("compression"),
+		// 0 is the schema's default and the client's "not chosen" sentinel:
+		// it only sends ashift when the value is positive.
+		Ashift: int(p.Int("ashift")),
 	})
 	if err != nil {
 		return mapDuplicateNameError("A ZFS pool with that name already exists", err)
@@ -147,32 +121,25 @@ func (h *NodeHandler) CreateZFSPool(c fiber.Ctx) error {
 		ResourceID:   nodeName,
 		Action:       "create_zfs_pool",
 		UPID:         upid,
-		Description:  "Create ZFS pool " + req.Name,
-		Extra:        map[string]any{"name": req.Name, "raidlevel": req.RaidLevel},
+		Description:  "Create ZFS pool " + name,
+		Extra:        map[string]any{"name": name, "raidlevel": raidLevel},
 	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
 // DeleteZFSPool handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/zfs/:pool_name.
-func (h *NodeHandler) DeleteZFSPool(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) DeleteZFSPool(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	poolName := c.Params("pool_name")
-	if poolName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Pool name is required")
-	}
-	cleanupDisks := fiber.Query[bool](c, "cleanup-disks", false)
-	cleanupConfig := fiber.Query[bool](c, "cleanup-config", false)
+	poolName := p.String("pool_name")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	upid, err := pxClient.DeleteNodeZFSPool(c.Context(), nodeName, poolName, cleanupDisks, cleanupConfig)
+	upid, err := pxClient.DeleteNodeZFSPool(c.Context(), nodeName, poolName,
+		p.Bool("cleanup-disks"), p.Bool("cleanup-config"))
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -192,12 +159,9 @@ func (h *NodeHandler) DeleteZFSPool(c fiber.Ctx) error {
 // --- LVM ---
 
 // ListLVM handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm.
-func (h *NodeHandler) ListLVM(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) ListLVM(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -211,36 +175,21 @@ func (h *NodeHandler) ListLVM(c fiber.Ctx) error {
 	return RespondItems(c, vgs)
 }
 
-type createLVMRequest struct {
-	Name       string `json:"name"`
-	Device     string `json:"device"`
-	AddStorage bool   `json:"add_storage"`
-}
-
 // CreateLVM handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm.
-func (h *NodeHandler) CreateLVM(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) CreateLVM(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	var req createLVMRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Name == "" || req.Device == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "name and device are required")
-	}
+	name, device := p.String("name"), p.String("device")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 	upid, err := pxClient.CreateNodeLVM(c.Context(), nodeName, proxmox.CreateLVMParams{
-		Name:       req.Name,
-		Device:     req.Device,
-		AddStorage: req.AddStorage,
+		Name:       name,
+		Device:     device,
+		AddStorage: p.Bool("add_storage"),
 	})
 	if err != nil {
 		return mapDuplicateNameError("A volume group or storage entry with that name already exists on this node", err)
@@ -252,32 +201,25 @@ func (h *NodeHandler) CreateLVM(c fiber.Ctx) error {
 		ResourceID:   nodeName,
 		Action:       "create_lvm",
 		UPID:         upid,
-		Description:  "Create LVM " + req.Name,
-		Extra:        map[string]any{"name": req.Name, "device": req.Device},
+		Description:  "Create LVM " + name,
+		Extra:        map[string]any{"name": name, "device": device},
 	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
 // DeleteLVM handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm/:vg_name.
-func (h *NodeHandler) DeleteLVM(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) DeleteLVM(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	vgName := c.Params("vg_name")
-	if vgName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Volume group name is required")
-	}
-	cleanupDisks := fiber.Query[bool](c, "cleanup-disks", false)
-	cleanupConfig := fiber.Query[bool](c, "cleanup-config", false)
+	vgName := p.String("vg_name")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	upid, err := pxClient.DeleteNodeLVM(c.Context(), nodeName, vgName, cleanupDisks, cleanupConfig)
+	upid, err := pxClient.DeleteNodeLVM(c.Context(), nodeName, vgName,
+		p.Bool("cleanup-disks"), p.Bool("cleanup-config"))
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -297,12 +239,9 @@ func (h *NodeHandler) DeleteLVM(c fiber.Ctx) error {
 // --- LVM-Thin ---
 
 // ListLVMThin handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin.
-func (h *NodeHandler) ListLVMThin(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) ListLVMThin(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -316,36 +255,21 @@ func (h *NodeHandler) ListLVMThin(c fiber.Ctx) error {
 	return RespondItems(c, pools)
 }
 
-type createLVMThinRequest struct {
-	Name       string `json:"name"`
-	Device     string `json:"device"`
-	AddStorage bool   `json:"add_storage"`
-}
-
 // CreateLVMThin handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin.
-func (h *NodeHandler) CreateLVMThin(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) CreateLVMThin(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	var req createLVMThinRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Name == "" || req.Device == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "name and device are required")
-	}
+	name, device := p.String("name"), p.String("device")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 	upid, err := pxClient.CreateNodeLVMThin(c.Context(), nodeName, proxmox.CreateLVMThinParams{
-		Name:       req.Name,
-		Device:     req.Device,
-		AddStorage: req.AddStorage,
+		Name:       name,
+		Device:     device,
+		AddStorage: p.Bool("add_storage"),
 	})
 	if err != nil {
 		return mapDuplicateNameError("A thin pool or storage entry with that name already exists on this node", err)
@@ -357,36 +281,25 @@ func (h *NodeHandler) CreateLVMThin(c fiber.Ctx) error {
 		ResourceID:   nodeName,
 		Action:       "create_lvmthin",
 		UPID:         upid,
-		Description:  "Create LVM-thin " + req.Name,
-		Extra:        map[string]any{"name": req.Name, "device": req.Device},
+		Description:  "Create LVM-thin " + name,
+		Extra:        map[string]any{"name": name, "device": device},
 	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
 // DeleteLVMThin handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin/:pool_name.
-func (h *NodeHandler) DeleteLVMThin(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) DeleteLVMThin(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	poolName := c.Params("pool_name")
-	if poolName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Pool name is required")
-	}
-	volumeGroup := c.Query("volume-group")
-	if volumeGroup == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "volume-group query parameter is required")
-	}
-	cleanupDisks := fiber.Query[bool](c, "cleanup-disks", false)
-	cleanupConfig := fiber.Query[bool](c, "cleanup-config", false)
+	poolName, volumeGroup := p.String("pool_name"), p.String("volume-group")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	upid, err := pxClient.DeleteNodeLVMThin(c.Context(), nodeName, poolName, volumeGroup, cleanupDisks, cleanupConfig)
+	upid, err := pxClient.DeleteNodeLVMThin(c.Context(), nodeName, poolName, volumeGroup,
+		p.Bool("cleanup-disks"), p.Bool("cleanup-config"))
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -406,12 +319,9 @@ func (h *NodeHandler) DeleteLVMThin(c fiber.Ctx) error {
 // --- Directory ---
 
 // ListDirectories handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/directory.
-func (h *NodeHandler) ListDirectories(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) ListDirectories(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -425,38 +335,22 @@ func (h *NodeHandler) ListDirectories(c fiber.Ctx) error {
 	return RespondItems(c, dirs)
 }
 
-type createDirectoryRequest struct {
-	Name       string `json:"name"`
-	Device     string `json:"device"`
-	Filesystem string `json:"filesystem"`
-	AddStorage bool   `json:"add_storage"`
-}
-
 // CreateDirectory handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/directory.
-func (h *NodeHandler) CreateDirectory(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) CreateDirectory(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	var req createDirectoryRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Name == "" || req.Device == "" || req.Filesystem == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "name, device, and filesystem are required")
-	}
+	name, device, filesystem := p.String("name"), p.String("device"), p.String("filesystem")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 	upid, err := pxClient.CreateNodeDirectory(c.Context(), nodeName, proxmox.CreateDirectoryParams{
-		Name:       req.Name,
-		Device:     req.Device,
-		Filesystem: req.Filesystem,
-		AddStorage: req.AddStorage,
+		Name:       name,
+		Device:     device,
+		Filesystem: filesystem,
+		AddStorage: p.Bool("add_storage"),
 	})
 	if err != nil {
 		return mapDuplicateNameError("A directory, mount unit, or storage entry with that name already exists on this node", err)
@@ -468,39 +362,26 @@ func (h *NodeHandler) CreateDirectory(c fiber.Ctx) error {
 		ResourceID:   nodeName,
 		Action:       "create_directory",
 		UPID:         upid,
-		Description:  "Create directory " + req.Name,
-		Extra:        map[string]any{"name": req.Name, "device": req.Device, "filesystem": req.Filesystem},
+		Description:  "Create directory " + name,
+		Extra:        map[string]any{"name": name, "device": device, "filesystem": filesystem},
 	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
 // --- Disk Init / Wipe ---
 
-type diskActionRequest struct {
-	Disk string `json:"disk"`
-}
-
 // InitializeGPT handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/initgpt.
-func (h *NodeHandler) InitializeGPT(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) InitializeGPT(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	var req diskActionRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Disk == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "disk is required")
-	}
+	disk := p.String("disk")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	upid, err := pxClient.InitializeGPT(c.Context(), nodeName, req.Disk)
+	upid, err := pxClient.InitializeGPT(c.Context(), nodeName, disk)
 	if err != nil {
 		return mapNamedOpError("initialize disk", err)
 	}
@@ -511,33 +392,24 @@ func (h *NodeHandler) InitializeGPT(c fiber.Ctx) error {
 		ResourceID:   nodeName,
 		Action:       "initialize_gpt",
 		UPID:         upid,
-		Description:  "Initialize GPT on " + req.Disk,
-		Extra:        map[string]any{"disk": req.Disk},
+		Description:  "Initialize GPT on " + disk,
+		Extra:        map[string]any{"disk": disk},
 	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
 // WipeDisk handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/disks/wipe.
-func (h *NodeHandler) WipeDisk(c fiber.Ctx) error {
-	clusterID, nodeName, err := h.resolveNodeName(c)
+func (h *NodeHandler) WipeDisk(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
-		return err
-	}
-	var req diskActionRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Disk == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "disk is required")
-	}
+	disk := p.String("disk")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	upid, err := pxClient.WipeDisk(c.Context(), nodeName, req.Disk)
+	upid, err := pxClient.WipeDisk(c.Context(), nodeName, disk)
 	if err != nil {
 		return mapNamedOpError("wipe disk", err)
 	}
@@ -548,8 +420,8 @@ func (h *NodeHandler) WipeDisk(c fiber.Ctx) error {
 		ResourceID:   nodeName,
 		Action:       "wipe_disk",
 		UPID:         upid,
-		Description:  "Wipe disk " + req.Disk,
-		Extra:        map[string]any{"disk": req.Disk},
+		Description:  "Wipe disk " + disk,
+		Extra:        map[string]any{"disk": disk},
 	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }

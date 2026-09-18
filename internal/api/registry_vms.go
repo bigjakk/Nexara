@@ -27,6 +27,12 @@ func (s *Server) buildRegistry() *Registry {
 	if s.containerHandler != nil {
 		registerContainerEndpoints(reg, s.containerHandler)
 	}
+	if s.nodeHandler != nil {
+		registerNodeEndpoints(reg, s.nodeHandler)
+	}
+	if s.storageHandler != nil {
+		registerStorageEndpoints(reg, s.storageHandler)
+	}
 	if s.cephHandler != nil {
 		registerCephEndpoints(reg, s.cephHandler)
 	}

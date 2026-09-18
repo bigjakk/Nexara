@@ -273,6 +273,21 @@ var endpointMeta = map[string]APIEndpoint{
 	"POST /api/v1/clusters/fetch-fingerprint": {Description: "Fetch a remote host's TLS fingerprint. Shared by the cluster, PBS and Veeam add-flows", Permission: "manage:cluster|manage:pbs|manage:veeam", Group: "Clusters"},
 
 	// ── Nodes ─────────────────────────────────────────────────────────
+	//
+	// Every entry below is a SHADOW COPY: all 38 NodeHandler routes are
+	// declared in internal/api/registry_nodes.go, and GetDocs renders a
+	// declared route from its declaration, so what a reader sees is the
+	// declaration's description, permission, group and full parameter
+	// schema — not these lines. They are kept saying the same thing about
+	// the permission so that removing them is a deletion rather than a
+	// behaviour change, and because
+	// TestGuard_DocumentedPermissionMatchesEnforcement compares this copy
+	// against the declared one: a second copy that nothing compares is a
+	// second copy that silently rots.
+	//
+	// Only five of the 38 ever had an entry here. The other 33 now get
+	// their docs from the declaration, which is the point of the migration
+	// rather than an omission to fix by adding more shadow copies.
 	"GET /api/v1/clusters/:cluster_id/nodes":                    {Description: "List cluster nodes", Permission: "view:node", Group: "Nodes"},
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/syslog":  {Description: "Read a node's syslog over a time window (since/until)", Permission: "view:node", Group: "Nodes"},
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/journal": {Description: "Read a node's systemd journal by line count (lastentries) or cursor", Permission: "view:node", Group: "Nodes"},
@@ -371,6 +386,20 @@ var endpointMeta = map[string]APIEndpoint{
 	"POST /api/v1/clusters/:cluster_id/guest-snapshots/resync": {Description: "Refresh one guest's snapshot inventory from Proxmox", Permission: "view:vm|view:container", Group: "Guest Snapshots"},
 
 	// ── Storage ───────────────────────────────────────────────────────
+	//
+	// SHADOW COPIES, exactly as the Nodes block above: 12 of the 13
+	// StorageHandler routes are declared in
+	// internal/api/registry_storage.go and render from there. The
+	// thirteenth, DELETE .../storage/:storage_id/content/*, is still a
+	// legacy route — its volume id is a greedy wildcard the parameter
+	// schema cannot describe — and has never had an entry here.
+	//
+	// The upload entry is the one worth reading twice: it still says
+	// manage:storage, while the declaration is Deferred and renders as the
+	// bare word "deferred". Both are true — manage:storage is what an ISO
+	// or CT template needs — and the declaration's Description carries the
+	// other half (manage:vm_import for an OVA), which is what
+	// TestGuard_DeclarationDropsNoDocumentedPermission checks.
 	"GET /api/v1/clusters/:cluster_id/storage":                     {Description: "List storage pools", Permission: "view:storage", Group: "Storage"},
 	"POST /api/v1/clusters/:cluster_id/storage":                    {Description: "Create a storage pool", Permission: "manage:storage", Group: "Storage"},
 	"GET /api/v1/clusters/:cluster_id/storage/:storage_id/config":  {Description: "Get storage pool configuration", Permission: "view:storage", Group: "Storage"},

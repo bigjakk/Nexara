@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -33,25 +34,6 @@ func deriveURLFilename(raw string) string {
 }
 
 // --- Request/response types ---
-
-type pullOCIRequest struct {
-	Reference string `json:"reference"`
-	FileName  string `json:"file_name,omitempty"`
-}
-
-type downloadURLRequest struct {
-	URL                    string `json:"url"`
-	Content                string `json:"content"`
-	Filename               string `json:"filename"`
-	Checksum               string `json:"checksum,omitempty"`
-	ChecksumAlgorithm      string `json:"checksum_algorithm,omitempty"`
-	DecompressionAlgorithm string `json:"decompression_algorithm,omitempty"`
-	VerifyCertificates     *bool  `json:"verify_certificates,omitempty"`
-}
-
-type downloadApplianceRequest struct {
-	Template string `json:"template"`
-}
 
 type templateTaskResponse struct {
 	UPID   string `json:"upid"`
@@ -81,16 +63,8 @@ type applianceResponse struct {
 
 // PullOCI handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/oci-pull.
 // Triggers an async skopeo-backed pull on Proxmox. Requires PVE 9.1+ on the node.
-func (h *StorageHandler) PullOCI(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
-		return err
-	}
-
-	pool, pxClient, err := h.resolveStorage(c)
+func (h *StorageHandler) PullOCI(c fiber.Ctx, p *apischema.Params) error {
+	pool, pxClient, err := h.resolveStorage(c, p)
 	if err != nil {
 		return err
 	}
@@ -104,17 +78,11 @@ func (h *StorageHandler) PullOCI(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Storage does not support vztmpl content; enable it in storage configuration")
 	}
 
-	var req pullOCIRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Reference == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "reference is required")
-	}
+	reference, fileName := p.String("reference"), p.String("file_name")
 
 	upid, err := pxClient.PullOCIImage(c.Context(), node.Name, pool.Storage, proxmox.OCIPullParams{
-		Reference: req.Reference,
-		FileName:  req.FileName,
+		Reference: reference,
+		FileName:  fileName,
 	})
 	if err != nil {
 		return mapTemplateError(err)
@@ -127,8 +95,8 @@ func (h *StorageHandler) PullOCI(c fiber.Ctx) error {
 		ResourceID:   pool.ID.String(),
 		Action:       "pull_oci",
 		UPID:         upid,
-		Description:  "Pull OCI image " + req.Reference,
-		Extra:        map[string]any{"reference": req.Reference, "filename": req.FileName, "storage": pool.Storage},
+		Description:  "Pull OCI image " + reference,
+		Extra:        map[string]any{"reference": reference, "filename": fileName, "storage": pool.Storage},
 	})
 
 	return c.JSON(templateTaskResponse{UPID: upid, Status: "dispatched"})
@@ -136,16 +104,8 @@ func (h *StorageHandler) PullOCI(c fiber.Ctx) error {
 
 // DownloadURL handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/download-url.
 // Triggers an async download of an arbitrary URL into the storage as iso, vztmpl, or import.
-func (h *StorageHandler) DownloadURL(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
-		return err
-	}
-
-	pool, pxClient, err := h.resolveStorage(c)
+func (h *StorageHandler) DownloadURL(c fiber.Ctx, p *apischema.Params) error {
+	pool, pxClient, err := h.resolveStorage(c, p)
 	if err != nil {
 		return err
 	}
@@ -155,36 +115,39 @@ func (h *StorageHandler) DownloadURL(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node for storage pool")
 	}
 
-	var req downloadURLRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	switch req.Content {
-	case "iso", "vztmpl", "import":
-	default:
-		return fiber.NewError(fiber.StatusBadRequest, "content must be iso, vztmpl, or import")
-	}
-	if !storageHasContent(pool.Content, req.Content) {
-		return fiber.NewError(fiber.StatusBadRequest, "Storage does not support "+req.Content+" content")
+	// The schema's enum is StorageDownloadContents, so the hand-rolled
+	// membership check is gone. What stays is the cross-field rule no
+	// per-parameter schema can express: whether THIS storage has that
+	// content kind enabled.
+	rawURL, content := p.String("url"), p.String("content")
+	if !storageHasContent(pool.Content, content) {
+		return fiber.NewError(fiber.StatusBadRequest, "Storage does not support "+content+" content")
 	}
 	// For OVA imports the filename is optional in the wizard — derive it from the URL path
 	// so a bare URL is enough. Proxmox still validates the extension (.ova for import).
-	if req.Filename == "" {
-		req.Filename = deriveURLFilename(req.URL)
-		if req.Filename == "" {
+	filename := p.String("filename")
+	if filename == "" {
+		filename = deriveURLFilename(rawURL)
+		if filename == "" {
 			return fiber.NewError(fiber.StatusBadRequest, "could not derive a filename from the URL; provide one explicitly")
 		}
 	}
 
 	upid, err := pxClient.DownloadURLToStorage(c.Context(), node.Name, pool.Storage, proxmox.URLDownloadParams{
-		URL:                    req.URL,
-		Content:                req.Content,
-		Filename:               req.Filename,
-		Checksum:               req.Checksum,
-		ChecksumAlgorithm:      req.ChecksumAlgorithm,
-		DecompressionAlgorithm: req.DecompressionAlgorithm,
-		VerifyCertificates:     req.VerifyCertificates,
+		URL:      rawURL,
+		Content:  content,
+		Filename: filename,
+		// The checksum/algorithm pairing stays in DownloadURLToStorage rather
+		// than moving into the schema: its rule is `if params.Checksum != ""`,
+		// and apischema's Requires would fire on an empty checksum too — which
+		// this endpoint has always accepted and ignored.
+		Checksum:               p.String("checksum"),
+		ChecksumAlgorithm:      p.String("checksum_algorithm"),
+		DecompressionAlgorithm: p.String("decompression_algorithm"),
+		// A *bool: omitting the key means "do not send it", which leaves
+		// Proxmox's own default (verify). optTristateBool carries no default
+		// precisely so that stays distinguishable from an explicit false.
+		VerifyCertificates: optBoolPtr(p.OptBool("verify_certificates")),
 	})
 	if err != nil {
 		return mapTemplateError(err)
@@ -197,8 +160,8 @@ func (h *StorageHandler) DownloadURL(c fiber.Ctx) error {
 		ResourceID:   pool.ID.String(),
 		Action:       "download_url",
 		UPID:         upid,
-		Description:  "Download " + req.URL,
-		Extra:        map[string]any{"url": req.URL, "content": req.Content, "filename": req.Filename, "storage": pool.Storage},
+		Description:  "Download " + rawURL,
+		Extra:        map[string]any{"url": rawURL, "content": content, "filename": filename, "storage": pool.Storage},
 	})
 
 	return c.JSON(templateTaskResponse{UPID: upid, Status: "dispatched"})
@@ -207,12 +170,9 @@ func (h *StorageHandler) DownloadURL(c fiber.Ctx) error {
 // ListAppliances handles GET /api/v1/clusters/:cluster_id/appliances.
 // Returns the official Proxmox appliance catalog (Debian/Ubuntu/Alpine/Turnkey/...).
 // Cluster-scoped because the catalog is identical across nodes; we pick any online node.
-func (h *StorageHandler) ListAppliances(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *StorageHandler) ListAppliances(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "storage", clusterID); err != nil {
 		return err
 	}
 
@@ -250,16 +210,8 @@ func (h *StorageHandler) ListAppliances(c fiber.Ctx) error {
 
 // DownloadAppliance handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/appliances.
 // Downloads a Proxmox-catalog appliance template into the named storage.
-func (h *StorageHandler) DownloadAppliance(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
-		return err
-	}
-
-	pool, pxClient, err := h.resolveStorage(c)
+func (h *StorageHandler) DownloadAppliance(c fiber.Ctx, p *apischema.Params) error {
+	pool, pxClient, err := h.resolveStorage(c, p)
 	if err != nil {
 		return err
 	}
@@ -273,15 +225,9 @@ func (h *StorageHandler) DownloadAppliance(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Storage does not support vztmpl content")
 	}
 
-	var req downloadApplianceRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Template == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "template is required")
-	}
+	template := p.String("template")
 
-	upid, err := pxClient.DownloadAppliance(c.Context(), node.Name, pool.Storage, req.Template)
+	upid, err := pxClient.DownloadAppliance(c.Context(), node.Name, pool.Storage, template)
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -293,8 +239,8 @@ func (h *StorageHandler) DownloadAppliance(c fiber.Ctx) error {
 		ResourceID:   pool.ID.String(),
 		Action:       "download_appliance",
 		UPID:         upid,
-		Description:  "Download appliance " + req.Template,
-		Extra:        map[string]any{"template": req.Template, "storage": pool.Storage},
+		Description:  "Download appliance " + template,
+		Extra:        map[string]any{"template": template, "storage": pool.Storage},
 	})
 
 	return c.JSON(templateTaskResponse{UPID: upid, Status: "dispatched"})

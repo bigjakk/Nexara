@@ -100,65 +100,14 @@ func (s *Server) setupRoutes() {
 		// internal/api/registry_pbs.go alongside the five global PBS routes
 		// and mounted by mountRegistry above, so there is no block for it
 		// here.
-		if s.nodeHandler != nil {
-			clusters.Get("/:cluster_id/nodes", s.nodeHandler.ListByCluster)
-			clusters.Get("/:cluster_id/nodes/:node_id/disks", s.nodeHandler.ListNodeDisks)
-			clusters.Get("/:cluster_id/nodes/:node_id/network-interfaces", s.nodeHandler.ListNodeNetworkInterfaces)
-			clusters.Get("/:cluster_id/nodes/:node_id/pci-devices", s.nodeHandler.ListNodePCIDevices)
+		//
+		// The 38 node routes are declared in
+		// internal/api/registry_nodes.go and mounted by mountRegistry above,
+		// so there is no block for them here. The node HARDWARE listings the
+		// VM dialogs use (/bridges, /hardware/*, /machine-types, /cpu-models,
+		// /cpu-flags, /isos) are VMHandler methods and live in
+		// internal/api/registry_vms.go.
 
-			// Node management (DNS, Time, Power) — use node_name (Proxmox name) not UUID.
-			clusters.Get("/:cluster_id/nodes/:node_name/dns", s.nodeHandler.GetNodeDNS)
-			clusters.Put("/:cluster_id/nodes/:node_name/dns", s.nodeHandler.SetNodeDNS)
-			clusters.Get("/:cluster_id/nodes/:node_name/time", s.nodeHandler.GetNodeTime)
-			clusters.Put("/:cluster_id/nodes/:node_name/time", s.nodeHandler.SetNodeTimezone)
-			clusters.Post("/:cluster_id/nodes/:node_name/shutdown", s.nodeHandler.ShutdownNode)
-			clusters.Post("/:cluster_id/nodes/:node_name/reboot", s.nodeHandler.RebootNode)
-			clusters.Post("/:cluster_id/nodes/:node_name/maintenance", s.nodeHandler.SetNodeMaintenance)
-
-			// Node disk management (SMART, ZFS, LVM, LVMthin, Init, Wipe).
-			clusters.Get("/:cluster_id/nodes/:node_name/disks/list", s.nodeHandler.ListLiveDisks)
-			clusters.Get("/:cluster_id/nodes/:node_name/disks/smart", s.nodeHandler.GetDiskSMART)
-			clusters.Get("/:cluster_id/nodes/:node_name/disks/zfs", s.nodeHandler.ListZFSPools)
-			clusters.Post("/:cluster_id/nodes/:node_name/disks/zfs", s.nodeHandler.CreateZFSPool)
-			clusters.Delete("/:cluster_id/nodes/:node_name/disks/zfs/:pool_name", s.nodeHandler.DeleteZFSPool)
-			clusters.Get("/:cluster_id/nodes/:node_name/disks/lvm", s.nodeHandler.ListLVM)
-			clusters.Post("/:cluster_id/nodes/:node_name/disks/lvm", s.nodeHandler.CreateLVM)
-			clusters.Delete("/:cluster_id/nodes/:node_name/disks/lvm/:vg_name", s.nodeHandler.DeleteLVM)
-			clusters.Get("/:cluster_id/nodes/:node_name/disks/lvmthin", s.nodeHandler.ListLVMThin)
-			clusters.Post("/:cluster_id/nodes/:node_name/disks/lvmthin", s.nodeHandler.CreateLVMThin)
-			clusters.Delete("/:cluster_id/nodes/:node_name/disks/lvmthin/:pool_name", s.nodeHandler.DeleteLVMThin)
-			clusters.Get("/:cluster_id/nodes/:node_name/disks/directory", s.nodeHandler.ListDirectories)
-			clusters.Post("/:cluster_id/nodes/:node_name/disks/directory", s.nodeHandler.CreateDirectory)
-			clusters.Post("/:cluster_id/nodes/:node_name/disks/initgpt", s.nodeHandler.InitializeGPT)
-			clusters.Put("/:cluster_id/nodes/:node_name/disks/wipe", s.nodeHandler.WipeDisk)
-
-			// Node services.
-			clusters.Get("/:cluster_id/nodes/:node_name/services", s.nodeHandler.ListNodeServices)
-			clusters.Post("/:cluster_id/nodes/:node_name/services/:service/:action", s.nodeHandler.ServiceAction)
-
-			// Node syslog / journal.
-			clusters.Get("/:cluster_id/nodes/:node_name/syslog", s.nodeHandler.GetNodeSyslog)
-			clusters.Get("/:cluster_id/nodes/:node_name/journal", s.nodeHandler.GetNodeJournal)
-
-			// Node support bundle (pvereport). manage:node, not view:node —
-			// see the handler for why.
-			clusters.Get("/:cluster_id/nodes/:node_name/report", s.nodeHandler.GetNodeReport)
-
-			// Hardware temperatures, read from the node's hwmon tree over SSH
-			// because Proxmox exposes no sensor API. Degrades to "not
-			// available" rather than erroring — see the handler.
-			clusters.Get("/:cluster_id/nodes/:node_name/sensors", s.nodeHandler.GetNodeSensors)
-
-			// Node firewall.
-			clusters.Get("/:cluster_id/nodes/:node_name/firewall/rules", s.nodeHandler.ListNodeFirewallRules)
-			clusters.Post("/:cluster_id/nodes/:node_name/firewall/rules", s.nodeHandler.CreateNodeFirewallRule)
-			clusters.Put("/:cluster_id/nodes/:node_name/firewall/rules/:pos", s.nodeHandler.UpdateNodeFirewallRule)
-			clusters.Delete("/:cluster_id/nodes/:node_name/firewall/rules/:pos", s.nodeHandler.DeleteNodeFirewallRule)
-			clusters.Get("/:cluster_id/nodes/:node_name/firewall/log", s.nodeHandler.GetNodeFirewallLog)
-
-			// Node bulk operations.
-			clusters.Post("/:cluster_id/nodes/:node_name/evacuate", s.nodeHandler.EvacuateNode)
-		}
 		// The VM detail page's Veeam card. Gated on view:veeam for the
 		// cluster, not view:vm — a caller who may see the guest is not
 		// thereby entitled to its backup posture. The vmHandler condition
@@ -181,19 +130,18 @@ func (s *Server) setupRoutes() {
 			clusters.Put("/:cluster_id/vms/:vm_id/folder", s.vmFoldersHandler.AssignVM)
 		}
 		if s.storageHandler != nil {
-			clusters.Get("/:cluster_id/storage", s.storageHandler.ListByCluster)
-			clusters.Post("/:cluster_id/storage", s.storageHandler.Create)
-			clusters.Get("/:cluster_id/storage/:storage_id/config", s.storageHandler.GetConfig)
-			clusters.Put("/:cluster_id/storage/:storage_id", s.storageHandler.Update)
-			clusters.Delete("/:cluster_id/storage/:storage_id", s.storageHandler.Delete)
-			clusters.Get("/:cluster_id/storage/:storage_id/content", s.storageHandler.GetContent)
-			clusters.Post("/:cluster_id/storage/:storage_id/upload", s.storageHandler.UploadFile)
+			// The other 12 storage routes are declared in
+			// internal/api/registry_storage.go and mounted by mountRegistry
+			// above. This ONE stays here because the registry cannot express
+			// it: the volume id is a greedy WILDCARD segment, and
+			// checkPathParams refuses one outright — a wildcard is the one
+			// piece of a path that reaches a handler unvalidated and
+			// un-normalized. Declaring it means reshaping the route to a
+			// :volume segment, which every caller's percent-encoding would
+			// have to agree on; that is a compatibility decision rather than a
+			// migration, and it is scoped separately. The handler keeps its
+			// hand-placed delete:storage check.
 			clusters.Delete("/:cluster_id/storage/:storage_id/content/*", s.storageHandler.DeleteContent)
-			clusters.Post("/:cluster_id/storage/:storage_id/oci-pull", s.storageHandler.PullOCI)
-			clusters.Post("/:cluster_id/storage/:storage_id/download-url", s.storageHandler.DownloadURL)
-			clusters.Post("/:cluster_id/storage/:storage_id/appliances", s.storageHandler.DownloadAppliance)
-			clusters.Get("/:cluster_id/appliances", s.storageHandler.ListAppliances)
-			clusters.Get("/:cluster_id/scan/iscsi", s.storageHandler.ScanISCSI)
 		}
 		// The 7 guest tools routes are declared in
 		// internal/api/registry_guest_tools.go and mounted by mountRegistry
