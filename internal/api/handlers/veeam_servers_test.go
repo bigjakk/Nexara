@@ -14,11 +14,103 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/veeam"
 )
 
-// newVeeamTestApp mounts the Veeam routes with a nil queries handle.
+// The Veeam routes are declared endpoints now
+// (internal/api/registry_veeam.go), so what USED to be tested here splits in
+// two, exactly as the PBS routes did.
+//
+// The parameter rules — the four required create fields, a malformed body, a
+// path id that is not a UUID — are the SCHEMA's, and they are tested against
+// the REAL declaration in internal/api/registry_veeam_test.go. So are the
+// twelve routes whose permission is now a middleware Check: a bare handler
+// mount cannot exercise a gate that no longer sits inside the handler.
+//
+// What stays here is what is still the handler's: the URL policy, the
+// insecure-TLS acknowledgement, the response DTO's shape, and the two routes
+// whose authorization is genuinely resolved at request time.
+
+// veeamMirror is a local copy of the parts of the Veeam declarations these
+// tests exercise.
+//
+// It is a mirror rather than the real thing because package api imports this
+// package, not the other way round — the same reason pbsMirror keeps its own
+// copy. The real declarations are pinned by
+// internal/api/registry_veeam_test.go, so between the two the whole chain is
+// covered.
+func veeamMirror(t *testing.T, extra apischema.Properties) apischema.Properties {
+	t.Helper()
+	props := apischema.Properties{
+		"name":                     {Type: apischema.String, MinLength: apischema.Ptr(1), MaxLength: apischema.Ptr(255)},
+		"base_url":                 {Type: apischema.String, MinLength: apischema.Ptr(1), MaxLength: apischema.Ptr(2048)},
+		"username":                 {Type: apischema.String, MinLength: apischema.Ptr(1), MaxLength: apischema.Ptr(255)},
+		"password":                 {Type: apischema.String, MinLength: apischema.Ptr(1), MaxLength: apischema.Ptr(1024)},
+		"tls_fingerprint":          {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(128)},
+		"verify_tls":               {Type: apischema.Boolean, Optional: true, Default: true},
+		"acknowledge_insecure_tls": {Type: apischema.Boolean, Optional: true, Default: false},
+		"allow_private_address":    {Type: apischema.Boolean, Optional: true, Default: false},
+	}
+	for name, prop := range extra {
+		props[name] = prop
+	}
+	if err := props.Compile(); err != nil {
+		t.Fatalf("the mirror schema is itself invalid: %v", err)
+	}
+	return props
+}
+
+// veeamPathMirror is veeamMirror for the routes that carry only path
+// parameters.
+func veeamPathMirror(t *testing.T, extra apischema.Properties) apischema.Properties {
+	t.Helper()
+	props := apischema.Properties{
+		"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath},
+	}
+	for name, prop := range extra {
+		props[name] = prop
+	}
+	if err := props.Compile(); err != nil {
+		t.Fatalf("the mirror schema is itself invalid: %v", err)
+	}
+	return props
+}
+
+// veeamHandlerWithParams adapts a registry-shaped handler to a fiber.Handler
+// by doing what Endpoint.serve does: read the request into a map, validate it
+// against the schema, and hand the result over. A validation failure comes
+// back as the same 400 the registry answers with, so a test that drives an
+// invalid body still sees the status a client would.
+//
+// It is pbsHandlerWithParams' twin rather than a shared helper, so that each
+// domain's test file states the schema its own routes are driven against and
+// a change to one cannot silently retune the other.
+func veeamHandlerWithParams(t *testing.T, props apischema.Properties, pathKeys []string, h func(fiber.Ctx, *apischema.Params) error) fiber.Handler {
+	t.Helper()
+	return func(c fiber.Ctx) error {
+		raw := map[string]any{}
+		if body := c.Body(); len(bytes.TrimSpace(body)) > 0 {
+			if err := json.Unmarshal(body, &raw); err != nil {
+				return fiber.NewError(fiber.StatusBadRequest, "request body is not valid JSON")
+			}
+		}
+		for _, key := range pathKeys {
+			if v := c.Params(key); v != "" {
+				raw[key] = v
+			}
+		}
+		params, err := props.Validate(raw)
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+		return h(c, params)
+	}
+}
+
+// newVeeamTestApp mounts the Veeam routes that still decide something in the
+// handler, with a nil queries handle.
 //
 // Every test here exercises a path that returns before the first database
 // call — validation, authorization, and the connection probe all run first —
@@ -40,17 +132,18 @@ func newVeeamTestApp(t *testing.T) *fiber.App {
 	})
 	installStubEngineMiddleware(app)
 
-	app.Post("/veeam-servers", handler.Create)
-	app.Get("/veeam-servers", handler.List)
-	app.Get("/veeam-servers/:id", handler.Get)
-	app.Put("/veeam-servers/:id", handler.Update)
-	app.Delete("/veeam-servers/:id", handler.Delete)
-	app.Post("/veeam-servers/:id/test", handler.Test)
-	app.Get("/veeam-servers/:id/platforms", handler.ListPlatforms)
-	app.Get("/veeam-servers/:id/infrastructure", handler.ListInfrastructure)
-	app.Get("/veeam-servers/:id/orphaned-objects", handler.ListOrphanedObjects)
-	app.Put("/veeam-servers/:id/backup-objects/:object_id/guest", handler.MapBackupObjectGuest)
-	app.Put("/veeam-servers/:id/platforms/:platform_id", handler.MapPlatform)
+	app.Post("/veeam-servers", veeamHandlerWithParams(t, veeamMirror(t, nil), nil, handler.Create))
+	// The two routes whose permission is genuinely resolved at request time:
+	// both run accessibleClusters("view", "veeam") before they touch a row, so
+	// a caller with no grant anywhere is refused without a database.
+	app.Get("/veeam-servers/:id/orphaned-objects",
+		veeamHandlerWithParams(t, veeamPathMirror(t, nil), []string{"id"}, handler.ListOrphanedObjects))
+	app.Put("/veeam-servers/:id/backup-objects/:object_id/guest",
+		veeamHandlerWithParams(t, veeamPathMirror(t, apischema.Properties{
+			"object_id":        {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath},
+			"guest_cluster_id": {Type: apischema.String, Alias: "cluster_id", Optional: true, Format: "uuid"},
+			"vmid":             {Type: apischema.Integer, Optional: true, Minimum: apischema.Ptr(1.0)},
+		}), []string{"id", "object_id"}, handler.MapBackupObjectGuest))
 
 	return app
 }
@@ -80,40 +173,11 @@ func doVeeamRequest(t *testing.T, app *fiber.App, method, path, role, body strin
 	return resp.StatusCode, string(raw)
 }
 
-func TestVeeamCreate_MissingFields(t *testing.T) {
-	app := newVeeamTestApp(t)
-
-	tests := []struct {
-		name string
-		body string
-	}{
-		{"empty body", `{}`},
-		{"missing name", `{"base_url":"https://vbr.example.com:9419","username":"administrator","password":"s"}`},
-		{"missing base_url", `{"name":"vbr","username":"administrator","password":"s"}`},
-		{"missing username", `{"name":"vbr","base_url":"https://vbr.example.com:9419","password":"s"}`},
-		{"missing password", `{"name":"vbr","base_url":"https://vbr.example.com:9419","username":"administrator"}`},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			status, body := doVeeamRequest(t, app, http.MethodPost, "/veeam-servers", "admin", tc.body)
-			if status != http.StatusBadRequest {
-				t.Errorf("status = %d, want 400 — body: %s", status, body)
-			}
-		})
-	}
-}
-
-func TestVeeamCreate_InvalidJSON(t *testing.T) {
-	app := newVeeamTestApp(t)
-	status, body := doVeeamRequest(t, app, http.MethodPost, "/veeam-servers", "admin", "not json")
-	if status != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 — body: %s", status, body)
-	}
-}
-
 // The URL carries an admin password on every request, so plaintext is refused
 // outright rather than warned about.
+//
+// The rule stays in the handler because the schema has no URL format:
+// validateURLFormat owns it and answers with a message of its own.
 func TestVeeamCreate_RejectsNonHTTPSAndCredentialledURLs(t *testing.T) {
 	app := newVeeamTestApp(t)
 
@@ -168,7 +232,22 @@ func TestVeeamCreate_UnreachableServerIsBadGateway(t *testing.T) {
 	}
 }
 
-func TestVeeamRoutes_RequirePermission(t *testing.T) {
+// TestVeeamRoutes_RefuseBeforeAnyLookup covers the two routes whose
+// authorization is still the handler's own.
+//
+// The other nine this used to cover — create, list, get, update, delete,
+// test, the two platform routes and the infrastructure listing — are
+// middleware Checks now, and
+// TestVeeamGlobalRoutesAreGatedByTheirDeclaration in
+// internal/api/registry_veeam_test.go drives each of them end to end against
+// the real declaration. A bare handler mount here would prove nothing about
+// a gate that no longer sits inside the handler, and leaving the cases in
+// would quietly turn into "these routes need no permission".
+//
+// Both of the two run accessibleClusters("view", "veeam") FIRST, before the
+// server row is loaded, which is what stops an unauthorized caller telling
+// 404 from 403 and probing which server ids exist.
+func TestVeeamRoutes_RefuseBeforeAnyLookup(t *testing.T) {
 	app := newVeeamTestApp(t)
 	id := uuid.New().String()
 
@@ -178,19 +257,6 @@ func TestVeeamRoutes_RequirePermission(t *testing.T) {
 		path   string
 		body   string
 	}{
-		{"create", http.MethodPost, "/veeam-servers", `{"name":"vbr","base_url":"https://vbr.example.com:9419","username":"u","password":"p"}`},
-		{"list", http.MethodGet, "/veeam-servers", ""},
-		{"get", http.MethodGet, "/veeam-servers/" + id, ""},
-		{"update", http.MethodPut, "/veeam-servers/" + id, `{"name":"renamed"}`},
-		{"delete", http.MethodDelete, "/veeam-servers/" + id, ""},
-		{"test", http.MethodPost, "/veeam-servers/" + id + "/test", ""},
-		// The platform mapping decides which cluster a body of backup data is
-		// attributed to, and every cluster-scoped Veeam permission resolves
-		// through it — so both sides are gated on the GLOBAL grant, not on
-		// one for the cluster being attached.
-		{"list platforms", http.MethodGet, "/veeam-servers/" + id + "/platforms", ""},
-		{"map platform", http.MethodPut, "/veeam-servers/" + id + "/platforms/" + uuid.New().String(), `{"cluster_id":null}`},
-		{"list infrastructure", http.MethodGet, "/veeam-servers/" + id + "/infrastructure", ""},
 		{"list orphaned objects", http.MethodGet, "/veeam-servers/" + id + "/orphaned-objects", ""},
 		{"map object guest", http.MethodPut, "/veeam-servers/" + id + "/backup-objects/" + uuid.New().String() + "/guest", `{"cluster_id":null,"vmid":null}`},
 	}
@@ -209,13 +275,17 @@ func TestVeeamRoutes_RequirePermission(t *testing.T) {
 	}
 }
 
-func TestVeeamGet_InvalidID(t *testing.T) {
-	app := newVeeamTestApp(t)
-	status, body := doVeeamRequest(t, app, http.MethodGet, "/veeam-servers/not-a-uuid", "admin", "")
-	if status != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 — body: %s", status, body)
-	}
-}
+// The both-or-neither rule on MapBackupObjectGuest — a cluster with no vmid
+// identifies nothing, and a vmid with no cluster is ambiguous across every
+// cluster the server protects — cannot be driven from here: the handler
+// authorizes and loads the object BEFORE it reaches that check, so a request
+// that got far enough to exercise it would need a live database. What the
+// migration had to preserve is the SHAPE the check reads, and that is asserted
+// against the real declaration by
+// TestMapBackupObjectGuestKeepsItsBothOrNeitherShape in
+// internal/api/registry_veeam_test.go: both parameters optional, neither
+// carrying a default, so "the caller said nothing" stays distinguishable from
+// "the caller sent zero" the way the *pointer fields used to make it.
 
 // A confirm-and-proceed gate, matching how private addresses are handled: a
 // lab with an unreachable internal CA is real, doing it by accident is not.

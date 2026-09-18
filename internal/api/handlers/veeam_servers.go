@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -63,36 +64,6 @@ func (h *VeeamHandler) SetSyncTrigger(t VeeamSyncTrigger) { h.syncTrigger = t }
 // it makes, because a first contact often pays a DNS and TLS-handshake cost
 // against a server that is not warm.
 const veeamProbeTimeout = 45 * time.Second
-
-type createVeeamRequest struct {
-	Name     string `json:"name"`
-	BaseURL  string `json:"base_url"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	// TLSFingerprint pins the leaf certificate. Empty means verify against
-	// the system CA pool.
-	TLSFingerprint string `json:"tls_fingerprint"`
-	// VerifyTLS defaults to true when omitted.
-	VerifyTLS *bool `json:"verify_tls"`
-	// AcknowledgeInsecureTLS is required to store a credential against a host
-	// whose certificate will not be verified at all.
-	AcknowledgeInsecureTLS bool `json:"acknowledge_insecure_tls,omitempty"`
-	AllowPrivateAddress    bool `json:"allow_private_address,omitempty"`
-}
-
-type updateVeeamRequest struct {
-	Name           *string `json:"name"`
-	BaseURL        *string `json:"base_url"`
-	Username       *string `json:"username"`
-	Password       *string `json:"password"`
-	TLSFingerprint *string `json:"tls_fingerprint"`
-	VerifyTLS      *bool   `json:"verify_tls"`
-	Enabled        *bool   `json:"enabled"`
-	// AcknowledgeInsecureTLS is required to remove a certificate pin or turn
-	// verification off on a server that already has one.
-	AcknowledgeInsecureTLS bool `json:"acknowledge_insecure_tls,omitempty"`
-	AllowPrivateAddress    bool `json:"allow_private_address,omitempty"`
-}
 
 // veeamServerResponse is the only shape a Veeam server is ever serialized in.
 // It has no password field at all — not an empty one, not a redacted one —
@@ -152,62 +123,50 @@ func toVeeamResponse(s db.VeeamServer, includeUsername bool) veeamServerResponse
 // the header exists to prevent. Adding a Veeam server already requires the
 // host to be reachable (the fingerprint fetch precedes it), so this costs no
 // workflow that was otherwise available.
-func (h *VeeamHandler) Create(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "veeam"); err != nil {
+func (h *VeeamHandler) Create(c fiber.Ctx, p *apischema.Params) error {
+	name := p.String("name")
+	baseURL := p.String("base_url")
+	username := p.String("username")
+	password := p.String("password")
+	fingerprint := p.String("tls_fingerprint")
+	verifyTLS := p.Bool("verify_tls")
+
+	if err := validateURLFormat(baseURL); err != nil {
 		return err
 	}
-
-	var req createVeeamRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Name == "" || req.BaseURL == "" || req.Username == "" || req.Password == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "name, base_url, username, and password are required")
-	}
-	if len(req.Name) > 255 {
-		return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
-	}
-	if err := validateURLFormat(req.BaseURL); err != nil {
-		return err
-	}
-	if err := enforceURLAddressPolicy(c.Context(), req.BaseURL, req.AllowPrivateAddress); err != nil {
+	if err := enforceURLAddressPolicy(c.Context(), baseURL, p.Bool("allow_private_address")); err != nil {
 		return renderAddressPolicyError(c, err)
 	}
 
-	verifyTLS := true
-	if req.VerifyTLS != nil {
-		verifyTLS = *req.VerifyTLS
-	}
-	if err := requireInsecureTLSAck(!verifyTLS && req.TLSFingerprint == "", req.AcknowledgeInsecureTLS); err != nil {
+	if err := requireInsecureTLSAck(!verifyTLS && fingerprint == "", p.Bool("acknowledge_insecure_tls")); err != nil {
 		return err
 	}
 
 	probe, err := h.probe(c.Context(), veeam.Config{
-		BaseURL:        req.BaseURL,
-		Username:       req.Username,
-		Password:       req.Password,
-		TLSFingerprint: req.TLSFingerprint,
+		BaseURL:        baseURL,
+		Username:       username,
+		Password:       password,
+		TLSFingerprint: fingerprint,
 		VerifyTLS:      verifyTLS,
 	})
 	if err != nil {
 		return renderVeeamProbeError(c, err)
 	}
 
-	encrypted, err := crypto.Encrypt(req.Password, h.encryptionKey)
+	encrypted, err := crypto.Encrypt(password, h.encryptionKey)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt password")
 	}
 
 	server, err := h.queries.CreateVeeamServer(c.Context(), db.CreateVeeamServerParams{
-		Name:              req.Name,
-		BaseUrl:           req.BaseURL,
-		Username:          req.Username,
+		Name:              name,
+		BaseUrl:           baseURL,
+		Username:          username,
 		PasswordEncrypted: encrypted,
 		ApiRevision:       auditTruncate(probe.APIRevision, maxVeeamUpstreamField),
 		ProductVersion:    auditTruncate(probe.BuildVersion, maxVeeamUpstreamField),
 		LicenseEdition:    auditTruncate(probe.LicenseEdition, maxVeeamUpstreamField),
-		TlsFingerprint:    req.TLSFingerprint,
+		TlsFingerprint:    fingerprint,
 		VerifyTls:         verifyTLS,
 		Enabled:           true,
 	})
@@ -229,11 +188,7 @@ func (h *VeeamHandler) Create(c fiber.Ctx) error {
 }
 
 // List handles GET /api/v1/veeam-servers.
-func (h *VeeamHandler) List(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "veeam"); err != nil {
-		return err
-	}
-
+func (h *VeeamHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 	full, err := h.callerSeesUsername(c)
 	if err != nil {
 		return err
@@ -252,17 +207,13 @@ func (h *VeeamHandler) List(c fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/veeam-servers/:id.
-func (h *VeeamHandler) Get(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "veeam"); err != nil {
-		return err
-	}
-
+func (h *VeeamHandler) Get(c fiber.Ctx, p *apischema.Params) error {
 	full, err := h.callerSeesUsername(c)
 	if err != nil {
 		return err
 	}
 
-	server, err := h.fetch(c)
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
@@ -290,17 +241,8 @@ func (h *VeeamHandler) callerSeesUsername(c fiber.Ctx) (bool, error) {
 // and refreshes the stored revision, version and edition. Renaming a server or
 // toggling `enabled` does not, so an operator can disable an unreachable
 // server without first having to make it reachable.
-func (h *VeeamHandler) Update(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "veeam"); err != nil {
-		return err
-	}
-
-	var req updateVeeamRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	existing, err := h.fetch(c)
+func (h *VeeamHandler) Update(c fiber.Ctx, p *apischema.Params) error {
+	existing, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
@@ -319,43 +261,43 @@ func (h *VeeamHandler) Update(c fiber.Ctx) error {
 		Enabled:           existing.Enabled,
 	}
 
-	if req.Name != nil {
-		if *req.Name == "" {
+	if name, supplied := p.OptString("name"); supplied {
+		// The empty refusal stays HERE rather than becoming a MinLength on the
+		// declaration: "name must not be empty" says what to do, and a bare
+		// "must be at least 1 character" would not.
+		if name == "" {
 			return fiber.NewError(fiber.StatusBadRequest, "name must not be empty")
 		}
-		if len(*req.Name) > 255 {
-			return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
-		}
-		params.Name = *req.Name
+		params.Name = name
 	}
-	if req.Enabled != nil {
-		params.Enabled = *req.Enabled
+	if enabled, supplied := p.OptBool("enabled"); supplied {
+		params.Enabled = enabled
 	}
 
 	connectionChanged := false
-	if req.BaseURL != nil && *req.BaseURL != existing.BaseUrl {
-		if err := validateURLFormat(*req.BaseURL); err != nil {
+	if baseURL, supplied := p.OptString("base_url"); supplied && baseURL != existing.BaseUrl {
+		if err := validateURLFormat(baseURL); err != nil {
 			return err
 		}
-		if err := enforceURLAddressPolicy(c.Context(), *req.BaseURL, req.AllowPrivateAddress); err != nil {
+		if err := enforceURLAddressPolicy(c.Context(), baseURL, p.Bool("allow_private_address")); err != nil {
 			return renderAddressPolicyError(c, err)
 		}
-		params.BaseUrl = *req.BaseURL
+		params.BaseUrl = baseURL
 		connectionChanged = true
 	}
-	if req.Username != nil && *req.Username != existing.Username {
-		if *req.Username == "" {
+	if username, supplied := p.OptString("username"); supplied && username != existing.Username {
+		if username == "" {
 			return fiber.NewError(fiber.StatusBadRequest, "username must not be empty")
 		}
-		params.Username = *req.Username
+		params.Username = username
 		connectionChanged = true
 	}
-	if req.TLSFingerprint != nil && *req.TLSFingerprint != existing.TlsFingerprint {
-		params.TlsFingerprint = *req.TLSFingerprint
+	if fingerprint, supplied := p.OptString("tls_fingerprint"); supplied && fingerprint != existing.TlsFingerprint {
+		params.TlsFingerprint = fingerprint
 		connectionChanged = true
 	}
-	if req.VerifyTLS != nil && *req.VerifyTLS != existing.VerifyTls {
-		params.VerifyTls = *req.VerifyTLS
+	if verifyTLS, supplied := p.OptBool("verify_tls"); supplied && verifyTLS != existing.VerifyTls {
+		params.VerifyTls = verifyTLS
 		connectionChanged = true
 	}
 
@@ -374,15 +316,22 @@ func (h *VeeamHandler) Update(c fiber.Ctx) error {
 	pinRemoved := params.TlsFingerprint == "" && existing.TlsFingerprint != ""
 	wasUnverified := existing.TlsFingerprint == "" && !existing.VerifyTls
 	nowUnverified := params.TlsFingerprint == "" && !params.VerifyTls
-	if err := requireInsecureTLSAck(nowUnverified && !wasUnverified, req.AcknowledgeInsecureTLS); err != nil {
+	if err := requireInsecureTLSAck(nowUnverified && !wasUnverified, p.Bool("acknowledge_insecure_tls")); err != nil {
 		return err
 	}
 
-	// The plaintext password lives only in this local, only for as long as
-	// the probe needs it. It is never assigned to params.
-	password := ""
-	if req.Password != nil && *req.Password != "" {
-		password = *req.Password
+	// The plaintext password lives only in these two locals, only for as long
+	// as the probe needs it. Neither is ever assigned to params.
+	//
+	// They are TWO rather than one because `password` is REASSIGNED below to
+	// the decrypted stored one when the caller sent none, so testing it
+	// afterwards would report a rotation for a request that only re-probed.
+	// suppliedPassword is what the caller actually sent, and an EMPTY value
+	// counts as "sent nothing" here exactly as the *string pointer's
+	// `*req.Password != ""` did.
+	suppliedPassword := p.String("password")
+	password := suppliedPassword
+	if password != "" {
 		connectionChanged = true
 	}
 
@@ -443,7 +392,7 @@ func (h *VeeamHandler) Update(c fiber.Ctx) error {
 				"attempted_base_url": auditSafe(params.BaseUrl),
 				"base_url_changed":   params.BaseUrl != existing.BaseUrl,
 				"username_changed":   params.Username != existing.Username,
-				"password_supplied":  req.Password != nil && *req.Password != "",
+				"password_supplied":  suppliedPassword != "",
 			})
 			return renderVeeamProbeError(c, perr)
 		}
@@ -451,8 +400,8 @@ func (h *VeeamHandler) Update(c fiber.Ctx) error {
 		params.ProductVersion = auditTruncate(probe.BuildVersion, maxVeeamUpstreamField)
 		params.LicenseEdition = auditTruncate(probe.LicenseEdition, maxVeeamUpstreamField)
 
-		if req.Password != nil && *req.Password != "" {
-			encrypted, eerr := crypto.Encrypt(*req.Password, h.encryptionKey)
+		if suppliedPassword != "" {
+			encrypted, eerr := crypto.Encrypt(suppliedPassword, h.encryptionKey)
 			if eerr != nil {
 				return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt password")
 			}
@@ -470,7 +419,7 @@ func (h *VeeamHandler) Update(c fiber.Ctx) error {
 	// weakened. None of it reveals a secret — the username is deliberately
 	// absent (see the audit doc comment).
 	h.audit(c, server, "veeam_server_updated", map[string]any{
-		"password_rotated": req.Password != nil && *req.Password != "",
+		"password_rotated": suppliedPassword != "",
 		"verify_tls":       server.VerifyTls,
 		"tls_pin_removed":  pinRemoved,
 		"base_url_changed": server.BaseUrl != existing.BaseUrl,
@@ -481,12 +430,8 @@ func (h *VeeamHandler) Update(c fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/veeam-servers/:id.
-func (h *VeeamHandler) Delete(c fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "veeam"); err != nil {
-		return err
-	}
-
-	existing, err := h.fetch(c)
+func (h *VeeamHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
+	existing, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
@@ -509,12 +454,8 @@ func (h *VeeamHandler) Delete(c fiber.Ctx) error {
 // connection using stored admin credentials, which is not a read of Nexara's
 // own state. Persists nothing — an operator diagnosing a broken server should
 // not have the act of diagnosing it rewrite the row.
-func (h *VeeamHandler) Test(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "veeam"); err != nil {
-		return err
-	}
-
-	server, err := h.fetch(c)
+func (h *VeeamHandler) Test(c fiber.Ctx, p *apischema.Params) error {
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
@@ -546,10 +487,10 @@ func (h *VeeamHandler) Test(c fiber.Ctx) error {
 }
 
 // fetch loads the server named by :id, mapping a missing row to 404.
-func (h *VeeamHandler) fetch(c fiber.Ctx) (db.VeeamServer, error) {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *VeeamHandler) fetch(c fiber.Ctx, p *apischema.Params) (db.VeeamServer, error) {
+	id, err := veeamServerID(p)
 	if err != nil {
-		return db.VeeamServer{}, fiber.NewError(fiber.StatusBadRequest, "Invalid Veeam server ID")
+		return db.VeeamServer{}, err
 	}
 	server, err := h.queries.GetVeeamServer(c.Context(), id)
 	if err != nil {

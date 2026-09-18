@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -69,14 +70,15 @@ func (s veeamScope) clusterFor(platform uuid.UUID, valid bool) pgtype.UUID {
 	return pgtype.UUID{Bytes: clusterID, Valid: true}
 }
 
-// veeamServerIDFromParam parses :id without touching the database, so the
-// permission check can run before the lookup.
-func veeamServerIDFromParam(c fiber.Ctx) (uuid.UUID, error) {
-	id, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return uuid.Nil, fiber.NewError(fiber.StatusBadRequest, "Invalid Veeam server ID")
-	}
-	return id, nil
+// veeamServerID reads :id without touching the database, so the permission
+// check can run before the lookup.
+//
+// The schema declares the parameter with apischema's "uuid" format
+// (internal/api/registry_veeam.go), so a malformed id is refused before the
+// handler runs and a failure here means the declaration and this call
+// disagree — which parseParamUUID reports as the 500 it is.
+func veeamServerID(p *apischema.Params) (uuid.UUID, error) {
+	return parseParamUUID(p.String("id"))
 }
 
 // scopedPlatforms returns the platform ids a caller may see, and whether the
@@ -162,11 +164,8 @@ type veeamRepositoryResponse struct {
 //
 // Global scope: a repository is genuinely shared — one holds the backups of
 // every cluster the server protects — so there is no cluster to scope it to.
-func (h *VeeamHandler) ListRepositories(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "veeam"); err != nil {
-		return err
-	}
-	server, err := h.fetch(c)
+func (h *VeeamHandler) ListRepositories(c fiber.Ctx, p *apischema.Params) error {
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
@@ -205,21 +204,18 @@ type veeamRepositoryMetricResponse struct {
 
 // GetRepositoryMetrics handles
 // GET /api/v1/veeam-servers/:id/repositories/:repository_id/metrics.
-func (h *VeeamHandler) GetRepositoryMetrics(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "veeam"); err != nil {
-		return err
-	}
-	server, err := h.fetch(c)
+func (h *VeeamHandler) GetRepositoryMetrics(c fiber.Ctx, p *apischema.Params) error {
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
 
-	repositoryID, err := uuid.Parse(c.Params("repository_id"))
+	repositoryID, err := parseParamUUID(p.String("repository_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid repository ID")
+		return err
 	}
 
-	since := time.Now().Add(-parseVeeamRange(c.Query("range")))
+	since := time.Now().Add(-parseVeeamRange(p.String("range")))
 	rows, err := h.queries.GetVeeamRepositoryMetrics(c.Context(), db.GetVeeamRepositoryMetricsParams{
 		VeeamServerID:     server.ID,
 		RepositoryVeeamID: repositoryID,
@@ -297,11 +293,11 @@ type veeamJobResponse struct {
 }
 
 // ListJobs handles GET /api/v1/veeam-servers/:id/jobs.
-func (h *VeeamHandler) ListJobs(c fiber.Ctx) error {
+func (h *VeeamHandler) ListJobs(c fiber.Ctx, p *apischema.Params) error {
 	// Authorize FIRST. Looking the server up before the permission check let
 	// an unauthorized caller tell 404 from 403 and so probe which server ids
 	// exist, which is the oracle veeamScopeFor's own refusal exists to close.
-	serverID, err := veeamServerIDFromParam(c)
+	serverID, err := veeamServerID(p)
 	if err != nil {
 		return err
 	}
@@ -309,7 +305,7 @@ func (h *VeeamHandler) ListJobs(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	server, err := h.fetch(c)
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
@@ -393,11 +389,11 @@ type veeamSessionResponse struct {
 const maxVeeamSessionRows = 500
 
 // ListSessions handles GET /api/v1/veeam-servers/:id/sessions.
-func (h *VeeamHandler) ListSessions(c fiber.Ctx) error {
+func (h *VeeamHandler) ListSessions(c fiber.Ctx, p *apischema.Params) error {
 	// Authorize FIRST. Looking the server up before the permission check let
 	// an unauthorized caller tell 404 from 403 and so probe which server ids
 	// exist, which is the oracle veeamScopeFor's own refusal exists to close.
-	serverID, err := veeamServerIDFromParam(c)
+	serverID, err := veeamServerID(p)
 	if err != nil {
 		return err
 	}
@@ -405,7 +401,7 @@ func (h *VeeamHandler) ListSessions(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	server, err := h.fetch(c)
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
@@ -474,11 +470,11 @@ type veeamBackupObjectResponse struct {
 // Two rows can still share a NAME without being the same guest: that is a
 // rebuilt guest whose replacement reused its name, and telling them apart is
 // exactly what the SMBIOS uuid is for.
-func (h *VeeamHandler) ListBackupObjects(c fiber.Ctx) error {
+func (h *VeeamHandler) ListBackupObjects(c fiber.Ctx, p *apischema.Params) error {
 	// Authorize FIRST. Looking the server up before the permission check let
 	// an unauthorized caller tell 404 from 403 and so probe which server ids
 	// exist, which is the oracle veeamScopeFor's own refusal exists to close.
-	serverID, err := veeamServerIDFromParam(c)
+	serverID, err := veeamServerID(p)
 	if err != nil {
 		return err
 	}
@@ -486,7 +482,7 @@ func (h *VeeamHandler) ListBackupObjects(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	server, err := h.fetch(c)
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
@@ -540,11 +536,11 @@ type veeamRestorePointResponse struct {
 //
 // Scoped through the parent object, so a caller who cannot see the guest
 // cannot enumerate its recovery history either.
-func (h *VeeamHandler) ListRestorePoints(c fiber.Ctx) error {
+func (h *VeeamHandler) ListRestorePoints(c fiber.Ctx, p *apischema.Params) error {
 	// Authorize FIRST. Looking the server up before the permission check let
 	// an unauthorized caller tell 404 from 403 and so probe which server ids
 	// exist, which is the oracle veeamScopeFor's own refusal exists to close.
-	serverID, err := veeamServerIDFromParam(c)
+	serverID, err := veeamServerID(p)
 	if err != nil {
 		return err
 	}
@@ -552,14 +548,14 @@ func (h *VeeamHandler) ListRestorePoints(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	server, err := h.fetch(c)
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
 
-	objectID, err := uuid.Parse(c.Params("object_id"))
+	objectID, err := parseParamUUID(p.String("object_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid backup object ID")
+		return err
 	}
 
 	objects, err := h.queries.ListVeeamBackupObjectsByServer(c.Context(), server.ID)
@@ -589,17 +585,19 @@ func (h *VeeamHandler) ListRestorePoints(c fiber.Ctx) error {
 	}
 
 	resp := make([]veeamRestorePointResponse, len(points))
-	for i, p := range points {
+	// `point` rather than the `p` this loop used to bind: p is the request's
+	// parameters now, and shadowing it would give one letter two meanings.
+	for i, point := range points {
 		resp[i] = veeamRestorePointResponse{
-			ID:            p.ID,
-			VeeamID:       p.VeeamID,
-			Name:          p.Name,
-			PointType:     p.PointType,
-			MalwareStatus: p.MalwareStatus,
-			GuestOSFamily: p.GuestOsFamily,
-			CreationTime:  p.CreationTime,
-			SizeBytes:     p.SizeBytes,
-			SupportsFLR:   p.SupportsFlr,
+			ID:            point.ID,
+			VeeamID:       point.VeeamID,
+			Name:          point.Name,
+			PointType:     point.PointType,
+			MalwareStatus: point.MalwareStatus,
+			GuestOSFamily: point.GuestOsFamily,
+			CreationTime:  point.CreationTime,
+			SizeBytes:     point.SizeBytes,
+			SupportsFLR:   point.SupportsFlr,
 		}
 	}
 	return RespondItems(c, resp)

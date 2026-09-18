@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -253,14 +253,19 @@ var validScopeTypes = map[string]bool{
 	"cluster": true, "node": true, "vm": true, "global": true,
 }
 
-// validChannelTypes is the complete set of channel types Nexara can deliver
-// to. "expo_push" used to be rejected here while its dispatcher sat unused
-// behind it; both the dispatcher and the mobile_devices table it read were
-// removed in v1.9.x along with the React Native app, so the type no longer
-// exists anywhere and needs no special-casing.
-var validChannelTypes = map[string]bool{
-	"email": true, "webhook": true, "slack": true, "discord": true,
-	"pagerduty": true, "teams": true, "telegram": true,
+// NotificationChannelTypes is the complete set of channel types Nexara can
+// deliver to. "expo_push" used to be rejected here while its dispatcher sat
+// unused behind it; both the dispatcher and the mobile_devices table it read
+// were removed in v1.9.x along with the React Native app, so the type no
+// longer exists anywhere and needs no special-casing.
+//
+// It replaced a `map[string]bool` the create and update handlers looked a
+// value up in. The declarations in internal/api/registry_alerts.go state it as
+// the parameter's Enum, which refuses an unknown type before either handler
+// runs — so a second copy here would be a lookup nothing consults, and the one
+// remaining list is the one the API publishes.
+var NotificationChannelTypes = []string{
+	"email", "webhook", "slack", "discord", "pagerduty", "teams", "telegram",
 }
 
 // createAlertRuleRequest is the body of both POST and PUT. On an update every
@@ -334,43 +339,41 @@ func validateEscalationChain(data json.RawMessage) error {
 	return nil
 }
 
-type createChannelRequest struct {
-	Name        string          `json:"name"`
-	ChannelType string          `json:"channel_type"`
-	Config      json.RawMessage `json:"config"`
-	Enabled     *bool           `json:"enabled"`
-}
-
-type createMaintenanceWindowRequest struct {
-	NodeID      string `json:"node_id"`
-	Description string `json:"description"`
-	StartsAt    string `json:"starts_at"`
-	EndsAt      string `json:"ends_at"`
+// channelConfigJSON renders the dispatcher settings object back to the JSON
+// the encrypted column stores.
+//
+// The value is carried through unvalidated — apischema has no nested-object
+// schema, and the accepted keys belong to whichever dispatcher channel_type
+// selects — so this is a re-marshal of what the caller sent rather than a
+// transformation. A failure is unreachable for a value that arrived as JSON,
+// but a silent nil here would store "null" over a working webhook URL.
+func channelConfigJSON(p *apischema.Params) (json.RawMessage, error) {
+	raw, err := json.Marshal(p.Object("config"))
+	if err != nil {
+		return nil, fiber.NewError(fiber.StatusBadRequest, "Invalid config")
+	}
+	return raw, nil
 }
 
 // ====== Alert Rules ======
 
 // ListRules lists all alert rules.
-func (h *AlertHandler) ListRules(c fiber.Ctx) error {
+func (h *AlertHandler) ListRules(c fiber.Ctx, p *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "alert")
 	if err != nil {
 		return err
 	}
 
-	limit, _ := strconv.Atoi(c.Query("limit", "50"))
-	offset, _ := strconv.Atoi(c.Query("offset", "0"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit := int(p.Int("limit"))
+	offset := int(p.Int("offset"))
 
-	clusterIDQ := c.Query("cluster_id")
+	// The EMPTY string means "do not filter", which is what the declaration's
+	// empty-or-uuid pattern keeps expressible — the uuid format would refuse it.
+	clusterIDQ := p.String("filter_cluster_id")
 	if clusterIDQ != "" {
-		cid, err := uuid.Parse(clusterIDQ)
+		cid, err := parseParamUUID(clusterIDQ)
 		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+			return err
 		}
 		if !access.PermitsCluster(cid) {
 			return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
@@ -844,10 +847,10 @@ func (h *AlertHandler) CreateRule(c fiber.Ctx) error {
 }
 
 // GetRule returns a single alert rule.
-func (h *AlertHandler) GetRule(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *AlertHandler) GetRule(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule ID")
+		return err
 	}
 
 	rule, err := h.queries.GetAlertRule(c.Context(), id)
@@ -1047,10 +1050,10 @@ func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 }
 
 // DeleteRule deletes an alert rule.
-func (h *AlertHandler) DeleteRule(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *AlertHandler) DeleteRule(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule ID")
+		return err
 	}
 
 	existing, err := h.queries.GetAlertRule(c.Context(), id)
@@ -1078,42 +1081,29 @@ func (h *AlertHandler) DeleteRule(c fiber.Ctx) error {
 // ====== Alert History ======
 
 // ListAlerts lists alert history with optional filters.
-func (h *AlertHandler) ListAlerts(c fiber.Ctx) error {
+func (h *AlertHandler) ListAlerts(c fiber.Ctx, p *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "alert")
 	if err != nil {
 		return err
 	}
 
-	limit, _ := strconv.Atoi(c.Query("limit", "50"))
-	offset, _ := strconv.Atoi(c.Query("offset", "0"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit := int(p.Int("limit"))
+	offset := int(p.Int("offset"))
 
-	state := c.Query("state")
-	if state != "" {
-		validStates := map[string]bool{"pending": true, "firing": true, "acknowledged": true, "resolved": true}
-		if !validStates[state] {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid state filter")
-		}
-	}
-	severity := c.Query("severity")
-	if severity != "" && !validSeveritiesAlert[severity] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid severity filter")
-	}
-	clusterIDStr := c.Query("cluster_id")
+	// Both vocabularies are the declaration's enums now, and both include the
+	// EMPTY string because "" has always reached SQL as "do not filter".
+	state := p.String("state")
+	severity := p.String("severity")
+	clusterIDStr := p.String("filter_cluster_id")
 
 	// No cluster filter must reach SQL as NULL (match all, RBAC-trimmed per
 	// row below) — a zero uuid.UUID would instead match cluster_id = '0000…'
 	// and return nothing.
 	var clusterID pgtype.UUID
 	if clusterIDStr != "" {
-		parsed, parseErr := uuid.Parse(clusterIDStr)
+		parsed, parseErr := parseParamUUID(clusterIDStr)
 		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+			return parseErr
 		}
 		if !access.PermitsCluster(parsed) {
 			return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
@@ -1156,10 +1146,10 @@ func (h *AlertHandler) ListAlerts(c fiber.Ctx) error {
 }
 
 // GetAlert returns a single alert.
-func (h *AlertHandler) GetAlert(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *AlertHandler) GetAlert(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid alert ID")
+		return err
 	}
 
 	alert, err := h.queries.GetAlertHistory(c.Context(), id)
@@ -1179,11 +1169,7 @@ func (h *AlertHandler) GetAlert(c fiber.Ctx) error {
 }
 
 // GetAlertSummary returns active alert counts.
-func (h *AlertHandler) GetAlertSummary(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "alert"); err != nil {
-		return err
-	}
-
+func (h *AlertHandler) GetAlertSummary(c fiber.Ctx, _ *apischema.Params) error {
 	summary, err := h.queries.GetAlertSummary(c.Context())
 	if err != nil {
 		return c.JSON(alertSummaryResponse{})
@@ -1200,10 +1186,10 @@ func (h *AlertHandler) GetAlertSummary(c fiber.Ctx) error {
 }
 
 // AcknowledgeAlert acknowledges a firing alert.
-func (h *AlertHandler) AcknowledgeAlert(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *AlertHandler) AcknowledgeAlert(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid alert ID")
+		return err
 	}
 
 	alert, err := h.queries.GetAlertHistory(c.Context(), id)
@@ -1251,10 +1237,10 @@ func (h *AlertHandler) AcknowledgeAlert(c fiber.Ctx) error {
 }
 
 // ResolveAlert resolves a firing or acknowledged alert.
-func (h *AlertHandler) ResolveAlert(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *AlertHandler) ResolveAlert(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid alert ID")
+		return err
 	}
 
 	alert, err := h.queries.GetAlertHistory(c.Context(), id)
@@ -1297,23 +1283,14 @@ func (h *AlertHandler) ResolveAlert(c fiber.Ctx) error {
 }
 
 // ListAlertsByCluster lists alerts for a specific cluster.
-func (h *AlertHandler) ListAlertsByCluster(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AlertHandler) ListAlertsByCluster(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "alert", clusterID); err != nil {
-		return err
-	}
 
-	limit, _ := strconv.Atoi(c.Query("limit", "50"))
-	offset, _ := strconv.Atoi(c.Query("offset", "0"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit := int(p.Int("limit"))
+	offset := int(p.Int("offset"))
 
 	alerts, err := h.queries.ListAlertHistoryByCluster(c.Context(), db.ListAlertHistoryByClusterParams{
 		ClusterID: pgtype.UUID{Bytes: clusterID, Valid: true},
@@ -1332,12 +1309,9 @@ func (h *AlertHandler) ListAlertsByCluster(c fiber.Ctx) error {
 }
 
 // CountActiveAlertsByCluster returns active alert counts for a cluster.
-func (h *AlertHandler) CountActiveAlertsByCluster(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AlertHandler) CountActiveAlertsByCluster(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "alert", clusterID); err != nil {
 		return err
 	}
 
@@ -1356,11 +1330,7 @@ func (h *AlertHandler) CountActiveAlertsByCluster(c fiber.Ctx) error {
 // ====== Notification Channels ======
 
 // ListChannels lists all notification channels.
-func (h *AlertHandler) ListChannels(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "notification_channel"); err != nil {
-		return err
-	}
-
+func (h *AlertHandler) ListChannels(c fiber.Ctx, _ *apischema.Params) error {
 	channels, err := h.queries.ListNotificationChannels(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list channels")
@@ -1374,43 +1344,24 @@ func (h *AlertHandler) ListChannels(c fiber.Ctx) error {
 }
 
 // CreateChannel creates a new notification channel.
-func (h *AlertHandler) CreateChannel(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "notification_channel"); err != nil {
+func (h *AlertHandler) CreateChannel(c fiber.Ctx, p *apischema.Params) error {
+	config, err := channelConfigJSON(p)
+	if err != nil {
 		return err
 	}
 
-	var req createChannelRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Name == "" || len(req.Name) > maxNameLen {
-		return fiber.NewError(fiber.StatusBadRequest, "Name is required and must be <= 255 characters")
-	}
-	if !validChannelTypes[req.ChannelType] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid channel_type")
-	}
-	if len(req.Config) == 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "Config is required")
-	}
-
-	encrypted, err := crypto.Encrypt(string(req.Config), h.encryptionKey)
+	encrypted, err := crypto.Encrypt(string(config), h.encryptionKey)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt config")
-	}
-
-	enabled := true
-	if req.Enabled != nil {
-		enabled = *req.Enabled
 	}
 
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
 	ch, err := h.queries.InsertNotificationChannel(c.Context(), db.InsertNotificationChannelParams{
-		Name:            req.Name,
-		ChannelType:     req.ChannelType,
+		Name:            p.String("name"),
+		ChannelType:     p.String("channel_type"),
 		ConfigEncrypted: encrypted,
-		Enabled:         enabled,
+		Enabled:         p.Bool("enabled"),
 		CreatedBy:       userID,
 	})
 	if err != nil {
@@ -1423,14 +1374,10 @@ func (h *AlertHandler) CreateChannel(c fiber.Ctx) error {
 }
 
 // GetChannel returns a single notification channel.
-func (h *AlertHandler) GetChannel(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "notification_channel"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *AlertHandler) GetChannel(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid channel ID")
+		return err
 	}
 
 	ch, err := h.queries.GetNotificationChannel(c.Context(), id)
@@ -1442,14 +1389,10 @@ func (h *AlertHandler) GetChannel(c fiber.Ctx) error {
 }
 
 // UpdateChannel updates a notification channel.
-func (h *AlertHandler) UpdateChannel(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "notification_channel"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *AlertHandler) UpdateChannel(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid channel ID")
+		return err
 	}
 
 	existing, err := h.queries.GetNotificationChannel(c.Context(), id)
@@ -1457,36 +1400,33 @@ func (h *AlertHandler) UpdateChannel(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Channel not found")
 	}
 
-	var req createChannelRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
+	// Every field reads the EMPTY value as absent rather than as a clear,
+	// which is what the pre-migration `if req.X != ""` tests did. `enabled` is
+	// the one exception and the reason it carries no declared default: omitting
+	// it has to leave the stored flag alone.
 	name := existing.Name
-	if req.Name != "" {
-		if len(req.Name) > maxNameLen {
-			return fiber.NewError(fiber.StatusBadRequest, "Name must be <= 255 characters")
-		}
-		name = req.Name
+	if v := p.String("name"); v != "" {
+		name = v
 	}
 	channelType := existing.ChannelType
-	if req.ChannelType != "" {
-		if !validChannelTypes[req.ChannelType] {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid channel_type")
-		}
-		channelType = req.ChannelType
+	if v := p.String("channel_type"); v != "" {
+		channelType = v
 	}
 	configEncrypted := existing.ConfigEncrypted
-	if len(req.Config) > 0 {
-		enc, encErr := crypto.Encrypt(string(req.Config), h.encryptionKey)
+	if p.Has("config") {
+		config, cErr := channelConfigJSON(p)
+		if cErr != nil {
+			return cErr
+		}
+		enc, encErr := crypto.Encrypt(string(config), h.encryptionKey)
 		if encErr != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt config")
 		}
 		configEncrypted = enc
 	}
 	enabled := existing.Enabled
-	if req.Enabled != nil {
-		enabled = *req.Enabled
+	if v, supplied := p.OptBool("enabled"); supplied {
+		enabled = v
 	}
 
 	ch, err := h.queries.UpdateNotificationChannel(c.Context(), db.UpdateNotificationChannelParams{
@@ -1506,14 +1446,10 @@ func (h *AlertHandler) UpdateChannel(c fiber.Ctx) error {
 }
 
 // DeleteChannel deletes a notification channel.
-func (h *AlertHandler) DeleteChannel(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "notification_channel"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *AlertHandler) DeleteChannel(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid channel ID")
+		return err
 	}
 
 	if _, err := h.queries.GetNotificationChannel(c.Context(), id); err != nil {
@@ -1530,14 +1466,10 @@ func (h *AlertHandler) DeleteChannel(c fiber.Ctx) error {
 }
 
 // TestChannel sends a test notification through a channel.
-func (h *AlertHandler) TestChannel(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "notification_channel"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *AlertHandler) TestChannel(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid channel ID")
+		return err
 	}
 
 	ch, err := h.queries.GetNotificationChannel(c.Context(), id)
@@ -1596,23 +1528,14 @@ func (h *AlertHandler) TestChannel(c fiber.Ctx) error {
 // ====== Maintenance Windows ======
 
 // ListMaintenanceWindows lists maintenance windows for a cluster.
-func (h *AlertHandler) ListMaintenanceWindows(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AlertHandler) ListMaintenanceWindows(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "maintenance_window", clusterID); err != nil {
-		return err
-	}
 
-	limit, _ := strconv.Atoi(c.Query("limit", "50"))
-	offset, _ := strconv.Atoi(c.Query("offset", "0"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit := int(p.Int("limit"))
+	offset := int(p.Int("offset"))
 
 	windows, err := h.queries.ListMaintenanceWindows(c.Context(), db.ListMaintenanceWindowsParams{
 		ClusterID: clusterID,
@@ -1631,29 +1554,17 @@ func (h *AlertHandler) ListMaintenanceWindows(c fiber.Ctx) error {
 }
 
 // CreateMaintenanceWindow creates a new maintenance window.
-func (h *AlertHandler) CreateMaintenanceWindow(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AlertHandler) CreateMaintenanceWindow(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "maintenance_window", clusterID); err != nil {
-		return err
-	}
 
-	var req createMaintenanceWindowRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if len(req.Description) > maxDescriptionLen {
-		return fiber.NewError(fiber.StatusBadRequest, "Description must be <= 1024 characters")
-	}
-
-	startsAt, err := time.Parse(time.RFC3339, req.StartsAt)
+	startsAt, err := time.Parse(time.RFC3339, p.String("starts_at"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid starts_at format (use RFC3339)")
 	}
-	endsAt, err := time.Parse(time.RFC3339, req.EndsAt)
+	endsAt, err := time.Parse(time.RFC3339, p.String("ends_at"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid ends_at format (use RFC3339)")
 	}
@@ -1661,12 +1572,18 @@ func (h *AlertHandler) CreateMaintenanceWindow(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "ends_at must be after starts_at")
 	}
 
+	// The EMPTY node_id means "the whole cluster", which the declaration keeps
+	// expressible with an empty-or-uuid pattern rather than the uuid format.
 	var nodeID pgtype.UUID
-	if req.NodeID != "" {
-		nid, parseErr := uuid.Parse(req.NodeID)
+	if raw := p.String("node_id"); raw != "" {
+		nid, parseErr := parseParamUUID(raw)
 		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid node_id")
+			return parseErr
 		}
+		// The OWNING cluster is the authority, not the one in the path: this
+		// call is what stops a caller who manages cluster A pinning a window to
+		// a node in cluster B. It cannot hoist into the route's middleware,
+		// which resolves the path's cluster and nothing else.
 		owner, err := resolveNodeCluster(c, h.queries, nid, "maintenance_window")
 		if err != nil {
 			return err
@@ -1682,7 +1599,7 @@ func (h *AlertHandler) CreateMaintenanceWindow(c fiber.Ctx) error {
 	window, err := h.queries.InsertMaintenanceWindow(c.Context(), db.InsertMaintenanceWindowParams{
 		ClusterID:   clusterID,
 		NodeID:      nodeID,
-		Description: req.Description,
+		Description: p.String("description"),
 		StartsAt:    startsAt,
 		EndsAt:      endsAt,
 		CreatedBy:   userID,
@@ -1697,18 +1614,15 @@ func (h *AlertHandler) CreateMaintenanceWindow(c fiber.Ctx) error {
 }
 
 // UpdateMaintenanceWindow updates a maintenance window.
-func (h *AlertHandler) UpdateMaintenanceWindow(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AlertHandler) UpdateMaintenanceWindow(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "maintenance_window", clusterID); err != nil {
 		return err
 	}
 
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid window ID")
+		return err
 	}
 
 	existing, err := h.queries.GetMaintenanceWindow(c.Context(), id)
@@ -1721,29 +1635,24 @@ func (h *AlertHandler) UpdateMaintenanceWindow(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Maintenance window not found")
 	}
 
-	var req createMaintenanceWindowRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
+	// Every field reads the EMPTY value as absent rather than as a clear, which
+	// is what the pre-migration `if req.X != ""` tests did — so there is no way
+	// to blank a description through this route, and there never was.
 	description := existing.Description
-	if req.Description != "" {
-		if len(req.Description) > maxDescriptionLen {
-			return fiber.NewError(fiber.StatusBadRequest, "Description must be <= 1024 characters")
-		}
-		description = req.Description
+	if v := p.String("description"); v != "" {
+		description = v
 	}
 	startsAt := existing.StartsAt
-	if req.StartsAt != "" {
-		parsed, parseErr := time.Parse(time.RFC3339, req.StartsAt)
+	if v := p.String("starts_at"); v != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, v)
 		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid starts_at format")
 		}
 		startsAt = parsed
 	}
 	endsAt := existing.EndsAt
-	if req.EndsAt != "" {
-		parsed, parseErr := time.Parse(time.RFC3339, req.EndsAt)
+	if v := p.String("ends_at"); v != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, v)
 		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid ends_at format")
 		}
@@ -1753,11 +1662,12 @@ func (h *AlertHandler) UpdateMaintenanceWindow(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "ends_at must be after starts_at")
 	}
 	nodeID := existing.NodeID
-	if req.NodeID != "" {
-		nid, parseErr := uuid.Parse(req.NodeID)
+	if raw := p.String("node_id"); raw != "" {
+		nid, parseErr := parseParamUUID(raw)
 		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid node_id")
+			return parseErr
 		}
+		// The owning cluster is the authority here too — see the create.
 		owner, ownerErr := resolveNodeCluster(c, h.queries, nid, "maintenance_window")
 		if ownerErr != nil {
 			return ownerErr
@@ -1785,18 +1695,15 @@ func (h *AlertHandler) UpdateMaintenanceWindow(c fiber.Ctx) error {
 }
 
 // DeleteMaintenanceWindow deletes a maintenance window.
-func (h *AlertHandler) DeleteMaintenanceWindow(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AlertHandler) DeleteMaintenanceWindow(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "maintenance_window", clusterID); err != nil {
 		return err
 	}
 
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid window ID")
+		return err
 	}
 
 	existing, err := h.queries.GetMaintenanceWindow(c.Context(), id)

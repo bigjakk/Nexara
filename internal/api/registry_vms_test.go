@@ -361,6 +361,8 @@ var routesOutsideTheClusterCheckShape = func() map[string]string {
 		firewallTemplateRoutesOutsideTheClusterCheckShape,
 		backupRoutesOutsideTheClusterCheckShape,
 		reportRoutesOutsideTheClusterCheckShape,
+		veeamRoutesOutsideTheClusterCheckShape,
+		alertRoutesOutsideTheClusterCheckShape,
 	} {
 		maps.Copy(out, m)
 	}
@@ -400,6 +402,8 @@ var registryDomainRouteCounts = map[string]int{
 	"registerBackupEndpoints":         backupRouteCount,
 	"registerVMImportEndpoints":       vmImportRouteCount,
 	"registerReportEndpoints":         reportRouteCount,
+	"registerVeeamEndpoints":          veeamRouteCount,
+	"registerAlertEndpoints":          alertRouteCount,
 	// NetworkHandler's 66 routes are declared across four files and four
 	// functions rather than one, so each group carries its own count here —
 	// see the file comment in registry_networks.go.
@@ -442,6 +446,8 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 		"registerBackupEndpoints":         0,
 		"registerVMImportEndpoints":       0,
 		"registerReportEndpoints":         0,
+		"registerVeeamEndpoints":          0,
+		"registerAlertEndpoints":          0,
 
 		"registerNetworkInterfaceEndpoints": 0,
 		"registerFirewallEndpoints":         0,
@@ -517,6 +523,14 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	before = reg.Len()
 	registerReportEndpoints(reg, s.reportHandler)
 	declared["registerReportEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerVeeamEndpoints(reg, s.veeamHandler, nil, nil)
+	declared["registerVeeamEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerAlertEndpoints(reg, s.alertHandler)
+	declared["registerAlertEndpoints"] = reg.Len() - before
 
 	before = reg.Len()
 	registerNetworkInterfaceEndpoints(reg, s.networkHandler)

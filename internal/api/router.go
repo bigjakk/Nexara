@@ -108,14 +108,12 @@ func (s *Server) setupRoutes() {
 		// /cpu-flags, /isos) are VMHandler methods and live in
 		// internal/api/registry_vms.go.
 
-		// The VM detail page's Veeam card. Gated on view:veeam for the
-		// cluster, not view:vm — a caller who may see the guest is not
-		// thereby entitled to its backup posture. The vmHandler condition
-		// is kept from when this sat inside the VM block: the card belongs
-		// to a page that does not exist without the VM routes.
-		if s.vmHandler != nil && s.veeamHandler != nil {
-			clusters.Get("/:cluster_id/vms/:vm_id/veeam", s.veeamHandler.GetGuestVeeamProtection)
-		}
+		// The VM detail page's Veeam card is declared in
+		// internal/api/registry_veeam.go alongside the 24 /veeam-servers
+		// routes and mounted by mountRegistry above, so there is no block for
+		// it here. It lost the vmHandler condition it used to carry: the card
+		// is VeeamHandler's route, and a Server holding one handler but not the
+		// other would have silently dropped it.
 		if s.guestSnapshotHandler != nil {
 			clusters.Post("/:cluster_id/guest-snapshots/resync", s.guestSnapshotHandler.Resync)
 		}
@@ -177,15 +175,10 @@ func (s *Server) setupRoutes() {
 		// internal/api/registry_cve.go and mounted by mountRegistry
 		// above, so there is no block for them here.
 
-		// Cluster-scoped alert routes.
-		if s.alertHandler != nil {
-			clusters.Get("/:cluster_id/alerts", s.alertHandler.ListAlertsByCluster)
-			clusters.Get("/:cluster_id/alerts/count", s.alertHandler.CountActiveAlertsByCluster)
-			clusters.Get("/:cluster_id/maintenance-windows", s.alertHandler.ListMaintenanceWindows)
-			clusters.Post("/:cluster_id/maintenance-windows", s.alertHandler.CreateMaintenanceWindow)
-			clusters.Put("/:cluster_id/maintenance-windows/:id", s.alertHandler.UpdateMaintenanceWindow)
-			clusters.Delete("/:cluster_id/maintenance-windows/:id", s.alertHandler.DeleteMaintenanceWindow)
-		}
+		// The 6 cluster-scoped alert and maintenance-window routes are
+		// declared in internal/api/registry_alerts.go alongside the 14
+		// instance-wide ones and mounted by mountRegistry above, so there is no
+		// block for them here.
 
 		// The 10 DRS routes are declared in internal/api/registry_drs.go
 		// and mounted by mountRegistry above, so there is no block for
@@ -356,28 +349,22 @@ func (s *Server) setupRoutes() {
 	// above, so there is no block for them here.
 
 	// Alert routes.
+	//
+	// 20 of AlertHandler's 22 routes are declared in
+	// internal/api/registry_alerts.go and mounted by mountRegistry above. The
+	// TWO below stay here because the registry cannot express them: their body
+	// carries `escalation_chain`, a JSON array of OBJECTS, and apischema's
+	// Property.Items is restricted to scalar element types (compileItems,
+	// "only scalar element types are supported"). Declaring them without
+	// `escalation_chain` is not an option either — an undeclared key is a 400,
+	// which would break the escalation editor on every save. Both keep their
+	// hand-placed permission checks, and
+	// TestAlertRuleWritesAreStillLegacy pins that it is a decision rather than
+	// a gap.
 	if s.alertHandler != nil {
-		alerts := v1.Group("/alerts", s.authRequired())
-		alerts.Get("/", s.alertHandler.ListAlerts)
-		alerts.Get("/summary", s.alertHandler.GetAlertSummary)
-		alerts.Get("/:id", s.alertHandler.GetAlert)
-		alerts.Post("/:id/acknowledge", s.alertHandler.AcknowledgeAlert)
-		alerts.Post("/:id/resolve", s.alertHandler.ResolveAlert)
-
 		alertRules := v1.Group("/alert-rules", s.authRequired())
-		alertRules.Get("/", s.alertHandler.ListRules)
 		alertRules.Post("/", s.alertHandler.CreateRule)
-		alertRules.Get("/:id", s.alertHandler.GetRule)
 		alertRules.Put("/:id", s.alertHandler.UpdateRule)
-		alertRules.Delete("/:id", s.alertHandler.DeleteRule)
-
-		notifChannels := v1.Group("/notification-channels", s.authRequired())
-		notifChannels.Get("/", s.alertHandler.ListChannels)
-		notifChannels.Post("/", s.alertHandler.CreateChannel)
-		notifChannels.Get("/:id", s.alertHandler.GetChannel)
-		notifChannels.Put("/:id", s.alertHandler.UpdateChannel)
-		notifChannels.Delete("/:id", s.alertHandler.DeleteChannel)
-		notifChannels.Post("/:id/test", s.alertHandler.TestChannel)
 	}
 
 	// Notification dead-letter queue.
@@ -403,89 +390,16 @@ func (s *Server) setupRoutes() {
 
 	// Veeam Backup & Replication server routes.
 	//
-	// Global-scope: a Veeam server can protect several Proxmox clusters, so
-	// the registry itself is gated on global view/manage/delete:veeam rather
-	// than per-cluster. Cluster scoping applies to the data these servers
-	// produce, which arrives with the inventory sync.
-	if s.veeamHandler != nil {
-		// Create, Update and Test each spend a real password grant against a
-		// domain-backed VBR server, so they carry the same dedicated limiter
-		// POST /clusters does — see veeamConnectLimiter.
-		//
-		// ONE instance shared across the three, not one call each: separate
-		// instances hold separate stores, which would silently triple the
-		// budget the limiter exists to cap.
-		veeamConnect := s.veeamConnectLimiter()
-
-		vbr := v1.Group("/veeam-servers", s.authRequired())
-		vbr.Post("/", veeamConnect, s.veeamHandler.Create)
-		vbr.Get("/", s.veeamHandler.List)
-		vbr.Get("/:id", s.veeamHandler.Get)
-		vbr.Put("/:id", veeamConnect, s.veeamHandler.Update)
-		vbr.Delete("/:id", s.veeamHandler.Delete)
-		vbr.Post("/:id/test", veeamConnect, s.veeamHandler.Test)
-
-		// Collected inventory. Repositories are global scope; jobs, sessions
-		// and backup objects are scoped per cluster through the server's
-		// veeam_platforms mapping, and fail closed to global-only while that
-		// mapping is unconfirmed.
-		vbr.Get("/:id/repositories", s.veeamHandler.ListRepositories)
-		vbr.Get("/:id/repositories/:repository_id/metrics", s.veeamHandler.GetRepositoryMetrics)
-		vbr.Get("/:id/jobs", s.veeamHandler.ListJobs)
-		vbr.Get("/:id/sessions", s.veeamHandler.ListSessions)
-		vbr.Get("/:id/backup-objects", s.veeamHandler.ListBackupObjects)
-		vbr.Get("/:id/backup-objects/:object_id/restore-points", s.veeamHandler.ListRestorePoints)
-
-		// Platform mapping. This is the operator-confirmed link a Veeam
-		// platformId has to a Nexara cluster, and every cluster-scoped Veeam
-		// permission resolves through it — so the write is gated on GLOBAL
-		// manage:veeam, not on a grant for the cluster being attached.
-		vbr.Get("/:id/platforms", s.veeamHandler.ListPlatforms)
-		vbr.Put("/:id/platforms/:platform_id", s.veeamHandler.MapPlatform)
-
-		// Veeam's own guests on the cluster — worker appliances and the VBR
-		// server. Coverage excludes these, so an operator needs to be able to
-		// see what was excluded: an exclusion nobody can inspect is
-		// indistinguishable from a coverage bug.
-		vbr.Get("/:id/infrastructure", s.veeamHandler.ListInfrastructure)
-
-		// Orphaned objects — backup objects whose platform is mapped but which
-		// match no guest on it. Restore points held for machines that no
-		// longer exist in the form that was backed up, which the Veeam console
-		// does not surface. The PUT beside it is the operator's override for
-		// what automatic resolution cannot know.
-		vbr.Get("/:id/orphaned-objects", s.veeamHandler.ListOrphanedObjects)
-		vbr.Put("/:id/backup-objects/:object_id/guest", s.veeamHandler.MapBackupObjectGuest)
-
-		// Job control. Gated on execute:veeam, resolved PER CLUSTER through
-		// the job's derived platform_id — a job whose platform is unmapped, or
-		// which has never run and so has no platform at all, requires the
-		// global grant.
-		//
-		// Every one of these spends a fresh OAuth2 password grant against the
-		// VBR server, so they carry their own limiter rather than the general
-		// one. ONE instance shared across the six, for the reason spelled out
-		// on veeamConnect above: separate instances hold separate stores and
-		// would multiply the budget the limiter exists to cap.
-		veeamControl := s.veeamControlLimiter()
-
-		vbr.Post("/:id/jobs/:job_id/start", veeamControl, s.veeamHandler.StartJob)
-		vbr.Post("/:id/jobs/:job_id/stop", veeamControl, s.veeamHandler.StopJob)
-		vbr.Post("/:id/jobs/:job_id/enable", veeamControl, s.veeamHandler.EnableJob)
-		vbr.Post("/:id/jobs/:job_id/disable", veeamControl, s.veeamHandler.DisableJob)
-		vbr.Post("/:id/sessions/:session_id/stop", veeamControl, s.veeamHandler.StopSession)
-
-		// Read-through to Veeam rather than stored: logs are large, per-run,
-		// and wanted only when someone opens one run. view:veeam, but it still
-		// costs a logon, so it shares the control limiter.
-		vbr.Get("/:id/sessions/:session_id/logs", veeamControl, s.veeamHandler.GetSessionLogs)
-
-		// The per-guest breakdown of one run — which guests it processed and
-		// which failed. Veeam's console shows this and none of its plain
-		// listings do, and a Proxmox job's object list is unreadable
-		// (GET /jobs/{id} is a 400), so this is the only route to it.
-		vbr.Get("/:id/sessions/:session_id/tasks", veeamControl, s.veeamHandler.GetSessionTasks)
-	}
+	// All 25 VeeamHandler routes are declared in
+	// internal/api/registry_veeam.go — the 24 under /veeam-servers and the VM
+	// detail page's Veeam card at /clusters/:cluster_id/vms/:vm_id/veeam — and
+	// mounted by mountRegistry above, so there is no group for them here. The
+	// two shared rate limiters they carried (veeamConnectLimiter for the three
+	// calls that spend a password grant, veeamControlLimiter for the seven job
+	// and session calls) are built once in buildRegistry and attached through
+	// the declaration's RateLimiter field, which mounts them in the same
+	// position this block did: after authentication, ahead of the permission
+	// check.
 
 	// The instance-wide PBS snapshot lookup and the backup-coverage report
 	// are declared in internal/api/registry_backup.go and mounted by

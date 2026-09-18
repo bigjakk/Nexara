@@ -78,6 +78,16 @@ func (s *Server) buildRegistry() *Registry {
 	if s.reportHandler != nil {
 		registerReportEndpoints(reg, s.reportHandler)
 	}
+	if s.veeamHandler != nil {
+		// ONE limiter instance per group, shared across the routes that carry
+		// it, exactly as the legacy block built them: separate instances hold
+		// separate stores, which would silently multiply the budget each one
+		// exists to cap. See veeamConnectLimiter in middleware.go.
+		registerVeeamEndpoints(reg, s.veeamHandler, s.veeamConnectLimiter(), s.veeamControlLimiter())
+	}
+	if s.alertHandler != nil {
+		registerAlertEndpoints(reg, s.alertHandler)
+	}
 	if s.networkHandler != nil {
 		// One handler, four declaration files: see the file comment in
 		// registry_networks.go for the split.

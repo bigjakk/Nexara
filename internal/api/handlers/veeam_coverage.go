@@ -10,7 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // Orphaned objects, operator overrides, and the per-guest protection card.
@@ -44,10 +46,10 @@ type veeamOrphanResponse struct {
 // the name. A name-matching coverage view would not have an orphan list at
 // all — it would silently report each of these guests as protected, by a
 // backup of the machine it replaced.
-func (h *VeeamHandler) ListOrphanedObjects(c fiber.Ctx) error {
+func (h *VeeamHandler) ListOrphanedObjects(c fiber.Ctx, p *apischema.Params) error {
 	// Authorize FIRST, before the server lookup, so an unauthorized caller
 	// cannot tell 404 from 403 and probe which server ids exist.
-	serverID, err := veeamServerIDFromParam(c)
+	serverID, err := veeamServerID(p)
 	if err != nil {
 		return err
 	}
@@ -55,7 +57,7 @@ func (h *VeeamHandler) ListOrphanedObjects(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	server, err := h.fetch(c)
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
@@ -97,13 +99,6 @@ func (h *VeeamHandler) ListOrphanedObjects(c fiber.Ctx) error {
 	return RespondItems(c, resp)
 }
 
-// mapObjectGuestRequest carries the guest to attach, or nulls to hand the row
-// back to automatic resolution.
-type mapObjectGuestRequest struct {
-	ClusterID *uuid.UUID `json:"cluster_id"`
-	VMID      *int32     `json:"vmid"`
-}
-
 // MapBackupObjectGuest handles
 // PUT /api/v1/veeam-servers/:id/backup-objects/:object_id/guest.
 //
@@ -121,8 +116,8 @@ type mapObjectGuestRequest struct {
 // collapses authorization to a single question — manage:veeam on that one
 // cluster — instead of a source check and a destination check that can
 // disagree.
-func (h *VeeamHandler) MapBackupObjectGuest(c fiber.Ctx) error {
-	serverID, err := veeamServerIDFromParam(c)
+func (h *VeeamHandler) MapBackupObjectGuest(c fiber.Ctx, p *apischema.Params) error {
+	serverID, err := veeamServerID(p)
 	if err != nil {
 		return err
 	}
@@ -130,23 +125,33 @@ func (h *VeeamHandler) MapBackupObjectGuest(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	server, err := h.fetch(c)
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
-	objectID, err := uuid.Parse(c.Params("object_id"))
+	objectID, err := parseParamUUID(p.String("object_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid backup object ID")
+		return err
 	}
 
-	var req mapObjectGuestRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	// An omitted key and an explicit null both read as "not supplied" — see
+	// present() in apischema/validate.go — which is the *pointer* meaning both
+	// of these fields used to carry: clear the mapping.
+	//
 	// Both or neither. A cluster with no vmid identifies nothing, and a vmid
 	// with no cluster is ambiguous across every cluster the server protects.
-	if (req.ClusterID == nil) != (req.VMID == nil) {
+	requestedCluster, clusterSupplied := p.OptString("guest_cluster_id")
+	requestedVMID, vmidSupplied := p.OptInt("vmid")
+	if clusterSupplied != vmidSupplied {
 		return fiber.NewError(fiber.StatusBadRequest, "cluster_id and vmid must be set together, or both null to clear the mapping")
+	}
+	var targetCluster *uuid.UUID
+	if clusterSupplied {
+		id, parseErr := parseParamUUID(requestedCluster)
+		if parseErr != nil {
+			return parseErr
+		}
+		targetCluster = &id
 	}
 
 	object, err := h.queries.GetVeeamBackupObject(c.Context(), db.GetVeeamBackupObjectParams{
@@ -187,14 +192,18 @@ func (h *VeeamHandler) MapBackupObjectGuest(c fiber.Ctx) error {
 	target := pgtype.UUID{}
 	targetVMID := pgtype.Int4{}
 	guestName := ""
-	if req.ClusterID != nil {
-		if *req.ClusterID != platformCluster {
+	// The schema bounds vmid at 1..999999999, so the narrowing is total; the
+	// helper is used anyway because nothing else in this package converts an
+	// int64 to an int32 by hand.
+	vmid := safeconv.Int32(int(requestedVMID))
+	if targetCluster != nil {
+		if *targetCluster != platformCluster {
 			return fiber.NewError(fiber.StatusBadRequest,
 				"The guest must be on the cluster this backup object's Veeam platform is mapped to")
 		}
 		guest, gErr := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
-			ClusterID: *req.ClusterID,
-			Vmid:      *req.VMID,
+			ClusterID: *targetCluster,
+			Vmid:      vmid,
 		})
 		if gErr != nil {
 			if errors.Is(gErr, pgx.ErrNoRows) {
@@ -203,8 +212,8 @@ func (h *VeeamHandler) MapBackupObjectGuest(c fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to resolve the guest")
 		}
 		guestName = guest.Name
-		target = pgtype.UUID{Bytes: *req.ClusterID, Valid: true}
-		targetVMID = pgtype.Int4{Int32: *req.VMID, Valid: true}
+		target = pgtype.UUID{Bytes: *targetCluster, Valid: true}
+		targetVMID = pgtype.Int4{Int32: vmid, Valid: true}
 	}
 
 	updated, err := h.queries.SetVeeamBackupObjectGuest(c.Context(), db.SetVeeamBackupObjectGuestParams{
@@ -222,30 +231,37 @@ func (h *VeeamHandler) MapBackupObjectGuest(c fiber.Ctx) error {
 
 	// Clearing hands the row back to automatic resolution, so re-run it now
 	// rather than leaving the object unattributed until the next sync tick.
-	if req.ClusterID == nil {
+	if targetCluster == nil {
 		if _, cErr := h.queries.CorrelateVeeamBackupObjects(c.Context(), server.ID); cErr != nil {
 			slog.Warn("veeam: re-correlating after clearing a manual mapping failed",
 				"veeam_server_id", server.ID, "object_id", objectID, "error", cErr)
 		}
 	}
 
+	// Both render as an explicit null when the mapping was cleared, rather
+	// than as a zero that reads like a real guest.
+	var auditVMID *int32
+	if targetCluster != nil {
+		auditVMID = &vmid
+	}
+
 	action := "veeam_object_unmapped"
-	if req.ClusterID != nil {
+	if targetCluster != nil {
 		action = "veeam_object_mapped"
 	}
 	h.audit(c, server, action, map[string]any{
 		"object":     auditSafe(updated.Name),
 		"object_id":  objectID.String(),
-		"cluster_id": clusterIDForAudit(req.ClusterID),
-		"vmid":       vmidForAudit(req.VMID),
+		"cluster_id": clusterIDForAudit(targetCluster),
+		"vmid":       vmidForAudit(auditVMID),
 		"guest_name": guestName,
 	})
 
 	return c.JSON(fiber.Map{
 		"id":           updated.ID,
 		"name":         updated.Name,
-		"cluster_id":   clusterIDForAudit(req.ClusterID),
-		"vmid":         vmidForAudit(req.VMID),
+		"cluster_id":   clusterIDForAudit(targetCluster),
+		"vmid":         vmidForAudit(auditVMID),
 		"match_method": updated.MatchMethod,
 	})
 }
@@ -296,22 +312,17 @@ const maxVeeamGuestRestorePoints = 100
 // route, and resolves it to the stable (cluster_id, vmid) identity for the
 // lookup — the UUID is a request-time handle, never a stored key, because the
 // collector re-mints it whenever it churns the guest row.
-func (h *VeeamHandler) GetGuestVeeamProtection(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+//
+// The cluster gate — view:veeam on the cluster, not view:vm, because a caller
+// who may see the guest is not thereby entitled to its backup posture — is
+// declared on the endpoint (internal/api/registry_veeam.go) and runs as
+// middleware before this function.
+func (h *VeeamHandler) GetGuestVeeamProtection(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
 	if err != nil {
-		return err
-	}
-	// view:veeam on the cluster, not view:vm: this is Veeam data, and a
-	// caller who may see the guest is not thereby entitled to its backup
-	// posture.
-	if err := requireClusterPerm(c, "view", "veeam", clusterID); err != nil {
 		return err
 	}
 
-	vmID, err := uuid.Parse(c.Params("vm_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
 	vm, err := h.queries.GetVM(c.Context(), vmID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -357,18 +368,21 @@ func (h *VeeamHandler) GetGuestVeeamProtection(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to load restore points")
 	}
-	for _, p := range points {
+	// `point` rather than the `p` this loop used to bind: p is the request's
+	// parameters now, and shadowing it inside the loop would give one letter two
+	// meanings in one function.
+	for _, point := range points {
 		resp.RestorePoints = append(resp.RestorePoints, veeamGuestRestorePointRow{
-			ID:            p.ID,
-			VeeamID:       p.VeeamID,
-			Name:          p.Name,
-			PointType:     p.PointType,
-			MalwareStatus: p.MalwareStatus,
-			GuestOSFamily: p.GuestOsFamily,
-			CreationTime:  p.CreationTime,
-			SizeBytes:     p.SizeBytes,
-			SupportsFLR:   p.SupportsFlr,
-			ObjectName:    p.ObjectName,
+			ID:            point.ID,
+			VeeamID:       point.VeeamID,
+			Name:          point.Name,
+			PointType:     point.PointType,
+			MalwareStatus: point.MalwareStatus,
+			GuestOSFamily: point.GuestOsFamily,
+			CreationTime:  point.CreationTime,
+			SizeBytes:     point.SizeBytes,
+			SupportsFLR:   point.SupportsFlr,
+			ObjectName:    point.ObjectName,
 		})
 	}
 

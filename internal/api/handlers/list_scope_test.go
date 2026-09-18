@@ -103,8 +103,15 @@ func newListScopeTestApp(t *testing.T) *fiber.App {
 
 	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 	installTestRoleMiddleware(app)
-	app.Get("/alert-rules", alerts.ListRules)
-	app.Get("/alerts", alerts.ListAlerts)
+	// The two alert listings are registry endpoints now, so they take their
+	// validated parameters rather than reading the query themselves. The scope
+	// gate this test is about runs before any of them is consulted, so an
+	// all-defaults Params is the honest stand-in for the request.
+	app.Get("/alert-rules", withParams(t, alertListMirror(t, nil), alerts.ListRules))
+	app.Get("/alerts", withParams(t, alertListMirror(t, apischema.Properties{
+		"state":    {Type: apischema.String, Optional: true},
+		"severity": {Type: apischema.String, Optional: true},
+	}), alerts.ListAlerts))
 	// The migration listing is a registry endpoint now, so it takes its
 	// validated parameters rather than reading the query itself. The scope
 	// gate this test is about runs before either is consulted, so an
@@ -132,6 +139,29 @@ func migrationListMirror(t *testing.T) apischema.Properties {
 	props := apischema.Properties{
 		"limit":  {Type: apischema.Integer, Optional: true, Default: 50},
 		"offset": {Type: apischema.Integer, Optional: true, Default: 0},
+	}
+	if err := props.Compile(); err != nil {
+		t.Fatalf("the mirror schema is itself invalid: %v", err)
+	}
+	return props
+}
+
+// alertListMirror is a local copy of the parts of the two alert listings'
+// declarations (internal/api/registry_alerts.go) that their handlers read.
+//
+// A mirror for the same reason migrationListMirror is one, and with the same
+// caveat: nothing here depends on the bounds matching. What it has to get
+// right is that every key the handler reads IS declared — a Params accessor
+// panics on an undeclared one — and that limit/offset carry a default.
+func alertListMirror(t *testing.T, extra apischema.Properties) apischema.Properties {
+	t.Helper()
+	props := apischema.Properties{
+		"limit":             {Type: apischema.Integer, Optional: true, Default: 50},
+		"offset":            {Type: apischema.Integer, Optional: true, Default: 0},
+		"filter_cluster_id": {Type: apischema.String, Alias: "cluster_id", Optional: true},
+	}
+	for name, prop := range extra {
+		props[name] = prop
 	}
 	if err := props.Compile(); err != nil {
 		t.Fatalf("the mirror schema is itself invalid: %v", err)

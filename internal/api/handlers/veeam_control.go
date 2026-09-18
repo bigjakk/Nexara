@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -39,8 +40,8 @@ import (
 const veeamControlTimeout = 30 * time.Second
 
 // StartJob handles POST /api/v1/veeam-servers/:id/jobs/:job_id/start.
-func (h *VeeamHandler) StartJob(c fiber.Ctx) error {
-	target, err := h.resolveJobForControl(c)
+func (h *VeeamHandler) StartJob(c fiber.Ctx, p *apischema.Params) error {
+	target, err := h.resolveJobForControl(c, p)
 	if err != nil {
 		return err
 	}
@@ -112,8 +113,8 @@ func (h *VeeamHandler) StartJob(c fiber.Ctx) error {
 //
 // Disruptive: the run is abandoned and the guests it had not reached yet keep
 // whatever recovery point they already had. The UI confirms it.
-func (h *VeeamHandler) StopJob(c fiber.Ctx) error {
-	target, err := h.resolveJobForControl(c)
+func (h *VeeamHandler) StopJob(c fiber.Ctx, p *apischema.Params) error {
+	target, err := h.resolveJobForControl(c, p)
 	if err != nil {
 		return err
 	}
@@ -174,8 +175,8 @@ func (h *VeeamHandler) StopJob(c fiber.Ctx) error {
 }
 
 // EnableJob handles POST /api/v1/veeam-servers/:id/jobs/:job_id/enable.
-func (h *VeeamHandler) EnableJob(c fiber.Ctx) error {
-	return h.setJobEnabled(c, true)
+func (h *VeeamHandler) EnableJob(c fiber.Ctx, p *apischema.Params) error {
+	return h.setJobEnabled(c, p, true)
 }
 
 // DisableJob handles POST /api/v1/veeam-servers/:id/jobs/:job_id/disable.
@@ -184,12 +185,12 @@ func (h *VeeamHandler) EnableJob(c fiber.Ctx) error {
 // no alarm is raised anywhere — the job simply stops running, so protection
 // stops accruing while every existing restore point sits there looking
 // healthy. Confirmed in the UI for that reason.
-func (h *VeeamHandler) DisableJob(c fiber.Ctx) error {
-	return h.setJobEnabled(c, false)
+func (h *VeeamHandler) DisableJob(c fiber.Ctx, p *apischema.Params) error {
+	return h.setJobEnabled(c, p, false)
 }
 
-func (h *VeeamHandler) setJobEnabled(c fiber.Ctx, enable bool) error {
-	target, err := h.resolveJobForControl(c)
+func (h *VeeamHandler) setJobEnabled(c fiber.Ctx, p *apischema.Params, enable bool) error {
+	target, err := h.resolveJobForControl(c, p)
 	if err != nil {
 		return err
 	}
@@ -227,8 +228,8 @@ func (h *VeeamHandler) setJobEnabled(c fiber.Ctx, enable bool) error {
 }
 
 // StopSession handles POST /api/v1/veeam-servers/:id/sessions/:session_id/stop.
-func (h *VeeamHandler) StopSession(c fiber.Ctx) error {
-	target, err := h.resolveSessionForControl(c, "execute")
+func (h *VeeamHandler) StopSession(c fiber.Ctx, p *apischema.Params) error {
+	target, err := h.resolveSessionForControl(c, p, "execute")
 	if err != nil {
 		return err
 	}
@@ -286,8 +287,8 @@ type veeamSessionLogResponse struct {
 // for a killed session. The UI says so rather than showing a bare "no data",
 // because "the log is empty" and "we failed to fetch the log" look identical
 // otherwise.
-func (h *VeeamHandler) GetSessionLogs(c fiber.Ctx) error {
-	target, err := h.resolveSessionForControl(c, "view")
+func (h *VeeamHandler) GetSessionLogs(c fiber.Ctx, p *apischema.Params) error {
+	target, err := h.resolveSessionForControl(c, p, "view")
 	if err != nil {
 		return err
 	}
@@ -367,8 +368,8 @@ type veeamTaskSessionResponse struct {
 // run still in flight — they appear as tasks finish — and none for a finished
 // run it kept no detail for. The response says which, because an operator
 // reads the wrong one otherwise.
-func (h *VeeamHandler) GetSessionTasks(c fiber.Ctx) error {
-	target, err := h.resolveSessionForControl(c, "view")
+func (h *VeeamHandler) GetSessionTasks(c fiber.Ctx, p *apischema.Params) error {
+	target, err := h.resolveSessionForControl(c, p, "view")
 	if err != nil {
 		return err
 	}
@@ -536,14 +537,14 @@ type veeamSessionTarget struct {
 // tell a job that exists from one that does not — the same 404-vs-403 oracle
 // the read endpoints close. The precise per-cluster check can only run after
 // the row is loaded, because the job's platform is what names the cluster.
-func (h *VeeamHandler) resolveJobForControl(c fiber.Ctx) (veeamJobTarget, error) {
-	serverID, err := veeamServerIDFromParam(c)
+func (h *VeeamHandler) resolveJobForControl(c fiber.Ctx, p *apischema.Params) (veeamJobTarget, error) {
+	serverID, err := veeamServerID(p)
 	if err != nil {
 		return veeamJobTarget{}, err
 	}
-	jobID, err := uuid.Parse(c.Params("job_id"))
+	jobID, err := parseParamUUID(p.String("job_id"))
 	if err != nil {
-		return veeamJobTarget{}, fiber.NewError(fiber.StatusBadRequest, "Invalid Veeam job ID")
+		return veeamJobTarget{}, err
 	}
 
 	scope, err := h.veeamScopeForAction(c, "execute", serverID)
@@ -551,7 +552,7 @@ func (h *VeeamHandler) resolveJobForControl(c fiber.Ctx) (veeamJobTarget, error)
 		return veeamJobTarget{}, err
 	}
 
-	server, err := h.fetch(c)
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return veeamJobTarget{}, err
 	}
@@ -581,14 +582,14 @@ func (h *VeeamHandler) resolveJobForControl(c fiber.Ctx) (veeamJobTarget, error)
 // resolveSessionForControl is resolveJobForControl for a session. The action
 // differs by endpoint: stopping a run is execute:veeam, reading its log is
 // view:veeam.
-func (h *VeeamHandler) resolveSessionForControl(c fiber.Ctx, action string) (veeamSessionTarget, error) {
-	serverID, err := veeamServerIDFromParam(c)
+func (h *VeeamHandler) resolveSessionForControl(c fiber.Ctx, p *apischema.Params, action string) (veeamSessionTarget, error) {
+	serverID, err := veeamServerID(p)
 	if err != nil {
 		return veeamSessionTarget{}, err
 	}
-	sessionID, err := uuid.Parse(c.Params("session_id"))
+	sessionID, err := parseParamUUID(p.String("session_id"))
 	if err != nil {
-		return veeamSessionTarget{}, fiber.NewError(fiber.StatusBadRequest, "Invalid Veeam session ID")
+		return veeamSessionTarget{}, err
 	}
 
 	scope, err := h.veeamScopeForAction(c, action, serverID)
@@ -596,7 +597,7 @@ func (h *VeeamHandler) resolveSessionForControl(c fiber.Ctx, action string) (vee
 		return veeamSessionTarget{}, err
 	}
 
-	server, err := h.fetch(c)
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return veeamSessionTarget{}, err
 	}

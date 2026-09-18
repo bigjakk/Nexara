@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/veeam"
 )
 
@@ -37,13 +38,22 @@ func newVeeamControlTestApp(t *testing.T) *fiber.App {
 	})
 	installStubEngineMiddleware(app)
 
-	app.Post("/veeam-servers/:id/jobs/:job_id/start", handler.StartJob)
-	app.Post("/veeam-servers/:id/jobs/:job_id/stop", handler.StopJob)
-	app.Post("/veeam-servers/:id/jobs/:job_id/enable", handler.EnableJob)
-	app.Post("/veeam-servers/:id/jobs/:job_id/disable", handler.DisableJob)
-	app.Post("/veeam-servers/:id/sessions/:session_id/stop", handler.StopSession)
-	app.Get("/veeam-servers/:id/sessions/:session_id/logs", handler.GetSessionLogs)
-	app.Get("/veeam-servers/:id/sessions/:session_id/tasks", handler.GetSessionTasks)
+	jobs := veeamPathMirror(t, apischema.Properties{
+		"job_id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath},
+	})
+	sessions := veeamPathMirror(t, apischema.Properties{
+		"session_id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath},
+	})
+	jobKeys := []string{"id", "job_id"}
+	sessionKeys := []string{"id", "session_id"}
+
+	app.Post("/veeam-servers/:id/jobs/:job_id/start", veeamHandlerWithParams(t, jobs, jobKeys, handler.StartJob))
+	app.Post("/veeam-servers/:id/jobs/:job_id/stop", veeamHandlerWithParams(t, jobs, jobKeys, handler.StopJob))
+	app.Post("/veeam-servers/:id/jobs/:job_id/enable", veeamHandlerWithParams(t, jobs, jobKeys, handler.EnableJob))
+	app.Post("/veeam-servers/:id/jobs/:job_id/disable", veeamHandlerWithParams(t, jobs, jobKeys, handler.DisableJob))
+	app.Post("/veeam-servers/:id/sessions/:session_id/stop", veeamHandlerWithParams(t, sessions, sessionKeys, handler.StopSession))
+	app.Get("/veeam-servers/:id/sessions/:session_id/logs", veeamHandlerWithParams(t, sessions, sessionKeys, handler.GetSessionLogs))
+	app.Get("/veeam-servers/:id/sessions/:session_id/tasks", veeamHandlerWithParams(t, sessions, sessionKeys, handler.GetSessionTasks))
 
 	return app
 }
@@ -85,6 +95,11 @@ func TestVeeamControl_RefusesBeforeAnyLookup(t *testing.T) {
 // A malformed id is caller-supplied syntax, not server state, so rejecting it
 // first reveals nothing. It must be a 400 rather than reaching the client and
 // being concatenated into a request path.
+//
+// The refusal moved a layer up with the migration: all three ids carry
+// apischema's "uuid" format on the declaration, so the schema answers before
+// the handler runs. The status the caller sees is unchanged, which is what
+// this pins.
 func TestVeeamControl_RejectsMalformedIDs(t *testing.T) {
 	app := newVeeamControlTestApp(t)
 	serverID := uuid.New().String()

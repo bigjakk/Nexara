@@ -26,15 +26,18 @@ import (
 // and PBS servers 6, then at 352 after Phase 6d moved 50: all 38
 // NodeHandler routes and 12 of the 13 StorageHandler ones, then at 288
 // after Phase 6e moved 64 of NetworkHandler's 66: 7 node-interface, 28
-// firewall, 25 SDN and 4 of the 6 firewall-template routes. It is now at
-// 237 after Phase 6f moved 51: 28 backup — 19 of them the routes nested
-// under /pbs-servers/:pbs_id — 11 VM-import, and all 12 report routes.
+// firewall, 25 SDN and 4 of the 6 firewall-template routes, then at 237
+// after Phase 6f moved 51: 28 backup — 19 of them the routes nested under
+// /pbs-servers/:pbs_id — 11 VM-import, and all 12 report routes. It is now
+// at 192 after Phase 6g moved 45: all 25 Veeam routes — 24 under
+// /veeam-servers and the last one the VM detail page's Veeam card — and 20
+// of AlertHandler's 22.
 //
 // TestGuard_LegacyRouteSetOnlyShrinks compares the live legacy set
 // against it and fails if anything NEW shows up — a route that is not
 // here must be added through the registry, not through router.go.
 //
-// THREE routes in this list are here because the registry CANNOT express
+// FIVE routes in this list are here because the registry CANNOT express
 // them, not because nobody got to them, and each is pinned by a test so it
 // stays a decision rather than a gap:
 //
@@ -49,6 +52,10 @@ import (
 //     registerFirewallTemplateEndpoints in
 //     internal/api/registry_firewall_templates.go and
 //     TestFirewallTemplateWritesAreStillLegacy.
+//   - POST /api/v1/alert-rules and PUT /api/v1/alert-rules/:id carry
+//     `escalation_chain`, an array of objects for the same reason. See
+//     registerAlertEndpoints in internal/api/registry_alerts.go and
+//     TestAlertRuleWritesAreStillLegacy.
 //
 // Regenerate after migrating routes into the registry (the set should
 // only ever need entries REMOVED, never added):
@@ -62,7 +69,6 @@ import (
 // removing entries that were migrated away is the intended maintenance.
 var legacyRouteBaseline = map[string]bool{
 	"DELETE /api/v1/admin/api-keys/:id":                                                    true,
-	"DELETE /api/v1/alert-rules/:id":                                                       true,
 	"DELETE /api/v1/api-keys":                                                              true,
 	"DELETE /api/v1/api-keys/:id":                                                          true,
 	"DELETE /api/v1/auth/sessions/:id":                                                     true,
@@ -73,7 +79,6 @@ var legacyRouteBaseline = map[string]bool{
 	"DELETE /api/v1/clusters/:cluster_id/access/users/:userid/tokens/:tokenid":             true,
 	"DELETE /api/v1/clusters/:cluster_id/acme/accounts/:name":                              true,
 	"DELETE /api/v1/clusters/:cluster_id/acme/plugins/:plugin_id":                          true,
-	"DELETE /api/v1/clusters/:cluster_id/maintenance-windows/:id":                          true,
 	"DELETE /api/v1/clusters/:cluster_id/metric-servers/:server_id":                        true,
 	"DELETE /api/v1/clusters/:cluster_id/nodes/:node/certificates/revoke":                  true,
 	"DELETE /api/v1/clusters/:cluster_id/pools/:pool_id":                                   true,
@@ -85,7 +90,6 @@ var legacyRouteBaseline = map[string]bool{
 	"DELETE /api/v1/clusters/:id":                                                          true,
 	"DELETE /api/v1/favorites":                                                             true,
 	"DELETE /api/v1/ldap/configs/:id":                                                      true,
-	"DELETE /api/v1/notification-channels/:id":                                             true,
 	"DELETE /api/v1/notification-dlq/:id":                                                  true,
 	"DELETE /api/v1/oidc/configs/:id":                                                      true,
 	"DELETE /api/v1/rbac/roles/:id":                                                        true,
@@ -94,13 +98,7 @@ var legacyRouteBaseline = map[string]bool{
 	"DELETE /api/v1/tasks":                                                                 true,
 	"DELETE /api/v1/users/:id":                                                             true,
 	"DELETE /api/v1/users/:id/totp":                                                        true,
-	"DELETE /api/v1/veeam-servers/:id":                                                     true,
 	"GET /api/v1/admin/api-keys":                                                           true,
-	"GET /api/v1/alert-rules":                                                              true,
-	"GET /api/v1/alert-rules/:id":                                                          true,
-	"GET /api/v1/alerts":                                                                   true,
-	"GET /api/v1/alerts/:id":                                                               true,
-	"GET /api/v1/alerts/summary":                                                           true,
 	"GET /api/v1/api-docs":                                                                 true,
 	"GET /api/v1/api-keys":                                                                 true,
 	"GET /api/v1/audit-log":                                                                true,
@@ -136,10 +134,7 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/acme/directories":                                    true,
 	"GET /api/v1/clusters/:cluster_id/acme/plugins":                                        true,
 	"GET /api/v1/clusters/:cluster_id/acme/tos":                                            true,
-	"GET /api/v1/clusters/:cluster_id/alerts":                                              true,
-	"GET /api/v1/clusters/:cluster_id/alerts/count":                                        true,
 	"GET /api/v1/clusters/:cluster_id/audit-log":                                           true,
-	"GET /api/v1/clusters/:cluster_id/maintenance-windows":                                 true,
 	"GET /api/v1/clusters/:cluster_id/metric-servers":                                      true,
 	"GET /api/v1/clusters/:cluster_id/metric-servers/:server_id":                           true,
 	"GET /api/v1/clusters/:cluster_id/metrics":                                             true,
@@ -157,14 +152,11 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/ssh-known-hosts":                                     true,
 	"GET /api/v1/clusters/:cluster_id/vm-folders":                                          true,
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics":                                  true,
-	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/veeam":                                    true,
 	"GET /api/v1/clusters/:id":                                                             true,
 	"GET /api/v1/favorites":                                                                true,
 	"GET /api/v1/guest-snapshots":                                                          true,
 	"GET /api/v1/ldap/configs":                                                             true,
 	"GET /api/v1/ldap/configs/:id":                                                         true,
-	"GET /api/v1/notification-channels":                                                    true,
-	"GET /api/v1/notification-channels/:id":                                                true,
 	"GET /api/v1/notification-dlq":                                                         true,
 	"GET /api/v1/notification-dlq/summary":                                                 true,
 	"GET /api/v1/oidc/configs":                                                             true,
@@ -183,25 +175,10 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/tasks":                                                                    true,
 	"GET /api/v1/users":                                                                    true,
 	"GET /api/v1/users/:id":                                                                true,
-	"GET /api/v1/veeam-servers":                                                            true,
-	"GET /api/v1/veeam-servers/:id":                                                        true,
-	"GET /api/v1/veeam-servers/:id/backup-objects":                                         true,
-	"GET /api/v1/veeam-servers/:id/backup-objects/:object_id/restore-points":               true,
-	"GET /api/v1/veeam-servers/:id/infrastructure":                                         true,
-	"GET /api/v1/veeam-servers/:id/jobs":                                                   true,
-	"GET /api/v1/veeam-servers/:id/orphaned-objects":                                       true,
-	"GET /api/v1/veeam-servers/:id/platforms":                                              true,
-	"GET /api/v1/veeam-servers/:id/repositories":                                           true,
-	"GET /api/v1/veeam-servers/:id/repositories/:repository_id/metrics":                    true,
-	"GET /api/v1/veeam-servers/:id/sessions":                                               true,
-	"GET /api/v1/veeam-servers/:id/sessions/:session_id/logs":                              true,
-	"GET /api/v1/veeam-servers/:id/sessions/:session_id/tasks":                             true,
 	"GET /api/v1/version":                                                                  true,
 	"GET /healthz":                                                                         true,
 	"PATCH /api/v1/clusters/:cluster_id/vm-folders/:folder_id":                             true,
 	"POST /api/v1/alert-rules":                                                             true,
-	"POST /api/v1/alerts/:id/acknowledge":                                                  true,
-	"POST /api/v1/alerts/:id/resolve":                                                      true,
 	"POST /api/v1/api-keys":                                                                true,
 	"POST /api/v1/audit-log/syslog-test":                                                   true,
 	"POST /api/v1/auth/change-password":                                                    true,
@@ -225,7 +202,6 @@ var legacyRouteBaseline = map[string]bool{
 	"POST /api/v1/clusters/:cluster_id/acme/accounts":                                      true,
 	"POST /api/v1/clusters/:cluster_id/acme/plugins":                                       true,
 	"POST /api/v1/clusters/:cluster_id/guest-snapshots/resync":                             true,
-	"POST /api/v1/clusters/:cluster_id/maintenance-windows":                                true,
 	"POST /api/v1/clusters/:cluster_id/metric-servers":                                     true,
 	"POST /api/v1/clusters/:cluster_id/nodes/:node/apt/repositories":                       true,
 	"POST /api/v1/clusters/:cluster_id/nodes/:node/certificates/order":                     true,
@@ -249,8 +225,6 @@ var legacyRouteBaseline = map[string]bool{
 	"POST /api/v1/ldap/configs":                                                            true,
 	"POST /api/v1/ldap/configs/:id/sync":                                                   true,
 	"POST /api/v1/ldap/configs/:id/test":                                                   true,
-	"POST /api/v1/notification-channels":                                                   true,
-	"POST /api/v1/notification-channels/:id/test":                                          true,
 	"POST /api/v1/notification-dlq/:id/dismiss":                                            true,
 	"POST /api/v1/notification-dlq/:id/retry":                                              true,
 	"POST /api/v1/oidc/configs":                                                            true,
@@ -260,13 +234,6 @@ var legacyRouteBaseline = map[string]bool{
 	"POST /api/v1/settings/branding/favicon":                                               true,
 	"POST /api/v1/settings/branding/logo":                                                  true,
 	"POST /api/v1/tasks":                                                                   true,
-	"POST /api/v1/veeam-servers":                                                           true,
-	"POST /api/v1/veeam-servers/:id/jobs/:job_id/disable":                                  true,
-	"POST /api/v1/veeam-servers/:id/jobs/:job_id/enable":                                   true,
-	"POST /api/v1/veeam-servers/:id/jobs/:job_id/start":                                    true,
-	"POST /api/v1/veeam-servers/:id/jobs/:job_id/stop":                                     true,
-	"POST /api/v1/veeam-servers/:id/sessions/:session_id/stop":                             true,
-	"POST /api/v1/veeam-servers/:id/test":                                                  true,
 	"PUT /api/v1/alert-rules/:id":                                                          true,
 	"PUT /api/v1/audit-log/syslog-config":                                                  true,
 	"PUT /api/v1/auth/profile":                                                             true,
@@ -277,7 +244,6 @@ var legacyRouteBaseline = map[string]bool{
 	"PUT /api/v1/clusters/:cluster_id/access/users/:userid/tokens/:tokenid":                true,
 	"PUT /api/v1/clusters/:cluster_id/acme/accounts/:name":                                 true,
 	"PUT /api/v1/clusters/:cluster_id/acme/plugins/:plugin_id":                             true,
-	"PUT /api/v1/clusters/:cluster_id/maintenance-windows/:id":                             true,
 	"PUT /api/v1/clusters/:cluster_id/metric-servers/:server_id":                           true,
 	"PUT /api/v1/clusters/:cluster_id/nodes/:node/acme-config":                             true,
 	"PUT /api/v1/clusters/:cluster_id/nodes/:node/apt/repositories":                        true,
@@ -289,15 +255,11 @@ var legacyRouteBaseline = map[string]bool{
 	"PUT /api/v1/clusters/:id":                                                             true,
 	"PUT /api/v1/firewall-templates/:id":                                                   true,
 	"PUT /api/v1/ldap/configs/:id":                                                         true,
-	"PUT /api/v1/notification-channels/:id":                                                true,
 	"PUT /api/v1/oidc/configs/:id":                                                         true,
 	"PUT /api/v1/rbac/roles/:id":                                                           true,
 	"PUT /api/v1/settings/:key":                                                            true,
 	"PUT /api/v1/tasks/:upid":                                                              true,
 	"PUT /api/v1/users/:id":                                                                true,
-	"PUT /api/v1/veeam-servers/:id":                                                        true,
-	"PUT /api/v1/veeam-servers/:id/backup-objects/:object_id/guest":                        true,
-	"PUT /api/v1/veeam-servers/:id/platforms/:platform_id":                                 true,
 }
 
 // legacyRouteRatchetViolations reports every key present in actual but

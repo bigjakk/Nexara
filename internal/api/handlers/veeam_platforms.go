@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -44,11 +45,8 @@ type veeamPlatformResponse struct {
 // construction — it is the list of clusters this server protects, including
 // ones the caller may hold no grant on — so there is no cluster to scope it
 // to, and a partial answer would make the mapping UI silently incomplete.
-func (h *VeeamHandler) ListPlatforms(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "veeam"); err != nil {
-		return err
-	}
-	server, err := h.fetch(c)
+func (h *VeeamHandler) ListPlatforms(c fiber.Ctx, p *apischema.Params) error {
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
@@ -75,47 +73,42 @@ func (h *VeeamHandler) ListPlatforms(c fiber.Ctx) error {
 	return RespondItems(c, resp)
 }
 
-// mapPlatformRequest carries the cluster to attach, or null to detach.
-//
-// A pointer so "cluster_id": null and an omitted key are both expressible and
-// both mean detach — the UI's "not mapped" option sends null, and treating a
-// missing field as "leave alone" would make the only way to unmap it a
-// separate endpoint.
-type mapPlatformRequest struct {
-	ClusterID *uuid.UUID `json:"cluster_id"`
-}
-
 // MapPlatform handles PUT /api/v1/veeam-servers/:id/platforms/:platform_id.
 //
 // Gated on GLOBAL manage:veeam. Deliberately not on manage:veeam for the
 // target cluster: this call decides which cluster a body of backup data is
 // attributed to, so a holder scoped to cluster A could otherwise point a
 // platform holding cluster B's guests at A and read it.
-func (h *VeeamHandler) MapPlatform(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "veeam"); err != nil {
-		return err
-	}
-	server, err := h.fetch(c)
+func (h *VeeamHandler) MapPlatform(c fiber.Ctx, p *apischema.Params) error {
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
-	platformID, err := uuid.Parse(c.Params("platform_id"))
+	platformID, err := parseParamUUID(p.String("platform_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid platform ID")
+		return err
 	}
 
-	var req mapPlatformRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	// An omitted key and an explicit null both read as "not supplied" — see
+	// present() in apischema/validate.go — which is exactly the *uuid.UUID
+	// pointer's old meaning: detach. The UI's "not mapped" option sends null.
+	requested, mapping := p.OptString("platform_cluster_id")
+	var requestedCluster *uuid.UUID
+	if mapping {
+		id, parseErr := parseParamUUID(requested)
+		if parseErr != nil {
+			return parseErr
+		}
+		requestedCluster = &id
 	}
 
 	clusterName := ""
 	target := pgtype.UUID{}
-	if req.ClusterID != nil {
+	if requestedCluster != nil {
 		// Resolved before the write so an unknown cluster is a 404 rather
 		// than a foreign-key 500, and so the audit row can name the cluster
 		// an operator actually chose.
-		cluster, cErr := h.queries.GetCluster(c.Context(), *req.ClusterID)
+		cluster, cErr := h.queries.GetCluster(c.Context(), *requestedCluster)
 		if cErr != nil {
 			if errors.Is(cErr, pgx.ErrNoRows) {
 				return fiber.NewError(fiber.StatusNotFound, "Cluster not found")
@@ -163,13 +156,13 @@ func (h *VeeamHandler) MapPlatform(c fiber.Ctx) error {
 	}
 
 	action := "veeam_platform_unmapped"
-	if req.ClusterID != nil {
+	if requestedCluster != nil {
 		action = "veeam_platform_mapped"
 	}
 	h.audit(c, server, action, map[string]any{
 		"platform_id":  platformID.String(),
 		"platform":     auditSafe(updated.DisplayName),
-		"cluster_id":   clusterIDForAudit(req.ClusterID),
+		"cluster_id":   clusterIDForAudit(requestedCluster),
 		"cluster_name": clusterName,
 	})
 
@@ -221,11 +214,8 @@ type veeamInfrastructureResponse struct {
 //
 // Global view:veeam, like the repository and platform listings: the answer
 // spans every cluster the server protects.
-func (h *VeeamHandler) ListInfrastructure(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "veeam"); err != nil {
-		return err
-	}
-	server, err := h.fetch(c)
+func (h *VeeamHandler) ListInfrastructure(c fiber.Ctx, p *apischema.Params) error {
+	server, err := h.fetch(c, p)
 	if err != nil {
 		return err
 	}
