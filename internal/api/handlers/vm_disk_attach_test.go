@@ -1009,3 +1009,92 @@ func TestRequireGuestKindPerm(t *testing.T) {
 		})
 	}
 }
+
+// --- Detach auditing ---
+
+type detachProbeStub struct {
+	config proxmox.VMConfig
+	err    error
+}
+
+func (s detachProbeStub) GetVMConfig(context.Context, string, int) (proxmox.VMConfig, error) {
+	return s.config, s.err
+}
+
+// The audit row for a detach has to distinguish three answers: the volume, "no
+// such slot", and "we could not look". Collapsing the last two is what makes an
+// audit row lie by omission.
+func TestDetachedVolume(t *testing.T) {
+	config := proxmox.VMConfig{
+		"digest":  "abc123",
+		"ide0":    "store01:vm-101-disk-0,size=32G",
+		"unused0": "store01:vm-101-disk-2",
+		"ide2":    "none,media=cdrom",
+	}
+
+	tests := []struct {
+		name       string
+		probe      detachProbe
+		disk       string
+		want       string
+		wantDigest string
+	}{
+		{"a live slot names its volume", detachProbeStub{config: config}, "ide0", "store01:vm-101-disk-0", "abc123"},
+		{"an unused slot names its volume", detachProbeStub{config: config}, "unused0", "store01:vm-101-disk-2", "abc123"},
+		{"an empty cdrom still resolves", detachProbeStub{config: config}, "ide2", "none", "abc123"},
+		{"a missing key says so, and still pins", detachProbeStub{config: config}, "scsi5", notInConfig, "abc123"},
+		{"an unreadable config says so, and differently", detachProbeStub{err: errors.New("boom")}, "ide0", configUnreadable, ""},
+		{"a digestless config pins nothing", detachProbeStub{config: proxmox.VMConfig{"ide0": "store01:vm-101-disk-0"}}, "ide0", "store01:vm-101-disk-0", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, digest := detachedVolume(context.Background(), tt.probe, "pve-01", 101, tt.disk)
+			if got != tt.want {
+				t.Errorf("volume = %q, want %q", got, tt.want)
+			}
+			if digest != tt.wantDigest {
+				t.Errorf("digest = %q, want %q", digest, tt.wantDigest)
+			}
+		})
+	}
+}
+
+// removes_volume is the difference between a reversible change and an
+// irreversible one, so it has three answers too. Asserting a definite false
+// when the answer is unknown reads as reassurance, which is the failure this
+// whole change exists to avoid.
+func TestDetachRemovesVolume(t *testing.T) {
+	tests := []struct {
+		name     string
+		disk     string
+		resolved string
+		want     *bool
+	}{
+		{"an unusedN key destroys, whatever the volume", "unused0", "store01:vm-101-disk-2", boolPtr(true)},
+		{"an unusedN key destroys even unresolved", "unused11", configUnreadable, boolPtr(true)},
+		{"a live slot parks its volume", "ide0", "store01:vm-101-disk-0", boolPtr(false)},
+		{"a cloud-init drive is freed, not parked", "ide2", "store01:vm-101-cloudinit", boolPtr(true)},
+		{"a cloud-init drive with a format suffix too", "ide2", "store01:vm-101-cloudinit.qcow2", boolPtr(true)},
+		{"a path-style cloud-init volume", "ide2", "/mnt/pve/store01/vm-101-cloudinit", boolPtr(true)},
+		{"a plain volume that merely mentions cloudinit is not one", "scsi1", "store01:vm-101-cloudinit-backup", boolPtr(false)},
+		{"a key that was not set destroyed nothing", "scsi5", notInConfig, boolPtr(false)},
+		{"an unreadable config cannot answer", "ide0", configUnreadable, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detachRemovesVolume(tt.disk, tt.resolved)
+			switch {
+			case tt.want == nil && got != nil:
+				t.Errorf("got %v, want nil (unknown)", *got)
+			case tt.want != nil && got == nil:
+				t.Errorf("got nil (unknown), want %v", *tt.want)
+			case tt.want != nil && got != nil && *got != *tt.want:
+				t.Errorf("got %v, want %v", *got, *tt.want)
+			}
+		})
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }

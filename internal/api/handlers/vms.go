@@ -832,11 +832,27 @@ func (h *VMHandler) DetachDisk(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	if err := pxClient.DetachDisk(c.Context(), node.Name, int(vm.Vmid), p.String("disk")); err != nil {
+	disk := p.String("disk")
+
+	// Resolved BEFORE the detach, because afterwards the slot is gone. The
+	// digest comes from the same read, so the delete is pinned to the config
+	// the audit row describes — without it a racing caller could replace the
+	// volume between the two calls and the row would name the wrong one.
+	// Empty when the read failed, which writes unpinned rather than failing a
+	// detach Proxmox would have accepted.
+	volume, digest := detachedVolume(c.Context(), pxClient, node.Name, int(vm.Vmid), disk)
+
+	if err := pxClient.DetachDisk(c.Context(), node.Name, int(vm.Vmid), disk, digest); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), "disk_detach", nil)
+	detachDetails, _ := json.Marshal(map[string]any{
+		"disk":           disk,
+		"volume":         volume,
+		"removes_volume": detachRemovesVolume(disk, volume),
+		"vmid":           vm.Vmid,
+	})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), "disk_detach", detachDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_detach")
 
 	return c.JSON(vmActionResponse{

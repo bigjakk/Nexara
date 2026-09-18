@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -401,4 +402,111 @@ func poolTotalBytes(pools []proxmox.StoragePool, storage string) (int64, poolLoo
 		return p.Total, poolResolved
 	}
 	return 0, poolNotListed
+}
+
+// --- Detach auditing ---
+
+// detachProbe is the slice of *proxmox.Client that detachedVolume reads.
+// Narrow on purpose, so the audit lookup is drivable by a fake.
+// The two sentinels detachedVolume returns in place of a volume id. They are
+// distinct because "there was nothing there" and "we could not look" send an
+// incident responder in opposite directions.
+const (
+	configUnreadable = "unresolved: the VM config could not be read"
+	notInConfig      = "unresolved: no such key in the VM config"
+)
+
+type detachProbe interface {
+	GetVMConfig(ctx context.Context, node string, vmid int) (proxmox.VMConfig, error)
+}
+
+// detachedVolume names the volume a slot holds, for the audit row, and is
+// called BEFORE the detach because afterwards the slot is gone.
+//
+// The slot name alone does not identify what a detach affected, and for one
+// shape of the call what it affects is destroyed: PVE reads `delete: ide1` as
+// "unhook the volume and park it in unusedN", but `delete: unused0` as
+// "remove the volume from storage". An audit row saying only
+// "disk_detach: unused0" cannot say which volume stopped existing.
+//
+// It also returns the config digest, so the caller can pin the delete to this
+// same read. Empty when the read failed.
+//
+// CAVEAT on which view this is: GetVMConfig requests /config without
+// current=1, so PVE returns the pending-MERGED view — pending values folded
+// in, keys queued for pending delete already gone. The delete loop PVE runs
+// reads the raw config instead. For a running VM, an ide/sata/efidisk/tpmstate
+// drive cannot be hot-unplugged, so the first detach only queues a pending
+// change; a second detach of the same key then reads a config that no longer
+// lists it and records "no such key" for a detach PVE accepts against a real
+// volume. Neither view is right for both cases (current=1 breaks the
+// pending-ADD case), and GetVMConfig is shared with planDiskAttach, so this is
+// documented rather than worked around.
+//
+// The read is best-effort — a detach Proxmox would accept must not fail
+// because the audit lookup did not. But an unreadable config is recorded as
+// unresolved rather than omitted: a missing value reads as "there was nothing
+// there", which is the opposite of "we could not look", and those two answers
+// send an incident responder in different directions.
+func detachedVolume(ctx context.Context, probe detachProbe, node string, vmid int, disk string) (volume, digest string) {
+	config, err := probe.GetVMConfig(ctx, node, vmid)
+	if err != nil {
+		return configUnreadable, ""
+	}
+	digest, _ = config["digest"].(string)
+	raw, ok := config[disk]
+	if !ok {
+		return notInConfig, digest
+	}
+	return describeVolume(raw), digest
+}
+
+// cloudInitVolumeRe matches the volume ids PVE treats as cloud-init drives.
+// Mirrors drive_is_cloudinit in qemu-server's Drive.pm: PVE FREES these on
+// detach rather than parking them, via vmconfig_register_unused_drive.
+var cloudInitVolumeRe = regexp.MustCompile(`[:/](?:vm-\d+-)?cloudinit(\.[a-z0-9]+)?$`)
+
+// detachRemovesVolume reports whether detaching disk destroys the volume
+// rather than parking it in an unusedN slot — the difference between a
+// reversible change and an irreversible one, which cannot be recovered from
+// the audit row later.
+//
+// It returns nil for "cannot tell", which JSON renders as null. Reporting a
+// definite false when the answer is unknown is the failure this whole change
+// exists to avoid: a row that asserts the reversible behaviour for a
+// destructive act reads as reassurance.
+//
+// Two shapes destroy a volume:
+//
+//   - an unusedN key, whose volume is already unhooked, so removing the key
+//     is the only thing left that can happen to it;
+//   - a cloud-init drive on ANY key, which PVE frees rather than parks.
+//
+// resolved is what detachedVolume found. When it could not read the config,
+// the cloud-init question is unanswerable and so is this one — except for an
+// unusedN key, which is decided by the key alone.
+//
+// The key-name test is only sound because PVE validates the option name
+// first: API2/Qemu.pm raises "unknown option" for anything outside the config
+// schema, so `unusedx` never reaches a written audit row. The declared
+// pattern (^[a-z]+[0-9]*$) does NOT constrain it — do not read the schema and
+// conclude otherwise.
+func detachRemovesVolume(disk, resolved string) *bool {
+	yes, no := true, false
+	if strings.HasPrefix(disk, "unused") {
+		return &yes
+	}
+	switch {
+	case resolved == notInConfig:
+		// PVE warns and skips a key that is not set, returning 200 having
+		// removed nothing. Without this the row claims a destruction that
+		// did not happen, which is worse than saying nothing.
+		return &no
+	case resolved == configUnreadable:
+		return nil
+	case cloudInitVolumeRe.MatchString(resolved):
+		return &yes
+	default:
+		return &no
+	}
 }

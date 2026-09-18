@@ -441,7 +441,19 @@ func (c *Client) AttachDisk(ctx context.Context, node string, vmid int, params D
 
 	return c.SetVMConfig(ctx, node, vmid, fields)
 }
-func (c *Client) DetachDisk(ctx context.Context, node string, vmid int, disk string) error {
+
+// DetachDisk removes a disk key from a VM's config. PVE parks the volume in
+// an unusedN slot for a regular drive key, and removes it from storage for an
+// unusedN key or a cloud-init drive.
+//
+// digest pins the write to a config read, the way AttachDisk does: PVE
+// refuses the PUT if the config moved underneath, which stops a concurrent
+// edit being silently clobbered and stops the audit row naming a volume that
+// a racing caller already replaced. It is optional here rather than required,
+// because the caller's read is best-effort — a detach Proxmox would accept
+// must not start failing because the audit lookup could not reach the API.
+// Pass "" to write unpinned.
+func (c *Client) DetachDisk(ctx context.Context, node string, vmid int, disk, digest string) error {
 	if err := validateNodeName(node); err != nil {
 		return err
 	}
@@ -454,6 +466,9 @@ func (c *Client) DetachDisk(ctx context.Context, node string, vmid int, disk str
 
 	fields := map[string]string{
 		"delete": disk,
+	}
+	if digest != "" {
+		fields["digest"] = digest
 	}
 
 	return c.SetVMConfig(ctx, node, vmid, fields)
