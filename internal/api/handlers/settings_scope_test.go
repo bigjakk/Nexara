@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -82,14 +83,39 @@ func newSettingsApp(t *testing.T, queries *db.Queries) *fiber.App {
 		return c.JSON(fiber.Map{"scope_id": out})
 	})
 
-	app.Post("/settings/branding/logo", handler.UploadLogo)
-	app.Post("/settings/branding/favicon", handler.UploadFavicon)
+	// The three MIGRATED routes are mounted the way mountRegistry mounts them:
+	// the two uploads behind the global manage:settings Check their declaration
+	// carries, and the delete behind the validated parameters its Deferred
+	// declaration carries. The three reads and the PUT are still legacy and are
+	// mounted bare, which is what they still are — see
+	// internal/api/registry_settings.go for the per-route account.
+	app.Post("/settings/branding/logo", RequirePermission("manage", "settings"),
+		withRequestParams(t, apischema.Properties{}, nil, handler.UploadLogo))
+	app.Post("/settings/branding/favicon", RequirePermission("manage", "settings"),
+		withRequestParams(t, apischema.Properties{}, nil, handler.UploadFavicon))
 	app.Get("/settings", handler.ListSettings)
 	app.Get("/settings/:key", handler.GetSetting)
 	app.Put("/settings/:key", handler.UpsertSetting)
-	app.Delete("/settings/:key", handler.DeleteSetting)
+	app.Delete("/settings/:key",
+		withRequestParams(t, settingDeleteMirror(t), []string{"key"}, handler.DeleteSetting))
 
 	return app
+}
+
+// settingDeleteMirror restates the schema registry_settings.go declares for
+// DELETE /api/v1/settings/:key, for the reason withRequestParams' own doc
+// comment gives: package api imports this package, not the other way round.
+//
+// The scope Enum is the load-bearing half: the cases below send ?scope=cluster
+// and ?scope=node expecting a 400, and that refusal now comes from here rather
+// than from settingScopeID. settingScopeID still makes it for the two routes
+// that stay legacy, and TestSettingScopeID drives it directly.
+func settingDeleteMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	return compiledMirror(t, apischema.Properties{
+		"key":   {Type: apischema.String, MinLength: apischema.Ptr(1), MaxLength: apischema.Ptr(128), Source: apischema.SourcePath},
+		"scope": {Type: apischema.String, Optional: true, Default: "user", Enum: []string{"global", "user"}},
+	})
 }
 
 // TestSettingScopeID covers the scope policy every settings handler shares:

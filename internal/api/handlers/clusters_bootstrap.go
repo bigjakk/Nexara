@@ -447,8 +447,15 @@ func revokeOwnToken(ctx context.Context, client *proxmox.Client, cluster db.Clus
 
 // wantsCredentialRevocation reports whether the caller opted into removing the
 // cluster's Proxmox-side credential. Opt-in only, and never the default.
-func wantsCredentialRevocation(c fiber.Ctx) bool {
-	switch c.Query("revoke_pve_credentials") {
+//
+// It takes the VALIDATED string rather than reading the query itself, and the
+// parameter stays a string in the declaration rather than becoming a boolean:
+// apischema's toBool also accepts "on" and "off", which this has never read as
+// an opt-in, and on an endpoint that deletes users and tokens from a live
+// hypervisor a schema that accepts a spelling the code then ignores is the
+// wrong kind of tidy-up.
+func wantsCredentialRevocation(value string) bool {
+	switch value {
 	case "1", "true", "yes":
 		return true
 	}

@@ -189,13 +189,15 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 // declared in registry_vms.go, so they are named explicitly rather than
 // skipped by a looser prefix rule that would also swallow a real omission.
 //
-// Two OTHER domains also mount routes under this prefix, and they are
+// FOUR other domains also mount routes under this prefix, and they are
 // deferred to rather than re-listed: the six ACME certificate and
-// acme-config routes carry their own tally in registry_acme_test.go, and
-// the rolling-update package preview carries its own in
-// registry_rolling_update_test.go. Deferring keeps every route in exactly
-// one tally — copying them here would create a second list to keep in step,
-// which is the failure this test exists to prevent.
+// acme-config routes carry their own tally in registry_acme_test.go, the
+// rolling-update package preview carries its own in
+// registry_rolling_update_test.go, the three APT repository routes carry
+// theirs in registry_apt_repositories_test.go, and the per-node historical
+// metrics route carries its own in registry_metrics_test.go. Deferring keeps
+// every route in exactly one tally — copying them here would create a second
+// list to keep in step, which is the failure this test exists to prevent.
 func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 	vmDialogRoutes := map[string]bool{
 		"GET " + clusterScope + "/nodes/:node_name/bridges":       true,
@@ -217,12 +219,15 @@ func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 		_, inNodeTally := nodeLegacyPermissions[key]
 		_, inACMETally := acmeLegacyPermissions[key]
 		_, inRollingTally := rollingLegacyPermissions[key]
-		if inNodeTally || inACMETally || inRollingTally || vmDialogRoutes[key] {
+		_, inAptTally := aptLegacyPermissions[key]
+		_, inMetricsTally := metricsLegacyPermissions[key]
+		if inNodeTally || inACMETally || inRollingTally || inAptTally || inMetricsTally || vmDialogRoutes[key] {
 			continue
 		}
 		t.Errorf("%s is declared under the node scope but is in none of nodeLegacyPermissions, "+
-			"acmeLegacyPermissions, rollingLegacyPermissions or the VM-dialog hardware set — add it "+
-			"to its domain's tally, or the tally stops being a review surface", key)
+			"acmeLegacyPermissions, rollingLegacyPermissions, aptLegacyPermissions, "+
+			"metricsLegacyPermissions or the VM-dialog hardware set — add it to its domain's tally, "+
+			"or the tally stops being a review surface", key)
 	}
 	if seen == 0 {
 		t.Fatal("no declared route matched the node scope; this guard would pass vacuously")

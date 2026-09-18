@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,9 +15,23 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 )
+
+// THREE of these nine routes are declared in
+// internal/api/registry_settings.go — the two branding uploads and the delete.
+// The other six stay in router.go, and that file's long comment is the reason,
+// per route. The short version: the two generic READS perform no permission
+// check on any path, the three branding reads are instance-shared, and the PUT
+// carries a `value` that is arbitrary JSON, which apischema's Type vocabulary
+// cannot describe.
+//
+// settingScopeID below is the conditional the whole decision turns on, and it
+// is the live instance rbac_route_guard_test.go's LIMITATION note names: it is
+// REACHABLE from the reads, which is what the call-graph guard checks, and it
+// never runs on them.
 
 // SettingsHandler handles application settings endpoints.
 type SettingsHandler struct {
@@ -82,6 +98,15 @@ var settingScopes = map[string]settingScope{
 	"global": {adminOnly: true},
 	"user":   {perUser: true},
 }
+
+// SettingScopeKeys returns the accepted ?scope= values, sorted. Exported for
+// the guard in package api that compares them against the Enum declared on the
+// delete: they are two copies of one list, and a schema that accepted a scope
+// this map has no entry for would fall through to the zero settingScope —
+// perUser false, adminOnly false — i.e. a shared row nobody's permission gates.
+// Package handlers cannot import package api, so the comparison reads this from
+// the other side.
+func SettingScopeKeys() []string { return slices.Sorted(maps.Keys(settingScopes)) }
 
 // settingOwner is the dedicated endpoint that owns a reserved shared-scope
 // setting key, and the permission that endpoint gates on.
@@ -390,14 +415,14 @@ func (h *SettingsHandler) UpsertSetting(c fiber.Ctx) error {
 
 // DeleteSetting deletes a setting by key.
 // DELETE /api/v1/settings/:key?scope=global|user
-func (h *SettingsHandler) DeleteSetting(c fiber.Ctx) error {
-	key, err := settingKeyFromPath(c)
-	if err != nil {
-		return err
-	}
+func (h *SettingsHandler) DeleteSetting(c fiber.Ctx, p *apischema.Params) error {
+	key := p.String("key")
+	scope := p.String("scope")
 
-	scope := c.Query("scope", "user")
-
+	// Still routed through settingScopeID: the declaration says the permission
+	// is Deferred, and this is where it is decided. It is also what refuses a
+	// key owned by a dedicated endpoint, which no schema can express — the
+	// reservation is a property of the KEY, not of its shape.
 	scopeID, err := settingScopeID(c, key, scope, true)
 	if err != nil {
 		return err
@@ -431,11 +456,7 @@ const (
 
 // UploadLogo handles logo file upload for branding.
 // POST /api/v1/settings/branding/logo
-func (h *SettingsHandler) UploadLogo(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "settings"); err != nil {
-		return err
-	}
-
+func (h *SettingsHandler) UploadLogo(c fiber.Ctx, _ *apischema.Params) error {
 	file, err := c.FormFile("logo")
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Logo file is required")
@@ -529,11 +550,7 @@ func (h *SettingsHandler) ServeLogo(c fiber.Ctx) error {
 
 // UploadFavicon handles favicon file upload for branding.
 // POST /api/v1/settings/branding/favicon
-func (h *SettingsHandler) UploadFavicon(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "settings"); err != nil {
-		return err
-	}
-
+func (h *SettingsHandler) UploadFavicon(c fiber.Ctx, _ *apischema.Params) error {
 	file, err := c.FormFile("favicon")
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Favicon file is required")

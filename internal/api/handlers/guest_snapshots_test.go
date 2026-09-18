@@ -1,14 +1,12 @@
 package handlers
 
 import (
-	"bytes"
-	"io"
-	"net/http"
-	"net/http/httptest"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"testing"
 	"time"
 
-	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -107,83 +105,65 @@ func TestFilterGuestSnapshotRows_UnknownGuestTypeDropped(t *testing.T) {
 	}
 }
 
-// newGuestSnapshotTestApp wires the Resync route with NIL queries: every case
-// below must resolve before any DB access, so a regression that moves the
-// guest lookup ahead of the permission gate panics on the nil Queries and
-// fails loudly instead of silently reintroducing the vmid-existence oracle.
-func newGuestSnapshotTestApp(t *testing.T) *fiber.App {
-	t.Helper()
-	handler := NewGuestSnapshotHandler(nil, testEncryptionKey, nil)
-	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
-	app.Use(func(c fiber.Ctx) error {
-		role := c.Get("X-Test-Role")
-		if role != "" {
-			c.Locals("role", role)
-			c.Locals("user_id", uuid.New())
-		}
-		return c.Next()
-	})
-	installStubEngineMiddleware(app)
-	app.Post("/clusters/:cluster_id/guest-snapshots/resync", handler.Resync)
-	return app
-}
-
-func TestGuestSnapshotResync_GatesBeforeLookup(t *testing.T) {
-	app := newGuestSnapshotTestApp(t)
-	clusterID := uuid.New().String()
-
-	tests := []struct {
-		name   string
-		role   string
-		path   string
-		body   string
-		status int
-	}{
-		{
-			name:   "no guest permission is rejected before any lookup",
-			role:   "viewer",
-			path:   "/clusters/" + clusterID + "/guest-snapshots/resync",
-			body:   `{"vmid":100}`,
-			status: http.StatusForbidden,
-		},
-		{
-			name:   "invalid cluster id",
-			role:   "admin",
-			path:   "/clusters/not-a-uuid/guest-snapshots/resync",
-			body:   `{"vmid":100}`,
-			status: http.StatusBadRequest,
-		},
-		{
-			name:   "malformed body",
-			role:   "admin",
-			path:   "/clusters/" + clusterID + "/guest-snapshots/resync",
-			body:   `{`,
-			status: http.StatusBadRequest,
-		},
-		{
-			name:   "missing vmid",
-			role:   "admin",
-			path:   "/clusters/" + clusterID + "/guest-snapshots/resync",
-			body:   `{"vmid":0}`,
-			status: http.StatusBadRequest,
-		},
+// TestGuard_GuestSnapshotResyncReadsPermissionsBeforeTheGuest is what is left
+// of the gates-before-lookup guard now that the COARSE gate has moved out of
+// this package.
+//
+// It used to mount Resync with NIL queries and assert that a caller holding
+// neither guest permission got a 403 before anything touched the database. That
+// refusal is now the declared Alternatives middleware in
+// internal/api/registry_guest_snapshots.go, and
+// TestGuestSnapshotResyncGateIsEitherGuestPermission proves it end to end —
+// including that the handler never runs, which is a stronger statement than
+// "it returned 403".
+//
+// The ORDERING inside the handler still matters and cannot be seen from there:
+// the two hasClusterPerm reads feed the PRECISE per-class refusal, which
+// answers 404 rather than 403 so a caller holding only the other guest class
+// cannot learn that a guest with this vmid exists. If the guest lookup moved
+// ahead of them, the 404-vs-403 split would become a vmid-existence oracle
+// again. This pins the order statically.
+func TestGuard_GuestSnapshotResyncReadsPermissionsBeforeTheGuest(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "guest_snapshots.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse guest_snapshots.go: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, tt.path, bytes.NewReader([]byte(tt.body)))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Test-Role", tt.role)
-			resp, err := app.Test(req)
-			if err != nil {
-				t.Fatalf("request: %v", err)
+	var lastPermRead, guestLookup token.Pos
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || fn.Name.Name != "Resync" {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
 			}
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != tt.status {
-				body, _ := io.ReadAll(resp.Body)
-				t.Fatalf("status = %d, want %d (body: %s)", resp.StatusCode, tt.status, body)
+			switch fun := call.Fun.(type) {
+			case *ast.Ident:
+				if fun.Name == "hasClusterPerm" && call.Pos() > lastPermRead {
+					lastPermRead = call.Pos()
+				}
+			case *ast.SelectorExpr:
+				if fun.Sel.Name == "GetVMByClusterAndVmid" && guestLookup == token.NoPos {
+					guestLookup = call.Pos()
+				}
 			}
+			return true
 		})
+	}
+
+	if lastPermRead == token.NoPos {
+		t.Fatal("Resync makes no hasClusterPerm call; the precise per-class refusal has nothing to decide on")
+	}
+	if guestLookup == token.NoPos {
+		t.Fatal("Resync makes no GetVMByClusterAndVmid call; this guard would pass vacuously")
+	}
+	if lastPermRead > guestLookup {
+		t.Errorf("Resync resolves the guest (offset %d) before reading its permissions (offset %d) — "+
+			"that turns the 404-vs-403 split into a vmid-existence oracle", guestLookup, lastPermRead)
 	}
 }
 

@@ -11,13 +11,31 @@ ORDER BY created_at DESC;
 -- name: GetScheduledTask :one
 SELECT * FROM scheduled_tasks WHERE id = $1;
 
--- name: UpdateScheduledTask :exec
-UPDATE scheduled_tasks
-SET schedule = $2, params = $3, enabled = $4, updated_at = now()
-WHERE id = $1;
+-- A scheduled task is addressed by its uuid, which says nothing about which
+-- cluster owns it, while the permission gate on these two resolves the cluster
+-- from the request PATH. Without the cluster_id predicate, `WHERE id = $1` let
+-- a caller holding manage:schedule on one cluster rewrite or delete another's
+-- row. The handler re-reads the row and compares its cluster as well
+-- (taskInCluster in internal/api/handlers/schedules.go); the two layers fail
+-- independently, and either one alone refuses the request.
+--
+-- :execrows rather than :exec so a zero-row result is visible: if the handler
+-- check is ever dropped, the write still cannot happen AND the caller is told,
+-- rather than the endpoint reporting success for a row it never touched.
 
--- name: DeleteScheduledTask :exec
-DELETE FROM scheduled_tasks WHERE id = $1;
+-- name: UpdateScheduledTask :execrows
+UPDATE scheduled_tasks
+SET schedule = sqlc.arg('schedule'),
+    params = sqlc.arg('params'),
+    enabled = sqlc.arg('enabled'),
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+  AND cluster_id = sqlc.arg('cluster_id');
+
+-- name: DeleteScheduledTask :execrows
+DELETE FROM scheduled_tasks
+WHERE id = sqlc.arg('id')
+  AND cluster_id = sqlc.arg('cluster_id');
 
 -- name: ClaimDueTasks :many
 -- Atomically claims due tasks so concurrent schedulers (e.g. during leader

@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -138,9 +139,13 @@ func TestParseAuditFilters_AlwaysScopes(t *testing.T) {
 			wantIDs:   []uuid.UUID{},
 		},
 		{
+			// start_time rather than user_id: a malformed uuid is now refused
+			// by the SCHEMA, before any handler runs, so it can no longer
+			// exercise an error path inside parseAuditFilters. An unparseable
+			// timestamp still can — time.Parse is a rule no schema expresses.
 			name:      "scope survives a rejected filter",
 			access:    clusterAccess{Allowed: map[uuid.UUID]bool{clusterA: true}},
-			query:     "?user_id=not-a-uuid",
+			query:     "?start_time=yesterday",
 			wantErr:   true,
 			wantQuery: true,
 			wantIDs:   []uuid.UUID{clusterA},
@@ -157,89 +162,109 @@ func TestParseAuditFilters_AlwaysScopes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// A probe route is the only way to hold a real fiber.Ctx; the
-			// assertions run inside it and report through the closure. `ran`
-			// is load-bearing: without it a route that stopped matching would
-			// 404, the assertions would never execute, and the test would
-			// report success having checked nothing.
-			ran := false
-			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
-			app.Get("/probe", func(c fiber.Ctx) error {
-				ran = true
-				listP, countP, query, err := handler.parseAuditFilters(c, tt.access)
-				if (err != nil) != tt.wantErr {
-					t.Errorf("parseAuditFilters err = %v, wantErr %v", err, tt.wantErr)
-				}
-				if query != tt.wantQuery {
-					t.Errorf("parseAuditFilters query = %v, want %v", query, tt.wantQuery)
-				}
-				assertScope(t, "list", listP.AccessibleClusterIds, tt.wantNil, tt.wantIDs)
-				assertScope(t, "count", countP.AccessibleClusterIds, tt.wantNil, tt.wantIDs)
-				return c.SendStatus(http.StatusOK)
-			})
-
-			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/probe"+tt.query, nil))
-			if err != nil {
-				t.Fatalf("request: %v", err)
+			params := auditParams(t, tt.query)
+			listP, countP, query, err := handler.parseAuditFilters(params, tt.access)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseAuditFilters err = %v, wantErr %v", err, tt.wantErr)
 			}
-			_ = resp.Body.Close()
-			if !ran {
-				t.Fatalf("probe handler never ran (status %d) — no assertion was made", resp.StatusCode)
+			if query != tt.wantQuery {
+				t.Errorf("parseAuditFilters query = %v, want %v", query, tt.wantQuery)
 			}
+			assertScope(t, "list", listP.AccessibleClusterIds, tt.wantNil, tt.wantIDs)
+			assertScope(t, "count", countP.AccessibleClusterIds, tt.wantNil, tt.wantIDs)
 		})
 	}
 }
 
-// TestParseAuditFilters_ClampsPagination pins the LIMIT/OFFSET bounds.
-// safeconv.Int32 bounds only the int32 range, so before the low clamps a
-// negative ?limit= reached Postgres as `LIMIT -1`, which it rejects — the
-// caller got a 500 from a query that never should have been sent.
-func TestParseAuditFilters_ClampsPagination(t *testing.T) {
+// auditListMirror and auditExportMirror restate the filter schemas
+// registry_audit.go declares, for the reason withRequestParams' own doc comment
+// gives: package api imports this package, not the other way round.
+//
+// The cluster filter is spelled filter_cluster_id with "cluster_id" as its
+// alias, exactly as the declaration does — that pairing is what lets the tests
+// below keep sending ?cluster_id=, which is the spelling every real caller uses.
+func auditListMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	return compiledMirror(t, apischema.Properties{
+		"limit":             {Type: apischema.Integer, Optional: true, Default: 50, Minimum: apischema.Ptr(1.0), Maximum: apischema.Ptr(200.0)},
+		"offset":            {Type: apischema.Integer, Optional: true, Default: 0, Minimum: apischema.Ptr(0.0)},
+		"filter_cluster_id": {Type: apischema.String, Alias: "cluster_id", Optional: true, Format: "uuid"},
+		"resource_type":     {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(64)},
+		"user_id":           {Type: apischema.String, Optional: true, Format: "uuid"},
+		"action":            {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(128)},
+		"source":            {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(32)},
+		"start_time":        {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(64)},
+		"end_time":          {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(64)},
+		"vmids":             {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(6000)},
+	})
+}
+
+func auditExportMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	props := auditListMirror(t)
+	props["format"] = apischema.Property{Type: apischema.String, Optional: true, Default: "json",
+		Enum: []string{"json", "csv", "syslog"}}
+	return compiledMirror(t, props)
+}
+
+// auditParams validates a raw query string against the listing mirror and hands
+// back the Params the handler would receive. The query is parsed here rather
+// than through a probe route because parseAuditFilters no longer touches the
+// fiber.Ctx at all — it reads the validated parameters, which is the whole
+// point of the migration.
+func auditParams(t *testing.T, query string) *apischema.Params {
+	t.Helper()
+	raw := map[string]any{}
+	for _, pair := range strings.Split(strings.TrimPrefix(query, "?"), "&") {
+		if pair == "" {
+			continue
+		}
+		key, value, _ := strings.Cut(pair, "=")
+		raw[key] = value
+	}
+	params, err := auditListMirror(t).Validate(raw)
+	if err != nil {
+		t.Fatalf("validating %q against the mirror schema: %v", query, err)
+	}
+	return params
+}
+
+// TestParseAuditFilters_UsesTheValidatedPagination pins that the LIMIT and
+// OFFSET the handler sends are the ones the schema validated.
+//
+// It replaces a clamp test, and the thing it used to protect is now protected
+// harder. safeconv.Int32 bounds only the int32 range, so a negative ?limit=
+// once reached Postgres as `LIMIT -1` and came back a 500; the handler grew low
+// clamps for it. The declaration now bounds limit to 1..200 and offset to >= 0,
+// so those values are refused BY NAME before any handler runs and can no longer
+// reach the query at all — pinned in package api by
+// TestAuditListBoundsArePinned. What is left here is the copy itself, which is
+// still where a typo would send the wrong page.
+func TestParseAuditFilters_UsesTheValidatedPagination(t *testing.T) {
 	handler := NewAuditHandler(nil, nil)
 	access := clusterAccess{HasGlobal: true}
 
-	tests := []struct {
+	for _, tt := range []struct {
 		name       string
 		query      string
 		wantLimit  int32
 		wantOffset int32
 	}{
 		{name: "defaults", wantLimit: 50},
-		{name: "negative limit clamps to 1", query: "?limit=-1", wantLimit: 1},
-		{name: "zero limit clamps to 1", query: "?limit=0", wantLimit: 1},
-		{name: "limit above the cap clamps to 200", query: "?limit=500", wantLimit: 200},
 		{name: "limit inside the range is kept", query: "?limit=25", wantLimit: 25},
-		{name: "negative offset clamps to 0", query: "?limit=10&offset=-1", wantLimit: 10},
+		{name: "the cap is kept", query: "?limit=200", wantLimit: 200},
 		{name: "offset is kept", query: "?limit=10&offset=40", wantLimit: 10, wantOffset: 40},
-	}
-
-	for _, tt := range tests {
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			ran := false
-			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
-			app.Get("/probe", func(c fiber.Ctx) error {
-				ran = true
-				listP, _, _, err := handler.parseAuditFilters(c, access)
-				if err != nil {
-					t.Errorf("parseAuditFilters: %v", err)
-					return c.SendStatus(http.StatusOK)
-				}
-				if listP.Limit != tt.wantLimit {
-					t.Errorf("Limit = %d, want %d", listP.Limit, tt.wantLimit)
-				}
-				if listP.Offset != tt.wantOffset {
-					t.Errorf("Offset = %d, want %d", listP.Offset, tt.wantOffset)
-				}
-				return c.SendStatus(http.StatusOK)
-			})
-
-			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/probe"+tt.query, nil))
+			listP, _, _, err := handler.parseAuditFilters(auditParams(t, tt.query), access)
 			if err != nil {
-				t.Fatalf("request: %v", err)
+				t.Fatalf("parseAuditFilters: %v", err)
 			}
-			_ = resp.Body.Close()
-			if !ran {
-				t.Fatalf("probe handler never ran (status %d) — no assertion was made", resp.StatusCode)
+			if listP.Limit != tt.wantLimit {
+				t.Errorf("Limit = %d, want %d", listP.Limit, tt.wantLimit)
+			}
+			if listP.Offset != tt.wantOffset {
+				t.Errorf("Offset = %d, want %d", listP.Offset, tt.wantOffset)
 			}
 		})
 	}
@@ -291,9 +316,9 @@ func newAuditScopeTestApp(t *testing.T) *fiber.App {
 	handler := NewAuditHandler(nil, nil)
 	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 	installTestRoleMiddleware(app)
-	app.Get("/audit-log", handler.List)
-	app.Get("/audit-log/recent", handler.ListRecent)
-	app.Get("/audit-log/export", handler.Export)
+	app.Get("/audit-log", withRequestParams(t, auditListMirror(t), nil, handler.List))
+	app.Get("/audit-log/recent", withRequestParams(t, apischema.Properties{}, nil, handler.ListRecent))
+	app.Get("/audit-log/export", withRequestParams(t, auditExportMirror(t), nil, handler.Export))
 	return app
 }
 

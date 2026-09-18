@@ -3,8 +3,13 @@ package handlers
 import (
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/changelog"
 )
+
+// The single route is declared in internal/api/registry_changelog.go, which
+// states that it is Public and takes no parameters; nothing below re-checks
+// either.
 
 // ChangelogHandler serves release notes parsed from GitHub Releases.
 type ChangelogHandler struct {
@@ -22,7 +27,7 @@ func NewChangelogHandler(svc *changelog.Service) *ChangelogHandler {
 // Always returns 200 with a (possibly empty) entries array — the popup is
 // expected to gracefully no-op on empty data, so callers don't need to
 // distinguish "no releases yet" from "GitHub is unreachable".
-func (h *ChangelogHandler) Get(c fiber.Ctx) error {
+func (h *ChangelogHandler) Get(c fiber.Ctx, _ *apischema.Params) error {
 	if h.svc == nil {
 		return RespondItems(c, []changelog.Entry{})
 	}

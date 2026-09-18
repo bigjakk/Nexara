@@ -3,7 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"strconv"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -11,11 +12,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/safeconv"
 )
+
+// All five routes are declared in internal/api/registry_notification_dlq.go,
+// which states their GLOBAL permission (view:notification_dlq for the two
+// reads, manage:notification_dlq for the three writes) and their parameters.
+//
+// What stays here is what the declaration cannot express: the SECOND global
+// permission a replay needs (manage:notification_channel — Permissions has no
+// "all of" shape), and the per-row cluster check on an entry that names one,
+// which is only knowable after the row is read.
 
 // NotificationDLQHandler exposes the dead-letter queue produced by the alert
 // engine when a dispatcher exhausts its retries or when a channel is
@@ -87,6 +98,11 @@ func toNotificationDLQResponse(row db.NotificationDlq) notificationDLQResponse {
 	return resp
 }
 
+// validDLQStates is the accepted ?state= vocabulary. It is the same set the
+// declaration's Enum carries in internal/api/registry_notification_dlq.go —
+// TestNotificationDLQStateVocabulary pins the two against each other, because
+// they are two copies of one list and a copy nothing compares is a copy that
+// rots.
 var validDLQStates = map[string]bool{
 	"pending":      true,
 	"rate_limited": true,
@@ -95,62 +111,53 @@ var validDLQStates = map[string]bool{
 	"dismissed":    true,
 }
 
+// DLQStateKeys returns the accepted ?state= values, sorted. Exported for the
+// guard in package api that compares them against the declared Enum; package
+// handlers cannot import package api, so the comparison reads this from the
+// other side.
+func DLQStateKeys() []string { return slices.Sorted(maps.Keys(validDLQStates)) }
+
 // List returns DLQ entries optionally filtered by state and channel_id.
 //
-// This endpoint is global-only: requirePerm below demands view:notification_dlq
-// at GLOBAL scope, and a cluster-scoped grant satisfies no global check
-// (internal/auth/rbac.go), so a Viewer of one cluster is refused outright
-// rather than served a filtered listing.
+// This endpoint is global-only, and that is stated by its DECLARATION rather
+// than by anything in this body: internal/api/registry_notification_dlq.go
+// declares globalCheck("view", "notification_dlq"), which mounts
+// handlers.RequirePermission as middleware. A cluster-scoped grant satisfies no
+// global check (internal/auth/rbac.go), so a Viewer of one cluster is refused
+// outright rather than served a filtered listing.
 //
 // Which makes the per-row cluster guard further down unreachable today — every
-// caller that gets past requirePerm holds a global grant, so accessibleClusters
-// returns HasGlobal and the guard keeps every row. It is kept because rows do
-// carry a denormalised cluster_id (set at write time from the rule's cluster),
-// so the row-level rule is worth stating and worth having already correct.
+// caller the declared gate lets through holds a global grant, so
+// accessibleClusters returns HasGlobal and the guard keeps every row. It is kept
+// because rows do carry a denormalised cluster_id (set at write time from the
+// rule's cluster), so the row-level rule is worth stating and worth having
+// already correct.
 //
 // It is NOT, however, a licence to widen the gate on its own. Opening this to
 // cluster-scoped callers means scoping ListNotificationDLQ in SQL as well:
 // LIMIT/OFFSET are applied across every cluster's rows and the guard trims
 // afterwards, so a scoped caller would page through the global rowset and get
 // short pages with holes. queries/audit_log.sql shows the shape that fixes it.
-func (h *NotificationDLQHandler) List(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "notification_dlq"); err != nil {
-		return err
-	}
-
+func (h *NotificationDLQHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "notification_dlq")
 	if err != nil {
 		return err
 	}
 
-	limit, _ := strconv.Atoi(c.Query("limit", "50"))
-	offset, _ := strconv.Atoi(c.Query("offset", "0"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
-
-	state := c.Query("state")
-	if state != "" && !validDLQStates[state] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid state filter")
-	}
-
 	var channelIDPg pgtype.UUID
-	if cidStr := c.Query("channel_id"); cidStr != "" {
-		cid, perr := uuid.Parse(cidStr)
+	if cidStr, supplied := p.OptString("channel_id"); supplied {
+		cid, perr := parseParamUUID(cidStr)
 		if perr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid channel_id")
+			return perr
 		}
 		channelIDPg = pgtype.UUID{Bytes: cid, Valid: true}
 	}
 
 	rows, err := h.queries.ListNotificationDLQ(c.Context(), db.ListNotificationDLQParams{
-		State:     state,
+		State:     p.String("state"),
 		ChannelID: channelIDPg,
-		LimitVal:  safeconv.Int32(limit),
-		OffsetVal: safeconv.Int32(offset),
+		LimitVal:  safeconv.Int32(int(p.Int("limit"))),
+		OffsetVal: safeconv.Int32(int(p.Int("offset"))),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list DLQ entries")
@@ -158,7 +165,7 @@ func (h *NotificationDLQHandler) List(c fiber.Ctx) error {
 
 	out := make([]notificationDLQResponse, 0, len(rows))
 	for _, r := range rows {
-		// Cross-cluster view guard, unreachable while the gate above is
+		// Cross-cluster view guard, unreachable while the DECLARED gate is
 		// global-only (see the doc comment): cluster-scoped rows require
 		// global or per-cluster access, and rows with no cluster (global
 		// rules / test dispatches) require global access, which every caller
@@ -176,11 +183,7 @@ func (h *NotificationDLQHandler) List(c fiber.Ctx) error {
 }
 
 // Summary returns counts grouped by state for the DLQ widget.
-func (h *NotificationDLQHandler) Summary(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "notification_dlq"); err != nil {
-		return err
-	}
-
+func (h *NotificationDLQHandler) Summary(c fiber.Ctx, _ *apischema.Params) error {
 	row, err := h.queries.CountNotificationDLQByState(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to count DLQ entries")
@@ -202,10 +205,10 @@ func (h *NotificationDLQHandler) Summary(c fiber.Ctx) error {
 //
 // For cluster-scoped DLQ rows the cluster permission is also checked so an
 // operator cross-cluster can't replay another tenant's traffic.
-func (h *NotificationDLQHandler) Retry(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "notification_dlq"); err != nil {
-		return err
-	}
+func (h *NotificationDLQHandler) Retry(c fiber.Ctx, p *apischema.Params) error {
+	// The declared Check has already required manage:notification_dlq. This is
+	// the SECOND global permission the replay needs, which Permissions has no
+	// "all of" shape for — see registerNotificationDLQEndpoints.
 	if err := requirePerm(c, "manage", "notification_channel"); err != nil {
 		return err
 	}
@@ -214,9 +217,9 @@ func (h *NotificationDLQHandler) Retry(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusServiceUnavailable, "Alert engine not available")
 	}
 
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid DLQ ID")
+		return err
 	}
 
 	row, err := h.queries.GetNotificationDLQ(c.Context(), id)
@@ -251,14 +254,10 @@ func (h *NotificationDLQHandler) Retry(c fiber.Ctx) error {
 // Dismiss marks a DLQ entry as dismissed without retrying. Used when an
 // operator decides the failure is no longer actionable (rule deleted,
 // channel rotated, etc).
-func (h *NotificationDLQHandler) Dismiss(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "notification_dlq"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *NotificationDLQHandler) Dismiss(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid DLQ ID")
+		return err
 	}
 
 	row, err := h.queries.GetNotificationDLQ(c.Context(), id)
@@ -284,14 +283,10 @@ func (h *NotificationDLQHandler) Dismiss(c fiber.Ctx) error {
 
 // Delete permanently removes a DLQ entry. Provided alongside Dismiss for
 // operators who want to keep the table compact.
-func (h *NotificationDLQHandler) Delete(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "notification_dlq"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *NotificationDLQHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid DLQ ID")
+		return err
 	}
 
 	row, err := h.queries.GetNotificationDLQ(c.Context(), id)

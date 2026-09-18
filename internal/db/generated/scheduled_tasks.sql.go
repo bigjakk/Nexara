@@ -86,13 +86,23 @@ func (q *Queries) ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([
 	return items, nil
 }
 
-const deleteScheduledTask = `-- name: DeleteScheduledTask :exec
-DELETE FROM scheduled_tasks WHERE id = $1
+const deleteScheduledTask = `-- name: DeleteScheduledTask :execrows
+DELETE FROM scheduled_tasks
+WHERE id = $1
+  AND cluster_id = $2
 `
 
-func (q *Queries) DeleteScheduledTask(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteScheduledTask, id)
-	return err
+type DeleteScheduledTaskParams struct {
+	ID        uuid.UUID `json:"id"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+}
+
+func (q *Queries) DeleteScheduledTask(ctx context.Context, arg DeleteScheduledTaskParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteScheduledTask, arg.ID, arg.ClusterID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const disableScheduledTaskForBadSchedule = `-- name: DisableScheduledTaskForBadSchedule :exec
@@ -251,27 +261,48 @@ func (q *Queries) ListScheduledTasksByCluster(ctx context.Context, clusterID uui
 	return items, nil
 }
 
-const updateScheduledTask = `-- name: UpdateScheduledTask :exec
+const updateScheduledTask = `-- name: UpdateScheduledTask :execrows
+
 UPDATE scheduled_tasks
-SET schedule = $2, params = $3, enabled = $4, updated_at = now()
-WHERE id = $1
+SET schedule = $1,
+    params = $2,
+    enabled = $3,
+    updated_at = now()
+WHERE id = $4
+  AND cluster_id = $5
 `
 
 type UpdateScheduledTaskParams struct {
-	ID       uuid.UUID       `json:"id"`
-	Schedule string          `json:"schedule"`
-	Params   json.RawMessage `json:"params"`
-	Enabled  bool            `json:"enabled"`
+	Schedule  string          `json:"schedule"`
+	Params    json.RawMessage `json:"params"`
+	Enabled   bool            `json:"enabled"`
+	ID        uuid.UUID       `json:"id"`
+	ClusterID uuid.UUID       `json:"cluster_id"`
 }
 
-func (q *Queries) UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) error {
-	_, err := q.db.Exec(ctx, updateScheduledTask,
-		arg.ID,
+// A scheduled task is addressed by its uuid, which says nothing about which
+// cluster owns it, while the permission gate on these two resolves the cluster
+// from the request PATH. Without the cluster_id predicate, `WHERE id = $1` let
+// a caller holding manage:schedule on one cluster rewrite or delete another's
+// row. The handler re-reads the row and compares its cluster as well
+// (taskInCluster in internal/api/handlers/schedules.go); the two layers fail
+// independently, and either one alone refuses the request.
+//
+// :execrows rather than :exec so a zero-row result is visible: if the handler
+// check is ever dropped, the write still cannot happen AND the caller is told,
+// rather than the endpoint reporting success for a row it never touched.
+func (q *Queries) UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateScheduledTask,
 		arg.Schedule,
 		arg.Params,
 		arg.Enabled,
+		arg.ID,
+		arg.ClusterID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateTaskLastRun = `-- name: UpdateTaskLastRun :exec

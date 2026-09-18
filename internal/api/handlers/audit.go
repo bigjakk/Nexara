@@ -15,12 +15,25 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/reports"
 	"github.com/bigjakk/nexara/internal/safeconv"
 	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
+
+// All nine routes are declared in internal/api/registry_audit.go, which states
+// their permission and their parameters: Advisory on the three enumerating
+// reads (nothing gates them — the SQL scope IS the authorization), a global
+// Check on the two lookups and the three syslog routes, and a cluster-scoped
+// Check on the per-cluster listing.
+//
+// reservedSettingVisibility below is NOT part of any of those shapes, and that
+// is deliberate: it is a per-row REDACTION of the details blob, not a gate — the
+// row is still returned, and who changed which setting is still visible. It
+// exists because view:audit is a default Viewer grant and a syslog_forwarding
+// entry names the collector the audit stream is sent to.
 
 // AuditHandler handles audit log endpoints.
 type AuditHandler struct {
@@ -160,65 +173,50 @@ func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow, visible map[string]bo
 // query is false when the caller holds no view:audit grant anywhere. The
 // params are correct regardless ('{}' matches nothing); the flag only lets the
 // caller skip a round-trip that could not come back with a row.
-func (h *AuditHandler) parseAuditFilters(c fiber.Ctx, access clusterAccess) (listP db.ListAuditLogAdvancedParams, countP db.CountAuditLogAdvancedParams, query bool, err error) {
-	limit := fiber.Query[int](c, "limit", 50)
-	offset := fiber.Query[int](c, "offset", 0)
-	if limit < 1 {
-		limit = 1
-	} else if limit > 200 {
-		limit = 200
-	}
-	// Clamped low as well as high: safeconv.Int32 only bounds the int32 range,
-	// so a negative ?limit= reached Postgres as `LIMIT -1` and came back a 500.
-	if offset < 0 {
-		offset = 0
-	}
-
+// The CLUSTER filter is deliberately NOT read here, even though it is one of
+// the filters: the per-cluster listing does not declare it — see
+// auditFilterClusterParam in internal/api/registry_audit.go for why — and
+// apischema's accessors panic on an undeclared key. The two instance-wide reads
+// apply it themselves, right after the access check that makes it safe.
+func (h *AuditHandler) parseAuditFilters(p *apischema.Params, access clusterAccess) (listP db.ListAuditLogAdvancedParams, countP db.CountAuditLogAdvancedParams, query bool, err error) {
 	query = applyAuditListScope(access, &listP, &countP)
-	listP.Limit = safeconv.Int32(limit)
-	listP.Offset = safeconv.Int32(offset)
+	// The declaration bounds limit to 1..200 and offset to >= 0, which is what
+	// the hand-written clamps did — except that a value outside the range is
+	// now refused by name rather than silently replaced.
+	listP.Limit = safeconv.Int32(int(p.Int("limit")))
+	listP.Offset = safeconv.Int32(int(p.Int("offset")))
 
-	if cid := c.Query("cluster_id"); cid != "" {
-		parsed, err := uuid.Parse(cid)
-		if err != nil {
-			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id filter")
-		}
-		v := pgtype.UUID{Bytes: parsed, Valid: true}
-		listP.ClusterID = v
-		countP.ClusterID = v
-	}
-
-	if rt := c.Query("resource_type"); rt != "" {
+	if rt, supplied := p.OptString("resource_type"); supplied {
 		v := pgtype.Text{String: rt, Valid: true}
 		listP.ResourceType = v
 		countP.ResourceType = v
 	}
 
-	if uid := c.Query("user_id"); uid != "" {
-		parsed, err := uuid.Parse(uid)
-		if err != nil {
-			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid user_id filter")
+	if uid, supplied := p.OptString("user_id"); supplied {
+		parsed, parseErr := parseParamUUID(uid)
+		if parseErr != nil {
+			return listP, countP, query, parseErr
 		}
 		v := pgtype.UUID{Bytes: parsed, Valid: true}
 		listP.UserID = v
 		countP.UserID = v
 	}
 
-	if a := c.Query("action"); a != "" {
+	if a, supplied := p.OptString("action"); supplied {
 		v := pgtype.Text{String: a, Valid: true}
 		listP.Action = v
 		countP.Action = v
 	}
 
-	if src := c.Query("source"); src != "" {
+	if src, supplied := p.OptString("source"); supplied {
 		v := pgtype.Text{String: src, Valid: true}
 		listP.Source = v
 		countP.Source = v
 	}
 
-	if st := c.Query("start_time"); st != "" {
-		t, err := time.Parse(time.RFC3339, st)
-		if err != nil {
+	if st, supplied := p.OptString("start_time"); supplied {
+		t, parseErr := time.Parse(time.RFC3339, st)
+		if parseErr != nil {
 			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid start_time (use RFC3339)")
 		}
 		v := pgtype.Timestamptz{Time: t, Valid: true}
@@ -226,9 +224,9 @@ func (h *AuditHandler) parseAuditFilters(c fiber.Ctx, access clusterAccess) (lis
 		countP.StartTime = v
 	}
 
-	if et := c.Query("end_time"); et != "" {
-		t, err := time.Parse(time.RFC3339, et)
-		if err != nil {
+	if et, supplied := p.OptString("end_time"); supplied {
+		t, parseErr := time.Parse(time.RFC3339, et)
+		if parseErr != nil {
 			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid end_time (use RFC3339)")
 		}
 		v := pgtype.Timestamptz{Time: t, Valid: true}
@@ -239,9 +237,9 @@ func (h *AuditHandler) parseAuditFilters(c fiber.Ctx, access clusterAccess) (lis
 	// Per-guest filter over the denormalized audit_log.vmid (000084). Shares
 	// parseVmidsParam — and therefore the bound on list length — with the
 	// identically-named filter on /tasks.
-	if raw := c.Query("vmids"); raw != "" {
-		vmids, err := parseVmidsParam(raw)
-		if err != nil {
+	if raw, supplied := p.OptString("vmids"); supplied {
+		vmids, vmidErr := parseVmidsParam(raw)
+		if vmidErr != nil {
 			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid vmids filter")
 		}
 		listP.Vmids = vmids
@@ -249,6 +247,36 @@ func (h *AuditHandler) parseAuditFilters(c fiber.Ctx, access clusterAccess) (lis
 	}
 
 	return listP, countP, query, nil
+}
+
+// auditClusterFilter resolves the optional ?cluster_id= on the two
+// instance-wide reads and refuses one the caller may not see. An absent filter
+// comes back as the invalid zero UUID, which reaches SQL as "no cluster
+// filter".
+//
+// Refusing rather than silently emptying is the point: a filter on a cluster
+// the caller has no view:audit on would otherwise come back as an empty page,
+// which reads as "nothing happened there" rather than as "you cannot see that".
+//
+// It returns the value rather than stamping the two params structs, and that
+// shape is deliberate: TestGuard_ScopedParamsCarryClusterScope requires any
+// function handed a scoped params struct by pointer to set
+// AccessibleClusterIds on it, and this one has no business doing that — the
+// SCOPE is parseAuditFilters', and a second function that touches these structs
+// without stamping it is exactly the shape the guard exists to refuse.
+func auditClusterFilter(p *apischema.Params, access clusterAccess) (pgtype.UUID, error) {
+	cid, supplied := p.OptString("filter_cluster_id")
+	if !supplied {
+		return pgtype.UUID{}, nil
+	}
+	parsed, err := parseParamUUID(cid)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	if !access.PermitsCluster(parsed) {
+		return pgtype.UUID{}, fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}, nil
 }
 
 // applyAuditListScope stamps the caller's view:audit scope onto BOTH the list
@@ -268,21 +296,21 @@ func applyAuditListScope(access clusterAccess, listP *db.ListAuditLogAdvancedPar
 }
 
 // List handles GET /api/v1/audit-log.
-func (h *AuditHandler) List(c fiber.Ctx) error {
+func (h *AuditHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "audit")
 	if err != nil {
 		return err
 	}
 
-	listP, countP, query, err := h.parseAuditFilters(c, access)
+	listP, countP, query, err := h.parseAuditFilters(p, access)
 	if err != nil {
 		return err
 	}
-
-	// If a cluster filter was supplied, the user must have access to it.
-	if listP.ClusterID.Valid && !access.PermitsCluster(uuid.UUID(listP.ClusterID.Bytes)) {
-		return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
+	filter, err := auditClusterFilter(p, access)
+	if err != nil {
+		return err
 	}
+	listP.ClusterID, countP.ClusterID = filter, filter
 
 	if !query {
 		return RespondList(c, []auditLogResponse{}, 0)
@@ -323,7 +351,7 @@ func (h *AuditHandler) List(c fiber.Ctx) error {
 }
 
 // ListRecent handles GET /api/v1/audit-log/recent — returns the 50 most recent entries.
-func (h *AuditHandler) ListRecent(c fiber.Ctx) error {
+func (h *AuditHandler) ListRecent(c fiber.Ctx, _ *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "audit")
 	if err != nil {
 		return err
@@ -401,16 +429,13 @@ func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow, visible map[strin
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/audit-log.
-func (h *AuditHandler) ListByCluster(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AuditHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "audit", clusterID); err != nil {
-		return err
-	}
 
-	// Scoped too, though requireClusterPerm above has already authorized this
+	// Scoped too, though the declared gate has already authorized this
 	// exact cluster and the ClusterID filter pins the result set to it. The
 	// stamp is a no-op against either of those — a global caller scopes to nil,
 	// and a cluster-scoped one to a set containing the very cluster being
@@ -424,11 +449,11 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx) error {
 	}
 
 	// The same parser the global route uses, so both audit routes accept the
-	// same filters (?vmids=, ?action=, ?start_time=, …) and clamp limit/offset
-	// identically. The path's cluster is stamped over whatever ?cluster_id=
-	// carried, after parsing: this route is scoped to one cluster by definition,
-	// and requireClusterPerm above authorized that one.
-	listP, countP, query, err := h.parseAuditFilters(c, access)
+	// same filters (?vmids=, ?action=, ?start_time=, …) and bound limit/offset
+	// identically. The path's cluster is stamped after parsing; a ?cluster_id=
+	// of its own is not accepted here at all — see auditFilterClusterParam in
+	// internal/api/registry_audit.go — so there is nothing left to overwrite.
+	listP, countP, query, err := h.parseAuditFilters(p, access)
 	if err != nil {
 		return err
 	}
@@ -480,11 +505,7 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx) error {
 }
 
 // ListActions handles GET /api/v1/audit-log/actions — returns distinct action values.
-func (h *AuditHandler) ListActions(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "audit"); err != nil {
-		return err
-	}
-
+func (h *AuditHandler) ListActions(c fiber.Ctx, _ *apischema.Params) error {
 	actions, err := h.queries.ListDistinctAuditActions(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list actions")
@@ -494,11 +515,7 @@ func (h *AuditHandler) ListActions(c fiber.Ctx) error {
 }
 
 // ListUsers handles GET /api/v1/audit-log/users — returns distinct users in audit log.
-func (h *AuditHandler) ListUsers(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "audit"); err != nil {
-		return err
-	}
-
+func (h *AuditHandler) ListUsers(c fiber.Ctx, _ *apischema.Params) error {
 	users, err := h.queries.ListDistinctAuditUsers(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list users")
@@ -518,15 +535,10 @@ func (h *AuditHandler) ListUsers(c fiber.Ctx) error {
 }
 
 // Export handles GET /api/v1/audit-log/export — exports audit log in CSV, JSON, or syslog format.
-func (h *AuditHandler) Export(c fiber.Ctx) error {
+func (h *AuditHandler) Export(c fiber.Ctx, p *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "audit")
 	if err != nil {
 		return err
-	}
-
-	format := c.Query("format", "json")
-	if format != "json" && format != "csv" && format != "syslog" {
-		return fiber.NewError(fiber.StatusBadRequest, "format must be 'json', 'csv', or 'syslog'")
 	}
 
 	// Parse same filters but override limit for export (max 10000). The scope
@@ -535,16 +547,17 @@ func (h *AuditHandler) Export(c fiber.Ctx) error {
 	// would silently drop a scoped user's accessible rows that fall beyond the
 	// newest 10000 global ones, producing a short export that nothing in the
 	// file marks as incomplete.
-	listP, countP, query, err := h.parseAuditFilters(c, access)
+	listP, countP, query, err := h.parseAuditFilters(p, access)
 	if err != nil {
 		return err
 	}
+	filter, err := auditClusterFilter(p, access)
+	if err != nil {
+		return err
+	}
+	listP.ClusterID, countP.ClusterID = filter, filter
 	listP.Limit = exportRowCap
 	listP.Offset = 0
-
-	if listP.ClusterID.Valid && !access.PermitsCluster(uuid.UUID(listP.ClusterID.Bytes)) {
-		return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
-	}
 
 	var rawItems []db.ListAuditLogAdvancedRow
 	var total int64
@@ -585,7 +598,7 @@ func (h *AuditHandler) Export(c fiber.Ctx) error {
 
 	timestamp := time.Now().Format("20060102-150405")
 
-	switch format {
+	switch p.String("format") {
 	case "csv":
 		return h.exportCSV(c, items, timestamp, visible)
 	case "syslog":
@@ -820,6 +833,25 @@ type syslogTestAuditDetails struct {
 	Error   string            `json:"error,omitempty"`
 }
 
+// syslogConfigFromParams reads a forwarding config out of the validated
+// parameters.
+//
+// One reader for the store and the probe, so the two cannot drift on which
+// fields they accept — they are one config, declared once as
+// syslogConfigParams (internal/api/registry_audit.go). The zero values it
+// produces for an omitted port, protocol or facility are the same ones a bound
+// struct produced, and each caller substitutes its own default afterwards.
+func syslogConfigFromParams(p *apischema.Params) proxsyslog.Config {
+	return proxsyslog.Config{
+		Enabled:       p.Bool("enabled"),
+		Host:          p.String("host"),
+		Port:          int(p.Int("port")),
+		Protocol:      p.String("protocol"),
+		Facility:      int(p.Int("facility")),
+		TLSSkipVerify: p.Bool("tls_skip_verify"),
+	}
+}
+
 // defaultSyslogConfig is what the endpoints report before anything has been
 // saved: forwarding off, and the RFC 5424 defaults the forwarder itself falls
 // back to.
@@ -884,11 +916,7 @@ func syslogTestAuditError(err error) string {
 }
 
 // GetSyslogConfig handles GET /api/v1/audit-log/syslog-config.
-func (h *AuditHandler) GetSyslogConfig(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "audit"); err != nil {
-		return err
-	}
-
+func (h *AuditHandler) GetSyslogConfig(c fiber.Ctx, _ *apischema.Params) error {
 	cfg, found, err := h.storedSyslogConfig(c)
 	if err != nil {
 		// Not folded into the defaults below. Showing "disabled, udp, 514" for a
@@ -904,15 +932,8 @@ func (h *AuditHandler) GetSyslogConfig(c fiber.Ctx) error {
 }
 
 // UpdateSyslogConfig handles PUT /api/v1/audit-log/syslog-config.
-func (h *AuditHandler) UpdateSyslogConfig(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "audit"); err != nil {
-		return err
-	}
-
-	var cfg proxsyslog.Config
-	if err := c.Bind().Body(&cfg); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+func (h *AuditHandler) UpdateSyslogConfig(c fiber.Ctx, p *apischema.Params) error {
+	cfg := syslogConfigFromParams(p)
 
 	// Validate.
 	if cfg.Enabled {
@@ -1000,15 +1021,8 @@ func (h *AuditHandler) UpdateSyslogConfig(c fiber.Ctx) error {
 }
 
 // TestSyslog handles POST /api/v1/audit-log/syslog-test.
-func (h *AuditHandler) TestSyslog(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "audit"); err != nil {
-		return err
-	}
-
-	var cfg proxsyslog.Config
-	if err := c.Bind().Body(&cfg); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+func (h *AuditHandler) TestSyslog(c fiber.Ctx, p *apischema.Params) error {
+	cfg := syslogConfigFromParams(p)
 
 	if cfg.Host == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Host is required")

@@ -5,6 +5,8 @@ import (
 	"runtime"
 
 	"github.com/gofiber/fiber/v3"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
 // Version information set via ldflags at build time.
@@ -21,7 +23,10 @@ type versionResponse struct {
 	GoVersion string `json:"go_version"`
 }
 
-func (s *Server) handleVersion(c fiber.Ctx) error {
+// handleVersion is declared in internal/api/registry_version.go. It is the one
+// registry handler that is a Server method rather than a handlers-package one,
+// because the values it reports are package api's own ldflags variables.
+func (s *Server) handleVersion(c fiber.Ctx, _ *apischema.Params) error {
 	return c.JSON(versionResponse{
 		Version:   Version,
 		Commit:    Commit,

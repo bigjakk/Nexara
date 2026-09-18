@@ -137,18 +137,41 @@ func TestScalarText(t *testing.T) {
 	}
 }
 
+// isJSONBody reports whether the request carries a JSON body, matching
+// api.isJSONContentType: application/json and the +json structured suffix, with
+// or without parameters.
+func isJSONBody(c fiber.Ctx) bool {
+	media, _, _ := strings.Cut(c.Get(fiber.HeaderContentType), ";")
+	media = strings.ToLower(strings.TrimSpace(media))
+	return media == fiber.MIMEApplicationJSON || strings.HasSuffix(media, "+json")
+}
+
 // withRequestParams adapts a registry-shaped handler to a fiber.Handler for a
-// test that drives a real REQUEST BODY, which list_scope_test.go's withParams
+// test that drives a real REQUEST, which list_scope_test.go's withParams
 // cannot: that one validates an EMPTY request so every parameter arrives
 // carrying its default, which is right for a handler whose test never reaches
 // the values.
 //
-// The handlers this serves branch ON the body — the LDAP transport gate reads
-// start_tls and server_url, the console-token gate picks its resource from
-// `type` — so the body has to be decoded and validated the way
-// api.Endpoint.extract does at runtime. This is a deliberately minimal stand-in
-// for that: a JSON object, plus the route's :param segments. Query parameters
-// are not read, because no handler tested through this takes one.
+// The handlers this serves branch ON what the caller sent — the LDAP transport
+// gate reads start_tls and server_url, the console-token gate picks its
+// resource from `type`, the audit and task listings read their filters — so the
+// request has to be decoded and validated the way api.Endpoint.extract does at
+// runtime. This is a deliberately minimal stand-in for that: the JSON body, the
+// query string, and the route's :param segments, merged into one map.
+//
+// Everything is read WHOLESALE rather than from a declared list, and that is
+// what keeps the "unknown parameter" 400 honest: an undeclared key has to reach
+// Validate to be rejected. A non-JSON content type is not decoded and not
+// drained, mirroring api.Endpoint.bodyValues — Fiber runs with
+// StreamRequestBody, so reading a MULTIPART body here would consume the upload
+// before the handler's c.FormFile could.
+//
+// ONE fidelity gap, recorded rather than fixed: c.Queries() flattens a repeated
+// key to its last value, while production's queryValues (api/registry_params.go)
+// keeps repeats as a []string, because that is how a query string spells an
+// array. No route tested through this declares an Array query parameter, so
+// nothing is mis-tested today — but a test for one would have to stop using
+// this helper.
 //
 // props is a MIRROR of the route's declaration rather than the declaration
 // itself, for the reason migrationListMirror gives: package api imports this
@@ -162,12 +185,17 @@ func withRequestParams(t *testing.T, props apischema.Properties, pathParams []st
 	}
 	return func(c fiber.Ctx) error {
 		raw := map[string]any{}
-		if body := c.Body(); len(body) > 0 {
-			dec := json.NewDecoder(bytes.NewReader(body))
-			dec.UseNumber()
-			if err := dec.Decode(&raw); err != nil {
-				return fiber.NewError(fiber.StatusBadRequest, "request body is not valid JSON")
+		if isJSONBody(c) {
+			if body := c.Body(); len(body) > 0 {
+				dec := json.NewDecoder(bytes.NewReader(body))
+				dec.UseNumber()
+				if err := dec.Decode(&raw); err != nil {
+					return fiber.NewError(fiber.StatusBadRequest, "request body is not valid JSON")
+				}
 			}
+		}
+		for key, value := range c.Queries() {
+			raw[key] = value
 		}
 		for _, name := range pathParams {
 			if v := c.Params(name); v != "" {

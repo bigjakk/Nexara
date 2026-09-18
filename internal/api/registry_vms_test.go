@@ -370,6 +370,15 @@ var routesOutsideTheClusterCheckShape = func() map[string]string {
 		oidcRoutesOutsideTheClusterCheckShape,
 		totpRoutesOutsideTheClusterCheckShape,
 		authRoutesOutsideTheClusterCheckShape,
+		searchRoutesOutsideTheClusterCheckShape,
+		anonymousRoutesOutsideTheClusterCheckShape,
+		guestSnapshotRoutesOutsideTheClusterCheckShape,
+		favoritesRoutesOutsideTheClusterCheckShape,
+		dlqRoutesOutsideTheClusterCheckShape,
+		taskRoutesOutsideTheClusterCheckShape,
+		clusterRoutesOutsideTheClusterCheckShape,
+		auditRoutesOutsideTheClusterCheckShape,
+		settingsRoutesOutsideTheClusterCheckShape,
 	} {
 		maps.Copy(out, m)
 	}
@@ -428,6 +437,23 @@ var registryDomainRouteCounts = map[string]int{
 	"registerFirewallEndpoints":         firewallRouteCount,
 	"registerSDNEndpoints":              sdnRouteCount,
 	"registerFirewallTemplateEndpoints": firewallTemplateRouteCount,
+
+	"registerMetricsEndpoints":         metricsRouteCount,
+	"registerPoolEndpoints":            poolRouteCount,
+	"registerAptRepositoryEndpoints":   aptRouteCount,
+	"registerMetricServerEndpoints":    metricServerRouteCount,
+	"registerScheduleEndpoints":        scheduleRouteCount,
+	"registerSearchEndpoints":          searchRouteCount,
+	"registerGuestSnapshotEndpoints":   guestSnapshotRouteCount,
+	"registerFavoritesEndpoints":       favoritesRouteCount,
+	"registerVMFolderEndpoints":        vmFolderRouteCount,
+	"registerNotificationDLQEndpoints": dlqRouteCount,
+	"registerTaskEndpoints":            taskRouteCount,
+	"registerClusterEndpoints":         clusterRouteCount,
+	"registerAuditEndpoints":           auditRouteCount,
+	"registerSettingsEndpoints":        settingsRouteCount,
+	"registerChangelogEndpoints":       changelogRouteCount,
+	"registerVersionEndpoint":          versionRouteCount,
 }
 
 // registryRouteCount is the total the registry must hold.
@@ -480,6 +506,23 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 		"registerFirewallEndpoints":         0,
 		"registerSDNEndpoints":              0,
 		"registerFirewallTemplateEndpoints": 0,
+
+		"registerMetricsEndpoints":         0,
+		"registerPoolEndpoints":            0,
+		"registerAptRepositoryEndpoints":   0,
+		"registerMetricServerEndpoints":    0,
+		"registerScheduleEndpoints":        0,
+		"registerSearchEndpoints":          0,
+		"registerGuestSnapshotEndpoints":   0,
+		"registerFavoritesEndpoints":       0,
+		"registerVMFolderEndpoints":        0,
+		"registerNotificationDLQEndpoints": 0,
+		"registerTaskEndpoints":            0,
+		"registerClusterEndpoints":         0,
+		"registerAuditEndpoints":           0,
+		"registerSettingsEndpoints":        0,
+		"registerChangelogEndpoints":       0,
+		"registerVersionEndpoint":          0,
 	}
 	reg := NewRegistry()
 	s := newRouteStubServer(t)
@@ -614,6 +657,70 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	before = reg.Len()
 	registerFirewallTemplateEndpoints(reg, s.networkHandler)
 	declared["registerFirewallTemplateEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerMetricsEndpoints(reg, s.metricsHandler)
+	declared["registerMetricsEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerPoolEndpoints(reg, s.poolHandler)
+	declared["registerPoolEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerAptRepositoryEndpoints(reg, s.aptRepositoryHandler)
+	declared["registerAptRepositoryEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerMetricServerEndpoints(reg, s.metricServerHandler)
+	declared["registerMetricServerEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerScheduleEndpoints(reg, s.scheduleHandler)
+	declared["registerScheduleEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerSearchEndpoints(reg, s.searchHandler)
+	declared["registerSearchEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerGuestSnapshotEndpoints(reg, s.guestSnapshotHandler)
+	declared["registerGuestSnapshotEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerFavoritesEndpoints(reg, s.favoritesHandler)
+	declared["registerFavoritesEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerVMFolderEndpoints(reg, s.vmFoldersHandler)
+	declared["registerVMFolderEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerNotificationDLQEndpoints(reg, s.notificationDLQHandler)
+	declared["registerNotificationDLQEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerTaskEndpoints(reg, s.taskHandler)
+	declared["registerTaskEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerClusterEndpoints(reg, s.clusterHandler, nil, nil, nil)
+	declared["registerClusterEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerAuditEndpoints(reg, s.auditHandler)
+	declared["registerAuditEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerSettingsEndpoints(reg, s.settingsHandler)
+	declared["registerSettingsEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerChangelogEndpoints(reg, s.changelogHandler)
+	declared["registerChangelogEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerVersionEndpoint(reg, s)
+	declared["registerVersionEndpoint"] = reg.Len() - before
 
 	if len(declared) != len(registryDomainRouteCounts) {
 		t.Fatalf("this test drives %d domains but registryDomainRouteCounts names %d — "+

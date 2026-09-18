@@ -75,9 +75,9 @@ func TestClusterCreateLimiterCannotBeSpelledAround(t *testing.T) {
 	}
 }
 
-// TestClusterCreateLimiterIsRouteScopedNotAppLevel is a static guard over the
-// real wiring, because the behavioural version of this assertion is a tautology
-// — building a route with auth ahead of the limiter and then observing that the
+// TestClusterCreateLimiterIsRouteScopedNotAppLevel is a guard over the real
+// wiring, because the behavioural version of this assertion is a tautology —
+// building a route with auth ahead of the limiter and then observing that the
 // limiter sits behind auth proves nothing about setupRoutes.
 //
 // Two properties matter and neither is visible from a hand-built app:
@@ -85,20 +85,33 @@ func TestClusterCreateLimiterCannotBeSpelledAround(t *testing.T) {
 //   - Registered on the ROUTE. An app.Use limiter matching on c.Path() is
 //     bypassable by path spelling (see the test above), because Fiber routes on
 //     a lowercased, slash-trimmed path.
-//   - Therefore it runs after the group's authRequired, so anonymous traffic
-//     cannot drain the budget and lock legitimate onboarding out.
+//   - Therefore it runs after authentication, so anonymous traffic cannot drain
+//     the budget and lock legitimate onboarding out.
+//
+// Since Phase 6j the route is DECLARED rather than registered in router.go, so
+// the first half is read off the declaration the running route table was built
+// from rather than out of router.go's source. That is strictly stronger than
+// the AST search it replaces: a mention of clusterCreateLimiter anywhere in the
+// file satisfied a text search, while Endpoint.RateLimiter being non-nil is the
+// value mountRegistry actually splices into the chain. Its POSITION in that
+// chain — after authentication, ahead of the permission check — is pinned by
+// TestRegistryChainOrder.
 func TestClusterCreateLimiterIsRouteScopedNotAppLevel(t *testing.T) {
+	e := declaredEndpoint(t, fiber.MethodPost, pathPrefix+"clusters")
+	if e.RateLimiter == nil {
+		t.Error("POST /api/v1/clusters declares no RateLimiter — an app-level limiter is bypassable by " +
+			"path spelling, and the create is what stops Nexara being used as a password-spraying proxy")
+	}
+	// The two routes that dial an arbitrary operator-supplied host carry the
+	// other limiter, for the same reason and with the same shape.
+	for _, path := range []string{pathPrefix + "clusters/fetch-fingerprint", pathPrefix + "clusters/:id/verify-certificate"} {
+		if declaredEndpoint(t, fiber.MethodPost, path).RateLimiter == nil {
+			t.Errorf("POST %s declares no RateLimiter; it opens an outbound TLS connection to a host the "+
+				"caller names, which the general budget makes a serviceable port scanner", path)
+		}
+	}
+
 	fset := token.NewFileSet()
-
-	routes, err := parser.ParseFile(fset, "router.go", nil, 0)
-	if err != nil {
-		t.Fatalf("parse router.go: %v", err)
-	}
-	if !mentionsClusterCreateLimiter(routes) {
-		t.Error("router.go does not wire clusterCreateLimiter onto the POST /clusters route — " +
-			"an app-level limiter is bypassable by path spelling")
-	}
-
 	mw, err := parser.ParseFile(fset, "middleware.go", nil, 0)
 	if err != nil {
 		t.Fatalf("parse middleware.go: %v", err)
@@ -114,17 +127,6 @@ func TestClusterCreateLimiterIsRouteScopedNotAppLevel(t *testing.T) {
 		}
 		return false
 	})
-}
-
-func mentionsClusterCreateLimiter(f *ast.File) bool {
-	found := false
-	ast.Inspect(f, func(n ast.Node) bool {
-		if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "clusterCreateLimiter" {
-			found = true
-		}
-		return true
-	})
-	return found
 }
 
 func mentionsClusterCreateLimiterIn(body *ast.BlockStmt) bool {

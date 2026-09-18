@@ -2,17 +2,21 @@ package handlers
 
 import (
 	"encoding/json"
-	"regexp"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-var handlePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+// All three routes are declared in internal/api/registry_apt_repositories.go,
+// which states their cluster-scoped permission (view:apt_repository for the
+// listing, manage:apt_repository for the two writes) and their parameters —
+// including the handle pattern this file used to enforce by hand. Nothing below
+// re-checks either.
 
 // AptRepositoryHandler handles APT repository management endpoints.
 type AptRepositoryHandler struct {
@@ -31,18 +35,12 @@ func (h *AptRepositoryHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.U
 }
 
 // ListRepositories handles GET /clusters/:cluster_id/nodes/:node/apt/repositories.
-func (h *AptRepositoryHandler) ListRepositories(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AptRepositoryHandler) ListRepositories(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "apt_repository", clusterID); err != nil {
-		return err
-	}
-	nodeName := c.Params("node")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
-	}
+	nodeName := p.String("node")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -54,54 +52,36 @@ func (h *AptRepositoryHandler) ListRepositories(c fiber.Ctx) error {
 	return c.JSON(repos)
 }
 
-type toggleRepoRequest struct {
-	Path    string `json:"path"`
-	Index   int    `json:"index"`
-	Enabled bool   `json:"enabled"`
-	Digest  string `json:"digest"`
-}
-
 // ToggleRepository handles PUT /clusters/:cluster_id/nodes/:node/apt/repositories.
-func (h *AptRepositoryHandler) ToggleRepository(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AptRepositoryHandler) ToggleRepository(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "apt_repository", clusterID); err != nil {
-		return err
-	}
-	nodeName := c.Params("node")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
-	}
-	var req toggleRepoRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Path == "" || len(req.Path) > 256 {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid file path")
-	}
-	if req.Index < 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "Index must be non-negative")
-	}
+	nodeName := p.String("node")
+	path := p.String("path")
+	// The declaration bounds index to 0..2147483647 so this narrowing is exact
+	// on a 32-bit build too.
+	index := int(p.Int("index"))
+	enabled := p.Bool("enabled")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	if err := pxClient.SetNodeAptRepository(c.Context(), nodeName, req.Path, req.Index, req.Enabled, req.Digest); err != nil {
+	if err := pxClient.SetNodeAptRepository(c.Context(), nodeName, path, index, enabled, p.String("digest")); err != nil {
 		return mapProxmoxError(err)
 	}
 
 	action := "disabled"
-	if req.Enabled {
+	if enabled {
 		action = "enabled"
 	}
 	details, _ := json.Marshal(map[string]interface{}{
 		"node":    nodeName,
-		"path":    req.Path,
-		"index":   req.Index,
-		"enabled": req.Enabled,
+		"path":    path,
+		"index":   index,
+		"enabled": enabled,
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "apt_repository", nodeName, action, details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindAptRepoChange, "apt_repository", nodeName, action)
@@ -109,41 +89,24 @@ func (h *AptRepositoryHandler) ToggleRepository(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-type addStandardRepoRequest struct {
-	Handle string `json:"handle"`
-	Digest string `json:"digest"`
-}
-
 // AddStandardRepository handles POST /clusters/:cluster_id/nodes/:node/apt/repositories.
-func (h *AptRepositoryHandler) AddStandardRepository(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *AptRepositoryHandler) AddStandardRepository(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "apt_repository", clusterID); err != nil {
-		return err
-	}
-	nodeName := c.Params("node")
-	if nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
-	}
-	var req addStandardRepoRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if !handlePattern.MatchString(req.Handle) {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid repository handle")
-	}
+	nodeName := p.String("node")
+	handle := p.String("handle")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	if err := pxClient.AddNodeAptStandardRepository(c.Context(), nodeName, req.Handle, req.Digest); err != nil {
+	if err := pxClient.AddNodeAptStandardRepository(c.Context(), nodeName, handle, p.String("digest")); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]string{"node": nodeName, "handle": req.Handle})
+	details, _ := json.Marshal(map[string]string{"node": nodeName, "handle": handle})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "apt_repository", nodeName, "added_standard_repo", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindAptRepoChange, "apt_repository", nodeName, "added_standard_repo")
 

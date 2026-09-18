@@ -126,6 +126,63 @@ func (s *Server) buildRegistry() *Registry {
 		registerSDNEndpoints(reg, s.networkHandler)
 		registerFirewallTemplateEndpoints(reg, s.networkHandler)
 	}
+	if s.metricsHandler != nil {
+		registerMetricsEndpoints(reg, s.metricsHandler)
+	}
+	if s.poolHandler != nil {
+		registerPoolEndpoints(reg, s.poolHandler)
+	}
+	if s.aptRepositoryHandler != nil {
+		registerAptRepositoryEndpoints(reg, s.aptRepositoryHandler)
+	}
+	if s.metricServerHandler != nil {
+		registerMetricServerEndpoints(reg, s.metricServerHandler)
+	}
+	if s.scheduleHandler != nil {
+		registerScheduleEndpoints(reg, s.scheduleHandler)
+	}
+	if s.searchHandler != nil {
+		registerSearchEndpoints(reg, s.searchHandler)
+	}
+	if s.guestSnapshotHandler != nil {
+		registerGuestSnapshotEndpoints(reg, s.guestSnapshotHandler)
+	}
+	if s.favoritesHandler != nil {
+		registerFavoritesEndpoints(reg, s.favoritesHandler)
+	}
+	if s.vmFoldersHandler != nil {
+		registerVMFolderEndpoints(reg, s.vmFoldersHandler)
+	}
+	if s.notificationDLQHandler != nil {
+		registerNotificationDLQEndpoints(reg, s.notificationDLQHandler)
+	}
+	if s.taskHandler != nil {
+		registerTaskEndpoints(reg, s.taskHandler)
+	}
+	if s.auditHandler != nil {
+		registerAuditEndpoints(reg, s.auditHandler)
+	}
+	if s.settingsHandler != nil {
+		registerSettingsEndpoints(reg, s.settingsHandler)
+	}
+	if s.clusterHandler != nil {
+		// THREE limiter instances, exactly as the legacy block built them.
+		// fingerprintFetchLimiter() returns a NEW limiter on every call and the
+		// legacy block called it twice, so fetch-fingerprint and
+		// verify-certificate each had their own 30/min store despite sharing a
+		// key string. Passing one instance to both would halve the budget for a
+		// caller who uses both — a live rate-limit change, not a migration. See
+		// registerClusterEndpoints, and contrast registerVeeamEndpoints, whose
+		// legacy block built ONE instance and therefore shares one.
+		registerClusterEndpoints(reg, s.clusterHandler,
+			s.clusterCreateLimiter(), s.fingerprintFetchLimiter(), s.fingerprintFetchLimiter())
+	}
+	if s.changelogHandler != nil {
+		registerChangelogEndpoints(reg, s.changelogHandler)
+	}
+	// Not gated on a handler: the version probe is a method on the Server
+	// itself. See registerVersionEndpoint.
+	registerVersionEndpoint(reg, s)
 	return reg
 }
 

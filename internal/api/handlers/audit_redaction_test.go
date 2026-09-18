@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -252,7 +253,7 @@ func TestListRecentRedactsForCallersWithoutTheOwningPermission(t *testing.T) {
 				c.Locals("rbac_engine", newGrantEngine(tt.perms...))
 				return c.Next()
 			})
-			app.Get("/audit-log/recent", handler.ListRecent)
+			app.Get("/audit-log/recent", withRequestParams(t, apischema.Properties{}, nil, handler.ListRecent))
 
 			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/audit-log/recent", nil))
 			if err != nil {

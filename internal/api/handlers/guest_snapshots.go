@@ -10,10 +10,22 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
+
+// Both routes are declared in internal/api/registry_guest_snapshots.go, which
+// states their permission and their parameters. The listing is Advisory —
+// nothing gates it and the filtering below IS the authorization — and the
+// resync carries an Alternatives gate that passes on EITHER guest permission.
+//
+// What stays here is the half neither shape can express: the PRECISE per-class
+// check on the resync, which is not knowable until the guest row is read, and
+// which answers 404 rather than 403 so a caller holding only the other class
+// cannot learn that a guest with this vmid exists.
 
 // maxSnapshotsPerGuest bounds a single guest's snapshot listing before the
 // resync upsert loop runs — a plausibility cap, not a product limit.
@@ -58,7 +70,7 @@ type guestSnapshotItem struct {
 // oldest first (rows without a snapshot time sort last). QEMU rows require
 // view:vm on the row's cluster, LXC rows view:container — the split matters
 // because the two resources can be granted independently.
-func (h *GuestSnapshotHandler) List(c fiber.Ctx) error {
+func (h *GuestSnapshotHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	vmAccess, err := accessibleClusters(c, "view", "vm")
 	if err != nil {
 		return err
@@ -69,12 +81,14 @@ func (h *GuestSnapshotHandler) List(c fiber.Ctx) error {
 	}
 
 	// Optional cluster filter — the caller must hold either guest permission
-	// on it (per-row filtering below still applies the precise one).
+	// on it (per-row filtering below still applies the precise one). Declared
+	// as filter_cluster_id with "cluster_id" as its alias; see the declaration
+	// for why the name the gate reads cannot be used for a query parameter.
 	var clusterFilter uuid.UUID
-	if cid := c.Query("cluster_id"); cid != "" {
-		clusterFilter, err = uuid.Parse(cid)
+	if cid, supplied := p.OptString("filter_cluster_id"); supplied {
+		clusterFilter, err = parseParamUUID(cid)
 		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id filter")
+			return err
 		}
 		if !vmAccess.PermitsCluster(clusterFilter) && !ctAccess.PermitsCluster(clusterFilter) {
 			return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
@@ -152,24 +166,22 @@ func mapGuestSnapshotRow(row db.ListAllGuestSnapshotsRow) guestSnapshotItem {
 	return item
 }
 
-type guestSnapshotResyncRequest struct {
-	Vmid int32 `json:"vmid"`
-}
-
 // Resync refreshes one guest's snapshot inventory straight from Proxmox and
 // converges the guest_snapshots rows, so the central page reflects a just-
 // completed snapshot task without waiting for the next collector pass. The
 // listing is read-only against Proxmox and yields no UPID (no TrackTask),
 // and the rows are derived cache state (no audit entry).
-func (h *GuestSnapshotHandler) Resync(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *GuestSnapshotHandler) Resync(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
 
-	// Coarse gate BEFORE the guest lookup: resolving first would make the
-	// 404-vs-403 split a vmid-existence oracle for callers with no guest
-	// permission on the cluster.
+	// The declared Alternatives gate has already refused a caller holding
+	// NEITHER guest permission on this cluster. These two reads are what the
+	// PRECISE per-class check below needs, and they are taken BEFORE the guest
+	// lookup on purpose: resolving first would make the 404-vs-403 split a
+	// vmid-existence oracle.
 	canVM, err := hasClusterPerm(c, "view", "vm", clusterID)
 	if err != nil {
 		return err
@@ -178,23 +190,12 @@ func (h *GuestSnapshotHandler) Resync(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if !canVM && !canCT {
-		return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
-	}
-
-	var req guestSnapshotResyncRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Vmid <= 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "vmid is required")
-	}
 
 	// Resolve on the stable (cluster_id, vmid) identity — central-page rows
 	// carry vmid, and the vms UUID may have churned since the row was listed.
 	vm, err := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
 		ClusterID: clusterID,
-		Vmid:      req.Vmid,
+		Vmid:      safeconv.Int32(int(p.Int("vmid"))),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

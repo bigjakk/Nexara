@@ -17,69 +17,74 @@ import (
 
 // legacyRouteBaseline is a machine-generated snapshot of every
 // "METHOD path" key setupRoutes registered OUTSIDE the declarative
-// registry. It was first captured on 2026-09-17 at 552 routes, then at 501
-// after Phase 6a moved the 18 ContainerHandler routes into the registry
-// (the 33 VMHandler routes had already left), then at 439 after Phase
-// 6b moved the 62 routes of five cluster-scoped domains — Ceph 17, HA 17,
-// DRS 10, CVE 10 and replication 8 — then at 402 after Phase 6c moved
-// 37 more: migrations 7, cluster options 9, guest tools 7, virtio-win 8
-// and PBS servers 6, then at 352 after Phase 6d moved 50: all 38
-// NodeHandler routes and 12 of the 13 StorageHandler ones, then at 288
-// after Phase 6e moved 64 of NetworkHandler's 66: 7 node-interface, 28
-// firewall, 25 SDN and 4 of the 6 firewall-template routes, then at 237
-// after Phase 6f moved 51: 28 backup — 19 of them the routes nested under
-// /pbs-servers/:pbs_id — 11 VM-import, and all 12 report routes, then at
-// 192 after Phase 6g moved 45: all 25 Veeam routes — 24 under
-// /veeam-servers and the last one the VM detail page's Veeam card — and 20
-// of AlertHandler's 22. It is now at 130 after Phase 6h moved 62: all 25
-// Proxmox access-control routes, all 18 ACME routes and all 19
-// rolling-update routes — the last of those counting the 7 SSH credential
-// and known-host routes the same handler owns. It is now at 76 after Phase 6i
-// moved 54 of the identity tranche's 57: 10 RBAC, 4 user-management, 6 API
-// key, 7 LDAP, 7 OIDC (6 admin plus /auth/oidc/authorize), 7 TOTP (including
-// the admin reset under /users/:id) and 13 of AuthHandler's 15.
+// registry. It was first captured on 2026-09-17 at 552 routes and has
+// shrunk with every tranche since: 501 after Phase 6a (18 containers, on top of
+// the 33 VMs already migrated), 439 after 6b (Ceph 17, HA 17, DRS 10, CVE 10,
+// replication 8), 402 after 6c (migrations 7, cluster options 9, guest tools 7,
+// virtio-win 8, PBS 6), 352 after 6d (38 nodes, 12 of 13 storage), 288 after 6e
+// (64 of NetworkHandler's 66), 237 after 6f (28 backup, 11 VM-import, 12
+// reports), 192 after 6g (25 Veeam, 20 of AlertHandler's 22), 130 after 6h (25
+// access control, 18 ACME, 19 rolling-update) and 76 after 6i (54 of the
+// identity tranche's 57).
+//
+// It is now at 17 after Phase 6j — the final tranche — moved the remaining 59:
+// audit 9, clusters 7, notification-DLQ 5, metric-servers 5, tasks 4, schedules
+// 4, pools 4, vm-folders 4 of 5, metrics 3, apt-repositories 3, favorites 3,
+// settings 3 of 9, guest-snapshots 2, search 1, changelog 1 and the build
+// version probe.
 //
 // TestGuard_LegacyRouteSetOnlyShrinks compares the live legacy set
 // against it and fails if anything NEW shows up — a route that is not
 // here must be added through the registry, not through router.go.
 //
-// EIGHT routes in this list are here because the registry CANNOT express
-// them, not because nobody got to them, and each is pinned by a test so it
-// stays a decision rather than a gap. The first five are blocked by a
-// PARAMETER TYPE; the last three, added in Phase 6i, are the first blocked by
-// something else:
+// EVERY route left in this list is here because the registry CANNOT express
+// it, not because nobody got to them — Phase 6j was the last tranche, and
+// /healthz aside, each of the other 16 is pinned by a test so it stays a
+// decision rather than a gap. They fall into five groups:
 //
 //   - DELETE .../storage/:storage_id/content/* takes its volume id as a
 //     greedy WILDCARD segment, which checkPathParams refuses outright
 //     because a parameter schema cannot describe one. See
 //     registerStorageEndpoints in internal/api/registry_storage.go and
 //     TestStorageDeleteContentIsStillLegacy.
-//   - POST /api/v1/firewall-templates and PUT /api/v1/firewall-templates/:id
-//     carry `rules`, a JSON array of OBJECTS, and apischema's Property.Items
-//     is restricted to scalar element types. See
-//     registerFirewallTemplateEndpoints in
-//     internal/api/registry_firewall_templates.go and
-//     TestFirewallTemplateWritesAreStillLegacy.
-//   - POST /api/v1/alert-rules and PUT /api/v1/alert-rules/:id carry
-//     `escalation_chain`, an array of objects for the same reason. See
-//     registerAlertEndpoints in internal/api/registry_alerts.go and
+//   - POST /api/v1/firewall-templates, PUT /api/v1/firewall-templates/:id,
+//     POST /api/v1/alert-rules and PUT /api/v1/alert-rules/:id carry a JSON
+//     array of OBJECTS (`rules`, `escalation_chain`), and apischema's
+//     Property.Items is restricted to scalar element types. See
+//     TestFirewallTemplateWritesAreStillLegacy and
 //     TestAlertRuleWritesAreStillLegacy.
 //   - GET /api/v1/auth/oidc/callback has a query string composed by the
 //     IDENTITY PROVIDER, and the registry answers an undeclared key with a 400
-//     (PVE's additionalProperties => 0). RFC 9207 adds `iss`, session
-//     management adds `session_state`, an error response carries
-//     `error`/`error_description`, and a provider may add its own — so the
-//     parameter set is open by construction. See registerOIDCEndpoints in
-//     internal/api/registry_oidc.go and TestOIDCCallbackIsStillLegacy.
+//     (PVE's additionalProperties => 0), so the parameter set is open by
+//     construction. See TestOIDCCallbackIsStillLegacy.
 //   - POST /api/v1/auth/register and POST /api/v1/auth/logout are mounted with
 //     authOptional, which the Permissions vocabulary has no shape for: it
 //     parses a session IF one is presented and lets the request through either
-//     way. Public installs no authentication at all — Register READS
-//     c.Locals("role") to decide whether the caller may create an account —
-//     and every other shape requires a session, which would 401 the logout a
-//     valid refresh cookie must still be able to perform. See
-//     registerAuthEndpoints in internal/api/registry_auth.go and
-//     TestAuthOptionalRoutesAreStillLegacy.
+//     way. See TestAuthOptionalRoutesAreStillLegacy.
+//   - PATCH .../vm-folders/:folder_id carries a THREE-state parent_id — absent
+//     leaves the folder where it is, an explicit null moves it to the top
+//     level, a uuid moves it under that folder — and apischema's present()
+//     reads an explicit JSON null as ABSENT, so a declaration would turn "move
+//     to the top level" into a request that answers 200 and changes nothing.
+//     See TestVMFolderReparentIsStillLegacy.
+//   - GET /api/v1/api-docs and the three branding reads (GET
+//     /api/v1/settings/branding{,/logo-file,/favicon-file}) are
+//     instanceSharedRoutes-shaped: authenticated, serving instance data
+//     identical for every caller, with no subject to authorize. Permissions has
+//     no shape for that, and folding them into SelfService would make
+//     selfServiceRoutes' stated invariant false. See TestAPIDocsIsStillLegacy
+//     and TestSettingsReadsAreStillLegacy.
+//   - GET /api/v1/settings and GET /api/v1/settings/:key perform NO permission
+//     check on any path (settingScopeID gates only when `write && adminOnly`),
+//     and are instance-shared for ?scope=global and self-service for
+//     ?scope=user, chosen per request. PUT /api/v1/settings/:key has the same
+//     conditional check as its declared sibling the DELETE, but its `value` is
+//     arbitrary JSON and apischema's Type vocabulary has no "any JSON value"
+//     member. See TestSettingsReadsAreStillLegacy.
+//   - GET /healthz is the only entry with no test of its own beyond
+//     TestHealthzIsStillLegacy: Register refuses any path outside /api/v1/, and
+//     the container health check has to answer on a path that is not part of
+//     the API surface.
 //
 // Regenerate after migrating routes into the registry (the set should
 // only ever need entries REMOVED, never added):
@@ -92,82 +97,23 @@ import (
 // not hand-edit this list to ADD an entry — that defeats the ratchet;
 // removing entries that were migrated away is the intended maintenance.
 var legacyRouteBaseline = map[string]bool{
-	"DELETE /api/v1/clusters/:cluster_id/metric-servers/:server_id":     true,
-	"DELETE /api/v1/clusters/:cluster_id/pools/:pool_id":                true,
-	"DELETE /api/v1/clusters/:cluster_id/schedules/:id":                 true,
 	"DELETE /api/v1/clusters/:cluster_id/storage/:storage_id/content/*": true,
-	"DELETE /api/v1/clusters/:cluster_id/vm-folders/:folder_id":         true,
-	"DELETE /api/v1/clusters/:id":                                       true,
-	"DELETE /api/v1/favorites":                                          true,
-	"DELETE /api/v1/notification-dlq/:id":                               true,
-	"DELETE /api/v1/settings/:key":                                      true,
-	"DELETE /api/v1/tasks":                                              true,
-	"GET /api/v1/api-docs":                                              true,
-	"GET /api/v1/audit-log":                                             true,
-	"GET /api/v1/audit-log/actions":                                     true,
-	"GET /api/v1/audit-log/export":                                      true,
-	"GET /api/v1/audit-log/recent":                                      true,
-	"GET /api/v1/audit-log/syslog-config":                               true,
-	"GET /api/v1/audit-log/users":                                       true,
-	"GET /api/v1/auth/oidc/callback":                                    true,
-	"GET /api/v1/changelog":                                             true,
-	"GET /api/v1/clusters":                                              true,
-	"GET /api/v1/clusters/:cluster_id/audit-log":                        true,
-	"GET /api/v1/clusters/:cluster_id/metric-servers":                   true,
-	"GET /api/v1/clusters/:cluster_id/metric-servers/:server_id":        true,
-	"GET /api/v1/clusters/:cluster_id/metrics":                          true,
-	"GET /api/v1/clusters/:cluster_id/nodes/:node/apt/repositories":     true,
-	"GET /api/v1/clusters/:cluster_id/nodes/:node_id/metrics":           true,
-	"GET /api/v1/clusters/:cluster_id/pools/:pool_id":                   true,
-	"GET /api/v1/clusters/:cluster_id/schedules":                        true,
-	"GET /api/v1/clusters/:cluster_id/vm-folders":                       true,
-	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics":               true,
-	"GET /api/v1/clusters/:id":                                          true,
-	"GET /api/v1/favorites":                                             true,
-	"GET /api/v1/guest-snapshots":                                       true,
-	"GET /api/v1/notification-dlq":                                      true,
-	"GET /api/v1/notification-dlq/summary":                              true,
-	"GET /api/v1/search":                                                true,
-	"GET /api/v1/settings":                                              true,
-	"GET /api/v1/settings/:key":                                         true,
-	"GET /api/v1/settings/branding":                                     true,
-	"GET /api/v1/settings/branding/favicon-file":                        true,
-	"GET /api/v1/settings/branding/logo-file":                           true,
-	"GET /api/v1/tasks":                                                 true,
-	"GET /api/v1/version":                                               true,
-	"GET /healthz":                                                      true,
-	"PATCH /api/v1/clusters/:cluster_id/vm-folders/:folder_id":          true,
-	"POST /api/v1/alert-rules":                                          true,
-	"POST /api/v1/audit-log/syslog-test":                                true,
-	"POST /api/v1/auth/logout":                                          true,
-	"POST /api/v1/auth/register":                                        true,
-	"POST /api/v1/clusters":                                             true,
-	"POST /api/v1/clusters/:cluster_id/guest-snapshots/resync":          true,
-	"POST /api/v1/clusters/:cluster_id/metric-servers":                  true,
-	"POST /api/v1/clusters/:cluster_id/nodes/:node/apt/repositories":    true,
-	"POST /api/v1/clusters/:cluster_id/pools":                           true,
-	"POST /api/v1/clusters/:cluster_id/schedules":                       true,
-	"POST /api/v1/clusters/:cluster_id/vm-folders":                      true,
-	"POST /api/v1/clusters/:id/verify-certificate":                      true,
-	"POST /api/v1/clusters/fetch-fingerprint":                           true,
-	"POST /api/v1/favorites":                                            true,
-	"POST /api/v1/firewall-templates":                                   true,
-	"POST /api/v1/notification-dlq/:id/dismiss":                         true,
-	"POST /api/v1/notification-dlq/:id/retry":                           true,
-	"POST /api/v1/settings/branding/favicon":                            true,
-	"POST /api/v1/settings/branding/logo":                               true,
-	"POST /api/v1/tasks":                                                true,
-	"PUT /api/v1/alert-rules/:id":                                       true,
-	"PUT /api/v1/audit-log/syslog-config":                               true,
-	"PUT /api/v1/clusters/:cluster_id/metric-servers/:server_id":        true,
-	"PUT /api/v1/clusters/:cluster_id/nodes/:node/apt/repositories":     true,
-	"PUT /api/v1/clusters/:cluster_id/pools/:pool_id":                   true,
-	"PUT /api/v1/clusters/:cluster_id/schedules/:id":                    true,
-	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/folder":                true,
-	"PUT /api/v1/clusters/:id":                                          true,
-	"PUT /api/v1/firewall-templates/:id":                                true,
-	"PUT /api/v1/settings/:key":                                         true,
-	"PUT /api/v1/tasks/:upid":                                           true,
+	"GET /api/v1/api-docs":                                     true,
+	"GET /api/v1/auth/oidc/callback":                           true,
+	"GET /api/v1/settings":                                     true,
+	"GET /api/v1/settings/:key":                                true,
+	"GET /api/v1/settings/branding":                            true,
+	"GET /api/v1/settings/branding/favicon-file":               true,
+	"GET /api/v1/settings/branding/logo-file":                  true,
+	"GET /healthz":                                             true,
+	"PATCH /api/v1/clusters/:cluster_id/vm-folders/:folder_id": true,
+	"POST /api/v1/alert-rules":                                 true,
+	"POST /api/v1/auth/logout":                                 true,
+	"POST /api/v1/auth/register":                               true,
+	"POST /api/v1/firewall-templates":                          true,
+	"PUT /api/v1/alert-rules/:id":                              true,
+	"PUT /api/v1/firewall-templates/:id":                       true,
+	"PUT /api/v1/settings/:key":                                true,
 }
 
 // legacyRouteRatchetViolations reports every key present in actual but

@@ -14,6 +14,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -158,6 +159,29 @@ func TestApplyTaskListScope(t *testing.T) {
 	}
 }
 
+// taskListMirror mirrors the ?limit=/?offset=/?sort=/?order=/filter_cluster_id/
+// ?status=/?vmids= schema GET /api/v1/tasks declares in
+// internal/api/registry_tasks.go, for the reason withRequestParams' own doc
+// comment gives: package api imports this package, not the other way round.
+//
+// It carries the defaults as well as the bounds, because the handler reads
+// p.String("sort") and p.Int("limit") unconditionally — apischema panics on an
+// undeclared key — and because the scope-gate cases below are about what the
+// handler does AFTER validation.
+func taskListMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	return apischema.Properties{
+		"limit":  {Type: apischema.Integer, Optional: true, Default: 50, Minimum: apischema.Ptr(1.0), Maximum: apischema.Ptr(200.0)},
+		"offset": {Type: apischema.Integer, Optional: true, Default: 0, Minimum: apischema.Ptr(0.0)},
+		"sort": {Type: apischema.String, Optional: true, Default: "started",
+			Enum: []string{"started", "cluster", "type", "description", "vm", "node", "progress", "status"}},
+		"order":             {Type: apischema.String, Optional: true, Default: "desc", Enum: []string{"asc", "desc"}},
+		"filter_cluster_id": {Type: apischema.String, Alias: "cluster_id", Optional: true, Format: "uuid"},
+		"status":            {Type: apischema.String, Optional: true, Enum: []string{"running", "completed", "failed", "stopped"}},
+		"vmids":             {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(6000)},
+	}
+}
+
 // newTaskListTestApp wires TaskHandler.List with NIL queries: every case in
 // the scope-gate test below must resolve before any DB access. A user without
 // view:task grants must short-circuit ahead of the DB (pre-fix, that path
@@ -170,7 +194,7 @@ func newTaskListTestApp(t *testing.T) *fiber.App {
 	handler := NewTaskHandler(nil, nil, 0)
 	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 	installTestRoleMiddleware(app)
-	app.Get("/tasks", handler.List)
+	app.Get("/tasks", withRequestParams(t, taskListMirror(t), nil, handler.List))
 	return app
 }
 

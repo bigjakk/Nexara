@@ -19,13 +19,13 @@ func (s *Server) setupRoutes() {
 	s.app.Get("/healthz", s.handleHealthz)
 
 	// API v1 group.
+	//
+	// The build version probe and the changelog are declared in
+	// internal/api/registry_version.go and
+	// internal/api/registry_changelog.go and mounted by mountRegistry above,
+	// so there are no routes on this group here. It is kept because the
+	// legacy blocks below still hang off it.
 	v1 := s.app.Group("/api/v1")
-	v1.Get("/version", s.handleVersion)
-
-	// Changelog (release notes from GitHub) — public, same as version.
-	if s.changelogHandler != nil {
-		v1.Get("/changelog", s.changelogHandler.Get)
-	}
 
 	// Auth routes.
 	//
@@ -73,22 +73,16 @@ func (s *Server) setupRoutes() {
 		}
 	}
 
-	// Cluster routes — single group for all cluster-scoped endpoints.
+	// Cluster routes — single group for the cluster-scoped endpoints that are
+	// still legacy.
+	//
+	// ClusterHandler's own 7 routes are declared in
+	// internal/api/registry_clusters.go and mounted by mountRegistry above,
+	// together with the two rate limiters they carry, so there are no routes
+	// for them here. The group survives because the legacy blocks below still
+	// hang off it.
 	if s.clusterHandler != nil {
 		clusters := v1.Group("/clusters", s.authRequired())
-		clusters.Post("/", s.clusterCreateLimiter(), s.clusterHandler.Create)
-		// Rate-limited: it opens an outbound TLS connection to a
-		// caller-supplied host, so the general 600/min budget made it a
-		// serviceable port scanner. Looser than the create limiters beside it
-		// because it is step 1 of a dialog a human retries.
-		clusters.Post("/fetch-fingerprint", s.fingerprintFetchLimiter(), s.clusterHandler.FetchFingerprint)
-		clusters.Get("/", s.clusterHandler.List)
-		clusters.Get("/:id", s.clusterHandler.Get)
-		clusters.Put("/:id", s.clusterHandler.Update)
-		// Rate-limited alongside fetch-fingerprint: it opens the same kind of
-		// outbound TLS connection, just to an address already on file.
-		clusters.Post("/:id/verify-certificate", s.fingerprintFetchLimiter(), s.clusterHandler.VerifyCertificate)
-		clusters.Delete("/:id", s.clusterHandler.Delete)
 
 		// Nested resources by cluster.
 		//
@@ -110,18 +104,27 @@ func (s *Server) setupRoutes() {
 		// it here. It lost the vmHandler condition it used to carry: the card
 		// is VeeamHandler's route, and a Server holding one handler but not the
 		// other would have silently dropped it.
-		if s.guestSnapshotHandler != nil {
-			clusters.Post("/:cluster_id/guest-snapshots/resync", s.guestSnapshotHandler.Resync)
-		}
+		// The per-guest snapshot resync is declared in
+		// internal/api/registry_guest_snapshots.go alongside the central
+		// inventory listing and mounted by mountRegistry above, so there is no
+		// block for it here.
 		// The 18 container routes are declared in
 		// internal/api/registry_containers.go and mounted by
 		// mountRegistry above, so there is no block for them here.
 		if s.vmFoldersHandler != nil {
-			clusters.Get("/:cluster_id/vm-folders", s.vmFoldersHandler.List)
-			clusters.Post("/:cluster_id/vm-folders", s.vmFoldersHandler.Create)
+			// The other 4 VM-folder routes are declared in
+			// internal/api/registry_vm_folders.go and mounted by mountRegistry
+			// above. This ONE stays here because apischema cannot express it:
+			// its `parent_id` is a THREE-state field — absent leaves the folder
+			// where it is, an explicit null moves it to the top level, a uuid
+			// moves it under that folder — and apischema's present() reads an
+			// explicit JSON null as ABSENT (validate.go). Declaring it would
+			// silently turn "move this folder to the top level" into a request
+			// that answers 200 and changes nothing. The handler keeps its
+			// jsonNullUUID decoder and its hand-placed manage:vm_folder check,
+			// and TestVMFolderReparentIsStillLegacy pins that it is a decision
+			// rather than a gap.
 			clusters.Patch("/:cluster_id/vm-folders/:folder_id", s.vmFoldersHandler.Update)
-			clusters.Delete("/:cluster_id/vm-folders/:folder_id", s.vmFoldersHandler.Delete)
-			clusters.Put("/:cluster_id/vms/:vm_id/folder", s.vmFoldersHandler.AssignVM)
 		}
 		if s.storageHandler != nil {
 			// The other 12 storage routes are declared in
@@ -148,11 +151,9 @@ func (s *Server) setupRoutes() {
 		// The 11 VM-import routes are declared in
 		// internal/api/registry_vm_import.go and mounted by mountRegistry
 		// above, so there is no block for them here.
-		if s.metricsHandler != nil {
-			clusters.Get("/:cluster_id/metrics", s.metricsHandler.GetClusterHistorical)
-			clusters.Get("/:cluster_id/vms/:vm_id/metrics", s.metricsHandler.GetVMHistorical)
-			clusters.Get("/:cluster_id/nodes/:node_id/metrics", s.metricsHandler.GetNodeHistorical)
-		}
+		// The 3 historical-metric routes are declared in
+		// internal/api/registry_metrics.go and mounted by mountRegistry
+		// above, so there is no block for them here.
 		// The 17 Ceph routes are declared in
 		// internal/api/registry_ceph.go and mounted by mountRegistry
 		// above, so there is no block for them here.
@@ -190,18 +191,14 @@ func (s *Server) setupRoutes() {
 		// instance-wide listings, and mounted by mountRegistry above, so there
 		// is no block for them here.
 
-		// Schedule routes.
-		if s.scheduleHandler != nil {
-			clusters.Post("/:cluster_id/schedules", s.scheduleHandler.Create)
-			clusters.Get("/:cluster_id/schedules", s.scheduleHandler.List)
-			clusters.Put("/:cluster_id/schedules/:id", s.scheduleHandler.Update)
-			clusters.Delete("/:cluster_id/schedules/:id", s.scheduleHandler.Delete)
-		}
+		// The 4 scheduled-task routes are declared in
+		// internal/api/registry_schedules.go and mounted by mountRegistry
+		// above, so there is no block for them here.
 
-		// Audit log (cluster-scoped).
-		if s.auditHandler != nil {
-			clusters.Get("/:cluster_id/audit-log", s.auditHandler.ListByCluster)
-		}
+		// The per-cluster audit listing is declared in
+		// internal/api/registry_audit.go alongside the 8 instance-wide audit
+		// routes and mounted by mountRegistry above, so there is no block for
+		// it here.
 
 		// The 19 rolling-update routes — 12 for the jobs and the node package
 		// preview, 7 for the SSH credentials and pinned host keys they run
@@ -216,13 +213,10 @@ func (s *Server) setupRoutes() {
 		// and mounted by mountRegistry above, so there is no block for
 		// them here.
 
-		// Resource pool CRUD routes (GET list already registered via vmHandler).
-		if s.poolHandler != nil {
-			clusters.Post("/:cluster_id/pools", s.poolHandler.CreatePool)
-			clusters.Get("/:cluster_id/pools/:pool_id", s.poolHandler.GetPool)
-			clusters.Put("/:cluster_id/pools/:pool_id", s.poolHandler.UpdatePool)
-			clusters.Delete("/:cluster_id/pools/:pool_id", s.poolHandler.DeletePool)
-		}
+		// The 4 resource-pool CRUD routes are declared in
+		// internal/api/registry_pools.go and mounted by mountRegistry above,
+		// so there is no block for them here. The pool LISTING is VMHandler's
+		// and lives in internal/api/registry_vms.go.
 
 		// The 25 Proxmox access-control routes — PVE users, API tokens,
 		// groups, roles, ACLs and the read-only realm listing — are declared
@@ -239,21 +233,10 @@ func (s *Server) setupRoutes() {
 		// and mounted by mountRegistry above, so there is no block for them
 		// here.
 
-		// APT repository management routes.
-		if s.aptRepositoryHandler != nil {
-			clusters.Get("/:cluster_id/nodes/:node/apt/repositories", s.aptRepositoryHandler.ListRepositories)
-			clusters.Put("/:cluster_id/nodes/:node/apt/repositories", s.aptRepositoryHandler.ToggleRepository)
-			clusters.Post("/:cluster_id/nodes/:node/apt/repositories", s.aptRepositoryHandler.AddStandardRepository)
-		}
-
-		// Metric server routes.
-		if s.metricServerHandler != nil {
-			clusters.Get("/:cluster_id/metric-servers", s.metricServerHandler.ListServers)
-			clusters.Post("/:cluster_id/metric-servers", s.metricServerHandler.CreateServer)
-			clusters.Get("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.GetServer)
-			clusters.Put("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.UpdateServer)
-			clusters.Delete("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.DeleteServer)
-		}
+		// The 3 APT repository routes are declared in
+		// internal/api/registry_apt_repositories.go and the 5 metric-server
+		// routes in internal/api/registry_metric_servers.go. Both are mounted
+		// by mountRegistry above, so there is no block for either here.
 	}
 
 	// Firewall template routes (not cluster-scoped).
@@ -298,15 +281,9 @@ func (s *Server) setupRoutes() {
 		alertRules.Put("/:id", s.alertHandler.UpdateRule)
 	}
 
-	// Notification dead-letter queue.
-	if s.notificationDLQHandler != nil {
-		dlq := v1.Group("/notification-dlq", s.authRequired())
-		dlq.Get("/", s.notificationDLQHandler.List)
-		dlq.Get("/summary", s.notificationDLQHandler.Summary)
-		dlq.Post("/:id/retry", s.notificationDLQHandler.Retry)
-		dlq.Post("/:id/dismiss", s.notificationDLQHandler.Dismiss)
-		dlq.Delete("/:id", s.notificationDLQHandler.Delete)
-	}
+	// The 5 notification dead-letter queue routes are declared in
+	// internal/api/registry_notification_dlq.go and mounted by mountRegistry
+	// above, so there is no group for them here.
 
 	// The 12 report routes are declared in
 	// internal/api/registry_reports.go and mounted by mountRegistry above,
@@ -336,33 +313,17 @@ func (s *Server) setupRoutes() {
 	// are declared in internal/api/registry_backup.go and mounted by
 	// mountRegistry above, so there is no block for them here.
 
-	// Audit log routes.
-	if s.auditHandler != nil {
-		audit := v1.Group("/audit-log", s.authRequired())
-		audit.Get("/recent", s.auditHandler.ListRecent)
-		audit.Get("/actions", s.auditHandler.ListActions)
-		audit.Get("/users", s.auditHandler.ListUsers)
-		audit.Get("/export", s.auditHandler.Export)
-		audit.Get("/syslog-config", s.auditHandler.GetSyslogConfig)
-		audit.Put("/syslog-config", s.auditHandler.UpdateSyslogConfig)
-		audit.Post("/syslog-test", s.auditHandler.TestSyslog)
-		audit.Get("/", s.auditHandler.List)
-	}
+	// The 9 audit-log routes — 8 instance-wide and the per-cluster listing —
+	// are declared in internal/api/registry_audit.go and mounted by
+	// mountRegistry above, so there is no group for them here.
 
-	// Task history routes.
-	if s.taskHandler != nil {
-		tasks := v1.Group("/tasks", s.authRequired())
-		tasks.Get("/", s.taskHandler.List)
-		tasks.Post("/", s.taskHandler.Create)
-		tasks.Put("/:upid", s.taskHandler.Update)
-		tasks.Delete("/", s.taskHandler.ClearCompleted)
-	}
+	// The 4 task-history routes are declared in
+	// internal/api/registry_tasks.go and mounted by mountRegistry above, so
+	// there is no group for them here.
 
-	// Central guest snapshot inventory.
-	if s.guestSnapshotHandler != nil {
-		snaps := v1.Group("/guest-snapshots", s.authRequired())
-		snaps.Get("/", s.guestSnapshotHandler.List)
-	}
+	// The central guest snapshot inventory is declared in
+	// internal/api/registry_guest_snapshots.go and mounted by mountRegistry
+	// above, so there is no group for it here.
 
 	// The 8 virtio-win routes — the instance-wide catalog and download
 	// source, and the 5 per-cluster policy routes — are declared in
@@ -382,21 +343,12 @@ func (s *Server) setupRoutes() {
 	// internal/api/registry_oidc.go, alongside the anonymous /auth/oidc/authorize
 	// that starts the login redirect, and mounted by mountRegistry above.
 
-	// Global search.
-	if s.searchHandler != nil {
-		v1.Get("/search", s.authRequired(), s.searchHandler.GlobalSearch)
-	}
+	// Global search is declared in internal/api/registry_search.go and
+	// mounted by mountRegistry above, so there is no route for it here.
 
-	// Per-user favorites (self-service): the caller's own starred clusters,
-	// nodes and guests, surfaced above the sidebar tree.
-	if s.favoritesHandler != nil {
-		favorites := v1.Group("/favorites", s.authRequired())
-		favorites.Get("/", s.favoritesHandler.ListFavorites)
-		favorites.Post("/", s.favoritesHandler.AddFavorite)
-		// The target is identified by query parameters rather than a path, so a
-		// node name never has to survive URL path segmentation.
-		favorites.Delete("/", s.favoritesHandler.RemoveFavorite)
-	}
+	// The 3 per-user favorites routes are declared in
+	// internal/api/registry_favorites.go and mounted by mountRegistry above,
+	// so there is no group for them here.
 
 	// The 6 API key routes — 4 for the caller's own keys and 2 for the
 	// instance-wide admin view — are declared in
@@ -418,17 +370,41 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Settings routes.
+	//
+	// THREE of the nine are declared in internal/api/registry_settings.go — the
+	// two branding uploads, whose manage:settings check is unconditional, and
+	// the delete, which is Deferred because its check depends on the ?scope= the
+	// caller sends. The SIX below stay here, and each for its own reason. See
+	// registerSettingsEndpoints for the full account and
+	// TestSettingsReadsAreStillLegacy, which pins every one of them.
+	//
+	//   - GET /settings and GET /settings/:key perform NO permission check on
+	//     any path: settingScopeID gates only when `write && adminOnly`, and
+	//     both pass write=false. They are instanceSharedRoutes-shaped for
+	//     ?scope=global and self-service for ?scope=user, chosen per request,
+	//     and Permissions has no shape for either half — declaring them Deferred
+	//     would render as "deferred" to an operator, which claims a runtime
+	//     check that does not exist. The reads being ungated is reported as a
+	//     GAP in its own right rather than closed here: adding a gate is a
+	//     behaviour change that could break a working deployment, and it is not
+	//     this migration's to make.
+	//   - PUT /settings/:key is the same conditional as the delete and would
+	//     declare the same Deferred, but its `value` is arbitrary JSON — the
+	//     branding page stores a string, the appearance page an object — and
+	//     apischema's Type vocabulary has no "any JSON value" member.
+	//   - GET /settings/branding and the two branding file routes are
+	//     instanceSharedRoutes-shaped: instance data identical for every caller,
+	//     with no subject to authorize. Permissions has no shape for that
+	//     either, and the comment on instanceSharedRoutes explains why folding
+	//     them into selfServiceRoutes would make that list's invariant false.
 	if s.settingsHandler != nil {
 		settings := v1.Group("/settings", s.authRequired())
 		settings.Get("/", s.settingsHandler.ListSettings)
 		settings.Get("/branding", s.settingsHandler.GetBranding)
 		settings.Get("/branding/logo-file", s.settingsHandler.ServeLogo)
 		settings.Get("/branding/favicon-file", s.settingsHandler.ServeFavicon)
-		settings.Post("/branding/logo", s.settingsHandler.UploadLogo)
-		settings.Post("/branding/favicon", s.settingsHandler.UploadFavicon)
 		settings.Get("/:key", s.settingsHandler.GetSetting)
 		settings.Put("/:key", s.settingsHandler.UpsertSetting)
-		settings.Delete("/:key", s.settingsHandler.DeleteSetting)
 	}
 
 	// The 4 user-management routes are declared in

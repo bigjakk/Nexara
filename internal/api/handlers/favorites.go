@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -43,6 +44,17 @@ const (
 	favoriteNode    = "node"
 	favoriteVM      = "vm"
 )
+
+// FavoriteResourceTypes returns the accepted resource_type values, sorted.
+//
+// Exported for the guard in package api that compares them against the Enum
+// declared in internal/api/registry_favorites.go: they are two copies of one
+// list, and the direction that bites is a schema accepting a type
+// parseFavoriteTarget has no branch for. Package handlers cannot import package
+// api, so the comparison reads this from the other side.
+func FavoriteResourceTypes() []string {
+	return []string{favoriteCluster, favoriteNode, favoriteVM}
+}
 
 // maxFavoritesPerUser caps how many favorites one user can hold at once.
 //
@@ -108,7 +120,7 @@ type favoriteResponse struct {
 // view:node, view:vm — so a favorite can never show a name the caller has since
 // lost the right to see. The rows stay in the table either way; only the
 // listing is filtered, so restoring the grant restores the shortcut.
-func (h *FavoritesHandler) ListFavorites(c fiber.Ctx) error {
+func (h *FavoritesHandler) ListFavorites(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -204,11 +216,25 @@ func (h *FavoritesHandler) ListFavorites(c fiber.Ctx) error {
 	return RespondItems(c, items)
 }
 
-// favoriteRequest is the body of both the add and the remove.
+// favoriteRequest is the validated reference both the add and the remove carry
+// — in a body on one and in a query string on the other, declared once as
+// favoriteTargetParams (internal/api/registry_favorites.go).
 type favoriteRequest struct {
-	ResourceType string `json:"resource_type"`
-	ClusterID    string `json:"cluster_id"`
-	Ref          string `json:"ref"`
+	ResourceType string
+	ClusterID    string
+	Ref          string
+}
+
+// favoriteRequestFromParams reads the three fields out of the validated
+// parameters. One reader for both routes, so they cannot drift on what a
+// reference is — the cluster arrives under the declared name
+// favorite_cluster_id, whatever spelling the caller used for it.
+func favoriteRequestFromParams(p *apischema.Params) favoriteRequest {
+	return favoriteRequest{
+		ResourceType: p.String("resource_type"),
+		ClusterID:    p.String("favorite_cluster_id"),
+		Ref:          p.String("ref"),
+	}
 }
 
 // favoriteTarget is a validated favoriteRequest.
@@ -269,6 +295,11 @@ func parseFavoriteTarget(req favoriteRequest) (favoriteTarget, error) {
 		ref = strconv.FormatInt(vmid, 10)
 		vmidValue = int32(vmid)
 	default:
+		// Unreachable through the declared Enum, and kept fail-closed for the
+		// same reason parseParamUUID keeps its branch: it fires if a
+		// declaration ever drops the Enum, and a favorite with an unrecognised
+		// type would otherwise be stored against a CHECK constraint that
+		// refuses it.
 		return favoriteTarget{}, fiber.NewError(fiber.StatusBadRequest,
 			"resource_type must be one of: cluster, node, vm")
 	}
@@ -287,17 +318,13 @@ func parseFavoriteTarget(req favoriteRequest) (favoriteTarget, error) {
 // starring cannot be used to confirm that a cluster id exists: without the
 // check, a caller who cannot see a cluster would get a foreign-key 500 for a
 // real id and a quiet success for an invented one.
-func (h *FavoritesHandler) AddFavorite(c fiber.Ctx) error {
+func (h *FavoritesHandler) AddFavorite(c fiber.Ctx, p *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
-	var req favoriteRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	target, err := parseFavoriteTarget(req)
+	target, err := parseFavoriteTarget(favoriteRequestFromParams(p))
 	if err != nil {
 		return err
 	}
@@ -372,17 +399,13 @@ func (h *FavoritesHandler) AddFavorite(c fiber.Ctx) error {
 //
 // Idempotent — removing a favorite that is not there succeeds, which is what a
 // star toggle wants when two clicks race.
-func (h *FavoritesHandler) RemoveFavorite(c fiber.Ctx) error {
+func (h *FavoritesHandler) RemoveFavorite(c fiber.Ctx, p *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
-	target, err := parseFavoriteTarget(favoriteRequest{
-		ResourceType: c.Query("resource_type"),
-		ClusterID:    c.Query("cluster_id"),
-		Ref:          c.Query("ref"),
-	})
+	target, err := parseFavoriteTarget(favoriteRequestFromParams(p))
 	if err != nil {
 		return err
 	}

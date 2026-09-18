@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -215,30 +214,13 @@ func accessibleClusters(c fiber.Ctx, action, resource string) (clusterAccess, er
 }
 
 // clusterIDFromParam extracts and parses the cluster_id URL parameter.
-// requireAnyGlobalManage passes if the caller holds global manage on ANY of
-// the named resources.
 //
-// For endpoints shared by several add-flows, where each flow's own create
-// endpoint is separately gated: the shared step must accept every permission
-// that can legitimately reach it, or it silently becomes a hidden dependency
-// on whichever one it happened to name.
-//
-// The action is a literal here rather than a parameter so the RBAC route
-// guard's static walk still reads "manage" out of the call graph.
-func requireAnyGlobalManage(c fiber.Ctx, resources ...string) error {
-	for _, resource := range resources {
-		ok, err := hasGlobalPerm(c, "manage", resource)
-		if err != nil {
-			return err
-		}
-		if ok {
-			return nil
-		}
-	}
-	return fiber.NewError(fiber.StatusForbidden,
-		"Requires global manage permission on one of: "+strings.Join(resources, ", "))
-}
-
+// requireAnyGlobalManage used to live above it, for the one endpoint shared by
+// several add-flows — POST /api/v1/clusters/fetch-fingerprint. That is now the
+// declared Permissions.Alternatives on the route (internal/api/registry_clusters.go),
+// which RequireAnyPermission mounts as middleware with the same "any of these"
+// semantics and a refusal message that names the alternatives; keeping a second
+// implementation with no caller would be a second place for the rule to drift.
 func clusterIDFromParam(c fiber.Ctx) (uuid.UUID, error) {
 	raw := c.Params("cluster_id")
 	if raw == "" {

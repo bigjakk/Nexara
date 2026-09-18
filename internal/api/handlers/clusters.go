@@ -21,12 +21,23 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/netguard"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
+
+// All seven routes are declared in internal/api/registry_clusters.go, which
+// states their permission, their parameters and their rate limiters; nothing
+// below re-checks any of the three.
+//
+// What stays here is what a declaration cannot see: the token-or-bootstrap
+// exclusivity, the URL address policy and its structured confirmation, the
+// credential-redirect refusal, the SSH trust reset, the rolling-update conflict
+// checks, and the two-source corroboration behind verify-certificate.
 
 // ClusterHandler handles cluster CRUD endpoints.
 type ClusterHandler struct {
@@ -44,34 +55,103 @@ func NewClusterHandler(queries *db.Queries, encryptionKey string, eventPub *even
 	}
 }
 
+// createClusterRequest and updateClusterRequest are the validated bodies, read
+// out of the declared parameters rather than bound from JSON.
+//
+// The POINTERS on the update are the whole point of the type: every field is
+// optional and omitting one must leave the stored value alone, which a zero
+// value cannot say. On the create, SyncIntervalSeconds carries the declared
+// default instead, because there is no stored value to preserve.
 type createClusterRequest struct {
-	Name                string `json:"name"`
-	APIURL              string `json:"api_url"`
-	TokenID             string `json:"token_id"`
-	TokenSecret         string `json:"token_secret"`
-	TLSFingerprint      string `json:"tls_fingerprint"`
-	SyncIntervalSeconds *int32 `json:"sync_interval_seconds"`
+	Name                string
+	APIURL              string
+	TokenID             string
+	TokenSecret         string
+	TLSFingerprint      string
+	SyncIntervalSeconds int32
 	// AllowPrivateAddress, when true, lets the URL resolve to a private/
 	// loopback/link-local IP (typical homelab setup). Cloud metadata,
 	// unspecified, and multicast addresses are still rejected.
-	AllowPrivateAddress bool `json:"allow_private_address,omitempty"`
+	AllowPrivateAddress bool
 	// Bootstrap asks Nexara to mint the cluster's credential itself instead of
 	// being handed one. Mutually exclusive with token_id/token_secret.
-	Bootstrap *bootstrapRequest `json:"bootstrap,omitempty"`
+	Bootstrap *bootstrapRequest
 }
 
 type updateClusterRequest struct {
-	Name                *string `json:"name"`
-	APIURL              *string `json:"api_url"`
-	TokenID             *string `json:"token_id"`
-	TokenSecret         *string `json:"token_secret"`
-	TLSFingerprint      *string `json:"tls_fingerprint"`
-	SyncIntervalSeconds *int32  `json:"sync_interval_seconds"`
-	IsActive            *bool   `json:"is_active"`
-	AllowPrivateAddress bool    `json:"allow_private_address,omitempty"`
+	Name                *string
+	APIURL              *string
+	TokenID             *string
+	TokenSecret         *string
+	TLSFingerprint      *string
+	SyncIntervalSeconds *int32
+	IsActive            *bool
+	AllowPrivateAddress bool
 	// AcknowledgeSSHTrustReset confirms that moving api_url may clear this
 	// cluster's SSH credential and every pinned host key.
-	AcknowledgeSSHTrustReset bool `json:"acknowledge_ssh_trust_reset,omitempty"`
+	AcknowledgeSSHTrustReset bool
+}
+
+// bootstrapFromParams rebuilds the optional onboarding block out of the opaque
+// object the schema validated.
+//
+// The re-marshal is what c.Bind().Body did before, restricted to the one key
+// that carries a nested object: apischema has no nested-object schema, so the
+// block's own rules stay with bootstrapRequest.validate. An explicit null reads
+// as absent, which is how the handler already read a nil *bootstrapRequest.
+func bootstrapFromParams(p *apischema.Params) (*bootstrapRequest, error) {
+	if !p.Has("bootstrap") {
+		return nil, nil
+	}
+	raw, err := json.Marshal(p.Object("bootstrap"))
+	if err != nil {
+		return nil, fiber.NewError(fiber.StatusBadRequest, "Invalid bootstrap block")
+	}
+	var req bootstrapRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, fiber.NewError(fiber.StatusBadRequest, "Invalid bootstrap block")
+	}
+	return &req, nil
+}
+
+// createClusterRequestFromParams reads the create body out of the validated
+// parameters.
+func createClusterRequestFromParams(p *apischema.Params) (createClusterRequest, error) {
+	boot, err := bootstrapFromParams(p)
+	if err != nil {
+		return createClusterRequest{}, err
+	}
+	return createClusterRequest{
+		Name:                p.String("name"),
+		APIURL:              p.String("api_url"),
+		TokenID:             p.String("token_id"),
+		TokenSecret:         p.String("token_secret"),
+		TLSFingerprint:      p.String("tls_fingerprint"),
+		SyncIntervalSeconds: safeconv.Int32(int(p.Int("sync_interval_seconds"))),
+		AllowPrivateAddress: p.Bool("allow_private_address"),
+		Bootstrap:           boot,
+	}, nil
+}
+
+// updateClusterRequestFromParams reads the edit body out of the validated
+// parameters, keeping "the caller did not mention this field" distinct from
+// "the caller sent the zero value" for every one of them.
+func updateClusterRequestFromParams(p *apischema.Params) updateClusterRequest {
+	req := updateClusterRequest{
+		Name:                     optStringPtr(p.OptString("name")),
+		APIURL:                   optStringPtr(p.OptString("api_url")),
+		TokenID:                  optStringPtr(p.OptString("token_id")),
+		TokenSecret:              optStringPtr(p.OptString("token_secret")),
+		TLSFingerprint:           optStringPtr(p.OptString("tls_fingerprint")),
+		IsActive:                 optBoolPtr(p.OptBool("is_active")),
+		AllowPrivateAddress:      p.Bool("allow_private_address"),
+		AcknowledgeSSHTrustReset: p.Bool("acknowledge_ssh_trust_reset"),
+	}
+	if v, supplied := p.OptInt("sync_interval_seconds"); supplied {
+		n := safeconv.Int32(int(v))
+		req.SyncIntervalSeconds = &n
+	}
+	return req
 }
 
 type clusterResponse struct {
@@ -155,22 +235,10 @@ func toClusterResponse(c db.Cluster, nsi nodeStatusInfo) clusterResponse {
 }
 
 // Create handles POST /api/v1/clusters.
-func (h *ClusterHandler) Create(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cluster"); err != nil {
+func (h *ClusterHandler) Create(c fiber.Ctx, p *apischema.Params) error {
+	req, err := createClusterRequestFromParams(p)
+	if err != nil {
 		return err
-	}
-
-	var req createClusterRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Name == "" || req.APIURL == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "name and api_url are required")
-	}
-
-	if len(req.Name) > 255 {
-		return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
 	}
 
 	// Either the operator hands us a token, or they hand us a password and we
@@ -185,7 +253,12 @@ func (h *ClusterHandler) Create(c fiber.Ctx) error {
 			return err
 		}
 	case req.TokenID == "" || req.TokenSecret == "":
-		return fiber.NewError(fiber.StatusBadRequest, "name, api_url, token_id, and token_secret are required")
+		// name and api_url are required by the declaration and answered by
+		// field name before this runs, so this branch is only ever about the
+		// credential — and it names the alternative, because supplying a
+		// bootstrap block instead is the other way to satisfy it.
+		return fiber.NewError(fiber.StatusBadRequest,
+			"token_id and token_secret are required, unless a bootstrap block is sent instead")
 	}
 
 	if err := validateURLFormat(req.APIURL); err != nil {
@@ -195,13 +268,9 @@ func (h *ClusterHandler) Create(c fiber.Ctx) error {
 		return renderAddressPolicyError(c, err)
 	}
 
-	syncInterval := int32(30)
-	if req.SyncIntervalSeconds != nil {
-		if *req.SyncIntervalSeconds < 10 || *req.SyncIntervalSeconds > 86400 {
-			return fiber.NewError(fiber.StatusBadRequest, "sync_interval_seconds must be between 10 and 86400")
-		}
-		syncInterval = *req.SyncIntervalSeconds
-	}
+	// The declaration carries both the 10..86400 bound and the default of 30,
+	// so this is the value the caller asked for or the one they inherited.
+	syncInterval := req.SyncIntervalSeconds
 
 	// Resolve the credential BEFORE writing anything. If the mint fails there
 	// is no half-configured cluster row to explain or clean up, and the
@@ -335,7 +404,7 @@ func (h *ClusterHandler) Create(c fiber.Ctx) error {
 }
 
 // List handles GET /api/v1/clusters.
-func (h *ClusterHandler) List(c fiber.Ctx) error {
+func (h *ClusterHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "cluster")
 	if err != nil {
 		return err
@@ -373,12 +442,9 @@ func (h *ClusterHandler) List(c fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/clusters/:id.
-func (h *ClusterHandler) Get(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ClusterHandler) Get(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
-	}
-	if err := requireClusterPerm(c, "view", "cluster", id); err != nil {
 		return err
 	}
 
@@ -406,19 +472,13 @@ func (h *ClusterHandler) Get(c fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/clusters/:id.
-func (h *ClusterHandler) Update(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ClusterHandler) Update(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
-	}
-	if err := requireClusterPerm(c, "manage", "cluster", id); err != nil {
 		return err
 	}
 
-	var req updateClusterRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	req := updateClusterRequestFromParams(p)
 
 	// An explicit "" is not a way to say "keep the current secret" — omitting
 	// the field is. Encrypting it would swap a working credential for the
@@ -453,9 +513,6 @@ func (h *ClusterHandler) Update(c fiber.Ctx) error {
 	}
 
 	if req.Name != nil {
-		if len(*req.Name) > 255 {
-			return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
-		}
 		params.Name = *req.Name
 	}
 	if req.APIURL != nil {
@@ -481,9 +538,6 @@ func (h *ClusterHandler) Update(c fiber.Ctx) error {
 		params.TlsFingerprint = *req.TLSFingerprint
 	}
 	if req.SyncIntervalSeconds != nil {
-		if *req.SyncIntervalSeconds < 10 || *req.SyncIntervalSeconds > 86400 {
-			return fiber.NewError(fiber.StatusBadRequest, "sync_interval_seconds must be between 10 and 86400")
-		}
 		params.SyncIntervalSeconds = *req.SyncIntervalSeconds
 	}
 	if req.IsActive != nil {
@@ -672,12 +726,9 @@ func (h *ClusterHandler) Update(c fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/clusters/:id.
-func (h *ClusterHandler) Delete(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
-	}
-	if err := requireClusterPerm(c, "delete", "cluster", id); err != nil {
 		return err
 	}
 
@@ -733,7 +784,7 @@ func (h *ClusterHandler) Delete(c fiber.Ctx) error {
 	// has already been deleted on the hypervisor — present in Nexara, unable to
 	// authenticate, and unfixable except by hand. `cluster` is a value copy, so
 	// the credential is still readable after the row is deleted.
-	revoke := wantsCredentialRevocation(c)
+	revoke := wantsCredentialRevocation(p.String("revoke_pve_credentials"))
 	if revoke {
 		// Deleting the cluster needs delete:cluster, which can be granted
 		// scoped to a single cluster. Mutating Proxmox's own access control is
@@ -987,11 +1038,6 @@ func testClusterConnectivity(apiURL, tokenID, tokenSecret, tlsFingerprint string
 	}
 }
 
-type fetchFingerprintRequest struct {
-	APIURL              string `json:"api_url"`
-	AllowPrivateAddress bool   `json:"allow_private_address,omitempty"`
-}
-
 type fetchFingerprintResponse struct {
 	Fingerprint string `json:"fingerprint"`
 	SelfSigned  bool   `json:"self_signed"`
@@ -999,38 +1045,16 @@ type fetchFingerprintResponse struct {
 
 // FetchFingerprint handles POST /api/v1/clusters/fetch-fingerprint.
 // It connects to the Proxmox host, retrieves the TLS certificate, and returns the SHA-256 fingerprint.
-func (h *ClusterHandler) FetchFingerprint(c fiber.Ctx) error {
-	// Any global permission that lets the caller register a remote server
-	// qualifies, because every one of those add-flows starts here: the
-	// operator has to see and accept a certificate before a credential is
-	// stored against it.
-	//
-	// Gating on manage:cluster alone made a backup-only role unusable — a
-	// role holding manage:pbs or manage:veeam but not manage:cluster was
-	// refused at step 1 and could never reach the create endpoint it *was*
-	// granted. Widening costs nothing: each of these permissions can already
-	// drive an outbound connection to an arbitrary operator-supplied URL
-	// through its own create endpoint, and this one returns a certificate,
-	// not a secret.
-	if err := requireAnyGlobalManage(c, "cluster", "pbs", "veeam"); err != nil {
+func (h *ClusterHandler) FetchFingerprint(c fiber.Ctx, p *apischema.Params) error {
+	apiURL := p.String("api_url")
+	if err := validateURLFormat(apiURL); err != nil {
 		return err
 	}
-
-	var req fetchFingerprintRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.APIURL == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "api_url is required")
-	}
-	if err := validateURLFormat(req.APIURL); err != nil {
-		return err
-	}
-	if err := enforceURLAddressPolicy(c.Context(), req.APIURL, req.AllowPrivateAddress); err != nil {
+	if err := enforceURLAddressPolicy(c.Context(), apiURL, p.Bool("allow_private_address")); err != nil {
 		return renderAddressPolicyError(c, err)
 	}
 
-	fingerprint, untrusted, err := dialLeafFingerprint(req.APIURL)
+	fingerprint, untrusted, err := dialLeafFingerprint(apiURL)
 	if err != nil {
 		return err
 	}
@@ -1139,14 +1163,11 @@ type verifyCertificateResponse struct {
 // Deliberately NOT automatic. Copying nodes.ssl_fingerprint into the cluster
 // row on a timer would make the pin follow whatever the cluster reports, which
 // is the same as not pinning at all.
-func (h *ClusterHandler) VerifyCertificate(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ClusterHandler) VerifyCertificate(c fiber.Ctx, p *apischema.Params) error {
+	// Re-pinning changes what the app will trust, so the declaration gates it
+	// on manage:cluster — the same permission as editing the credentials.
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
-	}
-	// Re-pinning changes what the app will trust, so it needs the same
-	// permission as editing the cluster's credentials.
-	if err := requireClusterPerm(c, "manage", "cluster", id); err != nil {
 		return err
 	}
 

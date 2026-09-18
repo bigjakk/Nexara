@@ -18,6 +18,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
@@ -89,26 +90,29 @@ func TestBootstrapRequestDefaults(t *testing.T) {
 	}
 }
 
+// TestWantsCredentialRevocation pins the exact opt-in vocabulary.
+//
+// It takes the validated string now that the parameter is declared, and the
+// "on" row is the reason the declaration keeps it a STRING rather than a
+// boolean: apischema's toBool reads "on" as true, so a boolean declaration
+// would accept a spelling this function then reads as no — a schema and a
+// handler disagreeing about whether to delete users from a live hypervisor.
 func TestWantsCredentialRevocation(t *testing.T) {
-	app := fiber.New()
-	var got []bool
-	app.Get("/x", func(c fiber.Ctx) error {
-		got = append(got, wantsCredentialRevocation(c))
-		return c.SendStatus(fiber.StatusOK)
-	})
-
-	queries := []string{"", "?revoke_pve_credentials=1", "?revoke_pve_credentials=true",
-		"?revoke_pve_credentials=yes", "?revoke_pve_credentials=0", "?revoke_pve_credentials=false"}
-	for _, q := range queries {
-		if _, err := app.Test(httptest.NewRequest(http.MethodGet, "/x"+q, nil)); err != nil {
-			t.Fatalf("Test(%q): %v", q, err)
-		}
-	}
-
-	want := []bool{false, true, true, true, false, false}
-	for i, w := range want {
-		if got[i] != w {
-			t.Errorf("query %q: wantsCredentialRevocation = %v, want %v", queries[i], got[i], w)
+	for _, tt := range []struct {
+		value string
+		want  bool
+	}{
+		{"", false},
+		{"1", true},
+		{"true", true},
+		{"yes", true},
+		{"0", false},
+		{"false", false},
+		{"on", false},
+		{"TRUE", false},
+	} {
+		if got := wantsCredentialRevocation(tt.value); got != tt.want {
+			t.Errorf("wantsCredentialRevocation(%q) = %v, want %v", tt.value, got, tt.want)
 		}
 	}
 }
@@ -700,22 +704,34 @@ func TestRevokeFailsClosedWithoutInventingASibling(t *testing.T) {
 	}
 }
 
-// TestRevokeDialogIntentReachesTheServer: the checkbox is the only place the
+// TestRevokeQueryParamIsTheOnlyOptIn: the checkbox is the only place the
 // operator expresses intent to mutate a live hypervisor, and one query parameter
-// carries it.
+// carries it — so an absent one must never read as consent.
+//
+// Driven through the declared schema rather than a bare c.Query, because that
+// is now what feeds it: the parameter is optional with NO default, so a request
+// that omits it hands the handler the empty string.
 func TestRevokeQueryParamIsTheOnlyOptIn(t *testing.T) {
-	app := fiber.New()
-	var seen []bool
-	app.Delete("/c/:id", func(c fiber.Ctx) error {
-		seen = append(seen, wantsCredentialRevocation(c))
-		return c.SendStatus(fiber.StatusNoContent)
-	})
-	for _, q := range []string{"", "?revoke_pve_credentials=1"} {
-		if _, err := app.Test(httptest.NewRequest(http.MethodDelete, "/c/x"+q, nil)); err != nil {
-			t.Fatalf("Test: %v", err)
-		}
+	props := apischema.Properties{
+		"revoke_pve_credentials": {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(16)},
 	}
-	if len(seen) != 2 || seen[0] || !seen[1] {
-		t.Errorf("opt-in = %v, want [false true]", seen)
+	if err := props.Compile(); err != nil {
+		t.Fatalf("the mirror schema is itself invalid: %v", err)
+	}
+
+	for _, tt := range []struct {
+		raw  map[string]any
+		want bool
+	}{
+		{map[string]any{}, false},
+		{map[string]any{"revoke_pve_credentials": "1"}, true},
+	} {
+		params, err := props.Validate(tt.raw)
+		if err != nil {
+			t.Fatalf("validate %v: %v", tt.raw, err)
+		}
+		if got := wantsCredentialRevocation(params.String("revoke_pve_credentials")); got != tt.want {
+			t.Errorf("%v: opt-in = %v, want %v", tt.raw, got, tt.want)
+		}
 	}
 }

@@ -10,6 +10,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
 // testEncryptionKey is a valid 32-byte hex key for tests.
@@ -36,13 +38,85 @@ func newClusterTestApp(t *testing.T) *fiber.App {
 	})
 	installStubEngineMiddleware(app)
 
-	app.Post("/clusters", handler.Create)
-	app.Get("/clusters", handler.List)
-	app.Get("/clusters/:id", handler.Get)
-	app.Put("/clusters/:id", handler.Update)
-	app.Delete("/clusters/:id", handler.Delete)
+	// The permission middleware is mounted HERE because it is no longer in the
+	// handler bodies: internal/api/registry_clusters.go declares it, and
+	// mountRegistry splices it in. These calls mirror that declaration so the
+	// 403 assertions below still exercise a real gate rather than a hand-rolled
+	// one — and registry_clusters_test.go's
+	// TestClusterRoutesAreGatedByTheirDeclaration drives the REAL declaration
+	// end to end, so a drift between the two is caught there rather than here.
+	app.Post("/clusters", RequirePermission("manage", "cluster"),
+		withRequestParams(t, clusterCreateMirror(t), nil, handler.Create))
+	app.Get("/clusters", withRequestParams(t, apischema.Properties{}, nil, handler.List))
+	app.Get("/clusters/:id", RequireClusterPermission("view", "cluster"),
+		withRequestParams(t, clusterIDMirror(t), []string{"id"}, handler.Get))
+	app.Put("/clusters/:id", RequireClusterPermission("manage", "cluster"),
+		withRequestParams(t, clusterUpdateMirror(t), []string{"id"}, handler.Update))
+	app.Delete("/clusters/:id", RequireClusterPermission("delete", "cluster"),
+		withRequestParams(t, clusterDeleteMirror(t), []string{"id"}, handler.Delete))
 
 	return app
+}
+
+// The three mirrors below restate the schemas registry_clusters.go declares, for
+// the reason withRequestParams' own doc comment gives: package api imports this
+// package, not the other way round. They carry only what these tests reach —
+// the required fields, the pointer-shaped optional ones, and the uuid format on
+// :id — and each is compiled, so a mirror that drifts into invalidity fails
+// loudly rather than quietly accepting anything.
+func clusterIDMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	return compiledMirror(t, apischema.Properties{
+		"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath},
+	})
+}
+
+func clusterCreateMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	return compiledMirror(t, apischema.Properties{
+		"name":                  {Type: apischema.String, MinLength: apischema.Ptr(1), MaxLength: apischema.Ptr(255)},
+		"api_url":               {Type: apischema.String, MinLength: apischema.Ptr(1), MaxLength: apischema.Ptr(2048)},
+		"token_id":              {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(255)},
+		"token_secret":          {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(1024)},
+		"tls_fingerprint":       {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(128)},
+		"sync_interval_seconds": {Type: apischema.Integer, Optional: true, Default: 30, Minimum: apischema.Ptr(10.0), Maximum: apischema.Ptr(86400.0)},
+		"allow_private_address": {Type: apischema.Boolean, Optional: true, Default: false},
+		"bootstrap":             {Type: apischema.Object, Optional: true},
+	})
+}
+
+func clusterUpdateMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	return compiledMirror(t, apischema.Properties{
+		"id":                          {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath},
+		"name":                        {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(255)},
+		"api_url":                     {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(2048)},
+		"token_id":                    {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(255)},
+		"token_secret":                {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(1024)},
+		"tls_fingerprint":             {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(128)},
+		"sync_interval_seconds":       {Type: apischema.Integer, Optional: true, Minimum: apischema.Ptr(10.0), Maximum: apischema.Ptr(86400.0)},
+		"is_active":                   {Type: apischema.Boolean, Optional: true},
+		"allow_private_address":       {Type: apischema.Boolean, Optional: true, Default: false},
+		"acknowledge_ssh_trust_reset": {Type: apischema.Boolean, Optional: true, Default: false},
+	})
+}
+
+func clusterDeleteMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	return compiledMirror(t, apischema.Properties{
+		"id":                     {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath},
+		"revoke_pve_credentials": {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(16)},
+	})
+}
+
+// compiledMirror compiles a mirror schema and fails the test if it is itself
+// malformed, so a drifting mirror is never mistaken for a passing handler.
+func compiledMirror(t *testing.T, props apischema.Properties) apischema.Properties {
+	t.Helper()
+	if err := props.Compile(); err != nil {
+		t.Fatalf("the mirror schema is itself invalid: %v", err)
+	}
+	return props
 }
 
 func testErrorHandler(c fiber.Ctx, err error) error {

@@ -1,14 +1,25 @@
 package handlers
 
 import (
+	"maps"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
+
+// All three routes are declared in internal/api/registry_metrics.go, which
+// states their cluster-scoped permission (view:cluster, view:vm, view:node
+// respectively) and their parameters; nothing below re-checks either.
+//
+// What stays here is what the declaration cannot see: the per-guest and
+// per-node queries key on the GUEST's or NODE's row id alone, so each handler
+// re-reads the row and refuses it when its cluster_id is not the one the gate
+// authorized.
 
 // MetricsHandler handles historical metric endpoints.
 type MetricsHandler struct {
@@ -30,11 +41,37 @@ type metricPoint struct {
 	NetOutBps    float64 `json:"netOutBps"`
 }
 
+// rangeDurations is the accepted ?range= vocabulary and the window each
+// member means. It is the same set metricRangeParam's Enum declares in
+// internal/api/registry_metrics.go — TestMetricRangeVocabulary pins the two
+// key sets against each other, because they are two copies of one list and a
+// copy nothing compares is a copy that rots.
 var rangeDurations = map[string]time.Duration{
 	"1h":  time.Hour,
 	"6h":  6 * time.Hour,
 	"24h": 24 * time.Hour,
 	"7d":  7 * 24 * time.Hour,
+}
+
+// MetricRangeKeys returns the accepted ?range= values, sorted. Exported for
+// the guard in package api that compares them against the declared Enum;
+// package handlers cannot import package api, so the comparison has to read
+// this from the other side.
+func MetricRangeKeys() []string { return slices.Sorted(maps.Keys(rangeDurations)) }
+
+// metricWindow resolves a validated ?range= to its duration.
+//
+// The declaration's Enum is what rejects an unknown value, so a miss here can
+// only mean the Enum and this map have drifted — our bug, not the caller's.
+// Answering 500 rather than falling through to a zero duration is the same
+// split parseParamUUID makes: a zero window would return 200 with an empty
+// series, which reads as "this guest has no metrics" instead of as a fault.
+func metricWindow(rangeParam string) (time.Duration, error) {
+	d, ok := rangeDurations[rangeParam]
+	if !ok {
+		return 0, fiber.NewError(fiber.StatusInternalServerError, "Unsupported metric range")
+	}
+	return d, nil
 }
 
 // rawRow is a generic container for rows from any metric query.
@@ -100,22 +137,18 @@ func toMetricPoint(r rawRow, diskReadBps, diskWriteBps, netInBps, netOutBps floa
 }
 
 // GetClusterHistorical handles GET /api/v1/clusters/:cluster_id/metrics.
-func (h *MetricsHandler) GetClusterHistorical(c fiber.Ctx) error {
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+func (h *MetricsHandler) GetClusterHistorical(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
-	}
-	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 
-	rangeParam := c.Query("range", "1h")
-	duration, ok := rangeDurations[rangeParam]
-	if !ok {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid range: must be 1h, 6h, 24h, or 7d")
+	rangeParam := p.String("range")
+	window, err := metricWindow(rangeParam)
+	if err != nil {
+		return err
 	}
-
-	since := time.Now().Add(-duration)
+	since := time.Now().Add(-window)
 
 	var rows []rawRow
 
@@ -150,16 +183,13 @@ func (h *MetricsHandler) GetClusterHistorical(c fiber.Ctx) error {
 }
 
 // GetVMHistorical handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics.
-func (h *MetricsHandler) GetVMHistorical(c fiber.Ctx) error {
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+func (h *MetricsHandler) GetVMHistorical(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+		return err
 	}
-	vmID, err := uuid.Parse(c.Params("vm_id"))
+	vmID, err := parseParamUUID(p.String("vm_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
-	}
-	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
 		return err
 	}
 	// The metric query keys on vm_id alone, so verify the VM actually belongs to
@@ -169,13 +199,12 @@ func (h *MetricsHandler) GetVMHistorical(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "VM not found")
 	}
 
-	rangeParam := c.Query("range", "1h")
-	duration, ok := rangeDurations[rangeParam]
-	if !ok {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid range: must be 1h, 6h, 24h, or 7d")
+	rangeParam := p.String("range")
+	window, err := metricWindow(rangeParam)
+	if err != nil {
+		return err
 	}
-
-	since := time.Now().Add(-duration)
+	since := time.Now().Add(-window)
 
 	var rows []rawRow
 
@@ -210,16 +239,13 @@ func (h *MetricsHandler) GetVMHistorical(c fiber.Ctx) error {
 }
 
 // GetNodeHistorical handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/metrics.
-func (h *MetricsHandler) GetNodeHistorical(c fiber.Ctx) error {
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+func (h *MetricsHandler) GetNodeHistorical(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+		return err
 	}
-	nodeID, err := uuid.Parse(c.Params("node_id"))
+	nodeID, err := parseParamUUID(p.String("node_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid node ID")
-	}
-	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	// Verify the node belongs to the authorized cluster (query keys on node_id).
@@ -227,13 +253,12 @@ func (h *MetricsHandler) GetNodeHistorical(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Node not found")
 	}
 
-	rangeParam := c.Query("range", "1h")
-	duration, ok := rangeDurations[rangeParam]
-	if !ok {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid range: must be 1h, 6h, 24h, or 7d")
+	rangeParam := p.String("range")
+	window, err := metricWindow(rangeParam)
+	if err != nil {
+		return err
 	}
-
-	since := time.Now().Add(-duration)
+	since := time.Now().Add(-window)
 
 	var rows []rawRow
 

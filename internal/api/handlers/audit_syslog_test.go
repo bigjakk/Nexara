@@ -20,6 +20,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
@@ -100,10 +101,28 @@ func newSyslogTestApp(t *testing.T, dbtx db.DBTX, pub *events.Publisher) *fiber.
 	})
 	installStubEngineMiddleware(app)
 
-	app.Put("/audit-log/syslog-config", handler.UpdateSyslogConfig)
-	app.Post("/audit-log/syslog-test", handler.TestSyslog)
+	app.Put("/audit-log/syslog-config", RequirePermission("manage", "audit"),
+		withRequestParams(t, syslogConfigMirror(t), nil, handler.UpdateSyslogConfig))
+	app.Post("/audit-log/syslog-test", RequirePermission("manage", "audit"),
+		withRequestParams(t, syslogConfigMirror(t), nil, handler.TestSyslog))
 
 	return app
+}
+
+// syslogConfigMirror restates the body schema registry_audit.go declares for
+// both syslog writes, and the RequirePermission calls above mirror its global
+// manage:audit Check — the gate is no longer in the handler bodies, and these
+// tests assert on it.
+func syslogConfigMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	return compiledMirror(t, apischema.Properties{
+		"enabled":         {Type: apischema.Boolean, Optional: true, Default: false},
+		"host":            {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(256)},
+		"port":            {Type: apischema.Integer, Optional: true, Default: 0, Minimum: apischema.Ptr(0.0), Maximum: apischema.Ptr(65535.0)},
+		"protocol":        {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(8)},
+		"facility":        {Type: apischema.Integer, Optional: true, Default: 0, Minimum: apischema.Ptr(0.0), Maximum: apischema.Ptr(23.0)},
+		"tls_skip_verify": {Type: apischema.Boolean, Optional: true, Default: false},
+	})
 }
 
 func syslogRequest(t *testing.T, app *fiber.App, method, url, body, role string) *http.Response {
@@ -479,40 +498,107 @@ func TestSyslogProbeAudits(t *testing.T) {
 }
 
 // TestSyslogAuditBoundsCallerStrings covers the caps on what a caller can push
-// into an audit row. Neither endpoint bounds the host it accepts, and the
+// into an audit row. Neither endpoint bounded the host it accepted, and the
 // probe's error text wraps the dialler's message around that same host, so
-// without the caps one request writes a body-sized string into audit_log — and
+// without the caps one request wrote a body-sized string into audit_log — and
 // the probe can be repeated as often as the caller likes.
+//
+// Since Phase 6j there are TWO defences and this drives all three parts of
+// them:
+//
+//   - The declaration (internal/api/registry_audit.go) caps `host` at 256
+//     characters, so an oversized one is refused before any handler runs and
+//     writes no row at all — strictly stronger than truncating it afterwards.
+//   - The handler still routes every recorded value through toSyslogAuditConfig
+//     and syslogTestAuditError on the path that writes the row. That wiring is
+//     what a schema bound cannot replace, so it is driven through a REAL
+//     request with a host at the declared ceiling, reading the recorded row
+//     back.
+//   - The truncation functions themselves still cut. Asserted directly,
+//     because a host the schema accepts can no longer be long enough to make
+//     them fire through a request — which is the point of the first bullet.
 func TestSyslogAuditBoundsCallerStrings(t *testing.T) {
-	host := strings.Repeat("日", 4000) + ".internal"
+	oversized := strings.Repeat("日", 4000) + ".internal"
 
-	capture := newSyslogDBTX()
-	app := newSyslogTestApp(t, capture, nil)
+	t.Run("an oversized host writes no audit row at all", func(t *testing.T) {
+		capture := newSyslogDBTX()
+		app := newSyslogTestApp(t, capture, nil)
 
-	body, _ := json.Marshal(map[string]any{"host": host, "port": 9999, "protocol": "sctp"})
-	resp := syslogRequest(t, app, http.MethodPost, "/audit-log/syslog-test", string(body), "admin")
-	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.ReadAll(resp.Body)
+		body, _ := json.Marshal(map[string]any{"host": oversized, "port": 9999, "protocol": "sctp"})
+		resp := syslogRequest(t, app, http.MethodPost, "/audit-log/syslog-test", string(body), "admin")
+		defer func() { _ = resp.Body.Close() }()
+		_, _ = io.ReadAll(resp.Body)
 
-	entries := capture.auditInserts(t)
-	if len(entries) != 1 {
-		t.Fatalf("wrote %d audit rows, want exactly 1: %+v", len(entries), entries)
-	}
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400 — the declared bound on host refuses this before the probe runs",
+				resp.StatusCode)
+		}
+		if entries := capture.auditInserts(t); len(entries) != 0 {
+			t.Errorf("wrote %d audit rows for a request the schema rejected: %+v", len(entries), entries)
+		}
+	})
 
-	var got syslogTestAuditDetails
-	if err := json.Unmarshal(entries[0].Details, &got); err != nil {
-		t.Fatalf("decode details: %v", err)
-	}
+	// The end-to-end half: a host at the declared ceiling is accepted, the probe
+	// fails to resolve it, and the recorded row carries the host AND the reason —
+	// both through the bounding functions, both inside their caps. This is what
+	// catches a field dropped from syslogTestAuditDetails, or a handler that
+	// stopped passing a value through toSyslogAuditConfig; neither is visible
+	// from a test that builds the struct itself.
+	t.Run("a host at the ceiling is recorded through the bounding functions", func(t *testing.T) {
+		// 256 runes exactly — the ceiling registry_audit.go declares for host,
+		// so this is the longest value a caller can still get past the schema.
+		host := strings.Repeat("a", 248) + ".invalid"
 
-	// Both bounds are asserted from below as well. An upper bound alone is
-	// satisfied by the empty string, so dropping the field entirely — or
-	// renaming its json tag — would pass while recording nothing.
-	assertTruncated(t, "details.target.host", got.Target.Host, maxSyslogAuditValueLen)
-	assertTruncated(t, "details.error", got.Error, maxSyslogAuditErrorLen)
+		capture := newSyslogDBTX()
+		app := newSyslogTestApp(t, capture, nil)
 
-	if !utf8.ValidString(string(entries[0].Details)) {
-		t.Errorf("the recorded details are not valid UTF-8: %q", entries[0].Details)
-	}
+		body, _ := json.Marshal(map[string]any{"host": host, "port": 9999, "protocol": "tcp"})
+		resp := syslogRequest(t, app, http.MethodPost, "/audit-log/syslog-test", string(body), "admin")
+		defer func() { _ = resp.Body.Close() }()
+		_, _ = io.ReadAll(resp.Body)
+
+		entries := capture.auditInserts(t)
+		if len(entries) != 1 {
+			t.Fatalf("wrote %d audit rows, want exactly 1: %+v", len(entries), entries)
+		}
+
+		var got syslogTestAuditDetails
+		if err := json.Unmarshal(entries[0].Details, &got); err != nil {
+			t.Fatalf("decode details: %v", err)
+		}
+		if got.Target.Host != host {
+			t.Errorf("details.target.host = %q, want the host the caller sent — the handler has to route "+
+				"it through toSyslogAuditConfig on the path that writes the row", got.Target.Host)
+		}
+		if got.Success {
+			t.Fatal("the probe reported success against a .invalid host; the reason field would be empty")
+		}
+		// The dialler's message wraps the caller's host, so this is the one cap
+		// a request can still stretch. Asserted as a bound rather than as a cut.
+		if got.Error == "" {
+			t.Error("details.error is empty — a failed probe records no reason")
+		}
+		// +1 for the ellipsis auditTruncate appends when it cuts.
+		if n := utf8.RuneCountInString(got.Error); n > maxSyslogAuditErrorLen+1 {
+			t.Errorf("details.error is %d runes, past the %d cap — syslogTestAuditError is not being applied",
+				n, maxSyslogAuditErrorLen)
+		}
+		if !utf8.ValidString(string(entries[0].Details)) {
+			t.Errorf("the recorded details are not valid UTF-8: %q", entries[0].Details)
+		}
+	})
+
+	t.Run("the truncation functions still cut", func(t *testing.T) {
+		got := toSyslogAuditConfig(proxsyslog.Config{
+			Host:     oversized,
+			Protocol: strings.Repeat("p", 4000),
+			Port:     9999,
+		})
+		assertTruncated(t, "target.host", got.Host, maxSyslogAuditValueLen)
+		assertTruncated(t, "target.protocol", got.Protocol, maxSyslogAuditValueLen)
+		assertTruncated(t, "error",
+			syslogTestAuditError(errors.New("dial tcp: "+strings.Repeat("x", 4000))), maxSyslogAuditErrorLen)
+	})
 }
 
 // assertTruncated checks a field that auditTruncate should have cut: capped at

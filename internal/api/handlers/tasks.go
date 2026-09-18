@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -11,10 +13,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/safeconv"
 )
+
+// All four routes are declared in internal/api/registry_tasks.go, which states
+// their permission and their parameters: Advisory on the listing, Deferred on
+// the create and the update, and a global Check on the bulk clear.
+//
+// What stays here is what a declaration cannot reach: the two requireClusterPerm
+// calls whose cluster is resolved at request time — from the body on the create,
+// from the task row on the update — and the SQL scoping that IS the listing's
+// authorization.
 
 // TaskHandler handles task history CRUD operations.
 type TaskHandler struct {
@@ -28,22 +40,6 @@ type TaskHandler struct {
 // automatic scheduler sweep.
 func NewTaskHandler(queries *db.Queries, eventPub *events.Publisher, retention time.Duration) *TaskHandler {
 	return &TaskHandler{queries: queries, eventPub: eventPub, retention: retention}
-}
-
-type createTaskRequest struct {
-	ClusterID   string `json:"cluster_id"`
-	UPID        string `json:"upid"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
-	Node        string `json:"node"`
-	TaskType    string `json:"task_type"`
-}
-
-type updateTaskRequest struct {
-	Status     string   `json:"status"`
-	ExitStatus string   `json:"exit_status"`
-	Progress   *float64 `json:"progress"`
-	FinishedAt *string  `json:"finished_at"`
 }
 
 type taskResponse struct {
@@ -89,11 +85,23 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 	return resp
 }
 
-// validTaskStatuses bounds the ?status= filter to the known task_history states
-// so a typo surfaces as a 400 rather than silently returning an empty page.
+// validTaskStatuses is the accepted task_history state vocabulary: it bounds
+// the ?status= filter so a typo surfaces as a 400 rather than silently
+// returning an empty page, and it is the same set the declarations' Enums carry
+// in internal/api/registry_tasks.go. TestTaskStatusVocabulary pins the two
+// against each other.
 var validTaskStatuses = map[string]bool{
 	"running": true, "completed": true, "failed": true, "stopped": true,
 }
+
+// TaskStatusKeys returns the accepted ?status= values, sorted. Exported for the
+// guard in package api that compares them against the declared Enums; package
+// handlers cannot import package api, so the comparison reads them from the
+// other side.
+func TaskStatusKeys() []string { return slices.Sorted(maps.Keys(validTaskStatuses)) }
+
+// TaskSortKeys is TaskStatusKeys for the ?sort= whitelist below.
+func TaskSortKeys() []string { return slices.Sorted(maps.Keys(taskSortColumns)) }
 
 // taskSortColumns whitelists the ?sort= keys ListTaskHistoryFiltered knows how
 // to order on, and defaultTaskSort/defaultTaskOrder are the ordering the page
@@ -178,32 +186,25 @@ func applyTaskListScope(access clusterAccess, listP *db.ListTaskHistoryFilteredP
 // pagination (mirrors AuditHandler.List). Includes DRS/system tasks. Status is
 // served from the reconciled task_history row, so the client need not poll
 // Proxmox per entry.
-func (h *TaskHandler) List(c fiber.Ctx) error {
+func (h *TaskHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "task")
 	if err != nil {
 		return err
 	}
 
-	limit := fiber.Query[int](c, "limit", 50)
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > 200 {
-		limit = 200
-	}
-	offset := fiber.Query[int](c, "offset", 0)
-	if offset < 0 {
-		offset = 0
-	}
-
-	sortBy, order, err := parseTaskSort(c.Query("sort"), c.Query("order"))
+	// The declaration's Enums and Defaults have already applied every rule
+	// parseTaskSort makes, so this can no longer fail on a real request. It is
+	// still called, and still checked: it is the one place that knows which
+	// ORDER BY keys queries/tasks.sql matches, and a declaration that dropped
+	// an Enum would otherwise reach the SQL as an unsorted page.
+	sortBy, order, err := parseTaskSort(p.String("sort"), p.String("order"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		return fiber.NewError(fiber.StatusInternalServerError, "Unsupported task sort")
 	}
 
 	listP := db.ListTaskHistoryFilteredParams{
-		Limit:   safeconv.Int32(limit),
-		Offset:  safeconv.Int32(offset),
+		Limit:   safeconv.Int32(int(p.Int("limit"))),
+		Offset:  safeconv.Int32(int(p.Int("offset"))),
 		SortBy:  sortBy,
 		SortDir: order,
 	}
@@ -211,11 +212,13 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 	// match, and the two queries must stay filter-for-filter identical.
 	var countP db.CountTaskHistoryFilteredParams
 
-	// Optional cluster filter — the caller must have view:task on it.
-	if cid := c.Query("cluster_id"); cid != "" {
-		clusterID, err := uuid.Parse(cid)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id filter")
+	// Optional cluster filter — the caller must have view:task on it. Declared
+	// as filter_cluster_id with "cluster_id" as its alias; see the declaration
+	// for why the name the gate reads cannot be used for a query parameter.
+	if cid, supplied := p.OptString("filter_cluster_id"); supplied {
+		clusterID, parseErr := parseParamUUID(cid)
+		if parseErr != nil {
+			return parseErr
 		}
 		if !access.PermitsCluster(clusterID) {
 			return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
@@ -225,10 +228,7 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 		countP.ClusterID = v
 	}
 
-	if status := c.Query("status"); status != "" {
-		if !validTaskStatuses[status] {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid status filter")
-		}
+	if status, supplied := p.OptString("status"); supplied {
 		v := pgtype.Text{String: status, Valid: true}
 		listP.Status = v
 		countP.Status = v
@@ -236,10 +236,11 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 
 	// Optional guest filter: comma-separated Proxmox VMIDs, matched against
 	// task_history.vmid (parsed from the UPID at insert). Used by the folder
-	// detail view to scope tasks to a folder's VMs.
-	if raw := c.Query("vmids"); raw != "" {
-		vmids, err := parseVmidsParam(raw)
-		if err != nil {
+	// detail view to scope tasks to a folder's VMs. The list SHAPE stays a
+	// handler rule — see taskVmidsParam for why it is declared as a string.
+	if raw, supplied := p.OptString("vmids"); supplied {
+		vmids, vmidErr := parseVmidsParam(raw)
+		if vmidErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid vmids filter")
 		}
 		listP.Vmids = vmids
@@ -277,45 +278,33 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 }
 
 // Create creates a new task history record.
-func (h *TaskHandler) Create(c fiber.Ctx) error {
+func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	uid, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid user")
 	}
 
-	var req createTaskRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	clusterID, err := uuid.Parse(req.ClusterID)
+	clusterID, err := parseParamUUID(p.String("task_cluster_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
-	}
-
-	// Per-cluster gate so a user with manage:task scoped to cluster X
-	// cannot insert task records claiming cluster Y.
-	if err := requireClusterPerm(c, "manage", "task", clusterID); err != nil {
 		return err
 	}
 
-	if req.UPID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "upid is required")
-	}
-
-	status := req.Status
-	if status == "" {
-		status = "running"
+	// Per-cluster gate so a user with manage:task scoped to cluster X
+	// cannot insert task records claiming cluster Y. It is here rather than in
+	// the declaration because the cluster arrives in the BODY, which middleware
+	// runs before reading — see the Deferred reason on this route.
+	if err := requireClusterPerm(c, "manage", "task", clusterID); err != nil {
+		return err
 	}
 
 	task, err := h.queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
 		ClusterID:   clusterID,
 		UserID:      uid,
-		Upid:        req.UPID,
-		Description: req.Description,
-		Status:      status,
-		Node:        req.Node,
-		TaskType:    req.TaskType,
+		Upid:        p.String("upid"),
+		Description: p.String("description"),
+		Status:      p.String("status"),
+		Node:        p.String("node"),
+		TaskType:    p.String("task_type"),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create task record")
@@ -327,19 +316,19 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 }
 
 // Update updates a task history record by UPID.
-func (h *TaskHandler) Update(c fiber.Ctx) error {
-	rawUPID := c.Params("upid")
-	if rawUPID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "upid is required")
-	}
+func (h *TaskHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	// Fiber (fasthttp) doesn't auto-decode route params; the frontend
 	// URL-encodes the UPID so colons arrive as %3A, etc.
+	rawUPID := p.String("upid")
 	upid, err := url.PathUnescape(rawUPID)
 	if err != nil {
 		upid = rawUPID
 	}
 
-	// Look up the task to find its cluster, then gate on per-cluster perm.
+	// Look up the task to find its cluster, then gate on per-cluster perm. It
+	// is here rather than in the declaration because the cluster is a property
+	// of the ROW, which middleware has no way to read — see the Deferred reason
+	// on this route.
 	task, err := h.queries.GetTaskByUpid(c.Context(), upid)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Task not found")
@@ -348,34 +337,30 @@ func (h *TaskHandler) Update(c fiber.Ctx) error {
 		return err
 	}
 
-	var req updateTaskRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
+	status := p.String("status")
 	params := db.UpdateTaskHistoryParams{
 		Upid:       upid,
-		Status:     req.Status,
-		ExitStatus: req.ExitStatus,
+		Status:     status,
+		ExitStatus: p.String("exit_status"),
 	}
 
-	if req.Progress != nil {
-		params.Progress = pgtype.Float8{Float64: *req.Progress, Valid: true}
+	if progress, supplied := p.OptFloat("progress"); supplied {
+		params.Progress = pgtype.Float8{Float64: progress, Valid: true}
 	}
 
-	if req.FinishedAt != nil {
-		t, err := time.Parse(time.RFC3339, *req.FinishedAt)
-		if err == nil {
+	if finishedAt, supplied := p.OptString("finished_at"); supplied {
+		t, parseErr := time.Parse(time.RFC3339, finishedAt)
+		if parseErr == nil {
 			params.FinishedAt = pgtype.Timestamptz{Time: t, Valid: true}
 		}
-	} else if req.Status == "stopped" {
+	} else if status == "stopped" {
 		params.FinishedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	}
 
 	if err := h.queries.UpdateTaskHistory(c.Context(), params); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update task")
 	}
-	h.eventPub.SystemEvent(c.Context(), events.KindTaskUpdate, req.Status)
+	h.eventPub.SystemEvent(c.Context(), events.KindTaskUpdate, status)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -386,11 +371,7 @@ func (h *TaskHandler) Update(c fiber.Ctx) error {
 // filter would require an array-of-uuid SQL parameter), this stays gated on
 // global manage:task — i.e. effectively admin-only. A user with manage:task
 // scoped only to cluster X cannot wipe history that includes cluster Y.
-func (h *TaskHandler) ClearCompleted(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "task"); err != nil {
-		return err
-	}
-
+func (h *TaskHandler) ClearCompleted(c fiber.Ctx, _ *apischema.Params) error {
 	if err := h.queries.DeleteCompletedTasks(c.Context(), time.Now().Add(-h.retention)); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to clear tasks")
 	}

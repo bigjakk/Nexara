@@ -6,10 +6,19 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
+
+// All four routes are declared in internal/api/registry_pools.go, which states
+// their cluster-scoped permission (manage:pool for the three writes, view:pool
+// for the read) and their parameters; nothing below re-checks either. The
+// LISTING of pools belongs to VMHandler and is declared in registry_vms.go.
+//
+// What stays here is the audit row and the cluster event each write emits, and
+// the mapping of Proxmox's own refusals onto a status code.
 
 // PoolHandler handles resource pool endpoints.
 type PoolHandler struct {
@@ -28,20 +37,14 @@ func (h *PoolHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*pr
 }
 
 // CreatePool handles POST /clusters/:cluster_id/pools.
-func (h *PoolHandler) CreatePool(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *PoolHandler) CreatePool(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "pool", clusterID); err != nil {
-		return err
-	}
-	var req proxmox.CreatePoolParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.PoolID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Pool ID is required")
+	req := proxmox.CreatePoolParams{
+		PoolID:  p.String("poolid"),
+		Comment: p.String("comment"),
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -57,18 +60,12 @@ func (h *PoolHandler) CreatePool(c fiber.Ctx) error {
 }
 
 // GetPool handles GET /clusters/:cluster_id/pools/:pool_id.
-func (h *PoolHandler) GetPool(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *PoolHandler) GetPool(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "pool", clusterID); err != nil {
-		return err
-	}
-	poolID := c.Params("pool_id")
-	if poolID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Pool ID is required")
-	}
+	poolID := p.String("pool_id")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -81,22 +78,25 @@ func (h *PoolHandler) GetPool(c fiber.Ctx) error {
 }
 
 // UpdatePool handles PUT /clusters/:cluster_id/pools/:pool_id.
-func (h *PoolHandler) UpdatePool(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *PoolHandler) UpdatePool(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "pool", clusterID); err != nil {
-		return err
+	poolID := p.String("pool_id")
+
+	req := proxmox.UpdatePoolParams{
+		VMs:     p.String("vms"),
+		Storage: p.String("storage"),
+		Delete:  p.String("delete"),
 	}
-	poolID := c.Params("pool_id")
-	if poolID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Pool ID is required")
-	}
-	var req proxmox.UpdatePoolParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	// Comment is a *string on purpose: omitting it leaves the stored comment
+	// alone, while sending it empty clears it. A plain string would collapse
+	// the two and overwrite every pool comment whose editor never touched the
+	// field — the same absent-versus-zero distinction the disks/attach `index`
+	// incident turned into a destroyed boot disk.
+	req.Comment = optStringPtr(p.OptString("comment"))
+
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -111,18 +111,12 @@ func (h *PoolHandler) UpdatePool(c fiber.Ctx) error {
 }
 
 // DeletePool handles DELETE /clusters/:cluster_id/pools/:pool_id.
-func (h *PoolHandler) DeletePool(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *PoolHandler) DeletePool(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "pool", clusterID); err != nil {
-		return err
-	}
-	poolID := c.Params("pool_id")
-	if poolID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Pool ID is required")
-	}
+	poolID := p.String("pool_id")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err

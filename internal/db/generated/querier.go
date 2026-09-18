@@ -296,7 +296,7 @@ type Querier interface {
 	DeleteSSHKnownHost(ctx context.Context, arg DeleteSSHKnownHostParams) error
 	DeleteSSHKnownHostByID(ctx context.Context, arg DeleteSSHKnownHostByIDParams) error
 	DeleteSSHKnownHostsForCluster(ctx context.Context, clusterID uuid.UUID) error
-	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
+	DeleteScheduledTask(ctx context.Context, arg DeleteScheduledTaskParams) (int64, error)
 	DeleteSetting(ctx context.Context, arg DeleteSettingParams) error
 	DeleteSettingByID(ctx context.Context, id uuid.UUID) error
 	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
@@ -1646,7 +1646,18 @@ type Querier interface {
 	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)
 	UpdateRollingUpdateJobStatus(ctx context.Context, arg UpdateRollingUpdateJobStatusParams) error
 	UpdateRollingUpdateNodeStep(ctx context.Context, arg UpdateRollingUpdateNodeStepParams) error
-	UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) error
+	// A scheduled task is addressed by its uuid, which says nothing about which
+	// cluster owns it, while the permission gate on these two resolves the cluster
+	// from the request PATH. Without the cluster_id predicate, `WHERE id = $1` let
+	// a caller holding manage:schedule on one cluster rewrite or delete another's
+	// row. The handler re-reads the row and compares its cluster as well
+	// (taskInCluster in internal/api/handlers/schedules.go); the two layers fail
+	// independently, and either one alone refuses the request.
+	//
+	// :execrows rather than :exec so a zero-row result is visible: if the handler
+	// check is ever dropped, the write still cannot happen AND the caller is told,
+	// rather than the endpoint reporting success for a row it never touched.
+	UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) (int64, error)
 	UpdateSessionTokenHash(ctx context.Context, arg UpdateSessionTokenHashParams) error
 	UpdateTaskHistory(ctx context.Context, arg UpdateTaskHistoryParams) error
 	UpdateTaskLastRun(ctx context.Context, arg UpdateTaskLastRunParams) error

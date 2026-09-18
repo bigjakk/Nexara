@@ -10,9 +10,24 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 )
+
+// 4 of the 5 routes are declared in internal/api/registry_vm_folders.go, which
+// states their cluster-scoped permission (view:vm_folder for the listing,
+// manage:vm_folder for the writes) and their parameters; nothing below
+// re-checks either.
+//
+// Update — PATCH /vm-folders/:folder_id — stays in router.go with its
+// hand-written body, and jsonNullUUID below is why: its parent_id has to tell
+// "absent" from "explicit null", and apischema reads an explicit null as
+// absent. See registerVMFolderEndpoints and TestVMFolderReparentIsStillLegacy.
+//
+// What stays here for all five is what a declaration cannot see: the
+// cluster-membership check on every folder and guest the request names, the
+// cycle check on a re-parent, and the unique-violation mapping onto 409.
 
 // VMFoldersHandler handles CRUD for the VM folder organisation layer
 // surfaced by the "VMs & Templates" tree perspective. Folders are pure
@@ -60,12 +75,9 @@ type vmFolderListResponse struct {
 // List returns every folder for the cluster plus every (vm_id, folder_id)
 // membership so the frontend can render the whole tree from a single round
 // trip.
-func (h *VMFoldersHandler) List(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMFoldersHandler) List(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "vm_folder", clusterID); err != nil {
 		return err
 	}
 
@@ -91,36 +103,36 @@ func (h *VMFoldersHandler) List(c fiber.Ctx) error {
 	return c.JSON(vmFolderListResponse{Folders: folderResp, Memberships: memberResp})
 }
 
-type vmFolderCreateRequest struct {
-	Name     string     `json:"name"`
-	ParentID *uuid.UUID `json:"parent_id"`
-}
-
 // Create handles POST /api/v1/clusters/:cluster_id/vm-folders.
-func (h *VMFoldersHandler) Create(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMFoldersHandler) Create(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm_folder", clusterID); err != nil {
-		return err
-	}
 
-	var req vmFolderCreateRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	name := strings.TrimSpace(req.Name)
+	// Trimmed HERE rather than in the schema: apischema validates the value as
+	// sent, and this rule is about the stored name. The declaration's bound is
+	// what closes the parameter; this is what decides the row.
+	name := strings.TrimSpace(p.String("name"))
 	if name == "" || len(name) > 128 {
 		return fiber.NewError(fiber.StatusBadRequest, "Folder name must be 1-128 characters")
 	}
 
+	var parentID *uuid.UUID
+	if raw, supplied := p.OptString("parent_id"); supplied {
+		parsed, parseErr := parseParamUUID(raw)
+		if parseErr != nil {
+			return parseErr
+		}
+		parentID = &parsed
+	}
+
 	parent := pgtype.UUID{}
-	if req.ParentID != nil {
-		if err := h.ensureFolderInCluster(c, *req.ParentID, clusterID); err != nil {
+	if parentID != nil {
+		if err := h.ensureFolderInCluster(c, *parentID, clusterID); err != nil {
 			return err
 		}
-		parent = pgtype.UUID{Bytes: *req.ParentID, Valid: true}
+		parent = pgtype.UUID{Bytes: *parentID, Valid: true}
 	}
 
 	folder, err := h.queries.CreateVMFolder(c.Context(), db.CreateVMFolderParams{
@@ -137,7 +149,7 @@ func (h *VMFoldersHandler) Create(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create folder")
 	}
 
-	details, _ := json.Marshal(map[string]any{"name": folder.Name, "parent_id": req.ParentID})
+	details, _ := json.Marshal(map[string]any{"name": folder.Name, "parent_id": parentID})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm_folder", folder.ID.String(), "create", details)
 
 	return c.Status(fiber.StatusCreated).JSON(toVMFolderResponse(folder))
@@ -262,18 +274,14 @@ func (h *VMFoldersHandler) Update(c fiber.Ctx) error {
 // Cascade in the schema removes child folders and memberships; VMs are not
 // touched, they simply lose their folder assignment and fall back to the
 // implicit "unassigned" pseudo-folder on the frontend.
-func (h *VMFoldersHandler) Delete(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMFoldersHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm_folder", clusterID); err != nil {
-		return err
-	}
-
-	folderID, err := uuid.Parse(c.Params("folder_id"))
+	folderID, err := parseParamUUID(p.String("folder_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid folder ID")
+		return err
 	}
 
 	folder, err := h.queries.GetVMFolder(c.Context(), folderID)
@@ -297,26 +305,17 @@ func (h *VMFoldersHandler) Delete(c fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
-type assignVMFolderRequest struct {
-	// null/missing means "unassign".
-	FolderID *uuid.UUID `json:"folder_id"`
-}
-
 // AssignVM handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/folder.
 // The VM must belong to the URL cluster and (if specified) the target
 // folder must also belong to that same cluster.
-func (h *VMFoldersHandler) AssignVM(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMFoldersHandler) AssignVM(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm_folder", clusterID); err != nil {
-		return err
-	}
-
-	vmID, err := uuid.Parse(c.Params("vm_id"))
+	vmID, err := parseParamUUID(p.String("vm_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+		return err
 	}
 
 	vm, err := h.queries.GetVM(c.Context(), vmID)
@@ -330,12 +329,18 @@ func (h *VMFoldersHandler) AssignVM(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "VM not found")
 	}
 
-	var req assignVMFolderRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	// Absent and an explicit null both mean "unassign", which is what the
+	// declaration says and what this has always read out of a *uuid.UUID.
+	var folderID *uuid.UUID
+	if raw, supplied := p.OptString("folder_id"); supplied {
+		parsed, parseErr := parseParamUUID(raw)
+		if parseErr != nil {
+			return parseErr
+		}
+		folderID = &parsed
 	}
 
-	if req.FolderID == nil {
+	if folderID == nil {
 		if err := h.queries.UnassignVMFromFolder(c.Context(), db.UnassignVMFromFolderParams{
 			ClusterID: clusterID,
 			Vmid:      vm.Vmid,
@@ -347,18 +352,18 @@ func (h *VMFoldersHandler) AssignVM(c fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNoContent)
 	}
 
-	if err := h.ensureFolderInCluster(c, *req.FolderID, clusterID); err != nil {
+	if err := h.ensureFolderInCluster(c, *folderID, clusterID); err != nil {
 		return err
 	}
 	if err := h.queries.AssignVMToFolder(c.Context(), db.AssignVMToFolderParams{
 		ClusterID: clusterID,
 		Vmid:      vm.Vmid,
-		FolderID:  *req.FolderID,
+		FolderID:  *folderID,
 	}); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to assign VM")
 	}
 
-	details, _ := json.Marshal(map[string]any{"vmid": vm.Vmid, "folder_id": *req.FolderID})
+	details, _ := json.Marshal(map[string]any{"vmid": vm.Vmid, "folder_id": *folderID})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm_folder_membership", vmID.String(), "assign", details)
 
 	return c.SendStatus(fiber.StatusNoContent)
