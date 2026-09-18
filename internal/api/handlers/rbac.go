@@ -10,10 +10,20 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 )
+
+// All 10 routes are declared in internal/api/registry_rbac.go, which states
+// their permission and their parameters; nothing below re-checks either. Nine
+// are a global Check (view:role or manage:role) and the tenth, MyPermissions,
+// is SelfService — it reads the caller's own id from the session.
+//
+// What stays here is what the declaration cannot see: the refusal to edit or
+// delete a built-in role, the refusal to touch the system account, and the
+// RBAC cache invalidation that has to follow every grant change.
 
 // RBACHandler handles role and permission management endpoints.
 type RBACHandler struct {
@@ -29,6 +39,31 @@ func NewRBACHandler(queries *db.Queries, rbac *auth.RBACEngine, eventPub *events
 		rbac:     rbac,
 		eventPub: eventPub,
 	}
+}
+
+// parseRolePermissionIDs reads the permission_ids array both role writes
+// carry.
+//
+// The uuid FORMAT has already run on every element, so this cannot fail on a
+// well-formed request — but Strings() hands back the string form and the
+// queries take uuid.UUID, and silently dropping an element that failed to
+// parse would create a role granting less than the caller asked for with no
+// indication. It returns the caller-facing 400 instead.
+//
+// It does NOT decide whether the set was supplied: an empty array and an
+// absent key both come back as an empty slice, and only p.Has can tell "strip
+// every permission" from "leave them alone". See UpdateRole.
+func parseRolePermissionIDs(p *apischema.Params) ([]uuid.UUID, error) {
+	raw := p.Strings("permission_ids")
+	out := make([]uuid.UUID, 0, len(raw))
+	for _, s := range raw {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			return nil, fiber.NewError(fiber.StatusBadRequest, "Invalid permission ID: "+s)
+		}
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 // invalidateRoleUsers clears the RBAC cache for all users holding a given role.
@@ -61,24 +96,8 @@ type permissionResponse struct {
 	Description string    `json:"description"`
 }
 
-type createRoleRequest struct {
-	Name          string      `json:"name"`
-	Description   string      `json:"description"`
-	PermissionIDs []uuid.UUID `json:"permission_ids"`
-}
-
-type updateRoleRequest struct {
-	Name          *string      `json:"name"`
-	Description   *string      `json:"description"`
-	PermissionIDs *[]uuid.UUID `json:"permission_ids"`
-}
-
 // ListRoles handles GET /api/v1/rbac/roles.
-func (h *RBACHandler) ListRoles(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "role"); err != nil {
-		return err
-	}
-
+func (h *RBACHandler) ListRoles(c fiber.Ctx, _ *apischema.Params) error {
 	roles, err := h.queries.ListRoles(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list roles")
@@ -100,14 +119,10 @@ func (h *RBACHandler) ListRoles(c fiber.Ctx) error {
 }
 
 // GetRole handles GET /api/v1/rbac/roles/:id.
-func (h *RBACHandler) GetRole(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "role"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *RBACHandler) GetRole(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid role ID")
+		return err
 	}
 
 	role, err := h.queries.GetRole(c.Context(), id)
@@ -124,12 +139,12 @@ func (h *RBACHandler) GetRole(c fiber.Ctx) error {
 	}
 
 	permResp := make([]permissionResponse, len(perms))
-	for i, p := range perms {
+	for i, perm := range perms {
 		permResp[i] = permissionResponse{
-			ID:          p.ID,
-			Action:      p.Action,
-			Resource:    p.Resource,
-			Description: p.Description,
+			ID:          perm.ID,
+			Action:      perm.Action,
+			Resource:    perm.Resource,
+			Description: perm.Description,
 		}
 	}
 
@@ -145,23 +160,15 @@ func (h *RBACHandler) GetRole(c fiber.Ctx) error {
 }
 
 // CreateRole handles POST /api/v1/rbac/roles.
-func (h *RBACHandler) CreateRole(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "role"); err != nil {
+func (h *RBACHandler) CreateRole(c fiber.Ctx, p *apischema.Params) error {
+	permissionIDs, err := parseRolePermissionIDs(p)
+	if err != nil {
 		return err
 	}
 
-	var req createRoleRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Name == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Name is required")
-	}
-
 	role, err := h.queries.CreateRole(c.Context(), db.CreateRoleParams{
-		Name:        req.Name,
-		Description: req.Description,
+		Name:        p.String("name"),
+		Description: p.String("description"),
 	})
 	if err != nil {
 		if isDuplicateKeyError(err) {
@@ -170,7 +177,7 @@ func (h *RBACHandler) CreateRole(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create role")
 	}
 
-	for _, pid := range req.PermissionIDs {
+	for _, pid := range permissionIDs {
 		if err := h.queries.AddRolePermission(c.Context(), db.AddRolePermissionParams{
 			RoleID:       role.ID,
 			PermissionID: pid,
@@ -193,14 +200,10 @@ func (h *RBACHandler) CreateRole(c fiber.Ctx) error {
 }
 
 // UpdateRole handles PUT /api/v1/rbac/roles/:id.
-func (h *RBACHandler) UpdateRole(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "role"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *RBACHandler) UpdateRole(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid role ID")
+		return err
 	}
 
 	existing, err := h.queries.GetRole(c.Context(), id)
@@ -215,18 +218,21 @@ func (h *RBACHandler) UpdateRole(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusForbidden, "Cannot modify built-in roles")
 	}
 
-	var req updateRoleRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
+	// Tristate reads, not zero-value tests: an omitted key leaves the stored
+	// value alone and an EMPTY one is a deliberate clear. p.OptString is what
+	// keeps those apart, the way the *string fields on the old request struct
+	// did.
 	name := existing.Name
-	description := existing.Description
-	if req.Name != nil {
-		name = *req.Name
+	if v, supplied := p.OptString("name"); supplied {
+		name = v
 	}
-	if req.Description != nil {
-		description = *req.Description
+	description := existing.Description
+	if v, supplied := p.OptString("description"); supplied {
+		description = v
+	}
+	permissionIDs, err := parseRolePermissionIDs(p)
+	if err != nil {
+		return err
 	}
 
 	role, err := h.queries.UpdateRole(c.Context(), db.UpdateRoleParams{
@@ -241,11 +247,15 @@ func (h *RBACHandler) UpdateRole(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update role")
 	}
 
-	if req.PermissionIDs != nil {
+	// p.Has, not len(permissionIDs): an EMPTY array is how a caller strips
+	// every permission from a role, and an absent key is how they leave the
+	// set alone. Testing the length would collapse the two and make the
+	// deliberate clear unexpressible.
+	if p.Has("permission_ids") {
 		if err := h.queries.SetRolePermissions(c.Context(), id); err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to clear role permissions")
 		}
-		for _, pid := range *req.PermissionIDs {
+		for _, pid := range permissionIDs {
 			if err := h.queries.AddRolePermission(c.Context(), db.AddRolePermissionParams{
 				RoleID:       id,
 				PermissionID: pid,
@@ -272,14 +282,10 @@ func (h *RBACHandler) UpdateRole(c fiber.Ctx) error {
 }
 
 // DeleteRole handles DELETE /api/v1/rbac/roles/:id.
-func (h *RBACHandler) DeleteRole(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "role"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *RBACHandler) DeleteRole(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid role ID")
+		return err
 	}
 
 	role, err := h.queries.GetRole(c.Context(), id)
@@ -310,11 +316,7 @@ func (h *RBACHandler) DeleteRole(c fiber.Ctx) error {
 // -- Permissions --
 
 // ListPermissions handles GET /api/v1/rbac/permissions.
-func (h *RBACHandler) ListPermissions(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "role"); err != nil {
-		return err
-	}
-
+func (h *RBACHandler) ListPermissions(c fiber.Ctx, _ *apischema.Params) error {
 	perms, err := h.queries.ListPermissions(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list permissions")
@@ -347,21 +349,11 @@ type userRoleResponse struct {
 	CreatedAt       string    `json:"created_at"`
 }
 
-type assignRoleRequest struct {
-	RoleID    uuid.UUID `json:"role_id"`
-	ScopeType string    `json:"scope_type"`
-	ScopeID   string    `json:"scope_id,omitempty"`
-}
-
 // ListUserRoles handles GET /api/v1/rbac/users/:user_id/roles.
-func (h *RBACHandler) ListUserRoles(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "role"); err != nil {
-		return err
-	}
-
-	userID, err := uuid.Parse(c.Params("user_id"))
+func (h *RBACHandler) ListUserRoles(c fiber.Ctx, p *apischema.Params) error {
+	userID, err := parseParamUUID(p.String("user_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+		return err
 	}
 
 	rows, err := h.queries.ListUserRoles(c.Context(), userID)
@@ -391,39 +383,32 @@ func (h *RBACHandler) ListUserRoles(c fiber.Ctx) error {
 }
 
 // AssignUserRole handles POST /api/v1/rbac/users/:user_id/roles.
-func (h *RBACHandler) AssignUserRole(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "role"); err != nil {
-		return err
-	}
-
-	userID, err := uuid.Parse(c.Params("user_id"))
+func (h *RBACHandler) AssignUserRole(c fiber.Ctx, p *apischema.Params) error {
+	userID, err := parseParamUUID(p.String("user_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+		return err
 	}
 
 	if userID == auth.SystemUserID {
 		return fiber.NewError(fiber.StatusForbidden, "Cannot modify the system account")
 	}
 
-	var req assignRoleRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.RoleID == uuid.Nil {
+	roleID, err := uuid.Parse(p.String("role_id"))
+	// The uuid format has already run, so the parse cannot fail — but the
+	// all-zeros uuid satisfies it, and assigning "no role" is not something a
+	// caller can have meant.
+	if err != nil || roleID == uuid.Nil {
 		return fiber.NewError(fiber.StatusBadRequest, "role_id is required")
 	}
-	if req.ScopeType == "" {
-		req.ScopeType = "global"
-	}
-	if req.ScopeType != "global" && req.ScopeType != "cluster" {
-		return fiber.NewError(fiber.StatusBadRequest, "scope_type must be 'global' or 'cluster'")
-	}
 
+	// Cross-field, so it stays here: apischema's Requires names a companion a
+	// parameter ALWAYS needs, not one it needs only for a particular value of
+	// another parameter.
+	scopeType := p.String("scope_type")
 	var scopeID pgtype.UUID
-	if req.ScopeType == "cluster" {
-		sid, err := uuid.Parse(req.ScopeID)
-		if err != nil {
+	if scopeType == "cluster" {
+		sid, parseErr := uuid.Parse(p.String("scope_id"))
+		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "scope_id is required for cluster scope")
 		}
 		scopeID = pgtype.UUID{Bytes: sid, Valid: true}
@@ -431,8 +416,8 @@ func (h *RBACHandler) AssignUserRole(c fiber.Ctx) error {
 
 	assignment, err := h.queries.AssignUserRole(c.Context(), db.AssignUserRoleParams{
 		UserID:    userID,
-		RoleID:    req.RoleID,
-		ScopeType: req.ScopeType,
+		RoleID:    roleID,
+		ScopeType: scopeType,
 		ScopeID:   scopeID,
 	})
 	if err != nil {
@@ -446,8 +431,8 @@ func (h *RBACHandler) AssignUserRole(c fiber.Ctx) error {
 
 	details, _ := json.Marshal(map[string]interface{}{
 		"user_id":    userID.String(),
-		"role_id":    req.RoleID.String(),
-		"scope_type": req.ScopeType,
+		"role_id":    roleID.String(),
+		"scope_type": scopeType,
 	})
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "role", assignment.ID.String(), "role_assigned", details)
 
@@ -461,23 +446,19 @@ func (h *RBACHandler) AssignUserRole(c fiber.Ctx) error {
 }
 
 // RevokeUserRole handles DELETE /api/v1/rbac/users/:user_id/roles/:id.
-func (h *RBACHandler) RevokeUserRole(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "role"); err != nil {
-		return err
-	}
-
-	userID, err := uuid.Parse(c.Params("user_id"))
+func (h *RBACHandler) RevokeUserRole(c fiber.Ctx, p *apischema.Params) error {
+	userID, err := parseParamUUID(p.String("user_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+		return err
 	}
 
 	if userID == auth.SystemUserID {
 		return fiber.NewError(fiber.StatusForbidden, "Cannot modify the system account")
 	}
 
-	assignmentID, err := uuid.Parse(c.Params("id"))
+	assignmentID, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid assignment ID")
+		return err
 	}
 
 	if err := h.queries.RevokeUserRole(c.Context(), db.RevokeUserRoleParams{
@@ -501,7 +482,7 @@ func (h *RBACHandler) RevokeUserRole(c fiber.Ctx) error {
 // -- Current User Permissions --
 
 // MyPermissions handles GET /api/v1/rbac/me/permissions.
-func (h *RBACHandler) MyPermissions(c fiber.Ctx) error {
+func (h *RBACHandler) MyPermissions(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
 func TestParseParamUUID(t *testing.T) {
@@ -131,5 +134,54 @@ func TestScalarText(t *testing.T) {
 		if ok != tt.ok || got != tt.want {
 			t.Errorf("scalarText(%#v) = (%q, %v), want (%q, %v)", tt.raw, got, ok, tt.want, tt.ok)
 		}
+	}
+}
+
+// withRequestParams adapts a registry-shaped handler to a fiber.Handler for a
+// test that drives a real REQUEST BODY, which list_scope_test.go's withParams
+// cannot: that one validates an EMPTY request so every parameter arrives
+// carrying its default, which is right for a handler whose test never reaches
+// the values.
+//
+// The handlers this serves branch ON the body — the LDAP transport gate reads
+// start_tls and server_url, the console-token gate picks its resource from
+// `type` — so the body has to be decoded and validated the way
+// api.Endpoint.extract does at runtime. This is a deliberately minimal stand-in
+// for that: a JSON object, plus the route's :param segments. Query parameters
+// are not read, because no handler tested through this takes one.
+//
+// props is a MIRROR of the route's declaration rather than the declaration
+// itself, for the reason migrationListMirror gives: package api imports this
+// package, not the other way round. It is compiled here so a mirror that is
+// itself malformed fails loudly rather than silently accepting anything.
+func withRequestParams(t *testing.T, props apischema.Properties, pathParams []string,
+	h func(fiber.Ctx, *apischema.Params) error) fiber.Handler {
+	t.Helper()
+	if err := props.Compile(); err != nil {
+		t.Fatalf("the mirror schema is itself invalid: %v", err)
+	}
+	return func(c fiber.Ctx) error {
+		raw := map[string]any{}
+		if body := c.Body(); len(body) > 0 {
+			dec := json.NewDecoder(bytes.NewReader(body))
+			dec.UseNumber()
+			if err := dec.Decode(&raw); err != nil {
+				return fiber.NewError(fiber.StatusBadRequest, "request body is not valid JSON")
+			}
+		}
+		for _, name := range pathParams {
+			if v := c.Params(name); v != "" {
+				raw[name] = v
+			}
+		}
+		params, err := props.Validate(raw)
+		if err != nil {
+			var verr *apischema.ValidationError
+			if errors.As(err, &verr) {
+				return fiber.NewError(fiber.StatusBadRequest, verr.Error())
+			}
+			return fiber.NewError(fiber.StatusInternalServerError, "Request validation failed")
+		}
+		return h(c, params)
 	}
 }

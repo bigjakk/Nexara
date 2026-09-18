@@ -12,10 +12,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 )
+
+// All 6 routes are declared in internal/api/registry_api_keys.go, which states
+// their permission and their parameters; nothing below re-checks either. Four
+// take manage:api_key and the two admin ones take manage:user.
+//
+// What stays here is what the declaration cannot see: the refusal to mint a key
+// while authenticated BY a key, the per-user cap, and the ownership check on
+// the single revoke.
 
 // APIKeyHandler handles API key management endpoints.
 type APIKeyHandler struct {
@@ -32,11 +41,6 @@ func NewAPIKeyHandler(queries *db.Queries, eventPub *events.Publisher) *APIKeyHa
 }
 
 // --- Request / Response types ---
-
-type createAPIKeyRequest struct {
-	Name      string `json:"name"`
-	ExpiresIn *int64 `json:"expires_in"` // seconds, optional, minimum 3600
-}
 
 type apiKeyResponse struct {
 	ID         uuid.UUID `json:"id"`
@@ -97,35 +101,23 @@ func textPtr(t pgtype.Text) *string {
 // --- Handlers ---
 
 // Create handles POST /api/v1/api-keys.
-func (h *APIKeyHandler) Create(c fiber.Ctx) error {
+func (h *APIKeyHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	// API keys cannot create new API keys — require an interactive JWT session.
-	// This prevents key self-replication if a key is compromised.
+	// This prevents key self-replication if a key is compromised. It is NOT the
+	// route's permission (manage:api_key is, and the middleware has already
+	// run): it is a rule about how the caller authenticated, which no grant
+	// expresses.
 	if authMethod, _ := c.Locals("auth_method").(string); authMethod == "api_key" {
 		return fiber.NewError(fiber.StatusForbidden, "API keys cannot be created using API key authentication; use an interactive login session")
 	}
 
-	if err := requirePerm(c, "manage", "api_key"); err != nil {
-		return err
-	}
-
-	var req createAPIKeyRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	// Validate name.
-	if req.Name == "" || len(req.Name) > 100 {
-		return fiber.NewError(fiber.StatusBadRequest, "Name is required and must be 1-100 characters")
-	}
-
-	// Validate expires_in if provided.
+	// Absent means "never expires", which is why this is an OptInt read rather
+	// than a zero test: expires_in carries no default precisely so that the two
+	// stay distinguishable.
 	var expiresAt pgtype.Timestamptz
-	if req.ExpiresIn != nil {
-		if *req.ExpiresIn < 3600 {
-			return fiber.NewError(fiber.StatusBadRequest, "Expiration must be at least 3600 seconds (1 hour)")
-		}
+	if seconds, supplied := p.OptInt("expires_in"); supplied {
 		expiresAt = pgtype.Timestamptz{
-			Time:  time.Now().Add(time.Duration(*req.ExpiresIn) * time.Second),
+			Time:  time.Now().Add(time.Duration(seconds) * time.Second),
 			Valid: true,
 		}
 	}
@@ -159,7 +151,7 @@ func (h *APIKeyHandler) Create(c fiber.Ctx) error {
 
 	apiKey, err := h.queries.CreateAPIKey(c.Context(), db.CreateAPIKeyParams{
 		UserID:    userID,
-		Name:      req.Name,
+		Name:      p.String("name"),
 		KeyPrefix: keyPrefix,
 		KeyHash:   keyHash,
 		ExpiresAt: expiresAt,
@@ -181,11 +173,7 @@ func (h *APIKeyHandler) Create(c fiber.Ctx) error {
 }
 
 // List handles GET /api/v1/api-keys.
-func (h *APIKeyHandler) List(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "api_key"); err != nil {
-		return err
-	}
-
+func (h *APIKeyHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -214,14 +202,10 @@ func (h *APIKeyHandler) List(c fiber.Ctx) error {
 }
 
 // Revoke handles DELETE /api/v1/api-keys/:id.
-func (h *APIKeyHandler) Revoke(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "api_key"); err != nil {
-		return err
-	}
-
-	keyID, err := uuid.Parse(c.Params("id"))
+func (h *APIKeyHandler) Revoke(c fiber.Ctx, p *apischema.Params) error {
+	keyID, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid API key ID")
+		return err
 	}
 
 	userID, ok := c.Locals("user_id").(uuid.UUID)
@@ -251,11 +235,7 @@ func (h *APIKeyHandler) Revoke(c fiber.Ctx) error {
 }
 
 // RevokeAll handles DELETE /api/v1/api-keys.
-func (h *APIKeyHandler) RevokeAll(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "api_key"); err != nil {
-		return err
-	}
-
+func (h *APIKeyHandler) RevokeAll(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -271,11 +251,7 @@ func (h *APIKeyHandler) RevokeAll(c fiber.Ctx) error {
 }
 
 // AdminList handles GET /api/v1/admin/api-keys.
-func (h *APIKeyHandler) AdminList(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
+func (h *APIKeyHandler) AdminList(c fiber.Ctx, _ *apischema.Params) error {
 	keys, err := h.queries.ListAllAPIKeys(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list API keys")
@@ -302,14 +278,10 @@ func (h *APIKeyHandler) AdminList(c fiber.Ctx) error {
 }
 
 // AdminRevoke handles DELETE /api/v1/admin/api-keys/:id.
-func (h *APIKeyHandler) AdminRevoke(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	keyID, err := uuid.Parse(c.Params("id"))
+func (h *APIKeyHandler) AdminRevoke(c fiber.Ctx, p *apischema.Params) error {
+	keyID, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid API key ID")
+		return err
 	}
 
 	// Verify key exists before revoking.

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -83,7 +84,7 @@ func (h *AuthHandler) currentSessionID(c fiber.Ctx) uuid.UUID {
 // account, and from where. Self-service: there is no permission to check
 // because a user is always entitled to their own sessions, and the query is
 // keyed by the authenticated user id so there is no way to ask for another's.
-func (h *AuthHandler) ListSessions(c fiber.Ctx) error {
+func (h *AuthHandler) ListSessions(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -107,15 +108,15 @@ func (h *AuthHandler) ListSessions(c fiber.Ctx) error {
 // Revokes one of the caller's own sessions — the "sign out that other device"
 // action. Self-service for the same reason as ListSessions; ownership is
 // enforced below rather than by a permission.
-func (h *AuthHandler) RevokeSessionByID(c fiber.Ctx) error {
+func (h *AuthHandler) RevokeSessionByID(c fiber.Ctx, p *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
-	sessionID, err := uuid.Parse(c.Params("id"))
+	sessionID, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid session ID")
+		return err
 	}
 
 	session, err := h.queries.GetSessionByID(c.Context(), sessionID)

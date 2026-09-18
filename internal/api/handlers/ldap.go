@@ -15,11 +15,22 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
+
+// All 7 routes are declared in internal/api/registry_ldap.go, which states
+// their permission — a global manage:user Check on every one — and their
+// parameters; nothing below re-checks either.
+//
+// What stays here is what the declaration cannot see: the insecure-transport
+// confirmation, which compares the STORED config against the requested one; the
+// credential-redirect refusal; and the URL and filter validators, which own
+// their rules for every caller rather than for one route.
 
 // LDAPHandler handles LDAP configuration endpoints.
 type LDAPHandler struct {
@@ -39,29 +50,75 @@ func NewLDAPHandler(queries *db.Queries, encryptionKey string, rbac *auth.RBACEn
 	}
 }
 
+// ldapConfigRequest is the validated body of both LDAP writes, read once out of
+// the registry's parameters so the two handlers cannot drift on how they read
+// it. The shape is unchanged from the struct Bind().Body used to fill; what
+// moved out is the parsing.
+//
+// BindPassword is write-only and must stay out of every audit row: view:audit
+// is a default Viewer grant, and both handlers build their details field by
+// field for exactly that reason.
 type ldapConfigRequest struct {
-	Name                 string            `json:"name"`
-	Enabled              bool              `json:"enabled"`
-	ServerURL            string            `json:"server_url"`
-	StartTLS             bool              `json:"start_tls"`
-	SkipTLSVerify        bool              `json:"skip_tls_verify"`
-	BindDN               string            `json:"bind_dn"`
-	BindPassword         string            `json:"bind_password"`
-	SearchBaseDN         string            `json:"search_base_dn"`
-	UserFilter           string            `json:"user_filter"`
-	UsernameAttribute    string            `json:"username_attribute"`
-	EmailAttribute       string            `json:"email_attribute"`
-	DisplayNameAttribute string            `json:"display_name_attribute"`
-	GroupSearchBaseDN    string            `json:"group_search_base_dn"`
-	GroupFilter          string            `json:"group_filter"`
-	GroupAttribute       string            `json:"group_attribute"`
-	GroupRoleMapping     map[string]string `json:"group_role_mapping"`
-	DefaultRoleID        *string           `json:"default_role_id"`
-	SyncIntervalMinutes  int32             `json:"sync_interval_minutes"`
+	Name                 string
+	Enabled              bool
+	ServerURL            string
+	StartTLS             bool
+	SkipTLSVerify        bool
+	BindDN               string
+	BindPassword         string
+	SearchBaseDN         string
+	UserFilter           string
+	UsernameAttribute    string
+	EmailAttribute       string
+	DisplayNameAttribute string
+	GroupSearchBaseDN    string
+	GroupFilter          string
+	GroupAttribute       string
+	GroupRoleMapping     map[string]string
+	DefaultRoleID        string
+	SyncIntervalMinutes  int32
 	// AcknowledgeInsecureTLS is required to store a config that carries
 	// passwords over a connection that is unencrypted, or encrypted but
 	// unverified.
-	AcknowledgeInsecureTLS bool `json:"acknowledge_insecure_tls,omitempty"`
+	AcknowledgeInsecureTLS bool
+}
+
+// ldapConfigFromParams reads the declared body.
+//
+// Every key is a string literal at this call site on purpose:
+// registry_paramkey_guard_test.go checks each one against the route's schema,
+// and a name that only appeared inside a helper would be a name it cannot see.
+func ldapConfigFromParams(p *apischema.Params) (ldapConfigRequest, error) {
+	mapping, err := StringMapFromObject(p.Object("group_role_mapping"), "group_role_mapping")
+	if err != nil {
+		return ldapConfigRequest{}, err
+	}
+	return ldapConfigRequest{
+		Name:                 p.String("name"),
+		Enabled:              p.Bool("enabled"),
+		ServerURL:            p.String("server_url"),
+		StartTLS:             p.Bool("start_tls"),
+		SkipTLSVerify:        p.Bool("skip_tls_verify"),
+		BindDN:               p.String("bind_dn"),
+		BindPassword:         p.String("bind_password"),
+		SearchBaseDN:         p.String("search_base_dn"),
+		UserFilter:           p.String("user_filter"),
+		UsernameAttribute:    p.String("username_attribute"),
+		EmailAttribute:       p.String("email_attribute"),
+		DisplayNameAttribute: p.String("display_name_attribute"),
+		GroupSearchBaseDN:    p.String("group_search_base_dn"),
+		GroupFilter:          p.String("group_filter"),
+		GroupAttribute:       p.String("group_attribute"),
+		GroupRoleMapping:     mapping,
+		DefaultRoleID:        p.String("default_role_id"),
+		// The schema bounds this at math.MaxInt32, so the clamp can never
+		// fire; see sync_interval_minutes in internal/api/registry_ldap.go.
+		// It is here because the DECLARATION is what makes that true, and
+		// nothing in this file can see the declaration — the same reason
+		// gosec cannot.
+		SyncIntervalMinutes:    safeconv.Int32(int(p.Int("sync_interval_minutes"))),
+		AcknowledgeInsecureTLS: p.Bool("acknowledge_insecure_tls"),
+	}, nil
 }
 
 type ldapConfigResponse struct {
@@ -134,11 +191,7 @@ func toLDAPConfigResponse(cfg db.LdapConfig) ldapConfigResponse {
 }
 
 // List handles GET /api/v1/ldap/configs.
-func (h *LDAPHandler) List(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
+func (h *LDAPHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 	configs, err := h.queries.ListLDAPConfigs(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list LDAP configs")
@@ -153,14 +206,10 @@ func (h *LDAPHandler) List(c fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/ldap/configs/:id.
-func (h *LDAPHandler) Get(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *LDAPHandler) Get(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid config ID")
+		return err
 	}
 
 	cfg, err := h.queries.GetLDAPConfig(c.Context(), id)
@@ -175,18 +224,10 @@ func (h *LDAPHandler) Get(c fiber.Ctx) error {
 }
 
 // Create handles POST /api/v1/ldap/configs.
-func (h *LDAPHandler) Create(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
+func (h *LDAPHandler) Create(c fiber.Ctx, p *apischema.Params) error {
+	req, err := ldapConfigFromParams(p)
+	if err != nil {
 		return err
-	}
-
-	var req ldapConfigRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.ServerURL == "" || req.SearchBaseDN == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "server_url and search_base_dn are required")
 	}
 
 	if err := validateLDAPServerURL(req.ServerURL); err != nil {
@@ -209,22 +250,18 @@ func (h *LDAPHandler) Create(c fiber.Ctx) error {
 
 	encPassword := ""
 	if req.BindPassword != "" {
-		var err error
-		encPassword, err = crypto.Encrypt(req.BindPassword, h.encryptionKey)
-		if err != nil {
+		var encErr error
+		encPassword, encErr = crypto.Encrypt(req.BindPassword, h.encryptionKey)
+		if encErr != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt bind password")
 		}
 	}
 
 	mappingJSON, _ := json.Marshal(req.GroupRoleMapping)
 
-	var defaultRoleID pgtype.UUID
-	if req.DefaultRoleID != nil && *req.DefaultRoleID != "" {
-		parsed, err := uuid.Parse(*req.DefaultRoleID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid default_role_id")
-		}
-		defaultRoleID = pgtype.UUID{Bytes: parsed, Valid: true}
+	defaultRoleID, err := optionalRoleID(req.DefaultRoleID)
+	if err != nil {
+		return err
 	}
 
 	syncInterval := req.SyncIntervalMinutes
@@ -273,14 +310,10 @@ func (h *LDAPHandler) Create(c fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/ldap/configs/:id.
-func (h *LDAPHandler) Update(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *LDAPHandler) Update(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid config ID")
+		return err
 	}
 
 	existing, err := h.queries.GetLDAPConfig(c.Context(), id)
@@ -291,13 +324,9 @@ func (h *LDAPHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get LDAP config")
 	}
 
-	var req ldapConfigRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.ServerURL == "" || req.SearchBaseDN == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "server_url and search_base_dn are required")
+	req, err := ldapConfigFromParams(p)
+	if err != nil {
+		return err
 	}
 
 	if err := validateLDAPServerURL(req.ServerURL); err != nil {
@@ -353,13 +382,9 @@ func (h *LDAPHandler) Update(c fiber.Ctx) error {
 
 	mappingJSON, _ := json.Marshal(req.GroupRoleMapping)
 
-	var defaultRoleID pgtype.UUID
-	if req.DefaultRoleID != nil && *req.DefaultRoleID != "" {
-		parsed, err := uuid.Parse(*req.DefaultRoleID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid default_role_id")
-		}
-		defaultRoleID = pgtype.UUID{Bytes: parsed, Valid: true}
+	defaultRoleID, err := optionalRoleID(req.DefaultRoleID)
+	if err != nil {
+		return err
 	}
 
 	syncInterval := req.SyncIntervalMinutes
@@ -411,14 +436,10 @@ func (h *LDAPHandler) Update(c fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/ldap/configs/:id.
-func (h *LDAPHandler) Delete(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *LDAPHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid config ID")
+		return err
 	}
 
 	if err := h.queries.DeleteLDAPConfig(c.Context(), id); err != nil {
@@ -430,24 +451,16 @@ func (h *LDAPHandler) Delete(c fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
-type testConnectionRequest struct {
-	TestUsername string `json:"test_username"`
-}
-
 type testConnectionResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
 
 // TestConnection handles POST /api/v1/ldap/configs/:id/test.
-func (h *LDAPHandler) TestConnection(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *LDAPHandler) TestConnection(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid config ID")
+		return err
 	}
 
 	cfg, err := h.queries.GetLDAPConfig(c.Context(), id)
@@ -476,12 +489,11 @@ func (h *LDAPHandler) TestConnection(c fiber.Ctx) error {
 
 	msg := "Connection and bind successful"
 
-	// If a test username was provided, try to search for it
-	var req testConnectionRequest
-	if err := c.Bind().Body(&req); err == nil && req.TestUsername != "" {
-		user, err := client.SearchUser(req.TestUsername)
+	// If a test username was provided, try to search for it.
+	if testUsername := p.String("test_username"); testUsername != "" {
+		user, err := client.SearchUser(testUsername)
 		if err != nil {
-			slog.Error("LDAP test user search failed", "config_id", id, "username", req.TestUsername, "error", err)
+			slog.Error("LDAP test user search failed", "config_id", id, "username", testUsername, "error", err)
 			return c.JSON(testConnectionResponse{
 				Success: false,
 				Message: classifyLDAPError(err),
@@ -497,14 +509,10 @@ func (h *LDAPHandler) TestConnection(c fiber.Ctx) error {
 }
 
 // Sync handles POST /api/v1/ldap/configs/:id/sync.
-func (h *LDAPHandler) Sync(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid config ID")
+		return err
 	}
 
 	cfg, err := h.queries.GetLDAPConfig(c.Context(), id)
@@ -667,6 +675,28 @@ func (h *LDAPHandler) BuildLDAPConfigFromDB(cfg db.LdapConfig) (auth.LDAPConfig,
 // SyncUserRoles is exported for use by the auth handler during login.
 func (h *LDAPHandler) SyncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []string, mapping map[string]string, defaultRoleID pgtype.UUID) {
 	h.syncUserRoles(c, userID, groups, mapping, defaultRoleID)
+}
+
+// optionalRoleID turns the default_role_id body value into the nullable column
+// it is written to.
+//
+// The empty string and an absent key mean the same thing — no default role —
+// which is why the parameter is declared with the emptyOrUUID PATTERN rather
+// than the uuid format: every registered format refuses "". The parse cannot
+// fail on a value that satisfied the pattern, so a failure here is a
+// declaration bug rather than a caller's mistake, and parseParamUUID reports it
+// as one.
+//
+// Shared by the LDAP and OIDC writes, which carry the same field.
+func optionalRoleID(value string) (pgtype.UUID, error) {
+	if value == "" {
+		return pgtype.UUID{}, nil
+	}
+	parsed, err := parseParamUUID(value)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}, nil
 }
 
 func withDefault(val, def string) string {

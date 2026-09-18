@@ -97,6 +97,27 @@ func (s *Server) buildRegistry() *Registry {
 	if s.rollingUpdateHandler != nil {
 		registerRollingUpdateEndpoints(reg, s.rollingUpdateHandler)
 	}
+	if s.rbacHandler != nil {
+		registerRBACEndpoints(reg, s.rbacHandler)
+	}
+	if s.userHandler != nil {
+		registerUserEndpoints(reg, s.userHandler)
+	}
+	if s.apiKeyHandler != nil {
+		registerAPIKeyEndpoints(reg, s.apiKeyHandler)
+	}
+	if s.ldapHandler != nil {
+		registerLDAPEndpoints(reg, s.ldapHandler)
+	}
+	if s.oidcHandler != nil {
+		registerOIDCEndpoints(reg, s.oidcHandler)
+	}
+	if s.totpHandler != nil {
+		registerTOTPEndpoints(reg, s.totpHandler)
+	}
+	if s.authHandler != nil {
+		registerAuthEndpoints(reg, s.authHandler)
+	}
 	if s.networkHandler != nil {
 		// One handler, four declaration files: see the file comment in
 		// registry_networks.go for the split.

@@ -11,6 +11,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
 // newLDAPTestApp mounts the LDAP routes with a nil queries handle.
@@ -37,9 +39,44 @@ func newLDAPTestApp(t *testing.T) *fiber.App {
 	})
 	installStubEngineMiddleware(app)
 
-	app.Post("/ldap/configs", handler.Create)
+	app.Post("/ldap/configs", withRequestParams(t, ldapCreateMirror(t), nil, handler.Create))
 
 	return app
+}
+
+// ldapCreateMirror is a local copy of the parts of POST /api/v1/ldap/configs'
+// declaration (internal/api/registry_ldap.go) that Create reads.
+//
+// A mirror for the reason migrationListMirror gives — package api imports this
+// package, not the other way round — and with the same caveat: what it has to
+// get right is that every key the handler reads IS declared, and that the three
+// transport booleans carry Default false. That last part is load-bearing here
+// rather than incidental: an omitted start_tls meaning FALSE is the accident
+// the gate under test exists to catch, so a mirror that made them tristate
+// would quietly stop testing it.
+func ldapCreateMirror(t *testing.T) apischema.Properties {
+	t.Helper()
+	return apischema.Properties{
+		"name":                     {Type: apischema.String, Optional: true},
+		"enabled":                  {Type: apischema.Boolean, Optional: true, Default: false},
+		"server_url":               {Type: apischema.String, MinLength: apischema.Ptr(1)},
+		"start_tls":                {Type: apischema.Boolean, Optional: true, Default: false},
+		"skip_tls_verify":          {Type: apischema.Boolean, Optional: true, Default: false},
+		"bind_dn":                  {Type: apischema.String, Optional: true},
+		"bind_password":            {Type: apischema.String, Optional: true},
+		"search_base_dn":           {Type: apischema.String, MinLength: apischema.Ptr(1)},
+		"user_filter":              {Type: apischema.String, Optional: true},
+		"username_attribute":       {Type: apischema.String, Optional: true},
+		"email_attribute":          {Type: apischema.String, Optional: true},
+		"display_name_attribute":   {Type: apischema.String, Optional: true},
+		"group_search_base_dn":     {Type: apischema.String, Optional: true},
+		"group_filter":             {Type: apischema.String, Optional: true},
+		"group_attribute":          {Type: apischema.String, Optional: true},
+		"group_role_mapping":       {Type: apischema.Object, Optional: true},
+		"default_role_id":          {Type: apischema.String, Optional: true},
+		"sync_interval_minutes":    {Type: apischema.Integer, Optional: true, Default: 0},
+		"acknowledge_insecure_tls": {Type: apischema.Boolean, Optional: true, Default: false},
+	}
 }
 
 func doLDAPRequest(t *testing.T, app *fiber.App, method, path, role, body string) (int, string) {

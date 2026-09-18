@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -26,6 +27,23 @@ import (
 // (it is the lock identity in pg_locks). The lock auto-releases on COMMIT or
 // ROLLBACK, so there is no caller responsibility to drop it.
 const firstUserAdvisoryLockKey int64 = 0x4E455841524131 // ASCII "NEXARA1"
+
+// 13 of the 15 routes are declared in internal/api/registry_auth.go — five
+// Public, seven SelfService and the Deferred console-token mint — which states
+// their parameters and how each is authorized.
+//
+// Register and Logout stay in router.go, and it is a vocabulary gap rather than
+// a parameter type: both are mounted with authOptional, which parses a session
+// if one is presented and lets the request through either way. Register READS
+// c.Locals("role") to decide whether the caller may create an account, and
+// Logout reads c.Locals("user_id") for its ownership cross-check — neither of
+// which a Public declaration would populate, since Public installs no
+// authentication middleware at all. See registerAuthEndpoints.
+//
+// What stays here is everything a declaration cannot see: the first-user
+// advisory lock, the constant-time login failure paths, the role-rotation guard
+// on refresh, the session ownership check, and the "auth_source must be local"
+// refusals on the profile and password edits.
 
 // AuthHandler handles authentication endpoints.
 type AuthHandler struct {
@@ -114,15 +132,6 @@ type registerRequest struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
 	DisplayName string `json:"display_name"`
-}
-
-type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type refreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
 }
 
 type logoutRequest struct {
@@ -351,19 +360,13 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 // disabling JIT-provisioning of new LDAP users on first login. Operators
 // who accept this trade can leave it; tighter postures should disable JIT
 // and pre-provision LDAP users.
-func (h *AuthHandler) Login(c fiber.Ctx) error {
-	var req loginRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Email == "" || req.Password == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Email and password are required")
-	}
+func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
+	email := p.String("email")
+	password := p.String("password")
 
 	invalidCredentials := fiber.NewError(fiber.StatusUnauthorized, "Invalid email or password")
 
-	user, err := h.queries.GetUserByEmail(c.Context(), req.Email)
+	user, err := h.queries.GetUserByEmail(c.Context(), email)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up user")
@@ -372,38 +375,38 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		// the LDAP path handles JIT-provisioning of new directory users.
 		// Otherwise fall through to a dummy bcrypt so timing matches the
 		// "real user, bad password" path.
-		if ldapUser, ok := h.tryLDAPLogin(c, req.Email, req.Password); ok {
+		if ldapUser, ok := h.tryLDAPLogin(c, email, password); ok {
 			return h.issueOrTOTP(c, ldapUser, "ldap_login")
 		}
-		auth.RunDummyBcrypt(req.Password)
+		auth.RunDummyBcrypt(password)
 		return invalidCredentials
 	}
 
 	switch user.AuthSource {
 	case "ldap":
-		if ldapUser, ok := h.tryLDAPLogin(c, req.Email, req.Password); ok {
+		if ldapUser, ok := h.tryLDAPLogin(c, email, password); ok {
 			return h.issueOrTOTP(c, ldapUser, "ldap_login")
 		}
 		// Pad failure to keep timing roughly aligned with the local-bcrypt
 		// path. LDAP roundtrip dominates wall-clock anyway, so this is a
 		// best-effort defence-in-depth, not a strict equaliser.
-		auth.RunDummyBcrypt(req.Password)
+		auth.RunDummyBcrypt(password)
 		return invalidCredentials
 	case "oidc":
 		// OIDC-sourced users cannot log in via password. Burn equivalent
 		// CPU so the response time is indistinguishable from a real
 		// local user with a wrong password.
-		auth.RunDummyBcrypt(req.Password)
+		auth.RunDummyBcrypt(password)
 		return invalidCredentials
 	}
 
 	// auth_source == "local" from here.
 	if !user.IsActive {
-		auth.RunDummyBcrypt(req.Password)
+		auth.RunDummyBcrypt(password)
 		return invalidCredentials
 	}
 
-	if err := auth.CheckPassword(user.PasswordHash, req.Password); err != nil {
+	if err := auth.CheckPassword(user.PasswordHash, password); err != nil {
 		return invalidCredentials
 	}
 
@@ -569,20 +572,6 @@ func (h *AuthHandler) IssueTokens(c fiber.Ctx, user db.User, auditAction string)
 	return h.issueTokens(c, user, auditAction)
 }
 
-type consoleTokenRequest struct {
-	ClusterID string `json:"cluster_id"`
-	Node      string `json:"node"`
-	VMID      int    `json:"vmid,omitempty"`
-	Type      string `json:"type"`
-	// Silent skips the audit-log entry for this mint. Used by background
-	// previews (e.g. VM thumbnails) that would otherwise flood the activity
-	// feed every page load. The mint is still slog'd at INFO so it's not
-	// invisible to operators, and RBAC still applies — silent does not grant
-	// any new authority. Honoured only for vm_vnc / ct_vnc; user-initiated
-	// console types (node_shell, vm_serial, ct_attach) always audit.
-	Silent bool `json:"silent,omitempty"`
-}
-
 type consoleTokenResponse struct {
 	Token     string `json:"token"`
 	ExpiresIn int    `json:"expires_in"`
@@ -596,48 +585,39 @@ type consoleTokenResponse struct {
 // The underlying access token + RBAC check happens first — minting requires
 // the dedicated console:<resource> permission on the target cluster (view:*
 // is deliberately not enough; see migration 000078).
-func (h *AuthHandler) ConsoleToken(c fiber.Ctx) error {
+func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
-	var req consoleTokenRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	// Validate inputs.
-	if req.ClusterID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "cluster_id is required")
-	}
-	clusterUUID, err := uuid.Parse(req.ClusterID)
+	clusterID := p.String("console_cluster_id")
+	clusterUUID, err := parseParamUUID(clusterID)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "cluster_id must be a UUID")
+		return err
 	}
-	if req.Node == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node is required")
-	}
-	if len(req.Node) > 128 {
-		return fiber.NewError(fiber.StatusBadRequest, "node name too long")
-	}
+	node := p.String("node")
+	consoleType := p.String("type")
+	vmid := int(p.Int("vmid"))
 
-	// Validate type and require the appropriate RBAC permission.
+	// The type's VOCABULARY is the declaration's enum; what stays here is the
+	// mapping from type to RBAC resource, and the two cross-field rules about
+	// vmid that no per-parameter schema can express.
 	var resource string
-	switch req.Type {
+	switch consoleType {
 	case "node_shell":
 		resource = "node"
-		if req.VMID != 0 {
+		if vmid != 0 {
 			return fiber.NewError(fiber.StatusBadRequest, "vmid must be omitted for node_shell")
 		}
 	case "vm_serial", "vm_vnc":
 		resource = "vm"
-		if req.VMID <= 0 {
+		if vmid <= 0 {
 			return fiber.NewError(fiber.StatusBadRequest, "vmid is required for vm console")
 		}
 	case "ct_attach", "ct_vnc":
 		resource = "container"
-		if req.VMID <= 0 {
+		if vmid <= 0 {
 			return fiber.NewError(fiber.StatusBadRequest, "vmid is required for container console")
 		}
 	default:
@@ -674,10 +654,10 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx) error {
 	token, _, err := h.jwtService.GenerateConsoleToken(
 		user.ID, user.Email, user.Role,
 		auth.ConsoleScope{
-			ClusterID: req.ClusterID,
-			Node:      req.Node,
-			VMID:      req.VMID,
-			Type:      req.Type,
+			ClusterID: clusterID,
+			Node:      node,
+			VMID:      vmid,
+			Type:      consoleType,
 		},
 		consoleTokenTTL,
 	)
@@ -687,21 +667,24 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx) error {
 
 	// Honour silent only for VNC types — the "preview thumbnail" use case.
 	// Terminal/serial mints are always user-initiated and always audit.
-	silent := req.Silent && (req.Type == "vm_vnc" || req.Type == "ct_vnc")
+	silent := p.Bool("silent") && (consoleType == "vm_vnc" || consoleType == "ct_vnc")
 	if silent {
 		slog.Info("console_token_mint (silent)",
 			"user_id", userID,
-			"cluster_id", req.ClusterID,
-			"node", req.Node,
-			"vmid", req.VMID,
-			"type", req.Type,
+			"cluster_id", clusterID,
+			"node", node,
+			"vmid", vmid,
+			"type", consoleType,
 		)
 	} else {
+		// Field by field rather than p.Raw(): view:audit is a default Viewer
+		// grant, and Raw() would publish whatever the caller sent — including
+		// any parameter this route later gains.
 		details, _ := json.Marshal(map[string]any{
-			"cluster_id": req.ClusterID,
-			"node":       req.Node,
-			"vmid":       req.VMID,
-			"type":       req.Type,
+			"cluster_id": clusterID,
+			"node":       node,
+			"vmid":       vmid,
+			"type":       consoleType,
 		})
 		// The mint is scoped to one cluster — the same clusterUUID the
 		// permission check above gates on — so the audit row carries it.
@@ -732,7 +715,7 @@ type wsTokenResponse struct {
 // upgrade entirely. The hub token can be carried in `?token=` or in the
 // `Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>` subprotocol
 // header (preferred — keeps the JWT out of proxy access logs and Referer).
-func (h *AuthHandler) WSToken(c fiber.Ctx) error {
+func (h *AuthHandler) WSToken(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -765,16 +748,15 @@ func (h *AuthHandler) WSToken(c fiber.Ctx) error {
 // Refresh exchanges a valid refresh token for a new token pair. The refresh
 // token is read from the JSON body when present (mobile path) and otherwise
 // from the HttpOnly cookie set on prior auth responses (web path).
-func (h *AuthHandler) Refresh(c fiber.Ctx) error {
-	var req refreshRequest
+func (h *AuthHandler) Refresh(c fiber.Ctx, p *apischema.Params) error {
 	// Body is optional — web clients post `{}` and rely on the cookie.
-	_ = c.Bind().Body(&req)
+	refreshToken := p.String("refresh_token")
 
-	if req.RefreshToken == "" {
-		req.RefreshToken = readRefreshTokenFromCookie(c)
+	if refreshToken == "" {
+		refreshToken = readRefreshTokenFromCookie(c)
 	}
 
-	if req.RefreshToken == "" {
+	if refreshToken == "" {
 		// Auth state, not a malformed request — return 401 so the SPA's
 		// refresh-failure path treats it consistently with stale-cookie
 		// rejections, and so an attacker scanning for /auth/refresh cannot
@@ -783,7 +765,7 @@ func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusUnauthorized, "Refresh token is required")
 	}
 
-	session, err := h.sessionManager.ValidateRefreshToken(c.Context(), req.RefreshToken)
+	session, err := h.sessionManager.ValidateRefreshToken(c.Context(), refreshToken)
 	if err != nil {
 		// Stale cookie → clear it so the browser stops sending it.
 		clearRefreshCookie(c)
@@ -935,7 +917,7 @@ func (h *AuthHandler) Logout(c fiber.Ctx) error {
 
 // LogoutAll revokes all sessions for the current user and clears the browser
 // refresh cookie.
-func (h *AuthHandler) LogoutAll(c fiber.Ctx) error {
+func (h *AuthHandler) LogoutAll(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -953,7 +935,7 @@ func (h *AuthHandler) LogoutAll(c fiber.Ctx) error {
 }
 
 // SetupStatus returns whether initial admin setup has been completed.
-func (h *AuthHandler) SetupStatus(c fiber.Ctx) error {
+func (h *AuthHandler) SetupStatus(c fiber.Ctx, _ *apischema.Params) error {
 	count, err := h.queries.CountUsers(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check user count")
@@ -976,7 +958,7 @@ func (h *AuthHandler) loadPerms(c fiber.Ctx, userID uuid.UUID) []string {
 }
 
 // SSOStatus returns whether OIDC/SSO is enabled and the provider name.
-func (h *AuthHandler) SSOStatus(c fiber.Ctx) error {
+func (h *AuthHandler) SSOStatus(c fiber.Ctx, _ *apischema.Params) error {
 	resp := fiber.Map{
 		"oidc_enabled":       false,
 		"oidc_provider_name": "",
@@ -994,24 +976,16 @@ func (h *AuthHandler) SSOStatus(c fiber.Ctx) error {
 }
 
 // OIDCTokenExchange consumes the short-lived exchange code and issues standard JWT tokens.
-func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx) error {
+func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error {
+	// The route is declared on AuthHandler alone, so a Server wired with an
+	// auth handler but no OIDC one reaches here rather than 404ing at the
+	// router. This is the same answer either way.
 	if h.oidcHandler == nil {
 		return fiber.NewError(fiber.StatusNotFound, "OIDC not configured")
 	}
 
-	var req struct {
-		Code string `json:"code"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Code == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Code is required")
-	}
-
 	// Atomic GetDel — single-use exchange code
-	data, err := h.oidcHandler.rdb.GetDel(c.Context(), "oidc:exchange:"+req.Code).Result()
+	data, err := h.oidcHandler.rdb.GetDel(c.Context(), "oidc:exchange:"+p.String("code")).Result()
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired exchange code")
 	}
@@ -1066,7 +1040,7 @@ type profileResponse struct {
 }
 
 // GetMe returns the current user's profile.
-func (h *AuthHandler) GetMe(c fiber.Ctx) error {
+func (h *AuthHandler) GetMe(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -1088,13 +1062,9 @@ func (h *AuthHandler) GetMe(c fiber.Ctx) error {
 	})
 }
 
-type updateProfileRequest struct {
-	DisplayName string `json:"display_name"`
-}
-
 // UpdateProfile allows the current user to update their own display name.
 // Only local users can edit their profile — LDAP/OIDC profiles are managed externally.
-func (h *AuthHandler) UpdateProfile(c fiber.Ctx) error {
+func (h *AuthHandler) UpdateProfile(c fiber.Ctx, p *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -1109,28 +1079,23 @@ func (h *AuthHandler) UpdateProfile(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusForbidden, "Profile is managed by your identity provider")
 	}
 
-	var req updateProfileRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	req.DisplayName = strings.TrimSpace(req.DisplayName)
-	if req.DisplayName == "" {
+	// The declaration bounds the length; the TRIM and the "only whitespace"
+	// refusal stay here, because the schema's MinLength counts characters and
+	// cannot see that all of them are spaces.
+	displayName := strings.TrimSpace(p.String("display_name"))
+	if displayName == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Display name is required")
-	}
-	if len(req.DisplayName) > 200 {
-		return fiber.NewError(fiber.StatusBadRequest, "Display name must be 200 characters or fewer")
 	}
 
 	updated, err := h.queries.UpdateUserDisplayName(c.Context(), db.UpdateUserDisplayNameParams{
 		ID:          userID,
-		DisplayName: req.DisplayName,
+		DisplayName: displayName,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update profile")
 	}
 
-	details, _ := json.Marshal(map[string]string{"display_name": req.DisplayName})
+	details, _ := json.Marshal(map[string]string{"display_name": displayName})
 	AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "profile_updated", details)
 
 	return c.JSON(profileResponse{
@@ -1144,14 +1109,9 @@ func (h *AuthHandler) UpdateProfile(c fiber.Ctx) error {
 	})
 }
 
-type changePasswordRequest struct {
-	OldPassword string `json:"old_password"`
-	NewPassword string `json:"new_password"`
-}
-
 // ChangePassword allows the current user to change their own password.
 // Only available for local auth users.
-func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
+func (h *AuthHandler) ChangePassword(c fiber.Ctx, p *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -1166,20 +1126,11 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusForbidden, "Password is managed by your identity provider")
 	}
 
-	var req changePasswordRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.OldPassword == "" || req.NewPassword == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Both old and new passwords are required")
-	}
-
-	if err := auth.CheckPassword(user.PasswordHash, req.OldPassword); err != nil {
+	if err := auth.CheckPassword(user.PasswordHash, p.String("old_password")); err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Current password is incorrect")
 	}
 
-	hashedPassword, err := auth.HashPassword(req.NewPassword)
+	hashedPassword, err := auth.HashPassword(p.String("new_password"))
 	if err != nil {
 		if errors.Is(err, auth.ErrPasswordTooShort) || errors.Is(err, auth.ErrPasswordTooLong) || errors.Is(err, auth.ErrPasswordWeak) {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())

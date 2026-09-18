@@ -13,6 +13,7 @@ import (
 	recoverer "github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 )
 
@@ -75,8 +76,33 @@ func newConsoleTokenTestApp(t *testing.T, engine permissionEngine) *fiber.App {
 		c.Locals("rbac_engine", engine)
 		return c.Next()
 	})
-	app.Post("/auth/console-token", handler.ConsoleToken)
+	app.Post("/auth/console-token", withRequestParams(t, consoleTokenMirror(), nil, handler.ConsoleToken))
 	return app
+}
+
+// consoleTokenMirror is a local copy of POST /api/v1/auth/console-token's
+// declaration (internal/api/registry_auth.go).
+//
+// A mirror for the reason migrationListMirror gives — package api imports this
+// package, not the other way round. Two things about it are load-bearing rather
+// than incidental:
+//
+//   - the cluster is named console_cluster_id with "cluster_id" as an ALIAS,
+//     because checkPathParams refuses a body parameter NAMED cluster_id; every
+//     caller, including mintConsoleTokenReq below, still sends the alias.
+//   - `type` carries the enum, so this test's five console types are exactly
+//     the ones the real route accepts. Getting that wrong would let a case pass
+//     here that a real request could not reach.
+func consoleTokenMirror() apischema.Properties {
+	return apischema.Properties{
+		"console_cluster_id": {Type: apischema.String, Format: "uuid", Alias: "cluster_id"},
+		"node":               {Type: apischema.String, Format: "node-name"},
+		"type": {Type: apischema.String, Enum: []string{
+			"node_shell", "vm_serial", "vm_vnc", "ct_attach", "ct_vnc",
+		}},
+		"vmid":   {Type: apischema.Integer, Optional: true, Minimum: apischema.Ptr(0.0)},
+		"silent": {Type: apischema.Boolean, Optional: true, Default: false},
+	}
 }
 
 func mintConsoleTokenReq(clusterID uuid.UUID, consoleType string, vmid int) *http.Request {

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -35,6 +36,15 @@ const (
 )
 
 var totpCodePattern = regexp.MustCompile(`^\d{6}$`)
+
+// All 7 routes are declared in internal/api/registry_totp.go: five SelfService
+// (the caller's own enrollment), one Public (the second factor of an
+// in-progress login) and one global manage:user Check (the admin reset, the
+// only route here that acts on somebody else).
+//
+// What stays here is what a declaration cannot see: the per-user lockout, the
+// per-token attempt budget, the peek-without-consuming reads, and the
+// "code or recovery_code, at least one" rule, which is cross-field.
 
 // TOTPHandler handles TOTP 2FA endpoints.
 type TOTPHandler struct {
@@ -61,7 +71,7 @@ func (h *TOTPHandler) SetIssueTokensFn(fn func(c fiber.Ctx, user db.User, auditA
 }
 
 // BeginSetup handles POST /api/v1/auth/totp/setup — starts TOTP enrollment.
-func (h *TOTPHandler) BeginSetup(c fiber.Ctx) error {
+func (h *TOTPHandler) BeginSetup(c fiber.Ctx, _ *apischema.Params) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -100,24 +110,15 @@ func (h *TOTPHandler) BeginSetup(c fiber.Ctx) error {
 }
 
 // ConfirmSetup handles POST /api/v1/auth/totp/setup/verify — confirms TOTP enrollment.
-func (h *TOTPHandler) ConfirmSetup(c fiber.Ctx) error {
+func (h *TOTPHandler) ConfirmSetup(c fiber.Ctx, p *apischema.Params) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
-	var req struct {
-		Code string `json:"code"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Code == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Code is required")
-	}
-	if !totpCodePattern.MatchString(req.Code) {
-		return fiber.NewError(fiber.StatusBadRequest, "Code must be exactly 6 digits")
-	}
+	// The declaration's pattern refuses both an absent code and a malformed
+	// one, which is the pair of checks this used to make by hand.
+	code := p.String("code")
 
 	setupKey := totpSetupKey(userID)
 	attemptsKey := totpSetupAttemptsKey(userID)
@@ -146,7 +147,7 @@ func (h *TOTPHandler) ConfirmSetup(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed attempts — please restart setup")
 	}
 
-	valid, err := h.totpService.ValidateCode(encrypted, req.Code)
+	valid, err := h.totpService.ValidateCode(encrypted, code)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to validate code")
 	}
@@ -189,23 +190,23 @@ func (h *TOTPHandler) ConfirmSetup(c fiber.Ctx) error {
 }
 
 // Disable handles DELETE /api/v1/auth/totp — disables TOTP for the current user.
-func (h *TOTPHandler) Disable(c fiber.Ctx) error {
+func (h *TOTPHandler) Disable(c fiber.Ctx, p *apischema.Params) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
-	var req struct {
-		Code         string `json:"code"`
-		RecoveryCode string `json:"recovery_code"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Code == "" && req.RecoveryCode == "" {
+	// Cross-field, so it stays here: apischema's Requires names a companion a
+	// parameter ALWAYS needs, not one of a set. The code's SHAPE stays here for
+	// a different reason — an explicitly empty code is legal, meaning "I am
+	// using the recovery code", and a schema Pattern would refuse it. See
+	// totpOptionalCodeParam.
+	code := p.String("code")
+	recoveryCode := p.String("recovery_code")
+	if code == "" && recoveryCode == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "TOTP code or recovery code is required")
 	}
-	if req.Code != "" && !totpCodePattern.MatchString(req.Code) {
+	if code != "" && !totpCodePattern.MatchString(code) {
 		return fiber.NewError(fiber.StatusBadRequest, "Code must be exactly 6 digits")
 	}
 
@@ -221,7 +222,7 @@ func (h *TOTPHandler) Disable(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "TOTP is not enabled")
 	}
 
-	validated, err := h.validateCodeOrRecovery(c.Context(), userID, row.TotpSecret.String, req.Code, req.RecoveryCode)
+	validated, err := h.validateCodeOrRecovery(c.Context(), userID, row.TotpSecret.String, code, recoveryCode)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to validate code")
 	}
@@ -229,7 +230,7 @@ func (h *TOTPHandler) Disable(c fiber.Ctx) error {
 		if h.recordTOTPFailure(c.Context(), userID) {
 			return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed 2FA attempts — try again in a few minutes")
 		}
-		if req.Code != "" {
+		if code != "" {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid TOTP code")
 		}
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid recovery code")
@@ -247,7 +248,7 @@ func (h *TOTPHandler) Disable(c fiber.Ctx) error {
 }
 
 // Status handles GET /api/v1/auth/totp/status — returns TOTP status for current user.
-func (h *TOTPHandler) Status(c fiber.Ctx) error {
+func (h *TOTPHandler) Status(c fiber.Ctx, _ *apischema.Params) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -270,24 +271,16 @@ func (h *TOTPHandler) Status(c fiber.Ctx) error {
 }
 
 // RegenerateRecoveryCodes handles POST /api/v1/auth/totp/recovery-codes/regenerate.
-func (h *TOTPHandler) RegenerateRecoveryCodes(c fiber.Ctx) error {
+func (h *TOTPHandler) RegenerateRecoveryCodes(c fiber.Ctx, p *apischema.Params) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
-	var req struct {
-		Code string `json:"code"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Code == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "TOTP code is required")
-	}
-	if !totpCodePattern.MatchString(req.Code) {
-		return fiber.NewError(fiber.StatusBadRequest, "Code must be exactly 6 digits")
-	}
+	// The declaration's pattern refuses both an absent code and a malformed
+	// one. A RECOVERY code is deliberately not accepted on this route: it would
+	// let one leaked recovery code mint ten fresh ones.
+	code := p.String("code")
 
 	if h.isUserTOTPLocked(c.Context(), userID) {
 		return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed 2FA attempts — try again in a few minutes")
@@ -298,7 +291,7 @@ func (h *TOTPHandler) RegenerateRecoveryCodes(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "TOTP is not enabled")
 	}
 
-	valid, err := h.totpService.ValidateCode(row.TotpSecret.String, req.Code)
+	valid, err := h.totpService.ValidateCode(row.TotpSecret.String, code)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to validate code")
 	}
@@ -334,28 +327,23 @@ func (h *TOTPHandler) RegenerateRecoveryCodes(c fiber.Ctx) error {
 }
 
 // VerifyLogin handles POST /api/v1/auth/totp/verify-login — completes two-step login.
-func (h *TOTPHandler) VerifyLogin(c fiber.Ctx) error {
-	var req struct {
-		TOTPPendingToken string `json:"totp_pending_token"`
-		Code             string `json:"code"`
-		RecoveryCode     string `json:"recovery_code"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.TOTPPendingToken == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Pending token is required")
-	}
-	if req.Code == "" && req.RecoveryCode == "" {
+func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
+	pendingToken := p.String("totp_pending_token")
+
+	// Cross-field, so it stays here; and the code's SHAPE stays here because an
+	// explicitly empty code is legal, meaning "I am using the recovery code".
+	// See totpOptionalCodeParam.
+	code := p.String("code")
+	recoveryCode := p.String("recovery_code")
+	if code == "" && recoveryCode == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "TOTP code or recovery code is required")
 	}
-
-	if req.Code != "" && !totpCodePattern.MatchString(req.Code) {
+	if code != "" && !totpCodePattern.MatchString(code) {
 		return fiber.NewError(fiber.StatusBadRequest, "Code must be exactly 6 digits")
 	}
 
-	pendingKey := fmt.Sprintf("totp:pending:%s", req.TOTPPendingToken)
-	attemptKey := fmt.Sprintf("totp:attempts:%s", req.TOTPPendingToken)
+	pendingKey := fmt.Sprintf("totp:pending:%s", pendingToken)
+	attemptKey := fmt.Sprintf("totp:attempts:%s", pendingToken)
 
 	// Per-pending-token attempt counter — caps brute-force on a single token
 	// regardless of which user it belongs to.
@@ -407,7 +395,7 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "TOTP not configured for user")
 	}
 
-	validated, verr := h.validateCodeOrRecovery(c.Context(), userID, user.TotpSecret.String, req.Code, req.RecoveryCode)
+	validated, verr := h.validateCodeOrRecovery(c.Context(), userID, user.TotpSecret.String, code, recoveryCode)
 	if verr != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to validate code")
 	}
@@ -419,7 +407,7 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx) error {
 			_ = h.rdb.Del(c.Context(), pendingKey, attemptKey).Err()
 			return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed 2FA attempts — try again in a few minutes")
 		}
-		if req.Code != "" {
+		if code != "" {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid TOTP code")
 		}
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid recovery code")
@@ -441,14 +429,10 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx) error {
 }
 
 // AdminReset handles DELETE /api/v1/users/:id/totp — admin resets user's TOTP.
-func (h *TOTPHandler) AdminReset(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *TOTPHandler) AdminReset(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+		return err
 	}
 
 	// Prevent admins from resetting their own TOTP — use the self-service disable flow.

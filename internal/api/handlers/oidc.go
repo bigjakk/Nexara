@@ -17,12 +17,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/notifications"
 )
+
+// Seven of the 8 routes are declared in internal/api/registry_oidc.go, which
+// states their permission — a global manage:user Check on the six admin ones,
+// Public on /authorize — and their parameters.
+//
+// Callback is the EIGHTH and stays legacy in router.go: its query string is
+// composed by the identity provider, and the registry answers an undeclared key
+// with a 400. See registerOIDCEndpoints' doc comment.
+//
+// What stays here is what a declaration cannot see: the cleartext-callback
+// confirmation, the credential-redirect refusal, and the issuer/redirect URL
+// validators — one of which resolves DNS, which no parameter schema could do.
 
 // OIDCHandler handles OIDC/SSO configuration and auth flow endpoints.
 type OIDCHandler struct {
@@ -46,24 +59,62 @@ func NewOIDCHandler(queries *db.Queries, encryptionKey string, rbac *auth.RBACEn
 
 // --- Request/Response types ---
 
+// oidcConfigRequest is the validated body of both OIDC writes, read once out of
+// the registry's parameters so the two handlers cannot drift on how they read
+// it. The shape is unchanged from the struct Bind().Body used to fill; what
+// moved out is the parsing.
+//
+// ClientSecret is write-only and must stay out of every audit row: view:audit
+// is a default Viewer grant, and both handlers build their details field by
+// field for exactly that reason.
 type oidcConfigRequest struct {
-	Name             string            `json:"name"`
-	Enabled          bool              `json:"enabled"`
-	IssuerURL        string            `json:"issuer_url"`
-	ClientID         string            `json:"client_id"`
-	ClientSecret     string            `json:"client_secret"`
-	RedirectURI      string            `json:"redirect_uri"`
-	Scopes           []string          `json:"scopes"`
-	EmailClaim       string            `json:"email_claim"`
-	DisplayNameClaim string            `json:"display_name_claim"`
-	GroupsClaim      string            `json:"groups_claim"`
-	GroupRoleMapping map[string]string `json:"group_role_mapping"`
-	DefaultRoleID    *string           `json:"default_role_id"`
-	AutoProvision    bool              `json:"auto_provision"`
-	AllowedDomains   []string          `json:"allowed_domains"`
+	Name             string
+	Enabled          bool
+	IssuerURL        string
+	ClientID         string
+	ClientSecret     string
+	RedirectURI      string
+	Scopes           []string
+	EmailClaim       string
+	DisplayNameClaim string
+	GroupsClaim      string
+	GroupRoleMapping map[string]string
+	DefaultRoleID    string
+	AutoProvision    bool
+	AllowedDomains   []string
 	// AcknowledgeInsecureRedirect is required to store a plain-http callback
 	// on anything but loopback.
-	AcknowledgeInsecureRedirect bool `json:"acknowledge_insecure_redirect,omitempty"`
+	AcknowledgeInsecureRedirect bool
+}
+
+// oidcConfigFromParams reads the declared body.
+//
+// Every key is a string literal at this call site on purpose:
+// registry_paramkey_guard_test.go checks each one against the route's schema,
+// and a name that only appeared inside a helper would be a name it cannot see.
+func oidcConfigFromParams(p *apischema.Params) (oidcConfigRequest, error) {
+	mapping, err := StringMapFromObject(p.Object("group_role_mapping"), "group_role_mapping")
+	if err != nil {
+		return oidcConfigRequest{}, err
+	}
+	return oidcConfigRequest{
+		Name:             p.String("name"),
+		Enabled:          p.Bool("enabled"),
+		IssuerURL:        p.String("issuer_url"),
+		ClientID:         p.String("client_id"),
+		ClientSecret:     p.String("client_secret"),
+		RedirectURI:      p.String("redirect_uri"),
+		Scopes:           p.Strings("scopes"),
+		EmailClaim:       p.String("email_claim"),
+		DisplayNameClaim: p.String("display_name_claim"),
+		GroupsClaim:      p.String("groups_claim"),
+		GroupRoleMapping: mapping,
+		DefaultRoleID:    p.String("default_role_id"),
+		AutoProvision:    p.Bool("auto_provision"),
+		AllowedDomains:   p.Strings("allowed_domains"),
+
+		AcknowledgeInsecureRedirect: p.Bool("acknowledge_insecure_redirect"),
+	}, nil
 }
 
 type oidcConfigResponse struct {
@@ -131,11 +182,7 @@ func toOIDCConfigResponse(cfg db.OidcConfig) oidcConfigResponse {
 // --- Admin CRUD endpoints ---
 
 // List handles GET /api/v1/oidc/configs.
-func (h *OIDCHandler) List(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
+func (h *OIDCHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 	configs, err := h.queries.ListOIDCConfigs(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list OIDC configs")
@@ -150,14 +197,10 @@ func (h *OIDCHandler) List(c fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/oidc/configs/:id.
-func (h *OIDCHandler) Get(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *OIDCHandler) Get(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid config ID")
+		return err
 	}
 
 	cfg, err := h.queries.GetOIDCConfig(c.Context(), id)
@@ -172,18 +215,10 @@ func (h *OIDCHandler) Get(c fiber.Ctx) error {
 }
 
 // Create handles POST /api/v1/oidc/configs.
-func (h *OIDCHandler) Create(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
+func (h *OIDCHandler) Create(c fiber.Ctx, p *apischema.Params) error {
+	req, err := oidcConfigFromParams(p)
+	if err != nil {
 		return err
-	}
-
-	var req oidcConfigRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.IssuerURL == "" || req.ClientID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "issuer_url and client_id are required")
 	}
 
 	if err := validateOIDCIssuerURL(req.IssuerURL); err != nil {
@@ -198,22 +233,18 @@ func (h *OIDCHandler) Create(c fiber.Ctx) error {
 
 	encSecret := ""
 	if req.ClientSecret != "" {
-		var err error
-		encSecret, err = crypto.Encrypt(req.ClientSecret, h.encryptionKey)
-		if err != nil {
+		var encErr error
+		encSecret, encErr = crypto.Encrypt(req.ClientSecret, h.encryptionKey)
+		if encErr != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt client secret")
 		}
 	}
 
 	mappingJSON, _ := json.Marshal(req.GroupRoleMapping)
 
-	var defaultRoleID pgtype.UUID
-	if req.DefaultRoleID != nil && *req.DefaultRoleID != "" {
-		parsed, err := uuid.Parse(*req.DefaultRoleID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid default_role_id")
-		}
-		defaultRoleID = pgtype.UUID{Bytes: parsed, Valid: true}
+	defaultRoleID, err := optionalRoleID(req.DefaultRoleID)
+	if err != nil {
+		return err
 	}
 
 	scopes := req.Scopes
@@ -260,14 +291,10 @@ func (h *OIDCHandler) Create(c fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/oidc/configs/:id.
-func (h *OIDCHandler) Update(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid config ID")
+		return err
 	}
 
 	existing, err := h.queries.GetOIDCConfig(c.Context(), id)
@@ -278,13 +305,9 @@ func (h *OIDCHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get OIDC config")
 	}
 
-	var req oidcConfigRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.IssuerURL == "" || req.ClientID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "issuer_url and client_id are required")
+	req, err := oidcConfigFromParams(p)
+	if err != nil {
+		return err
 	}
 
 	if err := validateOIDCIssuerURL(req.IssuerURL); err != nil {
@@ -334,13 +357,9 @@ func (h *OIDCHandler) Update(c fiber.Ctx) error {
 
 	mappingJSON, _ := json.Marshal(req.GroupRoleMapping)
 
-	var defaultRoleID pgtype.UUID
-	if req.DefaultRoleID != nil && *req.DefaultRoleID != "" {
-		parsed, err := uuid.Parse(*req.DefaultRoleID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid default_role_id")
-		}
-		defaultRoleID = pgtype.UUID{Bytes: parsed, Valid: true}
+	defaultRoleID, err := optionalRoleID(req.DefaultRoleID)
+	if err != nil {
+		return err
 	}
 
 	scopes := req.Scopes
@@ -399,14 +418,10 @@ func (h *OIDCHandler) Update(c fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/oidc/configs/:id.
-func (h *OIDCHandler) Delete(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *OIDCHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid config ID")
+		return err
 	}
 
 	if err := h.queries.DeleteOIDCConfig(c.Context(), id); err != nil {
@@ -419,14 +434,10 @@ func (h *OIDCHandler) Delete(c fiber.Ctx) error {
 }
 
 // TestConnection handles POST /api/v1/oidc/configs/:id/test.
-func (h *OIDCHandler) TestConnection(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *OIDCHandler) TestConnection(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid config ID")
+		return err
 	}
 
 	cfg, err := h.queries.GetOIDCConfig(c.Context(), id)
@@ -475,7 +486,7 @@ func (h *OIDCHandler) TestConnection(c fiber.Ctx) error {
 
 // Authorize handles GET /api/v1/auth/oidc/authorize.
 // Returns the IdP redirect URL with state, nonce, PKCE.
-func (h *OIDCHandler) Authorize(c fiber.Ctx) error {
+func (h *OIDCHandler) Authorize(c fiber.Ctx, _ *apischema.Params) error {
 	cfg, err := h.queries.GetEnabledOIDCConfig(c.Context())
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

@@ -363,6 +363,13 @@ var routesOutsideTheClusterCheckShape = func() map[string]string {
 		reportRoutesOutsideTheClusterCheckShape,
 		veeamRoutesOutsideTheClusterCheckShape,
 		alertRoutesOutsideTheClusterCheckShape,
+		rbacRoutesOutsideTheClusterCheckShape,
+		userRoutesOutsideTheClusterCheckShape,
+		apiKeyRoutesOutsideTheClusterCheckShape,
+		ldapRoutesOutsideTheClusterCheckShape,
+		oidcRoutesOutsideTheClusterCheckShape,
+		totpRoutesOutsideTheClusterCheckShape,
+		authRoutesOutsideTheClusterCheckShape,
 	} {
 		maps.Copy(out, m)
 	}
@@ -407,6 +414,13 @@ var registryDomainRouteCounts = map[string]int{
 	"registerAccessEndpoints":         accessRouteCount,
 	"registerACMEEndpoints":           acmeRouteCount,
 	"registerRollingUpdateEndpoints":  rollingRouteCount,
+	"registerRBACEndpoints":           rbacRouteCount,
+	"registerUserEndpoints":           userRouteCount,
+	"registerAPIKeyEndpoints":         apiKeyRouteCount,
+	"registerLDAPEndpoints":           ldapRouteCount,
+	"registerOIDCEndpoints":           oidcRouteCount,
+	"registerTOTPEndpoints":           totpRouteCount,
+	"registerAuthEndpoints":           authRouteCount,
 	// NetworkHandler's 66 routes are declared across four files and four
 	// functions rather than one, so each group carries its own count here —
 	// see the file comment in registry_networks.go.
@@ -454,6 +468,13 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 		"registerAccessEndpoints":         0,
 		"registerACMEEndpoints":           0,
 		"registerRollingUpdateEndpoints":  0,
+		"registerRBACEndpoints":           0,
+		"registerUserEndpoints":           0,
+		"registerAPIKeyEndpoints":         0,
+		"registerLDAPEndpoints":           0,
+		"registerOIDCEndpoints":           0,
+		"registerTOTPEndpoints":           0,
+		"registerAuthEndpoints":           0,
 
 		"registerNetworkInterfaceEndpoints": 0,
 		"registerFirewallEndpoints":         0,
@@ -549,6 +570,34 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	before = reg.Len()
 	registerRollingUpdateEndpoints(reg, s.rollingUpdateHandler)
 	declared["registerRollingUpdateEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerRBACEndpoints(reg, s.rbacHandler)
+	declared["registerRBACEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerUserEndpoints(reg, s.userHandler)
+	declared["registerUserEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerAPIKeyEndpoints(reg, s.apiKeyHandler)
+	declared["registerAPIKeyEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerLDAPEndpoints(reg, s.ldapHandler)
+	declared["registerLDAPEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerOIDCEndpoints(reg, s.oidcHandler)
+	declared["registerOIDCEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerTOTPEndpoints(reg, s.totpHandler)
+	declared["registerTOTPEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerAuthEndpoints(reg, s.authHandler)
+	declared["registerAuthEndpoints"] = reg.Len() - before
 
 	before = reg.Len()
 	registerNetworkInterfaceEndpoints(reg, s.networkHandler)

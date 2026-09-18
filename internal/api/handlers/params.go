@@ -225,3 +225,38 @@ func containerIDs(p *apischema.Params) (clusterID, ctID uuid.UUID, err error) {
 	}
 	return clusterID, ctID, nil
 }
+
+// StringMapFromObject narrows an Object parameter to the map[string]string a
+// group-to-role mapping actually is.
+//
+// apischema carries an Object through UNVALIDATED — there is no
+// nested-properties field, so the declaration asserts only "this is a JSON
+// object" — and the values arrive as whatever JSON produced: a string, a
+// json.Number, a bool. The columns these maps are written to are read back with
+// json.Unmarshal into a map[string]string, and that read is best-effort: one
+// non-string value makes the WHOLE mapping decode to nothing, silently, at
+// login time rather than at write time.
+//
+// The struct field this replaces was a map[string]string, so the JSON decoder
+// refused such a body with a 400. This is that refusal, kept — and it names the
+// offending key rather than the whole body.
+//
+// It takes the VALUE plus the field name rather than the *apischema.Params and
+// the key, for the reason given at the top of this file: a parameter name that
+// only ever appears inside a helper is a name registry_paramkey_guard_test.go
+// cannot check against the schema. field is used solely for the message.
+func StringMapFromObject(raw map[string]any, field string) (map[string]string, error) {
+	if raw == nil {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string, len(raw))
+	for name, value := range raw {
+		s, ok := value.(string)
+		if !ok {
+			return nil, fiber.NewError(fiber.StatusBadRequest,
+				field+": every value must be a string (\""+name+"\" is not)")
+		}
+		out[name] = s
+	}
+	return out, nil
+}

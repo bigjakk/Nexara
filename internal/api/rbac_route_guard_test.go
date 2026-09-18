@@ -106,6 +106,15 @@ var instanceSharedRoutes = map[string]string{
 // their own profile — but each must be listed with a reason so the set stays
 // small and reviewed, and so an IDOR (acting on a subject named in the path)
 // cannot hide here.
+//
+// The four /api/v1/api-keys routes were listed here until Phase 6i and should
+// not have been: every one of them opened with requirePerm(c, "manage",
+// "api_key"), so the exemption made this file's guards skip routes that were
+// never exempt — including the docs-drift check that was supposed to compare
+// endpointMeta's "manage:api_key" against what they enforce. They are scoped to
+// the caller as well, but that is a property of the handler, not the absence of
+// a gate. They now declare the Check (internal/api/registry_api_keys.go) and
+// both guards run on them again.
 var selfServiceRoutes = map[string]string{
 	"GET /api/v1/auth/me":                              "returns the caller's own profile",
 	"PUT /api/v1/auth/profile":                         "updates the caller's own profile",
@@ -120,10 +129,6 @@ var selfServiceRoutes = map[string]string{
 	"GET /api/v1/auth/totp/status":                     "reports the caller's own enrollment",
 	"POST /api/v1/auth/totp/recovery-codes/regenerate": "regenerates the caller's own recovery codes",
 	"GET /api/v1/rbac/me/permissions":                  "returns the caller's own grants",
-	"POST /api/v1/api-keys":                            "manages the caller's own API keys",
-	"GET /api/v1/api-keys":                             "manages the caller's own API keys",
-	"DELETE /api/v1/api-keys":                          "manages the caller's own API keys",
-	"DELETE /api/v1/api-keys/:id":                      "manages the caller's own API keys",
 	"DELETE /api/v1/favorites":                         "removes one of the caller's own favorites; the DELETE is keyed by the authenticated user id, and gating it on view access would strand rows a user can no longer see",
 }
 

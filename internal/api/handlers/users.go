@@ -12,10 +12,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 )
+
+// All 4 routes are declared in internal/api/registry_users.go, which states
+// their parameters and, for three of them, their permission. The fourth —
+// Update — is Deferred and keeps BOTH of its checks here, because the second
+// one fires only when the body carries `role`; see userUpdateReason.
+//
+// What else stays here is what a declaration cannot see: the refusal to touch
+// the system account, the refusal to change your own role or active status, the
+// refusal to delete your own account, and the session revocation that has to
+// follow a deactivation.
 
 // UserHandler handles user management endpoints.
 type UserHandler struct {
@@ -48,18 +59,8 @@ type userListResponse struct {
 	UpdatedAt   string    `json:"updated_at"`
 }
 
-type updateUserRequest struct {
-	DisplayName *string `json:"display_name"`
-	IsActive    *bool   `json:"is_active"`
-	Role        *string `json:"role"`
-}
-
 // List handles GET /api/v1/users.
-func (h *UserHandler) List(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "user"); err != nil {
-		return err
-	}
-
+func (h *UserHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 	users, err := h.queries.ListUsersWithRoles(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list users")
@@ -92,14 +93,10 @@ func (h *UserHandler) List(c fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/users/:id.
-func (h *UserHandler) Get(c fiber.Ctx) error {
-	if err := requirePerm(c, "view", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *UserHandler) Get(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+		return err
 	}
 
 	user, err := h.queries.GetUserByID(c.Context(), id)
@@ -124,14 +121,18 @@ func (h *UserHandler) Get(c fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/users/:id.
-func (h *UserHandler) Update(c fiber.Ctx) error {
+func (h *UserHandler) Update(c fiber.Ctx, p *apischema.Params) error {
+	// Deferred, so BOTH checks live here. This one is unconditional and runs
+	// before anything is read or written; the manage:role one below fires only
+	// when the body carries `role`. See userUpdateReason in
+	// internal/api/registry_users.go for why the pair is not a static Check.
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
 
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+		return err
 	}
 
 	if id == auth.SystemUserID {
@@ -146,37 +147,37 @@ func (h *UserHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get user")
 	}
 
-	var req updateUserRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
+	// Tristate reads throughout: every refusal below keys on the field having
+	// been SUPPLIED, not on its value, so a request that never mentioned
+	// is_active must not be read as "set it to false".
 	displayName := existing.DisplayName
 	isActive := existing.IsActive
 	role := existing.Role
 
 	callerID, _ := c.Locals("user_id").(uuid.UUID)
 
-	if req.DisplayName != nil {
-		displayName = *req.DisplayName
+	if v, supplied := p.OptString("display_name"); supplied {
+		displayName = v
 	}
-	if req.IsActive != nil {
+	deactivating := false
+	if v, supplied := p.OptBool("is_active"); supplied {
 		if callerID == id {
 			return fiber.NewError(fiber.StatusForbidden, "Cannot change your own active status")
 		}
-		isActive = *req.IsActive
+		isActive = v
+		deactivating = !v
 	}
-	if req.Role != nil {
+	if v, supplied := p.OptString("role"); supplied {
 		if callerID == id {
 			return fiber.NewError(fiber.StatusForbidden, "Cannot change your own role")
 		}
+		// The second, CONDITIONAL half of this route's authorization — the
+		// reason it is declared Deferred rather than Check. The vocabulary
+		// check that used to follow is now the schema's enum.
 		if err := requirePerm(c, "manage", "role"); err != nil {
 			return fiber.NewError(fiber.StatusForbidden, "Only role managers can change user roles")
 		}
-		if *req.Role != "admin" && *req.Role != "user" {
-			return fiber.NewError(fiber.StatusBadRequest, "Role must be 'admin' or 'user'")
-		}
-		role = *req.Role
+		role = v
 	}
 
 	user, err := h.queries.UpdateUserProfile(c.Context(), db.UpdateUserProfileParams{
@@ -193,7 +194,7 @@ func (h *UserHandler) Update(c fiber.Ctx) error {
 
 	// If the user was deactivated, immediately revoke all their sessions
 	// so the change takes effect without waiting for token expiry.
-	if req.IsActive != nil && !*req.IsActive && h.sessions != nil {
+	if deactivating && h.sessions != nil {
 		if err := h.sessions.RevokeAllUserSessions(c.Context(), id); err != nil {
 			slog.Error("failed to revoke sessions for deactivated user", "user_id", id, "error", err)
 		}
@@ -216,14 +217,10 @@ func (h *UserHandler) Update(c fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/users/:id.
-func (h *UserHandler) Delete(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "user"); err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Params("id"))
+func (h *UserHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+		return err
 	}
 
 	if id == auth.SystemUserID {

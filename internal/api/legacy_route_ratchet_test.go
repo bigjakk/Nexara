@@ -34,15 +34,20 @@ import (
 // of AlertHandler's 22. It is now at 130 after Phase 6h moved 62: all 25
 // Proxmox access-control routes, all 18 ACME routes and all 19
 // rolling-update routes — the last of those counting the 7 SSH credential
-// and known-host routes the same handler owns.
+// and known-host routes the same handler owns. It is now at 76 after Phase 6i
+// moved 54 of the identity tranche's 57: 10 RBAC, 4 user-management, 6 API
+// key, 7 LDAP, 7 OIDC (6 admin plus /auth/oidc/authorize), 7 TOTP (including
+// the admin reset under /users/:id) and 13 of AuthHandler's 15.
 //
 // TestGuard_LegacyRouteSetOnlyShrinks compares the live legacy set
 // against it and fails if anything NEW shows up — a route that is not
 // here must be added through the registry, not through router.go.
 //
-// FIVE routes in this list are here because the registry CANNOT express
+// EIGHT routes in this list are here because the registry CANNOT express
 // them, not because nobody got to them, and each is pinned by a test so it
-// stays a decision rather than a gap:
+// stays a decision rather than a gap. The first five are blocked by a
+// PARAMETER TYPE; the last three, added in Phase 6i, are the first blocked by
+// something else:
 //
 //   - DELETE .../storage/:storage_id/content/* takes its volume id as a
 //     greedy WILDCARD segment, which checkPathParams refuses outright
@@ -59,6 +64,22 @@ import (
 //     `escalation_chain`, an array of objects for the same reason. See
 //     registerAlertEndpoints in internal/api/registry_alerts.go and
 //     TestAlertRuleWritesAreStillLegacy.
+//   - GET /api/v1/auth/oidc/callback has a query string composed by the
+//     IDENTITY PROVIDER, and the registry answers an undeclared key with a 400
+//     (PVE's additionalProperties => 0). RFC 9207 adds `iss`, session
+//     management adds `session_state`, an error response carries
+//     `error`/`error_description`, and a provider may add its own — so the
+//     parameter set is open by construction. See registerOIDCEndpoints in
+//     internal/api/registry_oidc.go and TestOIDCCallbackIsStillLegacy.
+//   - POST /api/v1/auth/register and POST /api/v1/auth/logout are mounted with
+//     authOptional, which the Permissions vocabulary has no shape for: it
+//     parses a session IF one is presented and lets the request through either
+//     way. Public installs no authentication at all — Register READS
+//     c.Locals("role") to decide whether the caller may create an account —
+//     and every other shape requires a session, which would 401 the logout a
+//     valid refresh cookie must still be able to perform. See
+//     registerAuthEndpoints in internal/api/registry_auth.go and
+//     TestAuthOptionalRoutesAreStillLegacy.
 //
 // Regenerate after migrating routes into the registry (the set should
 // only ever need entries REMOVED, never added):
@@ -71,11 +92,6 @@ import (
 // not hand-edit this list to ADD an entry — that defeats the ratchet;
 // removing entries that were migrated away is the intended maintenance.
 var legacyRouteBaseline = map[string]bool{
-	"DELETE /api/v1/admin/api-keys/:id":                                 true,
-	"DELETE /api/v1/api-keys":                                           true,
-	"DELETE /api/v1/api-keys/:id":                                       true,
-	"DELETE /api/v1/auth/sessions/:id":                                  true,
-	"DELETE /api/v1/auth/totp":                                          true,
 	"DELETE /api/v1/clusters/:cluster_id/metric-servers/:server_id":     true,
 	"DELETE /api/v1/clusters/:cluster_id/pools/:pool_id":                true,
 	"DELETE /api/v1/clusters/:cluster_id/schedules/:id":                 true,
@@ -83,31 +99,17 @@ var legacyRouteBaseline = map[string]bool{
 	"DELETE /api/v1/clusters/:cluster_id/vm-folders/:folder_id":         true,
 	"DELETE /api/v1/clusters/:id":                                       true,
 	"DELETE /api/v1/favorites":                                          true,
-	"DELETE /api/v1/ldap/configs/:id":                                   true,
 	"DELETE /api/v1/notification-dlq/:id":                               true,
-	"DELETE /api/v1/oidc/configs/:id":                                   true,
-	"DELETE /api/v1/rbac/roles/:id":                                     true,
-	"DELETE /api/v1/rbac/users/:user_id/roles/:id":                      true,
 	"DELETE /api/v1/settings/:key":                                      true,
 	"DELETE /api/v1/tasks":                                              true,
-	"DELETE /api/v1/users/:id":                                          true,
-	"DELETE /api/v1/users/:id/totp":                                     true,
-	"GET /api/v1/admin/api-keys":                                        true,
 	"GET /api/v1/api-docs":                                              true,
-	"GET /api/v1/api-keys":                                              true,
 	"GET /api/v1/audit-log":                                             true,
 	"GET /api/v1/audit-log/actions":                                     true,
 	"GET /api/v1/audit-log/export":                                      true,
 	"GET /api/v1/audit-log/recent":                                      true,
 	"GET /api/v1/audit-log/syslog-config":                               true,
 	"GET /api/v1/audit-log/users":                                       true,
-	"GET /api/v1/auth/me":                                               true,
-	"GET /api/v1/auth/oidc/authorize":                                   true,
 	"GET /api/v1/auth/oidc/callback":                                    true,
-	"GET /api/v1/auth/sessions":                                         true,
-	"GET /api/v1/auth/setup-status":                                     true,
-	"GET /api/v1/auth/sso-status":                                       true,
-	"GET /api/v1/auth/totp/status":                                      true,
 	"GET /api/v1/changelog":                                             true,
 	"GET /api/v1/clusters":                                              true,
 	"GET /api/v1/clusters/:cluster_id/audit-log":                        true,
@@ -123,17 +125,8 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:id":                                          true,
 	"GET /api/v1/favorites":                                             true,
 	"GET /api/v1/guest-snapshots":                                       true,
-	"GET /api/v1/ldap/configs":                                          true,
-	"GET /api/v1/ldap/configs/:id":                                      true,
 	"GET /api/v1/notification-dlq":                                      true,
 	"GET /api/v1/notification-dlq/summary":                              true,
-	"GET /api/v1/oidc/configs":                                          true,
-	"GET /api/v1/oidc/configs/:id":                                      true,
-	"GET /api/v1/rbac/me/permissions":                                   true,
-	"GET /api/v1/rbac/permissions":                                      true,
-	"GET /api/v1/rbac/roles":                                            true,
-	"GET /api/v1/rbac/roles/:id":                                        true,
-	"GET /api/v1/rbac/users/:user_id/roles":                             true,
 	"GET /api/v1/search":                                                true,
 	"GET /api/v1/settings":                                              true,
 	"GET /api/v1/settings/:key":                                         true,
@@ -141,27 +134,13 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/settings/branding/favicon-file":                        true,
 	"GET /api/v1/settings/branding/logo-file":                           true,
 	"GET /api/v1/tasks":                                                 true,
-	"GET /api/v1/users":                                                 true,
-	"GET /api/v1/users/:id":                                             true,
 	"GET /api/v1/version":                                               true,
 	"GET /healthz":                                                      true,
 	"PATCH /api/v1/clusters/:cluster_id/vm-folders/:folder_id":          true,
 	"POST /api/v1/alert-rules":                                          true,
-	"POST /api/v1/api-keys":                                             true,
 	"POST /api/v1/audit-log/syslog-test":                                true,
-	"POST /api/v1/auth/change-password":                                 true,
-	"POST /api/v1/auth/console-token":                                   true,
-	"POST /api/v1/auth/login":                                           true,
 	"POST /api/v1/auth/logout":                                          true,
-	"POST /api/v1/auth/logout-all":                                      true,
-	"POST /api/v1/auth/oidc/token-exchange":                             true,
-	"POST /api/v1/auth/refresh":                                         true,
 	"POST /api/v1/auth/register":                                        true,
-	"POST /api/v1/auth/totp/recovery-codes/regenerate":                  true,
-	"POST /api/v1/auth/totp/setup":                                      true,
-	"POST /api/v1/auth/totp/setup/verify":                               true,
-	"POST /api/v1/auth/totp/verify-login":                               true,
-	"POST /api/v1/auth/ws-token":                                        true,
 	"POST /api/v1/clusters":                                             true,
 	"POST /api/v1/clusters/:cluster_id/guest-snapshots/resync":          true,
 	"POST /api/v1/clusters/:cluster_id/metric-servers":                  true,
@@ -173,21 +152,13 @@ var legacyRouteBaseline = map[string]bool{
 	"POST /api/v1/clusters/fetch-fingerprint":                           true,
 	"POST /api/v1/favorites":                                            true,
 	"POST /api/v1/firewall-templates":                                   true,
-	"POST /api/v1/ldap/configs":                                         true,
-	"POST /api/v1/ldap/configs/:id/sync":                                true,
-	"POST /api/v1/ldap/configs/:id/test":                                true,
 	"POST /api/v1/notification-dlq/:id/dismiss":                         true,
 	"POST /api/v1/notification-dlq/:id/retry":                           true,
-	"POST /api/v1/oidc/configs":                                         true,
-	"POST /api/v1/oidc/configs/:id/test":                                true,
-	"POST /api/v1/rbac/roles":                                           true,
-	"POST /api/v1/rbac/users/:user_id/roles":                            true,
 	"POST /api/v1/settings/branding/favicon":                            true,
 	"POST /api/v1/settings/branding/logo":                               true,
 	"POST /api/v1/tasks":                                                true,
 	"PUT /api/v1/alert-rules/:id":                                       true,
 	"PUT /api/v1/audit-log/syslog-config":                               true,
-	"PUT /api/v1/auth/profile":                                          true,
 	"PUT /api/v1/clusters/:cluster_id/metric-servers/:server_id":        true,
 	"PUT /api/v1/clusters/:cluster_id/nodes/:node/apt/repositories":     true,
 	"PUT /api/v1/clusters/:cluster_id/pools/:pool_id":                   true,
@@ -195,12 +166,8 @@ var legacyRouteBaseline = map[string]bool{
 	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/folder":                true,
 	"PUT /api/v1/clusters/:id":                                          true,
 	"PUT /api/v1/firewall-templates/:id":                                true,
-	"PUT /api/v1/ldap/configs/:id":                                      true,
-	"PUT /api/v1/oidc/configs/:id":                                      true,
-	"PUT /api/v1/rbac/roles/:id":                                        true,
 	"PUT /api/v1/settings/:key":                                         true,
 	"PUT /api/v1/tasks/:upid":                                           true,
-	"PUT /api/v1/users/:id":                                             true,
 }
 
 // legacyRouteRatchetViolations reports every key present in actual but

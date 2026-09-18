@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 )
 
@@ -312,11 +313,36 @@ func newTestApp(t *testing.T) *fiber.App {
 		},
 	})
 
+	// Register is still a plain fiber.Handler: it is mounted with authOptional
+	// and stays out of the registry, because the Permissions vocabulary has no
+	// shape for "parse a session if one is presented". See
+	// registerAuthEndpoints in internal/api/registry_auth.go.
 	app.Post("/auth/register", handler.Register)
-	app.Post("/auth/login", handler.Login)
-	app.Post("/auth/refresh", handler.Refresh)
+	app.Post("/auth/login", withRequestParams(t, authLoginMirror(), nil, handler.Login))
+	app.Post("/auth/refresh", withRequestParams(t, authRefreshMirror(), nil, handler.Refresh))
 
 	return app
+}
+
+// The two mirrors below are local copies of the parts of these routes'
+// declarations (internal/api/registry_auth.go) that the handlers read.
+//
+// Mirrors for the reason migrationListMirror gives — package api imports this
+// package, not the other way round. What each has to get right is the shape
+// these tests depend on: login refuses a missing or blank credential before the
+// handler sees it, and refresh accepts an empty body because the browser path
+// carries the token in a cookie.
+func authLoginMirror() apischema.Properties {
+	return apischema.Properties{
+		"email":    {Type: apischema.String, MinLength: apischema.Ptr(1)},
+		"password": {Type: apischema.String, MinLength: apischema.Ptr(1)},
+	}
+}
+
+func authRefreshMirror() apischema.Properties {
+	return apischema.Properties{
+		"refresh_token": {Type: apischema.String, Optional: true},
+	}
 }
 
 // extractBearerTokenFromHeader replicates the bearer token extraction logic for testing.

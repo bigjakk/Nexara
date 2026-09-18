@@ -28,52 +28,48 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Auth routes.
+	//
+	// 13 of AuthHandler's 15 routes — login, refresh, the two login-page status
+	// probes, the OIDC code exchange, the caller's own profile/password/session
+	// routes and the console-token mint — are declared in
+	// internal/api/registry_auth.go and mounted by mountRegistry above. The six
+	// TOTP routes under /auth/totp are in internal/api/registry_totp.go and
+	// /auth/oidc/authorize is in internal/api/registry_oidc.go.
+	//
+	// THREE routes stay here, for two different reasons.
+	//
+	// Register and Logout are mounted with authOptional, which the Permissions
+	// vocabulary cannot express: it parses a session IF one is presented and
+	// lets the request through either way. Public installs no authentication
+	// middleware at all, so c.Locals("role") would be empty and Register would
+	// refuse every admin-created account after the first; declaring them
+	// authenticated would 401 the logout a valid refresh cookie must still be
+	// able to perform once the access token has expired. Both keep their
+	// hand-written bodies, and TestAuthOptionalRoutesAreStillLegacy pins that
+	// this is a decision rather than a gap.
+	//
+	// The OIDC CALLBACK stays for a different reason: its query string is
+	// composed by the IDENTITY PROVIDER, and the registry answers an undeclared
+	// key with a 400 (PVE's additionalProperties => 0). RFC 9207 adds `iss`,
+	// session management adds `session_state`, an error response carries
+	// `error`/`error_description`, and a provider may add its own — so the
+	// parameter set is open by construction and any declaration would turn
+	// "this provider sends one extra parameter" into "SSO login returns 400".
+	// TestOIDCCallbackIsStillLegacy pins that one.
 	if s.authHandler != nil {
 		authGroup := v1.Group("/auth")
 		authGroup.Post("/register", s.authOptional(), s.authHandler.Register)
-		authGroup.Post("/login", s.authHandler.Login)
-		authGroup.Post("/refresh", s.authHandler.Refresh)
 		// Logout intentionally uses authOptional so a user with an expired
 		// access token (but a valid refresh cookie) can still revoke the
 		// server-side session. The cookie itself is the auth artefact for
-		// this endpoint; the user_id check below only fires when an access
-		// token IS present, defending against an attacker with a stolen
+		// this endpoint; the user_id check in the handler only fires when an
+		// access token IS present, defending against an attacker with a stolen
 		// cookie attempting to log out an unrelated user (covered by
 		// SameSite=Strict + same-origin SPA already, but defence-in-depth).
 		authGroup.Post("/logout", s.authOptional(), s.authHandler.Logout)
-		authGroup.Post("/logout-all", s.authRequired(), s.authHandler.LogoutAll)
-		// The caller's own sessions: what is signed in to this account, and
-		// revoking one of them individually.
-		authGroup.Get("/sessions", s.authRequired(), s.authHandler.ListSessions)
-		authGroup.Delete("/sessions/:id", s.authRequired(), s.authHandler.RevokeSessionByID)
-		authGroup.Post("/console-token", s.authRequired(), s.authHandler.ConsoleToken)
-		authGroup.Post("/ws-token", s.authRequired(), s.authHandler.WSToken)
 
-		authGroup.Get("/me", s.authRequired(), s.authHandler.GetMe)
-		authGroup.Put("/profile", s.authRequired(), s.authHandler.UpdateProfile)
-		authGroup.Post("/change-password", s.authRequired(), s.authHandler.ChangePassword)
-		authGroup.Get("/setup-status", s.authHandler.SetupStatus)
-		authGroup.Get("/sso-status", s.authHandler.SSOStatus)
-
-		// OIDC auth flow (public, no auth required)
 		if s.oidcHandler != nil {
-			authGroup.Get("/oidc/authorize", s.oidcHandler.Authorize)
 			authGroup.Get("/oidc/callback", s.oidcHandler.Callback)
-			authGroup.Post("/oidc/token-exchange", s.authHandler.OIDCTokenExchange)
-		}
-
-		// TOTP 2FA routes
-		if s.totpHandler != nil {
-			// Public — completes two-step login
-			authGroup.Post("/totp/verify-login", s.totpHandler.VerifyLogin)
-
-			// Authenticated — self-service TOTP management
-			totpGroup := authGroup.Group("/totp", s.authRequired())
-			totpGroup.Post("/setup", s.totpHandler.BeginSetup)
-			totpGroup.Post("/setup/verify", s.totpHandler.ConfirmSetup)
-			totpGroup.Delete("/", s.totpHandler.Disable)
-			totpGroup.Get("/status", s.totpHandler.Status)
-			totpGroup.Post("/recovery-codes/regenerate", s.totpHandler.RegenerateRecoveryCodes)
 		}
 	}
 
@@ -373,43 +369,18 @@ func (s *Server) setupRoutes() {
 	// internal/api/registry_virtio_win.go and mounted by mountRegistry
 	// above, so there is no block for them here.
 
-	// RBAC routes.
-	if s.rbacHandler != nil {
-		rbac := v1.Group("/rbac", s.authRequired())
-		rbac.Get("/roles", s.rbacHandler.ListRoles)
-		rbac.Post("/roles", s.rbacHandler.CreateRole)
-		rbac.Get("/roles/:id", s.rbacHandler.GetRole)
-		rbac.Put("/roles/:id", s.rbacHandler.UpdateRole)
-		rbac.Delete("/roles/:id", s.rbacHandler.DeleteRole)
-		rbac.Get("/permissions", s.rbacHandler.ListPermissions)
-		rbac.Get("/users/:user_id/roles", s.rbacHandler.ListUserRoles)
-		rbac.Post("/users/:user_id/roles", s.rbacHandler.AssignUserRole)
-		rbac.Delete("/users/:user_id/roles/:id", s.rbacHandler.RevokeUserRole)
-		rbac.Get("/me/permissions", s.rbacHandler.MyPermissions)
-	}
+	// The 10 RBAC routes — Nexara's own roles, the permission catalogue, the
+	// per-user assignments and the caller's own grants — are declared in
+	// internal/api/registry_rbac.go and mounted by mountRegistry above, so
+	// there is no group for them here.
 
-	// LDAP config routes.
-	if s.ldapHandler != nil {
-		ldap := v1.Group("/ldap", s.authRequired())
-		ldap.Get("/configs", s.ldapHandler.List)
-		ldap.Post("/configs", s.ldapHandler.Create)
-		ldap.Get("/configs/:id", s.ldapHandler.Get)
-		ldap.Put("/configs/:id", s.ldapHandler.Update)
-		ldap.Delete("/configs/:id", s.ldapHandler.Delete)
-		ldap.Post("/configs/:id/test", s.ldapHandler.TestConnection)
-		ldap.Post("/configs/:id/sync", s.ldapHandler.Sync)
-	}
+	// The 7 LDAP directory routes are declared in
+	// internal/api/registry_ldap.go and mounted by mountRegistry above, so
+	// there is no group for them here.
 
-	// OIDC config routes (admin).
-	if s.oidcHandler != nil {
-		oidc := v1.Group("/oidc", s.authRequired())
-		oidc.Get("/configs", s.oidcHandler.List)
-		oidc.Post("/configs", s.oidcHandler.Create)
-		oidc.Get("/configs/:id", s.oidcHandler.Get)
-		oidc.Put("/configs/:id", s.oidcHandler.Update)
-		oidc.Delete("/configs/:id", s.oidcHandler.Delete)
-		oidc.Post("/configs/:id/test", s.oidcHandler.TestConnection)
-	}
+	// The 6 OIDC provider-configuration routes are declared in
+	// internal/api/registry_oidc.go, alongside the anonymous /auth/oidc/authorize
+	// that starts the login redirect, and mounted by mountRegistry above.
 
 	// Global search.
 	if s.searchHandler != nil {
@@ -427,21 +398,10 @@ func (s *Server) setupRoutes() {
 		favorites.Delete("/", s.favoritesHandler.RemoveFavorite)
 	}
 
-	// API keys (self-service).
-	if s.apiKeyHandler != nil {
-		apiKeys := v1.Group("/api-keys", s.authRequired())
-		apiKeys.Post("/", s.apiKeyHandler.Create)
-		apiKeys.Get("/", s.apiKeyHandler.List)
-		apiKeys.Delete("/:id", s.apiKeyHandler.Revoke)
-		apiKeys.Delete("/", s.apiKeyHandler.RevokeAll)
-	}
-
-	// Admin API key management.
-	if s.apiKeyHandler != nil {
-		adminKeys := v1.Group("/admin/api-keys", s.authRequired())
-		adminKeys.Get("/", s.apiKeyHandler.AdminList)
-		adminKeys.Delete("/:id", s.apiKeyHandler.AdminRevoke)
-	}
+	// The 6 API key routes — 4 for the caller's own keys and 2 for the
+	// instance-wide admin view — are declared in
+	// internal/api/registry_api_keys.go and mounted by mountRegistry above, so
+	// there are no groups for them here.
 
 	// API documentation.
 	if s.apiDocsHandler != nil {
@@ -471,15 +431,10 @@ func (s *Server) setupRoutes() {
 		settings.Delete("/:key", s.settingsHandler.DeleteSetting)
 	}
 
-	// User management routes.
-	if s.userHandler != nil {
-		users := v1.Group("/users", s.authRequired())
-		users.Get("/", s.userHandler.List)
-		users.Get("/:id", s.userHandler.Get)
-		users.Put("/:id", s.userHandler.Update)
-		users.Delete("/:id", s.userHandler.Delete)
-		if s.totpHandler != nil {
-			users.Delete("/:id/totp", s.totpHandler.AdminReset)
-		}
-	}
+	// The 4 user-management routes are declared in
+	// internal/api/registry_users.go, and the admin TOTP reset that shares
+	// their path prefix in internal/api/registry_totp.go — it is TOTPHandler's
+	// route, not UserHandler's, and nesting it in the users block used to mean
+	// a Server holding one handler but not the other silently dropped it. Both
+	// are mounted by mountRegistry above, so there is no group for them here.
 }

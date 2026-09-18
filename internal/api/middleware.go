@@ -149,24 +149,7 @@ func (s *Server) setupMiddleware() {
 			return c.IP() + ":auth"
 		},
 		Next: func(c fiber.Ctx) bool {
-			switch limiterPath(c) {
-			case "/api/v1/auth/login",
-				"/api/v1/auth/register",
-				"/api/v1/auth/totp/verify-login",
-				"/api/v1/auth/totp",
-				"/api/v1/auth/totp/recovery-codes/regenerate",
-				// The OIDC flow is unauthenticated and every call does real
-				// work: /authorize performs an outbound discovery fetch to the
-				// IdP and writes a 10-minute Redis state key. Everything under
-				// /api/v1/auth/ is exempt from the general limiter, so without
-				// these two entries an anonymous loop can pin the server on
-				// outbound HTTP, hammer the operator's IdP, and grow the Redis
-				// instance that also holds sessions.
-				"/api/v1/auth/oidc/authorize",
-				"/api/v1/auth/oidc/callback":
-				return false
-			}
-			return true
+			return !authLimitedPaths[limiterPath(c)]
 		},
 	}))
 
@@ -182,7 +165,7 @@ func (s *Server) setupMiddleware() {
 			return c.IP() + ":refresh"
 		},
 		Next: func(c fiber.Ctx) bool {
-			return limiterPath(c) != "/api/v1/auth/refresh"
+			return limiterPath(c) != refreshLimitedPath
 		},
 	}))
 
@@ -198,7 +181,7 @@ func (s *Server) setupMiddleware() {
 			return c.IP() + ":ws-token"
 		},
 		Next: func(c fiber.Ctx) bool {
-			return limiterPath(c) != "/api/v1/auth/ws-token"
+			return limiterPath(c) != wsTokenLimitedPath
 		},
 	}))
 
@@ -347,6 +330,48 @@ func (s *Server) fingerprintFetchLimiter() fiber.Handler {
 //
 // Route-attached limiters (see clusterCreateLimiter) do not need this, because
 // matching is Fiber's job by then.
+// The three auth-facing rate limiters select their traffic by PATH rather
+// than by route, because they are mounted app-wide with Use rather than on
+// each route. That works — every request passes through them, registry and
+// legacy alike — but it means the limiter and the route agree only by
+// spelling, and nothing about a route's declaration mentions the cap that
+// protects it.
+//
+// Hoisting the paths out of the closures is what makes that agreement
+// checkable: TestGuard_RateLimitedPathsAreRegisteredRoutes asserts every
+// entry below still names a route the server mounts, so renaming or
+// reshaping one of these paths fails the build instead of silently taking
+// its brute-force cap off. The comparison uses the same normalisation
+// limiterPath applies, since that is what the closures compare against.
+var (
+	// authLimitedPaths are the login and TOTP-code paths capped at 15
+	// attempts per minute per IP.
+	//
+	// The last two are the OIDC flow, which is unauthenticated and does real
+	// work on every call: /authorize performs an outbound discovery fetch to
+	// the IdP and writes a 10-minute Redis state key. Everything under
+	// /api/v1/auth/ is exempt from the general limiter, so without them an
+	// anonymous loop can pin the server on outbound HTTP, hammer the
+	// operator's IdP, and grow the Redis instance that also holds sessions.
+	authLimitedPaths = map[string]bool{
+		"/api/v1/auth/login":                          true,
+		"/api/v1/auth/register":                       true,
+		"/api/v1/auth/totp/verify-login":              true,
+		"/api/v1/auth/totp":                           true,
+		"/api/v1/auth/totp/recovery-codes/regenerate": true,
+		"/api/v1/auth/oidc/authorize":                 true,
+		"/api/v1/auth/oidc/callback":                  true,
+	}
+)
+
+const (
+	// refreshLimitedPath is capped separately, at 30/min/IP.
+	refreshLimitedPath = "/api/v1/auth/refresh"
+
+	// wsTokenLimitedPath is capped separately, at 60/min/IP.
+	wsTokenLimitedPath = "/api/v1/auth/ws-token"
+)
+
 func limiterPath(c fiber.Ctx) string {
 	p := strings.ToLower(c.Path())
 	if len(p) > 1 {

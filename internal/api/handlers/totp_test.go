@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
 )
 
@@ -67,10 +68,33 @@ func newTOTPTestApp(t *testing.T, handler *TOTPHandler, userID uuid.UUID) *fiber
 		return c.Next()
 	})
 
-	app.Post("/totp/setup/verify", handler.ConfirmSetup)
-	app.Post("/totp/verify-login", handler.VerifyLogin)
+	app.Post("/totp/setup/verify", withRequestParams(t, totpConfirmSetupMirror(), nil, handler.ConfirmSetup))
+	app.Post("/totp/verify-login", withRequestParams(t, totpVerifyLoginMirror(), nil, handler.VerifyLogin))
 
 	return app
+}
+
+// The two mirrors below are local copies of the parts of these routes'
+// declarations (internal/api/registry_totp.go) that the handlers read.
+//
+// Mirrors for the reason migrationListMirror gives — package api imports this
+// package, not the other way round. What each has to get right is the SHAPE
+// these tests depend on: the confirm route's code is required and six digits,
+// so a malformed one never reaches the handler; the verify-login route's code
+// is optional and carries NO pattern, because an explicitly empty code is how a
+// client says it is using the recovery code instead.
+func totpConfirmSetupMirror() apischema.Properties {
+	return apischema.Properties{
+		"code": {Type: apischema.String, Pattern: `^[0-9]{6}$`},
+	}
+}
+
+func totpVerifyLoginMirror() apischema.Properties {
+	return apischema.Properties{
+		"totp_pending_token": {Type: apischema.String, MinLength: apischema.Ptr(1)},
+		"code":               {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(6)},
+		"recovery_code":      {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(128)},
+	}
 }
 
 // newJSONRequest builds a POST request with the JSON body and the
