@@ -227,6 +227,11 @@ func queryValues(c fiber.Ctx) map[string]any {
 // unless a parameter explicitly declares SourceBody, which is what makes
 // the GET case answerable at all: GET semantics say the body carries no
 // meaning, and inventing one for it would let a URL and a body disagree.
+// maxUndeclaredBodyBytes bounds the body read on an endpoint that declares
+// no body parameter. See the comment at its use in bodyValues: without a
+// bound, a Deferred route hands an unauthorized caller a 32 MiB buffer.
+const maxUndeclaredBodyBytes = 64 << 10
+
 func (e Endpoint) bodyValues(c fiber.Ctx) (map[string]any, error) {
 	required := e.declaresBodyParam()
 	if !required && !isMutatingMethod(e.Method) {
@@ -260,6 +265,29 @@ func (e Endpoint) bodyValues(c fiber.Ctx) (map[string]any, error) {
 				"request body must be sent as application/json")
 		}
 		return nil, nil
+	}
+
+	// An endpoint that declares no body parameter still parses a SMALL
+	// body, because silently discarding a payload the caller meant is the
+	// failure this package exists to prevent — a body here becomes an
+	// "unknown parameter" 400 further down.
+	//
+	// The BOUND is the load-bearing part. c.Body() drains up to Fiber's
+	// 32 MiB limit, the upload route is exempt from the 10 MiB body-limit
+	// middleware, and a Deferred route runs extraction BEFORE any
+	// permission check — so an unbounded read here lets an authenticated
+	// caller holding no grant force a 32 MiB buffer per concurrent
+	// request, just by sending a JSON content type to a route that wants
+	// multipart. A chunked body reports -1 and cannot be sized before
+	// reading, so it is refused unread rather than trusted.
+	//
+	// 64 KiB is far above any real "you sent something we do not take"
+	// payload and far below anything worth buffering unauthenticated.
+	if !required {
+		if n := c.Request().Header.ContentLength(); n < 0 || n > maxUndeclaredBodyBytes {
+			return nil, fiber.NewError(fiber.StatusBadRequest,
+				"this endpoint accepts no request body")
+		}
 	}
 
 	raw := bytes.TrimSpace(c.Body())

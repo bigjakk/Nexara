@@ -13,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/valyala/fasthttp"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 )
@@ -829,4 +830,99 @@ func TestRegistryNormalizesThroughTheDeclaredFormat(t *testing.T) {
 			t.Errorf("message = %q", env.Message)
 		}
 	})
+}
+
+// A Deferred route runs extraction BEFORE any permission check, so an
+// unbounded body read there is reachable by an authenticated caller holding
+// no grant. The storage upload is the live case: it declares no body
+// parameter, it is exempt from the 10 MiB body-limit middleware, and Fiber's
+// cap is 32 MiB — so sending a JSON content type to a route that wants
+// multipart used to buy a 32 MiB buffer per concurrent request.
+//
+// The Phase 2 security review predicted this before any route was Deferred;
+// migrating the upload made it live.
+func TestBodyIsBoundedOnAnEndpointThatDeclaresNoBodyParameter(t *testing.T) {
+	app := fiber.New()
+	reg := NewRegistry()
+	reg.Register(Endpoint{
+		Method: "POST", Path: "/api/v1/clusters/:cluster_id/nobody",
+		Description: "Declares no body parameter.", Group: "Test",
+		Permissions: Permissions{Deferred: "the handler decides once it reads the stream"},
+		Parameters:  apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")},
+		Handler:     func(c fiber.Ctx, _ *apischema.Params) error { return c.SendString("ok") },
+	})
+	mountRegistry(app, reg, func(c fiber.Ctx) error { return c.Next() })
+
+	path := "/api/v1/clusters/" + testClusterID + "/nobody"
+
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		// The one real client shape: /auth/refresh posts exactly this, so a
+		// blanket refusal would break token refresh for every caller.
+		{"a tiny {} body is still parsed", "{}", fiber.StatusOK},
+		{"a small unknown payload is still reported", `{"surprise":1}`, fiber.StatusBadRequest},
+		{"an oversized body is refused unread", "{\"pad\":\"" + strings.Repeat("x", maxUndeclaredBodyBytes+1) + "\"}", fiber.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// httptest.NewRequest sizes the body only for the reader types
+			// it recognises. An opaque reader leaves ContentLength at -1,
+			// which is what a genuinely chunked request looks like — and -1
+			// is exactly the case that cannot be bounded without reading.
+			req := httptest.NewRequest("POST", path, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			res, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			defer func() { _ = res.Body.Close() }()
+			if res.StatusCode != tt.wantStatus {
+				got, _ := io.ReadAll(res.Body)
+				t.Errorf("status = %d, want %d (body %s)", res.StatusCode, tt.wantStatus, got)
+			}
+		})
+	}
+}
+
+// A chunked body reports a Content-Length of -1 and cannot be sized before
+// reading, so it is the one shape the bound above cannot measure — and
+// therefore the one an attacker would reach for. It is tested here rather
+// than through app.Test because Fiber's test harness serialises
+// ContentLength verbatim, emitting a literal "Content-Length: -1" header
+// that fasthttp rejects while parsing, before any of this code runs.
+func TestUnsizeableBodyIsRefusedUnreadOnAnEndpointDeclaringNoBodyParameter(t *testing.T) {
+	app := fiber.New()
+	e := Endpoint{
+		Method: "POST", Path: "/api/v1/clusters/:cluster_id/nobody",
+		Parameters: apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")},
+	}
+
+	fctx := &fasthttp.RequestCtx{}
+	fctx.Request.Header.SetMethod("POST")
+	fctx.Request.Header.SetContentType("application/json")
+	fctx.Request.SetBodyString(`{"pad":"x"}`)
+	// Chunked is how a body arrives with no declared size. SetContentLength(-1)
+	// is fasthttp's spelling of it, and must follow SetBodyString, which
+	// otherwise writes a real length.
+	fctx.Request.Header.SetContentLength(-1)
+
+	ctx := app.AcquireCtx(fctx)
+	defer app.ReleaseCtx(ctx)
+
+	if got := fctx.Request.Header.ContentLength(); got != -1 {
+		t.Fatalf("precondition: ContentLength = %d, want -1 — this test is not exercising the unsizeable path", got)
+	}
+
+	_, err := e.bodyValues(ctx)
+	if err == nil {
+		t.Fatal("an unsizeable body was accepted; it cannot be bounded before reading, so it must be refused")
+	}
+	var fe *fiber.Error
+	if !errors.As(err, &fe) || fe.Code != fiber.StatusBadRequest {
+		t.Fatalf("err = %v, want a 400", err)
+	}
 }
