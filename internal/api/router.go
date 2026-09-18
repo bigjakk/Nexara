@@ -168,26 +168,9 @@ func (s *Server) setupRoutes() {
 		if s.guestSnapshotHandler != nil {
 			clusters.Post("/:cluster_id/guest-snapshots/resync", s.guestSnapshotHandler.Resync)
 		}
-		if s.containerHandler != nil {
-			clusters.Get("/:cluster_id/containers", s.containerHandler.ListByCluster)
-			clusters.Post("/:cluster_id/containers", s.containerHandler.CreateContainer)
-			clusters.Get("/:cluster_id/containers/:ct_id", s.containerHandler.GetContainer)
-			clusters.Post("/:cluster_id/containers/:ct_id/status", s.containerHandler.PerformAction)
-			clusters.Post("/:cluster_id/containers/:ct_id/clone", s.containerHandler.CloneContainer)
-			clusters.Post("/:cluster_id/containers/:ct_id/convert-to-template", s.containerHandler.ConvertToTemplate)
-			clusters.Post("/:cluster_id/containers/:ct_id/clone-to-template", s.containerHandler.CloneToTemplate)
-			clusters.Post("/:cluster_id/containers/:ct_id/migrate", s.containerHandler.MigrateContainer)
-			clusters.Delete("/:cluster_id/containers/:ct_id", s.containerHandler.DestroyContainer)
-			clusters.Get("/:cluster_id/containers/:ct_id/snapshot-capability", s.containerHandler.GetSnapshotCapability)
-			clusters.Get("/:cluster_id/containers/:ct_id/snapshots", s.containerHandler.ListSnapshots)
-			clusters.Post("/:cluster_id/containers/:ct_id/snapshots", s.containerHandler.CreateSnapshot)
-			clusters.Delete("/:cluster_id/containers/:ct_id/snapshots/:snap_name", s.containerHandler.DeleteSnapshot)
-			clusters.Post("/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback", s.containerHandler.RollbackSnapshot)
-			clusters.Get("/:cluster_id/containers/:ct_id/config", s.containerHandler.GetContainerConfig)
-			clusters.Put("/:cluster_id/containers/:ct_id/config", s.containerHandler.SetContainerConfig)
-			clusters.Post("/:cluster_id/containers/:ct_id/disks/resize", s.containerHandler.ResizeDisk)
-			clusters.Post("/:cluster_id/containers/:ct_id/volumes/move", s.containerHandler.MoveVolume)
-		}
+		// The 18 container routes are declared in
+		// internal/api/registry_containers.go and mounted by
+		// mountRegistry above, so there is no block for them here.
 		if s.vmFoldersHandler != nil {
 			clusters.Get("/:cluster_id/vm-folders", s.vmFoldersHandler.List)
 			clusters.Post("/:cluster_id/vm-folders", s.vmFoldersHandler.Create)

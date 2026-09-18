@@ -24,6 +24,9 @@ func (s *Server) buildRegistry() *Registry {
 	if s.vmHandler != nil {
 		registerVMEndpoints(reg, s.vmHandler)
 	}
+	if s.containerHandler != nil {
+		registerContainerEndpoints(reg, s.containerHandler)
+	}
 	return reg
 }
 

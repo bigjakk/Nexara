@@ -333,6 +333,14 @@ var vmRoutesWithDeferredPermission = map[string]string{
 	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template":   "clones a container with CloneCT when the row is lxc",
 }
 
+// vmRouteCount is how many endpoints registerVMEndpoints declares.
+//
+// It is stated per domain, and summed below, so that a later migration
+// adding its own routes cannot make this number drift without saying so:
+// a single total would be a number anyone could raise to make the test
+// pass again.
+const vmRouteCount = 33
+
 // TestVMRoutesDeclareACheck records what the survey of these 33 handlers
 // found: all but two resolved the cluster from the path and then made one
 // static requireClusterPerm call, so all but two are declarable as a
@@ -346,11 +354,20 @@ var vmRoutesWithDeferredPermission = map[string]string{
 // manage:vm Checks first, and a security review found that a caller with
 // manage:vm and no container rights could irreversibly convert a
 // container through them.
+//
+// It walks the WHOLE registry rather than only the VM declarations, and
+// keeps doing so as later phases add domains: "every declared route is a
+// cluster-scoped Check unless it is on a listed exception" is an invariant
+// worth holding across the registry, and a per-domain filter here would
+// let a new domain's route escape it by simply not being a VM route. The
+// count is the sum of the per-domain constants for the same reason.
 func TestVMRoutesDeclareACheck(t *testing.T) {
 	s := newRouteStubServer(t)
 	endpoints := s.registry.Endpoints()
-	if len(endpoints) != 33 {
-		t.Errorf("the registry holds %d endpoints, want the 33 VMHandler routes Phase 4 migrated", len(endpoints))
+	if want := vmRouteCount + containerRouteCount; len(endpoints) != want {
+		t.Errorf("the registry holds %d endpoints, want %d — the %d VMHandler routes Phase 4 migrated "+
+			"plus the %d ContainerHandler routes Phase 6a did",
+			len(endpoints), want, vmRouteCount, containerRouteCount)
 	}
 
 	seenDeferred := map[string]bool{}

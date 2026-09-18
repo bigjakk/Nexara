@@ -334,6 +334,22 @@ var endpointMeta = map[string]APIEndpoint{
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/isos":          {Description: "List every ISO on a node's ISO-capable storages", Permission: "view:node", Group: "Nodes"},
 
 	// ── Containers ────────────────────────────────────────────────────
+	//
+	// Every entry below is a SHADOW COPY: all 18 container routes are
+	// declared in internal/api/registry_containers.go, and GetDocs renders
+	// a declared route from its declaration, so what a reader sees is the
+	// declaration's description, permission, group and full parameter
+	// schema — not these lines. They are kept saying the same thing about
+	// the permission so that removing them is a deletion rather than a
+	// behaviour change, and because
+	// TestGuard_DocumentedPermissionMatchesEnforcement compares this copy
+	// against the declared one: a second copy that nothing compares is a
+	// second copy that silently rots.
+	//
+	// Three container routes never had an entry here at all — the two
+	// template routes and volumes/move — and now get their docs from the
+	// declaration, which is the point of the migration rather than an
+	// omission to fix by adding more shadow copies.
 	"GET /api/v1/clusters/:cluster_id/containers":                                       {Description: "List all containers", Permission: "view:container", Group: "Containers"},
 	"POST /api/v1/clusters/:cluster_id/containers":                                      {Description: "Create a container", Permission: "manage:container", Group: "Containers"},
 	"GET /api/v1/clusters/:cluster_id/containers/:ct_id":                                {Description: "Get container details", Permission: "view:container", Group: "Containers"},

@@ -17,7 +17,9 @@ import (
 
 // legacyRouteBaseline is a machine-generated snapshot of every
 // "METHOD path" key setupRoutes registered OUTSIDE the declarative
-// registry at the time this guard was written (2026-09-17, 552 routes).
+// registry. It was first captured on 2026-09-17 at 552 routes, and
+// regenerated at 501 after Phase 6a moved the 18 ContainerHandler routes
+// into the registry (the 33 VMHandler routes had already left).
 // TestGuard_LegacyRouteSetOnlyShrinks compares the live legacy set
 // against it and fails if anything NEW shows up — a route that is not
 // here must be added through the registry, not through router.go.
@@ -47,8 +49,6 @@ var legacyRouteBaseline = map[string]bool{
 	"DELETE /api/v1/clusters/:cluster_id/acme/plugins/:plugin_id":                          true,
 	"DELETE /api/v1/clusters/:cluster_id/backup-jobs/:job_id":                              true,
 	"DELETE /api/v1/clusters/:cluster_id/ceph/pools/:pool_name":                            true,
-	"DELETE /api/v1/clusters/:cluster_id/containers/:ct_id":                                true,
-	"DELETE /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name":           true,
 	"DELETE /api/v1/clusters/:cluster_id/cve-scans/:scan_id":                               true,
 	"DELETE /api/v1/clusters/:cluster_id/drs/ha-rules/:rule_name":                          true,
 	"DELETE /api/v1/clusters/:cluster_id/drs/rules/:rule_id":                               true,
@@ -164,11 +164,6 @@ var legacyRouteBaseline = map[string]bool{
 	"GET /api/v1/clusters/:cluster_id/config":                                              true,
 	"GET /api/v1/clusters/:cluster_id/config/join":                                         true,
 	"GET /api/v1/clusters/:cluster_id/config/nodes":                                        true,
-	"GET /api/v1/clusters/:cluster_id/containers":                                          true,
-	"GET /api/v1/clusters/:cluster_id/containers/:ct_id":                                   true,
-	"GET /api/v1/clusters/:cluster_id/containers/:ct_id/config":                            true,
-	"GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshot-capability":               true,
-	"GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots":                         true,
 	"GET /api/v1/clusters/:cluster_id/cve-notifications":                                   true,
 	"GET /api/v1/clusters/:cluster_id/cve-scan-schedule":                                   true,
 	"GET /api/v1/clusters/:cluster_id/cve-scans":                                           true,
@@ -364,16 +359,6 @@ var legacyRouteBaseline = map[string]bool{
 	"POST /api/v1/clusters/:cluster_id/ceph/osds/:osd_id/start":                            true,
 	"POST /api/v1/clusters/:cluster_id/ceph/osds/:osd_id/stop":                             true,
 	"POST /api/v1/clusters/:cluster_id/ceph/pools":                                         true,
-	"POST /api/v1/clusters/:cluster_id/containers":                                         true,
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone":                            true,
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone-to-template":                true,
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/convert-to-template":              true,
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/disks/resize":                     true,
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/migrate":                          true,
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots":                        true,
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback":    true,
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/status":                           true,
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/volumes/move":                     true,
 	"POST /api/v1/clusters/:cluster_id/cve-scans":                                          true,
 	"POST /api/v1/clusters/:cluster_id/drs/evaluate":                                       true,
 	"POST /api/v1/clusters/:cluster_id/drs/ha-rules":                                       true,
@@ -494,7 +479,6 @@ var legacyRouteBaseline = map[string]bool{
 	"PUT /api/v1/clusters/:cluster_id/acme/accounts/:name":                                 true,
 	"PUT /api/v1/clusters/:cluster_id/acme/plugins/:plugin_id":                             true,
 	"PUT /api/v1/clusters/:cluster_id/backup-jobs/:job_id":                                 true,
-	"PUT /api/v1/clusters/:cluster_id/containers/:ct_id/config":                            true,
 	"PUT /api/v1/clusters/:cluster_id/cve-notifications":                                   true,
 	"PUT /api/v1/clusters/:cluster_id/cve-scan-schedule":                                   true,
 	"PUT /api/v1/clusters/:cluster_id/description":                                         true,

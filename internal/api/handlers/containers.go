@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -29,57 +30,49 @@ func NewContainerHandler(queries *db.Queries, encryptionKey string, eventPub *ev
 	return &ContainerHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
-// validCTActions is the set of allowed container status actions.
-var validCTActions = map[string]bool{
-	"start":    true,
-	"stop":     true,
-	"shutdown": true,
-	"reboot":   true,
-	"suspend":  true,
-	"resume":   true,
+// ContainerStatusActions is the set of power actions
+// POST .../containers/:ct_id/status accepts, in the order the API
+// documentation lists them.
+//
+// It is exported so that the endpoint's declaration in
+// internal/api/registry_containers.go can use it as the parameter's enum:
+// the list that validates the request and the list the switch in
+// PerformAction covers are then the same list, and a new action cannot be
+// accepted by one and dropped by the other.
+//
+// "reset" is absent on purpose, and that is the one place this list is NOT
+// a copy of VMStatusActions: LXC has no hardware-reset equivalent, so
+// Proxmox's CT status endpoint offers no such action.
+var ContainerStatusActions = []string{"start", "stop", "shutdown", "reboot", "suspend", "resume"}
+
+// ctCloneParams reads the body shared by clone and clone-to-template.
+func ctCloneParams(p *apischema.Params) proxmox.CloneParams {
+	return proxmox.CloneParams{
+		NewID:   int(p.Int("new_id")),
+		Name:    p.String("name"),
+		Target:  p.String("target"),
+		Full:    p.Bool("full"),
+		Storage: p.String("storage"),
+	}
 }
 
-type ctActionRequest struct {
-	Action string `json:"action"`
-}
-
-// snapshotRequest is the container snapshot body. It used to be shared
-// with the VM snapshot handler; that one now takes its parameters from
-// the endpoint's declared schema, so this is the only remaining user and
-// it lives here until the container routes are migrated too.
-type snapshotRequest struct {
-	SnapName    string `json:"snap_name"`
-	Description string `json:"description"`
-	VMState     bool   `json:"vmstate"`
-}
-
-type ctCloneRequest struct {
-	NewID   int    `json:"new_id"`
-	Name    string `json:"name"`
-	Target  string `json:"target"`
-	Full    bool   `json:"full"`
-	Storage string `json:"storage"`
-}
-
-type ctMigrateRequest struct {
-	Target string `json:"target"`
-	Online bool   `json:"online"`
-}
-
-type ctVolumeMoveRequest struct {
-	Volume  string `json:"volume"`
-	Storage string `json:"storage"`
-	Delete  bool   `json:"delete"`
-	BWLimit int    `json:"bwlimit_kib"`
-}
+// Every handler in this file is a registry endpoint: it is declared in
+// internal/api/registry_containers.go, which states its parameters and its
+// permission, and it receives the validated parameters instead of
+// re-parsing the request.
+//
+// Two things that used to be at the top of each of these functions are
+// deliberately absent. The requireClusterPerm call now runs as route
+// middleware, attached from the declaration — a handler that forgets it
+// can no longer ship. And the body bind is gone: apischema has already
+// coerced, format-checked and default-filled every parameter, and rejected
+// any the endpoint does not declare, so the hand-rolled "x is required"
+// checks that followed each bind are gone with it.
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/containers.
-func (h *ContainerHandler) ListByCluster(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) ListByCluster(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "container", clusterID); err != nil {
 		return err
 	}
 
@@ -97,18 +90,10 @@ func (h *ContainerHandler) ListByCluster(c fiber.Ctx) error {
 }
 
 // GetContainer handles GET /api/v1/clusters/:cluster_id/containers/:ct_id.
-func (h *ContainerHandler) GetContainer(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) GetContainer(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
 	}
 
 	ct, err := h.queries.GetContainer(c.Context(), ctID)
@@ -119,11 +104,12 @@ func (h *ContainerHandler) GetContainer(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get container")
 	}
 	// A container id says nothing about which cluster it is in, while the
-	// permission above authorized the cluster in the PATH — so without
-	// this, a caller holding view:container on one cluster reads another
-	// cluster's inventory row by pairing its own cluster id with a foreign
-	// container id. resolveCT makes the same check for every handler that
-	// goes through it; this one looks the row up directly.
+	// route's permission middleware authorized the cluster in the PATH — so
+	// without this, a caller holding view:container on one cluster reads
+	// another cluster's inventory row by pairing its own cluster id with a
+	// foreign container id. resolveCT makes the same check for every handler
+	// that goes through it; this one looks the row up directly, which is why
+	// TestGuard_GuestLookupsAreClusterScoped watches it.
 	if ct.ClusterID != clusterID {
 		// 404 rather than 403: whether a container exists in a cluster the
 		// caller cannot see is not theirs to learn.
@@ -134,28 +120,14 @@ func (h *ContainerHandler) GetContainer(c fiber.Ctx) error {
 }
 
 // PerformAction handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/status.
-func (h *ContainerHandler) PerformAction(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) PerformAction(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
-	}
-
-	var req ctActionRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if !validCTActions[req.Action] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid action; must be one of: start, stop, shutdown, reboot, suspend, resume")
-	}
+	// The schema's enum is ContainerStatusActions, the same list the switch
+	// below covers, so an unknown action never reaches here.
+	action := p.String("action")
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
 	if err != nil {
@@ -163,7 +135,7 @@ func (h *ContainerHandler) PerformAction(c fiber.Ctx) error {
 	}
 
 	var upid string
-	switch req.Action {
+	switch action {
 	case "start":
 		upid, err = pxClient.StartCT(c.Context(), node.Name, int(ct.Vmid))
 	case "stop":
@@ -187,14 +159,14 @@ func (h *ContainerHandler) PerformAction(c fiber.Ctx) error {
 		ResourceType: "container",
 		ResourceID:   ct.ID.String(),
 		ResourceName: ct.Name,
-		Action:       req.Action,
+		Action:       action,
 		UPID:         upid,
-		Description:  guestActionDesc(req.Action, ct),
+		Description:  guestActionDesc(action, ct),
 		Extra:        map[string]any{"vmid": ct.Vmid},
 	})
 
 	// Watch the task in the background and update the DB when it completes.
-	watchTaskAndUpdateStatus(h.queries, h.eventPub, pxClient, node.Name, upid, ct.ID, cluster.ID, req.Action, "container")
+	watchTaskAndUpdateStatus(h.queries, h.eventPub, pxClient, node.Name, upid, ct.ID, cluster.ID, action, "container")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -203,41 +175,19 @@ func (h *ContainerHandler) PerformAction(c fiber.Ctx) error {
 }
 
 // CloneContainer handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone.
-func (h *ContainerHandler) CloneContainer(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) CloneContainer(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
-	}
-
-	var req ctCloneRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.NewID <= 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "new_id is required and must be positive")
-	}
+	clone := ctCloneParams(p)
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
 	if err != nil {
 		return err
 	}
 
-	upid, err := pxClient.CloneCT(c.Context(), node.Name, int(ct.Vmid), proxmox.CloneParams{
-		NewID:   req.NewID,
-		Name:    req.Name,
-		Target:  req.Target,
-		Full:    req.Full,
-		Storage: req.Storage,
-	})
+	upid, err := pxClient.CloneCT(c.Context(), node.Name, int(ct.Vmid), clone)
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -251,7 +201,7 @@ func (h *ContainerHandler) CloneContainer(c fiber.Ctx) error {
 		Action:       "clone",
 		UPID:         upid,
 		Description:  guestActionDesc("clone", ct),
-		Extra:        map[string]any{"vmid": ct.Vmid, "new_id": req.NewID},
+		Extra:        map[string]any{"vmid": ct.Vmid, "new_id": clone.NewID},
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "container", ct.ID.String(), "clone")
 
@@ -262,28 +212,12 @@ func (h *ContainerHandler) CloneContainer(c fiber.Ctx) error {
 }
 
 // MigrateContainer handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/migrate.
-func (h *ContainerHandler) MigrateContainer(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) MigrateContainer(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
-	}
-
-	var req ctMigrateRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Target == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "target node is required")
-	}
+	target := p.String("target")
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
 	if err != nil {
@@ -291,8 +225,8 @@ func (h *ContainerHandler) MigrateContainer(c fiber.Ctx) error {
 	}
 
 	upid, err := pxClient.MigrateCT(c.Context(), node.Name, int(ct.Vmid), proxmox.MigrateParams{
-		Target: req.Target,
-		Online: req.Online,
+		Target: target,
+		Online: p.Bool("online"),
 	})
 	if err != nil {
 		return mapProxmoxError(err)
@@ -306,8 +240,8 @@ func (h *ContainerHandler) MigrateContainer(c fiber.Ctx) error {
 		ResourceName: ct.Name,
 		Action:       "migrate",
 		UPID:         upid,
-		Description:  guestActionDesc("migrate", ct) + " → " + req.Target,
-		Extra:        map[string]any{"vmid": ct.Vmid, "target": req.Target},
+		Description:  guestActionDesc("migrate", ct) + " → " + target,
+		Extra:        map[string]any{"vmid": ct.Vmid, "target": target},
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindMigrationUpdate, "container", ct.ID.String(), "migrate")
 
@@ -319,18 +253,10 @@ func (h *ContainerHandler) MigrateContainer(c fiber.Ctx) error {
 
 // ConvertToTemplate handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/convert-to-template.
 // This converts a stopped container to a template. The operation is irreversible in Proxmox.
-func (h *ContainerHandler) ConvertToTemplate(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) ConvertToTemplate(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
 	}
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
@@ -372,41 +298,19 @@ func (h *ContainerHandler) ConvertToTemplate(c fiber.Ctx) error {
 
 // CloneToTemplate handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone-to-template.
 // This clones a container and then automatically converts the clone to a template.
-func (h *ContainerHandler) CloneToTemplate(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) CloneToTemplate(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
-	}
-
-	var req ctCloneRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.NewID <= 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "new_id is required and must be positive")
-	}
+	clone := ctCloneParams(p)
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
 	if err != nil {
 		return err
 	}
 
-	cloneUpid, err := pxClient.CloneCT(c.Context(), node.Name, int(ct.Vmid), proxmox.CloneParams{
-		NewID:   req.NewID,
-		Name:    req.Name,
-		Target:  req.Target,
-		Full:    req.Full,
-		Storage: req.Storage,
-	})
+	cloneUpid, err := pxClient.CloneCT(c.Context(), node.Name, int(ct.Vmid), clone)
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -420,16 +324,16 @@ func (h *ContainerHandler) CloneToTemplate(c fiber.Ctx) error {
 		Action:       "clone-to-template",
 		UPID:         cloneUpid,
 		Description:  guestActionDesc("clone-to-template", ct),
-		Extra:        map[string]any{"vmid": ct.Vmid, "new_id": req.NewID, "clone_to_template": true},
+		Extra:        map[string]any{"vmid": ct.Vmid, "new_id": clone.NewID, "clone_to_template": true},
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "container", ct.ID.String(), "clone-to-template")
 
 	// Background: poll clone task then convert the clone to template
 	targetNode := node.Name
-	if req.Target != "" {
-		targetNode = req.Target
+	if clone.Target != "" {
+		targetNode = clone.Target
 	}
-	go h.convertCloneToTemplate(pxClient, targetNode, req.NewID, cluster.ID.String()) //nolint:gosec // G118: intentionally detached — clone→template conversion must outlive the request (Fiber recycles the request context)
+	go h.convertCloneToTemplate(pxClient, targetNode, clone.NewID, cluster.ID.String()) //nolint:gosec // G118: intentionally detached — clone→template conversion must outlive the request (Fiber recycles the request context)
 
 	return c.JSON(vmActionResponse{
 		UPID:   cloneUpid,
@@ -480,18 +384,10 @@ func (h *ContainerHandler) convertCloneToTemplate(pxClient *proxmox.Client, node
 }
 
 // DestroyContainer handles DELETE /api/v1/clusters/:cluster_id/containers/:ct_id.
-func (h *ContainerHandler) DestroyContainer(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) DestroyContainer(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "delete", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
 	}
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
@@ -565,18 +461,10 @@ func (h *ContainerHandler) resolveCT(c fiber.Ctx, clusterID, ctID uuid.UUID) (db
 // --- Snapshot handlers ---
 
 // GetSnapshotCapability handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshot-capability.
-func (h *ContainerHandler) GetSnapshotCapability(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) GetSnapshotCapability(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
 	}
 
 	ct, node, _, pxClient, err := h.resolveCT(c, clusterID, ctID)
@@ -599,18 +487,10 @@ func (h *ContainerHandler) GetSnapshotCapability(c fiber.Ctx) error {
 }
 
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
-func (h *ContainerHandler) ListSnapshots(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) ListSnapshots(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
 	}
 
 	ct, node, _, pxClient, err := h.resolveCT(c, clusterID, ctID)
@@ -641,25 +521,18 @@ func (h *ContainerHandler) ListSnapshots(c fiber.Ctx) error {
 }
 
 // CreateSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
-func (h *ContainerHandler) CreateSnapshot(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) CreateSnapshot(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
-		return err
-	}
 
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
-	}
-
-	var req snapshotRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if err := validateSnapshotName(req.SnapName); err != nil {
+	// The schema's "pve-configid" format covers the shape; this covers the
+	// one rule that is not a shape — Proxmox reserves the name "current"
+	// for the live state, and a snapshot called that can never be rolled
+	// back to.
+	snapName := p.String("snap_name")
+	if err := validateSnapshotName(snapName); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
@@ -669,8 +542,8 @@ func (h *ContainerHandler) CreateSnapshot(c fiber.Ctx) error {
 	}
 
 	upid, err := pxClient.CreateCTSnapshot(c.Context(), node.Name, int(ct.Vmid), proxmox.SnapshotParams{
-		SnapName:    req.SnapName,
-		Description: req.Description,
+		SnapName:    snapName,
+		Description: p.String("description"),
 	})
 	if err != nil {
 		return mapProxmoxError(err)
@@ -685,7 +558,7 @@ func (h *ContainerHandler) CreateSnapshot(c fiber.Ctx) error {
 		Action:       "snapshot_create",
 		UPID:         upid,
 		Description:  guestActionDesc("snapshot_create", ct),
-		Extra:        map[string]any{"vmid": ct.Vmid, "snap_name": req.SnapName},
+		Extra:        map[string]any{"vmid": ct.Vmid, "snap_name": snapName},
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "snapshot_create")
 
@@ -696,27 +569,17 @@ func (h *ContainerHandler) CreateSnapshot(c fiber.Ctx) error {
 }
 
 // DeleteSnapshot handles DELETE /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name.
-func (h *ContainerHandler) DeleteSnapshot(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+// The permission is delete, not execute: destroying a snapshot is a
+// delete-class action, matching VMHandler.DeleteSnapshot and
+// DestroyContainer. The gate now lives in the declaration
+// (internal/api/registry_containers.go); the previous inline execute check
+// was a copy of the rollback handler's.
+func (h *ContainerHandler) DeleteSnapshot(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
 	}
-	// delete, not execute: destroying a snapshot is a delete-class action,
-	// matching VMHandler.DeleteSnapshot and DestroyContainer. The previous
-	// execute gate was a copy of the rollback handler's.
-	if err := requireClusterPerm(c, "delete", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
-	}
-
-	snapName := c.Params("snap_name")
-	if snapName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Snapshot name is required")
-	}
+	snapName := p.String("snap_name")
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
 	if err != nil {
@@ -748,24 +611,12 @@ func (h *ContainerHandler) DeleteSnapshot(c fiber.Ctx) error {
 }
 
 // RollbackSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback.
-func (h *ContainerHandler) RollbackSnapshot(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) RollbackSnapshot(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
-	}
-
-	snapName := c.Params("snap_name")
-	if snapName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Snapshot name is required")
-	}
+	snapName := p.String("snap_name")
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
 	if err != nil {
@@ -798,79 +649,49 @@ func (h *ContainerHandler) RollbackSnapshot(c fiber.Ctx) error {
 
 // --- Create Container handler ---
 
-type createCTRequest struct {
-	VMID         int               `json:"vmid"`
-	Hostname     string            `json:"hostname"`
-	Node         string            `json:"node"`
-	OSTemplate   string            `json:"ostemplate"`
-	Storage      string            `json:"storage"`
-	RootFS       string            `json:"rootfs"`
-	Memory       int               `json:"memory"`
-	Swap         int               `json:"swap"`
-	Cores        int               `json:"cores"`
-	Net0         string            `json:"net0"`
-	Password     string            `json:"password"`
-	SSHKeys      string            `json:"ssh_keys"`
-	Unprivileged bool              `json:"unprivileged"`
-	Start        bool              `json:"start"`
-	Description  string            `json:"description"`
-	Tags         string            `json:"tags"`
-	Pool         string            `json:"pool"`
-	Nameserver   string            `json:"nameserver"`
-	Searchdomain string            `json:"searchdomain"`
-	Extra        map[string]string `json:"extra"`
-}
-
 // CreateContainer handles POST /api/v1/clusters/:cluster_id/containers.
-func (h *ContainerHandler) CreateContainer(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) CreateContainer(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
+
+	// extra carries whatever Proxmox LXC config keys the schema does not
+	// name — features, cpulimit, arch, onboot — as a flat object.
+	extra, err := stringMap("extra", p.Object("extra"))
+	if err != nil {
 		return err
 	}
 
-	var req createCTRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.VMID <= 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "vmid is required and must be positive")
-	}
-	if req.Node == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node is required")
-	}
-	if req.OSTemplate == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "ostemplate is required")
-	}
+	vmid := int(p.Int("vmid"))
+	node := p.String("node")
+	hostname := p.String("hostname")
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 
-	upid, err := pxClient.CreateCT(c.Context(), req.Node, proxmox.CreateCTParams{
-		VMID:         req.VMID,
-		Hostname:     req.Hostname,
-		OSTemplate:   req.OSTemplate,
-		Storage:      req.Storage,
-		RootFS:       req.RootFS,
-		Memory:       req.Memory,
-		Swap:         req.Swap,
-		Cores:        req.Cores,
-		Net0:         req.Net0,
-		Password:     req.Password,
-		SSHKeys:      req.SSHKeys,
-		Unprivileged: req.Unprivileged,
-		Start:        req.Start,
-		Description:  req.Description,
-		Tags:         req.Tags,
-		Pool:         req.Pool,
-		Nameserver:   req.Nameserver,
-		Searchdomain: req.Searchdomain,
-		Extra:        req.Extra,
+	upid, err := pxClient.CreateCT(c.Context(), node, proxmox.CreateCTParams{
+		VMID:         vmid,
+		Hostname:     hostname,
+		OSTemplate:   p.String("ostemplate"),
+		Storage:      p.String("storage"),
+		RootFS:       p.String("rootfs"),
+		Memory:       int(p.Int("memory")),
+		Swap:         int(p.Int("swap")),
+		Cores:        int(p.Int("cores")),
+		Net0:         p.String("net0"),
+		Password:     p.String("password"),
+		SSHKeys:      p.String("ssh_keys"),
+		Unprivileged: p.Bool("unprivileged"),
+		Start:        p.Bool("start"),
+		Description:  p.String("description"),
+		Tags:         p.String("tags"),
+		Pool:         p.String("pool"),
+		Nameserver:   p.String("nameserver"),
+		Searchdomain: p.String("searchdomain"),
+		Extra:        extra,
 	})
 	if err != nil {
 		return mapProxmoxError(err)
@@ -878,16 +699,16 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx) error {
 
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
-		Node:         req.Node,
+		Node:         node,
 		ResourceType: "container",
-		ResourceID:   strconv.Itoa(req.VMID),
-		ResourceName: req.Hostname,
+		ResourceID:   strconv.Itoa(vmid),
+		ResourceName: hostname,
 		Action:       "create",
 		UPID:         upid,
-		Description:  "create CT " + strconv.Itoa(req.VMID),
-		Extra:        map[string]any{"vmid": req.VMID},
+		Description:  "create CT " + strconv.Itoa(vmid),
+		Extra:        map[string]any{"vmid": vmid},
 	})
-	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "container", strconv.Itoa(req.VMID), "create")
+	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "container", strconv.Itoa(vmid), "create")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -898,18 +719,10 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx) error {
 // --- Container Config handlers ---
 
 // GetContainerConfig handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/config.
-func (h *ContainerHandler) GetContainerConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) GetContainerConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
 	}
 
 	ct, node, _, pxClient, err := h.resolveCT(c, clusterID, ctID)
@@ -926,30 +739,10 @@ func (h *ContainerHandler) GetContainerConfig(c fiber.Ctx) error {
 }
 
 // ResizeDisk handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/disks/resize.
-func (h *ContainerHandler) ResizeDisk(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) ResizeDisk(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
-	}
-
-	var req struct {
-		Disk string `json:"disk"`
-		Size string `json:"size"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Disk == "" || req.Size == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "disk and size are required")
 	}
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
@@ -958,8 +751,8 @@ func (h *ContainerHandler) ResizeDisk(c fiber.Ctx) error {
 	}
 
 	if err := pxClient.ResizeCTDisk(c.Context(), node.Name, int(ct.Vmid), proxmox.DiskResizeParams{
-		Disk: req.Disk,
-		Size: req.Size,
+		Disk: p.String("disk"),
+		Size: p.String("size"),
 	}); err != nil {
 		return mapProxmoxError(err)
 	}
@@ -974,38 +767,26 @@ func (h *ContainerHandler) ResizeDisk(c fiber.Ctx) error {
 }
 
 // MoveVolume handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/volumes/move.
-func (h *ContainerHandler) MoveVolume(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) MoveVolume(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
-		return err
-	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
-	}
-
-	var req ctVolumeMoveRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	// Checked here rather than leaning on spec.Validate() so the message names
-	// the field this endpoint actually takes ("volume", not "disk").
-	if req.Volume == "" || req.Storage == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "volume and storage are required")
 	}
 
 	// Same spec the VM path uses; CTParams drops the format, which LXC has no
 	// concept of.
+	//
+	// Still validated here, not only in the schema: the bounds live in
+	// DiskMoveSpec, and this is the choke point every caller of MoveVolume
+	// goes through. The schema's job is that the two required fields are
+	// named in the 400 when they are missing — which is why "volume" is
+	// declared under the name this endpoint takes rather than the "disk"
+	// the spec calls it.
 	spec := proxmox.DiskMoveSpec{
-		Disk:          req.Volume,
-		TargetStorage: req.Storage,
-		DeleteSource:  req.Delete,
-		BWLimitKiB:    req.BWLimit,
+		Disk:          p.String("volume"),
+		TargetStorage: p.String("storage"),
+		DeleteSource:  p.Bool("delete"),
+		BWLimitKiB:    int(p.Int("bwlimit_kib")),
 	}
 	if err := spec.Validate(); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
@@ -1040,30 +821,22 @@ func (h *ContainerHandler) MoveVolume(c fiber.Ctx) error {
 	})
 }
 
-type setCTConfigRequest struct {
-	Fields map[string]string `json:"fields"`
-}
-
 // SetContainerConfig handles PUT /api/v1/clusters/:cluster_id/containers/:ct_id/config.
-func (h *ContainerHandler) SetContainerConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *ContainerHandler) SetContainerConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, ctID, err := containerIDs(p)
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
+
+	fields, err := stringMap("fields", p.Object("fields"))
+	if err != nil {
 		return err
 	}
-
-	ctID, err := uuid.Parse(c.Params("ct_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
-	}
-
-	var req setCTConfigRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if len(req.Fields) == 0 {
+	// The schema requires the parameter; it cannot require the object to
+	// hold anything, and a config write with nothing in it would be a
+	// no-op Proxmox round trip that still writes an audit row claiming a
+	// change.
+	if len(fields) == 0 {
 		return fiber.NewError(fiber.StatusBadRequest, "fields map is required")
 	}
 
@@ -1072,11 +845,11 @@ func (h *ContainerHandler) SetContainerConfig(c fiber.Ctx) error {
 		return err
 	}
 
-	if err := pxClient.SetContainerConfig(c.Context(), node.Name, int(ct.Vmid), req.Fields); err != nil {
+	if err := pxClient.SetContainerConfig(c.Context(), node.Name, int(ct.Vmid), fields); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	configDetails, _ := json.Marshal(map[string]interface{}{"fields": req.Fields})
+	configDetails, _ := json.Marshal(map[string]interface{}{"fields": fields})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "container", ct.ID.String(), "config_update", configDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "config_update")
 

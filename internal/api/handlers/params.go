@@ -120,3 +120,25 @@ func guestIDs(p *apischema.Params) (clusterID, guestID uuid.UUID, err error) {
 	}
 	return clusterID, guestID, nil
 }
+
+// containerIDs is guestIDs for the /containers/ routes, which spell the
+// guest's path parameter :ct_id.
+//
+// It is a separate function rather than a parameter on guestIDs because
+// registry_paramkey_guard_test.go walks a handler's callees for accessor
+// keys and checks them against THAT endpoint's schema: a shared helper
+// reading whichever of two literal keys it was told to would either read a
+// non-literal key (invisible to the guard) or read "vm_id" on a route that
+// declares "ct_id" (a guaranteed false failure). Two functions, two
+// literals, both checkable.
+func containerIDs(p *apischema.Params) (clusterID, ctID uuid.UUID, err error) {
+	clusterID, err = parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	ctID, err = parseParamUUID(p.String("ct_id"))
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	return clusterID, ctID, nil
+}
