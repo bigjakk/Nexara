@@ -63,6 +63,21 @@ func (s *Server) buildRegistry() *Registry {
 	if s.pbsHandler != nil {
 		registerPBSEndpoints(reg, s.pbsHandler)
 	}
+	// AFTER registerPBSEndpoints, so /pbs-servers and /pbs-servers/:id keep
+	// the positions they had in router.go — Fiber matches in registration
+	// order. It is gated on backupHandler alone, unlike the legacy block,
+	// which nested these 19 routes inside the pbsHandler gate as well: they
+	// are BackupHandler's, and a Server holding one handler but not the
+	// other would have silently dropped them.
+	if s.backupHandler != nil {
+		registerBackupEndpoints(reg, s.backupHandler)
+	}
+	if s.vmImportHandler != nil {
+		registerVMImportEndpoints(reg, s.vmImportHandler)
+	}
+	if s.reportHandler != nil {
+		registerReportEndpoints(reg, s.reportHandler)
+	}
 	if s.networkHandler != nil {
 		// One handler, four declaration files: see the file comment in
 		// registry_networks.go for the split.

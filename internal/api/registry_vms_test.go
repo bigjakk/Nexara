@@ -359,6 +359,8 @@ var routesOutsideTheClusterCheckShape = func() map[string]string {
 		virtioWinRoutesOutsideTheClusterCheckShape,
 		pbsRoutesOutsideTheClusterCheckShape,
 		firewallTemplateRoutesOutsideTheClusterCheckShape,
+		backupRoutesOutsideTheClusterCheckShape,
+		reportRoutesOutsideTheClusterCheckShape,
 	} {
 		maps.Copy(out, m)
 	}
@@ -395,6 +397,9 @@ var registryDomainRouteCounts = map[string]int{
 	"registerGuestToolsEndpoints":     guestToolsRouteCount,
 	"registerVirtioWinEndpoints":      virtioWinRouteCount,
 	"registerPBSEndpoints":            pbsRouteCount,
+	"registerBackupEndpoints":         backupRouteCount,
+	"registerVMImportEndpoints":       vmImportRouteCount,
+	"registerReportEndpoints":         reportRouteCount,
 	// NetworkHandler's 66 routes are declared across four files and four
 	// functions rather than one, so each group carries its own count here —
 	// see the file comment in registry_networks.go.
@@ -434,6 +439,9 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 		"registerGuestToolsEndpoints":     0,
 		"registerVirtioWinEndpoints":      0,
 		"registerPBSEndpoints":            0,
+		"registerBackupEndpoints":         0,
+		"registerVMImportEndpoints":       0,
+		"registerReportEndpoints":         0,
 
 		"registerNetworkInterfaceEndpoints": 0,
 		"registerFirewallEndpoints":         0,
@@ -497,6 +505,18 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	before = reg.Len()
 	registerPBSEndpoints(reg, s.pbsHandler)
 	declared["registerPBSEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerBackupEndpoints(reg, s.backupHandler)
+	declared["registerBackupEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerVMImportEndpoints(reg, s.vmImportHandler)
+	declared["registerVMImportEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerReportEndpoints(reg, s.reportHandler)
+	declared["registerReportEndpoints"] = reg.Len() - before
 
 	before = reg.Len()
 	registerNetworkInterfaceEndpoints(reg, s.networkHandler)

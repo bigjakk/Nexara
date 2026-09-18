@@ -10,8 +10,53 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-func intPtr(v int) *int       { return &v }
-func strPtr(v string) *string { return &v }
+// TestPBSMetricsTimeframesCoverTheWindowTable holds the exported enum and
+// the window table together, the way TestCephMetricsTimeframesCoverTheTable
+// does for Ceph.
+//
+// PBSMetricsTimeframes is what the endpoint declaration in
+// internal/api/registry_backup.go validates ?timeframe= against, and
+// datastoreMetricsTimeframes is what datastoreMetricsWindow looks the value
+// up in. Two lists, one vocabulary: a timeframe added to the table but not
+// the slice is unreachable through the API, and one added to the slice but
+// not the table passes validation and then silently serves the fallback
+// window. Both directions fail here.
+//
+// "latest" is the one member with no window on purpose — it selects the
+// most recent sample per datastore rather than a history range — so it is
+// excluded from the first direction and required to be absent from the
+// second.
+func TestPBSMetricsTimeframesCoverTheWindowTable(t *testing.T) {
+	for _, tf := range PBSMetricsTimeframes {
+		if tf == PBSMetricsLatestTimeframe {
+			continue
+		}
+		if _, ok := datastoreMetricsTimeframes[tf]; !ok {
+			t.Errorf("PBSMetricsTimeframes offers %q, but datastoreMetricsTimeframes has no window for it — "+
+				"the schema would accept it and datastoreMetricsWindow would silently serve the fallback", tf)
+		}
+	}
+	for tf := range datastoreMetricsTimeframes {
+		if !slices.Contains(PBSMetricsTimeframes, tf) {
+			t.Errorf("datastoreMetricsTimeframes defines a window for %q, but PBSMetricsTimeframes does not "+
+				"offer it — the schema's enum makes it unreachable", tf)
+		}
+	}
+	if _, wrong := datastoreMetricsTimeframes[PBSMetricsLatestTimeframe]; wrong {
+		t.Errorf("datastoreMetricsTimeframes defines a window for %q, which is the latest-sample mode and "+
+			"must not be a history window", PBSMetricsLatestTimeframe)
+	}
+	if !slices.Contains(PBSMetricsTimeframes, PBSMetricsLatestTimeframe) {
+		t.Errorf("the endpoint default %q is not in PBSMetricsTimeframes, so the declaration's Default "+
+			"would fail its own enum", PBSMetricsLatestTimeframe)
+	}
+	// The fallback datastoreMetricsWindow applies to an unrecognised value is
+	// still a real window, even though the enum now makes it unreachable from
+	// a request: the function is called with stored values elsewhere.
+	if _, ok := datastoreMetricsTimeframes[datastoreMetricsDefaultTimeframe]; !ok {
+		t.Errorf("the fallback timeframe %q is not in the window table", datastoreMetricsDefaultTimeframe)
+	}
+}
 
 func TestBackupJobRequestSelectionKeys(t *testing.T) {
 	tests := []struct {

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -74,12 +75,6 @@ func (h *VMImportHandler) resolveNode(c fiber.Ctx, clusterID uuid.UUID, nodeName
 
 // --- import-metadata -------------------------------------------------------------------
 
-type importMetadataRequest struct {
-	Node    string `json:"node"`
-	Storage string `json:"storage"`
-	Volume  string `json:"volume"`
-}
-
 type importMetadataResponse struct {
 	Type       string                        `json:"type"`
 	Source     string                        `json:"source"`
@@ -96,26 +91,17 @@ type importMetadataResponse struct {
 // GetImportMetadata handles POST /api/v1/clusters/:cluster_id/import-metadata. It parses an
 // importable OVA/OVF/ESXi guest and returns the pre-filled guest definition for the wizard.
 // POST (not GET) is used so the slash/colon-laden source volid travels in the JSON body.
-func (h *VMImportHandler) GetImportMetadata(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) GetImportMetadata(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "vm_import", clusterID); err != nil {
-		return err
-	}
-	var req importMetadataRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Storage == "" || req.Volume == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "storage and volume are required")
-	}
-	_, _, pxClient, err := h.resolveNode(c, clusterID, req.Node)
+	node, storage, volume := p.String("node"), p.String("storage"), p.String("volume")
+	_, _, pxClient, err := h.resolveNode(c, clusterID, node)
 	if err != nil {
 		return err
 	}
-	meta, err := pxClient.GetImportMetadata(c.Context(), req.Node, req.Storage, req.Volume)
+	meta, err := pxClient.GetImportMetadata(c.Context(), node, storage, volume)
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -148,22 +134,16 @@ func (h *VMImportHandler) GetImportMetadata(c fiber.Ctx) error {
 // (DownloadURL) — rather than the lower manage:vm_import, which must not gain a node-side
 // URL-fetch capability it otherwise lacks. The browser-upload leg (no node-side fetch) is
 // what remains available to manage:vm_import holders.
-func (h *VMImportHandler) QueryURLMetadata(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) QueryURLMetadata(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
-		return err
-	}
-	rawURL := c.Query("url")
-	if rawURL == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "url is required")
-	}
+	rawURL := p.String("url")
 	if !isHTTPURL(rawURL) {
 		return fiber.NewError(fiber.StatusBadRequest, "url must be an http or https URL")
 	}
-	nodeName, err := h.pickImportNode(c, clusterID, c.Query("node"))
+	nodeName, err := h.pickImportNode(c, clusterID, p.String("node"))
 	if err != nil {
 		return err
 	}
@@ -244,12 +224,9 @@ type importSourceEntry struct {
 // from the *live* Proxmox storage config rather than Nexara's periodically-synced inventory
 // — so a shared storage appears once (not once per node) and a just-registered ESXi source
 // shows up immediately. Each entry carries an online node from which to browse it.
-func (h *VMImportHandler) ListImportSources(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) ListImportSources(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "vm_import", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, importClientTimeout)
@@ -358,19 +335,13 @@ type importSourceContentResponse struct {
 // the given storage as seen from the given node. The node is one that ListImportSources
 // already resolved to be online, which is what lets a shared source be browsed even when its
 // inventory-owning node is down.
-func (h *VMImportHandler) ListImportContent(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) ListImportContent(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "vm_import", clusterID); err != nil {
-		return err
-	}
-	storage := c.Query("storage")
-	nodeName := c.Query("node")
-	if storage == "" || nodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "storage and node are required")
-	}
+	storage := p.String("storage")
+	nodeName := p.String("node")
 	node, err := h.queries.GetNodeByClusterAndName(c.Context(), db.GetNodeByClusterAndNameParams{
 		ClusterID: clusterID,
 		Name:      nodeName,
@@ -402,82 +373,117 @@ func (h *VMImportHandler) ListImportContent(c fiber.Ctx) error {
 // --- start import ----------------------------------------------------------------------
 
 type startImportRequest struct {
-	Node              string `json:"node"`               // node that can see the source volume
-	Storage           string `json:"storage"`            // source storage name
-	Volume            string `json:"volume"`             // source volid
-	SourceFormat      string `json:"source_format"`      // ova|ovf|vmdk|raw|esxi
-	SourceAcquisition string `json:"source_acquisition"` // staged|url|esxi|upload
-	TargetNode        string `json:"target_node"`
-	TargetStorage     string `json:"target_storage"`
-	WorkingStorage    string `json:"working_storage"`
-	Bridge            string `json:"bridge"`
-	VMID              int    `json:"vmid"` // 0 → auto-allocate via /cluster/nextid
-	Name              string `json:"name"`
-	DiskFormat        string `json:"disk_format"`
-	StartAfter        bool   `json:"start_after"`
-	LiveImport        bool   `json:"live_import"`
+	Node              string // node that can see the source volume
+	Storage           string // source storage name
+	Volume            string // source volid
+	SourceFormat      string // ova|ovf|vmdk|raw|esxi
+	SourceAcquisition string // staged|url|esxi|upload
+	TargetNode        string
+	TargetStorage     string
+	WorkingStorage    string
+	Bridge            string
+	VMID              int // 0 → auto-allocate via /cluster/nextid
+	Name              string
+	DiskFormat        string
+	StartAfter        bool
+	LiveImport        bool
 
 	// Guest-config overrides (empty/zero = keep the source-derived value). These give the
 	// import wizard the same knobs as Create VM, minus adding hardware.
-	Cores       int    `json:"cores"`
-	Sockets     int    `json:"sockets"`
-	Memory      int    `json:"memory"` // MiB
-	CPUType     string `json:"cpu_type"`
-	OSType      string `json:"os_type"`
-	BIOS        string `json:"bios"`
-	Machine     string `json:"machine"`
-	ScsiHW      string `json:"scsihw"`
-	Pool        string `json:"pool"`
-	Tags        string `json:"tags"`
-	Description string `json:"description"`
-	OnBoot      *bool  `json:"onboot"`
-	Agent       *bool  `json:"agent"`
-	Numa        *bool  `json:"numa"`
+	Cores       int
+	Sockets     int
+	Memory      int // MiB
+	CPUType     string
+	OSType      string
+	BIOS        string
+	Machine     string
+	ScsiHW      string
+	Pool        string
+	Tags        string
+	Description string
+	OnBoot      *bool
+	Agent       *bool
+	Numa        *bool
 
 	// Network options for the synthesised net0 (applied only when Bridge is set).
-	NetModel   string `json:"net_model"`
-	VLANTag    int    `json:"vlan_tag"`
-	Firewall   *bool  `json:"firewall"`
-	MACAddress string `json:"mac_address"`
-	RateLimit  string `json:"rate_limit"`
-	MTU        int    `json:"mtu"`
-	Multiqueue int    `json:"multiqueue"`
+	NetModel   string
+	VLANTag    int
+	Firewall   *bool
+	MACAddress string
+	RateLimit  string
+	MTU        int
+	Multiqueue int
+}
+
+// startImportRequestFromParams reads the import body.
+//
+// The three *bool fields stay pointers because proxmox.ImportCreateOptions
+// sends the corresponding Proxmox key only when one is non-nil: omitting
+// onboot, agent or numa means "keep whatever the source metadata derived",
+// which is different from sending it as false. They are declared optional
+// with no default so OptBool reports which of the two the caller meant.
+func startImportRequestFromParams(p *apischema.Params) startImportRequest {
+	return startImportRequest{
+		Node:              p.String("node"),
+		Storage:           p.String("storage"),
+		Volume:            p.String("volume"),
+		SourceFormat:      p.String("source_format"),
+		SourceAcquisition: p.String("source_acquisition"),
+		TargetNode:        p.String("target_node"),
+		TargetStorage:     p.String("target_storage"),
+		WorkingStorage:    p.String("working_storage"),
+		Bridge:            p.String("bridge"),
+		VMID:              int(p.Int("vmid")),
+		Name:              p.String("name"),
+		DiskFormat:        p.String("disk_format"),
+		StartAfter:        p.Bool("start_after"),
+		LiveImport:        p.Bool("live_import"),
+
+		Cores:       int(p.Int("cores")),
+		Sockets:     int(p.Int("sockets")),
+		Memory:      int(p.Int("memory")),
+		CPUType:     p.String("cpu_type"),
+		OSType:      p.String("os_type"),
+		BIOS:        p.String("bios"),
+		Machine:     p.String("machine"),
+		ScsiHW:      p.String("scsihw"),
+		Pool:        p.String("pool"),
+		Tags:        p.String("tags"),
+		Description: p.String("description"),
+		OnBoot:      optBoolPtr(p.OptBool("onboot")),
+		Agent:       optBoolPtr(p.OptBool("agent")),
+		Numa:        optBoolPtr(p.OptBool("numa")),
+
+		NetModel:   p.String("net_model"),
+		VLANTag:    int(p.Int("vlan_tag")),
+		Firewall:   optBoolPtr(p.OptBool("firewall")),
+		MACAddress: p.String("mac_address"),
+		RateLimit:  p.String("rate_limit"),
+		MTU:        int(p.Int("mtu")),
+		Multiqueue: int(p.Int("multiqueue")),
+	}
 }
 
 // StartVMImport handles POST /api/v1/clusters/:cluster_id/vm-imports. It records an import
 // job, dispatches the create-with-import-from call against the chosen target node, tracks
 // the resulting Proxmox task, and returns the job. The disk conversion proceeds async and
 // is reconciled to a terminal status by the scheduler.
-func (h *VMImportHandler) StartVMImport(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) StartVMImport(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm_import", clusterID); err != nil {
-		return err
-	}
-	var req startImportRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Storage == "" || req.Volume == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "storage and volume are required")
-	}
-	if req.TargetNode == "" || req.TargetStorage == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "target_node and target_storage are required")
-	}
+	req := startImportRequestFromParams(p)
+	// The enum on source_acquisition accepts the empty string, which has
+	// always meant "staged"; this is the normalisation, not the check.
 	acquisition := req.SourceAcquisition
-	switch acquisition {
-	case "", "staged":
+	if acquisition == "" {
 		acquisition = "staged"
-	case "url", "esxi", "upload":
-	default:
-		return fiber.NewError(fiber.StatusBadRequest, "invalid source_acquisition")
 	}
 	// A VMID of 0 means auto-allocate; any explicit value must be in Proxmox's valid range
-	// (100–999999999). Reject early with a clear message rather than letting PVE fail the
-	// create task after the wizard has been completed.
-	if req.VMID != 0 && (req.VMID < 100 || req.VMID > 999999999) {
+	// (100–999999999). The schema bounds the upper end and 0; the 1–99 gap is the part a
+	// single numeric range cannot express, so it stays here.
+	if req.VMID != 0 && req.VMID < 100 {
 		return fiber.NewError(fiber.StatusBadRequest, "vmid must be between 100 and 999999999")
 	}
 
@@ -629,26 +635,15 @@ func (h *VMImportHandler) validateTargetNode(c fiber.Ctx, clusterID uuid.UUID, s
 // --- list / get ------------------------------------------------------------------------
 
 // ListVMImports handles GET /api/v1/clusters/:cluster_id/vm-imports.
-func (h *VMImportHandler) ListVMImports(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) ListVMImports(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "vm_import", clusterID); err != nil {
-		return err
-	}
-	limit := 100
-	if v, convErr := strconv.Atoi(c.Query("limit")); convErr == nil && v > 0 && v <= 500 {
-		limit = v
-	}
-	offset := 0
-	if v, convErr := strconv.Atoi(c.Query("offset")); convErr == nil && v > 0 {
-		offset = v
-	}
 	jobs, err := h.queries.ListVMImportJobsByCluster(c.Context(), db.ListVMImportJobsByClusterParams{
 		ClusterID: clusterID,
-		Limit:     safeconv.Int32(limit),
-		Offset:    safeconv.Int32(offset),
+		Limit:     safeconv.Int32(int(p.Int("limit"))),
+		Offset:    safeconv.Int32(int(p.Int("offset"))),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list import jobs")
@@ -661,15 +656,12 @@ func (h *VMImportHandler) ListVMImports(c fiber.Ctx) error {
 }
 
 // GetVMImport handles GET /api/v1/clusters/:cluster_id/vm-imports/:id.
-func (h *VMImportHandler) GetVMImport(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) GetVMImport(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "vm_import", clusterID); err != nil {
-		return err
-	}
-	job, err := h.getJobForCluster(c, clusterID)
+	job, err := h.getJobForCluster(c, p, clusterID)
 	if err != nil {
 		return err
 	}
@@ -678,30 +670,22 @@ func (h *VMImportHandler) GetVMImport(c fiber.Ctx) error {
 
 // --- cancel ----------------------------------------------------------------------------
 
-type cancelImportRequest struct {
-	DeleteVM bool `json:"delete_vm"`
-}
-
 // CancelVMImport handles POST /api/v1/clusters/:cluster_id/vm-imports/:id/cancel. It
 // best-effort stops the running create task and, when delete_vm is set, destroys the
 // partially-created VM, then marks the job cancelled.
-func (h *VMImportHandler) CancelVMImport(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) CancelVMImport(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm_import", clusterID); err != nil {
-		return err
-	}
-	job, err := h.getJobForCluster(c, clusterID)
+	job, err := h.getJobForCluster(c, p, clusterID)
 	if err != nil {
 		return err
 	}
 	if job.Status != "pending" && job.Status != "running" {
 		return fiber.NewError(fiber.StatusBadRequest, "import is not in a cancellable state")
 	}
-	var req cancelImportRequest
-	_ = c.Bind().Body(&req)
+	deleteVM := p.Bool("delete_vm")
 
 	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
 	if err != nil {
@@ -718,7 +702,7 @@ func (h *VMImportHandler) CancelVMImport(c fiber.Ctx) error {
 	}
 
 	// Optional cleanup of the partially-created guest.
-	if req.DeleteVM && job.TargetVmid > 0 {
+	if deleteVM && job.TargetVmid > 0 {
 		if upid, destroyErr := pxClient.DestroyVM(c.Context(), job.TargetNode, int(job.TargetVmid)); destroyErr == nil {
 			TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 				ClusterID:    cluster.ID,
@@ -737,7 +721,7 @@ func (h *VMImportHandler) CancelVMImport(c fiber.Ctx) error {
 	if err := h.queries.CancelVMImportJob(c.Context(), job.ID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to cancel import job")
 	}
-	details, _ := json.Marshal(map[string]any{"job_id": job.ID.String(), "vmid": job.TargetVmid, "delete_vm": req.DeleteVM})
+	details, _ := json.Marshal(map[string]any{"job_id": job.ID.String(), "vmid": job.TargetVmid, "delete_vm": deleteVM})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm_import", job.ID.String(), "cancel", details)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMImport, "vm_import", job.ID.String(), "cancelled")
 
@@ -748,32 +732,34 @@ func (h *VMImportHandler) CancelVMImport(c fiber.Ctx) error {
 // --- ESXi source registration ----------------------------------------------------------
 
 type esxiSourceRequest struct {
-	Storage              string `json:"storage"` // storage id to create (e.g. "esxi-prod")
-	Server               string `json:"server"`
-	Username             string `json:"username"`
-	Password             string `json:"password"`
-	SkipCertVerification bool   `json:"skip_cert_verification"`
-	Nodes                string `json:"nodes"` // optional comma-separated node restriction
+	Storage              string // storage id to create (e.g. "esxi-prod")
+	Server               string
+	Username             string
+	Password             string
+	SkipCertVerification bool
+	Nodes                string // optional comma-separated node restriction
+}
+
+func esxiSourceRequestFromParams(p *apischema.Params) esxiSourceRequest {
+	return esxiSourceRequest{
+		Storage:              p.String("storage"),
+		Server:               p.String("server"),
+		Username:             p.String("username"),
+		Password:             p.String("password"),
+		SkipCertVerification: p.Bool("skip_cert_verification"),
+		Nodes:                p.String("nodes"),
+	}
 }
 
 // RegisterEsxiSource handles POST /api/v1/clusters/:cluster_id/vm-import-sources/esxi. It
 // registers an ESXi/vCenter host as an "import"-content storage so its guests become
 // importable. Credentials are stored by Proxmox under /etc/pve/priv; we never log them.
-func (h *VMImportHandler) RegisterEsxiSource(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) RegisterEsxiSource(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm_import", clusterID); err != nil {
-		return err
-	}
-	var req esxiSourceRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Storage == "" || req.Server == "" || req.Username == "" || req.Password == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "storage, server, username and password are required")
-	}
+	req := esxiSourceRequestFromParams(p)
 
 	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
 	if err != nil {
@@ -801,18 +787,12 @@ func (h *VMImportHandler) RegisterEsxiSource(c fiber.Ctx) error {
 // the *live* storage config so a just-registered ESXi source (not yet in inventory) can be
 // removed, and so a role holding only manage:vm_import cannot delete arbitrary production
 // storage — that still requires manage:storage via the storage management endpoint.
-func (h *VMImportHandler) DeleteImportSource(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) DeleteImportSource(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "vm_import", clusterID); err != nil {
-		return err
-	}
-	storageName := c.Params("storage")
-	if storageName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "storage is required")
-	}
+	storageName := p.String("storage")
 	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
@@ -839,30 +819,17 @@ func (h *VMImportHandler) DeleteImportSource(c fiber.Ctx) error {
 
 // --- enable import content -------------------------------------------------------------
 
-type enableImportContentRequest struct {
-	Storage string `json:"storage"`
-}
-
 // EnableImportContent handles POST /api/v1/clusters/:cluster_id/vm-import-sources/enable-content.
 // It adds the "import" content type to an existing file-based storage by MERGING it into the
 // storage's current content list (never replacing it), so a fresh cluster can be made
 // import-capable straight from the wizard. Requires manage:storage — changing what a storage
 // is used for is a storage-management action, not something manage:vm_import alone permits.
-func (h *VMImportHandler) EnableImportContent(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *VMImportHandler) EnableImportContent(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
-		return err
-	}
-	var req enableImportContentRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Storage == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "storage is required")
-	}
+	storage := p.String("storage")
 	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
@@ -871,23 +838,23 @@ func (h *VMImportHandler) EnableImportContent(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := pxClient.GetStorageConfig(c.Context(), req.Storage)
+	cfg, err := pxClient.GetStorageConfig(c.Context(), storage)
 	if err != nil {
 		return mapProxmoxError(err)
 	}
 	if storageHasContent(cfg.Content, "import") {
-		return c.JSON(fiber.Map{"status": "unchanged", "storage": req.Storage, "content": cfg.Content})
+		return c.JSON(fiber.Map{"status": "unchanged", "storage": storage, "content": cfg.Content})
 	}
 	merged := mergeContent(cfg.Content, "import")
 	form := url.Values{}
 	form.Set("content", merged)
-	if err := pxClient.UpdateStorage(c.Context(), req.Storage, form); err != nil {
+	if err := pxClient.UpdateStorage(c.Context(), storage, form); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"storage": req.Storage, "content": merged})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", req.Storage, "enable_import_content", details)
-	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "storage", req.Storage, "update")
-	return c.JSON(fiber.Map{"status": "updated", "storage": req.Storage, "content": merged})
+	details, _ := json.Marshal(map[string]any{"storage": storage, "content": merged})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", storage, "enable_import_content", details)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "storage", storage, "update")
+	return c.JSON(fiber.Map{"status": "updated", "storage": storage, "content": merged})
 }
 
 // mergeContent appends want to a comma-separated PVE content list if absent, preserving the
@@ -906,11 +873,11 @@ func mergeContent(content, want string) string {
 
 // --- helpers ---------------------------------------------------------------------------
 
-func (h *VMImportHandler) getJobForCluster(c fiber.Ctx, clusterID uuid.UUID) (db.VmImportJob, error) {
+func (h *VMImportHandler) getJobForCluster(c fiber.Ctx, p *apischema.Params, clusterID uuid.UUID) (db.VmImportJob, error) {
 	var zero db.VmImportJob
-	id, err := uuid.Parse(c.Params("id"))
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid import job ID")
+		return zero, err
 	}
 	job, err := h.queries.GetVMImportJob(c.Context(), id)
 	if err != nil {

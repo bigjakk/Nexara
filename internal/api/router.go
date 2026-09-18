@@ -151,19 +151,9 @@ func (s *Server) setupRoutes() {
 		// internal/api/registry_virtio_win.go alongside the 3 instance-wide
 		// ones and mounted by mountRegistry above, so there is no block for
 		// them here.
-		if s.vmImportHandler != nil {
-			clusters.Post("/:cluster_id/import-metadata", s.vmImportHandler.GetImportMetadata)
-			clusters.Get("/:cluster_id/query-url-metadata", s.vmImportHandler.QueryURLMetadata)
-			clusters.Get("/:cluster_id/vm-import-sources", s.vmImportHandler.ListImportSources)
-			clusters.Get("/:cluster_id/vm-import-sources/content", s.vmImportHandler.ListImportContent)
-			clusters.Post("/:cluster_id/vm-import-sources/esxi", s.vmImportHandler.RegisterEsxiSource)
-			clusters.Post("/:cluster_id/vm-import-sources/enable-content", s.vmImportHandler.EnableImportContent)
-			clusters.Delete("/:cluster_id/vm-import-sources/:storage", s.vmImportHandler.DeleteImportSource)
-			clusters.Get("/:cluster_id/vm-imports", s.vmImportHandler.ListVMImports)
-			clusters.Post("/:cluster_id/vm-imports", s.vmImportHandler.StartVMImport)
-			clusters.Get("/:cluster_id/vm-imports/:id", s.vmImportHandler.GetVMImport)
-			clusters.Post("/:cluster_id/vm-imports/:id/cancel", s.vmImportHandler.CancelVMImport)
-		}
+		// The 11 VM-import routes are declared in
+		// internal/api/registry_vm_import.go and mounted by mountRegistry
+		// above, so there is no block for them here.
 		if s.metricsHandler != nil {
 			clusters.Get("/:cluster_id/metrics", s.metricsHandler.GetClusterHistorical)
 			clusters.Get("/:cluster_id/vms/:vm_id/metrics", s.metricsHandler.GetVMHistorical)
@@ -206,16 +196,10 @@ func (s *Server) setupRoutes() {
 		// migration routes and mounted by mountRegistry above, so there is
 		// no block for it here.
 
-		// Restore and backup job routes under clusters.
-		if s.backupHandler != nil {
-			clusters.Post("/:cluster_id/restore", s.backupHandler.RestoreBackup)
-			clusters.Post("/:cluster_id/backup", s.backupHandler.TriggerBackup)
-			clusters.Get("/:cluster_id/backup-jobs", s.backupHandler.ListBackupJobs)
-			clusters.Post("/:cluster_id/backup-jobs", s.backupHandler.CreateBackupJob)
-			clusters.Put("/:cluster_id/backup-jobs/:job_id", s.backupHandler.UpdateBackupJob)
-			clusters.Delete("/:cluster_id/backup-jobs/:job_id", s.backupHandler.DeleteBackupJob)
-			clusters.Post("/:cluster_id/backup-jobs/:job_id/run", s.backupHandler.RunBackupJob)
-		}
+		// The 7 cluster-scoped restore and backup-job routes are declared in
+		// internal/api/registry_backup.go alongside the 19 PBS ones and the 2
+		// instance-wide listings, and mounted by mountRegistry above, so there
+		// is no block for them here.
 
 		// Schedule routes.
 		if s.scheduleHandler != nil {
@@ -406,55 +390,16 @@ func (s *Server) setupRoutes() {
 		dlq.Delete("/:id", s.notificationDLQHandler.Delete)
 	}
 
-	// Report routes.
-	if s.reportHandler != nil {
-		rpts := v1.Group("/reports", s.authRequired())
-		rpts.Get("/schedules", s.reportHandler.ListSchedules)
-		rpts.Post("/schedules", s.reportHandler.CreateSchedule)
-		rpts.Get("/schedules/:id", s.reportHandler.GetSchedule)
-		rpts.Put("/schedules/:id", s.reportHandler.UpdateSchedule)
-		rpts.Delete("/schedules/:id", s.reportHandler.DeleteSchedule)
-		rpts.Post("/generate", s.reportHandler.GenerateReport)
-		rpts.Get("/runs", s.reportHandler.ListRuns)
-		rpts.Get("/runs/:id", s.reportHandler.GetRun)
-		rpts.Get("/runs/:id/html", s.reportHandler.GetRunHTML)
-		rpts.Get("/runs/:id/csv", s.reportHandler.GetRunCSV)
-		rpts.Delete("/runs/:id", s.reportHandler.DeleteRun)
-		rpts.Post("/runs/:id/email", s.reportHandler.EmailRun)
-	}
+	// The 12 report routes are declared in
+	// internal/api/registry_reports.go and mounted by mountRegistry above,
+	// so there is no group for them here.
 
 	// PBS server routes.
 	//
 	// The 6 PBSHandler routes are declared in internal/api/registry_pbs.go
-	// and mounted by mountRegistry above. The group survives for the 19
-	// backup routes nested under it, which gate through
-	// BackupHandler.requirePBSPerm and are not migrated.
-	if s.pbsHandler != nil {
-		pbs := v1.Group("/pbs-servers", s.authRequired())
-
-		// Backup management routes nested under PBS servers.
-		if s.backupHandler != nil {
-			pbs.Get("/:pbs_id/datastores", s.backupHandler.ListDatastores)
-			pbs.Get("/:pbs_id/datastores/status", s.backupHandler.GetDatastoreStatus)
-			pbs.Post("/:pbs_id/datastores/:store/gc", s.backupHandler.TriggerGC)
-			pbs.Delete("/:pbs_id/datastores/:store/snapshots", s.backupHandler.DeleteSnapshot)
-			pbs.Put("/:pbs_id/datastores/:store/snapshots/protect", s.backupHandler.ProtectSnapshot)
-			pbs.Put("/:pbs_id/datastores/:store/snapshots/notes", s.backupHandler.UpdateSnapshotNotes)
-			pbs.Post("/:pbs_id/datastores/:store/prune", s.backupHandler.PruneDatastore)
-			pbs.Get("/:pbs_id/datastores/:store/rrd", s.backupHandler.GetDatastoreRRD)
-			pbs.Get("/:pbs_id/datastores/:store/config", s.backupHandler.GetDatastoreConfig)
-			pbs.Get("/:pbs_id/snapshots", s.backupHandler.ListSnapshots)
-			pbs.Get("/:pbs_id/sync-jobs", s.backupHandler.ListSyncJobs)
-			pbs.Post("/:pbs_id/sync-jobs/:job_id/run", s.backupHandler.RunSyncJob)
-			pbs.Get("/:pbs_id/prune-jobs", s.backupHandler.ListPruneJobs)
-			pbs.Get("/:pbs_id/verify-jobs", s.backupHandler.ListVerifyJobs)
-			pbs.Post("/:pbs_id/verify-jobs/:job_id/run", s.backupHandler.RunVerifyJob)
-			pbs.Get("/:pbs_id/tasks", s.backupHandler.ListTasks)
-			pbs.Get("/:pbs_id/tasks/:upid", s.backupHandler.GetTaskStatus)
-			pbs.Get("/:pbs_id/tasks/:upid/log", s.backupHandler.GetTaskLog)
-			pbs.Get("/:pbs_id/metrics", s.backupHandler.GetDatastoreMetrics)
-		}
-	}
+	// and the 19 BackupHandler routes nested under /pbs-servers/:pbs_id in
+	// internal/api/registry_backup.go. Both are mounted by mountRegistry
+	// above, so there is no group for them here.
 
 	// Veeam Backup & Replication server routes.
 	//
@@ -542,11 +487,9 @@ func (s *Server) setupRoutes() {
 		vbr.Get("/:id/sessions/:session_id/tasks", veeamControl, s.veeamHandler.GetSessionTasks)
 	}
 
-	// PBS snapshot lookup (cross-server, by backup_id / VMID).
-	if s.backupHandler != nil {
-		v1.Get("/pbs-snapshots", s.authRequired(), s.backupHandler.ListSnapshotsByBackupID)
-		v1.Get("/backup-coverage", s.authRequired(), s.backupHandler.GetBackupCoverage)
-	}
+	// The instance-wide PBS snapshot lookup and the backup-coverage report
+	// are declared in internal/api/registry_backup.go and mounted by
+	// mountRegistry above, so there is no block for them here.
 
 	// Audit log routes.
 	if s.auditHandler != nil {

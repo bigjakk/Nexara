@@ -110,8 +110,11 @@ func newListScopeTestApp(t *testing.T) *fiber.App {
 	// gate this test is about runs before either is consulted, so an
 	// all-defaults Params is the honest stand-in for the request.
 	app.Get("/migrations", withParams(t, migrationListMirror(t), migrations.List))
-	app.Get("/report-schedules", reports.ListSchedules)
-	app.Get("/report-runs", reports.ListRuns)
+	// The two report listings are registry endpoints now. Neither declares a
+	// parameter — the page size is a constant in the handler — so an empty
+	// schema is the whole of their declaration rather than a mirror of it.
+	app.Get("/report-schedules", withParams(t, apischema.Properties{}, reports.ListSchedules))
+	app.Get("/report-runs", withParams(t, apischema.Properties{}, reports.ListRuns))
 	return app
 }
 

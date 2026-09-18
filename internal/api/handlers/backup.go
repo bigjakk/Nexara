@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/backupcoverage"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -76,12 +77,12 @@ func (h *BackupHandler) createPBSClient(c fiber.Ctx, pbsServerID uuid.UUID) (*pr
 	return client, nil
 }
 
-func parsePBSID(c fiber.Ctx) (uuid.UUID, error) {
-	id, err := uuid.Parse(c.Params("pbs_id"))
-	if err != nil {
-		return uuid.Nil, fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
-	}
-	return id, nil
+// pbsIDFromParams reads the :pbs_id path parameter. The uuid format on the
+// declaration has already refused anything that is not one, so a parse
+// failure here is a defect in the schema rather than a caller mistake —
+// which is exactly the split parseParamUUID encodes (500, not 400).
+func pbsIDFromParams(p *apischema.Params) (uuid.UUID, error) {
+	return parseParamUUID(p.String("pbs_id"))
 }
 
 // requirePBSPerm gates an operation on a PBS server. If the PBS server is
@@ -116,8 +117,8 @@ func (h *BackupHandler) requirePBSPerm(c fiber.Ctx, pbsID uuid.UUID, action stri
 // --- Live proxy endpoints ---
 
 // ListDatastores handles GET /api/v1/pbs-servers/:pbs_id/datastores
-func (h *BackupHandler) ListDatastores(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) ListDatastores(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -139,8 +140,8 @@ func (h *BackupHandler) ListDatastores(c fiber.Ctx) error {
 }
 
 // GetDatastoreStatus handles GET /api/v1/pbs-servers/:pbs_id/datastores/status
-func (h *BackupHandler) GetDatastoreStatus(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) GetDatastoreStatus(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -163,8 +164,8 @@ func (h *BackupHandler) GetDatastoreStatus(c fiber.Ctx) error {
 }
 
 // TriggerGC handles POST /api/v1/pbs-servers/:pbs_id/datastores/:store/gc
-func (h *BackupHandler) TriggerGC(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) TriggerGC(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -173,10 +174,7 @@ func (h *BackupHandler) TriggerGC(c fiber.Ctx) error {
 		return err
 	}
 
-	store := c.Params("store")
-	if store == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Datastore name is required")
-	}
+	store := p.String("store")
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -194,15 +192,29 @@ func (h *BackupHandler) TriggerGC(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"upid": upid})
 }
 
-type deleteSnapshotRequest struct {
-	BackupType string `json:"backup_type"`
-	BackupID   string `json:"backup_id"`
-	BackupTime int64  `json:"backup_time"`
+// snapshotRef is the (type, id, time) triple that names one PBS snapshot.
+// All three snapshot routes take it, and all three refused an empty type,
+// an empty id or a zero time with one combined message. The declarations
+// state the same rule a field at a time — MinLength on the two strings, a
+// Minimum of 1 on the timestamp — so the rejection now names which of the
+// three is wrong.
+type snapshotRef struct {
+	BackupType string
+	BackupID   string
+	BackupTime int64
+}
+
+func snapshotRefFromParams(p *apischema.Params) snapshotRef {
+	return snapshotRef{
+		BackupType: p.String("backup_type"),
+		BackupID:   p.String("backup_id"),
+		BackupTime: p.Int("backup_time"),
+	}
 }
 
 // DeleteSnapshot handles DELETE /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots
-func (h *BackupHandler) DeleteSnapshot(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) DeleteSnapshot(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -211,18 +223,8 @@ func (h *BackupHandler) DeleteSnapshot(c fiber.Ctx) error {
 		return err
 	}
 
-	store := c.Params("store")
-	if store == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Datastore name is required")
-	}
-
-	var req deleteSnapshotRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.BackupType == "" || req.BackupID == "" || req.BackupTime == 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "backup_type, backup_id, and backup_time are required")
-	}
+	store := p.String("store")
+	req := snapshotRefFromParams(p)
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -246,15 +248,13 @@ func (h *BackupHandler) DeleteSnapshot(c fiber.Ctx) error {
 }
 
 type protectSnapshotRequest struct {
-	BackupType string `json:"backup_type"`
-	BackupID   string `json:"backup_id"`
-	BackupTime int64  `json:"backup_time"`
-	Protected  bool   `json:"protected"`
+	snapshotRef
+	Protected bool
 }
 
 // ProtectSnapshot handles PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/protect
-func (h *BackupHandler) ProtectSnapshot(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) ProtectSnapshot(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -263,18 +263,8 @@ func (h *BackupHandler) ProtectSnapshot(c fiber.Ctx) error {
 		return err
 	}
 
-	store := c.Params("store")
-	if store == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Datastore name is required")
-	}
-
-	var req protectSnapshotRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.BackupType == "" || req.BackupID == "" || req.BackupTime == 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "backup_type, backup_id, and backup_time are required")
-	}
+	store := p.String("store")
+	req := protectSnapshotRequest{snapshotRef: snapshotRefFromParams(p), Protected: p.Bool("protected")}
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -304,15 +294,13 @@ func (h *BackupHandler) ProtectSnapshot(c fiber.Ctx) error {
 }
 
 type updateSnapshotNotesRequest struct {
-	BackupType string `json:"backup_type"`
-	BackupID   string `json:"backup_id"`
-	BackupTime int64  `json:"backup_time"`
-	Comment    string `json:"comment"`
+	snapshotRef
+	Comment string
 }
 
 // UpdateSnapshotNotes handles PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/notes
-func (h *BackupHandler) UpdateSnapshotNotes(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) UpdateSnapshotNotes(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -321,18 +309,8 @@ func (h *BackupHandler) UpdateSnapshotNotes(c fiber.Ctx) error {
 		return err
 	}
 
-	store := c.Params("store")
-	if store == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Datastore name is required")
-	}
-
-	var req updateSnapshotNotesRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.BackupType == "" || req.BackupID == "" || req.BackupTime == 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "backup_type, backup_id, and backup_time are required")
-	}
+	store := p.String("store")
+	req := updateSnapshotNotesRequest{snapshotRef: snapshotRefFromParams(p), Comment: p.String("comment")}
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -349,8 +327,8 @@ func (h *BackupHandler) UpdateSnapshotNotes(c fiber.Ctx) error {
 }
 
 // GetTaskLog handles GET /api/v1/pbs-servers/:pbs_id/tasks/:upid/log
-func (h *BackupHandler) GetTaskLog(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) GetTaskLog(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -358,10 +336,7 @@ func (h *BackupHandler) GetTaskLog(c fiber.Ctx) error {
 		return err
 	}
 
-	upid := c.Params("upid")
-	if upid == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "UPID is required")
-	}
+	upid := p.String("upid")
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -377,19 +352,19 @@ func (h *BackupHandler) GetTaskLog(c fiber.Ctx) error {
 }
 
 type pruneDatastoreRequest struct {
-	BackupType  string `json:"backup_type"`
-	BackupID    string `json:"backup_id"`
-	DryRun      bool   `json:"dry_run"`
-	KeepLast    int    `json:"keep_last"`
-	KeepDaily   int    `json:"keep_daily"`
-	KeepWeekly  int    `json:"keep_weekly"`
-	KeepMonthly int    `json:"keep_monthly"`
-	KeepYearly  int    `json:"keep_yearly"`
+	BackupType  string
+	BackupID    string
+	DryRun      bool
+	KeepLast    int
+	KeepDaily   int
+	KeepWeekly  int
+	KeepMonthly int
+	KeepYearly  int
 }
 
 // PruneDatastore handles POST /api/v1/pbs-servers/:pbs_id/datastores/:store/prune
-func (h *BackupHandler) PruneDatastore(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) PruneDatastore(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -398,14 +373,16 @@ func (h *BackupHandler) PruneDatastore(c fiber.Ctx) error {
 		return err
 	}
 
-	store := c.Params("store")
-	if store == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Datastore name is required")
-	}
-
-	var req pruneDatastoreRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	store := p.String("store")
+	req := pruneDatastoreRequest{
+		BackupType:  p.String("backup_type"),
+		BackupID:    p.String("backup_id"),
+		DryRun:      p.Bool("dry_run"),
+		KeepLast:    int(p.Int("keep_last")),
+		KeepDaily:   int(p.Int("keep_daily")),
+		KeepWeekly:  int(p.Int("keep_weekly")),
+		KeepMonthly: int(p.Int("keep_monthly")),
+		KeepYearly:  int(p.Int("keep_yearly")),
 	}
 
 	client, err := h.createPBSClient(c, pbsID)
@@ -446,8 +423,8 @@ func (h *BackupHandler) PruneDatastore(c fiber.Ctx) error {
 }
 
 // GetDatastoreConfig handles GET /api/v1/pbs-servers/:pbs_id/datastores/:store/config
-func (h *BackupHandler) GetDatastoreConfig(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) GetDatastoreConfig(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -455,10 +432,7 @@ func (h *BackupHandler) GetDatastoreConfig(c fiber.Ctx) error {
 		return err
 	}
 
-	store := c.Params("store")
-	if store == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Datastore name is required")
-	}
+	store := p.String("store")
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -474,8 +448,8 @@ func (h *BackupHandler) GetDatastoreConfig(c fiber.Ctx) error {
 }
 
 // RunSyncJob handles POST /api/v1/pbs-servers/:pbs_id/sync-jobs/:job_id/run
-func (h *BackupHandler) RunSyncJob(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) RunSyncJob(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -484,10 +458,7 @@ func (h *BackupHandler) RunSyncJob(c fiber.Ctx) error {
 		return err
 	}
 
-	jobID := c.Params("job_id")
-	if jobID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Job ID is required")
-	}
+	jobID := p.String("job_id")
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -506,8 +477,8 @@ func (h *BackupHandler) RunSyncJob(c fiber.Ctx) error {
 }
 
 // RunVerifyJob handles POST /api/v1/pbs-servers/:pbs_id/verify-jobs/:job_id/run
-func (h *BackupHandler) RunVerifyJob(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) RunVerifyJob(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -516,10 +487,7 @@ func (h *BackupHandler) RunVerifyJob(c fiber.Ctx) error {
 		return err
 	}
 
-	jobID := c.Params("job_id")
-	if jobID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Job ID is required")
-	}
+	jobID := p.String("job_id")
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -538,8 +506,8 @@ func (h *BackupHandler) RunVerifyJob(c fiber.Ctx) error {
 }
 
 // ListTasks handles GET /api/v1/pbs-servers/:pbs_id/tasks
-func (h *BackupHandler) ListTasks(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) ListTasks(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -547,12 +515,7 @@ func (h *BackupHandler) ListTasks(c fiber.Ctx) error {
 		return err
 	}
 
-	limit := 50
-	if l := c.Query("limit"); l != "" {
-		if parsed, pErr := strconv.Atoi(l); pErr == nil && parsed > 0 && parsed <= 500 {
-			limit = parsed
-		}
-	}
+	limit := int(p.Int("limit"))
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -569,8 +532,8 @@ func (h *BackupHandler) ListTasks(c fiber.Ctx) error {
 }
 
 // GetTaskStatus handles GET /api/v1/pbs-servers/:pbs_id/tasks/:upid
-func (h *BackupHandler) GetTaskStatus(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) GetTaskStatus(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -578,10 +541,7 @@ func (h *BackupHandler) GetTaskStatus(c fiber.Ctx) error {
 		return err
 	}
 
-	upid := c.Params("upid")
-	if upid == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "UPID is required")
-	}
+	upid := p.String("upid")
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -599,8 +559,8 @@ func (h *BackupHandler) GetTaskStatus(c fiber.Ctx) error {
 // --- DB-backed endpoints ---
 
 // ListSnapshots handles GET /api/v1/pbs-servers/:pbs_id/snapshots
-func (h *BackupHandler) ListSnapshots(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) ListSnapshots(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -608,7 +568,7 @@ func (h *BackupHandler) ListSnapshots(c fiber.Ctx) error {
 		return err
 	}
 
-	datastore := c.Query("datastore")
+	datastore := p.String("datastore")
 	if datastore != "" {
 		snaps, err := h.queries.ListPBSSnapshotsByDatastore(c.Context(), db.ListPBSSnapshotsByDatastoreParams{
 			PbsServerID: pbsID,
@@ -629,8 +589,8 @@ func (h *BackupHandler) ListSnapshots(c fiber.Ctx) error {
 }
 
 // ListSyncJobs handles GET /api/v1/pbs-servers/:pbs_id/sync-jobs
-func (h *BackupHandler) ListSyncJobs(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) ListSyncJobs(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -656,8 +616,8 @@ func (h *BackupHandler) ListSyncJobs(c fiber.Ctx) error {
 // (see proxmox.GetPruneJobs for why). It is a convenience for API callers, not
 // a boundary: anyone past the permission gate can omit it and get every job,
 // exactly as ListSyncJobs already returns.
-func (h *BackupHandler) ListPruneJobs(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) ListPruneJobs(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -675,7 +635,7 @@ func (h *BackupHandler) ListPruneJobs(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return RespondItems(c, filterPruneJobsByStore(jobs, c.Query("store")))
+	return RespondItems(c, filterPruneJobsByStore(jobs, p.String("store")))
 }
 
 // filterPruneJobsByStore narrows a job list to one datastore. An empty store
@@ -696,8 +656,8 @@ func filterPruneJobsByStore(jobs []proxmox.PBSPruneJob, store string) []proxmox.
 }
 
 // ListVerifyJobs handles GET /api/v1/pbs-servers/:pbs_id/verify-jobs
-func (h *BackupHandler) ListVerifyJobs(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) ListVerifyJobs(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -738,7 +698,31 @@ var datastoreMetricsTimeframes = map[string]struct {
 
 // datastoreMetricsDefaultTimeframe is what an unrecognised ?timeframe= falls
 // back to; it must be a key of datastoreMetricsTimeframes.
+//
+// It is NOT the endpoint's default: a request that names no timeframe asks
+// for the LATEST sample per datastore rather than for a window, which is a
+// different query entirely. See PBSMetricsLatestTimeframe.
 const datastoreMetricsDefaultTimeframe = "1h"
+
+// PBSMetricsLatestTimeframe is the ?timeframe= value that selects the most
+// recent sample per datastore instead of a history window, and is what the
+// endpoint answers when the caller names none.
+const PBSMetricsLatestTimeframe = "latest"
+
+// PBSMetricsTimeframes is the ?timeframe= vocabulary
+// GET /api/v1/pbs-servers/{pbs_id}/metrics accepts: the latest-sample mode
+// first, then each history window shortest first.
+//
+// Exported so the endpoint's declaration in internal/api/registry_backup.go
+// can use it as the parameter's enum, the way registry_ceph.go uses
+// CephMetricsTimeframes — the list that validates a request and the table
+// that maps a timeframe to its window are then held together by
+// TestPBSMetricsTimeframesCoverTheTable rather than by whoever remembers to
+// edit both.
+//
+// A slice rather than the map's keys because the docs render it in order,
+// and a map gives a different order on every run.
+var PBSMetricsTimeframes = []string{PBSMetricsLatestTimeframe, "1h", "6h", "24h", "7d"}
 
 // datastoreMetricsWindow maps a requested timeframe to its window and bucket
 // width, falling back to the default for anything unrecognised.
@@ -751,8 +735,8 @@ func datastoreMetricsWindow(timeframe string) (window time.Duration, bucketSecon
 }
 
 // GetDatastoreMetrics handles GET /api/v1/pbs-servers/:pbs_id/metrics
-func (h *BackupHandler) GetDatastoreMetrics(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) GetDatastoreMetrics(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -760,9 +744,9 @@ func (h *BackupHandler) GetDatastoreMetrics(c fiber.Ctx) error {
 		return err
 	}
 
-	timeframe := c.Query("timeframe", "latest")
+	timeframe := p.String("timeframe")
 
-	if timeframe == "latest" {
+	if timeframe == PBSMetricsLatestTimeframe {
 		metrics, err := h.queries.GetLatestPBSDatastoreMetrics(c.Context(), pbsID)
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to get datastore metrics")
@@ -788,8 +772,8 @@ func (h *BackupHandler) GetDatastoreMetrics(c fiber.Ctx) error {
 
 // GetDatastoreRRD handles GET /api/v1/pbs-servers/:pbs_id/datastores/:store/rrd
 // Live proxy to PBS RRD — returns IO performance metrics (transfer rate, IOPS).
-func (h *BackupHandler) GetDatastoreRRD(c fiber.Ctx) error {
-	pbsID, err := parsePBSID(c)
+func (h *BackupHandler) GetDatastoreRRD(c fiber.Ctx, p *apischema.Params) error {
+	pbsID, err := pbsIDFromParams(p)
 	if err != nil {
 		return err
 	}
@@ -797,13 +781,9 @@ func (h *BackupHandler) GetDatastoreRRD(c fiber.Ctx) error {
 		return err
 	}
 
-	store := c.Params("store")
-	if store == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Datastore name is required")
-	}
-
-	timeframe := c.Query("timeframe", "hour")
-	cf := c.Query("cf", "AVERAGE")
+	store := p.String("store")
+	timeframe := p.String("timeframe")
+	cf := p.String("cf")
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -823,16 +803,13 @@ func (h *BackupHandler) GetDatastoreRRD(c fiber.Ctx) error {
 // filtered to PBS servers whose cluster the caller has view:backup on.
 // Standalone PBS servers (no cluster_id) are visible only to callers with the
 // global view:backup grant.
-func (h *BackupHandler) ListSnapshotsByBackupID(c fiber.Ctx) error {
+func (h *BackupHandler) ListSnapshotsByBackupID(c fiber.Ctx, p *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "backup")
 	if err != nil {
 		return err
 	}
 
-	backupID := c.Query("backup_id")
-	if backupID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "backup_id query parameter is required")
-	}
+	backupID := p.String("backup_id")
 
 	// Build the set of PBS servers the caller can see, mapped to whether
 	// they're cluster-bound (and which cluster).
@@ -875,29 +852,26 @@ func (h *BackupHandler) createPVEClient(c fiber.Ctx, clusterID uuid.UUID) (*prox
 }
 
 type triggerBackupRequest struct {
-	VMID     string `json:"vmid"`
-	Node     string `json:"node"`
-	Storage  string `json:"storage"`
-	Mode     string `json:"mode"`
-	Compress string `json:"compress"`
+	VMID     string
+	Node     string
+	Storage  string
+	Mode     string
+	Compress string
 }
 
 // TriggerBackup handles POST /api/v1/clusters/:cluster_id/backup
-func (h *BackupHandler) TriggerBackup(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *BackupHandler) TriggerBackup(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
-		return err
-	}
 
-	var req triggerBackupRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.VMID == "" || req.Node == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "vmid and node are required")
+	req := triggerBackupRequest{
+		VMID:     p.String("vmid"),
+		Node:     p.String("node"),
+		Storage:  p.String("storage"),
+		Mode:     p.String("mode"),
+		Compress: p.String("compress"),
 	}
 
 	client, err := h.createPVEClient(c, clusterID)
@@ -939,12 +913,9 @@ func (h *BackupHandler) TriggerBackup(c fiber.Ctx) error {
 }
 
 // ListBackupJobs handles GET /api/v1/clusters/:cluster_id/backup-jobs
-func (h *BackupHandler) ListBackupJobs(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *BackupHandler) ListBackupJobs(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "backup", clusterID); err != nil {
 		return err
 	}
 
@@ -962,25 +933,67 @@ func (h *BackupHandler) ListBackupJobs(c fiber.Ctx) error {
 }
 
 type backupJobRequest struct {
-	Enabled  *int   `json:"enabled"`
-	Type     string `json:"type"`
-	Schedule string `json:"schedule"`
-	Storage  string `json:"storage"`
+	Enabled  *int
+	Type     string
+	Schedule string
+	Storage  string
 	// Node and Comment are pointers because "" is a meaningful value for them
 	// — "run on any node", "no comment" — and PVE only unsets a property that
 	// is named in the delete list. A client that omits the field entirely
 	// leaves the job's current value alone.
-	Node             *string `json:"node"`
-	VMID             string  `json:"vmid"`
-	All              *int    `json:"all"`
-	Exclude          string  `json:"exclude"`
-	Pool             string  `json:"pool"`
-	Mode             string  `json:"mode"`
-	Compress         string  `json:"compress"`
-	MailNotification string  `json:"mailnotification"`
-	MailTo           string  `json:"mailto"`
-	Comment          *string `json:"comment"`
+	Node             *string
+	VMID             string
+	All              *int
+	Exclude          string
+	Pool             string
+	Mode             string
+	Compress         string
+	MailNotification string
+	MailTo           string
+	Comment          *string
 }
+
+// backupJobRequestFromParams reads the create/update body.
+//
+// The four pointer fields keep the distinction the declaration exists to
+// preserve: `enabled`, `all`, `node` and `comment` are declared optional
+// with NO default, so OptInt/OptString report whether the caller named them
+// at all. Collapsing any of them into a plain value would turn "leave this
+// alone" into "set it to zero" — which for `enabled` means disabling a job
+// on every partial save, and for `node` and `comment` means clearing them.
+func backupJobRequestFromParams(p *apischema.Params) backupJobRequest {
+	req := backupJobRequest{
+		Type:             p.String("type"),
+		Schedule:         p.String("schedule"),
+		Storage:          p.String("storage"),
+		VMID:             p.String("vmid"),
+		Exclude:          p.String("exclude"),
+		Pool:             p.String("pool"),
+		Mode:             p.String("mode"),
+		Compress:         p.String("compress"),
+		MailNotification: p.String("mailnotification"),
+		MailTo:           p.String("mailto"),
+	}
+	if v, supplied := p.OptInt("enabled"); supplied {
+		req.Enabled = intPtr(int(v))
+	}
+	if v, supplied := p.OptInt("all"); supplied {
+		req.All = intPtr(int(v))
+	}
+	if v, supplied := p.OptString("node"); supplied {
+		req.Node = strPtr(v)
+	}
+	if v, supplied := p.OptString("comment"); supplied {
+		req.Comment = strPtr(v)
+	}
+	return req
+}
+
+// intPtr and strPtr build the optional-field pointers above. They are
+// package-level rather than inline because backupJobRequest's own tests
+// construct the same shapes.
+func intPtr(v int) *int       { return &v }
+func strPtr(v string) *string { return &v }
 
 // backupSelectionKeys are the vzdump properties that decide which guests a job
 // backs up. A job carries one selection, so switching between them has to clear
@@ -1116,19 +1129,13 @@ func (r backupJobRequest) auditDetails() json.RawMessage {
 }
 
 // CreateBackupJob handles POST /api/v1/clusters/:cluster_id/backup-jobs
-func (h *BackupHandler) CreateBackupJob(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *BackupHandler) CreateBackupJob(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
-		return err
-	}
 
-	var req backupJobRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	req := backupJobRequestFromParams(p)
 
 	client, err := h.createPVEClient(c, clusterID)
 	if err != nil {
@@ -1145,24 +1152,14 @@ func (h *BackupHandler) CreateBackupJob(c fiber.Ctx) error {
 }
 
 // UpdateBackupJob handles PUT /api/v1/clusters/:cluster_id/backup-jobs/:job_id
-func (h *BackupHandler) UpdateBackupJob(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *BackupHandler) UpdateBackupJob(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
-		return err
-	}
 
-	jobID := c.Params("job_id")
-	if jobID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Job ID is required")
-	}
-
-	var req backupJobRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	jobID := p.String("job_id")
+	req := backupJobRequestFromParams(p)
 
 	client, err := h.createPVEClient(c, clusterID)
 	if err != nil {
@@ -1181,19 +1178,13 @@ func (h *BackupHandler) UpdateBackupJob(c fiber.Ctx) error {
 }
 
 // DeleteBackupJob handles DELETE /api/v1/clusters/:cluster_id/backup-jobs/:job_id
-func (h *BackupHandler) DeleteBackupJob(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *BackupHandler) DeleteBackupJob(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "delete", "backup", clusterID); err != nil {
-		return err
-	}
 
-	jobID := c.Params("job_id")
-	if jobID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Job ID is required")
-	}
+	jobID := p.String("job_id")
 
 	client, err := h.createPVEClient(c, clusterID)
 	if err != nil {
@@ -1210,19 +1201,13 @@ func (h *BackupHandler) DeleteBackupJob(c fiber.Ctx) error {
 }
 
 // RunBackupJob handles POST /api/v1/clusters/:cluster_id/backup-jobs/:job_id/run
-func (h *BackupHandler) RunBackupJob(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *BackupHandler) RunBackupJob(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
-		return err
-	}
 
-	jobID := c.Params("job_id")
-	if jobID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Job ID is required")
-	}
+	jobID := p.String("job_id")
 
 	client, err := h.createPVEClient(c, clusterID)
 	if err != nil {
@@ -1251,41 +1236,45 @@ func (h *BackupHandler) RunBackupJob(c fiber.Ctx) error {
 // --- Restore endpoint ---
 
 type restoreBackupRequest struct {
-	PBSServerID       string `json:"pbs_server_id"`
-	BackupType        string `json:"backup_type"`
-	BackupID          string `json:"backup_id"`
-	BackupTime        int64  `json:"backup_time"`
-	Datastore         string `json:"datastore"`
-	TargetNode        string `json:"target_node"`
-	VMID              int    `json:"vmid"`
-	Storage           string `json:"storage"`
-	Force             bool   `json:"force"`
-	Unique            bool   `json:"unique"`
-	StartAfterRestore bool   `json:"start_after_restore"`
+	PBSServerID       string
+	BackupType        string
+	BackupID          string
+	BackupTime        int64
+	Datastore         string
+	TargetNode        string
+	VMID              int
+	Storage           string
+	Force             bool
+	Unique            bool
+	StartAfterRestore bool
 }
 
 // RestoreBackup handles POST /api/v1/clusters/:cluster_id/restore
-func (h *BackupHandler) RestoreBackup(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
-		return err
+
+	req := restoreBackupRequest{
+		PBSServerID:       p.String("pbs_server_id"),
+		BackupType:        p.String("backup_type"),
+		BackupID:          p.String("backup_id"),
+		BackupTime:        p.Int("backup_time"),
+		Datastore:         p.String("datastore"),
+		TargetNode:        p.String("target_node"),
+		VMID:              int(p.Int("vmid")),
+		Storage:           p.String("storage"),
+		Force:             p.Bool("force"),
+		Unique:            p.Bool("unique"),
+		StartAfterRestore: p.Bool("start_after_restore"),
 	}
 
-	var req restoreBackupRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.PBSServerID == "" || req.BackupType == "" || req.BackupID == "" || req.BackupTime == 0 || req.TargetNode == "" || req.VMID <= 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "pbs_server_id, backup_type, backup_id, backup_time, target_node, and vmid are required")
-	}
-
-	// Look up PBS server to validate it exists.
-	pbsID, err := uuid.Parse(req.PBSServerID)
+	// Look up PBS server to validate it exists. The uuid format on the
+	// declaration has already refused anything unparseable.
+	pbsID, err := parseParamUUID(req.PBSServerID)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid pbs_server_id")
+		return err
 	}
 
 	_, err = h.queries.GetPBSServer(c.Context(), pbsID)
@@ -1476,7 +1465,7 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx) error {
 // clusters' guests appear, and view:veeam — resolved separately — decides
 // where Veeam data may be consulted. A caller holding the first but not the
 // second gets exactly the report they got before Veeam existed.
-func (h *BackupHandler) GetBackupCoverage(c fiber.Ctx) error {
+func (h *BackupHandler) GetBackupCoverage(c fiber.Ctx, _ *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "backup")
 	if err != nil {
 		return err

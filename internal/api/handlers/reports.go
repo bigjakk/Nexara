@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/cronspec"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -21,7 +22,27 @@ import (
 // reportSemaphore limits concurrent report generations.
 var reportSemaphore = make(chan struct{}, 3)
 
-var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+// EmailAddressPattern is the recipient rule these endpoints have always
+// enforced, exported so the declarations in internal/api/registry_reports.go
+// state it as the parameter's Pattern instead of keeping a second copy that
+// drifts.
+//
+// It is NOT apischema's registered "email" format, and the difference runs
+// in BOTH directions, which is why swapping to the format would have been a
+// behaviour change rather than a tidy-up. The format is built on
+// mail.ParseAddress and additionally refuses a quoted or dot-irregular local
+// part, so it rejects "a..b@example.com", which this accepts; and it accepts
+// an angle-bracketed address, a one-character TLD and an IP-literal domain,
+// all of which this rejects. It also NORMALISES what it validates, which
+// would rewrite a stored recipient list. The migration keeps the rule that
+// was here; picking one of the two for the whole API is a separate decision.
+const EmailAddressPattern = `^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`
+
+// MaxEmailRecipients is the recipient cap both bodies enforced, exported for
+// the same reason as the pattern above.
+const MaxEmailRecipients = 50
+
+var emailRegex = regexp.MustCompile(EmailAddressPattern)
 
 // ReportHandler handles report schedules, generation, and run history.
 type ReportHandler struct {
@@ -154,7 +175,7 @@ func toRunResponse(r db.ReportRun) reportRunResponse {
 // --- Schedule CRUD ---
 
 // ListSchedules handles GET /api/v1/reports/schedules
-func (h *ReportHandler) ListSchedules(c fiber.Ctx) error {
+func (h *ReportHandler) ListSchedules(c fiber.Ctx, _ *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "report")
 	if err != nil {
 		return err
@@ -190,82 +211,83 @@ func (h *ReportHandler) ListSchedules(c fiber.Ctx) error {
 }
 
 // CreateSchedule handles POST /api/v1/reports/schedules
-func (h *ReportHandler) CreateSchedule(c fiber.Ctx) error {
-	var req struct {
-		Name            string          `json:"name"`
-		ReportType      string          `json:"report_type"`
-		ClusterID       string          `json:"cluster_id"`
-		TimeRangeHours  int             `json:"time_range_hours"`
-		Schedule        string          `json:"schedule"`
-		Format          string          `json:"format"`
-		EmailEnabled    bool            `json:"email_enabled"`
-		EmailChannelID  *string         `json:"email_channel_id"`
-		EmailRecipients []string        `json:"email_recipients"`
-		Parameters      json.RawMessage `json:"parameters"`
-		Enabled         *bool           `json:"enabled"`
+func (h *ReportHandler) CreateSchedule(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("report_cluster_id"))
+	if err != nil {
+		return err
 	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	fields := scheduleFields{
+		Name:            p.String("name"),
+		ReportType:      p.String("report_type"),
+		ClusterID:       clusterID,
+		TimeRangeHours:  int(p.Int("time_range_hours")),
+		Schedule:        p.String("schedule"),
+		Format:          p.String("format"),
+		EmailEnabled:    p.Bool("email_enabled"),
+		EmailChannelID:  p.String("email_channel_id"),
+		EmailRecipients: p.Strings("email_recipients"),
 	}
+	rawParams, err := rawReportParams(p)
+	if err != nil {
+		return err
+	}
+	fields.Parameters = rawParams
 
-	if err := h.validateScheduleRequest(c, req.Name, req.ReportType, req.ClusterID, req.TimeRangeHours, req.Schedule, req.Format, req.EmailEnabled, req.EmailChannelID, req.EmailRecipients, req.Parameters); err != nil {
+	if err := h.validateScheduleFields(c, fields); err != nil {
 		return err
 	}
 
-	clusterID, _ := uuid.Parse(req.ClusterID)
 	if err := requireClusterPerm(c, "manage", "report", clusterID); err != nil {
 		return err
 	}
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
 	enabled := true
-	if req.Enabled != nil {
-		enabled = *req.Enabled
+	if v, supplied := p.OptBool("enabled"); supplied {
+		enabled = v
 	}
-	if req.Format == "" {
-		req.Format = "html"
-	}
-	if req.TimeRangeHours == 0 {
-		req.TimeRangeHours = 168
+	format := fields.Format
+	if format == "" {
+		format = "html"
 	}
 	// Stored in canonical form: only the keys the validator saw.
-	_, paramsJSON, pErr := reports.NormalizeParams(req.Parameters)
+	_, paramsJSON, pErr := reports.NormalizeParams(fields.Parameters)
 	if pErr != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid parameters: "+pErr.Error())
 	}
-	req.Parameters = paramsJSON
-	if req.EmailRecipients == nil {
-		req.EmailRecipients = []string{}
+	recipients := fields.EmailRecipients
+	if recipients == nil {
+		recipients = []string{}
 	}
 
 	var emailChannelID pgtype.UUID
-	if req.EmailChannelID != nil && *req.EmailChannelID != "" {
-		id, err := uuid.Parse(*req.EmailChannelID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid email_channel_id")
+	if fields.EmailChannelID != "" {
+		id, parseErr := parseParamUUID(fields.EmailChannelID)
+		if parseErr != nil {
+			return parseErr
 		}
 		emailChannelID = pgtype.UUID{Bytes: id, Valid: true}
 	}
 
 	var nextRunAt pgtype.Timestamptz
-	if req.Schedule != "" && enabled {
-		next, err := cronspec.NextRunTime(req.Schedule, time.Now())
-		if err == nil {
+	if fields.Schedule != "" && enabled {
+		next, nextErr := cronspec.NextRunTime(fields.Schedule, time.Now())
+		if nextErr == nil {
 			nextRunAt = pgtype.Timestamptz{Time: next, Valid: true}
 		}
 	}
 
 	schedule, err := h.queries.InsertReportSchedule(c.Context(), db.InsertReportScheduleParams{
-		Name:            req.Name,
-		ReportType:      req.ReportType,
+		Name:            fields.Name,
+		ReportType:      fields.ReportType,
 		ClusterID:       clusterID,
-		TimeRangeHours:  safeconv.Int32(req.TimeRangeHours),
-		Schedule:        req.Schedule,
-		Format:          req.Format,
-		EmailEnabled:    req.EmailEnabled,
+		TimeRangeHours:  safeconv.Int32(fields.TimeRangeHours),
+		Schedule:        fields.Schedule,
+		Format:          format,
+		EmailEnabled:    fields.EmailEnabled,
 		EmailChannelID:  emailChannelID,
-		EmailRecipients: req.EmailRecipients,
-		Parameters:      req.Parameters,
+		EmailRecipients: recipients,
+		Parameters:      paramsJSON,
 		Enabled:         enabled,
 		NextRunAt:       nextRunAt,
 		CreatedBy:       userID,
@@ -285,10 +307,10 @@ func (h *ReportHandler) CreateSchedule(c fiber.Ctx) error {
 }
 
 // GetSchedule handles GET /api/v1/reports/schedules/:id
-func (h *ReportHandler) GetSchedule(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ReportHandler) GetSchedule(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid schedule ID")
+		return err
 	}
 
 	schedule, err := h.queries.GetReportSchedule(c.Context(), id)
@@ -304,10 +326,10 @@ func (h *ReportHandler) GetSchedule(c fiber.Ctx) error {
 }
 
 // UpdateSchedule handles PUT /api/v1/reports/schedules/:id
-func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ReportHandler) UpdateSchedule(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid schedule ID")
+		return err
 	}
 
 	existing, err := h.queries.GetReportSchedule(c.Context(), id)
@@ -320,37 +342,24 @@ func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 		return err
 	}
 
-	var req struct {
-		Name            *string         `json:"name"`
-		ReportType      *string         `json:"report_type"`
-		ClusterID       *string         `json:"cluster_id"`
-		TimeRangeHours  *int            `json:"time_range_hours"`
-		Schedule        *string         `json:"schedule"`
-		Format          *string         `json:"format"`
-		EmailEnabled    *bool           `json:"email_enabled"`
-		EmailChannelID  *string         `json:"email_channel_id"`
-		EmailRecipients []string        `json:"email_recipients"`
-		Parameters      json.RawMessage `json:"parameters"`
-		Enabled         *bool           `json:"enabled"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	// Apply defaults from existing record.
+	// Apply defaults from existing record. Each read is an Opt accessor
+	// because "the caller did not mention this field" has to stay distinct
+	// from "the caller sent the zero value" — the enable/disable toggle PUTs
+	// only `enabled`, and a plain read would rewrite every other column with
+	// an empty string.
 	name := existing.Name
-	if req.Name != nil {
-		name = *req.Name
+	if v, supplied := p.OptString("name"); supplied {
+		name = v
 	}
 	reportType := existing.ReportType
-	if req.ReportType != nil {
-		reportType = *req.ReportType
+	if v, supplied := p.OptString("report_type"); supplied {
+		reportType = v
 	}
 	clusterID := existing.ClusterID
-	if req.ClusterID != nil {
-		cid, err := uuid.Parse(*req.ClusterID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+	if v, supplied := p.OptString("report_cluster_id"); supplied {
+		cid, parseErr := parseParamUUID(v)
+		if parseErr != nil {
+			return parseErr
 		}
 		// If the user is moving the schedule to a different cluster, gate on
 		// manage:report on the target cluster too.
@@ -362,63 +371,83 @@ func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 		clusterID = cid
 	}
 	timeRangeHours := int(existing.TimeRangeHours)
-	if req.TimeRangeHours != nil {
-		timeRangeHours = *req.TimeRangeHours
+	if v, supplied := p.OptInt("time_range_hours"); supplied {
+		timeRangeHours = int(v)
 	}
 	scheduleStr := existing.Schedule
-	if req.Schedule != nil {
-		scheduleStr = *req.Schedule
+	suppliedSchedule := ""
+	if v, supplied := p.OptString("schedule"); supplied {
+		scheduleStr = v
+		suppliedSchedule = v
 	}
 	format := existing.Format
-	if req.Format != nil {
-		format = *req.Format
+	if v, supplied := p.OptString("format"); supplied {
+		format = v
 	}
 	emailEnabled := existing.EmailEnabled
-	if req.EmailEnabled != nil {
-		emailEnabled = *req.EmailEnabled
+	if v, supplied := p.OptBool("email_enabled"); supplied {
+		emailEnabled = v
 	}
 	emailRecipients := existing.EmailRecipients
-	if req.EmailRecipients != nil {
-		emailRecipients = req.EmailRecipients
+	if p.Has("email_recipients") {
+		emailRecipients = p.Strings("email_recipients")
 	}
 	parameters := existing.Parameters
-	if req.Parameters != nil {
-		_, canonical, pErr := reports.NormalizeParams(req.Parameters)
+	if p.Has("parameters") {
+		raw, rawErr := rawReportParams(p)
+		if rawErr != nil {
+			return rawErr
+		}
+		_, canonical, pErr := reports.NormalizeParams(raw)
 		if pErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid parameters: "+pErr.Error())
 		}
 		parameters = canonical
 	}
 	enabled := existing.Enabled
-	if req.Enabled != nil {
-		enabled = *req.Enabled
+	if v, supplied := p.OptBool("enabled"); supplied {
+		enabled = v
 	}
 
 	emailChannelID := existing.EmailChannelID
-	if req.EmailChannelID != nil {
-		if *req.EmailChannelID == "" {
+	if v, supplied := p.OptString("email_channel_id"); supplied {
+		if v == "" {
 			emailChannelID = pgtype.UUID{}
 		} else {
-			eid, err := uuid.Parse(*req.EmailChannelID)
-			if err != nil {
-				return fiber.NewError(fiber.StatusBadRequest, "Invalid email_channel_id")
+			eid, parseErr := parseParamUUID(v)
+			if parseErr != nil {
+				return parseErr
 			}
 			emailChannelID = pgtype.UUID{Bytes: eid, Valid: true}
 		}
 	}
 
-	// Validate the cron the CALLER supplied, not the effective one. An update
-	// that leaves the schedule alone — the enable/disable toggle sends only
-	// `enabled` — must not be rejected because of an expression already in the
-	// row. A stored expression that can never fire predates this validation,
-	// and disabling it is precisely the action an operator needs to reach.
-	// It stays inert either way: the scheduler writes next_run_at NULL, which
-	// this table's due predicate never matches.
-	suppliedSchedule := ""
-	if req.Schedule != nil {
-		suppliedSchedule = *req.Schedule
-	}
-	if err := h.validateScheduleRequest(c, name, reportType, clusterID.String(), timeRangeHours, suppliedSchedule, format, emailEnabled, nil, emailRecipients, parameters); err != nil {
+	// The cron validated is the one the CALLER supplied, not the effective
+	// one. An update that leaves the schedule alone — the enable/disable
+	// toggle sends only `enabled` — must not be rejected because of an
+	// expression already in the row. A stored expression that can never fire
+	// predates this validation, and disabling it is precisely the action an
+	// operator needs to reach. It stays inert either way: the scheduler
+	// writes next_run_at NULL, which this table's due predicate never
+	// matches.
+	//
+	// EmailChannelID is deliberately left empty here rather than passed
+	// through. The channel lookup is a create-time check and always has been:
+	// CreateSchedule passed the caller's value and UpdateSchedule passed nil,
+	// so an update has never re-validated the stored channel. Passing it now
+	// would start rejecting a save on a channel that was deleted or retyped
+	// since — which is exactly the save an operator makes to fix it.
+	if err := h.validateScheduleFields(c, scheduleFields{
+		Name:            name,
+		ReportType:      reportType,
+		ClusterID:       clusterID,
+		TimeRangeHours:  timeRangeHours,
+		Schedule:        suppliedSchedule,
+		Format:          format,
+		EmailEnabled:    emailEnabled,
+		EmailRecipients: emailRecipients,
+		Parameters:      parameters,
+	}); err != nil {
 		return err
 	}
 
@@ -466,10 +495,10 @@ func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 }
 
 // DeleteSchedule handles DELETE /api/v1/reports/schedules/:id
-func (h *ReportHandler) DeleteSchedule(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ReportHandler) DeleteSchedule(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid schedule ID")
+		return err
 	}
 
 	existing, err := h.queries.GetReportSchedule(c.Context(), id)
@@ -492,44 +521,24 @@ func (h *ReportHandler) DeleteSchedule(c fiber.Ctx) error {
 // --- Report Generation ---
 
 // GenerateReport handles POST /api/v1/reports/generate
-func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
-	var req struct {
-		ReportType     string          `json:"report_type"`
-		ClusterID      string          `json:"cluster_id"`
-		TimeRangeHours int             `json:"time_range_hours"`
-		Format         string          `json:"format"`
-		Parameters     json.RawMessage `json:"parameters"`
+func (h *ReportHandler) GenerateReport(c fiber.Ctx, p *apischema.Params) error {
+	reportType := p.String("report_type")
+	rawParams, err := rawReportParams(p)
+	if err != nil {
+		return err
 	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if !reports.ValidReportType(req.ReportType) {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid report_type")
-	}
-	params, paramsJSON, err := reports.NormalizeParams(req.Parameters)
+	params, paramsJSON, err := reports.NormalizeParams(rawParams)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid parameters: "+err.Error())
 	}
-	clusterID, err := uuid.Parse(req.ClusterID)
+	clusterID, err := parseParamUUID(p.String("report_cluster_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+		return err
 	}
 	if err := requireClusterPerm(c, "generate", "report", clusterID); err != nil {
 		return err
 	}
-	if req.TimeRangeHours <= 0 {
-		req.TimeRangeHours = 168
-	}
-	if req.TimeRangeHours > 8760 {
-		return fiber.NewError(fiber.StatusBadRequest, "time_range_hours must be between 1 and 8760")
-	}
-	if req.Format == "" {
-		req.Format = "html"
-	}
-	if req.Format != "html" && req.Format != "csv" {
-		return fiber.NewError(fiber.StatusBadRequest, "format must be 'html' or 'csv'")
-	}
+	timeRangeHours := int(p.Int("time_range_hours"))
 
 	// Limit concurrent report generations.
 	select {
@@ -542,10 +551,10 @@ func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
 	run, err := h.queries.InsertReportRun(c.Context(), db.InsertReportRunParams{
-		ReportType:     req.ReportType,
+		ReportType:     reportType,
 		ClusterID:      clusterID,
 		Status:         "running",
-		TimeRangeHours: safeconv.Int32(req.TimeRangeHours),
+		TimeRangeHours: safeconv.Int32(timeRangeHours),
 		Parameters:     paramsJSON,
 		CreatedBy:      userID,
 	})
@@ -558,9 +567,9 @@ func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
 	// The requester's own grants decide what the report may read (Veeam
 	// data in particular); the stored run is then readable under view:report.
 	data, err := h.generator.Generate(c.Context(), reports.Request{
-		Type:           req.ReportType,
+		Type:           reportType,
 		ClusterID:      clusterID,
-		TimeRangeHours: req.TimeRangeHours,
+		TimeRangeHours: timeRangeHours,
 		Params:         params,
 		RequestedBy:    userID,
 	})
@@ -569,7 +578,7 @@ func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
 			ID:           run.ID,
 			ErrorMessage: err.Error(),
 		})
-		h.logger.Error("report generation failed", "error", err, "cluster_id", clusterID, "type", req.ReportType)
+		h.logger.Error("report generation failed", "error", err, "cluster_id", clusterID, "type", reportType)
 		return fiber.NewError(fiber.StatusInternalServerError, "Report generation failed")
 	}
 
@@ -619,7 +628,7 @@ func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
 // --- Report Runs ---
 
 // ListRuns handles GET /api/v1/reports/runs
-func (h *ReportHandler) ListRuns(c fiber.Ctx) error {
+func (h *ReportHandler) ListRuns(c fiber.Ctx, _ *apischema.Params) error {
 	access, err := accessibleClusters(c, "view", "report")
 	if err != nil {
 		return err
@@ -654,10 +663,10 @@ func (h *ReportHandler) ListRuns(c fiber.Ctx) error {
 }
 
 // GetRun handles GET /api/v1/reports/runs/:id
-func (h *ReportHandler) GetRun(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ReportHandler) GetRun(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
+		return err
 	}
 
 	run, err := h.queries.GetReportRun(c.Context(), id)
@@ -673,10 +682,10 @@ func (h *ReportHandler) GetRun(c fiber.Ctx) error {
 }
 
 // GetRunHTML handles GET /api/v1/reports/runs/:id/html
-func (h *ReportHandler) GetRunHTML(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ReportHandler) GetRunHTML(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
+		return err
 	}
 
 	row, err := h.queries.GetReportRunHTML(c.Context(), id)
@@ -699,10 +708,10 @@ func (h *ReportHandler) GetRunHTML(c fiber.Ctx) error {
 }
 
 // GetRunCSV handles GET /api/v1/reports/runs/:id/csv
-func (h *ReportHandler) GetRunCSV(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ReportHandler) GetRunCSV(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
+		return err
 	}
 
 	row, err := h.queries.GetReportRunCSV(c.Context(), id)
@@ -725,29 +734,67 @@ func (h *ReportHandler) GetRunCSV(c fiber.Ctx) error {
 
 // --- Validation ---
 
-func (h *ReportHandler) validateScheduleRequest(c fiber.Ctx, name, reportType, clusterID string, timeRangeHours int, schedule, format string, emailEnabled bool, emailChannelID *string, emailRecipients []string, parameters json.RawMessage) error {
-	if name == "" || len(name) > 200 {
+// scheduleFields is the EFFECTIVE schedule a create or an update would
+// store: on create it is what the caller sent, and on update it is the
+// stored row with the caller's changes applied.
+//
+// It replaces the twelve positional arguments validateScheduleRequest used
+// to take. Six of them were strings, three of them adjacent, so a
+// transposition compiled and validated the wrong field against the wrong
+// rule — and the one that mattered, emailChannelID, was passed nil from one
+// caller and a pointer from the other with nothing at the call site saying
+// why.
+type scheduleFields struct {
+	Name           string
+	ReportType     string
+	ClusterID      uuid.UUID
+	TimeRangeHours int
+	Schedule       string
+	Format         string
+	EmailEnabled   bool
+	// EmailChannelID is checked against the notification_channels table, and
+	// only when EmailEnabled. Empty means "do not look it up", which is what
+	// UpdateSchedule has always passed — see the note at its call site.
+	EmailChannelID  string
+	EmailRecipients []string
+	Parameters      json.RawMessage
+}
+
+// validateScheduleFields is what survives of the old validator once the
+// declarations state the rest.
+//
+// The name length, the report-type vocabulary, the time range, the format
+// enum, the recipient cap and the address rule, and the cluster's uuid shape
+// are all in the parameter schema now — but they stay HERE as well, and that
+// is the point rather than duplication. The schema validates what the CALLER
+// sent; on an update the effective value may come from the stored row
+// instead, and a row written before a rule existed has to be caught on the
+// way back out. Only the two checks a parameter schema cannot make are
+// unconditionally handler-side: the cron expression (a Go function over a
+// clock) and the notification channel (a DB lookup).
+func (h *ReportHandler) validateScheduleFields(c fiber.Ctx, f scheduleFields) error {
+	if f.Name == "" || len(f.Name) > 200 {
 		return fiber.NewError(fiber.StatusBadRequest, "name must be 1-200 characters")
 	}
-	if !reports.ValidReportType(reportType) {
+	if !reports.ValidReportType(f.ReportType) {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid report_type")
 	}
-	if _, err := uuid.Parse(clusterID); err != nil {
+	if f.ClusterID == uuid.Nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
 	}
-	if timeRangeHours < 1 || timeRangeHours > 8760 {
+	if f.TimeRangeHours < 1 || f.TimeRangeHours > 8760 {
 		return fiber.NewError(fiber.StatusBadRequest, "time_range_hours must be between 1 and 8760")
 	}
-	if schedule != "" {
-		if err := cronspec.ValidateCron(schedule); err != nil {
+	if f.Schedule != "" {
+		if err := cronspec.ValidateCron(f.Schedule); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid schedule: %v", err))
 		}
 	}
-	if format != "" && format != "html" && format != "csv" {
+	if f.Format != "" && f.Format != "html" && f.Format != "csv" {
 		return fiber.NewError(fiber.StatusBadRequest, "format must be 'html' or 'csv'")
 	}
-	if emailEnabled && emailChannelID != nil && *emailChannelID != "" {
-		id, err := uuid.Parse(*emailChannelID)
+	if f.EmailEnabled && f.EmailChannelID != "" {
+		id, err := uuid.Parse(f.EmailChannelID)
 		if err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid email_channel_id")
 		}
@@ -759,21 +806,62 @@ func (h *ReportHandler) validateScheduleRequest(c fiber.Ctx, name, reportType, c
 			return fiber.NewError(fiber.StatusBadRequest, "Channel must be of type 'email'")
 		}
 	}
-	if len(emailRecipients) > 50 {
-		return fiber.NewError(fiber.StatusBadRequest, "email_recipients limited to 50 addresses")
+	if len(f.EmailRecipients) > MaxEmailRecipients {
+		return fiber.NewError(fiber.StatusBadRequest,
+			fmt.Sprintf("email_recipients limited to %d addresses", MaxEmailRecipients))
 	}
-	for _, addr := range emailRecipients {
+	for _, addr := range f.EmailRecipients {
 		if !emailRegex.MatchString(addr) {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid email recipient: %s", addr))
 		}
 	}
-	if len(parameters) > 65536 {
+	if len(f.Parameters) > MaxReportParametersBytes {
 		return fiber.NewError(fiber.StatusBadRequest, "parameters must be under 64KB")
 	}
-	if _, err := reports.ParseParams(parameters); err != nil {
+	if _, err := reports.ParseParams(f.Parameters); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid parameters: "+err.Error())
 	}
 	return nil
+}
+
+// MaxReportParametersBytes caps the stored `parameters` object.
+//
+// It is enforced here rather than in the declaration because apischema has
+// no serialized-size facet for an Object — MinLength/MaxLength count
+// characters on a string and elements on an array, and checkDeclaration
+// refuses them on anything else. The bound is measured on the RE-SERIALISED
+// form rawReportParams produces, which is the same object with insignificant
+// whitespace removed, so it is never looser than the byte count the bound
+// request used to carry.
+const MaxReportParametersBytes = 65536
+
+// rawReportParams re-serialises the declared `parameters` object into the
+// json.RawMessage that reports.NormalizeParams and ParseParams consume.
+//
+// Returning nil for an absent parameter is what keeps the update path's
+// three-state read: NormalizeParams treats nil as "{}" and UpdateSchedule
+// asks p.Has before calling this at all, so "the caller sent no parameters"
+// and "the caller sent an empty object" stay distinct.
+//
+// ONE wire spelling changes meaning on the update, and it is the JSON null.
+// The bound json.RawMessage read "null" as a four-byte value, so
+// `"parameters": null` used to clear a schedule's options; apischema reads a
+// null as ABSENT (present() in validate.go), so it now leaves them alone.
+// Every other optional field on that body was a POINTER and therefore always
+// read a null as absent, so this brings the one outlier into line rather
+// than away from it, and no Nexara dialog has ever sent it — an explicit
+// `{}` still clears them.
+func rawReportParams(p *apischema.Params) (json.RawMessage, error) {
+	if !p.Has("parameters") {
+		return nil, nil
+	}
+	raw, err := json.Marshal(p.Object("parameters"))
+	if err != nil {
+		// Unreachable for a value that arrived as JSON, but a silent nil here
+		// would store "{}" over whatever the caller sent.
+		return nil, fiber.NewError(fiber.StatusBadRequest, "Invalid parameters")
+	}
+	return raw, nil
 }
 
 // DeleteRun handles DELETE /api/v1/reports/runs/:id
@@ -781,10 +869,10 @@ func (h *ReportHandler) validateScheduleRequest(c fiber.Ctx, name, reportType, c
 // manage:report on the run's cluster, the same grant that owns schedules: a
 // run is the durable record of a report, and removing one is a management
 // act rather than a viewing one.
-func (h *ReportHandler) DeleteRun(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ReportHandler) DeleteRun(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
+		return err
 	}
 	run, err := h.queries.GetReportRun(c.Context(), id)
 	if err != nil {
@@ -806,31 +894,19 @@ func (h *ReportHandler) DeleteRun(c fiber.Ctx) error {
 // stored HTML attached, and the CSV when asked for. Gated on generate:report,
 // the grant that produces reports — delivering one is the same act as making
 // one, and nothing here reads anything the caller could not already download.
-func (h *ReportHandler) EmailRun(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+func (h *ReportHandler) EmailRun(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
+		return err
 	}
-	var req struct {
-		ChannelID  string   `json:"channel_id"`
-		Recipients []string `json:"recipients"`
-		WithCSV    bool     `json:"with_csv"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	channelID, err := uuid.Parse(req.ChannelID)
+	channelID, err := parseParamUUID(p.String("channel_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid channel_id")
+		return err
 	}
-	if len(req.Recipients) > 50 {
-		return fiber.NewError(fiber.StatusBadRequest, "recipients limited to 50 addresses")
-	}
-	for _, addr := range req.Recipients {
-		if !emailRegex.MatchString(addr) {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid recipient: %s", addr))
-		}
-	}
+	// The recipient cap and the address rule are the declaration's now: this
+	// body is the ONLY source of the list, unlike the schedule bodies, whose
+	// effective value may come from the stored row.
+	recipients := p.Strings("recipients")
 
 	row, err := h.queries.GetReportRunForEmail(c.Context(), id)
 	if err != nil {
@@ -865,8 +941,8 @@ func (h *ReportHandler) EmailRun(c fiber.Ctx) error {
 			GeneratedAt: row.CompletedAt.Time.UTC().Format("2006-01-02 15:04") + " UTC",
 		}
 	}
-	msg := reports.ReportMessage(&data, row.ReportHtml.String, row.ReportCsv.String, req.WithCSV && row.ReportCsv.Valid, reports.DigestOptions{RunID: id.String()})
-	if err := reports.SendReportEmail(c.Context(), h.queries, h.encryptionKey, channelID, req.Recipients, msg, h.logger); err != nil {
+	msg := reports.ReportMessage(&data, row.ReportHtml.String, row.ReportCsv.String, p.Bool("with_csv") && row.ReportCsv.Valid, reports.DigestOptions{RunID: id.String()})
+	if err := reports.SendReportEmail(c.Context(), h.queries, h.encryptionKey, channelID, recipients, msg, h.logger); err != nil {
 		h.logger.Error("report email failed", "run_id", id, "error", err)
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to send report email")
 	}
