@@ -4,10 +4,12 @@ Nexara exposes a REST API at `/api/v1`. All endpoints (except auth and health) r
 
 > **The live source of truth is the in-app catalog at `/settings/api-docs`.**
 > That page enumerates every route from the running Fiber router at request
-> time, so it cannot drift from what the server actually serves. This file
-> covers the auth handshake, error envelope, and WebSocket protocol — the
-> parts the auto-generated catalog can't infer — plus a hand-curated
-> overview of the major endpoint groups for offline reference.
+> time, so it cannot drift from what the server actually serves, and for each
+> route the endpoint registry declares it renders the whole request contract —
+> every parameter's type, where it goes on the wire, its bounds, and whether it
+> is required. This file covers the auth handshake, error envelope, and
+> WebSocket protocol — the parts the auto-generated catalog can't infer — plus
+> a hand-curated overview of the major endpoint groups for offline reference.
 
 ## Base URL
 
@@ -154,6 +156,48 @@ endpoints (`/auth/me`, `/auth/logout`, `/auth/change-password`,
 `/auth/totp/setup`, `/auth/oidc/token-exchange`, …) and the `/ws`,
 `/ws/console`, `/ws/vnc` upgrades have no request-rate limit at all.
 
+## Request Parameters
+
+Each endpoint declares its parameters — path, query and body alike — in one
+place, and the declaration is enforced before the handler runs. Four
+consequences are worth knowing before scripting against the API:
+
+- **An undeclared key is rejected, not ignored.** A request carrying a key the
+  endpoint does not declare answers `400` naming it: `siz: unknown parameter
+  (not declared by this endpoint)`.
+- **A declared parameter must arrive where it is declared.** Moving a body
+  parameter onto the query string answers `400` — `vmid: must be sent in the
+  request body, not as a query parameter` — which also keeps a body-only secret
+  out of URLs that proxies and access logs record.
+- **Values are coerced across wire spellings.** `500` and `"500"` are the same
+  integer, and `true`, `1`, `yes` and `on` are all the same boolean, so a query
+  string and a JSON body can say the same thing. `1.5` is still not an integer,
+  and a repeated query key is how a query string spells an array. A parameter
+  that declares a format is additionally **normalized** before the handler sees
+  it: a disk size reaches Proxmox as a bare GiB count (`"1T"` becomes `1024`),
+  and a UUID is lowercased.
+- **A value outside a declared bound is a `400`, not a clamp** — see
+  Pagination & Filtering below.
+
+A rejection uses the error envelope above, with the parameter's name at the
+front of `message`:
+
+```json
+{ "error": "bad_request", "message": "limit: must be at most 100 (got 500)" }
+```
+
+There is no per-field rejection map: only the first problem is reported, and
+unknown keys are reported before missing ones, so a misspelled `size` comes
+back as the unknown key it is rather than as a missing required `size`.
+
+The check is on the request's own keys. The contents of an object-valued
+parameter — a report's `parameters`, for instance — are the handler's to
+validate and are documented with their endpoint. A handful of routes predate
+the declaration layer and still parse their own input; the catalog does not
+mark them, and an empty parameter list is not the tell — a declared endpoint
+that takes no parameters at all renders identically, and still rejects every
+key sent to it.
+
 ## Response Envelope
 
 Every endpoint that returns a **collection** returns the same envelope:
@@ -205,8 +249,8 @@ List endpoints support query parameters:
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
-| `limit` | Max items to return. The default and the ceiling are per-endpoint — most list endpoints default to 50 and cap at 100 or 200, a few default to 500 and cap higher. Out-of-range values are clamped or fall back to the default rather than erroring | `?limit=100` |
-| `offset` | Skip N items (negative values are clamped to 0) | `?offset=50` |
+| `limit` | Max items to return. The default and the ceiling are per-endpoint — most list endpoints default to 50 and cap at 100 or 200, a few default to 500 and cap higher, and a few declare no ceiling at all. Where a bound is declared, a value outside it is a `400` naming the bound, **not** a clamp | `?limit=100` |
+| `offset` | Skip N items. A negative value — or one past the endpoint's ceiling, where it declares one — is a `400` rather than being clamped | `?offset=50` |
 
 Result ordering is fixed per endpoint — there is no generic `sort`/`order`
 parameter.
@@ -408,7 +452,7 @@ leaves provenance intact.
 > `:node` is the Proxmox node *name* (e.g. `pve-01`); `:node_id` is Nexara's own
 > node UUID, as returned in the `id` field of `GET /clusters/:id/nodes`. They
 > are not interchangeable — a route taking `:node_id` rejects a node name with
-> `400 Invalid node ID`.
+> `400 node_id: expected a UUID such as …`.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -615,7 +659,7 @@ row: QEMU rows require `view:vm` on the row's cluster, LXC rows
 | POST | `/clusters/:id/storage/:sid/download-url` | Download a file from a URL to storage |
 | POST | `/clusters/:id/storage/:sid/appliances` | Download a turnkey appliance |
 | GET | `/clusters/:id/appliances` | List available appliance templates |
-| GET | `/clusters/:id/scan/iscsi` | Discover iSCSI targets on a portal — `?portal=<host[:port]>`; returns `[{ "target", "portal" }]`. **Requires `manage:storage`** (node-side network probe) |
+| GET | `/clusters/:id/scan/iscsi` | Discover iSCSI targets on a portal — `?portal=<host[:port]>`; each item is `{ "target", "portal" }`. **Requires `manage:storage`** (node-side network probe) |
 
 ### VM Import
 
