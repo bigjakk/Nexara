@@ -335,11 +335,99 @@ var vmRoutesWithDeferredPermission = map[string]string{
 
 // vmRouteCount is how many endpoints registerVMEndpoints declares.
 //
-// It is stated per domain, and summed below, so that a later migration
-// adding its own routes cannot make this number drift without saying so:
-// a single total would be a number anyone could raise to make the test
-// pass again.
+// It is stated per domain, and summed by registryRouteCount, so that a
+// later migration adding its own routes cannot make this number drift
+// without saying so: a single total would be a number anyone could raise
+// to make the test pass again.
 const vmRouteCount = 33
+
+// registryDomainRouteCounts names every migrated domain and how many
+// routes it declares, keyed by the function that declares them.
+//
+// The map — rather than an expression summing the constants — is what
+// makes the failure message useful: a mismatch prints the per-domain
+// breakdown, so "the registry holds 68, want 51" says WHICH domain is
+// unaccounted for instead of leaving the reader to subtract.
+var registryDomainRouteCounts = map[string]int{
+	"registerVMEndpoints":          vmRouteCount,
+	"registerContainerEndpoints":   containerRouteCount,
+	"registerCephEndpoints":        cephRouteCount,
+	"registerHAEndpoints":          haRouteCount,
+	"registerDRSEndpoints":         drsRouteCount,
+	"registerCVEEndpoints":         cveRouteCount,
+	"registerReplicationEndpoints": replicationRouteCount,
+}
+
+// registryRouteCount is the total the registry must hold.
+func registryRouteCount() int {
+	total := 0
+	for _, n := range registryDomainRouteCounts {
+		total += n
+	}
+	return total
+}
+
+// TestRegistryDomainCountsAreIndividuallyRight checks each domain's
+// constant against the declarations it actually names, so that a wrong
+// per-domain number cannot hide inside a correct total. Two domains
+// drifting by +1 and -1 would leave registryRouteCount right and both
+// tables wrong.
+func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
+	declared := map[string]int{
+		"registerVMEndpoints":          0,
+		"registerContainerEndpoints":   0,
+		"registerCephEndpoints":        0,
+		"registerHAEndpoints":          0,
+		"registerDRSEndpoints":         0,
+		"registerCVEEndpoints":         0,
+		"registerReplicationEndpoints": 0,
+	}
+	reg := NewRegistry()
+	s := newRouteStubServer(t)
+
+	registerVMEndpoints(reg, s.vmHandler)
+	declared["registerVMEndpoints"] = reg.Len()
+
+	before := reg.Len()
+	registerContainerEndpoints(reg, s.containerHandler)
+	declared["registerContainerEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerCephEndpoints(reg, s.cephHandler)
+	declared["registerCephEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerHAEndpoints(reg, s.haHandler)
+	declared["registerHAEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerDRSEndpoints(reg, s.drsHandler)
+	declared["registerDRSEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerCVEEndpoints(reg, s.cveHandler)
+	declared["registerCVEEndpoints"] = reg.Len() - before
+
+	before = reg.Len()
+	registerReplicationEndpoints(reg, s.replicationHandler)
+	declared["registerReplicationEndpoints"] = reg.Len() - before
+
+	if len(declared) != len(registryDomainRouteCounts) {
+		t.Fatalf("this test drives %d domains but registryDomainRouteCounts names %d — "+
+			"add the new domain here too, or its count is unchecked",
+			len(declared), len(registryDomainRouteCounts))
+	}
+	for name, got := range declared {
+		want, listed := registryDomainRouteCounts[name]
+		if !listed {
+			t.Errorf("%s is not in registryDomainRouteCounts", name)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s declares %d routes, but its constant says %d", name, got, want)
+		}
+	}
+}
 
 // TestVMRoutesDeclareACheck records what the survey of these 33 handlers
 // found: all but two resolved the cluster from the path and then made one
@@ -364,10 +452,9 @@ const vmRouteCount = 33
 func TestVMRoutesDeclareACheck(t *testing.T) {
 	s := newRouteStubServer(t)
 	endpoints := s.registry.Endpoints()
-	if want := vmRouteCount + containerRouteCount; len(endpoints) != want {
-		t.Errorf("the registry holds %d endpoints, want %d — the %d VMHandler routes Phase 4 migrated "+
-			"plus the %d ContainerHandler routes Phase 6a did",
-			len(endpoints), want, vmRouteCount, containerRouteCount)
+	if want := registryRouteCount(); len(endpoints) != want {
+		t.Errorf("the registry holds %d endpoints, want %d — the sum of the per-domain counts in "+
+			"registryDomainRouteCounts", len(endpoints), want)
 	}
 
 	seenDeferred := map[string]bool{}

@@ -227,26 +227,9 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/vms/:vm_id/metrics", s.metricsHandler.GetVMHistorical)
 			clusters.Get("/:cluster_id/nodes/:node_id/metrics", s.metricsHandler.GetNodeHistorical)
 		}
-		if s.cephHandler != nil {
-			ceph := clusters.Group("/:cluster_id/ceph")
-			ceph.Get("/status", s.cephHandler.GetStatus)
-			ceph.Get("/osds", s.cephHandler.ListOSDs)
-			ceph.Get("/pools", s.cephHandler.ListPools)
-			ceph.Get("/monitors", s.cephHandler.ListMonitors)
-			ceph.Get("/fs", s.cephHandler.ListFS)
-			ceph.Get("/rules", s.cephHandler.ListCrushRules)
-			ceph.Post("/pools", s.cephHandler.CreatePool)
-			ceph.Delete("/pools/:pool_name", s.cephHandler.DeletePool)
-			ceph.Get("/osds/:osd_id/preflight", s.cephHandler.GetOSDPreflight)
-			ceph.Post("/osds/:osd_id/in", s.cephHandler.SetOSDIn)
-			ceph.Post("/osds/:osd_id/out", s.cephHandler.SetOSDOut)
-			ceph.Post("/osds/:osd_id/start", s.cephHandler.StartOSD)
-			ceph.Post("/osds/:osd_id/stop", s.cephHandler.StopOSD)
-			ceph.Post("/osds/:osd_id/restart", s.cephHandler.RestartOSD)
-			ceph.Get("/metrics", s.cephHandler.GetHistorical)
-			ceph.Get("/osds/metrics", s.cephHandler.GetOSDMetrics)
-			ceph.Get("/pools/metrics", s.cephHandler.GetPoolMetrics)
-		}
+		// The 17 Ceph routes are declared in
+		// internal/api/registry_ceph.go and mounted by mountRegistry
+		// above, so there is no block for them here.
 
 		// Network, Firewall, SDN routes.
 		if s.networkHandler != nil {
@@ -319,19 +302,9 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/firewall/log", s.networkHandler.GetFirewallLog)
 		}
 
-		// CVE scanning routes.
-		if s.cveHandler != nil {
-			clusters.Get("/:cluster_id/cve-scans", s.cveHandler.ListScans)
-			clusters.Post("/:cluster_id/cve-scans", s.cveHandler.TriggerScan)
-			clusters.Get("/:cluster_id/cve-scans/:scan_id", s.cveHandler.GetScan)
-			clusters.Get("/:cluster_id/cve-scans/:scan_id/vulnerabilities", s.cveHandler.ListVulnerabilities)
-			clusters.Delete("/:cluster_id/cve-scans/:scan_id", s.cveHandler.DeleteScan)
-			clusters.Get("/:cluster_id/security-posture", s.cveHandler.GetSecurityPosture)
-			clusters.Get("/:cluster_id/cve-scan-schedule", s.cveHandler.GetSchedule)
-			clusters.Put("/:cluster_id/cve-scan-schedule", s.cveHandler.UpdateSchedule)
-			clusters.Get("/:cluster_id/cve-notifications", s.cveHandler.GetCVENotificationConfig)
-			clusters.Put("/:cluster_id/cve-notifications", s.cveHandler.UpdateCVENotificationConfig)
-		}
+		// The 10 CVE and security-posture routes are declared in
+		// internal/api/registry_cve.go and mounted by mountRegistry
+		// above, so there is no block for them here.
 
 		// Cluster-scoped alert routes.
 		if s.alertHandler != nil {
@@ -343,19 +316,9 @@ func (s *Server) setupRoutes() {
 			clusters.Delete("/:cluster_id/maintenance-windows/:id", s.alertHandler.DeleteMaintenanceWindow)
 		}
 
-		// DRS routes.
-		if s.drsHandler != nil {
-			clusters.Get("/:cluster_id/drs/config", s.drsHandler.GetConfig)
-			clusters.Put("/:cluster_id/drs/config", s.drsHandler.UpdateConfig)
-			clusters.Get("/:cluster_id/drs/rules", s.drsHandler.ListRules)
-			clusters.Post("/:cluster_id/drs/rules", s.drsHandler.CreateRule)
-			clusters.Delete("/:cluster_id/drs/rules/:rule_id", s.drsHandler.DeleteRule)
-			clusters.Post("/:cluster_id/drs/evaluate", s.drsHandler.TriggerEvaluate)
-			clusters.Get("/:cluster_id/drs/history", s.drsHandler.ListHistory)
-			clusters.Get("/:cluster_id/drs/ha-rules", s.drsHandler.ListHARules)
-			clusters.Post("/:cluster_id/drs/ha-rules", s.drsHandler.CreateHARule)
-			clusters.Delete("/:cluster_id/drs/ha-rules/:rule_name", s.drsHandler.DeleteHARule)
-		}
+		// The 10 DRS routes are declared in internal/api/registry_drs.go
+		// and mounted by mountRegistry above, so there is no block for
+		// them here.
 
 		// Migration routes under clusters.
 		if s.migrationHandler != nil {
@@ -426,26 +389,9 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/config/nodes", s.clusterOptionsHandler.ListCorosyncNodes)
 		}
 
-		// HA management routes.
-		if s.haHandler != nil {
-			clusters.Get("/:cluster_id/ha/resources", s.haHandler.ListResources)
-			clusters.Post("/:cluster_id/ha/resources", s.haHandler.CreateResource)
-			clusters.Get("/:cluster_id/ha/resources/:sid", s.haHandler.GetResource)
-			clusters.Put("/:cluster_id/ha/resources/:sid", s.haHandler.UpdateResource)
-			clusters.Delete("/:cluster_id/ha/resources/:sid", s.haHandler.DeleteResource)
-			clusters.Get("/:cluster_id/ha/groups", s.haHandler.ListGroups)
-			clusters.Post("/:cluster_id/ha/groups", s.haHandler.CreateGroup)
-			clusters.Put("/:cluster_id/ha/groups/:group", s.haHandler.UpdateGroup)
-			clusters.Delete("/:cluster_id/ha/groups/:group", s.haHandler.DeleteGroup)
-			clusters.Get("/:cluster_id/ha/status", s.haHandler.GetStatus)
-			clusters.Get("/:cluster_id/ha/rules", s.haHandler.ListRules)
-			clusters.Post("/:cluster_id/ha/rules", s.haHandler.CreateRule)
-			clusters.Put("/:cluster_id/ha/rules/:rule", s.haHandler.UpdateRule)
-			clusters.Delete("/:cluster_id/ha/rules/:rule", s.haHandler.DeleteRule)
-			clusters.Get("/:cluster_id/ha/manager-status", s.haHandler.GetManagerStatus)
-			clusters.Post("/:cluster_id/ha/arm", s.haHandler.ArmHA)
-			clusters.Post("/:cluster_id/ha/disarm", s.haHandler.DisarmHA)
-		}
+		// The 17 HA routes are declared in internal/api/registry_ha.go
+		// and mounted by mountRegistry above, so there is no block for
+		// them here.
 
 		// Resource pool CRUD routes (GET list already registered via vmHandler).
 		if s.poolHandler != nil {
@@ -487,17 +433,9 @@ func (s *Server) setupRoutes() {
 			access.Get("/permissions", s.accessHandler.GetPermissions)
 		}
 
-		// Replication routes.
-		if s.replicationHandler != nil {
-			clusters.Get("/:cluster_id/replication", s.replicationHandler.ListJobs)
-			clusters.Post("/:cluster_id/replication", s.replicationHandler.CreateJob)
-			clusters.Get("/:cluster_id/replication/:job_id", s.replicationHandler.GetJob)
-			clusters.Put("/:cluster_id/replication/:job_id", s.replicationHandler.UpdateJob)
-			clusters.Delete("/:cluster_id/replication/:job_id", s.replicationHandler.DeleteJob)
-			clusters.Post("/:cluster_id/replication/:job_id/trigger", s.replicationHandler.TriggerSync)
-			clusters.Get("/:cluster_id/replication/:job_id/status", s.replicationHandler.GetStatus)
-			clusters.Get("/:cluster_id/replication/:job_id/log", s.replicationHandler.GetLog)
-		}
+		// The 8 replication routes are declared in
+		// internal/api/registry_replication.go and mounted by
+		// mountRegistry above, so there is no block for them here.
 
 		// ACME certificate routes.
 		if s.acmeHandler != nil {

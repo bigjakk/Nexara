@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
@@ -48,25 +49,6 @@ func NewDRSHandler(queries *db.Queries, encryptionKey string, eventPub *events.P
 
 // --- Request / Response types ---
 
-type drsConfigRequest struct {
-	Mode                string          `json:"mode"`
-	Weights             json.RawMessage `json:"weights"`
-	ImbalanceThreshold  float64         `json:"imbalance_threshold"`
-	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
-	IncludeContainers   bool            `json:"include_containers"`
-	// A POINTER, unlike the flag above, because this one defaults to TRUE and
-	// absent must mean "leave the stored value alone".
-	//
-	// A plain bool would read an absent key as false, so any client predating
-	// the field would silently disarm the protection on its next save and DRS
-	// would start migrating Veeam's workers mid-backup with nothing to show
-	// why. Coercing absent to TRUE has the mirror fault: it re-arms a flag an
-	// operator deliberately turned off, from a stale browser tab saving an
-	// unrelated threshold change. Neither is a decision the caller made — see
-	// UpsertDRSConfig, which does the preserving.
-	ExcludeVeeamWorkers *bool `json:"exclude_veeam_workers"`
-}
-
 type drsConfigResponse struct {
 	ID                  uuid.UUID       `json:"id"`
 	ClusterID           uuid.UUID       `json:"cluster_id"`
@@ -98,6 +80,18 @@ type nativeCRSStatus struct {
 
 // optionalBool maps an absent request field to SQL NULL, which the upsert
 // reads as "leave the stored value alone".
+//
+// exclude_veeam_workers is why it exists, and why that parameter is
+// declared with no default: it defaults to TRUE, so absent has to mean
+// "leave the stored value alone" rather than either boolean.
+//
+// A plain bool would read an absent key as false, so any client predating
+// the field would silently disarm the protection on its next save and DRS
+// would start migrating Veeam's workers mid-backup with nothing to show
+// why. Coercing absent to TRUE has the mirror fault: it re-arms a flag an
+// operator deliberately turned off, from a stale browser tab saving an
+// unrelated threshold change. Neither is a decision the caller made — see
+// UpsertDRSConfig, which does the preserving.
 func optionalBool(v *bool) pgtype.Bool {
 	if v == nil {
 		return pgtype.Bool{}
@@ -119,13 +113,6 @@ func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
 		CreatedAt:           c.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:           c.UpdatedAt.Format(time.RFC3339Nano),
 	}
-}
-
-type drsRuleRequest struct {
-	RuleType  string          `json:"rule_type"`
-	VMIDs     json.RawMessage `json:"vm_ids"`
-	NodeNames json.RawMessage `json:"node_names"`
-	Enabled   bool            `json:"enabled"`
 }
 
 type drsRuleResponse struct {
@@ -193,25 +180,30 @@ func toDRSHistoryResponse(h db.DrsHistory) drsHistoryResponse {
 
 // --- Handlers ---
 
-var validDRSModes = map[string]bool{
-	"disabled":  true,
-	"advisory":  true,
-	"automatic": true,
-}
+// DRSModes is the mode vocabulary PUT .../drs/config accepts, ordered
+// least to most active.
+//
+// It is exported so the endpoint's declaration in
+// internal/api/registry_drs.go can use it as the parameter's enum: the
+// list that validates the request and the list UpdateConfig's own
+// "enabled is derived from mode" rule reads are then the same list.
+// TestDRSModesCoverTheBranchesThatReadThem holds it against the two
+// literals this package still compares a mode against by name.
+var DRSModes = []string{"disabled", "advisory", "automatic"}
 
-var validRuleTypes = map[string]bool{
-	"affinity":      true,
-	"anti-affinity": true,
-	"pin":           true,
-}
+// DRSRuleTypes is the rule vocabulary both rule-create endpoints accept.
+//
+// Unlike the Proxmox vocabularies elsewhere in this package these three
+// values are NEXARA's: haRuleToResponse and CreateHARule map them onto
+// PVE's node-affinity and resource-affinity, so a fourth cannot appear
+// without this file changing. That is what makes an enum safe here where
+// it would not be for a PVE rule type.
+var DRSRuleTypes = []string{"affinity", "anti-affinity", "pin"}
 
 // GetConfig handles GET /api/v1/clusters/:cluster_id/drs/config.
-func (h *DRSHandler) GetConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *DRSHandler) GetConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
 		return err
 	}
 
@@ -267,50 +259,58 @@ func (h *DRSHandler) detectNativeCRS(c fiber.Ctx, clusterID uuid.UUID) *nativeCR
 }
 
 // UpdateConfig handles PUT /api/v1/clusters/:cluster_id/drs/config.
-func (h *DRSHandler) UpdateConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *DRSHandler) UpdateConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
-		return err
+
+	mode := p.String("mode")
+	threshold := p.Float("imbalance_threshold")
+	// NOT redundant with the schema, and not safe to tidy away.
+	//
+	// apischema.Property has Minimum and Maximum and no EXCLUSIVE form of
+	// either, so the declaration bounds this to [0,1] but cannot say
+	// "greater than 0" — 0 passes validation and arrives here. A threshold
+	// of 0 would make every imbalance actionable, which is a migration
+	// loop. See the declaration in registry_drs.go, and TestDRSConfigBody's
+	// "a zero threshold is still refused" case, which asserts the schema
+	// really does let 0 reach this line.
+	if threshold <= 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "imbalance_threshold must be greater than 0")
 	}
 
-	var req drsConfigRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if !validDRSModes[req.Mode] {
-		return fiber.NewError(fiber.StatusBadRequest, "mode must be one of: disabled, advisory, automatic")
-	}
-
-	if req.ImbalanceThreshold <= 0 || req.ImbalanceThreshold > 1 {
-		return fiber.NewError(fiber.StatusBadRequest, "imbalance_threshold must be between 0 and 1")
-	}
-
-	if req.EvalIntervalSeconds < 60 {
-		return fiber.NewError(fiber.StatusBadRequest, "eval_interval_seconds must be at least 60")
-	}
-
-	if req.Weights == nil {
-		req.Weights = json.RawMessage(`{"cpu":0.3,"memory":0.7}`)
+	// The schema's Default supplies the same object the handler used to
+	// substitute for a missing weights key, so there is no nil case left.
+	//
+	// The marshal cannot fail on anything a request can produce: every
+	// value in the map came out of encoding/json, so it is a string, bool,
+	// nil, json.Number, map or slice, and the declared Default is two
+	// float64s. The error is therefore OUR bug rather than the caller's,
+	// and is classified the way parseParamUUID classifies the same kind of
+	// mistake — a 500, not a 400 that would blame whoever happened to be
+	// calling.
+	weights, err := json.Marshal(p.Object("weights"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Request validation failed")
 	}
 
 	// `enabled` is derived from `mode` — the user-facing config no longer
 	// exposes a separate toggle. The DB column remains because the
 	// rolling-update orchestrator uses it as a runtime pause flag.
-	enabled := req.Mode != "disabled"
+	enabled := mode != "disabled"
 
 	cfg, err := h.queries.UpsertDRSConfig(c.Context(), db.UpsertDRSConfigParams{
 		ClusterID:           clusterID,
-		Mode:                req.Mode,
+		Mode:                mode,
 		Enabled:             enabled,
-		Weights:             req.Weights,
-		ImbalanceThreshold:  req.ImbalanceThreshold,
-		EvalIntervalSeconds: req.EvalIntervalSeconds,
-		IncludeContainers:   req.IncludeContainers,
-		ExcludeVeeamWorkers: optionalBool(req.ExcludeVeeamWorkers),
+		Weights:             weights,
+		ImbalanceThreshold:  threshold,
+		EvalIntervalSeconds: safeconv.Int32(int(p.Int("eval_interval_seconds"))),
+		IncludeContainers:   p.Bool("include_containers"),
+		// A *bool, so that omitting the key leaves the stored value alone
+		// rather than writing false. See the comment on the declaration.
+		ExcludeVeeamWorkers: optionalBool(optBoolPtr(p.OptBool("exclude_veeam_workers"))),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update DRS config")
@@ -321,8 +321,8 @@ func (h *DRSHandler) UpdateConfig(c fiber.Ctx) error {
 	// when explaining a backup job DRS killed, and the STORED value is what to
 	// record — the request may have omitted the field entirely.
 	details, _ := json.Marshal(map[string]interface{}{
-		"mode":                  req.Mode,
-		"imbalance_threshold":   req.ImbalanceThreshold,
+		"mode":                  mode,
+		"imbalance_threshold":   threshold,
 		"include_containers":    cfg.IncludeContainers,
 		"exclude_veeam_workers": cfg.ExcludeVeeamWorkers,
 	})
@@ -332,12 +332,9 @@ func (h *DRSHandler) UpdateConfig(c fiber.Ctx) error {
 }
 
 // ListRules handles GET /api/v1/clusters/:cluster_id/drs/rules.
-func (h *DRSHandler) ListRules(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *DRSHandler) ListRules(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
 		return err
 	}
 
@@ -355,61 +352,60 @@ func (h *DRSHandler) ListRules(c fiber.Ctx) error {
 }
 
 // CreateRule handles POST /api/v1/clusters/:cluster_id/drs/rules.
-func (h *DRSHandler) CreateRule(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *DRSHandler) CreateRule(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+
+	ruleType := p.String("rule_type")
+	vmIDs, err := intListFromStrings(p.Strings("vm_ids"))
+	if err != nil {
 		return err
 	}
-
-	var req drsRuleRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	// Marshalled rather than forwarded raw: both columns are JSONB and the
+	// API's own response types are number[] and string[], so the stored
+	// shape has to be the validated list, not whatever text arrived.
+	// json.Marshal of a non-nil slice never fails, and a nil one renders as
+	// "null" — hence the explicit empty slices, which are what the handler
+	// used to substitute for a missing key.
+	if vmIDs == nil {
+		vmIDs = []int{}
 	}
-
-	if !validRuleTypes[req.RuleType] {
-		return fiber.NewError(fiber.StatusBadRequest, "rule_type must be one of: affinity, anti-affinity, pin")
+	nodeNames := p.Strings("node_names")
+	if nodeNames == nil {
+		nodeNames = []string{}
 	}
-
-	if req.VMIDs == nil {
-		req.VMIDs = json.RawMessage(`[]`)
-	}
-	if req.NodeNames == nil {
-		req.NodeNames = json.RawMessage(`[]`)
-	}
+	vmIDsJSON, _ := json.Marshal(vmIDs)
+	nodeNamesJSON, _ := json.Marshal(nodeNames)
 
 	rule, err := h.queries.InsertDRSRule(c.Context(), db.InsertDRSRuleParams{
 		ClusterID: clusterID,
-		RuleType:  req.RuleType,
-		VmIds:     req.VMIDs,
-		NodeNames: req.NodeNames,
-		Enabled:   req.Enabled,
+		RuleType:  ruleType,
+		VmIds:     vmIDsJSON,
+		NodeNames: nodeNamesJSON,
+		Enabled:   p.Bool("enabled"),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create DRS rule")
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{"rule_type": req.RuleType, "vm_ids": req.VMIDs, "node_names": req.NodeNames})
+	details, _ := json.Marshal(map[string]interface{}{"rule_type": ruleType, "vm_ids": vmIDs, "node_names": nodeNames})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs_rule", rule.ID.String(), "rule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(toDRSRuleResponse(rule))
 }
 
 // DeleteRule handles DELETE /api/v1/clusters/:cluster_id/drs/rules/:rule_id.
-func (h *DRSHandler) DeleteRule(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *DRSHandler) DeleteRule(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
 		return err
 	}
 
-	ruleID, err := uuid.Parse(c.Params("rule_id"))
+	ruleID, err := parseParamUUID(p.String("rule_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule ID")
+		return err
 	}
 
 	if err := h.queries.DeleteDRSRule(c.Context(), ruleID); err != nil {
@@ -422,12 +418,9 @@ func (h *DRSHandler) DeleteRule(c fiber.Ctx) error {
 }
 
 // TriggerEvaluate handles POST /api/v1/clusters/:cluster_id/drs/evaluate.
-func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
 		return err
 	}
 
@@ -572,23 +565,18 @@ func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx) error {
 }
 
 // ListHistory handles GET /api/v1/clusters/:cluster_id/drs/history.
-func (h *DRSHandler) ListHistory(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *DRSHandler) ListHistory(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
-		return err
-	}
-
-	limit := int32(50)
-	if l := fiber.Query[int](c, "limit", 50); l > 0 && l <= 500 {
-		limit = int32(l)
 	}
 
 	history, err := h.queries.ListDRSHistory(c.Context(), db.ListDRSHistoryParams{
 		ClusterID: clusterID,
-		Limit:     limit,
+		// The schema bounds it to 1..500 and defaults it to 50, so the
+		// clamp that silently answered with 50 rows for ?limit=5000 is
+		// gone: an out-of-range limit is now a 400 that names the field.
+		Limit: safeconv.Int32(int(p.Int("limit"))),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list DRS history")
@@ -666,12 +654,9 @@ func haRuleToResponse(clusterID uuid.UUID, entry proxmox.HARuleEntry) drsRuleRes
 }
 
 // ListHARules handles GET /api/v1/clusters/:cluster_id/drs/ha-rules.
-func (h *DRSHandler) ListHARules(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *DRSHandler) ListHARules(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
 		return err
 	}
 
@@ -694,54 +679,38 @@ func (h *DRSHandler) ListHARules(c fiber.Ctx) error {
 }
 
 // CreateHARule handles POST /api/v1/clusters/:cluster_id/drs/ha-rules.
-func (h *DRSHandler) CreateHARule(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *DRSHandler) CreateHARule(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+
+	ruleName := p.String("rule_name")
+	ruleType := p.String("rule_type")
+	vmIDs, err := intListFromStrings(p.Strings("vm_ids"))
+	if err != nil {
 		return err
 	}
-
-	var req struct {
-		RuleName  string   `json:"rule_name"`
-		RuleType  string   `json:"rule_type"`
-		VMIDs     []int    `json:"vm_ids"`
-		NodeNames []string `json:"node_names"`
-		Enabled   bool     `json:"enabled"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.RuleName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "rule_name is required for HA rules")
-	}
-	if !validRuleTypes[req.RuleType] {
-		return fiber.NewError(fiber.StatusBadRequest, "rule_type must be one of: affinity, anti-affinity, pin")
-	}
-	if len(req.VMIDs) == 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "vm_ids is required")
-	}
+	nodeNames := p.Strings("node_names")
 
 	// Convert VMIDs to Proxmox SID format: "vm:100,vm:101".
-	sids := make([]string, len(req.VMIDs))
-	for i, id := range req.VMIDs {
+	sids := make([]string, len(vmIDs))
+	for i, id := range vmIDs {
 		sids[i] = "vm:" + strconv.Itoa(id)
 	}
 
 	// Map DRS rule type back to Proxmox HA format.
 	var haRuleType string
 	params := proxmox.CreateHARuleParams{
-		Rule:      req.RuleName,
+		Rule:      ruleName,
 		Resources: strings.Join(sids, ","),
 	}
 
-	switch req.RuleType {
+	switch ruleType {
 	case "pin":
 		haRuleType = "node-affinity"
-		if len(req.NodeNames) > 0 {
-			params.Nodes = strings.Join(req.NodeNames, ",")
+		if len(nodeNames) > 0 {
+			params.Nodes = strings.Join(nodeNames, ",")
 		}
 	case "affinity":
 		haRuleType = "resource-affinity"
@@ -760,13 +729,13 @@ func (h *DRSHandler) CreateHARule(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	haDetails, _ := json.Marshal(map[string]interface{}{"rule_name": req.RuleName, "rule_type": req.RuleType, "vm_ids": req.VMIDs, "ha_type": haRuleType})
+	haDetails, _ := json.Marshal(map[string]interface{}{"rule_name": ruleName, "rule_type": ruleType, "vm_ids": vmIDs, "ha_type": haRuleType})
 	// "created", not "ha_rule_created": the row's resource_type already says
 	// ha_rule, and HAHandler.CreateRule has always written the short verb. One
 	// resource type, one vocabulary.
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", req.RuleName, "created", haDetails)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", ruleName, "created", haDetails)
 
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok", "rule_name": req.RuleName})
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok", "rule_name": ruleName})
 }
 
 // DeleteHARule handles DELETE /api/v1/clusters/:cluster_id/drs/ha-rules/:rule_name.
@@ -785,23 +754,18 @@ func (h *DRSHandler) CreateHARule(c fiber.Ctx) error {
 // The snapshot read costs one extra round trip to PVE. That is affordable on an
 // operator-initiated delete, and it is the only evidence the prior state ever
 // leaves behind.
-func (h *DRSHandler) DeleteHARule(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *DRSHandler) DeleteHARule(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
-		return err
-	}
 
-	// Read raw, unlike the HA tab's decodePathParam: the DRS client sends the
-	// rule name unencoded, so decoding here would corrupt a name containing a
-	// literal percent. What matters for the lookup below is that the same
-	// string reaches both findHARule and DeleteHARule, and it does.
-	ruleName := c.Params("rule_name")
-	if ruleName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "rule_name is required")
-	}
+	// Read raw, unlike the HA tab's decodeParamValue: the DRS client sends
+	// the rule name unencoded, so decoding here would corrupt a name
+	// containing a literal percent. What matters for the lookup below is
+	// that the same string reaches both findHARule and DeleteHARule, and it
+	// does. The schema has already refused an empty or traversing name.
+	ruleName := p.String("rule_name")
 
 	client, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {

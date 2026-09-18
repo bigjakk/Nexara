@@ -612,7 +612,7 @@ func (q *Queries) ListCVEScanVulns(ctx context.Context, scanID uuid.UUID) ([]Cve
 
 const listCVEScanVulnsByNode = `-- name: ListCVEScanVulnsByNode :many
 SELECT id, scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description, risk_score, epss, epss_percentile, kev, risk_severity, ssvc_label FROM cve_scan_vulns
-WHERE scan_node_id = $1
+WHERE scan_id = $1 AND scan_node_id = $2
 ORDER BY
     CASE severity
         WHEN 'critical' THEN 0
@@ -624,8 +624,23 @@ ORDER BY
     package_name
 `
 
-func (q *Queries) ListCVEScanVulnsByNode(ctx context.Context, scanNodeID uuid.UUID) ([]CveScanVuln, error) {
-	rows, err := q.db.Query(ctx, listCVEScanVulnsByNode, scanNodeID)
+type ListCVEScanVulnsByNodeParams struct {
+	ScanID     uuid.UUID `json:"scan_id"`
+	ScanNodeID uuid.UUID `json:"scan_node_id"`
+}
+
+// Vulnerabilities on one node OF ONE SCAN.
+//
+// scan_id is in the filter as well as scan_node_id, and it is what makes this
+// read SAFE rather than what makes it tidy. The route authorizes the CLUSTER
+// in its path and then checks that the scan in its path belongs to it;
+// scan_node_id, by contrast, comes from a ?node_id= the caller chooses freely.
+// With scan_node_id alone, a caller holding view:cve_scan on one cluster could
+// name a scan-node row from another cluster's scan and read its
+// vulnerabilities. Every sibling listing here filters on scan_id for the same
+// reason, and TestCVEVulnReadsAreScanScoped holds all five of them to it.
+func (q *Queries) ListCVEScanVulnsByNode(ctx context.Context, arg ListCVEScanVulnsByNodeParams) ([]CveScanVuln, error) {
+	rows, err := q.db.Query(ctx, listCVEScanVulnsByNode, arg.ScanID, arg.ScanNodeID)
 	if err != nil {
 		return nil, err
 	}

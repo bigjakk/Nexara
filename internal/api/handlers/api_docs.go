@@ -444,6 +444,21 @@ var endpointMeta = map[string]APIEndpoint{
 	"GET /api/v1/veeam-servers/:id/sessions/:session_id/tasks":               {Description: "Per-guest breakdown of one run: which guests it processed and which failed, linked to their Nexara guest where the name resolves unambiguously. Empty while a run is still in flight — Veeam reports task rows only as tasks finish", Permission: "view:veeam", Group: "Backup"},
 
 	// ── DRS ───────────────────────────────────────────────────────────
+	//
+	// Every entry below is a SHADOW COPY, the same way the Containers
+	// block above is: all 10 DRS routes are declared in
+	// internal/api/registry_drs.go, and GetDocs renders a declared route
+	// from its declaration — so what a reader sees is the declaration's
+	// description, permission, group and full parameter schema, not these
+	// lines. They are kept saying the same thing about the permission so
+	// that removing them is a deletion rather than a behaviour change, and
+	// because TestGuard_DocumentedPermissionMatchesEnforcement compares
+	// this copy against the declared one.
+	//
+	// Two DRS routes never had an entry here at all — POST ha-rules and
+	// DELETE ha-rules/:rule_name — and now get their docs from the
+	// declaration, which is the point of the migration rather than an
+	// omission to fix by adding more shadow copies.
 	"GET /api/v1/clusters/:cluster_id/drs/config":            {Description: "Get DRS configuration", Permission: "view:drs", Group: "DRS"},
 	"PUT /api/v1/clusters/:cluster_id/drs/config":            {Description: "Update DRS configuration", Permission: "manage:drs", Group: "DRS"},
 	"GET /api/v1/clusters/:cluster_id/drs/rules":             {Description: "List DRS rules", Permission: "view:drs", Group: "DRS"},
@@ -474,6 +489,19 @@ var endpointMeta = map[string]APIEndpoint{
 	"POST /api/v1/notification-channels/:id/test": {Description: "Send a test notification", Permission: "manage:notification_channel", Group: "Notification Channels"},
 
 	// ── CVE Scanning / Security ───────────────────────────────────────
+	//
+	// Every CVE entry below is a SHADOW COPY, the same way the Containers
+	// and DRS blocks are: all 10 CVE routes are declared in
+	// internal/api/registry_cve.go, and GetDocs renders a declared route
+	// from its declaration. They are kept saying the same thing about the
+	// permission so that removing them is a deletion rather than a
+	// behaviour change, and because
+	// TestGuard_DocumentedPermissionMatchesEnforcement compares this copy
+	// against the declared one.
+	//
+	// Four CVE routes never had an entry here — both cve-scan-schedule
+	// routes and both cve-notifications routes — and now get their docs
+	// from the declaration.
 	"GET /api/v1/clusters/:cluster_id/cve-scans":                          {Description: "List CVE scans", Permission: "view:cve_scan", Group: "Security"},
 	"POST /api/v1/clusters/:cluster_id/cve-scans":                         {Description: "Trigger a CVE scan", Permission: "manage:cve_scan", Group: "Security"},
 	"GET /api/v1/clusters/:cluster_id/cve-scans/:scan_id":                 {Description: "Get scan details", Permission: "view:cve_scan", Group: "Security"},

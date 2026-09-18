@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -48,10 +49,10 @@ func TestCephMetricsWindowBounded(t *testing.T) {
 // query is driven by whatever the client sends. The default doubles as the
 // documented value for a missing parameter, so it has to be a real key.
 func TestCephMetricsWindowFallback(t *testing.T) {
-	fallback, ok := cephMetricsTimeframes[cephMetricsDefaultTimeframe]
+	fallback, ok := cephMetricsTimeframes[CephMetricsDefaultTimeframe]
 	if !ok {
 		t.Fatalf("default timeframe %q is not in the table",
-			cephMetricsDefaultTimeframe)
+			CephMetricsDefaultTimeframe)
 	}
 
 	for _, timeframe := range []string{"", "not-a-timeframe", "1H", "30d"} {
@@ -63,5 +64,67 @@ func TestCephMetricsWindowFallback(t *testing.T) {
 					fallback.window, fallback.bucketSeconds)
 			}
 		})
+	}
+}
+
+// TestCephMetricsTimeframesCoverTheTable holds the exported enum and the
+// window table together.
+//
+// CephMetricsTimeframes is what the endpoint declaration in
+// internal/api/registry_ceph.go validates ?timeframe= against, and
+// cephMetricsTimeframes is what cephMetricsWindow looks the value up in.
+// Two lists, one vocabulary: a timeframe added to the table but not the
+// slice is unreachable through the API, and one added to the slice but not
+// the table passes validation and then silently serves the default window.
+// Both directions fail here.
+func TestCephMetricsTimeframesCoverTheTable(t *testing.T) {
+	for _, tf := range CephMetricsTimeframes {
+		if _, ok := cephMetricsTimeframes[tf]; !ok {
+			t.Errorf("CephMetricsTimeframes offers %q, but cephMetricsTimeframes has no window for it — "+
+				"the schema would accept it and cephMetricsWindow would silently serve the default", tf)
+		}
+	}
+	for tf := range cephMetricsTimeframes {
+		if !slices.Contains(CephMetricsTimeframes, tf) {
+			t.Errorf("cephMetricsTimeframes defines a window for %q, but CephMetricsTimeframes does not "+
+				"offer it — the schema's enum makes it unreachable", tf)
+		}
+	}
+	if !slices.Contains(CephMetricsTimeframes, CephMetricsDefaultTimeframe) {
+		t.Errorf("the default timeframe %q is not in CephMetricsTimeframes, so the declaration's "+
+			"Default would fail its own enum", CephMetricsDefaultTimeframe)
+	}
+}
+
+// TestCephOSDActionsCoverTheDisruptiveSet keeps the exported action
+// vocabulary honest against the two places that reason about an action.
+//
+// CephOSDActions is what the pre-flight endpoint validates ?action=
+// against; cephDisruptiveOSDActions decides whether that action gets a
+// redundancy warning, and osdServingAfter decides what the cluster looks
+// like afterwards. An action the enum accepts but osdServingAfter has no
+// case for falls to the default branch and is graded as if nothing
+// happened — an advisory check that answers "ok" to an action it does not
+// understand.
+func TestCephOSDActionsCoverTheDisruptiveSet(t *testing.T) {
+	for action := range cephDisruptiveOSDActions {
+		if !slices.Contains(CephOSDActions, action) {
+			t.Errorf("cephDisruptiveOSDActions names %q, which CephOSDActions does not offer — "+
+				"the warning it carries is unreachable", action)
+		}
+	}
+
+	// osdServingAfter has no exported shape to inspect, so this drives it:
+	// every declared action must produce a verdict that depends on the
+	// action rather than on the OSD's current state alone. A serving OSD
+	// is the input, so anything disruptive must answer false and anything
+	// else must answer true.
+	serving := cephOSDResponse{ID: 1, Up: 1, In: 1, Host: "pve-01"}
+	for _, action := range CephOSDActions {
+		got := osdServingAfter(serving, action)
+		if want := !cephDisruptiveOSDActions[action]; got != want {
+			t.Errorf("osdServingAfter(serving, %q) = %v, want %v — the action is %sdisruptive",
+				action, got, want, map[bool]string{true: "", false: "not "}[cephDisruptiveOSDActions[action]])
+		}
 	}
 }

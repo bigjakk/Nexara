@@ -926,7 +926,17 @@ type Querier interface {
 	ListCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) ([]uuid.UUID, error)
 	ListCVEScanNodes(ctx context.Context, scanID uuid.UUID) ([]CveScanNode, error)
 	ListCVEScanVulns(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
-	ListCVEScanVulnsByNode(ctx context.Context, scanNodeID uuid.UUID) ([]CveScanVuln, error)
+	// Vulnerabilities on one node OF ONE SCAN.
+	//
+	// scan_id is in the filter as well as scan_node_id, and it is what makes this
+	// read SAFE rather than what makes it tidy. The route authorizes the CLUSTER
+	// in its path and then checks that the scan in its path belongs to it;
+	// scan_node_id, by contrast, comes from a ?node_id= the caller chooses freely.
+	// With scan_node_id alone, a caller holding view:cve_scan on one cluster could
+	// name a scan-node row from another cluster's scan and read its
+	// vulnerabilities. Every sibling listing here filters on scan_id for the same
+	// reason, and TestCVEVulnReadsAreScanScoped holds all five of them to it.
+	ListCVEScanVulnsByNode(ctx context.Context, arg ListCVEScanVulnsByNodeParams) ([]CveScanVuln, error)
 	ListCVEScanVulnsBySeverity(ctx context.Context, arg ListCVEScanVulnsBySeverityParams) ([]CveScanVuln, error)
 	ListCVEScanVulnsKEV(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
 	ListCVEScans(ctx context.Context, arg ListCVEScansParams) ([]CveScan, error)

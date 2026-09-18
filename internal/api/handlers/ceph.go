@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -108,18 +109,6 @@ type cephCrushRuleResponse struct {
 	MaxSize  int    `json:"max_size"`
 }
 
-type createPoolRequest struct {
-	Name        string `json:"name"`
-	Size        int    `json:"size"`
-	MinSize     int    `json:"min_size,omitempty"`
-	PGNum       int    `json:"pg_num"`
-	Application string `json:"application,omitempty"`
-	// crush_rule_name is Nexara's own wire name for this field and differs from
-	// PVE's, which is crush_rule. Do not "align" it — the client translates.
-	CrushRule   string `json:"crush_rule_name,omitempty"`
-	PGAutoScale string `json:"pg_autoscale_mode,omitempty"`
-}
-
 // cephPoolActionResponse is returned by pool create and delete. Both are
 // dispatched as Proxmox tasks, so the UPID is the caller's handle on the
 // outcome; neither operation has finished when the response is written.
@@ -133,16 +122,13 @@ type cephPoolActionResponse struct {
 // --- Live Proxmox proxy endpoints ---
 
 // GetStatus handles GET /api/v1/clusters/:cluster_id/ceph/status
-func (h *CephHandler) GetStatus(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) GetStatus(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
-		return err
-	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c)
+	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
 	if err != nil {
 		return err
 	}
@@ -179,16 +165,13 @@ func (h *CephHandler) GetStatus(c fiber.Ctx) error {
 }
 
 // ListOSDs handles GET /api/v1/clusters/:cluster_id/ceph/osds
-func (h *CephHandler) ListOSDs(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) ListOSDs(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
-		return err
-	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c)
+	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
 	if err != nil {
 		return err
 	}
@@ -243,16 +226,13 @@ func boolToInt(b bool) int {
 }
 
 // ListPools handles GET /api/v1/clusters/:cluster_id/ceph/pools
-func (h *CephHandler) ListPools(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) ListPools(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
-		return err
-	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c)
+	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
 	if err != nil {
 		return err
 	}
@@ -263,37 +243,34 @@ func (h *CephHandler) ListPools(c fiber.Ctx) error {
 	}
 
 	resp := make([]cephPoolResponse, len(pools))
-	for i, p := range pools {
+	for i, pool := range pools {
 		resp[i] = cephPoolResponse{
-			PoolName:     p.PoolName,
-			Pool:         int(p.Pool),
-			Size:         int(p.Size),
-			MinSize:      int(p.MinSize),
-			PGNum:        int(p.PGNum),
-			PGAutoScale:  p.PGAutoScale,
-			CrushRule:    int(p.CrushRule),
-			BytesUsed:    p.BytesUsed,
-			PercentUsed:  p.PercentUsed,
-			ReadBytesSec: p.ReadBytesSec,
-			WritBytesSec: p.WritBytesSec,
-			ReadOpPerSec: p.ReadOpPerSec,
-			WritOpPerSec: p.WritOpPerSec,
+			PoolName:     pool.PoolName,
+			Pool:         int(pool.Pool),
+			Size:         int(pool.Size),
+			MinSize:      int(pool.MinSize),
+			PGNum:        int(pool.PGNum),
+			PGAutoScale:  pool.PGAutoScale,
+			CrushRule:    int(pool.CrushRule),
+			BytesUsed:    pool.BytesUsed,
+			PercentUsed:  pool.PercentUsed,
+			ReadBytesSec: pool.ReadBytesSec,
+			WritBytesSec: pool.WritBytesSec,
+			ReadOpPerSec: pool.ReadOpPerSec,
+			WritOpPerSec: pool.WritOpPerSec,
 		}
 	}
 	return RespondItems(c, resp)
 }
 
 // ListMonitors handles GET /api/v1/clusters/:cluster_id/ceph/monitors
-func (h *CephHandler) ListMonitors(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) ListMonitors(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
-		return err
-	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c)
+	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
 	if err != nil {
 		return err
 	}
@@ -316,16 +293,13 @@ func (h *CephHandler) ListMonitors(c fiber.Ctx) error {
 }
 
 // ListFS handles GET /api/v1/clusters/:cluster_id/ceph/fs
-func (h *CephHandler) ListFS(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) ListFS(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
-		return err
-	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c)
+	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
 	if err != nil {
 		return err
 	}
@@ -347,16 +321,13 @@ func (h *CephHandler) ListFS(c fiber.Ctx) error {
 }
 
 // ListCrushRules handles GET /api/v1/clusters/:cluster_id/ceph/rules
-func (h *CephHandler) ListCrushRules(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) ListCrushRules(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
-		return err
-	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c)
+	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
 	if err != nil {
 		return err
 	}
@@ -380,42 +351,31 @@ func (h *CephHandler) ListCrushRules(c fiber.Ctx) error {
 }
 
 // CreatePool handles POST /api/v1/clusters/:cluster_id/ceph/pools
-func (h *CephHandler) CreatePool(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) CreatePool(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ceph", clusterID); err != nil {
-		return err
-	}
 
-	var req createPoolRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Name == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Pool name is required")
-	}
-	if req.Size <= 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "Pool size must be positive")
-	}
-	if req.PGNum <= 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "pg_num must be positive")
-	}
+	poolName := p.String("name")
 
-	pxClient, nodeName, err := h.resolveClusterNode(c)
+	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
 	if err != nil {
 		return err
 	}
 
 	upid, err := pxClient.CreateCephPool(c.Context(), nodeName, proxmox.CephPoolCreateParams{
-		Name:        req.Name,
-		Size:        req.Size,
-		MinSize:     req.MinSize,
-		PGNum:       req.PGNum,
-		Application: req.Application,
-		CrushRule:   req.CrushRule,
-		PGAutoScale: req.PGAutoScale,
+		Name:    poolName,
+		Size:    int(p.Int("size")),
+		MinSize: int(p.Int("min_size")),
+		PGNum:   int(p.Int("pg_num")),
+		// crush_rule_name is Nexara's own wire name for this field and
+		// differs from PVE's, which is crush_rule. Do not "align" it — the
+		// client translates, and the comment on that translation in
+		// client_storage.go explains why sending PVE's spelling was the bug.
+		Application: p.String("application"),
+		CrushRule:   p.String("crush_rule_name"),
+		PGAutoScale: p.String("pg_autoscale_mode"),
 	})
 	if err != nil {
 		return mapProxmoxError(err)
@@ -425,14 +385,14 @@ func (h *CephHandler) CreatePool(c fiber.Ctx) error {
 		ClusterID:    clusterID,
 		Node:         nodeName,
 		ResourceType: "ceph_pool",
-		ResourceID:   req.Name,
-		ResourceName: req.Name,
+		ResourceID:   poolName,
+		ResourceName: poolName,
 		Action:       "create",
 		UPID:         upid,
-		Description:  fmt.Sprintf("Create Ceph pool %s on %s", req.Name, nodeName),
+		Description:  fmt.Sprintf("Create Ceph pool %s on %s", poolName, nodeName),
 		Extra: map[string]any{
-			"size":   req.Size,
-			"pg_num": req.PGNum,
+			"size":   p.Int("size"),
+			"pg_num": p.Int("pg_num"),
 		},
 	})
 
@@ -442,28 +402,22 @@ func (h *CephHandler) CreatePool(c fiber.Ctx) error {
 	// The UPID is the handle on the real outcome.
 	return c.Status(fiber.StatusAccepted).JSON(cephPoolActionResponse{
 		Status: "dispatched",
-		Name:   req.Name,
+		Name:   poolName,
 		Node:   nodeName,
 		UPID:   upid,
 	})
 }
 
 // DeletePool handles DELETE /api/v1/clusters/:cluster_id/ceph/pools/:pool_name
-func (h *CephHandler) DeletePool(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) DeletePool(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ceph", clusterID); err != nil {
-		return err
-	}
 
-	poolName := c.Params("pool_name")
-	if poolName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Pool name is required")
-	}
+	poolName := p.String("pool_name")
 
-	pxClient, nodeName, err := h.resolveClusterNode(c)
+	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
 	if err != nil {
 		return err
 	}
@@ -571,34 +525,51 @@ var cephMetricsTimeframes = map[string]struct {
 	"7d":  {7 * 24 * time.Hour, 3600},
 }
 
-// cephMetricsDefaultTimeframe is both the documented default for a missing
-// ?timeframe= and the fallback for an unrecognised one; it must be a key of
-// cephMetricsTimeframes.
-const cephMetricsDefaultTimeframe = "1h"
+// CephMetricsTimeframes is the ?timeframe= vocabulary
+// GET .../ceph/metrics accepts, ordered shortest window first.
+//
+// It is exported so the endpoint's declaration in
+// internal/api/registry_ceph.go can use it as the parameter's enum: the
+// list that validates the request and the table that maps a timeframe to
+// its window are then held together by
+// TestCephMetricsTimeframesCoverTheTable rather than by whoever remembers
+// to edit both.
+//
+// A slice rather than the map's keys because the docs render it in order,
+// and a map gives a different order on every run.
+var CephMetricsTimeframes = []string{"1h", "6h", "24h", "7d"}
+
+// CephMetricsDefaultTimeframe is both the documented default for a missing
+// ?timeframe= and the fallback cephMetricsWindow applies to an
+// unrecognised one; it must be a key of cephMetricsTimeframes.
+//
+// The declaration states it as the parameter's Default, so the fallback
+// below is no longer reachable from an HTTP request — the enum refuses
+// anything that is not a key. It stays because cephMetricsWindow is
+// called with a stored value elsewhere, and because a lookup that returns
+// a zero window on a miss would ask the database for a window ending
+// before it started.
+const CephMetricsDefaultTimeframe = "1h"
 
 // cephMetricsWindow maps a requested timeframe to its window and bucket width,
 // falling back to the default for anything unrecognised.
 func cephMetricsWindow(timeframe string) (window time.Duration, bucketSeconds int32) {
 	tf, ok := cephMetricsTimeframes[timeframe]
 	if !ok {
-		tf = cephMetricsTimeframes[cephMetricsDefaultTimeframe]
+		tf = cephMetricsTimeframes[CephMetricsDefaultTimeframe]
 	}
 	return tf.window, tf.bucketSeconds
 }
 
 // GetHistorical handles GET /api/v1/clusters/:cluster_id/ceph/metrics
-func (h *CephHandler) GetHistorical(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) GetHistorical(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
-		return err
-	}
 
-	timeframe := c.Query("timeframe", cephMetricsDefaultTimeframe)
 	now := time.Now()
-	window, bucketSeconds := cephMetricsWindow(timeframe)
+	window, bucketSeconds := cephMetricsWindow(p.String("timeframe"))
 
 	metrics, err := h.queries.GetCephClusterMetricsHistory(c.Context(), db.GetCephClusterMetricsHistoryParams{
 		BucketSeconds: bucketSeconds,
@@ -614,12 +585,9 @@ func (h *CephHandler) GetHistorical(c fiber.Ctx) error {
 }
 
 // GetOSDMetrics handles GET /api/v1/clusters/:cluster_id/ceph/osds/metrics
-func (h *CephHandler) GetOSDMetrics(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) GetOSDMetrics(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
 		return err
 	}
 
@@ -632,12 +600,9 @@ func (h *CephHandler) GetOSDMetrics(c fiber.Ctx) error {
 }
 
 // GetPoolMetrics handles GET /api/v1/clusters/:cluster_id/ceph/pools/metrics
-func (h *CephHandler) GetPoolMetrics(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) GetPoolMetrics(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
 		return err
 	}
 
@@ -652,12 +617,13 @@ func (h *CephHandler) GetPoolMetrics(c fiber.Ctx) error {
 // --- Helpers ---
 
 // resolveClusterNode picks the first online node for Ceph API calls.
-func (h *CephHandler) resolveClusterNode(c fiber.Ctx) (*proxmox.Client, string, error) {
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return nil, "", fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
-	}
-
+//
+// clusterID is passed in rather than re-read from the path. It used to
+// parse c.Params("cluster_id") itself, which meant every handler resolved
+// the same value twice and — more to the point — a second reader of the
+// path that the route declaration does not describe. The caller has the
+// id the schema validated; there is nothing here to re-derive.
+func (h *CephHandler) resolveClusterNode(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, string, error) {
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return nil, "", err

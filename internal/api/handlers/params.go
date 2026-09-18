@@ -63,6 +63,76 @@ func optIntPtr(value int64, supplied bool) *int {
 	return &n
 }
 
+// optStringPtr is optBoolPtr for a string parameter, read the same way:
+// optStringPtr(p.OptString("comment")).
+//
+// The EMPTY STRING is a supplied value here, not an absent one, and that
+// is the point rather than an accident: a form that sends comment:"" means
+// "clear the note", and a helper that folded "" into nil would silently
+// turn every such save into a no-op. apischema draws the same line — see
+// present() in validate.go.
+func optStringPtr(value string, supplied bool) *string {
+	if !supplied {
+		return nil
+	}
+	return &value
+}
+
+// intListFromStrings converts the string form of a validated
+// integer-array parameter into the ints a JSONB column — and the API's own
+// number[] response shape — need.
+//
+// Params.Strings renders every element whatever its declared type, so an
+// Array of Integer comes back as decimal text. A failure here is not a bad
+// request: the schema has already refused anything that is not an integer
+// inside the declared bounds. It means the declaration and this call
+// disagree about the parameter, which is our bug and no request can fix,
+// so it is reported the way parseParamUUID reports the same class of
+// mistake — a 500, with nothing about our schema handed to the caller.
+//
+// nil in, nil out: a caller who omitted an optional array gets no list,
+// which the caller distinguishes from an empty one if it needs to.
+func intListFromStrings(values []string) ([]int, error) {
+	if values == nil {
+		return nil, nil
+	}
+	out := make([]int, 0, len(values))
+	for _, v := range values {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fiber.NewError(fiber.StatusInternalServerError, "Request validation failed")
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+// uuidListFromStrings converts a validated uuid-array parameter into the
+// uuid.UUIDs the queries take.
+//
+// It is intListFromStrings for the other element type, and fails the same
+// way and for the same reason: the schema's "uuid" format has already
+// refused anything uuid.Parse could choke on, so an error here is a
+// disagreement between the declaration and this call rather than something
+// the caller got wrong.
+//
+// Unlike intListFromStrings it returns an EMPTY slice for an empty input
+// rather than nil, because its one caller stores the result as "the
+// channel set is now this" — and a nil there would be indistinguishable
+// from "the caller said nothing", which is the distinction the Has check
+// at the call site exists to make.
+func uuidListFromStrings(values []string) ([]uuid.UUID, error) {
+	out := make([]uuid.UUID, 0, len(values))
+	for _, v := range values {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			return nil, fiber.NewError(fiber.StatusInternalServerError, "Request validation failed")
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
 // stringMap flattens an object parameter into the map[string]string a
 // Proxmox configuration write takes.
 //

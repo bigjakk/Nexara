@@ -11,16 +11,23 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// decodePathParam returns the path param URL-decoded, falling back to the raw
-// value if the input is malformed. Audit logs and Proxmox SID paths both want
-// the literal value (e.g. "vm:109"), not "vm%3A109".
-func decodePathParam(c fiber.Ctx, name string) string {
-	raw := c.Params(name)
+// decodeParamValue returns a path parameter URL-decoded, falling back to the
+// raw text if the input is malformed. Audit logs and Proxmox SID paths both
+// want the literal value (e.g. "vm:109"), not "vm%3A109" — Fiber does not
+// decode a path parameter, and Proxmox rejects a percent-encoded colon in an
+// HA SID path.
+//
+// It takes the value the handler has already read with p.String rather than
+// the context and a key: registry_paramkey_guard_test.go walks each handler
+// for accessor calls whose key is a string literal, and a key passed through
+// a helper is a key that guard cannot see.
+func decodeParamValue(raw string) string {
 	if decoded, err := url.PathUnescape(raw); err == nil {
 		return decoded
 	}
@@ -141,12 +148,9 @@ func (h *HAHandler) requireArmDisarmSupport(c fiber.Ctx, clusterID uuid.UUID) er
 
 // ArmHA handles POST /clusters/:cluster_id/ha/arm — re-arms the HA stack
 // cluster-wide after a disarm window.
-func (h *HAHandler) ArmHA(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) ArmHA(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	if err := h.requireArmDisarmSupport(c, clusterID); err != nil {
@@ -167,34 +171,26 @@ func (h *HAHandler) ArmHA(c fiber.Ctx) error {
 
 // DisarmHA handles POST /clusters/:cluster_id/ha/disarm — disarms the HA stack
 // cluster-wide for planned maintenance. Body: {"resource_mode": "freeze"|"ignore"}.
-func (h *HAHandler) DisarmHA(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) DisarmHA(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	if err := h.requireArmDisarmSupport(c, clusterID); err != nil {
 		return err
 	}
-	var req struct {
-		ResourceMode string `json:"resource_mode"`
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.ResourceMode != "freeze" && req.ResourceMode != "ignore" {
-		return fiber.NewError(fiber.StatusBadRequest, "resource_mode must be 'freeze' or 'ignore'")
-	}
+	// The schema's enum is the same two values the hand-rolled check
+	// named, so there is nothing left to re-test here.
+	resourceMode := p.String("resource_mode")
+
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	if err := pxClient.DisarmHA(c.Context(), req.ResourceMode); err != nil {
+	if err := pxClient.DisarmHA(c.Context(), resourceMode); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"action": "disarm-ha", "resource_mode": req.ResourceMode})
+	details, _ := json.Marshal(map[string]any{"action": "disarm-ha", "resource_mode": resourceMode})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha", clusterID.String(), "disarm_ha", details)
 	h.publishHA(c, clusterID, clusterID.String(), "disarm_ha")
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -207,12 +203,9 @@ func (h *HAHandler) publishHA(c fiber.Ctx, clusterID uuid.UUID, resourceID, acti
 // --- HA Resources ---
 
 // ListResources handles GET /clusters/:cluster_id/ha/resources.
-func (h *HAHandler) ListResources(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) ListResources(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -227,21 +220,26 @@ func (h *HAHandler) ListResources(c fiber.Ctx) error {
 }
 
 // CreateResource handles POST /clusters/:cluster_id/ha/resources.
-func (h *HAHandler) CreateResource(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) CreateResource(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
-		return err
+	sid := p.String("sid")
+	req := proxmox.CreateHAResourceParams{
+		SID:         sid,
+		State:       p.String("state"),
+		Group:       p.String("group"),
+		MaxRestart:  int(p.Int("max_restart")),
+		MaxRelocate: int(p.Int("max_relocate")),
+		Comment:     p.String("comment"),
+		// A *int, so that omitting the key means "do not send this
+		// property" rather than "send 0" — the distinction a plain bool
+		// could not express and the schema now carries by declaring no
+		// default.
+		Failback: optIntPtr(p.OptInt("failback")),
 	}
-	var req proxmox.CreateHAResourceParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.SID == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "SID is required")
-	}
+
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -249,8 +247,8 @@ func (h *HAHandler) CreateResource(c fiber.Ctx) error {
 	if err := pxClient.CreateHAResource(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
-	detailMap := map[string]any{"sid": req.SID}
-	if name := resolveSIDName(c.Context(), h.queries, clusterID, req.SID); name != "" {
+	detailMap := map[string]any{"sid": sid}
+	if name := resolveSIDName(c.Context(), h.queries, clusterID, sid); name != "" {
 		detailMap["name"] = name
 	}
 	if req.State != "" {
@@ -272,24 +270,18 @@ func (h *HAHandler) CreateResource(c fiber.Ctx) error {
 		detailMap["failback"] = *req.Failback
 	}
 	details, _ := json.Marshal(detailMap)
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_resource", req.SID, "created", details)
-	h.publishHA(c, clusterID, req.SID, "resource_created")
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_resource", sid, "created", details)
+	h.publishHA(c, clusterID, sid, "resource_created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
 // GetResource handles GET /clusters/:cluster_id/ha/resources/:sid.
-func (h *HAHandler) GetResource(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) GetResource(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
-		return err
-	}
-	sid := decodePathParam(c, "sid")
-	if sid == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "SID is required")
-	}
+	sid := decodeParamValue(p.String("sid"))
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -302,22 +294,26 @@ func (h *HAHandler) GetResource(c fiber.Ctx) error {
 }
 
 // UpdateResource handles PUT /clusters/:cluster_id/ha/resources/:sid.
-func (h *HAHandler) UpdateResource(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) UpdateResource(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
-		return err
+	sid := decodeParamValue(p.String("sid"))
+	// Every field is a pointer, so "the caller omitted it" and "the caller
+	// sent the zero value" have to stay apart all the way to the form the
+	// client builds. p.OptX reports the difference; a Go zero value could
+	// not, which is the whole reason these are pointers.
+	req := proxmox.UpdateHAResourceParams{
+		State:       optStringPtr(p.OptString("state")),
+		Group:       optStringPtr(p.OptString("group")),
+		MaxRestart:  optIntPtr(p.OptInt("max_restart")),
+		MaxRelocate: optIntPtr(p.OptInt("max_relocate")),
+		Comment:     optStringPtr(p.OptString("comment")),
+		Failback:    optIntPtr(p.OptInt("failback")),
+		Digest:      p.String("digest"),
 	}
-	sid := decodePathParam(c, "sid")
-	if sid == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "SID is required")
-	}
-	var req proxmox.UpdateHAResourceParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -354,18 +350,12 @@ func (h *HAHandler) UpdateResource(c fiber.Ctx) error {
 }
 
 // DeleteResource handles DELETE /clusters/:cluster_id/ha/resources/:sid.
-func (h *HAHandler) DeleteResource(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) DeleteResource(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
-		return err
-	}
-	sid := decodePathParam(c, "sid")
-	if sid == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "SID is required")
-	}
+	sid := decodeParamValue(p.String("sid"))
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -414,12 +404,9 @@ const haGroupsMigratedMsg = "HA Groups were migrated to HA Rules in Proxmox VE 9
 
 // ListGroups handles GET /clusters/:cluster_id/ha/groups.
 // On PVE 9.x where groups have been migrated to rules, returns an empty array.
-func (h *HAHandler) ListGroups(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) ListGroups(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -439,24 +426,19 @@ func (h *HAHandler) ListGroups(c fiber.Ctx) error {
 }
 
 // CreateGroup handles POST /clusters/:cluster_id/ha/groups.
-func (h *HAHandler) CreateGroup(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) CreateGroup(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
-		return err
+	req := proxmox.CreateHAGroupParams{
+		Group:      p.String("group"),
+		Nodes:      p.String("nodes"),
+		Restricted: int(p.Int("restricted")),
+		NoFailback: int(p.Int("nofailback")),
+		Comment:    p.String("comment"),
 	}
-	var req proxmox.CreateHAGroupParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Group == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Group name is required")
-	}
-	if req.Nodes == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Nodes are required")
-	}
+
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -484,22 +466,20 @@ func (h *HAHandler) CreateGroup(c fiber.Ctx) error {
 }
 
 // UpdateGroup handles PUT /clusters/:cluster_id/ha/groups/:group.
-func (h *HAHandler) UpdateGroup(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) UpdateGroup(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
-		return err
+	group := decodeParamValue(p.String("group"))
+	req := proxmox.UpdateHAGroupParams{
+		Nodes:      optStringPtr(p.OptString("nodes")),
+		Restricted: optIntPtr(p.OptInt("restricted")),
+		NoFailback: optIntPtr(p.OptInt("nofailback")),
+		Comment:    optStringPtr(p.OptString("comment")),
+		Digest:     p.String("digest"),
 	}
-	group := decodePathParam(c, "group")
-	if group == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Group name is required")
-	}
-	var req proxmox.UpdateHAGroupParams
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -530,18 +510,12 @@ func (h *HAHandler) UpdateGroup(c fiber.Ctx) error {
 }
 
 // DeleteGroup handles DELETE /clusters/:cluster_id/ha/groups/:group.
-func (h *HAHandler) DeleteGroup(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) DeleteGroup(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
-		return err
-	}
-	group := decodePathParam(c, "group")
-	if group == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Group name is required")
-	}
+	group := decodeParamValue(p.String("group"))
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -609,12 +583,9 @@ func mapHARuleError(err error) error {
 }
 
 // ListRules handles GET /clusters/:cluster_id/ha/rules.
-func (h *HAHandler) ListRules(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) ListRules(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -635,35 +606,31 @@ func (h *HAHandler) ListRules(c fiber.Ctx) error {
 }
 
 // CreateRule handles POST /clusters/:cluster_id/ha/rules.
-func (h *HAHandler) CreateRule(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) CreateRule(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
-		return err
+	// "node-affinity" or "resource-affinity"; Proxmox owns the vocabulary,
+	// so the schema requires a value without claiming to know the set.
+	ruleType := p.String("type")
+	req := proxmox.CreateHARuleParams{
+		Rule:      p.String("rule"),
+		Resources: p.String("resources"),
+		Nodes:     p.String("nodes"),
+		Strict:    int(p.Int("strict")),
+		Affinity:  p.String("affinity"),
+		Comment:   p.String("comment"),
 	}
-	var req struct {
-		Type string `json:"type"` // "node-affinity" or "resource-affinity"
-		proxmox.CreateHARuleParams
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Rule == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Rule name is required")
-	}
-	if req.Type == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Rule type is required")
-	}
+
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	if err := pxClient.CreateHARule(c.Context(), req.Type, req.CreateHARuleParams); err != nil {
+	if err := pxClient.CreateHARule(c.Context(), ruleType, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	detailMap := map[string]any{"rule": req.Rule, "type": req.Type}
+	detailMap := map[string]any{"rule": req.Rule, "type": ruleType}
 	if req.Resources != "" {
 		detailMap["resources"] = req.Resources
 		if names := resolveResourceNames(c.Context(), h.queries, clusterID, req.Resources); names != nil {
@@ -689,36 +656,31 @@ func (h *HAHandler) CreateRule(c fiber.Ctx) error {
 }
 
 // UpdateRule handles PUT /clusters/:cluster_id/ha/rules/:rule.
-func (h *HAHandler) UpdateRule(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) UpdateRule(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
-		return err
+	rule := decodeParamValue(p.String("rule"))
+	ruleType := p.String("type")
+	req := proxmox.UpdateHARuleParams{
+		Resources: optStringPtr(p.OptString("resources")),
+		Nodes:     optStringPtr(p.OptString("nodes")),
+		Strict:    optIntPtr(p.OptInt("strict")),
+		Affinity:  optStringPtr(p.OptString("affinity")),
+		Comment:   optStringPtr(p.OptString("comment")),
+		Disable:   optIntPtr(p.OptInt("disable")),
+		Digest:    p.String("digest"),
 	}
-	rule := decodePathParam(c, "rule")
-	if rule == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Rule name is required")
-	}
-	var req struct {
-		Type string `json:"type"`
-		proxmox.UpdateHARuleParams
-	}
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
-	if req.Type == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Rule type is required")
-	}
+
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	if err := pxClient.UpdateHARule(c.Context(), rule, req.Type, req.UpdateHARuleParams); err != nil {
+	if err := pxClient.UpdateHARule(c.Context(), rule, ruleType, req); err != nil {
 		return mapHARuleError(err)
 	}
-	detailMap := map[string]any{"rule": rule, "type": req.Type}
+	detailMap := map[string]any{"rule": rule, "type": ruleType}
 	if req.Resources != nil {
 		detailMap["resources"] = *req.Resources
 		if names := resolveResourceNames(c.Context(), h.queries, clusterID, *req.Resources); names != nil {
@@ -863,18 +825,12 @@ func haRuleDeleteDetails(ctx context.Context, queries *db.Queries, clusterID uui
 // stale-list situation because PVE's update_rule genuinely dies there; the
 // difference is Proxmox's, not ours. What the two must not do is disagree in
 // the audit log, so the no-op case is recorded as the no-op it was.
-func (h *HAHandler) DeleteRule(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) DeleteRule(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
-		return err
-	}
-	rule := decodePathParam(c, "rule")
-	if rule == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Rule name is required")
-	}
+	rule := decodeParamValue(p.String("rule"))
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -902,12 +858,9 @@ func (h *HAHandler) DeleteRule(c fiber.Ctx) error {
 // --- HA Status ---
 
 // GetStatus handles GET /clusters/:cluster_id/ha/status.
-func (h *HAHandler) GetStatus(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) GetStatus(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -922,12 +875,9 @@ func (h *HAHandler) GetStatus(c fiber.Ctx) error {
 }
 
 // GetManagerStatus handles GET /clusters/:cluster_id/ha/manager-status.
-func (h *HAHandler) GetManagerStatus(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *HAHandler) GetManagerStatus(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)

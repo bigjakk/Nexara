@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -21,11 +22,19 @@ import (
 //     (POST /nodes/{node}/ceph/{action}?service=osd.N) that DO return a UPID, so
 //     they must be addressed to the OSD's own host and recorded via TrackTask.
 
-// cephOSDActions are the OSD actions the API accepts, mirroring the routes
-// registered in the router.
-var cephOSDActions = map[string]bool{
-	"in": true, "out": true, "start": true, "stop": true, "restart": true,
-}
+// CephOSDActions are the OSD actions the API accepts, in the order the
+// five routes are declared.
+//
+// It is exported so the pre-flight endpoint's declaration in
+// internal/api/registry_ceph.go can use it as the ?action= enum: the list
+// that validates the request and the list of routes that can act on an
+// OSD are then the same list. It replaced a map whose only reader was the
+// hand-rolled "Invalid action" check the schema now makes.
+//
+// A slice rather than a set because the docs render it in order, and
+// because cephDisruptiveOSDActions below is the only membership question
+// anything still asks.
+var CephOSDActions = []string{"in", "out", "start", "stop", "restart"}
 
 // cephDisruptiveOSDActions are the actions that can reduce data redundancy, and
 // so get a pre-flight assessment in the UI before the operator confirms.
@@ -86,25 +95,17 @@ type cephOSDPreflight struct {
 
 // GetOSDPreflight handles
 // GET /api/v1/clusters/:cluster_id/ceph/osds/:osd_id/preflight?action=out
-func (h *CephHandler) GetOSDPreflight(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) GetOSDPreflight(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
-		return err
-	}
+	osdID := int(p.Int("osd_id"))
+	// The schema's enum is CephOSDActions and its default is "out", so the
+	// hand-rolled membership check and the c.Query default are both gone.
+	action := p.String("action")
 
-	osdID, err := osdIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	action := c.Query("action", "out")
-	if !cephOSDActions[action] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid action")
-	}
-
-	octx, err := h.loadOSDContext(c, osdID)
+	octx, err := h.loadOSDContext(c, clusterID, osdID)
 	if err != nil {
 		return err
 	}
@@ -118,11 +119,11 @@ func (h *CephHandler) GetOSDPreflight(c fiber.Ctx) error {
 	}
 
 	constraints := make([]cephPoolConstraint, 0, len(pools))
-	for _, p := range pools {
+	for _, pool := range pools {
 		constraints = append(constraints, cephPoolConstraint{
-			PoolName: p.PoolName,
-			Size:     int(p.Size),
-			MinSize:  int(p.MinSize),
+			PoolName: pool.PoolName,
+			Size:     int(pool.Size),
+			MinSize:  int(pool.MinSize),
 		})
 	}
 
@@ -327,32 +328,25 @@ func maxSeverity(a, b string) string {
 // --- Action endpoints ---
 
 // SetOSDIn handles POST /api/v1/clusters/:cluster_id/ceph/osds/:osd_id/in
-func (h *CephHandler) SetOSDIn(c fiber.Ctx) error {
-	return h.osdMembershipAction(c, "in")
+func (h *CephHandler) SetOSDIn(c fiber.Ctx, p *apischema.Params) error {
+	return h.osdMembershipAction(c, p, "in")
 }
 
 // SetOSDOut handles POST /api/v1/clusters/:cluster_id/ceph/osds/:osd_id/out
-func (h *CephHandler) SetOSDOut(c fiber.Ctx) error {
-	return h.osdMembershipAction(c, "out")
+func (h *CephHandler) SetOSDOut(c fiber.Ctx, p *apischema.Params) error {
+	return h.osdMembershipAction(c, p, "out")
 }
 
 // osdMembershipAction marks an OSD in or out. Ceph applies these immediately and
 // returns no UPID, so they are recorded with AuditLog rather than TrackTask.
-func (h *CephHandler) osdMembershipAction(c fiber.Ctx, action string) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) osdMembershipAction(c fiber.Ctx, p *apischema.Params, action string) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ceph", clusterID); err != nil {
-		return err
-	}
+	osdID := int(p.Int("osd_id"))
 
-	osdID, err := osdIDFromParam(c)
-	if err != nil {
-		return err
-	}
-
-	octx, err := h.loadOSDContext(c, osdID)
+	octx, err := h.loadOSDContext(c, clusterID, osdID)
 	if err != nil {
 		return err
 	}
@@ -389,37 +383,30 @@ func (h *CephHandler) osdMembershipAction(c fiber.Ctx, action string) error {
 }
 
 // StartOSD handles POST /api/v1/clusters/:cluster_id/ceph/osds/:osd_id/start
-func (h *CephHandler) StartOSD(c fiber.Ctx) error {
-	return h.osdDaemonAction(c, "start")
+func (h *CephHandler) StartOSD(c fiber.Ctx, p *apischema.Params) error {
+	return h.osdDaemonAction(c, p, "start")
 }
 
 // StopOSD handles POST /api/v1/clusters/:cluster_id/ceph/osds/:osd_id/stop
-func (h *CephHandler) StopOSD(c fiber.Ctx) error {
-	return h.osdDaemonAction(c, "stop")
+func (h *CephHandler) StopOSD(c fiber.Ctx, p *apischema.Params) error {
+	return h.osdDaemonAction(c, p, "stop")
 }
 
 // RestartOSD handles POST /api/v1/clusters/:cluster_id/ceph/osds/:osd_id/restart
-func (h *CephHandler) RestartOSD(c fiber.Ctx) error {
-	return h.osdDaemonAction(c, "restart")
+func (h *CephHandler) RestartOSD(c fiber.Ctx, p *apischema.Params) error {
+	return h.osdDaemonAction(c, p, "restart")
 }
 
 // osdDaemonAction starts, stops or restarts an OSD daemon. Proxmox returns a
 // UPID for these, so the result is recorded via TrackTask.
-func (h *CephHandler) osdDaemonAction(c fiber.Ctx, action string) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CephHandler) osdDaemonAction(c fiber.Ctx, p *apischema.Params, action string) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "ceph", clusterID); err != nil {
-		return err
-	}
+	osdID := int(p.Int("osd_id"))
 
-	osdID, err := osdIDFromParam(c)
-	if err != nil {
-		return err
-	}
-
-	octx, err := h.loadOSDContext(c, osdID)
+	octx, err := h.loadOSDContext(c, clusterID, osdID)
 	if err != nil {
 		return err
 	}
@@ -477,8 +464,8 @@ type osdContext struct {
 // Reading the tree first is what lets the handlers route daemon actions to the
 // right host and reject IDs that do not exist, instead of forwarding them to
 // Proxmox and surfacing its error.
-func (h *CephHandler) loadOSDContext(c fiber.Ctx, osdID int) (*osdContext, error) {
-	pxClient, nodeName, err := h.resolveClusterNode(c)
+func (h *CephHandler) loadOSDContext(c fiber.Ctx, clusterID uuid.UUID, osdID int) (*osdContext, error) {
+	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
 	if err != nil {
 		return nil, err
 	}
@@ -518,14 +505,6 @@ func (h *CephHandler) daemonNode(c fiber.Ctx, clusterID uuid.UUID, osd cephOSDRe
 	}
 	return "", fiber.NewError(fiber.StatusUnprocessableEntity, fmt.Sprintf(
 		"Ceph reports osd.%d on host %q, which is not a known node in this cluster", osd.ID, osd.Host))
-}
-
-func osdIDFromParam(c fiber.Ctx) (int, error) {
-	osdID, err := strconv.Atoi(c.Params("osd_id"))
-	if err != nil || osdID < 0 {
-		return 0, fiber.NewError(fiber.StatusBadRequest, "Invalid OSD ID")
-	}
-	return osdID, nil
 }
 
 // osdDisplayName prefers the CRUSH name ("osd.3") and falls back to composing

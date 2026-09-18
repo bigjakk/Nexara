@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -16,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/notifications"
@@ -207,35 +207,37 @@ type securityPostureResponse struct {
 	CompletedAt    string    `json:"completed_at,omitempty"`
 }
 
-var validSeverities = map[string]bool{
-	"critical": true, "high": true, "medium": true, "low": true, "unknown": true,
-}
+// CVESeverities is the ?severity= vocabulary
+// GET .../cve-scans/:scan_id/vulnerabilities accepts, ordered most severe
+// first.
+//
+// It is exported so the endpoint's declaration in
+// internal/api/registry_cve.go can use it as the parameter's enum: the
+// list that validates the request and the set the scanner writes into the
+// severity column are then held together by
+// TestCVESeveritiesAllHaveAPostureBucket rather than by whoever remembers to
+// edit both.
+//
+// A slice rather than the map's keys because the docs render it in order,
+// and a map gives a different order on every run.
+var CVESeverities = []string{"critical", "high", "medium", "low", "unknown"}
 
 // --- Handlers ---
 
 // ListScans lists CVE scans for a cluster.
-func (h *CVEHandler) ListScans(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CVEHandler) ListScans(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
-		return err
-	}
-
-	limit, _ := strconv.Atoi(c.Query("limit", "20"))
-	offset, _ := strconv.Atoi(c.Query("offset", "0"))
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
 	}
 
 	scans, err := h.queries.ListCVEScans(c.Context(), db.ListCVEScansParams{
 		ClusterID: clusterID,
-		Limit:     safeconv.Int32(limit),
-		Offset:    safeconv.Int32(offset),
+		// The schema bounds and defaults both of these, so the clamp that
+		// silently answered with 20 rows for ?limit=5000 is gone: an
+		// out-of-range value is now a 400 that names the field.
+		Limit:  safeconv.Int32(int(p.Int("limit"))),
+		Offset: safeconv.Int32(int(p.Int("offset"))),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list scans")
@@ -249,12 +251,9 @@ func (h *CVEHandler) ListScans(c fiber.Ctx) error {
 }
 
 // TriggerScan starts a new CVE scan for a cluster.
-func (h *CVEHandler) TriggerScan(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CVEHandler) TriggerScan(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -324,18 +323,15 @@ func (h *CVEHandler) TriggerScan(c fiber.Ctx) error {
 }
 
 // GetScan returns a single CVE scan with its node results.
-func (h *CVEHandler) GetScan(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CVEHandler) GetScan(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
-	scanID, err := uuid.Parse(c.Params("scan_id"))
+	scanID, err := parseParamUUID(p.String("scan_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid scan ID")
+		return err
 	}
 
 	scan, err := h.queries.GetCVEScan(c.Context(), scanID)
@@ -365,18 +361,15 @@ func (h *CVEHandler) GetScan(c fiber.Ctx) error {
 }
 
 // ListVulnerabilities returns vulnerabilities for a scan.
-func (h *CVEHandler) ListVulnerabilities(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CVEHandler) ListVulnerabilities(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
-	scanID, err := uuid.Parse(c.Params("scan_id"))
+	scanID, err := parseParamUUID(p.String("scan_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid scan ID")
+		return err
 	}
 
 	// Verify the scan belongs to this cluster
@@ -388,14 +381,14 @@ func (h *CVEHandler) ListVulnerabilities(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Scan not found")
 	}
 
-	severity := c.Query("severity")
-	nodeID := c.Query("node_id")
-	kevOnly := c.Query("kev") == "true"
-
-	// Validate severity if provided
-	if severity != "" && !validSeverities[severity] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid severity value")
-	}
+	// The schema's enum is CVESeverities and its uuid format is what used
+	// to be a hand-rolled uuid.Parse, so both of the "Invalid …" refusals
+	// below are the schema's now. Read through the Opt accessors because
+	// what matters is whether the caller CHOSE a filter, not whether the
+	// value is non-empty.
+	severity, filterBySeverity := p.OptString("severity")
+	nodeID, filterByNode := p.OptString("node_id")
+	kevOnly := p.Bool("kev")
 
 	var vulns []db.CveScanVuln
 
@@ -405,13 +398,20 @@ func (h *CVEHandler) ListVulnerabilities(c fiber.Ctx) error {
 		// Applied independently of severity/nodeID since the dashboard
 		// callout deep-links straight here.
 		vulns, err = h.queries.ListCVEScanVulnsKEV(c.Context(), scanID)
-	case nodeID != "":
-		nid, parseErr := uuid.Parse(nodeID)
+	case filterByNode:
+		nid, parseErr := parseParamUUID(nodeID)
 		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid node ID")
+			return parseErr
 		}
-		vulns, err = h.queries.ListCVEScanVulnsByNode(c.Context(), nid)
-	case severity != "":
+		// scanID as well as the node, and the scan is the half that
+		// matters: it was checked against the cluster in the path a few
+		// lines above, while nodeID is whatever ?node_id= carried. Passing
+		// the node alone let a caller read another cluster's scan.
+		vulns, err = h.queries.ListCVEScanVulnsByNode(c.Context(), db.ListCVEScanVulnsByNodeParams{
+			ScanID:     scanID,
+			ScanNodeID: nid,
+		})
+	case filterBySeverity:
 		vulns, err = h.queries.ListCVEScanVulnsBySeverity(c.Context(), db.ListCVEScanVulnsBySeverityParams{
 			ScanID:   scanID,
 			Severity: severity,
@@ -432,18 +432,15 @@ func (h *CVEHandler) ListVulnerabilities(c fiber.Ctx) error {
 }
 
 // DeleteScan deletes a CVE scan and its results.
-func (h *CVEHandler) DeleteScan(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CVEHandler) DeleteScan(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
-	scanID, err := uuid.Parse(c.Params("scan_id"))
+	scanID, err := parseParamUUID(p.String("scan_id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid scan ID")
+		return err
 	}
 
 	// Verify the scan belongs to this cluster
@@ -465,12 +462,9 @@ func (h *CVEHandler) DeleteScan(c fiber.Ctx) error {
 }
 
 // GetSecurityPosture returns the security posture summary for a cluster.
-func (h *CVEHandler) GetSecurityPosture(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CVEHandler) GetSecurityPosture(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -530,18 +524,10 @@ type cveScanScheduleResponse struct {
 	UpdatedAt     string    `json:"updated_at"`
 }
 
-type updateCVEScheduleRequest struct {
-	Enabled       *bool  `json:"enabled"`
-	IntervalHours *int32 `json:"interval_hours"`
-}
-
 // GetSchedule returns the CVE scan schedule for a cluster.
-func (h *CVEHandler) GetSchedule(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CVEHandler) GetSchedule(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -564,18 +550,10 @@ func (h *CVEHandler) GetSchedule(c fiber.Ctx) error {
 }
 
 // UpdateSchedule updates the CVE scan schedule for a cluster.
-func (h *CVEHandler) UpdateSchedule(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CVEHandler) UpdateSchedule(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
-	}
-	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
-		return err
-	}
-
-	var req updateCVEScheduleRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
 	// Get current values for defaults
@@ -587,14 +565,18 @@ func (h *CVEHandler) UpdateSchedule(c fiber.Ctx) error {
 		intervalHours = existing.IntervalHours
 	}
 
-	if req.Enabled != nil {
-		enabled = *req.Enabled
+	// Neither parameter carries a schema default, so "supplied" really does
+	// mean the caller chose — an omitted one keeps what is stored.
+	if v, ok := p.OptBool("enabled"); ok {
+		enabled = v
 	}
-	if req.IntervalHours != nil {
-		intervalHours = *req.IntervalHours
+	if v, ok := p.OptInt("interval_hours"); ok {
+		intervalHours = safeconv.Int32(int(v))
 	}
 
-	// Validate interval
+	// The schema bounds what the CALLER may send; this bounds the MERGED
+	// value, which can also come from a stored row written before those
+	// bounds existed.
 	if intervalHours < 1 || intervalHours > 168 {
 		return fiber.NewError(fiber.StatusBadRequest, "Interval must be between 1 and 168 hours")
 	}
@@ -630,22 +612,11 @@ type cveNotifyConfigResponse struct {
 	LastNotifiedAt  string      `json:"last_notified_at,omitempty"`
 }
 
-type updateCVENotifyConfigRequest struct {
-	Enabled         *bool       `json:"enabled"`
-	NotifyOnAct     *bool       `json:"notify_on_act"`
-	NotifyOnAttend  *bool       `json:"notify_on_attend"`
-	ChannelIDs      []uuid.UUID `json:"channel_ids"`
-	CooldownMinutes *int32      `json:"cooldown_minutes"`
-}
-
 // GetCVENotificationConfig returns the per-cluster CVE notification config.
 // Falls back to disabled defaults when no config exists yet.
-func (h *CVEHandler) GetCVENotificationConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CVEHandler) GetCVENotificationConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -687,19 +658,16 @@ func (h *CVEHandler) GetCVENotificationConfig(c fiber.Ctx) error {
 }
 
 // UpdateCVENotificationConfig upserts the per-cluster CVE notification config.
-func (h *CVEHandler) UpdateCVENotificationConfig(c fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
+func (h *CVEHandler) UpdateCVENotificationConfig(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
-		return err
-	}
 
-	var req updateCVENotifyConfigRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	// channel_ids is read through Has rather than through the returned
+	// slice, because an EMPTY list and an ABSENT key mean different things
+	// here: [] clears the channels, and omitting the key keeps them.
+	requestedChannels, channelsSupplied := p.Strings("channel_ids"), p.Has("channel_ids")
 
 	// Defaults / merge from existing.
 	enabled := false
@@ -724,20 +692,24 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c fiber.Ctx) error {
 		}
 		channelIDs = existingChannels
 	}
-	if req.Enabled != nil {
-		enabled = *req.Enabled
+	if v, ok := p.OptBool("enabled"); ok {
+		enabled = v
 	}
-	if req.NotifyOnAct != nil {
-		notifyOnAct = *req.NotifyOnAct
+	if v, ok := p.OptBool("notify_on_act"); ok {
+		notifyOnAct = v
 	}
-	if req.NotifyOnAttend != nil {
-		notifyOnAttend = *req.NotifyOnAttend
+	if v, ok := p.OptBool("notify_on_attend"); ok {
+		notifyOnAttend = v
 	}
-	if req.ChannelIDs != nil {
-		channelIDs = req.ChannelIDs
+	if channelsSupplied {
+		parsed, parseErr := uuidListFromStrings(requestedChannels)
+		if parseErr != nil {
+			return parseErr
+		}
+		channelIDs = parsed
 	}
-	if req.CooldownMinutes != nil {
-		cooldownMinutes = *req.CooldownMinutes
+	if v, ok := p.OptInt("cooldown_minutes"); ok {
+		cooldownMinutes = safeconv.Int32(int(v))
 	}
 
 	if cooldownMinutes < 0 || cooldownMinutes > 10080 {
