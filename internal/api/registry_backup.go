@@ -808,7 +808,7 @@ func backupJobParams() apischema.Properties {
 			Description: "1 backs up every guest. 0 is not a selection at all and leaves the job's current one alone.",
 		},
 		"exclude":          optString(512, "<vmid>[,<vmid>...]", "Guests to skip from an all-guests job. Sending it implies all=1, which is the one combination Proxmox allows."),
-		"pool":             optString(64, "<pool>", "Back up every guest in this resource pool. Selecting this clears the other selections."),
+		"pool":             optPoolID("Back up every guest in this resource pool. Selecting this clears the other selections."),
 		"mode":             optString(32, "<snapshot|suspend|stop>", "vzdump mode."),
 		"compress":         optString(32, "<0|1|gzip|lzo|zstd>", "Compression for the archives."),
 		"mailnotification": optString(32, "<always|failure>", "When Proxmox emails about this job."),

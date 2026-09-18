@@ -371,7 +371,7 @@ func createCTParams() apischema.Properties {
 		// Metadata.
 		"description":  optString(8192, "<string>", "Free-text note stored on the container."),
 		"tags":         optString(1024, "<tags>", "Semicolon-separated Proxmox tags."),
-		"pool":         optString(64, "<pool>", "Resource pool to place the container in."),
+		"pool":         optPoolID("Resource pool to place the container in."),
 		"nameserver":   optString(512, "<addresses>", "DNS servers for the container."),
 		"searchdomain": optString(512, "<domains>", "DNS search domains for the container."),
 

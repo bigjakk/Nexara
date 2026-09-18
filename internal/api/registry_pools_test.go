@@ -85,6 +85,15 @@ func TestPoolRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 // would therefore make an existing pool unmanageable through this API, which is
 // the same trap snapshotNameParam documents. This pins that the looser pattern
 // stays looser.
+//
+// The accepted set is pve-poolid's own segment charset, [A-Za-z0-9._-]+,
+// read off verify_poolname in pve-access-control rather than guessed. That
+// matters: a leading DASH was pinned here as a 400 until the rule was
+// actually looked up, and it is valid — the same invented strictness this
+// test exists to prevent, reproduced inside the test itself. What is still
+// refused is a character outside the charset, and NESTING: pve-poolid
+// allows "infra/prod", but a slash cannot survive a path segment. See
+// poolIDParam for why that gap is not closed by loosening this pattern.
 func TestPoolIDIsLooserThanConfigID(t *testing.T) {
 	const path = clusterScope + "/pools/:pool_id"
 	prop := declaredEndpoint(t, fiber.MethodDelete, path).Parameters["pool_id"]
@@ -99,9 +108,16 @@ func TestPoolIDIsLooserThanConfigID(t *testing.T) {
 	}{
 		{"Pool-01", fiber.StatusNoContent},
 		{"01.pool", fiber.StatusNoContent},
-		{"p", fiber.StatusNoContent}, // one character: pve-configid demands two
-		{"-leading-dash", fiber.StatusBadRequest},
-		{"pool@name", fiber.StatusBadRequest},
+		{"p", fiber.StatusNoContent},             // one character: pve-configid demands two
+		{"-leading-dash", fiber.StatusNoContent}, // valid to verify_poolname
+		{".hidden", fiber.StatusNoContent},       // ditto
+		{"pool@name", fiber.StatusBadRequest},    // "@" is outside the charset
+		// 404, not 400, and the difference is the point: a slash or an
+		// empty segment does not match the ROUTE, so the request never
+		// reaches the parameter schema. A nested pool id is unaddressable
+		// here no matter what pattern this parameter carries.
+		{"infra/prod", fiber.StatusNotFound},
+		{"", fiber.StatusNotFound},
 	} {
 		cap := &capture{}
 		e := declaredEndpoint(t, fiber.MethodDelete, path)
@@ -113,6 +129,49 @@ func TestPoolIDIsLooserThanConfigID(t *testing.T) {
 		status, env := send(t, app, httptest.NewRequest(http.MethodDelete, target, nil))
 		if status != tt.want {
 			t.Errorf("pool id %q: status = %d (%q), want %d", tt.id, status, env.Message, tt.want)
+		}
+	}
+}
+
+// TestPoolCreateAcceptsANestedID is the counterpart to the 404 rows above.
+// A nested pool id is unreachable as a path segment, but CREATING one is a
+// plain form field to Proxmox, so the create body must not inherit the
+// path parameter's no-slash restriction.
+//
+// It is asserted separately from TestPoolIDIsLooserThanConfigID because
+// the two parameters are now different declarations for a reason, and a
+// test that walked "every pool id parameter" would have to pick one rule
+// and would quietly re-merge them.
+func TestPoolCreateAcceptsANestedID(t *testing.T) {
+	const path = clusterScope + "/pools"
+	target := strings.NewReplacer(":cluster_id", testClusterID).Replace(path)
+
+	for _, tt := range []struct {
+		id   string
+		want int
+	}{
+		{"prod01", fiber.StatusNoContent},
+		{"infra/prod", fiber.StatusNoContent},    // two levels
+		{"infra/prod/db", fiber.StatusNoContent}, // three, pve-poolid's max
+		{"a/b/c/d", fiber.StatusBadRequest},      // four
+		{"infra//prod", fiber.StatusBadRequest},  // empty segment
+		{"infra/prod/", fiber.StatusBadRequest},  // trailing separator
+		{"pool@name", fiber.StatusBadRequest},    // outside the charset
+	} {
+		cap := &capture{}
+		e := declaredEndpoint(t, fiber.MethodPost, path)
+		e.Handler = cap.handler()
+		e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
+		app := newRegistryApp(t, noAuth(), e)
+
+		body := `{"poolid":"` + tt.id + `"}`
+		status, env := send(t, app, jsonRequest(http.MethodPost, target, body))
+		if status != tt.want {
+			t.Errorf("poolid %q: status = %d (%q), want %d", tt.id, status, env.Message, tt.want)
+			continue
+		}
+		if tt.want == fiber.StatusNoContent && cap.params.String("poolid") != tt.id {
+			t.Errorf("poolid %q reached the handler as %q", tt.id, cap.params.String("poolid"))
 		}
 	}
 }

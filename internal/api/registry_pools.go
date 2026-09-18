@@ -11,24 +11,51 @@ import (
 // clusterCheck, clusterParams, withParams and optString — lives in
 // registry_vms.go, where the first migrated domain defined it.
 
-// poolIDParam is a Proxmox resource pool id.
+// poolIDParam is the REQUIRED pool id, in the one form that can be
+// expressed as a single path segment.
 //
-// It is deliberately LOOSER than the pve-configid format: Proxmox's own
-// pve-poolid allows a leading digit and a dot, and a pool created outside
-// Nexara can therefore carry a name our own create would refuse. Tightening it
-// here would make such a pool un-gettable, un-editable and un-deletable through
-// this API, which is the same trap snapshotNameParam (registry_vms.go)
-// documents. The bound is 100 characters, matching the storage-id ceiling
-// Proxmox applies to section-config ids generally.
+// The charset is PVE's own pve-poolid (verify_poolname, pve-access-control):
+// [A-Za-z0-9._-], which allows a leading digit, dot or dash. It is
+// deliberately LOOSER than pve-configid, because a pool created outside
+// Nexara can carry a name our own create would refuse and an unaddressable
+// pool cannot be edited or deleted — the same trap snapshotNameParam
+// (registry_vms.go) documents. The 100-character bound matches the
+// storage-id ceiling Proxmox applies to section-config ids generally;
+// pve-poolid itself imposes none.
+//
+// What it cannot express is pve-poolid's NESTING. A nested id
+// ("infra/prod") contains a slash, so it neither matches a Fiber path
+// segment nor survives the "/pools/{poolid}" form the client builds — a
+// nested pool is unreachable through the three per-pool routes whatever
+// pattern this carries, and the fix is the query form PVE moved to
+// ("PUT /pools?poolid=…"), not a looser rule here. Hence poolCreateIDParam
+// below, which is not bound by either constraint.
 func poolIDParam(source apischema.Source, description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.String,
 		Source:      source,
-		Pattern:     `^[A-Za-z0-9][A-Za-z0-9._-]*$`,
+		Pattern:     `^[A-Za-z0-9._-]+$`,
 		MaxLength:   apischema.Ptr(100),
 		Typetext:    "<poolid>",
 		Description: description,
 	}
+}
+
+// poolCreateIDParam is `poolid` on POST /pools, which is a BODY parameter
+// and reaches Proxmox as a form field — form.Set("poolid", …) in
+// CreateResourcePool — so nothing between here and PVE has to carry it as a
+// path segment.
+//
+// It therefore takes pve-poolid whole, nesting included. Sharing
+// poolIDParam here would refuse "infra/prod", a pool name PVE's own
+// POST /pools accepts, purely because of a restriction that belongs to the
+// OTHER routes' URL shape. That is the invented-strictness mistake
+// optPoolID's comment describes, and it is easy to make precisely because
+// one helper looks like it should serve both.
+func poolCreateIDParam(description string) apischema.Property {
+	p := poolIDParam(apischema.SourceAuto, description)
+	p.Pattern = `^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+){0,2}$`
+	return p
 }
 
 // poolPathParams is the pair every per-pool route carries.
@@ -58,7 +85,7 @@ func registerPoolEndpoints(reg *Registry, h *handlers.PoolHandler) {
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("manage", "pool"),
 		Parameters: clusterParams(apischema.Properties{
-			"poolid":  poolIDParam(apischema.SourceAuto, "Id for the new pool."),
+			"poolid":  poolCreateIDParam("Id for the new pool. May be nested, e.g. \"infra/prod\"."),
 			"comment": optString(1024, "<string>", "Free-text comment stored on the pool."),
 		}),
 		Handler: h.CreatePool,

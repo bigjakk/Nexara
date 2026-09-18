@@ -279,7 +279,48 @@ var snapshotNameParam = apischema.Property{
 const (
 	emptyOrNodeName  = `^$|^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`
 	emptyOrStorageID = `^$|^[A-Za-z][A-Za-z0-9._-]*$`
+	// PVE's own pve-poolid format, transcribed from verify_poolname in
+	// pve-access-control (src/PVE/AccessControl.pm), plus the empty
+	// alternative this block exists for. Copied rather than tightened:
+	// the segment charset really does allow a leading dot or dash, and
+	// pools really do nest up to three levels ("infra/prod/db"), so the
+	// tidier-looking `^[A-Za-z0-9][A-Za-z0-9._-]*$` would 400 pool names
+	// Proxmox itself accepts and this API has always forwarded.
+	emptyOrPoolID = `^$|^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+){0,2}$`
 )
+
+// optPoolID is the `pool` body parameter, wherever a request names a
+// Proxmox resource pool.
+//
+// What the pattern is for is the ERROR, not safety. On SetVMPool the value
+// becomes a path segment — "/pools/" + url.PathEscape(pool)
+// (internal/proxmox/client_admin.go) — but PathEscape encodes "/" as %2F,
+// so a value like "../../access/users" was always one inert literal
+// segment and no traversal was ever possible. What WAS possible was
+// forwarding junk to Proxmox and returning its 502, which quotes a URL the
+// caller never wrote ("Method 'PUT /pools/has spaces!' not implemented")
+// instead of a 400 naming the field.
+//
+// So the rule is deliberately PVE's own (emptyOrPoolID) rather than a
+// stricter one of our invention: a schema that rejects ids Proxmox accepts
+// turns a working request into a 400, which is a worse bug than the one
+// being fixed.
+//
+// MaxLength matches poolIDParam's 100 for the same reason — Nexara can
+// create a 100-character pool through POST /pools, and a 64-cap here would
+// leave it unassignable.
+//
+// NOTE, not fixed here: a NESTED id ("infra/prod") is valid to PVE and now
+// passes this schema, but SetVMPool still cannot apply one, because
+// UpdateResourcePool uses the legacy "/pools/{poolid}" path form that
+// cannot carry a slash. PVE's replacement is "PUT /pools?poolid=…". Of the
+// six routes taking this parameter, SetVMPool is the only one affected —
+// the other five pass `pool` as a form field and handle nesting fine.
+func optPoolID(description string) apischema.Property {
+	p := optString(100, "<pool>", description)
+	p.Pattern = emptyOrPoolID
+	return p
+}
 
 // cloneParams are the body parameters shared by clone and
 // clone-to-template, which take the same Proxmox call.
@@ -524,16 +565,12 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("manage", "pool"),
 		Parameters: vmParams(apischema.Properties{
-			"pool": {
-				Type:      apischema.String,
-				Optional:  true,
-				MaxLength: apischema.Ptr(64),
-				Typetext:  "<pool>",
-				// No format: the EMPTY string is the meaningful value that
-				// removes the guest from its pool, and every format in the
-				// registry rejects it.
-				Description: "Target pool id. An empty value removes the guest from its current pool.",
-			},
+			// A pattern rather than a format: the EMPTY string is the
+			// meaningful value that removes the guest from its pool, and
+			// every format in the registry rejects it. This is also the
+			// route whose value becomes a Proxmox path segment — see
+			// optPoolID.
+			"pool": optPoolID("Target pool id. An empty value removes the guest from its current pool."),
 		}),
 		Handler: h.SetVMPool,
 	})
@@ -932,7 +969,7 @@ func createVMParams() apischema.Properties {
 		// Metadata.
 		"description": optString(8192, "<string>", "Free-text note stored on the VM."),
 		"tags":        optString(1024, "<tags>", "Semicolon-separated Proxmox tags."),
-		"pool":        optString(64, "<pool>", "Resource pool to place the VM in."),
+		"pool":        optPoolID("Resource pool to place the VM in."),
 
 		"extra": {
 			Type:     apischema.Object,

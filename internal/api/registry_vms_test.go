@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"maps"
 	"net/http"
 	"strconv"
@@ -894,6 +895,105 @@ func TestCloneParametersTolerateTheEmptySentinel(t *testing.T) {
 	target := "/api/v1/clusters/" + testClusterID + "/vms/" + testVMID + "/clone"
 	if status, env := send(t, app, jsonRequest(http.MethodPost, target, body)); status != fiber.StatusBadRequest {
 		t.Errorf("status = %d (%q), want 400 for a storage id carrying a colon", status, env.Message)
+	}
+}
+
+// TestPoolParameterKeepsTheRemovalSentinel is the compatibility half of
+// emptyOrPoolID, and the reason the pattern has an empty alternative at
+// all: PUT .../pool with pool:"" is how the SPA takes a guest OUT of its
+// resource pool. Anchoring the parameter without that alternative would
+// make removal impossible — a 400 on the one value the endpoint's own
+// description promises.
+func TestPoolParameterKeepsTheRemovalSentinel(t *testing.T) {
+	const path = "/api/v1/clusters/:cluster_id/vms/:vm_id/pool"
+	target := "/api/v1/clusters/" + testClusterID + "/vms/" + testVMID + "/pool"
+
+	// The last four are the shapes PVE's own verify_poolname accepts and
+	// an earlier, tidier-looking pattern of ours did not: a leading dot, a
+	// leading dash, and nesting two and three levels deep.
+	for _, pool := range []string{"", "prod01", "Pool_2", "a.b-c", ".hidden", "-dash", "infra/prod", "infra/prod/db"} {
+		cap := &capture{}
+		app := newRegistryApp(t, noAuth(), probeEndpoint(t, fiber.MethodPut, path, cap))
+		body := `{"pool":"` + pool + `"}`
+		status, env := send(t, app, jsonRequest(http.MethodPut, target, body))
+		if status != fiber.StatusNoContent {
+			t.Errorf("pool %q: status = %d (%q), want 204", pool, status, env.Message)
+			continue
+		}
+		if got := cap.params.String("pool"); got != pool {
+			t.Errorf("pool %q reached the handler as %q; it must be passed through untouched", pool, got)
+		}
+	}
+}
+
+// TestPoolParameterRejectsWhatProxmoxWouldBounce is the other half. Each
+// value here previously reached Proxmox and came back as a 502 quoting a
+// URL the caller never wrote, because SetVMPool interpolates the value
+// into "/pools/{pool}" (internal/proxmox/client_admin.go).
+//
+// Traversal is NOT what this rejects, and the cases are chosen so nobody
+// reads it that way: url.PathEscape encodes "/" as %2F, so
+// "../../access/users" was always one inert literal segment rather than a
+// path escape — it is rejected here for being four levels deep with "."
+// as a segment, not for looking dangerous. What was wrong was the ERROR: a
+// 502 naming Proxmox for a request this API could have refused itself.
+//
+// Note "." and ".." are NOT in this table. pve-poolid's segment charset
+// allows a bare dot, so they are pool ids Proxmox accepts; rejecting them
+// would be the invented-strictness mistake this pattern avoids.
+func TestPoolParameterRejectsWhatProxmoxWouldBounce(t *testing.T) {
+	const path = "/api/v1/clusters/:cluster_id/vms/:vm_id/pool"
+	target := "/api/v1/clusters/" + testClusterID + "/vms/" + testVMID + "/pool"
+
+	for _, pool := range []string{
+		"has spaces!",          // the value that produced the observed 502
+		"../../access/users",   // four levels, and "." is not a segment
+		"infra/prod/db/deeper", // one level past pve-poolid's max of three
+		"has//empty",           // an empty segment
+		"trailing/",            // ditto, at the end
+		"semi;colon",
+		"star*",
+	} {
+		cap := &capture{}
+		app := newRegistryApp(t, noAuth(), probeEndpoint(t, fiber.MethodPut, path, cap))
+		body, err := json.Marshal(map[string]string{"pool": pool})
+		if err != nil {
+			t.Fatalf("encoding body for %q: %v", pool, err)
+		}
+		status, env := send(t, app, jsonRequest(http.MethodPut, target, string(body)))
+		if status != fiber.StatusBadRequest {
+			t.Errorf("pool %q: status = %d (%q), want 400 — this never was a valid pool id",
+				pool, status, env.Message)
+		}
+	}
+}
+
+// TestEveryPoolParameterCarriesThePattern stops the fix from being applied
+// to the one route it was found on. Only SetVMPool's `pool` becomes a
+// Proxmox path segment, but a pool id that is not a pool id is worth
+// refusing on all of them.
+//
+// SIX routes, from five declaration sites: backupJobParams serves both
+// POST /backup-jobs and PUT /backup-jobs/:job_id, which is exactly why the
+// count is asserted over the REGISTRY rather than over the source. Editing
+// the five sites and counting five would have left a route unchecked and
+// still passed.
+func TestEveryPoolParameterCarriesThePattern(t *testing.T) {
+	var found int
+	for _, e := range newRouteStubServer(t).registry.Endpoints() {
+		prop, ok := e.Parameters["pool"]
+		if !ok {
+			continue
+		}
+		found++
+		if prop.Pattern != emptyOrPoolID {
+			t.Errorf("%s %s declares pool with pattern %q, want emptyOrPoolID",
+				e.Method, e.Path, prop.Pattern)
+		}
+	}
+	if found != 6 {
+		t.Errorf("found %d routes taking a `pool` body parameter, want 6 — "+
+			"a new one must carry the pattern too", found)
 	}
 }
 

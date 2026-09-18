@@ -400,7 +400,7 @@ func startImportParams() apischema.Properties {
 		"bios":        optString(64, "<seabios|ovmf>", "Firmware."),
 		"machine":     optString(128, "<type>", "QEMU machine type."),
 		"scsihw":      optString(128, "<model>", "SCSI controller model."),
-		"pool":        optString(64, "<pool>", "Resource pool to place the guest in."),
+		"pool":        optPoolID("Resource pool to place the guest in."),
 		"tags":        optString(1024, "<tags>", "Semicolon-separated Proxmox tags."),
 		"description": optString(8192, "<string>", "Free-text note stored on the guest."),
 		// Tristates rather than flags: ImportCreateOptions carries *bool and
