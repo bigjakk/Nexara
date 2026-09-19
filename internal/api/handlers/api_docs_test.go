@@ -201,12 +201,26 @@ func TestGetDocs_ParameterContract(t *testing.T) {
 		Method: fiber.MethodPost, Path: path,
 		Description: "probe", Permission: "manage:probe", Group: "Probe",
 		Parameters: []APIParameter{
-			{Name: "id", Type: "string", Source: "path", Format: "uuid", Typetext: "<uuid>"},
+			{Name: "id", Type: "string", Source: "path", Format: "uuid", Typetext: "<uuid>",
+				Rule: &APIRule{
+					Name:    "uuid",
+					Permits: "a canonical 8-4-4-4-12 hexadecimal UUID in either case, normalized to lowercase.",
+					Regex:   `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,
+				}},
 			{Name: "verbose", Type: "boolean", Source: "query", Optional: true, Default: false},
 			{Name: "bus", Type: "string", Source: "body", Enum: []string{"scsi", "sata"}},
 			{Name: "index", Type: "integer", Source: "body", Optional: true,
 				Description: "Omit to take the lowest free slot."},
 			{Name: "retries", Type: "integer", Source: "body", Optional: true, Default: 0},
+			// A rule that validates by parsing rather than by matching: it
+			// has no regex to publish, and the KEY must be absent rather
+			// than present-and-empty. A consumer reads presence as "you may
+			// compile this".
+			{Name: "size", Type: "string", Source: "body", Optional: true, Format: "disk-size",
+				Rule: &APIRule{
+					Name:    "disk-size",
+					Permits: "a decimal size with an optional binary unit, normalized to a whole GiB count.",
+				}},
 			{Name: "format", Type: "string", Source: "body", Optional: true, Requires: []string{"bus"}},
 			// The bounds. `floor` carries a ZERO minimum and `blank` a
 			// ZERO max_length: both are real constraints and both marshal
@@ -317,6 +331,36 @@ func TestGetDocs_ParameterContract(t *testing.T) {
 			},
 		},
 		{
+			name: "a format publishes the rule it names",
+			// The payoff of the rule catalogue: `format: "uuid"` states
+			// that a rule applies, and the rule block states what it is.
+			// Before it, this payload named a rule and left a caller to go
+			// and read the server's source for what it permits — and an
+			// external consumer could not do even that.
+			param: "id", wantOptional: "false", wantDefault: "", wantSource: `"path"`,
+			wantExtra: map[string]any{
+				"format": "uuid",
+				"rule": map[string]any{
+					"name":    "uuid",
+					"permits": "a canonical 8-4-4-4-12 hexadecimal UUID in either case, normalized to lowercase.",
+					"regex":   `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,
+				},
+			},
+		},
+		{
+			name: "a rule with no regex omits the key rather than blanking it",
+			// The absent-versus-empty rule the bounds already follow, on
+			// the one field a consumer is meant to compile: a `regex` key
+			// that is present and empty reads as "matches nothing".
+			param: "size", wantOptional: "true", wantDefault: "", wantSource: `"body"`,
+			wantExtra: map[string]any{
+				"rule": map[string]any{
+					"name":    "disk-size",
+					"permits": "a decimal size with an optional binary unit, normalized to a whole GiB count.",
+				},
+			},
+		},
+		{
 			name:  "an alias survives",
 			param: "newname", wantOptional: "true", wantDefault: "", wantSource: `"body"`,
 			wantExtra: map[string]any{"alias": "oldname"},
@@ -396,8 +440,11 @@ func TestGetDocs_ParameterContract(t *testing.T) {
 		if !ok {
 			t.Fatal("the index parameter left the fixture; this subtest would pass vacuously")
 		}
-		// `index` declares no format, typetext, enum or requires.
-		for _, key := range []string{"format", "typetext", "enum", "requires"} {
+		// `index` declares no format, typetext, enum, requires or rule.
+		// `rule` belongs here rather than only in the positive cases: an
+		// integer parameter naming no rule must not carry an empty rule
+		// object, which would read as "a rule applies and permits nothing".
+		for _, key := range []string{"format", "typetext", "enum", "requires", "rule"} {
 			if _, present := index[key]; present {
 				t.Errorf("index carries an empty %q key; omitempty should have dropped it", key)
 			}

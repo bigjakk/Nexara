@@ -2,6 +2,7 @@ package api
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -118,6 +119,7 @@ func docParameters(e Endpoint) []handlers.APIParameter {
 			Alias:     prop.Alias,
 			Items:     docItems(prop.Items),
 			Requires:  slices.Clone(prop.Requires),
+			Rule:      docRule(prop.Format, prop.Pattern),
 		})
 	}
 	sortDocParameters(out)
@@ -157,7 +159,102 @@ func docItems(item *apischema.Property) *handlers.APIItems {
 		Maximum:     clonePtr(item.Maximum),
 		MinLength:   clonePtr(item.MinLength),
 		MaxLength:   clonePtr(item.MaxLength),
+		Rule:        docRule(item.Format, item.Pattern),
 	}
+}
+
+// ruleByPattern maps a catalogued PATTERN's regex back to the rule's name.
+//
+// A parameter reaches a format BY NAME (Property.Format) and a pattern BY
+// VALUE (Property.Pattern), so the two look up in opposite directions and
+// the pattern direction needs an index. Building it here rather than
+// asking apischema for one keeps the catalogue's exported surface to the
+// two functions the declarations use.
+//
+// FORMATS are deliberately excluded, and the exclusion is load-bearing
+// rather than tidy. A format validates AND NORMALIZES, and a value that
+// merely matches a format's regex has not been through its normalization
+// — so attributing a bare Pattern to a format would document a rewrite the
+// route does not perform.
+//
+// It is not enough to say the registry refuses that shape. apischema.Rule
+// panics when asked for a format, but only for THAT spelling: a regex
+// pasted out in full reaches Property.Pattern with nothing to stop it, and
+// one does — accessRealmPattern in registry_access.go is
+// `^[A-Za-z][A-Za-z0-9._-]*$`, byte-identical to the storage-id format's
+// rule. Were formats in this index, every realm parameter would publish
+// itself as storage-id and promise a normalization it never receives.
+var ruleByPattern = buildRuleByPattern(apischema.Catalogue())
+
+// buildRuleByPattern indexes the catalogue's pattern rules by regex.
+//
+// It panics on two names sharing one regex, at init, for the reason
+// buildCatalogue panics on a duplicated name: with two candidates the
+// lookup would pick one by map order and the docs would attribute the
+// parameter to whichever the runtime happened to hash first — a silent
+// wrong answer rather than a loud one. It takes the catalogue as an
+// argument so a test can hand it that collision.
+func buildRuleByPattern(all []apischema.RuleDoc) map[string]string {
+	out := make(map[string]string, len(all))
+	for _, d := range all {
+		if d.Kind != apischema.KindPattern {
+			continue
+		}
+		if prev, dup := out[d.Rule]; dup {
+			panic(fmt.Sprintf("api: catalogue rules %q and %q share the regex %s, so a declared "+
+				"Pattern cannot be attributed to either", prev, d.Name, d.Rule))
+		}
+		out[d.Rule] = d.Name
+	}
+	return out
+}
+
+// docRule renders the catalogued rule behind a parameter's format or
+// pattern — the payload's answer to "the docs name a rule; what is it?".
+//
+// Format is asked first because it is the stronger claim: it names the
+// rule outright, and no declaration carries both (a format already
+// implies its own shape check, so a second Pattern beside it would be a
+// second, unrelated rule on one value). A pattern nobody catalogued
+// renders nothing, which is the same honest gap an unmigrated route's
+// empty Parameters is: the rule is still published as a regex, and the
+// missing prose is what marks it as not yet promoted to the catalogue.
+func docRule(format, pattern string) *handlers.APIRule {
+	name := format
+	if name == "" {
+		name = ruleByPattern[pattern]
+	}
+	if name == "" {
+		return nil
+	}
+	d, ok := apischema.LookupRule(name)
+	if !ok {
+		// Unreachable for a format, for two reasons that stack: a
+		// declaration naming an unregistered format is refused at
+		// registration (compileProperty), and RegisterFormat itself panics
+		// for a name the catalogue does not carry — pinned by
+		// TestRegisterFormatRequiresACatalogueEntry in
+		// apischema/format_test.go. (Not by
+		// TestEveryCataloguedFormatIsRegistered, which checks the opposite
+		// direction: that every CATALOGUE entry has a registered format.)
+		// Rendering nothing rather than panicking keeps a catalogue gap
+		// from taking the whole docs payload down with it.
+		return nil
+	}
+	// Origin is NOT copied across. See the note on handlers.APIRule for
+	// why the catalogue keeps it and the payload does not.
+	r := &handlers.APIRule{
+		Name:    d.Name,
+		Permits: d.Permits,
+	}
+	// Only a rule whose regex IS the whole shape check publishes one. See
+	// the note on handlers.APIRule.Regex: a part-prose rule has no
+	// compilable form, and handing a consumer one that only looks
+	// compilable is worse than handing them none.
+	if d.RuleIsRegex {
+		r.Regex = d.Rule
+	}
+	return r
 }
 
 // sortDocParameters puts the rendered parameters in the reading order

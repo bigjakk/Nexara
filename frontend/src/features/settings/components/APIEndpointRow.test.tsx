@@ -88,9 +88,69 @@ const constrained: APIEndpoint = {
       source: "body",
       optional: false,
       pattern: "^[A-Za-z][A-Za-z0-9_-]*$",
+      // A catalogued PATTERN: the payload carries the regex twice — once
+      // as `pattern`, once inside the rule — because for a pattern rule
+      // they are the same string. The cell must still show one
+      // "matches" line.
+      rule: {
+        name: "pve-configid-existing",
+        permits:
+          "a PVE configuration id WITHOUT the two-character minimum: a leading letter, then letters, digits, underscore and dash, one character or more.",
+        regex: "^[A-Za-z][A-Za-z0-9_-]*$",
+      },
       min_length: 2,
       max_length: 40,
       description: "Snapshot name.",
+    },
+    {
+      // A FORMAT whose rule is a regex. Before the rule block, the docs
+      // said "format: uuid" and stopped: the regex behind a format was
+      // reachable nowhere in this payload, so a caller could not
+      // pre-validate and could not predict the 400.
+      name: "ident",
+      type: "string",
+      source: "body",
+      optional: true,
+      format: "uuid",
+      rule: {
+        name: "uuid",
+        permits:
+          "a canonical 8-4-4-4-12 hexadecimal UUID in either case, normalized to lowercase.",
+        regex:
+          "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      },
+    },
+    {
+      // The narrowing case, copied from the real POST …/snapshots route:
+      // the RULE permits 2 to 128 characters and the PARAMETER caps at 40,
+      // because the handler's validateSnapshotName does. Both are
+      // published and both apply; the effective contract is 2 to 40.
+      name: "configid",
+      type: "string",
+      source: "body",
+      optional: true,
+      format: "pve-configid",
+      max_length: 40,
+      rule: {
+        name: "pve-configid",
+        permits:
+          "a PVE configuration id: a leading letter, then letters, digits, underscore and dash, 2 to 128 characters.",
+        regex: "^[A-Za-z][A-Za-z0-9_-]{1,127}$",
+      },
+    },
+    {
+      // A rule that validates by PARSING rather than by matching, so it
+      // publishes no regex and `permits` is the whole statement.
+      name: "size",
+      type: "string",
+      source: "body",
+      optional: true,
+      format: "disk-size",
+      rule: {
+        name: "disk-size",
+        permits:
+          "a decimal size with an optional binary unit, normalized to a whole GiB count between 1 and 1048576.",
+      },
     },
     {
       name: "floor",
@@ -133,6 +193,12 @@ const constrained: APIEndpoint = {
         max_length: 16,
         typetext: "<colour>",
         description: "A colour tag.",
+        rule: {
+          name: "pve-object-id",
+          permits:
+            "a PVE object id: a leading letter or digit, then letters, digits, dot, underscore and dash.",
+          regex: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        },
       },
     },
     {
@@ -312,6 +378,144 @@ describe("APIEndpointRow", () => {
       expect(
         dl.getByText("matches ^[A-Za-z][A-Za-z0-9_-]*$"),
       ).toBeInTheDocument();
+    });
+
+    it("says what a format PERMITS, not just that one applies", () => {
+      // The whole point of the change. `format: uuid` names a rule and
+      // declines to say what it is; an operator on this page could go and
+      // read the server's source, and an external consumer could not.
+      renderRow(constrained, true);
+      const table = within(screen.getByRole("table"));
+      expect(table.getByText("format: uuid")).toBeInTheDocument();
+      expect(
+        table.getByText(
+          "permits a canonical 8-4-4-4-12 hexadecimal UUID in either case, normalized to lowercase.",
+        ),
+      ).toBeInTheDocument();
+      // A format's regex lives nowhere else in the payload, so this line
+      // exists only because the rule carries it.
+      expect(
+        table.getByText(
+          "matches ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("names a pattern's rule and shows one matches line, not two", () => {
+      renderRow(constrained, true);
+      const table = within(screen.getByRole("table"));
+      // A pattern carries no format, so the rule's NAME is the only handle
+      // a reader has on it.
+      expect(
+        table.getByText("rule: pve-configid-existing"),
+      ).toBeInTheDocument();
+      expect(
+        table.getByText(/^permits a PVE configuration id WITHOUT/),
+      ).toBeInTheDocument();
+      // `pattern` and `rule.regex` are the same string for a pattern rule;
+      // rendering both would put the regex on screen twice.
+      expect(
+        table.getAllByText("matches ^[A-Za-z][A-Za-z0-9_-]*$"),
+      ).toHaveLength(1);
+    });
+
+    it("shows no regex for a rule that validates by parsing", () => {
+      renderRow(constrained, true);
+      const table = within(screen.getByRole("table"));
+      const row = table.getByText("size").closest("tr");
+      expect(row).not.toBeNull();
+      const cells = within(row as HTMLElement);
+      expect(cells.getByText("format: disk-size")).toBeInTheDocument();
+      expect(cells.getByText(/^permits a decimal size/)).toBeInTheDocument();
+      // disk-size parses and converts; there is no regex to compile, and a
+      // "matches" line here would offer one that does not exist.
+      expect(cells.queryByText(/^matches /)).not.toBeInTheDocument();
+    });
+
+    it("says what an array element's rule permits", () => {
+      renderRow(constrained, true);
+      const table = within(screen.getByRole("table"));
+      expect(table.getByText("rule: pve-object-id")).toBeInTheDocument();
+      expect(table.getByText(/^permits a PVE object id/)).toBeInTheDocument();
+      expect(
+        table.getByText("matches ^[A-Za-z0-9][A-Za-z0-9._-]*$"),
+      ).toBeInTheDocument();
+    });
+
+    it("carries the rule into the small-width list too", () => {
+      const { container } = renderRow(constrained, true);
+      const dl = within(container.querySelector("dl") as HTMLElement);
+      expect(dl.getByText("format: uuid")).toBeInTheDocument();
+      expect(
+        dl.getByText(
+          "permits a canonical 8-4-4-4-12 hexadecimal UUID in either case, normalized to lowercase.",
+        ),
+      ).toBeInTheDocument();
+      expect(dl.getByText("rule: pve-configid-existing")).toBeInTheDocument();
+    });
+
+    it("shows no rule line for a parameter that names none", () => {
+      renderRow(constrained, true);
+      const table = within(screen.getByRole("table"));
+      const row = table.getByText("unbounded").closest("tr");
+      expect(row).not.toBeNull();
+      const cells = within(row as HTMLElement);
+      expect(cells.queryByText(/^permits /)).not.toBeInTheDocument();
+      expect(cells.queryByText(/^rule: /)).not.toBeInTheDocument();
+    });
+
+    it("does not let a narrower parameter read as a contradiction of its rule", () => {
+      // The live failure this guards. `up to 40 chars` and
+      // `permits … 2 to 128 characters.` are both true and both published:
+      // the first is the PARAMETER's cap, the second is what the named
+      // RULE allows in general, and a request must satisfy both. Rendered
+      // as two adjacent lines in one flat list they read as one correcting
+      // the other, and a caller cannot tell which governs.
+      renderRow(constrained, true);
+      const row = within(screen.getByRole("table"))
+        .getByText("configid")
+        .closest("tr");
+      expect(row).not.toBeNull();
+      const cells = within(row as HTMLElement);
+
+      const cap = cells.getByText("up to 40 chars");
+      const permits = cells.getByText(/^permits a PVE configuration id/);
+      expect(cap).toBeInTheDocument();
+      expect(permits).toBeInTheDocument();
+
+      // The fix is STRUCTURAL, not a matter of wording: the rule's lines
+      // live inside their own indented scope and the parameter's do not.
+      // Asserting on the text alone would pass just as happily against the
+      // flat list that caused the problem.
+      expect(permits.closest(".border-l")).not.toBeNull();
+      expect(cap.closest(".border-l")).toBeNull();
+
+      // And the scope is named, so a reader knows whose 2-to-128 it is.
+      expect(cells.getByText("format: pve-configid")).toBeInTheDocument();
+    });
+
+    it("says outright that the parameter's own limits apply as well", () => {
+      renderRow(constrained, true);
+      const row = within(screen.getByRole("table"))
+        .getByText("configid")
+        .closest("tr");
+      const cells = within(row as HTMLElement);
+      expect(
+        cells.getByText(/and the limits above apply as well/),
+      ).toBeInTheDocument();
+    });
+
+    it("omits that line for a parameter that adds no limits of its own", () => {
+      // `ident` is a bare uuid format with no bounds, so there is nothing
+      // for the rule to combine with and the line would be noise.
+      renderRow(constrained, true);
+      const row = within(screen.getByRole("table"))
+        .getByText("ident")
+        .closest("tr");
+      const cells = within(row as HTMLElement);
+      expect(
+        cells.queryByText(/and the limits above apply as well/),
+      ).not.toBeInTheDocument();
     });
 
     it("keeps the description a separate node from the type in the list", () => {

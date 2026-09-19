@@ -92,6 +92,7 @@ type Constrained = Pick<
   | "type"
   | "format"
   | "pattern"
+  | "rule"
   | "minimum"
   | "maximum"
   | "min_length"
@@ -100,7 +101,17 @@ type Constrained = Pick<
 
 function constraintLines(c: Constrained): ConstraintLine[] {
   const out: ConstraintLine[] = [];
-  if (c.format) out.push({ text: `format: ${c.format}` });
+  // The named rule is NOT one of these lines. Everything constraintLines
+  // returns is a facet of the PARAMETER, and the rule is a facet of the
+  // rule — which is a different subject, and putting the two in one flat
+  // list is what made `up to 40 chars` read as a contradiction of
+  // `permits … 2 to 128 characters.` RuleShape renders it in its own
+  // scope instead.
+  //
+  // The exception is a `format` with no rule block to head. That cannot
+  // happen from this server — every registered format is catalogued — but
+  // a name with nothing behind it is still better than no name at all.
+  if (c.format && !c.rule) out.push({ text: `format: ${c.format}` });
 
   // The length bounds count CHARACTERS on a string and ELEMENTS on an
   // array — the server's own rejection says "must have at least N items"
@@ -172,6 +183,77 @@ function ConstraintText({ lines }: { lines: ConstraintLine[] }) {
 }
 
 /**
+ * The regex to show BESIDE the parameter's own constraints, as opposed to
+ * inside the rule block.
+ *
+ * Only an uncatalogued pattern lands here: it is a regex with no prose and
+ * no name, so there is no block to put it in. A catalogued pattern's regex
+ * is the same string as `rule.regex` — that is how the rule was found —
+ * and a format's regex has never been anywhere but the rule, so both
+ * belong to the rule and render there.
+ *
+ * `||`, not `??`. This is the one place the absent-versus-zero rule that
+ * governs `minimum` and `default` does NOT apply: an empty regex is not a
+ * constraint that matches nothing, it is no constraint.
+ */
+function looseRegex(c: Pick<Constrained, "pattern" | "rule">): string {
+  return c.rule ? "" : c.pattern || "";
+}
+
+/**
+ * Whether the parameter publishes a facet of its own that applies ON TOP
+ * of its named rule.
+ *
+ * Nothing here decides whether the facet actually BINDS — a max_length of
+ * 200 over a rule capped at 128 narrows nothing — so the line it drives
+ * says only that the limits apply as well, which is true either way. The
+ * claim to avoid is "this parameter is stricter", which would sometimes be
+ * false; the claim to make is that both hold, which is the JSON Schema
+ * reading and is always true.
+ */
+function hasOwnLimits(c: Constrained): boolean {
+  return (
+    c.minimum !== undefined ||
+    c.maximum !== undefined ||
+    c.min_length !== undefined ||
+    c.max_length !== undefined
+  );
+}
+
+/**
+ * The named rule, in its own scope.
+ *
+ * It borrows ItemsShape's treatment — a left rule and an indent under a
+ * lead-in — because it is the same kind of thing: a named sub-schema whose
+ * facets are its own and not the parameter's. That structure is what stops
+ * `permits … 2 to 128 characters.` reading as a correction of the
+ * `up to 40 chars` line above it. Both are true; they are about different
+ * subjects, and the indent says which is which.
+ */
+function RuleShape({ param }: { param: Constrained }) {
+  const { rule } = param;
+  if (!rule) return null;
+  const lines: ConstraintLine[] = [
+    // "format:" or "rule:" rather than one label for both, because the
+    // payload distinguishes them and the distinction is real: a format
+    // NORMALIZES the value it validates and a pattern never rewrites it.
+    { text: `${param.format ? "format" : "rule"}: ${rule.name}` },
+    { text: `permits ${rule.permits}` },
+  ];
+  if (rule.regex) lines.push({ text: `matches ${rule.regex}`, mono: true });
+  return (
+    <div className="mt-1 border-l pl-2">
+      <ConstraintText lines={lines} />
+      {hasOwnLimits(param) && (
+        <div className="text-[11px] text-muted-foreground">
+          {"\u2026and the limits above apply as well"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Everything about a parameter's VALUE, in one cell: its type, the shape
  * its typetext spells out, and every rule a request has to satisfy.
  *
@@ -184,8 +266,8 @@ function ConstraintText({ lines }: { lines: ConstraintLine[] }) {
  */
 function ParameterShape({ param }: { param: APIParameter }) {
   const lines = constraintLines(param);
-  if (param.pattern)
-    lines.push({ text: `matches ${param.pattern}`, mono: true });
+  const regex = looseRegex(param);
+  if (regex) lines.push({ text: `matches ${regex}`, mono: true });
   if (param.requires?.length) {
     lines.push({ text: `send with ${param.requires.join(", ")}` });
   }
@@ -197,6 +279,7 @@ function ParameterShape({ param }: { param: APIParameter }) {
       )}
       {param.enum && param.enum.length > 0 && <EnumChips values={param.enum} />}
       <ConstraintText lines={lines} />
+      <RuleShape param={param} />
       {param.items && <ItemsShape items={param.items} />}
     </>
   );
@@ -205,8 +288,8 @@ function ParameterShape({ param }: { param: APIParameter }) {
 /** The element schema of an array, nested under its parameter. */
 function ItemsShape({ items }: { items: APIItems }) {
   const lines = constraintLines(items);
-  if (items.pattern)
-    lines.push({ text: `matches ${items.pattern}`, mono: true });
+  const regex = looseRegex(items);
+  if (regex) lines.push({ text: `matches ${regex}`, mono: true });
   return (
     <div className="mt-1 border-l pl-2">
       {/* The trailing space is an explicit expression, not a literal: a
@@ -221,6 +304,7 @@ function ItemsShape({ items }: { items: APIItems }) {
       )}
       {items.enum && items.enum.length > 0 && <EnumChips values={items.enum} />}
       <ConstraintText lines={lines} />
+      <RuleShape param={items} />
       {items.description && (
         <div className="text-[11px] text-muted-foreground">
           {items.description}

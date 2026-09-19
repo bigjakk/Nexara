@@ -1100,6 +1100,11 @@ export interface APIParameter {
   enum?: string[];
   /** Named validation+normalisation rule, e.g. "uuid", "disk-size". */
   format?: string;
+  /**
+   * What the rule named by `format` — or spelled out by `pattern` —
+   * actually permits. Absent when neither names a catalogued rule.
+   */
+  rule?: APIRule;
   /** Human-readable value shape, e.g. "<number><K|M|G|T|P>". */
   typetext?: string;
   description?: string;
@@ -1127,6 +1132,29 @@ export interface APIParameter {
 }
 
 /**
+ * The rule behind a parameter's `format` or `pattern`.
+ *
+ * A NAME is not a RULE: `format: "pve-configid"` says a rule applies and
+ * not what it is, which leaves a caller to go and read the server's source.
+ * This is the server's own one-line statement of what the rule permits,
+ * plus the regex where the rule IS one regex.
+ */
+export interface APIRule {
+  /** The catalogued rule's name, e.g. "pve-configid", "pve-object-id". */
+  name: string;
+  /** One line saying what the rule allows. */
+  permits: string;
+  /**
+   * The rule's regular expression — present ONLY when the regex is the
+   * whole check. A rule that validates by parsing (`ip`, `disk-size`)
+   * publishes none, and `permits` is then the whole statement. Absence is
+   * the signal: compile this when it is here, read `permits` when it is
+   * not.
+   */
+  regex?: string;
+}
+
+/**
  * An array parameter's element schema.
  *
  * Deliberately narrower than APIParameter: the server's schema engine allows
@@ -1140,6 +1168,8 @@ export interface APIItems {
   enum?: string[];
   format?: string;
   pattern?: string;
+  /** The element's own rule, on the same terms as APIParameter.rule. */
+  rule?: APIRule;
   typetext?: string;
   description?: string;
   minimum?: number;

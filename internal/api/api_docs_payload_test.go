@@ -2,6 +2,8 @@ package api
 
 import (
 	"maps"
+	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -357,6 +359,15 @@ func TestDocParameters_Constraints(t *testing.T) {
 				}
 				if p.Pattern != "" || p.Alias != "" || p.Items != nil {
 					t.Errorf("pattern/alias/items = %q/%q/%v, want all empty", p.Pattern, p.Alias, p.Items)
+				}
+				// Added with the rule block: a parameter that names no rule
+				// must not acquire one. Without this line the "unbounded"
+				// case asserted the absence of every facet EXCEPT the
+				// newest, which is how a guard quietly stops covering the
+				// field most likely to be wrong.
+				if p.Rule != nil {
+					t.Errorf("rule = %+v, want nil — this parameter names neither a format nor a "+
+						"pattern, so there is no rule to attribute to it", p.Rule)
 				}
 			},
 		},
@@ -756,4 +767,468 @@ func TestDeclaredParameterNames_CoversEveryPathParam(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestDocParameters_RuleText is the payload half of the rule catalogue's
+// payoff: a parameter that names a rule must also say what that rule
+// permits.
+//
+// A bare `format: "pve-configid"` states that a rule applies without
+// stating what it is. An operator on the in-app catalog can at least go
+// and read apischema/catalogue.go; an external consumer reading
+// /api/v1/api-docs cannot, and neither can anyone debugging a 400 at
+// three in the morning. That is the same failure the undocumented
+// `pattern` was, one level of indirection along — and the catalogue was
+// written specifically to answer it.
+func TestDocParameters_RuleText(t *testing.T) {
+	got := docParamsOf(t, Endpoint{
+		Method: fiber.MethodPost, Path: "/api/v1/probe",
+		Description: "Synthetic probe endpoint.", Group: "Test",
+		Permissions: Permissions{Deferred: "synthetic"},
+		Parameters: apischema.Properties{
+			// A format whose rule IS a regex: the payload publishes both.
+			"snap_name": {Type: apischema.String, Format: "pve-configid"},
+			// A format whose rule is NOT a regex — disk-size parses and
+			// converts rather than matching — so there is no regex to give
+			// and Permits has to carry the whole rule.
+			"size": {Type: apischema.String, Optional: true, Format: "disk-size"},
+			// A catalogued PATTERN, reached by value rather than by name.
+			"alias": {Type: apischema.String, Optional: true, Pattern: apischema.Rule("pve-object-id")},
+			// A DERIVED sentinel rule. Its whole reason to exist is the
+			// empty string, so its Permits line is the one place a caller
+			// can learn what sending "" does.
+			"pool": {Type: apischema.String, Optional: true, Pattern: apischema.Rule("pve-poolid-or-empty")},
+			// A pattern nobody catalogued: still published as a regex,
+			// with no prose, which is the honest gap.
+			"adhoc": {Type: apischema.String, Optional: true, Pattern: `^zzz-[0-9]+$`},
+			// No rule at all.
+			"plain": {Type: apischema.String, Optional: true},
+			// An element schema carries a rule on the same terms.
+			"node_names": {
+				Type: apischema.Array, Optional: true,
+				Items: &apischema.Property{Type: apischema.String, Format: "node-name"},
+			},
+		},
+		Handler: noopHandler,
+	})
+
+	t.Run("a format publishes what it permits, and its regex", func(t *testing.T) {
+		r := got["snap_name"].Rule
+		if r == nil {
+			t.Fatal(`snap_name renders format:"pve-configid" with no rule — the docs name a rule ` +
+				`and decline to say what it is, which is the gap the catalogue exists to close`)
+		}
+		if r.Name != "pve-configid" {
+			t.Errorf("rule.name = %q, want %q", r.Name, "pve-configid")
+		}
+		want, _ := apischema.LookupRule("pve-configid")
+		if r.Permits != want.Permits {
+			t.Errorf("rule.permits = %q, want the catalogue's own line %q", r.Permits, want.Permits)
+		}
+		if r.Permits == "" {
+			t.Error("rule.permits is empty; a rule block with no prose publishes nothing new")
+		}
+		if r.Regex != `^[A-Za-z][A-Za-z0-9_-]{1,127}$` {
+			t.Errorf("rule.regex = %q, want the catalogued regex — a format's regex is reachable "+
+				"NOWHERE ELSE in this payload, so dropping it leaves a consumer unable to "+
+				"pre-validate at all", r.Regex)
+		}
+	})
+
+	t.Run("a rule that is not one regex publishes none", func(t *testing.T) {
+		r := got["size"].Rule
+		if r == nil {
+			t.Fatal("size renders no rule for its disk-size format")
+		}
+		if r.Permits == "" {
+			t.Error("rule.permits is empty, and it is the ONLY statement of this rule there is")
+		}
+		if r.Regex != "" {
+			t.Errorf("rule.regex = %q, want empty: disk-size validates by parsing and converting, "+
+				"so anything here looks compilable and is not", r.Regex)
+		}
+	})
+
+	t.Run("a catalogued pattern says what it permits too", func(t *testing.T) {
+		p := got["alias"]
+		r := p.Rule
+		if r == nil {
+			t.Fatal(`alias carries the catalogued rule pve-object-id and renders no rule block. ` +
+				`A regex says what SHAPE a value has and never why — that this one refuses a ` +
+				`leading dot to keep ".." out of a Proxmox path is unreadable from the regex`)
+		}
+		if r.Name != "pve-object-id" {
+			t.Errorf("rule.name = %q, want %q — the name is the only handle a reader of a "+
+				"PATTERN parameter has, since the payload otherwise carries just the regex",
+				r.Name, "pve-object-id")
+		}
+		if r.Regex != p.Pattern {
+			t.Errorf("rule.regex = %q but pattern = %q; for a pattern rule the two ARE the same "+
+				"string and must not be able to disagree", r.Regex, p.Pattern)
+		}
+	})
+
+	t.Run("a sentinel rule's line reaches the payload and names the empty string", func(t *testing.T) {
+		// A derived sentinel rule is the one kind whose Permits line has a
+		// job its base's does not: the base rejects "" and this admits it,
+		// so if the line never names the empty string the payload has not
+		// said what distinguishes the two.
+		//
+		// It deliberately stops there. Publishing what "" MEANS was tried
+		// and reverted — the meaning is per-ROUTE, not per-rule (see
+		// derive's doc comment in apischema/catalogue.go), and three of the
+		// five lines were wrong at most of their sites, one of them
+		// contradicting its own Description in the same payload cell.
+		r := got["pool"].Rule
+		if r == nil {
+			t.Fatal("pool carries pve-poolid-or-empty and renders no rule block")
+		}
+		want, ok := apischema.LookupRule("pve-poolid-or-empty")
+		if !ok {
+			t.Fatal("pve-poolid-or-empty left the catalogue")
+		}
+		// Pinned against the catalogue rather than against frozen prose:
+		// the line is free to be reworded, it is not free to stop arriving.
+		if r.Permits != want.Permits {
+			t.Errorf("rule.permits = %q, want the catalogue's own line %q", r.Permits, want.Permits)
+		}
+		if !strings.Contains(r.Permits, "empty string") {
+			t.Errorf("rule.permits = %q and never mentions the empty string, which is the only "+
+				"reason this rule exists apart from its base", r.Permits)
+		}
+		// What is NOT asserted, and must not be: that the line says what
+		// sending "" DOES. Two of the five rules do say so, because theirs
+		// generalises over every site; three deliberately do not. A shape
+		// check here would either fail the three or fail a rewording of
+		// the two, and would be deleted rather than satisfied — the same
+		// reason prose-scraping was rejected for the narrowing guard in
+		// registry_rule_catalogue_test.go. A first draft tried "must be
+		// longer than its base" and was wrong on its first run: the
+		// derived line is legitimately SHORTER, because it names the base
+		// rule instead of restating its character class.
+		//
+		// The subtest name says what it proves — the line ARRIVES and
+		// NAMES the empty string — rather than what it would be nice to
+		// prove. The earlier name promised a meaning check and would have
+		// passed against a line with no meaning in it.
+	})
+
+	t.Run("an uncatalogued pattern renders no rule", func(t *testing.T) {
+		p := got["adhoc"]
+		if p.Pattern != `^zzz-[0-9]+$` {
+			t.Errorf("pattern = %q, want the declared regex", p.Pattern)
+		}
+		if p.Rule != nil {
+			t.Errorf("rule = %+v, want nil: attributing an arbitrary regex to a catalogue entry "+
+				"would publish provenance this rule does not have", p.Rule)
+		}
+	})
+
+	t.Run("a parameter with no named rule renders none", func(t *testing.T) {
+		if r := got["plain"].Rule; r != nil {
+			t.Errorf("rule = %+v, want nil", r)
+		}
+	})
+
+	t.Run("an array element carries its rule", func(t *testing.T) {
+		items := got["node_names"].Items
+		if items == nil {
+			t.Fatal("node_names lost its element schema")
+		}
+		if items.Rule == nil {
+			t.Fatal(`the element renders format:"node-name" with no rule — the original ` +
+				`complaint, one nesting level down`)
+		}
+		if items.Rule.Name != "node-name" || items.Rule.Permits == "" {
+			t.Errorf("items.rule = %+v, want the node-name entry with its prose", items.Rule)
+		}
+	})
+}
+
+// TestBuildRuleByPattern indexes the catalogue the way docRule reads it,
+// and pins the collision case.
+//
+// The panic is the point. Two entries sharing one regex leaves the lookup
+// with two candidates and no way to choose, so it would attribute the
+// parameter to whichever Go's map iteration reached first — a different
+// answer per process, and a wrong one either way. Failing at init makes
+// that a build-time stop rather than a docs page that quietly lies.
+func TestBuildRuleByPattern(t *testing.T) {
+	t.Run("indexes patterns and excludes formats", func(t *testing.T) {
+		idx := buildRuleByPattern(apischema.Catalogue())
+		if got := idx[apischema.Rule("pve-object-id")]; got != "pve-object-id" {
+			t.Errorf("lookup of the pve-object-id regex = %q, want %q", got, "pve-object-id")
+		}
+		// uuid is a FORMAT. Its regex must not resolve to a rule through
+		// the pattern index: a value that merely matches it has not been
+		// through the format's normalization, so documenting the two as
+		// the same rule would promise a rewrite the route never performs.
+		uuid, ok := apischema.LookupRule("uuid")
+		if !ok {
+			t.Fatal("the uuid format left the catalogue")
+		}
+		if got, found := idx[uuid.Rule]; found {
+			t.Errorf("the uuid format's regex resolves to %q through the pattern index; formats "+
+				"must be reachable by NAME only", got)
+		}
+	})
+
+	t.Run("panics when two rules share one regex", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("buildRuleByPattern accepted two rules with the same regex; the docs would " +
+					"attribute a parameter to whichever one the map happened to hash first")
+			}
+			msg, _ := r.(string)
+			for _, want := range []string{"first-name", "second-name"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("panic message %q does not name %q", msg, want)
+				}
+			}
+		}()
+		buildRuleByPattern([]apischema.RuleDoc{
+			{Name: "first-name", Kind: apischema.KindPattern, Rule: `^same$`, RuleIsRegex: true},
+			{Name: "second-name", Kind: apischema.KindPattern, Rule: `^same$`, RuleIsRegex: true},
+		})
+	})
+}
+
+// TestGuard_EveryNamedRuleInThePayloadSaysWhatItPermits walks the REAL
+// registry and fails if any parameter names a rule the payload does not
+// explain.
+//
+// The synthetic tests above prove the wiring works for one declaration.
+// This one proves it reaches every declaration that has a rule to state,
+// which is the claim an operator actually relies on — and it is the guard
+// that could not have existed before this change, because until now there
+// was nothing in the payload for it to check.
+//
+// The floors are what keep it from passing by looking at nothing: a bug
+// that stopped rendering rules entirely, or a stub server that registered
+// no routes, would otherwise leave an empty loop and a green test.
+func TestGuard_EveryNamedRuleInThePayloadSaysWhatItPermits(t *testing.T) {
+	s := newRouteStubServer(t)
+	eps := docEndpoints(s.registry)
+	if len(eps) < 400 {
+		t.Fatalf("docEndpoints rendered %d endpoints, want the declared set; this test would pass "+
+			"by looking at almost nothing", len(eps))
+	}
+
+	// check is shared by parameters and by array elements: an element
+	// carries the same two rule-bearing fields and the same obligation.
+	var formats, patterns int
+	check := func(where, format, pattern string, rule *handlers.APIRule) {
+		named := format
+		if named == "" {
+			named = ruleByPattern[pattern]
+			if named == "" {
+				return // an uncatalogued pattern owes no prose
+			}
+			patterns++
+		} else {
+			formats++
+		}
+		if rule == nil {
+			t.Errorf("%s names the rule %q and publishes no rule block: the docs state that a "+
+				"rule applies and decline to say what it is", where, named)
+			return
+		}
+		if rule.Name != named {
+			t.Errorf("%s: rule.name = %q, want %q", where, rule.Name, named)
+		}
+		// The check above derives `named` from the SAME index production
+		// reads, so on its own it proves self-consistency and not correct
+		// attribution: corrupt ruleByPattern and both sides move together.
+		// The published regex is the independent witness. A pattern is
+		// indexed BY its regex, so a correctly attributed rule always
+		// publishes the regex the parameter declares, and a misindexed one
+		// shows up here as two regexes that do not match.
+		//
+		// Gated on format == "" because docRule resolves a Format FIRST:
+		// with both fields set, rule.Regex is correctly the format's and
+		// has no reason to equal the pattern, and this would report a
+		// misattribution that did not happen. bothFields below is what
+		// reports that case, and it reports the true thing.
+		//
+		// This holds for every catalogued pattern as things stand — all 13
+		// are RuleIsRegex — but note that nothing enforces it in general.
+		// orEmptyRules panics on a non-regex base, which covers only the 5
+		// entries it derives from; a hand-written pattern entry with
+		// RuleIsRegex false would be indexed by its prose and publish no
+		// regex, and this check would simply not fire for it.
+		if format == "" && pattern != "" && rule.Regex != pattern {
+			t.Errorf("%s: rule %q publishes the regex %s, but the parameter declares the pattern %s — "+
+				"the pattern was attributed to the wrong catalogue entry",
+				where, rule.Name, rule.Regex, pattern)
+		}
+		if rule.Permits == "" {
+			t.Errorf("%s: rule %q publishes an empty permits line", where, named)
+		}
+	}
+
+	// docRule asks Format first and a pattern second, which is only
+	// unambiguous because no declaration carries both. apischema does NOT
+	// forbid the pair — compileProperty validates the two independently —
+	// so this pins the premise rather than assuming it. A parameter
+	// carrying both would publish `format: X` and a rule block for X
+	// beside a `pattern` that is some OTHER regex, and the page would
+	// render the rule's name over the pattern's text.
+	bothFields := func(where, format, pattern string) {
+		if format != "" && pattern != "" {
+			t.Errorf("%s declares both format %q and pattern %s. The docs can name one rule per "+
+				"value: decide which one governs, or teach docRule to publish both.",
+				where, format, pattern)
+		}
+	}
+
+	for _, e := range eps {
+		for _, p := range e.Parameters {
+			at := e.Method + " " + e.Path + " [" + p.Name + "]"
+			bothFields(at, p.Format, p.Pattern)
+			check(at, p.Format, p.Pattern, p.Rule)
+			if p.Items != nil {
+				bothFields(at+"[]", p.Items.Format, p.Items.Pattern)
+				check(at+"[]", p.Items.Format, p.Items.Pattern, p.Items.Rule)
+			}
+		}
+	}
+
+	// Both kinds must be represented, and in quantity. Checking only
+	// formats would leave the pattern half — the half that needs the
+	// reverse index, and so the half likelier to break — unexercised.
+	if formats < 100 {
+		t.Errorf("only %d format-bearing parameters were checked; the registry declares far more, "+
+			"so the walk is missing them", formats)
+	}
+	if patterns < 50 {
+		t.Errorf("only %d catalogued-pattern-bearing parameters were checked; the reverse index "+
+			"is resolving almost nothing", patterns)
+	}
+}
+
+// TestGuard_PublishedRuleFieldsAreTheReviewedSet holds the rule block to
+// the three fields that were reviewed for publication.
+//
+// /api/v1/api-docs is served to any authenticated caller and this repo is
+// public, so APIRule is a public surface and every field added to it is a
+// publication decision. The catalogue entry it is rendered from carries
+// five more: the upstream Proxmox file, that upstream rule verbatim, a
+// divergence note, and the Accepts/Rejects witnesses. Those were left out
+// deliberately — the first three are maintainer notes naming Go
+// identifiers and repo paths, and the witnesses are FREE-FORM STRINGS, the
+// one place in the catalogue where a real host, guest or storage name
+// could plausibly be typed. Adding any of them by reflex, because the
+// field was sitting right there in RuleDoc, is the mistake this catches.
+//
+// It is a field-set check rather than a string scan on purpose: a scan
+// would have to name the tokens it forbids, and writing the estate's real
+// identifiers into a public repo to prove they are not in a public payload
+// is the leak it was meant to prevent.
+func TestGuard_PublishedRuleFieldsAreTheReviewedSet(t *testing.T) {
+	want := []string{"Name", "Permits", "Regex"}
+
+	rt := reflect.TypeOf(handlers.APIRule{})
+	got := make([]string, 0, rt.NumField())
+	for i := range rt.NumField() {
+		got = append(got, rt.Field(i).Name)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("handlers.APIRule publishes %v, want exactly %v.\n"+
+			"Every field here is served to any authenticated caller. If this is a deliberate "+
+			"addition, review it against the identifier rule in CLAUDE.md and update this list; "+
+			"if it came from RuleDoc because the field was there, it should not be published — "+
+			"the upstream citation and the divergence note are written for a maintainer, the "+
+			"Accepts/Rejects witnesses are free-form strings, and Origin was published once and "+
+			"withdrawn (see the note on handlers.APIRule).", got, want)
+	}
+}
+
+// TestGuard_NoPublishedRuleCarriesAnAddressLiteral is the content half,
+// written so that it names nothing.
+//
+// The three published fields are generic BY CONSTRUCTION — a regex, a
+// sentence about a Proxmox validator — but "by construction" is an
+// argument, not a check. A dotted quad is the one shape that has no
+// business in any of them and is unambiguous to look for, so it stands in
+// for "somebody pasted a real value into a prose line". A hit is not
+// necessarily a leak; it is a line a human should read.
+func TestGuard_NoPublishedRuleCarriesAnAddressLiteral(t *testing.T) {
+	dottedQuad := regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b`)
+
+	seen := 0
+	for _, d := range apischema.Catalogue() {
+		r := docRule(ruleFieldsFor(d))
+		if r == nil {
+			t.Errorf("catalogue entry %q renders no rule block, so nothing about it is checked", d.Name)
+			continue
+		}
+		seen++
+		for field, text := range map[string]string{
+			"name": r.Name, "permits": r.Permits, "regex": r.Regex,
+		} {
+			if hit := dottedQuad.FindString(text); hit != "" {
+				t.Errorf("catalogue rule %q publishes %q in its %s, which this payload serves to "+
+					"every authenticated caller — check it is not a real address", d.Name, hit, field)
+			}
+		}
+	}
+	if seen != len(apischema.Catalogue()) {
+		t.Fatalf("checked %d of %d catalogue entries; the rest rendered nothing and this test "+
+			"would pass by looking at them", seen, len(apischema.Catalogue()))
+	}
+}
+
+// nameCollisionRules are the catalogue entries whose Divergence says
+// Proxmox registers a DIFFERENT rule under the same name.
+//
+// They are listed because they are the one divergence shape `origin`
+// cannot compress. For every other entry, "origin: proxmox" carries the
+// actionable half — Proxmox is the authority and may refuse what we
+// accept — which is why withholding the Divergence prose from the payload
+// costs a caller nothing. A name collision is the opposite: a reader who
+// knows Proxmox sees `format: "disk-size"` and applies PVE's semantics,
+// where a bare number is BYTES and here it is GiB. Nothing in the
+// published fields contradicts them unless the Permits line does.
+//
+// Both entries currently do — disk-size's ends "a bare number is already
+// GiB" and bwlimit's says "in KiB/s" — and the guard below exists so that
+// a THIRD collision cannot be added without someone deciding, on purpose,
+// whether its Permits line closes the same trap.
+var nameCollisionRules = []string{"bwlimit", "disk-size"}
+
+// TestGuard_NameCollisionRulesStayTheKnownTwo is the ratchet under the
+// decision to leave Divergence out of the payload.
+//
+// It is deliberately a list rather than a check on the prose: "does this
+// Permits line warn a Proxmox-literate reader off the wrong semantics" is
+// a judgement, and the useful thing a test can do is force someone to make
+// it. Adding a collision is expected to update this list in the same
+// change, having read the new entry's Permits line.
+func TestGuard_NameCollisionRulesStayTheKnownTwo(t *testing.T) {
+	var got []string
+	for _, d := range apischema.Catalogue() {
+		if strings.Contains(d.Divergence, "NAME COLLISION") {
+			got = append(got, d.Name)
+		}
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, nameCollisionRules) {
+		t.Errorf("catalogue rules colliding with a DIFFERENT Proxmox rule of the same name = %v, "+
+			"want %v.\nThe docs payload publishes the rule's NAME and not its divergence, so a "+
+			"collision is invisible to a caller unless the rule's Permits line states the "+
+			"difference in caller-visible terms (disk-size ends \"a bare number is already GiB\"; "+
+			"bwlimit says \"in KiB/s\"). Read the new entry's Permits line, decide whether it does, "+
+			"then update this list.", got, nameCollisionRules)
+	}
+}
+
+// ruleFieldsFor spells a catalogue entry the way a declaration would
+// reach it, so the guards above render every entry through the real
+// docRule rather than reading the catalogue directly.
+func ruleFieldsFor(d apischema.RuleDoc) (format, pattern string) {
+	if d.Kind == apischema.KindFormat {
+		return d.Name, ""
+	}
+	return "", d.Rule
 }

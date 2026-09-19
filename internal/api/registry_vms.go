@@ -644,15 +644,30 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 			// what a caller actually hits — so the description states the
 			// effective contract rather than the schema's half of it.
 			//
-			// No MaxLength is declared here on purpose. Adding one would
-			// put an unverified Nexara bound in a SECOND place, in the same
-			// change that removed it from the first; and the pairing is
-			// already safe, since create (≤40) stays well inside what
-			// snapshotNameParam can address (≤128). Whether 40 belongs at
-			// all is a question for upstream, not for this declaration.
+			// That reasoning once concluded the opposite — that no
+			// MaxLength should be declared here, because it would put an
+			// unverified Nexara bound in a second place. What changed is
+			// that the docs payload now publishes the rule TEXT, so the
+			// choice is no longer "one copy of 40 or two" but "state the
+			// bound or publish a rule the route provably rejects".
 			"snap_name": {
-				Type:        apischema.String,
-				Format:      "pve-configid",
+				Type:   apischema.String,
+				Format: "pve-configid",
+				// MaxLength mirrors validateSnapshotName's 40, and it is
+				// declared here rather than left to the handler because the
+				// docs payload now publishes the RULE TEXT for a format.
+				// Without it a caller reads permits "2 to 128 characters"
+				// beside a description saying 2-40, with nothing to say
+				// which governs — and the answer is 40, enforced one layer
+				// down where the schema cannot show it.
+				//
+				// This narrows the create side only. snapshotNameParam, the
+				// ADDRESSING parameter on delete and rollback, keeps 128 so
+				// a longer snapshot made outside Nexara stays reachable.
+				// Whether 40 is the right number at all is a question for
+				// upstream; this only stops the schema and the prose
+				// disagreeing in public.
+				MaxLength:   apischema.Ptr(40),
 				Typetext:    "<name>",
 				Description: `Snapshot name: 2-40 characters, starting with a letter. "current" is reserved by Proxmox.`,
 			},

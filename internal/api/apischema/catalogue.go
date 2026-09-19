@@ -612,6 +612,43 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 		}
 		return d
 	}
+	// derive builds one sentinel variant.
+	//
+	// permits is CALLER-FACING; why is the Nexara-side detail — which
+	// dialog sends the value, which routes carry it — that belongs with a
+	// maintainer and not in a public payload.
+	//
+	// # Do not put the sentinel's MEANING in permits
+	//
+	// It is tempting, because a bare "…, or the empty string." reads like
+	// an omission: it states the widening and withholds the interesting
+	// part. It was tried, and reverted, and the reason is the same one
+	// that withdrew Origin from the docs payload (see handlers.APIRule):
+	// A PER-RULE FIELD CANNOT ANSWER A PER-ROUTE QUESTION. What "" means
+	// is a property of the ROUTE, not of the character rule, and the two
+	// come apart badly:
+	//
+	//   - node-name-or-empty was published as "let Proxmox choose the
+	//     node". It has 12 sites and that is true at NONE of them. Clone
+	//     keeps the guest on the source node, evacuate lets Nexara score a
+	//     target per guest, migrations keeps it where it is, virtio-win
+	//     means any online node, query-url-metadata picks the first online
+	//     one, the two backup-job routes clear a restriction, and the two
+	//     SDN controller routes leave it unset with no node chosen at all.
+	//   - uuid-or-empty was published as "clears the association". Wrong
+	//     at 3 of 12, and one of those contradicted its own Description in
+	//     the same payload cell: PUT …/maintenance-windows/:id says
+	//     "Empty or omitted leaves the existing pin alone; this route
+	//     cannot unpin a window."
+	//   - pve-poolid-or-empty was published as "remove the guest from its
+	//     pool". True at 1 site of 6 — at the three create routes there is
+	//     no guest yet, and at the two backup-job routes the value scopes a
+	//     JOB.
+	//
+	// The meaning belongs in the route's Description, which is where every
+	// one of those sites already states it, and which the docs page renders
+	// in the same cell. Two rules keep a meaning here because theirs
+	// generalises over every site that carries it — see below.
 	derive := func(baseName, permits, why string) RuleDoc {
 		d := of(baseName)
 		return RuleDoc{
@@ -623,7 +660,7 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 			Origin:       d.Origin,
 			Upstream:     d.Upstream,
 			UpstreamRule: d.UpstreamRule,
-			Divergence:   strings.TrimSpace(why + " " + d.Divergence),
+			Divergence:   strings.TrimSpace(emptyWidening + " " + why + " " + d.Divergence),
 			// The witnesses are the base's, plus the empty string the
 			// variant exists for. Two of the base's rejects cannot come
 			// across: "" is the whole point of the variant, and a value
@@ -639,23 +676,58 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 	}
 
 	return []RuleDoc{
+		// Neutral: what "" does differs at all 12 sites. Each states it.
 		derive("node-name",
 			"a node name, or the empty string.",
-			`The empty string means "let Proxmox choose the node" on the routes that carry it.`),
+			`The empty string means something different on every route that carries it — "keep it on `+
+				`the source node", "let Nexara score a target", "any online node", "clear the `+
+				`restriction", "leave it unset". Each Description says which.`),
+		// A meaning that GENERALISES: at all 7 sites "" leaves the storage
+		// field unset and the route proceeds without one. Five say "lets
+		// Proxmox choose", which is what leaving it unset causes;
+		// POST /migrations wants storage_map instead; and virtio-win's
+		// config REFUSES empty once enabled is true — a condition on
+		// leaving it unset, not a second meaning for it.
 		derive("storage-id",
-			"a storage id, or the empty string.",
-			`The empty string means "leave it unset" — the clone dialog sends storage:"" for a linked clone.`),
+			`a storage id, or the empty string, which means "leave it unset".`,
+			`The clone dialog sends storage:"" for a linked clone.`),
+		// Neutral: 12 sites, and "" is a filter at two of them, a
+		// leave-alone at another, and an attaches-none at the rest.
 		derive("uuid",
 			"a UUID, or the empty string.",
-			`The empty string means "not attached to a cluster" on the PBS server create body.`),
+			`Six declaration files reach for it — PBS, alerts, ldap, oidc, reports and rolling updates — `+
+				`each for its own "" sentinel, and they do not agree: the two alert listings read it as `+
+				`"every cluster the caller can see", while PUT …/maintenance-windows/:id reads it as `+
+				`"leave the existing pin alone".`),
+		// A meaning that GENERALISES: both sites are listing filters whose
+		// Description reads "Empty or omitted returns every …".
 		derive("pbs-safe-id",
-			"a PBS id, or the empty string.",
-			`The empty string means "do not filter" on the two PBS listing query parameters.`),
+			`a PBS id, or the empty string, which means "do not filter".`,
+			"Carried by the two PBS listing query parameters."),
+		// Neutral: only PUT …/vms/:vm_id/pool unpools a guest. The three
+		// create routes have no guest yet and the backup-job routes scope
+		// a job.
 		derive("pve-poolid",
 			"a resource pool id, nesting included, or the empty string.",
-			`The empty string means "remove the guest from its pool" — the pool selector sends pool:"".`),
+			`The pool selector sends pool:"" to unpool a guest, but that is ONE of six sites.`),
 	}
 }
+
+// emptyWidening opens every derived Divergence.
+//
+// It is stated once rather than five times because it is the same fact
+// each time, and it is stated at all because Origin does not say it: a
+// derived entry inherits the BASE rule's Origin, so node-name-or-empty
+// reads "proxmox" for a widening Proxmox had no part in — pve_verify_node_name
+// rejects "" outright, and the empty value the variant exists for never
+// reaches Proxmox at all. Origin answers where the CHARACTER RULE came
+// from and nothing else, which for uuid-or-empty is Nexara anyway. (The
+// docs payload does not publish Origin, for this reason among others; see
+// handlers.APIRule.)
+const emptyWidening = "The empty string is NEXARA's widening: every base rule rejects it, and no rule " +
+	"this one is derived from admits it. The Origin below is the BASE's — it records where the " +
+	"CHARACTER RULE came from and says nothing about the sentinel. (uuid is Nexara's own to begin " +
+	"with, so for uuid-or-empty there is no upstream in the picture at all.)"
 
 // carryRejects is the subset of a base rule's rejects that its -or-empty
 // variant still rejects: the ones its REGEX turns away. It panics if that

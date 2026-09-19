@@ -275,50 +275,188 @@ func TestCataloguedRulesStillAcceptWhatTheirSitesSend(t *testing.T) {
 	t.Parallel()
 
 	byRule := make(map[string][]ruleSite)
-	for _, site := range declaredPatternSites(t) {
+	for _, site := range declaredRuleSites(t) {
 		byRule[site.rule] = append(byRule[site.rule], site)
 	}
 
 	for _, d := range apischema.Catalogue() {
-		if d.Kind != apischema.KindPattern {
-			continue
-		}
 		sites := byRule[d.Name]
 		t.Run(d.Name, func(t *testing.T) {
 			t.Parallel()
 
 			if len(sites) == 0 {
-				// TestEveryCataloguedPatternIsUsed reports the source-level
-				// version of this; reaching here means the rule is spelled
-				// apischema.Rule somewhere that never becomes a declared
-				// parameter, which is the same finding one layer down.
-				t.Fatalf("no declared parameter carries this rule, so its witnesses check nothing")
+				// A FORMAT may legitimately have no site: it is registered
+				// in the format registry whether or not a declaration
+				// reaches for it, and five (email, ip, mac-addr,
+				// fingerprint-sha256, bwlimit) currently do not.
+				// A PATTERN with no site documents a rule this API does not
+				// apply — TestEveryCataloguedPatternIsUsed reports the
+				// source-level version of that, and reaching here means the
+				// rule is spelled apischema.Rule somewhere that never
+				// becomes a declared parameter, the same finding one layer
+				// down.
+				if d.Kind == apischema.KindPattern {
+					t.Fatalf("no declared parameter carries this rule, so its witnesses check nothing")
+				}
+				t.Skip("no declaration carries this format")
 			}
 
 			for _, site := range sites {
-				// Requires and Alias are cross-field rules about OTHER
-				// parameters; this asks only what the declaration admits for
-				// this value, so they are cleared rather than satisfied.
-				prop := site.prop
-				prop.Requires = nil
-				prop.Alias = ""
-				props := apischema.Properties{"v": prop}
-
 				for _, v := range d.Accepts {
-					if _, err := props.Validate(map[string]any{"v": v}); err != nil {
-						t.Errorf("%s: %q is catalogued as accepted, but this declaration rejects it: %v. "+
-							"A bound or a format on the declaration is narrowing the rule without saying so.",
-							site, v, err)
+					if siteAccepts(site.prop, v) {
+						continue
 					}
+					// The declaration refuses a value the rule permits.
+					// That is ALLOWED — a route may be stricter than the
+					// general rule — but only if a reader of the payload
+					// can SEE why. narrowedByPublishedFacet asks exactly
+					// that: does the parameter's own published bound or
+					// enum refuse this value on its own?
+					if narrowedByPublishedFacet(site.prop, v) {
+						continue
+					}
+					t.Errorf("%s: %q is catalogued as accepted by %q, and this declaration rejects it "+
+						"for a reason the docs payload does not publish. A route may narrow a rule, but "+
+						"the narrowing has to be a DECLARED facet — a MaxLength, a MinLength, an Enum — "+
+						"so that /api/v1/api-docs shows it beside the rule. A narrowing that lives in a "+
+						"Format that rewrites the value first, or anywhere else the schema cannot render, "+
+						"leaves a caller reading permits text that the route will not honour.",
+						site, v, d.Name)
 				}
 				for _, v := range d.Rejects {
-					if _, err := props.Validate(map[string]any{"v": v}); err == nil {
+					if siteAccepts(site.prop, v) {
 						t.Errorf("%s: %q is catalogued as rejected, but this declaration accepts it",
 							site, v)
 					}
 				}
 			}
 		})
+	}
+}
+
+// siteAccepts reports whether one declared parameter admits a value.
+//
+// Requires and Alias are cross-field rules about OTHER parameters; this
+// asks only what the declaration admits for THIS value, so they are
+// cleared rather than satisfied.
+func siteAccepts(prop apischema.Property, v string) bool {
+	prop.Requires = nil
+	prop.Alias = ""
+	_, err := apischema.Properties{"v": prop}.Validate(map[string]any{"v": v})
+	return err == nil
+}
+
+// narrowedByPublishedFacet reports whether the parameter's OWN published
+// facets — everything /api/v1/api-docs renders BESIDE the rule — refuse
+// this value on their own.
+//
+// It removes the rule and keeps the rest. Which field is the rule depends
+// on how the site reaches it, and both are published, so only one is
+// dropped: a Format site keeps its Pattern (a second, independently
+// rendered constraint), and a Pattern site keeps its Format (there are
+// none, but the asymmetry should not be baked in). If what is left still
+// refuses the value, a caller reading the payload can see the refusal
+// coming.
+//
+// If it ACCEPTS, the refusal came from the rule's own application at this
+// site rather than from anything rendered — which is not a contradiction
+// in terms, because a format NORMALIZES before the bounds are checked. A
+// MinLength of 4 beside the disk-size format refuses "500G": four
+// characters as the caller types it, three after normalization to "500".
+// The published bound is measured against a value the caller never sees,
+// so the payload states a rule the route will not honour.
+func narrowedByPublishedFacet(prop apischema.Property, v string) bool {
+	published := prop
+	published.Requires = nil
+	published.Alias = ""
+	if prop.Format != "" {
+		published.Format = ""
+	} else {
+		published.Pattern = ""
+	}
+	return !siteAccepts(published, v)
+}
+
+// ruleNarrowingSites is the closed set of declared parameters that refuse
+// a value their own catalogued rule permits.
+//
+// Every entry here is a DECLARED, PUBLISHED narrowing — the test below
+// re-derives the set and checks the narrowing is visible in the payload,
+// so an entry cannot be added for a narrowing a caller cannot see. The
+// list exists for the other direction, which no derived check can provide:
+// it fails when a narrowing DISAPPEARS.
+//
+// That is not hypothetical. Both entries below were added to stop the
+// payload contradicting itself: snap_name's handler (validateSnapshotName)
+// caps the name at 40 where the pve-configid rule permits 128, and until
+// the MaxLength was declared the payload published "2 to 128 characters"
+// for a route that answers 400 at 41. Delete the two MaxLength lines and
+// every other test in this repo stays green — the schema simply gets wider
+// — which is why the floor has to be a list rather than a derivation.
+//
+// # What this cannot see
+//
+// THE BIG ONE: a site that stops carrying the rule at all. declaredRuleSites
+// finds a pattern site by matching the declared regex against the
+// catalogue's, so REPLACING apischema.Rule("x") with a tighter literal does
+// not register as a narrowing — it removes the parameter from the walk, and
+// every guard in this file then has nothing to say about it. Swapping
+// pveObjectNameParam's Rule("pve-object-id") for `^[a-z][a-z0-9]*$` with a
+// MaxLength of 8 narrows 20 routes across ACME, firewall and SDN, and all
+// six rule guards stay green; only unrelated domain tests notice, and only
+// by accident. TestNoInlinePatternRestatesACataloguedRule catches the
+// VERBATIM re-inline of a catalogued regex, which is the copy-paste case,
+// and is blind to a tightened one for the same reason: it compares for
+// equality. Closing this needs a source-level check that a parameter which
+// USED to spell apischema.Rule still does — a ratchet over declaration
+// sites, not over rules.
+//
+// The lesser one: a narrowing that lives only in the handler leaves no
+// trace a declaration walk can read. Before the MaxLength was declared,
+// the registry genuinely admitted a 128-character snap_name and only the
+// handler refused it. Scraping the Description for a stated limit was
+// considered and rejected — POST /sdn/zones' `zone` says "Proxmox caps
+// this at 8 characters for most zone types", which is an UPSTREAM
+// narrowing this API deliberately does not enforce, so a prose guard would
+// demand a bound that should not exist and would be silenced rather than
+// satisfied. The reachable discipline is: when you find a handler-side
+// narrowing, declare it, and this list holds it there.
+var ruleNarrowingSites = []string{
+	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots [snap_name] narrows pve-configid",
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots [snap_name] narrows pve-configid",
+}
+
+// TestGuard_RuleNarrowingSitesAreDeclared is the ratchet under
+// ruleNarrowingSites. It fails in both directions: a narrowing that
+// vanishes, and one that appears without anyone deciding it should.
+func TestGuard_RuleNarrowingSitesAreDeclared(t *testing.T) {
+	t.Parallel()
+
+	byName := make(map[string]apischema.RuleDoc)
+	for _, d := range apischema.Catalogue() {
+		byName[d.Name] = d
+	}
+
+	var got []string
+	for _, site := range declaredRuleSites(t) {
+		d := byName[site.rule]
+		for _, v := range d.Accepts {
+			if siteAccepts(site.prop, v) {
+				continue
+			}
+			got = append(got, site.String()+" narrows "+site.rule)
+			break
+		}
+	}
+	slices.Sort(got)
+
+	if !slices.Equal(got, ruleNarrowingSites) {
+		t.Errorf("parameters refusing a value their catalogued rule permits =\n  %s\nwant\n  %s\n\n"+
+			"A narrowing that DISAPPEARED means a declared bound was deleted and the route's real "+
+			"limit went back to living somewhere the payload cannot show. A narrowing that APPEARED "+
+			"means a route just became stricter than its documented rule: confirm the bound is "+
+			"declared (not enforced only in the handler) and add it here.",
+			strings.Join(got, "\n  "), strings.Join(ruleNarrowingSites, "\n  "))
 	}
 }
 
@@ -335,22 +473,50 @@ func (s ruleSite) String() string {
 	return s.method + " " + s.path + " [" + s.param + "]"
 }
 
-// declaredPatternSites walks the built registry and returns every parameter
-// — and every array element schema — whose Pattern is a catalogued rule.
+// declaredRuleSites walks the built registry and returns every parameter
+// — and every array element schema — that carries a catalogued rule,
+// whether as a Format or as a Pattern.
 //
 // It matches on the RULE TEXT rather than on how the declaration spelled it,
 // because at runtime apischema.Rule("x") and a pasted copy of the same regex
-// are the same string. That is deliberate: a site that regressed to a literal
-// is still held to the rule here, and the source-level guards above are what
-// report the regression itself.
-func declaredPatternSites(t *testing.T) []ruleSite {
+// are the same string. That is deliberate for the copy-paste case: a site
+// that regressed to a VERBATIM literal is still held to the rule here, and
+// TestNoInlinePatternRestatesACataloguedRule reports the regression itself.
+//
+// It is also this function's blind spot, and the blind spot is bigger than
+// the case it handles. A literal that is TIGHTENED rather than copied
+// matches no catalogue entry, so the site silently leaves this walk — and
+// TestNoInlinePatternRestatesACataloguedRule compares for equality, so it
+// does not see a tightened copy either. Neither guard reports a rule that
+// was replaced instead of re-inlined. See the note on ruleNarrowingSites.
+func declaredRuleSites(t *testing.T) []ruleSite {
 	t.Helper()
 
+	// Patterns are reached BY VALUE, so they need a regex index; a format
+	// is reached BY NAME and needs none. Formats are deliberately left out
+	// of this index: a format validates AND NORMALIZES, so a bare Pattern
+	// that merely matches a format's regex is not that format, and
+	// attributing it would hold the site to witnesses it never runs.
 	rules := make(map[string]string) // rule text -> rule name
 	for _, d := range apischema.Catalogue() {
 		if d.Kind == apischema.KindPattern {
 			rules[d.Rule] = d.Name
 		}
+	}
+	formats := make(map[string]bool, len(rules))
+	for _, d := range apischema.Catalogue() {
+		if d.Kind == apischema.KindFormat {
+			formats[d.Name] = true
+		}
+	}
+	// ruleOf answers with the catalogued rule a property carries, however
+	// it reaches it.
+	ruleOf := func(p apischema.Property) (string, bool) {
+		if formats[p.Format] {
+			return p.Format, true
+		}
+		name, ok := rules[p.Pattern]
+		return name, ok
 	}
 
 	s := newRouteStubServer(t)
@@ -364,7 +530,7 @@ func declaredPatternSites(t *testing.T) []ruleSite {
 	for _, e := range endpoints {
 		for _, param := range slices.Sorted(maps.Keys(e.Parameters)) {
 			prop := e.Parameters[param]
-			if name, ok := rules[prop.Pattern]; ok {
+			if name, ok := ruleOf(prop); ok {
 				out = append(out, ruleSite{rule: name, method: e.Method, path: e.Path, param: param, prop: prop})
 			}
 			if prop.Items == nil {
@@ -372,7 +538,7 @@ func declaredPatternSites(t *testing.T) []ruleSite {
 			}
 			// An element schema carries the same facets minus the ones
 			// compileItems forbids, so it validates standalone.
-			if name, ok := rules[prop.Items.Pattern]; ok {
+			if name, ok := ruleOf(*prop.Items); ok {
 				item := *prop.Items
 				out = append(out, ruleSite{
 					rule: name, method: e.Method, path: e.Path, param: param + "[]", prop: item,

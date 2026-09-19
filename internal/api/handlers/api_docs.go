@@ -174,6 +174,10 @@ type APIParameter struct {
 	// put in one.
 	Items *APIItems `json:"items,omitempty"`
 
+	// Rule is what the NAME in Format — or the regex in Pattern — actually
+	// permits. Absent when neither names a catalogued rule.
+	Rule *APIRule `json:"rule,omitempty"`
+
 	// Requires names the parameters a caller must supply ALONGSIDE this
 	// one. A companion carrying only its default does not satisfy it.
 	Requires []string `json:"requires,omitempty"`
@@ -199,6 +203,121 @@ type APIItems struct {
 	Maximum     *float64 `json:"maximum,omitempty"`
 	MinLength   *int     `json:"min_length,omitempty"`
 	MaxLength   *int     `json:"max_length,omitempty"`
+
+	// Rule is the element's own catalogued rule, on the same terms as
+	// APIParameter.Rule. An element carries a format or a pattern as
+	// readily as a parameter does — `node_names` on the DRS rule bodies is
+	// an array of node-name — and an element whose rule went unstated
+	// would be the original complaint one nesting level down.
+	Rule *APIRule `json:"rule,omitempty"`
+}
+
+// APIRule is the catalogued rule a parameter's Format or Pattern names,
+// rendered as what a caller needs in order to satisfy it.
+//
+// It exists because a NAME is not a RULE. `format: "pve-configid"` states
+// that a rule applies without stating what it is, which leaves a caller
+// with the same lookup task the catalogue was written to end: open the
+// repo, find the format registry, read the regex. An external consumer
+// cannot do even that.
+//
+// # This block describes the RULE, not the parameter
+//
+// Both fields below state what the named rule permits IN GENERAL. The
+// parameter's own facets — its max_length, min_length, enum, minimum and
+// maximum — are published beside it and apply AS WELL, exactly as
+// `pattern` and `maxLength` coexist in JSON Schema: every assertion holds,
+// and a value must satisfy all of them. A route is free to be stricter
+// than the general rule, and several are.
+//
+// The live example is `snap_name` on the two snapshot-create routes. It
+// declares `format: "pve-configid"`, whose rule permits 2 to 128
+// characters, AND `max_length: 40`, because the handler's own
+// validateSnapshotName caps it there. Both are published; the effective
+// contract is their intersection, which is 2 to 40. Reading `permits` or
+// `regex` on its own and concluding that a 64-character name will be
+// accepted is the mistake this section exists to prevent — which is why
+// the rule is not suppressed when a narrowing facet is present. Dropping
+// the regex would leave a caller with less, not less-wrong: they would
+// lose the character class and keep the length cap, and the character
+// class is the half they cannot guess.
+//
+// One narrowing is NOT expressible in either place and is stated in the
+// route's Description instead: validateSnapshotName also rejects the
+// literal name "current", which Proxmox reserves. A schema facet cannot
+// say "anything but this one word", so the prose carries it.
+//
+// What is published here is deliberately a SUBSET of the catalogue entry
+// (internal/api/apischema/catalogue.go). The entry also carries the
+// upstream Proxmox file the rule was transcribed from, that upstream rule
+// verbatim, a divergence note wherever ours differs, the accept/reject
+// witnesses its tests run, and an Origin. Every one of the first four is
+// written for a maintainer re-verifying the transcription — they name Go
+// identifiers, repo paths and decisions that were considered and rejected
+// — and none of them changes what a caller may send. They stay in the
+// catalogue, which is where a maintainer reads them.
+//
+// ORIGIN WAS PUBLISHED AND THEN WITHDRAWN, and the reason is worth keeping
+// because the field looks obviously useful. It conflates two questions
+// that are not the same one: WHO WROTE THIS RULE, which is what the
+// catalogue records, and WHO IS THE AUTHORITY ON THIS VALUE, which is what
+// a caller wanted it for. Those diverge in both directions, for 81 of the
+// 790 parameters that carry a rule:
+//
+//   - The five "-or-empty" rules inherit Origin from the rule they widen,
+//     so 27 parameters reported "proxmox" for a rule Proxmox has no
+//     validator for, and whose empty string — the whole reason the variant
+//     exists — pve_verify_node_name rejects outright.
+//   - pve-object-id (49 parameters) and pve-object-id-colon (5) report
+//     "nexara" because Nexara defines them, yet those values ARE forwarded
+//     to Proxmox and Proxmox is far stricter: POST /sdn/zones takes `zone`
+//     under a rule admitting uppercase, dots, underscores and a leading
+//     digit at 64 characters, where PVE's own pve-sdn-zone-id is
+//     [a-z][a-z0-9]* capped at 8.
+//
+// A caller applying the documented semantics — "nexara means this API is
+// the authority, so an upstream 400 would be a bug" — reaches a wrong
+// conclusion at both. Nor is it fixable per entry: origin is a property of
+// the RULE, and "who may still refuse this value" is a property of the
+// ROUTE that carries it. A per-rule field cannot answer a per-route
+// question. It also had no reader — the SPA never rendered it — and cost
+// ~15 KB of payload to say nothing correct.
+type APIRule struct {
+	// Name is the catalogued rule's name. For a Format parameter it
+	// repeats Format, which is not redundant in the one place it counts:
+	// for a PATTERN parameter the payload carries only the regex, and the
+	// name is the term an operator can search the catalogue for and quote
+	// in a support thread.
+	Name string `json:"name"`
+
+	// Permits states in one line what the RULE allows — not what this
+	// parameter allows. Where the parameter publishes a narrower facet of
+	// its own, both hold and the narrower one binds. See the section on
+	// the type above.
+	//
+	// This is the field the whole payload exists to carry.
+	Permits string `json:"permits"`
+
+	// Regex is the RULE's regular expression. It is one of the constraints
+	// on this parameter and not the whole contract: a value must match it
+	// AND satisfy every other facet the parameter publishes. Compiling it
+	// alone yields a validator that is correct about shape and silent
+	// about length — it would accept a 64-character snap_name the route
+	// answers 400 for.
+	//
+	// It is present ONLY when the regex is the whole SHAPE check. A format
+	// like `disk-size` or `ip` validates by parsing rather than by
+	// matching, and has no regex to give; Permits states its rule in full
+	// instead. Publishing a part-prose, part-regex string under this key
+	// would hand a consumer something that looks compilable and is not, so
+	// absence is the signal: a caller may compile this when it is here,
+	// and must read Permits when it is not.
+	//
+	// For a Pattern parameter this repeats Pattern verbatim. The
+	// duplication is on purpose — a consumer reads one rule out of one
+	// place whichever kind it is — and it costs nothing, because the two
+	// are the same string and gzip charges for it once.
+	Regex string `json:"regex,omitempty"`
 }
 
 // endpointMeta is the curated overlay for routes the endpoint registry does

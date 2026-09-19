@@ -373,6 +373,22 @@ func checkNumeric(field string, prop Property, v float64, text string) error {
 
 // checkLength applies MinLength and MaxLength, which count characters on
 // a string and elements on an array.
+//
+// BESIDE A FORMAT, IT MEASURES THE NORMALIZED VALUE, not the one the
+// caller sent — normalization runs first (see the order on Validate). A
+// MinLength of 4 next to the disk-size format refuses "500G": four
+// characters as typed, three once normalized to "500". The bound is real
+// and the rejection is correct, but it is stated against a string the
+// caller never sees, and /api/v1/api-docs publishes the two side by side
+// with nothing saying which order they apply in.
+//
+// EVERY format that rewrites is a hazard here, so read this as the LIST
+// and not as a sample of it: disk-size; bwlimit ("0007" -> "7",
+// proportionally the largest rewrite of the lot); email, which trims and
+// drops the angle brackets, so "<user@example.com>" arrives 18 characters
+// long and is measured at 16; ip; cidr; mac-addr; and fingerprint-sha256.
+// Prefer expressing the limit in the format itself, or check that the
+// bound still means what you intend after the rewrite.
 func checkLength(field string, prop Property, n int, unit, units string) error {
 	if prop.MinLength != nil && n < *prop.MinLength {
 		return newErr(field, fmt.Sprintf("must have at least %d %s", *prop.MinLength, plural(*prop.MinLength, unit, units)))

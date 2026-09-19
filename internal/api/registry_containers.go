@@ -210,12 +210,13 @@ func registerContainerEndpoints(reg *Registry, h *handlers.ContainerHandler) {
 		Permissions: clusterCheck("execute", "container"),
 		Parameters: ctParams(apischema.Properties{
 			// The 40 is validateSnapshotName's, not pve-configid's — see the
-			// same declaration in registry_vms.go for why the description
-			// says 40 while the format allows 128, and why no MaxLength is
-			// declared here.
+			// same declaration in registry_vms.go for why MaxLength states
+			// it here rather than leaving it to the handler, and why that
+			// file's comment records having once concluded the opposite.
 			"snap_name": {
 				Type:        apischema.String,
 				Format:      "pve-configid",
+				MaxLength:   apischema.Ptr(40),
 				Typetext:    "<name>",
 				Description: `Snapshot name: 2-40 characters, starting with a letter. "current" is reserved by Proxmox.`,
 			},
