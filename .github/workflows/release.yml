@@ -55,7 +55,10 @@ jobs:
           version: v2.13.2
 
       - name: Test
-        run: go test -race -count=1 ./...
+        # -timeout 30m: see the same override in ci.yml. internal/api under
+        # -race does not fit Go's 10m per-package default on a hosted runner,
+        # and a release is the worst place to discover that.
+        run: go test -race -count=1 -timeout 30m ./...
         env:
           NEXARA_TEST_DB_URL: postgres://nexara:nexara@localhost:5432/nexara_test?sslmode=disable
 

@@ -35,8 +35,14 @@ frontend-build:
 	cp -r frontend/dist cmd/nexara/dist
 
 ## test: Run all tests
+# -timeout 30m, not Go's 10m default. internal/api runs ~482s under bare -race
+# on a 12-core box and 585-645s through THIS target, which adds -coverprofile
+# (coverage costs 20-40%). It builds the whole 535-route registry in-process for
+# a dozen guards, and TestGuard_RegistryHandlersOnlyReadDeclaredParams is ~82%
+# of the package on its own. Against the 10m default that is a 2.4% margin on
+# the coverage path, and the failure reads as a hung test rather than a slow one.
 test:
-	$(GOTEST) -race -coverprofile=coverage.out ./...
+	$(GOTEST) -race -timeout 30m -coverprofile=coverage.out ./...
 
 ## lint: Run golangci-lint
 lint:
@@ -83,8 +89,11 @@ audit-npm:
 audit: audit-go audit-npm
 
 ## coverage-html: Generate HTML coverage report
+# -timeout 30m for the same reason as `test:` above, and more so: this is the
+# same -race sweep plus coverage instrumentation, so it is the slowest path in
+# the Makefile.
 coverage-html:
-	$(GOTEST) -race -coverprofile=coverage.out ./...
+	$(GOTEST) -race -timeout 30m -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
