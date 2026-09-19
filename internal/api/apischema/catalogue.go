@@ -246,18 +246,23 @@ func formatRules() []RuleDoc {
 		{
 			Name:         "pve-configid",
 			Kind:         KindFormat,
-			Permits:      "a PVE configuration id: a leading letter, then letters, digits, underscore and dash, 2 to 40 characters.",
-			Rule:         `^[A-Za-z][A-Za-z0-9_-]{1,39}$`,
+			Permits:      "a PVE configuration id: a leading letter, then letters, digits, underscore and dash, 2 to 128 characters.",
+			Rule:         `^[A-Za-z][A-Za-z0-9_-]{1,127}$`,
 			RuleIsRegex:  true,
 			Origin:       OriginProxmox,
 			Upstream:     "pve-common src/PVE/JSONSchema.pm pve_verify_configid ($CONFIGID_RE)",
 			UpstreamRule: `^[a-z][a-z0-9_-]+\z (case-insensitive) — a letter then ONE OR MORE, so minimum 2 and no maximum`,
-			Divergence: "STRICTER: the 40-character ceiling is this package's, and PVE imposes none. It bounds " +
-				"a value that becomes a path segment. An id longer than 40 that PVE would accept is refused " +
-				"here — see pve-configid-existing, which is what the routes that must address an EXISTING " +
-				"object use.",
-			Accepts: []string{"snap1", "ab", "a-b_c", strings.Repeat("s", 40)},
-			Rejects: []string{"", "a", "1snap", "snap.1", strings.Repeat("s", 41)},
+			Divergence: "STRICTER in the ceiling only, and the ceiling is now the ADDRESSING rule's rather " +
+				"than an invented one. PVE imposes no maximum. This one is 128 because that is " +
+				"pve-configid-existing's MaxLength at both its declaration sites (snapshotNameParam in " +
+				"registry_vms.go, haConfigIDParam in registry_ha.go), and the create rule has to stay a " +
+				"SUBSET of the rule that addresses what it created — a create rule that admits a name the " +
+				"delete route's MaxLength then refuses produces an object this API cannot remove, which is " +
+				"the same failure ceph-pool-name records. It was 40, which refused ids PVE accepts for no " +
+				"reason anyone could name: the 5 sites that carry this format are all BODY parameters, so " +
+				"the path-segment argument that bounds storage-id and node-name never applied here.",
+			Accepts: []string{"snap1", "ab", "a-b_c", strings.Repeat("s", 41), strings.Repeat("s", 128)},
+			Rejects: []string{"", "a", "1snap", "snap.1", strings.Repeat("s", 129)},
 		},
 		{
 			Name:        "uuid",
@@ -275,9 +280,9 @@ func formatRules() []RuleDoc {
 		{
 			Name:    "email",
 			Kind:    KindFormat,
-			Permits: "a bare email address, optionally in angle brackets, whose local part is an unquoted RFC 5322 dot-atom and whose domain contains a dot; a display name is refused.",
+			Permits: "a bare email address, optionally in angle brackets, whose local part is an unquoted RFC 5322 dot-atom; a display name and a second address are refused. The domain is whatever mail.ParseAddress takes, a dotless one included.",
 			Rule: "net/mail.ParseAddress on the trimmed value, then: the parsed Name must be empty (no display " +
-				"name), the domain must contain a dot, and the local part must match " +
+				"name), and the local part must match " +
 				"^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[...]+)*$ so that a QUOTED local part — which " +
 				"ParseAddress unquotes, turning `\"a,b\"@example.com` into a,b@example.com — cannot make " +
 				"normalization a non-fixed-point or split a comma-joined recipient list in two.",
@@ -285,12 +290,29 @@ func formatRules() []RuleDoc {
 			Origin:       OriginProxmox,
 			Upstream:     "pve-common src/PVE/JSONSchema.pm pve_verify_email (via PVE::ParseUtils $EMAIL_RE)",
 			UpstreamRule: `^[\w\+\-\~]+(\.[\w\+\-\~]+)*@[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)*\z`,
-			Divergence: "Differs in BOTH directions. LOOSER in the local part: PVE allows only word characters, " +
-				"plus, dash and tilde, so \"o'brien@example.com\" is an address here and not to PVE. STRICTER " +
-				"in the domain: PVE's domain needs no dot, so \"admin@localhost\" is a PVE-valid notification " +
-				"target that this refuses. The stricter half is the one that can 400 a value Proxmox accepts.",
-			Accepts: []string{"user@example.com", "<user@example.com>", " user@example.com ", "o'brien@example.com"},
-			Rejects: []string{"", "user", "user@localhost", "User <user@example.com>", `"a,b"@example.com`},
+			Divergence: "LOOSER than PVE in BOTH halves of the address, and no longer stricter anywhere.\n" +
+				"LOCAL PART: PVE allows only word characters, plus, dash and tilde, so " +
+				"\"o'brien@example.com\" is an address here and not to PVE.\n" +
+				"DOMAIN: PVE's class is [a-zA-Z0-9-] in dot-separated groups. mail.ParseAddress is wider, " +
+				"so \"a@_\", \"a@b_c.com\" and the IP-literal \"user@[::1]\" all pass here and none of " +
+				"them matches $EMAIL_RE. That looseness arrived WITH the fix below and is the price of it: " +
+				"the dot requirement was the only thing refusing them, and it was refusing " +
+				"\"admin@localhost\" too. Harmless in the same way the local part is — a recipient the " +
+				"mailer cannot resolve fails at send time, which is not this rule's job to pre-empt.\n" +
+				"The stricter half is GONE: this used to require a dot in the domain, which refused " +
+				"\"admin@localhost\" — valid for local delivery, and accepted by PVE, whose domain needs " +
+				"no dot either.\n" +
+				"NARROWING THE LOCAL PART TO MATCH PVE WAS CONSIDERED AND REJECTED. No declaration carries " +
+				"this format: every parameter that takes an address declines it on purpose and says so — " +
+				"the login body (a lookup key, registry_auth.go), the PVE account attribute and the ACME " +
+				"contact list (both forwarded to Proxmox, which validates them itself, and both needing the " +
+				"empty string a format refuses), and the report recipients (handlers.EmailAddressPattern, " +
+				"Nexara's own mailer). So nothing validated here reaches PVE, PVE is not the authority for " +
+				"it, and the first consumer this format plausibly gets is a Nexara-side recipient — where " +
+				"PVE's \\w-only local part would refuse RFC 5322 addresses an operator may already have " +
+				"stored. Widening cannot break a saved value; narrowing can.",
+			Accepts: []string{"user@example.com", "<user@example.com>", " user@example.com ", "o'brien@example.com", "admin@localhost"},
+			Rejects: []string{"", "user", "user@", "User <user@example.com>", `"a,b"@example.com`, "user@example.com, other@example.com"},
 		},
 		{
 			Name:         "ip",
@@ -447,28 +469,58 @@ func patternRules() []RuleDoc {
 			Rejects: []string{"", "1snap", "snap.1", ".", "..", "-snap"},
 		},
 		{
-			Name:        "ceph-pool-name",
-			Kind:        KindPattern,
-			Permits:     "a Ceph pool name: an optional leading dot, then a letter or digit, then letters, digits, dot, underscore and dash.",
-			Rule:        `^\.?[A-Za-z0-9][A-Za-z0-9._-]*$`,
+			Name: "ceph-pool-name",
+			Kind: KindPattern,
+			Permits: "a Ceph pool name: anything at all except a colon, a slash, a backslash and whitespace, " +
+				"so long as it is not made only of dots.",
+			Rule:        `^\.*[^:/\\\s.][^:/\\\s]*$`,
 			RuleIsRegex: true,
 			Origin:      OriginProxmox,
 			Upstream:    "pve-manager PVE/API2/Ceph/Pool.pm $ceph_pool_common_options (the `name` parameter)",
-			UpstreamRule: `pattern ^[^:/\s]+$ — anything at all except a colon, a slash or whitespace. ` +
+			UpstreamRule: `pattern => qr|^[^:/\s]+$| — anything at all except a colon, a slash or whitespace. ` +
 				`Grep for $ceph_pool_common_options, NOT for a route: the closure is where the rule ` +
 				`lives, and createpool and setpool splice it in. The routes that ADDRESS an existing ` +
 				`pool — destroypool, getpool, poolindex — declare name as a bare type => 'string' with ` +
-				`no pattern at all.`,
-			Divergence: "STRICTER, and by a wide margin. PVE excludes three characters on CREATE and " +
-				"constrains the addressing routes not at all; this admits one character class on both. A " +
-				"pool created outside Nexara — \"rbd+meta\", \"pool!1\" — matches PVE's rule and not this " +
-				"one, and would be un-gettable, un-editable and un-deletable through this " +
-				"API, which is the exact failure the leading-dot allowance below exists to avoid. The " +
-				"leading dot IS deliberate: Ceph's own internal pools are named \".mgr\" and friends, and " +
-				"requiring an alphanumeric AFTER it is what keeps \"..\" out, since RE2 has no negative " +
-				"lookahead and DeleteCephPool concatenates the value into a path.",
-			Accepts: []string{".mgr", "rbd", "cephfs_data", "pool-01"},
-			Rejects: []string{"", ".", "..", "-pool", "rbd+meta", "a/b"},
+				`no pattern at all. One caveat a reader checking upstream will hit: createpool also runs ` +
+				`parse_storage_id($pool) — the much narrower storage-id rule, which WOULD reject ` +
+				`"rbd+meta" — but only when add_storages is set, and Nexara never sends it, so it is not ` +
+				`in play here.`,
+			Divergence: "STRICTER than upstream in TWO places, both deliberate, both because a name this API " +
+				"accepts on CREATE has to be one it can still DELETE. Neither is a transcription slip.\n" +
+				"(1) A name made ONLY of dots. Upstream's class admits \".\" and \"..\", and DeleteCephPool " +
+				"concatenates this value into a Proxmox path — \"..\" pops the pool collection and lands " +
+				"DELETE on /nodes/{node}/ceph. RE2 has no negative lookahead, so the exclusion is spelled " +
+				"positively: at least one character that is not a dot. That also turns away \"...\", which " +
+				"upstream would take and which names nothing.\n" +
+				"(2) The BACKSLASH. This one is not about traversal, it is about an asymmetry between the " +
+				"two client methods: DeleteCephPool runs validatePathSegment (internal/proxmox/client.go), " +
+				"which refuses \"/\" AND \"\\\\\"; CreateCephPool runs no such check, because the name goes " +
+				"out in the FORM BODY rather than in a path. So a rule admitting a backslash lets this API " +
+				"mint a pool — \"a\\\\b\" creates with a 204 — that it can then never remove, the delete " +
+				"answering 400 \"must not contain a path separator\". PVE accepts the name; we refuse it " +
+				"rather than create something unaddressable.\n" +
+				"Everything else is upstream's, character for character, and that is the correction: this " +
+				"rule used to be ^\\.?[A-Za-z0-9][A-Za-z0-9._-]*$ — one invented character class — so a " +
+				"pool PVE and Ceph both accept, \"rbd+meta\" or \"pool!1\" or \"-pool\", could not be " +
+				"created through this API, and one that already existed could not be DELETED through it: " +
+				"the two routes carrying this rule are POST /ceph/pools and DELETE /ceph/pools/{pool_name}, " +
+				"and there is no per-pool GET or PUT, so such a pool still appeared in the listing while " +
+				"every attempt to remove it answered 400.\n" +
+				"What makes the widening safe is NOT that url.PathEscape escapes everything — it does not. " +
+				"Of the characters this admits, \"!\", \"'\", \"(\", \")\", \"*\", \",\", \";\", \"%\", " +
+				"\"?\" and \"#\" are escaped, while \"$\", \"&\", \"+\", \"=\", \"@\" and \"~\" pass " +
+				"through UNCHANGED. They are safe because they are legal in a path segment and mean " +
+				"nothing to a path parser, not because they are encoded. The two characters that would " +
+				"matter — \"/\" and \"\\\\\" — are excluded by this rule before PathEscape is ever " +
+				"reached, which is also why citing \"\\\\\"→%5C as reassurance would be backwards: " +
+				"validatePathSegment rejects a backslash first, so it never gets escaped at all.\n" +
+				"LOOSER than upstream in one detail worth stating: Go's \\s is the ASCII set [\\t\\n\\f\\r ], " +
+				"so a vertical tab and every Unicode space pass here and may not in Perl. That is the " +
+				"harmless direction — PVE refuses them itself, with its own message. The anchors are exact: " +
+				"Go's regexp defaults to syntax.Perl, which sets OneLine, so ^…$ here IS \\A…\\z and a " +
+				"trailing newline cannot slip past the $.",
+			Accepts: []string{".mgr", "rbd", "cephfs_data", "pool-01", "rbd+meta", "pool!1", "-pool"},
+			Rejects: []string{"", ".", "..", "...", "a/b", "a:b", "a b", "rbd\n", `a\b`, `\pool`},
 		},
 		{
 			Name:         "pbs-safe-id",

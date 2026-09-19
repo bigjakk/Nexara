@@ -47,19 +47,27 @@ func osdParams(extra apischema.Properties) apischema.Properties {
 
 // cephPoolNameParam is a Ceph pool name as a PATH parameter.
 //
-// The optional leading dot is deliberate: Ceph's own internal pools are
-// named ".mgr" and friends, and a pattern anchored on an alphanumeric
-// would make them undeletable through this API. Requiring an
-// alphanumeric AFTER that dot is what keeps ".." — the traversal segment
-// — out, which RE2 cannot express as a negative lookahead.
-//
-// proxmox.DeleteCephPool also runs validatePathSegment on the value; this
-// is the same refusal made earlier, with a message that names the
-// parameter.
-//
 // The rule is the catalogue's ceph-pool-name, shared with the create body
-// below. Its entry records that PVE's own rule for this field is far wider
-// than this one.
+// below: PVE's own `^[^:/\s]+$`, minus a name made only of dots and minus
+// the backslash. It is deliberately wide — "rbd+meta", "pool!1", ".mgr"
+// and "-pool" are all pool names Ceph and PVE accept, and a pool this API
+// cannot name is a pool this API cannot delete.
+//
+// The two exclusions are both about keeping create and delete in
+// agreement, and the catalogue entry gives the full reasoning. In short:
+// ".." pops the pool collection and lands DELETE on /nodes/{node}/ceph,
+// and a backslash passes CreateCephPool (the name travels in the form
+// body, unchecked) but is refused by DeleteCephPool's validatePathSegment,
+// so admitting it would let this API mint a pool it could never remove.
+//
+// proxmox.DeleteCephPool also runs validatePathSegment on the value and
+// then url.PathEscape. Note that PathEscape does NOT escape everything
+// this rule admits — "$", "&", "+", "=", "@" and "~" pass through
+// unchanged. They are harmless because they are legal in a path segment,
+// not because they are encoded; the characters that would matter, "/" and
+// "\", are excluded by the rule itself. The rule here is the same refusal
+// validatePathSegment makes, but earlier, and with a message that names
+// the parameter.
 var cephPoolNameParam = apischema.Property{
 	Type:        apischema.String,
 	Pattern:     apischema.Rule("ceph-pool-name"),

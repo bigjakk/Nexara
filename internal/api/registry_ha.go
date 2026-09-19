@@ -227,7 +227,7 @@ func registerHAEndpoints(reg *Registry, h *handlers.HAHandler) {
 				// property's comment for why the path parameter is not.
 				Format:      "pve-configid",
 				Typetext:    "<name>",
-				Description: "Name for the new group: 2-40 characters, starting with a letter.",
+				Description: "Name for the new group: 2-128 characters, starting with a letter.",
 			},
 			"nodes":      haNodesParam(),
 			"restricted": haFlag("Confine the group's guests to these nodes, rather than preferring them."),
@@ -295,7 +295,7 @@ func registerHAEndpoints(reg *Registry, h *handlers.HAHandler) {
 				Type:        apischema.String,
 				Format:      "pve-configid",
 				Typetext:    "<name>",
-				Description: "Name for the new rule: 2-40 characters, starting with a letter.",
+				Description: "Name for the new rule: 2-128 characters, starting with a letter.",
 			},
 			"type":      haRuleTypeParam(),
 			"resources": haResourcesParam(),

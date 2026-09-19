@@ -263,7 +263,7 @@ func registerDRSEndpoints(reg *Registry, h *handlers.DRSHandler) {
 				Type:        apischema.String,
 				Format:      "pve-configid",
 				Typetext:    "<name>",
-				Description: "Name for the new Proxmox HA rule: 2-40 characters, starting with a letter.",
+				Description: "Name for the new Proxmox HA rule: 2-128 characters, starting with a letter.",
 			},
 			"rule_type": drsRuleTypeParam(),
 			"vm_ids": drsVMIDsParam(false,

@@ -236,7 +236,7 @@ func formatConfigID(value string) (string, error) {
 		return "", errEmptyForm
 	}
 	if !configIDRe.MatchString(value) {
-		return "", errors.New("expected an identifier starting with a letter, 2 to 40 characters long (letters, digits, underscore and dash)")
+		return "", errors.New("expected an identifier starting with a letter, 2 to 128 characters long (letters, digits, underscore and dash)")
 	}
 	return value, nil
 }
@@ -257,13 +257,21 @@ func formatUUID(value string) (string, error) {
 // values are used as recipients and as identifiers, and silently dropping
 // half of what the caller sent is worse than refusing it. So is a quoted
 // local part — see emailLocalRe.
+//
+// The DOMAIN is whatever mail.ParseAddress accepts, dotless included. It
+// used to have to contain a dot, which refused "admin@localhost" — a valid
+// local-delivery target, and one PVE's own $EMAIL_RE takes, since its
+// domain part is `[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)*` with the dotted
+// groups optional. That was the only respect in which this was stricter
+// than Proxmox, and a stricter rule here is a 400 on a value Proxmox
+// would have accepted.
 func formatEmail(value string) (string, error) {
 	addr, err := mail.ParseAddress(strings.TrimSpace(value))
 	if err != nil || addr.Name != "" {
 		return "", errEmail
 	}
 	at := strings.LastIndex(addr.Address, "@")
-	if at < 0 || !strings.Contains(addr.Address[at+1:], ".") {
+	if at < 0 {
 		return "", errEmail
 	}
 	if !emailLocalRe.MatchString(addr.Address[:at]) {

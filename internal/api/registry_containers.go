@@ -209,6 +209,10 @@ func registerContainerEndpoints(reg *Registry, h *handlers.ContainerHandler) {
 		Group:       "Containers",
 		Permissions: clusterCheck("execute", "container"),
 		Parameters: ctParams(apischema.Properties{
+			// The 40 is validateSnapshotName's, not pve-configid's — see the
+			// same declaration in registry_vms.go for why the description
+			// says 40 while the format allows 128, and why no MaxLength is
+			// declared here.
 			"snap_name": {
 				Type:        apischema.String,
 				Format:      "pve-configid",

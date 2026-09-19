@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -431,6 +432,185 @@ func TestCephPoolNameParamAndBodyAgree(t *testing.T) {
 	if create.MaxLength == nil || del.MaxLength == nil || *create.MaxLength != *del.MaxLength {
 		t.Errorf("create caps the name at %v and delete at %v", create.MaxLength, del.MaxLength)
 	}
+}
+
+// TestCephPoolNameSurvivesThePathSegment drives the names PVE's own rule
+// admits at the DELETE route as real requests, and checks the handler is
+// handed the name the caller sent.
+//
+// The catalogue's witnesses already prove the regex takes these, but the
+// regex is only the first thing standing between the caller and Proxmox:
+// Fiber has to route a path segment containing the character, and it has to
+// hand the handler the same bytes back. A rule that admits a name the
+// router cannot carry would be a fix on paper only — the pool would still
+// be undeletable, just with a different status code.
+//
+// Every name here is one PVE accepts and this API used to answer 400 to:
+// the pattern was an invented ^\.?[A-Za-z0-9][A-Za-z0-9._-]*$, so a pool
+// called "rbd+meta" could be neither read, edited nor destroyed through
+// Nexara. ".mgr" is included as the regression the leading-dot allowance
+// was added for.
+//
+// The names are sent RAW rather than through url.PathEscape, because that
+// is what a client has to do for them to arrive intact: Fiber runs with
+// UnescapePath at its default of false, so c.Params hands back the segment
+// exactly as it came in (the same fact firewallIPSetEntryCIDRParam is built
+// around). Every character used here is legal unencoded in a path segment
+// — RFC 3986 sub-delims and unreserved.
+//
+// The characters that are NOT — "#", "%", "?" and a space, which a client
+// must percent-encode — therefore arrive still encoded and are then escaped
+// a second time by DeleteCephPool's url.PathEscape, so Proxmox is asked for
+// a pool whose name literally contains "%23". That is the same pre-existing
+// double-encoding defect firewallIPSetEntryCIDRParam records on the IP set
+// route, and it lives in the client rather than in this rule.
+//
+// Widening did not CAUSE it, but it does widen its REACH, and that is worth
+// stating plainly rather than filed under "pre-existing": before, a pool
+// named with one of those characters could only exist if something outside
+// Nexara had created it, so the defect needed a pre-existing pool to bite
+// on. Now POST /ceph/pools will create one, and the DELETE that follows
+// addresses the wrong name. Left for separate scoping; not asserted here,
+// because asserting it would freeze the defect as the spec.
+func TestCephPoolNameSurvivesThePathSegment(t *testing.T) {
+	const path = cephScope + "/pools/:pool_name"
+	prefix := strings.Replace(cephRoute(path), "store01", "", 1)
+
+	for _, name := range []string{
+		"rbd+meta", "pool!1", "pool'1", "a.b~c", "-pool", ".mgr",
+		"a$b", "a,b", "a;b", "a=b", "a@b", "a(b)", "rbd",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cap := &capture{}
+			app := newRegistryApp(t, noAuth(), probeCephEndpoint(t, fiber.MethodDelete, path, cap))
+			target := prefix + name
+
+			status, env := send(t, app, httptest.NewRequest(http.MethodDelete, target, nil))
+			if status != fiber.StatusNoContent {
+				t.Fatalf("DELETE %s: status = %d (%q), want 204 — PVE accepts this pool name, so "+
+					"refusing it here makes the pool undeletable through this API", target, status, env.Message)
+			}
+			if got := cap.params.String("pool_name"); got != name {
+				t.Errorf("handler was handed %q, want %q: the value did not survive the round trip "+
+					"through the path segment, so the wrong pool would be destroyed", got, name)
+			}
+		})
+	}
+}
+
+// TestCephPoolDeleteStillRefusesATraversingName is the other half: the one
+// respect in which this rule is deliberately STRICTER than PVE's.
+//
+// PVE's own pattern (^[^:/\s]+$) admits "." and "..", and
+// proxmox.DeleteCephPool concatenates the name into a Proxmox path — ".."
+// pops the pool collection and lands DELETE on /nodes/{node}/ceph, "."
+// stops a level short on /ceph/pool. RE2 has no negative lookahead, so the
+// catalogue's rule excludes them positively, by requiring one character
+// that is not a dot. That also excludes "...", which upstream would take
+// and which names nothing.
+//
+// The segment is sent RAW, and that is the case that matters: nothing
+// between the client and the router collapses a dot segment, so ".."
+// really does arrive as ".." and the pattern is the thing that stops it.
+// Sent percent-encoded it arrives as the literal text "%2E%2E" — a
+// different string, which this rule accepts and which is NOT a traversal,
+// because url.PathEscape re-escapes the percent on the way out and Proxmox
+// is asked for a pool named "%2E%2E".
+func TestCephPoolDeleteStillRefusesATraversingName(t *testing.T) {
+	const path = cephScope + "/pools/:pool_name"
+	prefix := strings.Replace(cephRoute(path), "store01", "", 1)
+
+	for _, name := range []string{".", "..", "...", "...."} {
+		t.Run(name, func(t *testing.T) {
+			cap := &capture{}
+			app := newRegistryApp(t, noAuth(), probeCephEndpoint(t, fiber.MethodDelete, path, cap))
+			target := prefix + name
+
+			status, _ := send(t, app, httptest.NewRequest(http.MethodDelete, target, nil))
+			if status == fiber.StatusNoContent {
+				t.Fatalf("DELETE %s was accepted; a name made only of dots is a traversal segment "+
+					"once DeleteCephPool concatenates it into a Proxmox path", target)
+			}
+			if cap.called {
+				t.Error("the handler ran for a name the schema must refuse")
+			}
+		})
+	}
+}
+
+// TestCephPoolNameRefusesABackslashOnBothHalves pins the second deliberate
+// divergence from PVE's pattern, and it guards a REGRESSION rather than a
+// hypothetical.
+//
+// The two client methods do not check the name the same way.
+// proxmox.DeleteCephPool runs validatePathSegment (internal/proxmox/client.go),
+// which refuses "/" AND "\". proxmox.CreateCephPool runs no such check — it
+// only refuses an empty name — because the name travels in the FORM BODY
+// rather than in a path, so it needs no traversal guard.
+//
+// That asymmetry means a rule admitting a backslash is not merely lax, it is
+// productive of unaddressable state: POST {"name":"a\\b"} answers 204 and the
+// pool is created on the cluster, and every DELETE of it afterwards answers
+// 400 `ceph pool name "a\b" must not contain a path separator`. Nexara mints a
+// pool Nexara can never remove — the same failure the widening of this rule
+// set out to close, arrived at from the create side instead of the delete
+// side.
+//
+// So BOTH halves are asserted, and the create half is the one that matters:
+// a rule that refused the backslash only on the delete path would leave
+// exactly the bug above in place.
+//
+// The two halves are driven DIFFERENTLY, and the reason is worth recording
+// because it looks like an inconsistency. The create half goes through the
+// real router, because a JSON string body carries a literal backslash
+// unchanged. The delete half validates the declaration directly, because
+// app.Test serialises the request through net/url, which percent-encodes a
+// raw backslash in a path — "a\b" arrives at the handler as "a%5Cb", a
+// different string that this rule rightly accepts. That is a property of
+// the TEST HARNESS, not of the system: nothing in HTTP stops a hand-built
+// request putting a raw 0x5C byte in the request line, so the exclusion is
+// still load-bearing on the path and is asserted where it can actually be
+// observed.
+func TestCephPoolNameRefusesABackslashOnBothHalves(t *testing.T) {
+	names := []string{`a\b`, `\pool`, `pool\`, `..\..`}
+
+	t.Run("create body", func(t *testing.T) {
+		const path = cephScope + "/pools"
+		for _, name := range names {
+			t.Run(name, func(t *testing.T) {
+				cap := &capture{}
+				app := newRegistryApp(t, noAuth(), probeCephEndpoint(t, fiber.MethodPost, path, cap))
+				// Go's %q escapes the backslash, which is also JSON's escape.
+				body := fmt.Sprintf(`{"name":%q,"size":3,"pg_num":128}`, name)
+
+				status, env := send(t, app, jsonRequest(http.MethodPost, cephRoute(path), body))
+				if status != fiber.StatusBadRequest {
+					t.Fatalf("POST name=%q: status = %d (%q), want 400 — CreateCephPool does not run "+
+						"validatePathSegment, so a pool created under this name could never be deleted",
+						name, status, env.Message)
+				}
+				if cap.called {
+					t.Error("the handler ran for a name that would create an undeletable pool")
+				}
+			})
+		}
+	})
+
+	t.Run("delete path", func(t *testing.T) {
+		e := declaredEndpoint(t, fiber.MethodDelete, cephScope+"/pools/:pool_name")
+		for _, name := range names {
+			t.Run(name, func(t *testing.T) {
+				_, err := e.Parameters.Validate(map[string]any{
+					"cluster_id": testClusterID,
+					"pool_name":  name,
+				})
+				if err == nil {
+					t.Errorf("pool_name=%q was accepted; validatePathSegment refuses it one layer down, "+
+						"so the schema should answer first and name the parameter", name)
+				}
+			})
+		}
+	})
 }
 
 // TestCephOSDActionsTakeNoBody covers the shape the OSD action dialog

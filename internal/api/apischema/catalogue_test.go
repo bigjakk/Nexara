@@ -258,6 +258,48 @@ func TestOrEmptyRulesAcceptTheirBasePlusNothingElse(t *testing.T) {
 	}
 }
 
+// TestCreateConfigIDIsASubsetOfTheAddressingRule holds the pairing that
+// decides pve-configid's ceiling.
+//
+// pve-configid is the CREATE rule; pve-configid-existing is what the routes
+// that address an existing object carry. A create rule that admits a name
+// the addressing rule refuses produces an object this API cannot then read
+// or delete — the same failure ceph-pool-name's entry records, arrived at
+// from the other side. So create has to stay a SUBSET of addressing, and
+// this asserts it over every witness in the catalogue rather than over
+// pve-configid's own, which would agree by construction.
+//
+// What this canNOT see is the length half, and that is worth saying plainly
+// rather than leaving a reader to assume it is covered: pve-configid-existing
+// carries no length bound in its rule: its cap is a MaxLength: 128 at each
+// declaration (snapshotNameParam in internal/api/registry_vms.go,
+// haConfigIDParam in internal/api/registry_ha.go), which this package cannot
+// reach. pve-configid's own ceiling was raised from 40 to exactly 128 to
+// match those, so RAISING IT FURTHER WITHOUT RAISING THEM re-opens the gap
+// and nothing here will fail. That check belongs in internal/api, where both
+// halves are visible.
+func TestCreateConfigIDIsASubsetOfTheAddressingRule(t *testing.T) {
+	t.Parallel()
+
+	create, ok := LookupRule("pve-configid")
+	if !ok {
+		t.Fatal("pve-configid is not catalogued")
+	}
+	existing, ok := LookupRule("pve-configid-existing")
+	if !ok {
+		t.Fatal("pve-configid-existing is not catalogued")
+	}
+	existingRe := regexp.MustCompile(existing.Rule)
+
+	for _, v := range orEmptyCorpus() {
+		if accepted(t, create, v) && !existingRe.MatchString(v) {
+			t.Errorf("pve-configid accepts %q but pve-configid-existing refuses it: an object created "+
+				"under that name could not then be addressed, so it would be neither readable nor "+
+				"deletable through this API", v)
+		}
+	}
+}
+
 // TestRuleRefusesAFormat pins the one misuse the accessor can catch: a
 // declaration reaching a normalizing rule through Pattern, which would
 // check the shape and silently drop the normalization the format exists

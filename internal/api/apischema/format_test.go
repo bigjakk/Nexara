@@ -114,8 +114,18 @@ var formatCorpus = map[string]formatCases{
 			"Ab":                          "Ab",
 			"my-snap_2":                   "my-snap_2",
 			"s" + strings.Repeat("x", 39): "s" + strings.Repeat("x", 39),
+			// 41 and 128 characters. Both used to be rejected, and that
+			// assertion was wrong: PVE's $CONFIGID_RE
+			// (qr/[a-z][a-z0-9_-]+/i, anchored ^…\z) states NO maximum, so
+			// a 41-character HA rule name is one Proxmox accepts and this
+			// API used to answer with a 400. The ceiling that remains is
+			// 128, matching pve-configid-existing's MaxLength at the routes
+			// that address an existing object — see the catalogue entry for
+			// why create has to stay a subset of that.
+			"s" + strings.Repeat("x", 40):  "s" + strings.Repeat("x", 40),
+			"s" + strings.Repeat("x", 127): "s" + strings.Repeat("x", 127),
 		},
-		reject: []string{"", "a", "1snap", "snap!", "snap.1", "s" + strings.Repeat("x", 40)},
+		reject: []string{"", "a", "1snap", "snap!", "snap.1", "s" + strings.Repeat("x", 128)},
 	},
 	"uuid": {
 		accept: map[string]string{
@@ -137,12 +147,19 @@ var formatCorpus = map[string]formatCases{
 			" user@example.com ":            "user@example.com",
 			"<user@example.com>":            "user@example.com",
 			"User.Name+tag@sub.example.com": "User.Name+tag@sub.example.com",
+			// A dotless domain. This was asserted as a REJECT, and the
+			// assertion was wrong twice over: "admin@localhost" is a valid
+			// local-delivery target, and PVE's own $EMAIL_RE
+			// (pve-common src/PVE/ParseUtils.pm) makes the dotted groups
+			// optional — `@[a-zA-Z0-9\-]+(\.[a-zA-Z0-9\-]+)*` — so Proxmox
+			// takes it and this format answered 400. It was the only
+			// respect in which this rule was stricter than upstream.
+			"admin@localhost": "admin@localhost",
 		},
 		reject: []string{
 			"",
 			"not-an-email",
 			"user@",
-			"user@localhost", // no dot in the domain
 			"Full Name <user@example.com>",
 			"user@example.com, other@example.com",
 			// A quoted local part unquotes into an address this package

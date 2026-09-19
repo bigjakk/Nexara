@@ -637,6 +637,19 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("execute", "vm"),
 		Parameters: vmParams(apischema.Properties{
+			// The 40 in the description is NOT this format's bound and must
+			// not be "corrected" to 128 to match it. pve-configid allows 2
+			// to 128 (Proxmox's own $CONFIGID_RE states no maximum at all);
+			// the 40 is validateSnapshotName's, in the handler, and it is
+			// what a caller actually hits — so the description states the
+			// effective contract rather than the schema's half of it.
+			//
+			// No MaxLength is declared here on purpose. Adding one would
+			// put an unverified Nexara bound in a SECOND place, in the same
+			// change that removed it from the first; and the pairing is
+			// already safe, since create (≤40) stays well inside what
+			// snapshotNameParam can address (≤128). Whether 40 belongs at
+			// all is a question for upstream, not for this declaration.
 			"snap_name": {
 				Type:        apischema.String,
 				Format:      "pve-configid",
