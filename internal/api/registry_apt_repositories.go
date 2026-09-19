@@ -54,7 +54,7 @@ func registerAptRepositoryEndpoints(reg *Registry, h *handlers.AptRepositoryHand
 		Path:   aptScope,
 		Description: "List a node's APT repositories, the standard repositories Proxmox offers it, and " +
 			"any warnings about the current configuration.",
-		Group:       "Node Management",
+		Group:       "Nodes",
 		Permissions: clusterCheck("view", "apt_repository"),
 		Parameters:  aptParams(nil),
 		Handler:     h.ListRepositories,
@@ -63,7 +63,7 @@ func registerAptRepositoryEndpoints(reg *Registry, h *handlers.AptRepositoryHand
 		Method:      fiber.MethodPut,
 		Path:        aptScope,
 		Description: "Enable or disable one repository entry, identified by the file it lives in and its index within that file.",
-		Group:       "Node Management",
+		Group:       "Nodes",
 		Permissions: clusterCheck("manage", "apt_repository"),
 		Parameters: aptParams(apischema.Properties{
 			"path": {
@@ -102,7 +102,7 @@ func registerAptRepositoryEndpoints(reg *Registry, h *handlers.AptRepositoryHand
 		Method:      fiber.MethodPost,
 		Path:        aptScope,
 		Description: "Add one of the standard repositories Proxmox offers for this node, named by its handle (e.g. no-subscription).",
-		Group:       "Node Management",
+		Group:       "Nodes",
 		Permissions: clusterCheck("manage", "apt_repository"),
 		Parameters: aptParams(apischema.Properties{
 			"handle": {

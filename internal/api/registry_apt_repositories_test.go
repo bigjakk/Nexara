@@ -148,8 +148,15 @@ func TestEveryAptEndpointIsDocumented(t *testing.T) {
 		if strings.TrimSpace(e.Description) == "" {
 			t.Errorf("%s has no description", key)
 		}
-		if e.Group != "Node Management" {
-			t.Errorf("%s is in group %q, want Node Management", key, e.Group)
+		// "Nodes", not the "Node Management" these three carried until the
+		// group vocabulary was canonicalised: the Nodes section already holds
+		// the other writes against a node (dns, time, services, reboot,
+		// shutdown, maintenance, the disk lifecycle), so a second section for
+		// three more of them split one docs heading in two and left an
+		// operator looking under the wrong one. See canonicalGroups in
+		// registry_group_guard_test.go.
+		if e.Group != "Nodes" {
+			t.Errorf("%s is in group %q, want Nodes", key, e.Group)
 		}
 		names := pathParamNames(e.Path)
 		if len(names) == 0 || names[0] != "cluster_id" {
