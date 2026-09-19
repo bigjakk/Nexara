@@ -233,11 +233,19 @@ func (h *ReportHandler) CreateSchedule(c fiber.Ctx, p *apischema.Params) error {
 	}
 	fields.Parameters = rawParams
 
-	if err := h.validateScheduleFields(c, fields); err != nil {
+	// Authorize BEFORE validating. validateScheduleFields reads the
+	// notification channel out of the database and distinguishes "not
+	// found" from "not an email channel", so running it first answered
+	// that question for any authenticated caller holding no report grant
+	// at all — an existence oracle over a table otherwise gated on
+	// view:notification_channel. This route is Deferred, so no middleware
+	// stands in front of the handler and the order here IS the gate.
+	// EmailRun (below) already had it this way round.
+	if err := requireClusterPerm(c, "manage", "report", clusterID); err != nil {
 		return err
 	}
 
-	if err := requireClusterPerm(c, "manage", "report", clusterID); err != nil {
+	if err := h.validateScheduleFields(c, fields); err != nil {
 		return err
 	}
 	userID, _ := c.Locals("user_id").(uuid.UUID)
