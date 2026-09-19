@@ -241,6 +241,7 @@ All settings are environment variables. `docker-compose.yml` injects a curated s
 | `WS_ALLOWED_ORIGINS` | empty (allow all) | Comma-separated exact origins allowed to open WebSocket connections. **Set to your public origin in production** (CSRF defence). |
 | `SECURE_COOKIES` | `auto` | `auto` / `always` / `never` — `Secure` flag on the refresh-token cookie. `auto` infers HTTPS from `X-Forwarded-Proto`, but only from a `TRUSTED_PROXIES` upstream. **Set `always`** when TLS terminates at a reverse proxy. |
 | `HSTS_MAX_AGE` | `0` (off) | Seconds for `Strict-Transport-Security`. Enable only on HTTPS with a trusted certificate — over a self-signed origin it pins HTTPS and makes cert errors unbypassable. Otherwise emit HSTS at the proxy. |
+| `COMPRESSION_ENABLED` | `true` | gzip/brotli on API and SPA responses (`/api/v1/api-docs` drops ~710 KB → ~81 KB). Set `false` only when a reverse proxy already compresses, to save the duplicated CPU. |
 
 See [`.env.example`](.env.example) for the full reference.
 

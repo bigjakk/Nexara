@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/compress"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/gofiber/fiber/v3/middleware/logger"
@@ -208,11 +209,216 @@ func (s *Server) setupMiddleware() {
 		Max:        s.config.RateLimitMax,
 		Expiration: s.config.RateLimitExpiration,
 		Next: func(c fiber.Ctx) bool {
-			return strings.HasPrefix(limiterPath(c), "/api/v1/auth/") ||
+			return strings.HasPrefix(limiterPath(c), authCookieScopePrefix) ||
 				strings.HasPrefix(limiterPath(c), "/ws")
 		},
 	}))
+
+	// Response compression — see compressionSkipped for what is excluded and
+	// why, and the block comment above it for the BREACH assessment.
+	//
+	// Registered last in setupMiddleware, so everything that produces a
+	// compressible body sits INSIDE it: the route handlers setupRoutes mounts,
+	// the /ws auth middleware and upgraders wsServer.RegisterRoutes adds, and
+	// the embedded-SPA static handler RegisterFrontend appends — main.go calls
+	// all three after New(). It is not the innermost app-level middleware in
+	// the process (those three Use calls land after it); it is the last one
+	// this function installs, which is what the ordering below is about.
+	//
+	// The ordering is load-bearing in four places, each of which breaks
+	// something if reversed:
+	//
+	//   - Inside recover.New(). Fiber's compress middleware post-processes
+	//     after c.Next() returns and has no deferred recover of its own, so a
+	//     panic unwinds straight past it: recover catches it and the 500 goes
+	//     out uncompressed, rather than compress running against a
+	//     half-written response.
+	//   - Inside logger.New(). The logger measures latency around its own
+	//     c.Next(), so compression time is counted in the latency it reports —
+	//     which is the number the client actually experienced.
+	//   - Inside cors.New(). A preflight is short-circuited by cors with a 204
+	//     and never reaches compress at all. (shouldSkip would skip a 204
+	//     anyway; this just avoids the call.)
+	//   - Inside every limiter. A 429 or a 413 from the body-size guard
+	//     short-circuits above this point, so a request being throttled never
+	//     pays for compression. Those envelopes are all well under fasthttp's
+	//     200-byte floor, so nothing is lost by not compressing them.
+	//
+	// One consequence worth stating because it is invisible from here: an
+	// error RETURNED to Fiber is never compressed. Fiber's compress middleware
+	// does `if err := c.Next(); err != nil { return err }` and skips its
+	// post-processing entirely, and buildFiberConfig's ErrorHandler runs above
+	// the whole Use chain — so every 4xx/5xx raised via fiber.NewError is
+	// rendered after compress has already bailed out.
+	//
+	// That is a statement about the ErrorHandler path ONLY, not about error
+	// responses in general. Plenty of handlers answer with c.Status(…).JSON(…)
+	// and a nil error instead, and compress does post-process those. Most sit
+	// on mutating routes, where compressionSkipped's method rule covers them;
+	// the /ws auth rejections are the notable GET-shaped exception and reach
+	// compress unguarded. Nothing comes of it either way — every one of those
+	// bodies is a few dozen bytes, under the size floor — but the reason is
+	// the floor, not this paragraph.
+	//
+	// TestCompression_ErrorEnvelopesAreNeverCompressed pins the ErrorHandler
+	// half, with a body large enough that the floor cannot be why it passes.
+	if s.config.CompressionEnabled {
+		s.app.Use(compress.New(compress.Config{Next: compressionSkipped}))
+	}
 }
+
+// compressionSkipped reports whether a request's response must NOT be
+// compressed. Returning true skips Fiber's compress middleware.
+//
+// ── BREACH assessment ───────────────────────────────────────────────────
+//
+// BREACH needs four things at once: a compressed response, a SECRET in that
+// response body, ATTACKER-CHOSEN text reflected into the SAME body, and the
+// ability to make the victim's browser issue that request thousands of times
+// while measuring the compressed size. Nexara fails the fourth condition
+// outright, for a reason that is structural rather than incidental:
+//
+//   - The credential that authorizes the entire /api/v1 surface is a Bearer
+//     token (or an nxra_ API key) in the Authorization HEADER — see
+//     extractBearerToken. A header is not covered by Content-Encoding, and
+//     fasthttp speaks HTTP/1.1 only, so there is no HPACK header compression
+//     either: the credential is never in the compressed stream. More
+//     importantly, a header credential is not AMBIENT. A cross-origin page
+//     cannot make a browser attach it, so an attacker cannot cause an
+//     authenticated request at all — and anyone who CAN issue the request
+//     already holds the token and can simply read the plaintext body. There
+//     is no "cause it but can't read it" gap for a side channel to exploit.
+//   - The one ambient credential is the refresh cookie, and it is HttpOnly +
+//     SameSite=Strict + Path=/api/v1/auth/ (handlers/auth_cookies.go).
+//     SameSite=Strict means it is not attached to ANY cross-site request,
+//     including a top-level navigation from an attacker's page.
+//   - No response body carries a STABLE secret paired with free-form
+//     reflected input. Every token-bearing body mints a fresh random secret
+//     per response (login, refresh, console/ws tokens, TOTP enrolment, API
+//     key create, PVE token create). BREACH extracts a secret that repeats
+//     across the responses it measures; a value that is re-randomised on
+//     every request cannot be recovered a byte at a time.
+//
+// Conclusion: BREACH does not apply to Nexara as it stands. What follows is
+// therefore not a fix for a live vulnerability — it is the cheap half of the
+// trade. The endpoints excluded below are the only ones whose bodies can
+// carry a credential, they are all small single-object responses, and they
+// are all low-volume, so excluding them saves an attacker's future self a
+// great deal and costs the operator no measurable bandwidth. It also means a
+// later change to the auth model — cookie auth on /api/v1, a relaxed
+// SameSite, a secret that stops being per-request — does not silently turn
+// eleven handlers into oracles.
+//
+// ── What is NOT excluded, deliberately ──────────────────────────────────
+//
+// WebSocket upgrades (/ws, /ws/console, /ws/vnc) need no entry here. A
+// successful upgrade leaves the response at 101, and compress's shouldSkip
+// bails on any status < 200, so the library already excludes it and a /ws case
+// would duplicate that. TestCompression_WebSocketUpgradeStillWorks pins the
+// upgrade end-to-end so a Fiber release that changed shouldSkip would fail the
+// build rather than break consoles in production.
+//
+// A REJECTED upgrade is a different matter, and not what it looks like: only
+// the no-upgrade-header branch returns a *fiber.Error (fiber.ErrUpgradeRequired
+// in ws/server.go); the token and scope/origin branches all answer with
+// c.Status(…).JSON(…) and a nil error, so compress does post-process them.
+// Nothing comes of it — those bodies are 20-60 bytes, well under the floor
+// below — but the reason is the floor, not the error path.
+//
+// Likewise absent: a small-response floor (fasthttp declines to compress a
+// BUFFERED body under 200 bytes — minCompressLen; a body STREAM has no floor,
+// so a tiny file served by the SPA static handler can still be compressed,
+// which is harmless), a content-type allow-list (fasthttp already restricts
+// compression to text/*, application/*, image/svg, image/x-icon, font/* and
+// multipart/*, so the branding PNG/JPEG/WEBP endpoints are skipped for free),
+// an already-compressed check (both Fiber and fasthttp bail when
+// Content-Encoding is already set), and Range requests (shouldSkip handles
+// them, which is what keeps the SPA static handler's byte-range serving
+// intact).
+func compressionSkipped(c fiber.Ctx) bool {
+	// Rule 1 — compress only responses to SAFE methods.
+	//
+	// Every one of the eleven handlers that puts a credential in a response
+	// body answers a POST or a PUT: login/register/refresh, the console and
+	// ws-token mints, all three TOTP enrolment steps, API key create, and PVE
+	// token create/regenerate. Two of those additionally reflect caller-chosen
+	// free text into the same body — the API key's `name` (100 chars) and the
+	// PVE token's `comment` (1024 chars) — which is the literal shape BREACH
+	// names, minus the delivery vehicle.
+	//
+	// Stated as a method rule rather than a list of paths on purpose: a path
+	// list in this file and the routes in registry_*.go agree only by
+	// spelling, so renaming a route would silently take the exclusion off
+	// (the same trap limiterPath exists to document). The method is a property
+	// of the request, and cannot drift.
+	//
+	// It costs nothing measurable. Every large payload this API produces is a
+	// GET — the ~709 KB route catalogue, the {items,total} listings, metrics,
+	// and the embedded SPA. No mutating endpoint returns a large body:
+	// POST /reports/generate, the biggest candidate, answers with run METADATA
+	// and leaves the rendered HTML to GET /reports/runs/:id/html.
+	//
+	// HEAD is swept up by the same comparison (compress's shouldSkip would
+	// drop it too, but it never gets that far).
+	if c.Method() != fiber.MethodGet {
+		return true
+	}
+
+	// Rule 2 — never compress anything under the refresh cookie's own Path.
+	//
+	// Rule 1 guards the SECRET half of the BREACH precondition. This guards
+	// the CAUSATION half: this prefix is the exact scope in which a browser
+	// attaches a credential without the caller asking, and therefore the only
+	// region of the API where an attacker could ever provoke a response they
+	// cannot themselves read. The boundary is not a judgement call — it is
+	// refreshCookiePath from handlers/auth_cookies.go, verbatim.
+	//
+	// Stated plainly: as the handlers stand today this rule is REDUNDANT with
+	// rule 1. Every credential-bearing response is a POST or a PUT, and no
+	// safe-method endpoint under this prefix returns a secret: /auth/me is a
+	// profile, /auth/sessions omits token hashes, /auth/totp/status,
+	// /auth/setup-status and /auth/sso-status are booleans, /auth/oidc/
+	// authorize redirects to the IdP, and /auth/oidc/callback is a 302 whose
+	// Location carries a 5-second exchange code — not a token in a body.
+	//
+	// The redundancy is the point, and is why it is kept rather than trimmed:
+	// the two rules guard independent properties, so a future GET under this
+	// prefix that does return a token — a /auth/session that re-issues, say —
+	// would be compressed the day it lands with nothing to catch it. If the
+	// cookie's Path is ever widened, this must widen with it;
+	// TestCompression_AuthPathsAreAllExcluded pins that every rate-limited
+	// auth path this file already tracks stays covered.
+	//
+	// Bandwidth cost is nil: these are sub-kilobyte responses, and the
+	// busiest of them (/auth/refresh) fires once per session per ~14 minutes.
+	//
+	// limiterPath rather than c.Path(), for exactly the reason spelled out on
+	// limiterPath: Fiber routes on a lowercased, slash-trimmed path, so
+	// "/API/v1/auth/login/" reaches the handler while a raw comparison misses
+	// it. The bare "/api/v1/auth" is named separately because the prefix's
+	// trailing slash would not match it — it routes nowhere today, and the
+	// point is that it would not need revisiting if it ever did.
+	p := limiterPath(c)
+	return p == authCookieScope || strings.HasPrefix(p, authCookieScopePrefix)
+}
+
+// authCookieScope and authCookieScopePrefix name the part of the API the
+// refresh cookie is scoped to, and therefore the only part a browser will
+// authenticate automatically. Two spellings because both are needed: the
+// prefix matches children, the bare scope matches the subtree root, and
+// limiterPath has already stripped trailing slashes by the time either is
+// compared against.
+//
+// Kept in sync by hand with refreshCookiePath in
+// internal/api/handlers/auth_cookies.go, which is unexported. The trailing
+// slash is load-bearing there (RFC 6265 §5.1.4 — without it the cookie would
+// also match a neighbour like /api/v1/auth-debug) and is kept here so the two
+// read as the same value; TestCompressionSkipped_Decisions pins that this
+// exclusion does not match that neighbour either.
+const (
+	authCookieScope       = "/api/v1/auth"
+	authCookieScopePrefix = authCookieScope + "/"
+)
 
 // clusterCreateLimiter caps POST /api/v1/clusters at 10/min/IP.
 //

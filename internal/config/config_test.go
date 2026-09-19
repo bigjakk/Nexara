@@ -92,6 +92,42 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 }
 
+// TestLoad_CompressionEnabled pins the COMPRESSION_ENABLED env var end to end:
+// that it defaults on, and that the name actually binds to the field.
+//
+// The second half is the point. A Config field is read through its envconfig
+// tag and nothing else, so a single dropped letter in that tag leaves the
+// field sitting at its default forever — the operator's off switch does
+// nothing, silently, and no compile error or lint rule notices. Asserting only
+// the default would pass against exactly that bug.
+func TestLoad_CompressionEnabled(t *testing.T) {
+	t.Run("defaults on", func(t *testing.T) {
+		setRequiredEnv(t)
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if !cfg.CompressionEnabled {
+			t.Error("CompressionEnabled = false with COMPRESSION_ENABLED unset, want true")
+		}
+	})
+
+	t.Run("env var turns it off", func(t *testing.T) {
+		setRequiredEnv(t)
+		t.Setenv("COMPRESSION_ENABLED", "false")
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.CompressionEnabled {
+			t.Error("CompressionEnabled = true with COMPRESSION_ENABLED=false — the env var is not " +
+				"bound to the field; check the envconfig tag spelling")
+		}
+	})
+}
+
 func TestLoad_TaskHistoryRetention(t *testing.T) {
 	t.Run("defaults to 7d", func(t *testing.T) {
 		setRequiredEnv(t)

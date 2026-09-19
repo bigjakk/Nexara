@@ -24,6 +24,11 @@ func newTestServer(t *testing.T) *Server {
 		RateLimitExpiration: time.Minute,
 		AccessTokenTTL:      15 * time.Minute,
 		RefreshTokenTTL:     7 * 24 * time.Hour,
+		// Matches the envconfig default. A Config built as a struct literal
+		// bypasses envconfig entirely, so every defaulted field has to be
+		// restated or the stub server runs in a shape production never has —
+		// here, with the compress middleware absent from the chain.
+		CompressionEnabled: true,
 	}
 	// Nil pool and nil Redis: app.New leaves every DB- and Redis-backed
 	// singleton nil, which is the same degraded shape the server has always

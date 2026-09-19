@@ -125,6 +125,19 @@ type Config struct {
 	// only for an HTTPS deployment with a trusted certificate. HSTS is otherwise
 	// best emitted at the TLS-terminating reverse proxy.
 	HSTSMaxAge int `envconfig:"HSTS_MAX_AGE" default:"0"`
+	// CompressionEnabled turns HTTP response compression (brotli / gzip /
+	// deflate, negotiated from Accept-Encoding) on or off. On by default: the
+	// API's largest payload, GET /api/v1/api-docs, is ~710 KB of JSON that
+	// ships at ~81 KB gzipped and ~70 KB under brotli, and every client already
+	// opts in or out through Accept-Encoding, so no client can be broken by it.
+	//
+	// The off switch exists for one real deployment, not as a general dial:
+	// Nexara is commonly fronted by nginx/Traefik/Caddy (see TrustedProxies),
+	// and a proxy already configured to compress makes Nexara's pass pure
+	// wasted CPU — the proxy would just forward the bytes Nexara spent CPU
+	// shrinking. There is deliberately no compression-LEVEL knob; Fiber's
+	// default level is the balanced one and nothing here would tune it.
+	CompressionEnabled bool `envconfig:"COMPRESSION_ENABLED" default:"true"`
 }
 
 // NewMetricsTicker creates a time.Ticker using the configured metrics collection interval.
