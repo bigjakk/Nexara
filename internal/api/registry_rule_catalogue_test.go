@@ -396,20 +396,24 @@ func narrowedByPublishedFacet(prop apischema.Property, v string) bool {
 //
 // # What this cannot see
 //
-// THE BIG ONE: a site that stops carrying the rule at all. declaredRuleSites
-// finds a pattern site by matching the declared regex against the
-// catalogue's, so REPLACING apischema.Rule("x") with a tighter literal does
-// not register as a narrowing — it removes the parameter from the walk, and
-// every guard in this file then has nothing to say about it. Swapping
-// pveObjectNameParam's Rule("pve-object-id") for `^[a-z][a-z0-9]*$` with a
-// MaxLength of 8 narrows 20 routes across ACME, firewall and SDN, and all
-// six rule guards stay green; only unrelated domain tests notice, and only
-// by accident. TestNoInlinePatternRestatesACataloguedRule catches the
-// VERBATIM re-inline of a catalogued regex, which is the copy-paste case,
-// and is blind to a tightened one for the same reason: it compares for
-// equality. Closing this needs a source-level check that a parameter which
-// USED to spell apischema.Rule still does — a ratchet over declaration
-// sites, not over rules.
+// THE BIG ONE, and it is no longer this file's to carry: a site that stops
+// carrying the rule at all. declaredRuleSites finds a pattern site by
+// matching the declared regex against the catalogue's, so REPLACING
+// apischema.Rule("x") with a tighter literal does not register as a
+// narrowing — it removes the parameter from the walk, and every guard in
+// this file then has nothing to say about it. Swapping pveObjectNameParam's
+// Rule("pve-object-id") for `^[a-z][a-z0-9]*$` with a MaxLength of 8 narrows
+// 20 routes across ACME, firewall and SDN, and all six rule guards here stay
+// green; only unrelated domain tests notice, and only by accident.
+// TestNoInlinePatternRestatesACataloguedRule catches the VERBATIM re-inline
+// of a catalogued regex, which is the copy-paste case, and is blind to a
+// tightened one for the same reason: it compares for equality.
+//
+// registry_rule_reference_ratchet_test.go closes it, with the shape this
+// note asked for — a ratchet over declaration SITES that still spell
+// apischema.Rule, read from the source, rather than over rules read from the
+// build. Nothing here changed: these guards still cannot see it, and are not
+// meant to.
 //
 // The lesser one: a narrowing that lives only in the handler leaves no
 // trace a declaration walk can read. Before the MaxLength was declared,
@@ -488,7 +492,13 @@ func (s ruleSite) String() string {
 // matches no catalogue entry, so the site silently leaves this walk — and
 // TestNoInlinePatternRestatesACataloguedRule compares for equality, so it
 // does not see a tightened copy either. Neither guard reports a rule that
-// was replaced instead of re-inlined. See the note on ruleNarrowingSites.
+// was replaced instead of re-inlined.
+//
+// That is covered from the other side, and has to be: no reading of the
+// BUILT registry can distinguish apischema.Rule("x") from a pasted copy,
+// because they compile to the same string. See ruleReferenceSites in
+// registry_rule_reference_ratchet_test.go, which reads the declarations as
+// source and ratchets the ones that name their rule.
 func declaredRuleSites(t *testing.T) []ruleSite {
 	t.Helper()
 
