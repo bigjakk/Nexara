@@ -67,36 +67,56 @@ func fetchDocs[T any](t *testing.T, app *fiber.App) ListResponse[T] {
 	return out
 }
 
-// attachPath is a route that BOTH the registry declares (in
-// internal/api/registry_vms.go) and endpointMeta still carries an entry
-// for. It is the route the whole phase is about, so the precedence test
-// uses the real one rather than a synthetic path: if the duplication is
-// ever removed and this key leaves endpointMeta, the "declaration wins"
-// case here still holds, and the sub-test that reads the overlay value
-// will say so out loud.
-const attachPath = "/api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach"
+// overlaidPath is a SYNTHETIC path, not a real route. It used to be a real
+// one — first the disk-attach route, then, after that entry was removed,
+// one of the 6 API Keys routes endpointMeta still carried an entry for —
+// but as of the endpointMeta cleanup (internal/api/handlers/api_docs.go),
+// NO real route is declared by the registry AND ALSO carries an
+// endpointMeta entry any more: every entry left in endpointMeta is for one
+// of the 17 legacy routes, which by definition have no declaration to
+// prove precedence against. So this sub-test seeds a temporary entry onto
+// this made-up key itself (see below) rather than depending on a
+// production route that cleanup keeps making disappear out from under it.
+const overlaidPath = "/api/v1/made-up/overlaid-thing"
+
+// stillLegacyPath is a route neither this phase nor any registry migration
+// has reached: POST/PUT .../alert-rules carry a JSON array of OBJECTS
+// (`rules`), which apischema's Property.Items cannot describe (see
+// TestAlertRuleWritesAreStillLegacy in internal/api). It stands in for
+// "a route only endpointMeta documents" more durably than a route that
+// merely hasn't been migrated YET.
+const stillLegacyPath = "/api/v1/alert-rules"
 
 func TestGetDocs_DeclarationBeatsEndpointMeta(t *testing.T) {
-	if _, ok := endpointMeta["POST "+attachPath]; !ok {
-		t.Fatalf("endpointMeta no longer carries %q; pick another duplicated route, "+
-			"or drop this test if the overlay copy is gone for good", attachPath)
+	overlaidKey := "DELETE " + overlaidPath
+	if _, exists := endpointMeta[overlaidKey]; exists {
+		t.Fatalf("endpointMeta already has a real entry for the synthetic key %q; "+
+			"pick a different made-up path", overlaidKey)
 	}
+	// Seed the overlay this sub-test needs to prove "declared wins" against,
+	// and remove it again once the test ends — endpointMeta is a package
+	// var, so leaving this in would leak into every other test in the
+	// package.
+	endpointMeta[overlaidKey] = APIEndpoint{
+		Description: "OVERLAY description", Permission: "overlay:perm", Group: "Overlay Group",
+	}
+	t.Cleanup(func() { delete(endpointMeta, overlaidKey) })
 
 	declared := []APIEndpoint{{
-		Method:      fiber.MethodPost,
-		Path:        attachPath,
+		Method:      fiber.MethodDelete,
+		Path:        overlaidPath,
 		Description: "DECLARED description",
 		Permission:  "declared:perm",
 		Group:       "Declared Group",
 		Parameters: []APIParameter{
-			{Name: "cluster_id", Type: "string", Source: "path"},
+			{Name: "id", Type: "string", Source: "path"},
 		},
 	}}
 
 	app := docsFixture(t, declared,
-		[2]string{fiber.MethodPost, attachPath},
+		[2]string{fiber.MethodDelete, overlaidPath},
 		// A legacy route: endpointMeta has it, the registry does not.
-		[2]string{fiber.MethodGet, "/api/v1/clusters"},
+		[2]string{fiber.MethodPost, stillLegacyPath},
 		// A route neither source knows about.
 		[2]string{fiber.MethodGet, "/api/v1/made-up/thing"},
 	)
@@ -116,10 +136,9 @@ func TestGetDocs_DeclarationBeatsEndpointMeta(t *testing.T) {
 	}{
 		{
 			name: "declared route renders its declaration, not the overlay",
-			key:  "POST " + attachPath,
-			// endpointMeta's entry for this key says "Allocate a new disk
-			// and attach it. …" with permission manage:vm and group
-			// "Virtual Machines"; none of it may appear.
+			key:  overlaidKey,
+			// The overlay seeded above says "OVERLAY description" /
+			// overlay:perm / "Overlay Group"; none of it may appear.
 			wantDesc:   "DECLARED description",
 			wantPerm:   "declared:perm",
 			wantGroup:  "Declared Group",
@@ -127,14 +146,14 @@ func TestGetDocs_DeclarationBeatsEndpointMeta(t *testing.T) {
 		},
 		{
 			name: "legacy route still renders from endpointMeta",
-			key:  "GET /api/v1/clusters",
+			key:  "POST " + stillLegacyPath,
 			// Spelled out rather than read back out of endpointMeta: a
 			// lookup that returned the zero value would compare "" to ""
 			// and assert nothing at all, which is how this sub-test would
 			// quietly stop covering the legacy path.
-			wantDesc:   "List all clusters",
-			wantPerm:   "view:cluster",
-			wantGroup:  "Clusters",
+			wantDesc:   "Create an alert rule",
+			wantPerm:   "manage:alert",
+			wantGroup:  "Alerts",
 			wantParams: 0,
 		},
 		{

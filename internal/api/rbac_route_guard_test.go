@@ -484,13 +484,16 @@ func routeHandlerKey(h any) string {
 	return name
 }
 
-// normalizeRoutePath mirrors GetDocs' trailing-slash handling so route keys
-// match the curated endpointMeta keys.
+// normalizeRoutePath is the package-local name this test package's many
+// files (registry_*_test.go and friends) call to match route keys against
+// the curated endpointMeta keys — it is not a second implementation of the
+// rule, only a local alias for it: handlers.NormalizeDocPath is GetDocs'
+// own trailing-slash normalisation (the single spelling documented on that
+// function), and delegating here rather than re-deriving it is what keeps
+// this package's many callers from silently drifting from what GetDocs
+// actually does.
 func normalizeRoutePath(path string) string {
-	if len(path) > len("/api/v1/") && strings.HasSuffix(path, "/") {
-		return strings.TrimSuffix(path, "/")
-	}
-	return path
+	return handlers.NormalizeDocPath(path)
 }
 
 // TestGuard_EveryRouteEnforcesPermission is the invariant: every registered
@@ -652,13 +655,45 @@ func TestGuard_ExemptionKeysMatchRegisteredRoutes(t *testing.T) {
 // Only the action is compared. Resources are frequently computed (the console
 // endpoint picks node/vm/container from the request), whereas the action is
 // almost always a literal.
+//
+// This USED to also branch on whether key was a registry-declared route
+// (registryDocumentedPermissionViolation / registryEnforcedActions,
+// registry_rbac_guard_test.go), comparing endpointMeta's entry against the
+// DECLARATION for the routes migrated with a "shadow copy" overlay entry
+// kept in step deliberately. The endpointMeta cleanup that removed every
+// such overlapping entry (see the endpointMeta doc comment,
+// internal/api/handlers/api_docs.go) also removed that branch's only
+// production inputs: endpointMeta ∩ {registry-declared routes} is now
+// provably empty (TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet
+// above pins endpointMeta to exactly the 9 legacy keys, none of which the
+// registry declares), so `declared, ok := meta[key]` below already
+// `continue`s past every registry route before any registry-specific
+// branch could run — the branch was dead code, not merely rarely
+// exercised, and excising it changes nothing for any key reachable today.
+//
+// This does leave one theoretical gap: if a currently-legacy route in
+// endpointMetaSurvivingKeys is migrated to the registry in the future
+// AND its stale overlay entry is not deleted in the same change (against
+// the convention the endpointMeta doc comment states), nothing here would
+// flag the leftover entry. That was true of the excised branch too in
+// spirit — GetDocs never renders such an entry either way, so a stale
+// leftover is inert production clutter, not a docs lie an operator could
+// act on; catching the clutter itself is TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet's
+// job (delete the migrated route's key from endpointMetaSurvivingKeys in
+// that same future change), not this guard's.
+//
+// registryDocumentedPermissionViolation and registryEnforcedActions are
+// unchanged and still exercised directly by their own unit tests
+// (TestRegistryDocumentedPermissionViolation, TestRegistryEnforcedActions,
+// registry_rbac_guard_test.go) against synthetic data — only their one
+// production call site, here, was removed.
 func TestGuard_DocumentedPermissionMatchesEnforcement(t *testing.T) {
 	s := newRouteStubServer(t)
 
 	graph := buildCallGraph(t)
 	meta := handlers.EndpointMetaPermissions()
-	registryByKey := registryEndpointsByKey(s.registry.Endpoints())
 
+	compared := 0
 	for _, r := range s.app.GetRoutes(true) {
 		if r.Method == "USE" || len(r.Handlers) == 0 {
 			continue
@@ -666,7 +701,7 @@ func TestGuard_DocumentedPermissionMatchesEnforcement(t *testing.T) {
 		key := r.Method + " " + normalizeRoutePath(r.Path)
 		declared, ok := meta[key]
 		if !ok || declared == "" {
-			continue // auto-derived metadata; nothing curated to contradict
+			continue // auto-derived metadata, or a registry route: nothing curated to contradict
 		}
 		if _, exempt := publicRoutes[key]; exempt {
 			continue
@@ -675,46 +710,25 @@ func TestGuard_DocumentedPermissionMatchesEnforcement(t *testing.T) {
 			continue
 		}
 
-		// GetDocs (internal/api/handlers/api_docs.go) now renders a registry
-		// route from its DECLARATION and falls back to endpointMeta only for
-		// the legacy ones, so a curated entry for a migrated route is no
-		// longer what an operator reads. It is still checked here, and must
-		// be: the entry is the second copy this migration has not finished
-		// deleting, and a second copy that nothing compares is a second copy
-		// that silently rots — which is how the console-token endpoint came
-		// to document view:vm long after it moved to console:vm. The two
-		// paths differ only in how "what it enforces" is discovered:
-		// exactly, from the declaration itself, rather than approximated
-		// from a call graph.
-		var enforced map[string]bool
-		var handlerDescription string
-		if e, isRegistry := registryByKey[key]; isRegistry {
-			// A registry route's RESOURCE is a literal in the declaration,
-			// so unlike a legacy one it can be compared exactly rather than
-			// approximated. The action-only comparison below still runs —
-			// it is what the two paths share — but this is the one that
-			// catches a route documented manage:vm while declaring
-			// Resource: "cluster".
-			if msg := registryDocumentedPermissionViolation(key, declared, e.Permissions); msg != "" {
-				t.Error(msg)
-			}
-			enforced = registryEnforcedActions(e.Permissions)
-			handlerDescription = "registry endpoint (" + e.Permissions.Describe() + ")"
-		} else {
-			handlerKey := routeHandlerKey(r.Handlers[len(r.Handlers)-1])
-			if handlerKey == "" {
-				continue
-			}
-			enforced = graph.literalActionsFor(handlerKey)
-			handlerDescription = "handlers." + handlerKey
+		handlerKey := routeHandlerKey(r.Handlers[len(r.Handlers)-1])
+		if handlerKey == "" {
+			continue
 		}
+		enforced := graph.literalActionsFor(handlerKey)
 		if len(enforced) == 0 {
-			continue // fully dynamic action, or a shape with no static action (Deferred/Advisory/Public/SelfService); cannot verify statically
+			continue // fully dynamic action; cannot verify statically
 		}
 
-		if msg := documentedPermissionViolation(key, declared, handlerDescription, enforced); msg != "" {
+		compared++
+		if msg := documentedPermissionViolation(key, declared, "handlers."+handlerKey, enforced); msg != "" {
 			t.Error(msg)
 		}
+	}
+	if compared == 0 {
+		t.Fatal("compared 0 routes against endpointMeta — this guard would pass vacuously. " +
+			"Either endpointMeta has drifted to empty or all-auto-derived, or every curated " +
+			"legacy route became exempt or its action unresolvable at once; either way, " +
+			"nothing is being verified here right now")
 	}
 }
 

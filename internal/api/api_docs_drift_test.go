@@ -121,19 +121,85 @@ func TestEndpointMetaMatchesRegisteredRoutes(t *testing.T) {
 
 	registered := make(map[string]bool)
 	for _, r := range s.app.GetRoutes(true) {
-		// Mirror GetDocs' trailing-slash normalisation: Group(...) +
-		// .Post("/") registers "/api/v1/api-keys/"; curated keys use
-		// the trimmed form.
-		path := r.Path
-		if len(path) > len("/api/v1/") && strings.HasSuffix(path, "/") {
-			path = strings.TrimSuffix(path, "/")
-		}
+		// handlers.NormalizeDocPath is GetDocs' own trailing-slash
+		// normalisation: Group(...) + .Post("/") registers
+		// "/api/v1/api-keys/"; curated keys use the trimmed form. Calling
+		// the real function rather than re-deriving the rule here is what
+		// keeps this guard unable to drift from what GetDocs actually does.
+		path := handlers.NormalizeDocPath(r.Path)
 		registered[r.Method+" "+path] = true
 	}
 
 	for _, key := range handlers.EndpointMetaKeys() {
 		if !registered[key] {
 			t.Errorf("endpointMeta key %q matches no registered route — update the key in internal/api/handlers/api_docs.go to the exact method+path registered in router.go (param names included)", key)
+		}
+	}
+}
+
+// endpointMetaSurvivingKeys is the exact, closed set of keys endpointMeta
+// is supposed to carry: the 9 legacy routes (of the 17 in router.go) that
+// have a curated entry — see the doc comment on endpointMeta itself
+// (internal/api/handlers/api_docs.go) for which 9 and why.
+//
+// This exists because TestEndpointMetaMatchesRegisteredRoutes only checks
+// the direction "every key that exists points at a real route" — it has
+// no floor on HOW MANY keys should exist, so it passes just as cleanly
+// over 9 keys, 3 keys, or zero. That gap is not hypothetical: it is what
+// let a real regression through in an earlier draft of the cleanup that
+// produced this list — deleting any of these 9 (which GetDocs DOES render
+// for these legacy routes, unlike the ~223 removed entries for
+// registry-declared ones) silently blanks that route's description and
+// permission in the live /api/v1/api-docs payload, and nothing in this
+// package's test suite noticed. TestGuard_DocumentedPermissionMatchesEnforcement's
+// own anti-vacuity floor (rbac_route_guard_test.go) checks that SOMETHING
+// was compared, not that these specific 9 keys survived, so it does not
+// substitute for this.
+var endpointMetaSurvivingKeys = []string{
+	"GET /api/v1/api-docs",
+	"GET /api/v1/auth/oidc/callback",
+	"GET /api/v1/settings",
+	"GET /api/v1/settings/:key",
+	"POST /api/v1/alert-rules",
+	"POST /api/v1/auth/logout",
+	"POST /api/v1/auth/register",
+	"PUT /api/v1/alert-rules/:id",
+	"PUT /api/v1/settings/:key",
+}
+
+// TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet is the floor
+// TestEndpointMetaMatchesRegisteredRoutes does not provide: it fails,
+// naming the key, if endpointMeta ever loses one of the 9 surviving
+// entries OR gains a new one that was not deliberately added to
+// endpointMetaSurvivingKeys above. A genuinely new legacy route earning a
+// curated entry is expected to update this list in the same change; an
+// entry disappearing without this list changing is the regression this
+// guard exists to catch.
+func TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet(t *testing.T) {
+	got := handlers.EndpointMetaKeys()
+
+	want := make(map[string]bool, len(endpointMetaSurvivingKeys))
+	for _, k := range endpointMetaSurvivingKeys {
+		want[k] = true
+	}
+	gotSet := make(map[string]bool, len(got))
+	for _, k := range got {
+		gotSet[k] = true
+	}
+
+	for _, k := range got {
+		if !want[k] {
+			t.Errorf("endpointMeta carries %q, which is not in endpointMetaSurvivingKeys — "+
+				"if this is a deliberate new legacy-route entry, add it to that list; "+
+				"if not, it is an unreviewed addition to what GetDocs renders for a legacy route", k)
+		}
+	}
+	for _, k := range endpointMetaSurvivingKeys {
+		if !gotSet[k] {
+			t.Errorf("endpointMetaSurvivingKeys expects %q but endpointMeta no longer carries it — "+
+				"this route's description and permission just went blank in the live "+
+				"/api/v1/api-docs payload; restore the entry or, if the route stopped being "+
+				"legacy (it now has a registry declaration), remove it from this list too", k)
 		}
 	}
 }

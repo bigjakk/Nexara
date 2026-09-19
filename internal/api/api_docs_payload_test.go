@@ -695,61 +695,49 @@ func TestGuard_AttachDiskIndexStaysDefaultless(t *testing.T) {
 	}
 }
 
-// TestGuard_DeclarationDropsNoDocumentedPermission is the guard for the
-// regression this phase very nearly shipped.
+// TestGuard_DeclarationDropsNoDocumentedPermission (RETIRED) was the guard
+// for the regression this phase very nearly shipped: GetDocs renders a
+// declared route from its declaration and stops reading endpointMeta for
+// it, so anything the overlay said and the declaration did not say would
+// go silently missing from the PAYLOAD's permission field.
 //
-// GetDocs now renders a declared route from its declaration and stops
-// reading endpointMeta for it, so anything the overlay said and the
-// declaration does not say is silently gone from the payload. That bit
-// convert-to-template and clone-to-template: the overlay documented
-// "manage:vm" plus a sentence about manage:container, while the
-// declaration is Deferred — which Describe() renders as the bare word
-// "deferred", telling an operator building a role nothing at all.
+// Be precise about what it actually checked, because the obvious reading
+// overstates it: `overlay := handlers.EndpointMetaPermissions()` returns
+// only the `Permission` FIELD of each endpointMeta entry, never the
+// Description. For convert-to-template that field was "manage:vm" —
+// "manage:container" lived only in endpointMeta's Description sentence,
+// which this guard never read and therefore never compared against
+// anything. It could only ever prove "manage:vm still appears somewhere
+// in what the declaration renders" for that route, never "manage:container
+// still appears somewhere". Confirmed by re-running this exact body against
+// registry_vms.go with "and manage:container as well when the guest is a
+// container." deleted from both convert-to-template's and
+// clone-to-template's Description: it still passes, 210 comparisons, zero
+// findings. So while this comment block's earlier revision claimed the
+// guard covered the manage:container half, it did not — nothing in this
+// test suite did, and per the assessment on the endpointMeta cleanup this
+// file's other guards inherited, nothing does today either.
 //
-// The invariant is therefore not "the two copies agree" (they cannot,
-// for a Deferred route) but "the migration lost nothing": every
-// permission the overlay documented still appears SOMEWHERE in what the
-// route now renders — in the permission field, or spelled out in the
-// description.
+// What it DID do was catch a route whose overlay Permission field (the one
+// thing it could see) stopped appearing anywhere in the declaration — a
+// one-time migration-safety check ("did we lose the ONE fact this narrow
+// view had") against the OLD, frozen endpointMeta text, which is a
+// comparison that needs an old copy to diff against. Its own anti-vacuity
+// check — "no declared route has a curated permission to compare... remove
+// it once endpointMeta no longer overlaps the registry" — said explicitly
+// what should happen once that old copy was gone: this test's `checked`
+// count is a self-fulfilling zero once every registry-overlapping
+// endpointMeta entry is removed (see internal/api/handlers/api_docs.go's
+// endpointMeta doc comment for the full removal), which is the state this
+// repo is now in.
 //
-// registryDocumentedPermissionViolation in registry_rbac_guard_test.go
-// deliberately returns early for the shapes with no static permission,
-// so this is the only check that covers them.
-func TestGuard_DeclarationDropsNoDocumentedPermission(t *testing.T) {
-	s := newRouteStubServer(t)
-
-	overlay := handlers.EndpointMetaPermissions()
-	rendered := docEndpoints(s.registry)
-	if len(rendered) == 0 {
-		t.Fatal("no declarations at all; this guard would pass vacuously")
-	}
-
-	checked := 0
-	for _, ep := range rendered {
-		documented := overlay[ep.Method+" "+ep.Path]
-		if documented == "" {
-			continue // nothing curated to lose
-		}
-		for _, want := range strings.Split(documented, "|") {
-			want = strings.TrimSpace(want)
-			if want == "" {
-				continue
-			}
-			checked++
-			if strings.Contains(ep.Permission, want) || strings.Contains(ep.Description, want) {
-				continue
-			}
-			t.Errorf("%s %s: endpointMeta documents %q but the declaration renders permission %q "+
-				"and never mentions it in the description — migrating the docs to the declaration "+
-				"dropped it. Say it in the Description when the Permissions field cannot express it.",
-				ep.Method, ep.Path, want, ep.Permission)
-		}
-	}
-	if checked == 0 {
-		t.Fatal("no declared route has a curated permission to compare; this guard would pass vacuously " +
-			"(remove it once endpointMeta no longer overlaps the registry)")
-	}
-}
+// Unlike TestAPIKeyDocsPromiseWhatTheRoutesEnforce (registry_api_keys_test.go,
+// also retired the same way), there is no replacement test for the narrow
+// thing this one verified, because there is nothing left to verify it
+// against: a migration-time "did the Permission field survive" diff has no
+// object once the field it diffed no longer exists anywhere. It is NOT a
+// replacement for prose-level review of a Deferred or Advisory route's
+// Description — it never did that job even before retirement.
 
 // TestDeclaredParameterNames_CoversEveryPathParam re-states, over the
 // real registry and through the docs accessor, what checkPathParams

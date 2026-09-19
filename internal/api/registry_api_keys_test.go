@@ -9,7 +9,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
-	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
 // apiKeyRouteCount is how many endpoints registerAPIKeyEndpoints declares. It
@@ -63,6 +62,11 @@ func declaredAPIKeyEndpoints(t *testing.T) map[string]Endpoint {
 
 // TestAPIKeyRoutesDeclareTheSamePermissionTheyEnforced is the tally: 6
 // hand-placed calls in, 6 declared global Checks out, none kept.
+//
+// This is also, since the endpointMeta cleanup below, the ONLY place that
+// checks a declared route's permission against apiKeyLegacyPermissions —
+// see the retirement note where TestAPIKeyDocsPromiseWhatTheRoutesEnforce
+// used to be for why, and why nothing was lost when that test went.
 func TestAPIKeyRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	declared := declaredAPIKeyEndpoints(t)
 	if len(declared) != apiKeyRouteCount {
@@ -202,31 +206,32 @@ func TestAPIKeyRoutesLeftTheSelfServiceExemption(t *testing.T) {
 	}
 }
 
-// TestAPIKeyDocsPromiseWhatTheRoutesEnforce is what the stale exemption was
-// suppressing: endpointMeta's curated permission is what an operator reads when
-// building a role, and while these four routes were exempt nothing compared it
-// to anything.
-func TestAPIKeyDocsPromiseWhatTheRoutesEnforce(t *testing.T) {
-	meta := handlers.EndpointMetaPermissions()
-	compared := 0
-	for key, want := range apiKeyLegacyPermissions {
-		declared, documented := meta[key]
-		if !documented || declared == "" {
-			continue // auto-derived; nothing curated to contradict
-		}
-		compared++
-		if declared != want {
-			t.Errorf("%s: the API docs promise %q but the route enforces %q", key, declared, want)
-		}
-	}
-	// Every one of the six HAS a curated entry today (api_docs.go:257-260 and
-	// 566-567). Without this the guard would pass silently if they were
-	// deleted — the vacuous shape, where the input cannot express failure.
-	if compared != apiKeyRouteCount {
-		t.Errorf("compared %d of %d routes against endpointMeta; the rest have no curated entry, so this "+
-			"guard is checking less than it claims", compared, apiKeyRouteCount)
-	}
-}
+// TestAPIKeyDocsPromiseWhatTheRoutesEnforce (RETIRED) used to compare
+// endpointMeta's curated permission for each of these 6 routes against
+// apiKeyLegacyPermissions, with an explicit "compared != apiKeyRouteCount"
+// check specifically so it would fail loudly — rather than pass vacuously —
+// the moment those curated entries went away.
+//
+// They did go away, deliberately: internal/api/handlers/api_docs.go's
+// GetDocs renders a registry-declared route from its DECLARATION and never
+// reads endpointMeta for it at all, so this test's own premise ("endpointMeta's
+// curated permission is what an operator reads when building a role") had
+// already stopped being true for these 6 routes specifically — the overlay
+// text for them was dead weight nobody could see, same as the ~217 other
+// migrated-route entries the same cleanup removed. Keeping this test alive
+// by keeping those 6 entries alive would have meant preserving dead
+// production data — confirmed dead by a one-off manual check at the time
+// of that cleanup (not a test in this repo a reader can re-run): the
+// rendered /api/v1/api-docs payload was byte-identical, same SHA-256,
+// with and without all 223 removed entries — purely to keep this guard's
+// input non-empty.
+//
+// The coverage did not evaporate: TestAPIKeyRoutesDeclareTheSamePermissionTheyEnforced
+// above makes the SAME comparison against apiKeyLegacyPermissions, except
+// through e.Permissions.Describe() on the live DECLARATION — the thing GetDocs
+// actually renders — rather than through the dead overlay. Its own
+// `hoisted != apiKeyRouteCount` check at the end is that test's equivalent
+// anti-vacuity guard, over the value that matters now.
 
 // probeAPIKeyEndpoint is a declared API key endpoint with its handler swapped
 // for a capture and its gate removed, so a parameter test needs neither a
