@@ -367,8 +367,41 @@ func (h *StorageHandler) DeleteContent(c fiber.Ctx) error {
 }
 
 // storageConfigResponse wraps the Proxmox storage config for frontend consumption.
+//
+// Build it with newStorageConfigResponse — never with a bare composite literal.
+// The constructor is the one place the write-only credentials are dropped, and
+// proxmox_read_credentials_test.go fails the build if a second construction
+// site appears.
 type storageConfigResponse struct {
 	proxmox.StorageConfig
+}
+
+// newStorageConfigResponse is the body of GET .../storage/:storage_id/config,
+// with every field whose WRITE value is a secret blanked — the same rule
+// metric_servers.go applies to the InfluxDB token, and the same reason: the
+// route is gated on view:storage, which every built-in Viewer holds.
+//
+// password (cifs/pbs), keyring (rbd/cephfs) and encryption-key (pbs) are
+// write-only: Proxmox accepts them on create/update and the operator has no
+// reason to read them back. Blanking is safe to do on a GET the editor
+// round-trips because both halves already treat an absent value as "leave the
+// stored one alone" — storagePluginForm drops an empty value rather than
+// sending it, and EditStorageDialog only submits a field whose value differs
+// from the one it loaded. A blanked field therefore loads empty, is not
+// resubmitted, and the stored credential survives an unrelated edit. They are
+// `omitempty`, so blanking drops the key from the JSON entirely rather than
+// publishing an empty string that reads as "there is no password set".
+//
+// Deliberately NOT blanked: fingerprint is the PBS server's TLS certificate
+// fingerprint, which the edit dialog reads and shows, and master-pubkey is a
+// PUBLIC key — PBS encrypts a copy of the backup key to it so the private half
+// can recover it. Neither is a secret in either direction, so dropping them
+// would be noise.
+func newStorageConfigResponse(cfg proxmox.StorageConfig) storageConfigResponse {
+	cfg.Password = ""
+	cfg.Keyring = ""
+	cfg.EncryptionKey = ""
+	return storageConfigResponse{cfg}
 }
 
 // StorageTypes are the Proxmox storage plugin types POST
@@ -410,7 +443,7 @@ func (h *StorageHandler) GetConfig(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(storageConfigResponse{*cfg})
+	return c.JSON(newStorageConfigResponse(*cfg))
 }
 
 // iscsiTargetResponse is one discovered target from an iSCSI portal scan.

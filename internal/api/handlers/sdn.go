@@ -568,7 +568,29 @@ func (h *NetworkHandler) ListSDNIPAMs(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return RespondItems(c, ipams)
+	return RespondItems(c, sdnIPAMsForRead(ipams))
+}
+
+// sdnIPAMsForRead blanks the write-only API token on every plugin, the way
+// metric_servers.go blanks the InfluxDB token: /cluster/sdn/ipams.cfg keeps a
+// netbox or phpIPAM token in clear text and Proxmox hands it back on the read,
+// while this route is gated on view:network (registry_sdn.go declares
+// clusterCheck("view", "network") — there is no view:sdn permission), and
+// migration 000016 grants every view permission to the built-in Viewer.
+//
+// Safe for the editor's round trip: CreateSDNIPAMDialog prefills its Token box
+// from this response and only sends a non-empty one, and UpdateSDNIPAM in turn
+// only sets the outbound form field when it is non-empty — so a blanked token
+// is not resubmitted and the stored one is left alone. Token is `omitempty`,
+// so blanking removes the key rather than publishing an empty string.
+//
+// The slice is the caller's own decoded response, so writing through it is
+// safe — nothing else holds a reference.
+func sdnIPAMsForRead(ipams []proxmox.SDNIPAM) []proxmox.SDNIPAM {
+	for i := range ipams {
+		ipams[i].Token = ""
+	}
+	return ipams
 }
 
 // CreateSDNIPAM handles POST /api/v1/clusters/:cluster_id/sdn/ipams.
@@ -664,7 +686,23 @@ func (h *NetworkHandler) ListSDNDNS(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return RespondItems(c, plugins)
+	return RespondItems(c, sdnDNSForRead(plugins))
+}
+
+// sdnDNSForRead blanks the write-only API key on every plugin, for the reason
+// sdnIPAMsForRead gives about the IPAM token — here it is the PowerDNS API key,
+// stored in clear text in dns.cfg and returned by the same kind of read, and
+// this route is gated on the same view:network.
+//
+// The round trip is safe for the same two reasons, verified on this half too:
+// CreateSDNDNSDialog only puts `key` in the body when it is non-empty, and
+// UpdateSDNDNS only sets the outbound form field when it is non-empty. Key is
+// `omitempty`, so blanking removes it from the JSON rather than sending "".
+func sdnDNSForRead(plugins []proxmox.SDNDNS) []proxmox.SDNDNS {
+	for i := range plugins {
+		plugins[i].Key = ""
+	}
+	return plugins
 }
 
 // CreateSDNDNS handles POST /api/v1/clusters/:cluster_id/sdn/dns.
