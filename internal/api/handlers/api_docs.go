@@ -321,12 +321,38 @@ type APIRule struct {
 }
 
 // endpointMeta is the curated overlay for routes the endpoint registry does
-// NOT own: the 17 routes still registered imperatively in router.go (9 of
-// which carry an entry here; the other 8 — the storage content wildcard,
-// the three branding reads, /healthz, the vm-folders reparent, and both
-// firewall-templates routes — never had one and get auto-derived metadata
-// instead). See legacy_route_ratchet_test.go for the full, closed list and
-// why each one resists the registry.
+// NOT own: the 17 routes still registered imperatively in router.go (13 of
+// which carry an entry here). Of the other 4, the three branding reads get
+// auto-derived metadata — their derived section happens to be the right one
+// — and /healthz gets none at all: GetDocs filters on the /api/v1/ prefix,
+// so it never sees that route. See legacy_route_ratchet_test.go for the
+// full, closed list and why each one resists the registry.
+//
+// FOUR of the 13 were added because their GROUP was wrong, and are worth
+// naming because they are the shape this overlay is easiest to forget about.
+// groupFromPath derives a section from the second path segment, which is
+// right often enough to hide how often it is not: it filed the
+// storage-content delete and the vm-folders reparent under "Clusters", while
+// their 12 and 4 declared siblings sit in "Storage" and "Virtual Machines",
+// and it invented a two-route "Firewall Templates" section beside the
+// "Firewall" section that already held their four declared siblings. An
+// operator hunting for an endpoint opens the wrong card and concludes it does
+// not exist; nothing 500s and nothing logs. Declaring them instead — which
+// would be the better fix, since it also shrinks the legacy set — is not
+// available: each is held by the same limitation that makes it legacy at all
+// (a greedy wildcard segment, a three-state parent_id, a JSON array of
+// objects), and legacy_route_ratchet_test.go records which per route. So the
+// overlay states the section the declaration would have.
+// TestGuard_NoRouteFallsThroughToADerivedGroup (api_docs_drift_test.go) is
+// what keeps the next one from going unnoticed for as long as these did.
+//
+// They carry a Description and a Permission as well, and the Permission is
+// not decoration: an entry whose Permission is non-empty is compared against
+// what the handler's call graph actually gates on, by
+// TestGuard_DocumentedPermissionMatchesEnforcement (rbac_route_guard_test.go),
+// which skips a blank one. Adding these four therefore put four routes under
+// that check for the first time — so the strings have to be kept in step with
+// the require*Perm calls in the handler bodies, not just with each other.
 //
 // GetDocs renders a registry-declared route from its declaration and never
 // consults this map for it (see GetDocs' doc comment), so an entry here
@@ -371,6 +397,36 @@ var endpointMeta = map[string]APIEndpoint{
 	"PUT /api/v1/settings/:key":      {Description: "Create or update a setting; global-scope writes require manage:settings, user-scope writes affect only the caller, global keys owned by a dedicated endpoint are rejected", Permission: "manage:settings", Group: "Settings"},
 	"POST /api/v1/alert-rules":       {Description: "Create an alert rule", Permission: "manage:alert", Group: "Alerts"},
 	"PUT /api/v1/alert-rules/:id":    {Description: "Update an alert rule", Permission: "manage:alert", Group: "Alerts"},
+
+	// ── Legacy routes whose DERIVED section was the wrong one ──────────
+	//
+	// Each names the Group its 4-to-12 declared siblings carry, so it
+	// renders in the card an operator would look in. See the note above on
+	// why these four cannot simply be declared.
+	"DELETE /api/v1/clusters/:cluster_id/storage/:storage_id/content/*": {
+		Description: "Delete one volume from a storage pool. The volume id is the greedy wildcard tail of the path — " +
+			"percent-encoded, and the reason this route cannot be declared, since a parameter schema cannot describe a wildcard",
+		Permission: "delete:storage",
+		Group:      "Storage",
+	},
+	"PATCH /api/v1/clusters/:cluster_id/vm-folders/:folder_id": {
+		Description: "Rename a folder, re-parent it, or both. parent_id is three-state: omitting it leaves the folder " +
+			"where it is, an explicit null moves it to the top level, and a uuid moves it under that folder",
+		Permission: "manage:vm_folder",
+		Group:      "Virtual Machines",
+	},
+	"POST /api/v1/firewall-templates": {
+		Description: "Create a firewall rule template. rules is a JSON array of rule objects, saved in Nexara's own " +
+			"database rather than on a cluster; applying it to one is a separate, cluster-scoped route",
+		Permission: "manage:network",
+		Group:      "Firewall",
+	},
+	"PUT /api/v1/firewall-templates/:id": {
+		Description: "Replace a firewall rule template's name, description and rules. Rules already applied to a " +
+			"cluster are not touched — applying a template copies its rules rather than linking them",
+		Permission: "manage:network",
+		Group:      "Firewall",
+	},
 }
 
 // EndpointMetaKeys returns the sorted "METHOD path" keys of the curated
@@ -383,6 +439,21 @@ func EndpointMetaKeys() []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// EndpointMetaGroups returns the curated "METHOD path" → Group mapping.
+//
+// It exists for TestGuard_NoRouteFallsThroughToADerivedGroup in
+// internal/api, which has to tell a section the overlay STATED from one
+// groupFromPath derived — and the rendered payload alone cannot, because
+// the two are frequently the same string. "GET /api/v1/settings" renders
+// "Settings" either way; the difference is whether anybody decided it.
+func EndpointMetaGroups() map[string]string {
+	out := make(map[string]string, len(endpointMeta))
+	for k, v := range endpointMeta {
+		out[k] = v.Group
+	}
+	return out
 }
 
 // EndpointMetaPermissions returns the curated "METHOD path" → permission
@@ -420,6 +491,16 @@ func NormalizeDocPath(path string) string {
 // `endpointMeta` map has no entry for it. The second segment after
 // `/api/v1/` is the natural carve-up (e.g. `/api/v1/ldap/...` →
 // "Ldap"). Falls through to "Other" for paths that don't fit.
+//
+// It is a LAST RESORT, not a default. The second segment is the resource a
+// route hangs off, which is only sometimes the section it belongs in:
+// everything under `/api/v1/clusters/…` derives "Clusters" however deeply
+// nested, and a collection of its own derives a section of its own even when
+// its siblings already have one. Four routes rendered in the wrong card that
+// way before anything looked. So a route reaching here is a finding rather
+// than a state — TestGuard_NoRouteFallsThroughToADerivedGroup in
+// internal/api/api_docs_drift_test.go reports every one that is not on a
+// short reviewed list, and pins the derived value for the ones that are.
 func groupFromPath(path string) string {
 	const prefix = "/api/v1/"
 	if !strings.HasPrefix(path, prefix) {

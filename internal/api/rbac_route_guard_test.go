@@ -665,8 +665,10 @@ func TestGuard_ExemptionKeysMatchRegisteredRoutes(t *testing.T) {
 // internal/api/handlers/api_docs.go) also removed that branch's only
 // production inputs: endpointMeta ∩ {registry-declared routes} is now
 // provably empty (TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet
-// above pins endpointMeta to exactly the 9 legacy keys, none of which the
-// registry declares), so `declared, ok := meta[key]` below already
+// above pins endpointMeta to an exact key set — 9 when that guard was
+// written, 13 since four mis-grouped legacy routes gained entries to put
+// them in the right docs section — none of which the registry declares),
+// so `declared, ok := meta[key]` below already
 // `continue`s past every registry route before any registry-specific
 // branch could run — the branch was dead code, not merely rarely
 // exercised, and excising it changes nothing for any key reachable today.
