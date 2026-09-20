@@ -76,6 +76,9 @@ func (c *Client) CreateHARule(ctx context.Context, ruleType string, params Creat
 	return nil
 }
 func (c *Client) UpdateHARule(ctx context.Context, ruleID string, ruleType string, params UpdateHARuleParams) error {
+	if err := validateHAConfigID("rule", ruleID); err != nil {
+		return err
+	}
 	path := "/cluster/ha/rules/" + url.PathEscape(ruleID)
 	form := url.Values{}
 	form.Set("type", ruleType)
@@ -137,6 +140,9 @@ func (c *Client) SetHARuleDisabled(ctx context.Context, ruleID string, ruleType 
 	return c.UpdateHARule(ctx, ruleID, ruleType, UpdateHARuleParams{Disable: &disable})
 }
 func (c *Client) DeleteHARule(ctx context.Context, ruleID string) error {
+	if err := validateHAConfigID("rule", ruleID); err != nil {
+		return err
+	}
 	path := "/cluster/ha/rules/" + url.PathEscape(ruleID)
 	if err := c.doDelete(ctx, path, nil); err != nil {
 		return fmt.Errorf("delete HA rule %q: %w", ruleID, err)
@@ -188,6 +194,64 @@ func validateHAResourceID(sid string) error {
 	}
 	if !haResourceIDPattern.MatchString(sid) {
 		return fmt.Errorf("%w: HA resource id %q should be a VMID, optionally prefixed (e.g. \"vm:100\")", ErrInvalidInput, sid)
+	}
+	return nil
+}
+
+// haConfigIDPattern matches a Proxmox HA group or rule id: a leading letter,
+// then letters, digits, underscore and dash.
+//
+// It is the catalogue's `pve-configid-existing` rule verbatim
+// (internal/api/apischema/catalogue.go), which is Proxmox's own $CONFIGID_RE
+// from pve-common's JSONSchema.pm loosened by exactly one character — PVE
+// demands two, this accepts one — so that an id created outside Nexara can
+// never become unaddressable through a stricter rule of ours. Both an HA group
+// id (pve-ha-group-id) and an HA rule id are declared `format: pve-configid`
+// upstream, so the two share one pattern.
+var haConfigIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+
+// validateHAConfigID checks an HA group or rule id before it is interpolated
+// into a request path. kind is "group" or "rule", and appears in the message.
+//
+// This lives here, at the client, rather than in the handlers, because the
+// handlers are not the only caller and the next one will not remember. Until
+// this existed the five methods that interpolate one of these ids were safe
+// only because the route declarations happened to carry a pattern that excluded
+// "%", "." and "/" — haConfigIDParam in registry_ha.go, reused by the DRS
+// delete route in registry_drs.go. That is a guard in the caller: it protects
+// the callers that opt in and nothing else. The rolling orchestrator already
+// reaches UpdateHARule through SetHARuleDisabled without passing any
+// declaration at all.
+//
+// url.PathEscape is not a substitute, and the escaping it does is the reason it
+// looks like one. It escapes "/" to %2F and leaves ".." untouched, and Proxmox
+// decodes the escape BEFORE it resolves the path — the capture-server run
+// recorded on forbiddenVolumeIDChars (client_storage.go) is the evidence. So
+// "../../../nodes/pve-01/qemu/100" leaves here as
+// "..%2F..%2F..%2Fnodes%2Fpve-01%2Fqemu%2F100" and arrives as a DELETE three
+// levels up, on a guest, carrying the cluster's API token.
+//
+// The pattern rather than a separator ban, deliberately. validatePathSegment
+// would stop the traversal — PathEscape re-encodes a literal "%" to %25, so
+// unlike a volume id there is nothing here to smuggle an escape through — but
+// it would leave the client LOOSER than the declarations it is replacing,
+// accepting spaces, dots and colons that no PVE config id can contain. The
+// choke point should carry the rule the callers have been relying on, not a
+// weaker one; validateHAResourceID, three functions below, made the same choice
+// for the same file.
+//
+// No length cap, equally deliberately. The route declarations cap at 128, which
+// is the right layer for a documented limit, but PVE imposes no maximum of its
+// own: a cap here would buy nothing — a string of letters, digits, "_" and "-"
+// cannot leave its path segment however long it is — while handing the client a
+// way to refuse a name Proxmox minted, which is how the rolling orchestrator
+// would lose the ability to re-enable a rule it had disabled.
+func validateHAConfigID(kind, id string) error {
+	if id == "" {
+		return fmt.Errorf("%w: HA %s id is required", ErrInvalidInput, kind)
+	}
+	if !haConfigIDPattern.MatchString(id) {
+		return fmt.Errorf("%w: HA %s id %q must start with a letter and contain only letters, digits, underscore and dash", ErrInvalidInput, kind, id)
 	}
 	return nil
 }
@@ -268,6 +332,9 @@ func (c *Client) CreateHAGroup(ctx context.Context, params CreateHAGroupParams) 
 	return nil
 }
 func (c *Client) GetHAGroup(ctx context.Context, group string) (*HAGroup, error) {
+	if err := validateHAConfigID("group", group); err != nil {
+		return nil, err
+	}
 	path := "/cluster/ha/groups/" + url.PathEscape(group)
 	var g HAGroup
 	if err := c.do(ctx, path, &g); err != nil {
@@ -276,6 +343,9 @@ func (c *Client) GetHAGroup(ctx context.Context, group string) (*HAGroup, error)
 	return &g, nil
 }
 func (c *Client) UpdateHAGroup(ctx context.Context, group string, params UpdateHAGroupParams) error {
+	if err := validateHAConfigID("group", group); err != nil {
+		return err
+	}
 	form := url.Values{}
 	if params.Nodes != nil {
 		form.Set("nodes", *params.Nodes)
@@ -299,6 +369,9 @@ func (c *Client) UpdateHAGroup(ctx context.Context, group string, params UpdateH
 	return nil
 }
 func (c *Client) DeleteHAGroup(ctx context.Context, group string) error {
+	if err := validateHAConfigID("group", group); err != nil {
+		return err
+	}
 	path := "/cluster/ha/groups/" + url.PathEscape(group)
 	if err := c.doDelete(ctx, path, nil); err != nil {
 		return fmt.Errorf("delete HA group %s: %w", group, err)
