@@ -1205,8 +1205,9 @@ func TestSnapshotNameDescriptionNamesItsOwnReservedSet(t *testing.T) {
 // The probe swaps the real handler out, so reaching it means the schema
 // let the value through. A name at the cap must reach the handler and one
 // character over must not — which puts the refusal in the declaration,
-// where the docs can show it, rather than only in validateSnapshotName
-// where a caller reading the payload could not predict it.
+// where the docs can show it, rather than only in
+// proxmox.ValidateSnapshotName where a caller reading the payload could
+// not predict it.
 func TestSnapshotNameCapIsEnforcedBySchema(t *testing.T) {
 	for _, rt := range snapshotCreateRoutes {
 		t.Run(rt.kind, func(t *testing.T) {
@@ -1274,13 +1275,13 @@ func newRecoveringRegistryApp(t *testing.T, es ...Endpoint) *fiber.App {
 }
 
 // TestSnapshotCreateHandlerPassesItsOwnGuestKind closes the gap the
-// reserved-name split opens: validateSnapshotName now takes the guest kind
-// from its CALLER, and a caller that passes the wrong one is silent.
+// reserved-name split opens: proxmox.ValidateSnapshotName takes the guest
+// kind from its CALLER, and a caller that passes the wrong one is silent.
 //
-// Swap the two constants and every test in the handlers package still
-// passes — they call validateSnapshotName directly and never see which
-// kind the handler chose. So this drives the REAL handler, with a name
-// that is reserved for exactly one of the two kinds.
+// Swap the two constants and every rule test still passes — those call
+// proxmox.ValidateSnapshotName directly and never see which kind the
+// handler chose. So this drives the REAL handler, with a name that is
+// reserved for exactly one of the two kinds.
 //
 // The schema cannot be what refuses these: "pending" and "vzdump" are both
 // valid pve-configid values, which the first subtest asserts rather than
@@ -1307,7 +1308,7 @@ func TestSnapshotCreateHandlerPassesItsOwnGuestKind(t *testing.T) {
 
 			// The real handler, with only its permission gate relaxed. It
 			// refuses before it reaches its (nil) database, so a 400 here
-			// can only have come from validateSnapshotName — and only if the
+			// can only have come from proxmox.ValidateSnapshotName — and only if the
 			// handler named the guest kind whose reserved set contains this
 			// name. Naming the other kind lets it through to the database
 			// and reports 500.

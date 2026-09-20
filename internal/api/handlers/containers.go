@@ -533,7 +533,9 @@ func (h *ContainerHandler) CreateSnapshot(c fiber.Ctx, p *apischema.Params) erro
 	// point and adds what a declaration cannot express: the names Proxmox
 	// reserves, which for a container are "current" and "vzdump" and are
 	// NOT the VM's set — a container snapshot may be called "pending".
-	// See validateSnapshotName for where each rule comes from upstream.
+	// See the "Snapshot names" block in internal/proxmox/client_guests.go
+	// for where each rule comes from upstream, and for why the rule itself
+	// sits at the client.
 	snapName := p.String("snap_name")
 	if err := snapshotNameError(lxcSnapshot, snapName); err != nil {
 		return err

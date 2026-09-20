@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -158,8 +159,21 @@ func TestGuard_ScheduledTaskLookupsAreClusterScoped(t *testing.T) {
 // that into a ClusterID field on each params struct. A caller that stops filling
 // it in passes uuid.Nil, which matches no row — so the failure is a silent
 // no-op rather than a cross-cluster write, and the rows==0 check turns it into a
-// 404. This asserts the field is set at all, which is what makes that true.
+// 404.
+//
+// It asserts the VALUE and not merely that the field is set, and the difference
+// became load-bearing when taskInCluster started returning the row: with the
+// task in scope, `ClusterID: task.ClusterID` compiles, reads plausibly, and is
+// a no-op today only because taskInCluster has already proved the two equal. It
+// would stop being a no-op the moment that comparison is relaxed, and by then
+// the write would be scoping itself on a value it read out of the row it is
+// about to write — authorization by self-assertion. The path's clusterID is the
+// only value that carries the caller's authority here, so that is the one
+// pinned.
 func TestGuard_ScheduledTaskWritesCarryTheClusterPredicate(t *testing.T) {
+	// The identifier schedules.go binds the path's :cluster_id to.
+	const wantClusterIDIdent = "clusterID"
+
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "schedules.go", nil, 0)
 	if err != nil {
@@ -188,9 +202,21 @@ func TestGuard_ScheduledTaskWritesCarryTheClusterPredicate(t *testing.T) {
 			if !isKV {
 				continue
 			}
-			if key, isIdent := kv.Key.(*ast.Ident); isIdent && key.Name == "ClusterID" {
-				want[sel.Sel.Name] = true
+			key, isIdent := kv.Key.(*ast.Ident)
+			if !isIdent || key.Name != "ClusterID" {
+				continue
 			}
+			// Must be the bare path-derived identifier. A selector such as
+			// task.ClusterID is exactly the regression described above.
+			val, isIdent := kv.Value.(*ast.Ident)
+			if !isIdent || val.Name != wantClusterIDIdent {
+				t.Errorf("schedules.go builds a %s with ClusterID from %s, want the bare %q the "+
+					"path supplied — scoping a write on a value read out of the row being written "+
+					"authorizes it against itself",
+					sel.Sel.Name, types.ExprString(kv.Value), wantClusterIDIdent)
+				continue
+			}
+			want[sel.Sel.Name] = true
 		}
 		return true
 	})

@@ -123,7 +123,7 @@ const constrained: APIEndpoint = {
     {
       // The narrowing case, copied from the real POST …/snapshots route:
       // the RULE permits 2 to 128 characters and the PARAMETER caps at 40,
-      // because the handler's validateSnapshotName does. Both are
+      // because the client's proxmox.ValidateSnapshotName does. Both are
       // published and both apply; the effective contract is 2 to 40.
       name: "configid",
       type: "string",

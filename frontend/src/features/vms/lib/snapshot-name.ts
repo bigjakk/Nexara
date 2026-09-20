@@ -16,8 +16,10 @@ import type { ResourceKind } from "../types/vm";
  *     so there is nothing for a snapshot named "pending" to collide with.
  *   - "vzdump" — containers only, exact. "VZDump" IS accepted.
  *
- * The authority is reservedSnapshotName in internal/api/handlers/vms.go; the
- * two must not drift.
+ * The authority is proxmox.ReservedSnapshotName in
+ * internal/proxmox/client_guests.go; the two must not drift. (It lived in
+ * internal/api/handlers/vms.go until the rule moved to the client choke point,
+ * so that the scheduler and the guest-tools engine share it too.)
  */
 export const SNAPSHOT_NAME_RULES =
   "Must start with a letter and use only letters, numbers, '-' and '_' — no spaces (2–40 characters).";

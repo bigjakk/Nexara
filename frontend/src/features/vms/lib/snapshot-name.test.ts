@@ -58,7 +58,7 @@ describe("snapshotNameError", () => {
     });
   });
 
-  // Mirrors reservedSnapshotName in internal/api/handlers/vms.go: "current"
+  // Mirrors proxmox.ReservedSnapshotName in internal/proxmox/client_guests.go: "current"
   // for both kinds (exact), "pending" for VMs only (case-insensitive),
   // "vzdump" for containers only (exact).
   describe("reserved names", () => {

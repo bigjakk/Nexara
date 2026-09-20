@@ -131,6 +131,80 @@ func scheduleParamsJSON(p *apischema.Params) (json.RawMessage, error) {
 	return raw, nil
 }
 
+// snapshotScheduleParams is the slice of a snapshot task's opaque params this
+// layer has an opinion about.
+//
+// It is deliberately a SUBSET of internal/scheduler's snapshotParams rather
+// than a shared type: the column is carried through undescribed (the
+// declaration's "params" is a bare apischema.Object) and the scheduler is what
+// owns its full shape. The one key checked here is the one that can make the
+// task unrunnable.
+//
+// Two copies of one contract is a drift that fails OPEN, so the two are pinned
+// against each other by TestGuard_SnapshotScheduleParamsMatchesTheScheduler.
+type snapshotScheduleParams struct {
+	SnapName string `json:"snap_name"`
+}
+
+// snapshotScheduleGuestKind maps the stored resource_type onto the guest kind
+// whose reserved names apply, using the SAME two values the scheduler switches
+// on when the task fires (internal/scheduler, executeSnapshot).
+//
+// The second result is false for anything else. That is not a name the check
+// can decide — and it does not need to: a snapshot task whose resource_type is
+// neither "vm" nor "ct" is refused wholesale by the scheduler on its first
+// fire, so no snap_name of any shape would have made it run. Refusing here on
+// the NAME would report the wrong problem, and refusing on the TYPE is a
+// separate change from this one.
+func snapshotScheduleGuestKind(resourceType string) (snapshotGuestKind, bool) {
+	switch resourceType {
+	case "vm":
+		return qemuSnapshot, true
+	case "ct":
+		return lxcSnapshot, true
+	}
+	return "", false
+}
+
+// validateSnapshotScheduleParams refuses AT CREATION a snap_name Proxmox would
+// refuse at every fire.
+//
+// The client is what actually stops a bad name reaching Proxmox — see the
+// "Snapshot names" block in internal/proxmox/client_guests.go, which is the
+// choke point every caller goes through. This is not a second gate on the same
+// hazard; it is about WHEN the operator finds out. Without it the row is
+// accepted, the schedule looks armed in the UI, and the failure lands on every
+// fire as a raw PVE sentence in last_error — a recurring snapshot that silently
+// never runs. With it the caller gets a 400 naming the problem while they are
+// still looking at the form.
+//
+// It reads the same json.RawMessage that is about to be STORED rather than the
+// parsed body, so what is validated and what is persisted cannot diverge.
+func validateSnapshotScheduleParams(action, resourceType string, params json.RawMessage) error {
+	if action != "snapshot" {
+		return nil
+	}
+	kind, known := snapshotScheduleGuestKind(resourceType)
+	if !known {
+		// Passing on rather than guessing a reserved set — the task is
+		// unrunnable for a reason that has nothing to do with its name. See
+		// snapshotScheduleGuestKind.
+		return nil
+	}
+	var sp snapshotScheduleParams
+	if err := json.Unmarshal(params, &sp); err != nil {
+		// scheduleParamsJSON produced this a moment ago, so it is JSON; a
+		// snap_name of the wrong TYPE is what lands here.
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid params: snap_name must be a string")
+	}
+	if sp.SnapName == "" {
+		// Absent is the common case and is not a mistake: executeSnapshot
+		// mints "auto-<timestamp>" instead, which is always a legal name.
+		return nil
+	}
+	return snapshotNameError(kind, sp.SnapName)
+}
+
 // Create handles POST /api/v1/clusters/:cluster_id/schedules.
 func (h *ScheduleHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
@@ -156,6 +230,10 @@ func (h *ScheduleHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	action := p.String("action")
 	resourceType := p.String("resource_type")
 	resourceID := p.String("resource_id")
+
+	if err := validateSnapshotScheduleParams(action, resourceType, params); err != nil {
+		return err
+	}
 
 	task, err := h.queries.InsertScheduledTask(c.Context(), db.InsertScheduledTaskParams{
 		ClusterID:    clusterID,
@@ -218,21 +296,30 @@ func (h *ScheduleHandler) List(c fiber.Ctx, p *apischema.Params) error {
 // tasks in clusters the caller cannot see. It is the same split guest_snapshots
 // makes for a guest of the wrong kind.
 //
-// It returns only an error: neither caller needs the row, and the WRITE they go
-// on to issue carries the cluster predicate itself rather than trusting a value
-// read a moment earlier.
-func (h *ScheduleHandler) taskInCluster(c fiber.Ctx, taskID, clusterID uuid.UUID) error {
+// It returns the row because Update needs two fields the PUT body cannot carry:
+// a task's action and the resource it acts on are fixed at creation, so the
+// only way to know whether an updated params blob belongs to a snapshot — and
+// to which guest kind — is to read them back. Delete ignores the row.
+//
+// Returning it does NOT make it the authority for the write. Both statements
+// carry a cluster_id predicate of their own (queries/scheduled_tasks.sql), and
+// that predicate is the PATH's clusterID — never task.ClusterID, which would
+// scope the write on a value read out of the row it is about to write.
+// TestGuard_ScheduledTaskWritesCarryTheClusterPredicate pins the value for
+// exactly that reason, because with the row in scope the wrong one compiles
+// and reads plausibly.
+func (h *ScheduleHandler) taskInCluster(c fiber.Ctx, taskID, clusterID uuid.UUID) (db.ScheduledTask, error) {
 	task, err := h.queries.GetScheduledTask(c.Context(), taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusNotFound, "Schedule not found")
+			return db.ScheduledTask{}, fiber.NewError(fiber.StatusNotFound, "Schedule not found")
 		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get schedule")
+		return db.ScheduledTask{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to get schedule")
 	}
 	if task.ClusterID != clusterID {
-		return fiber.NewError(fiber.StatusNotFound, "Schedule not found")
+		return db.ScheduledTask{}, fiber.NewError(fiber.StatusNotFound, "Schedule not found")
 	}
-	return nil
+	return task, nil
 }
 
 // Update handles PUT /api/v1/clusters/:cluster_id/schedules/:id.
@@ -246,7 +333,8 @@ func (h *ScheduleHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	if err := h.taskInCluster(c, taskID, clusterID); err != nil {
+	task, err := h.taskInCluster(c, taskID, clusterID)
+	if err != nil {
 		return err
 	}
 
@@ -257,6 +345,13 @@ func (h *ScheduleHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 
 	params, err := scheduleParamsJSON(p)
 	if err != nil {
+		return err
+	}
+
+	// The action and the resource come off the stored row: a PUT can change
+	// the cron, the params and the enabled flag, but not what the task acts
+	// on.
+	if err := validateSnapshotScheduleParams(task.Action, task.ResourceType, params); err != nil {
 		return err
 	}
 
@@ -298,7 +393,7 @@ func (h *ScheduleHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	if err := h.taskInCluster(c, taskID, clusterID); err != nil {
+	if _, err := h.taskInCluster(c, taskID, clusterID); err != nil {
 		return err
 	}
 

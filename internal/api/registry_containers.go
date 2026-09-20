@@ -216,7 +216,7 @@ func registerContainerEndpoints(reg *Registry, h *handlers.ContainerHandler) {
 			//
 			// The reserved names differ from the VM route's on purpose:
 			// Proxmox reserves "vzdump" for containers and "pending" for
-			// VMs, and neither reserves the other's. validateSnapshotName
+			// VMs, and neither reserves the other's. proxmox.SnapshotGuestKind
 			// documents why.
 			"snap_name": {
 				Type:        apischema.String,

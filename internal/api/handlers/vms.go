@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/url"
 	"regexp"
@@ -1014,145 +1013,42 @@ type snapshotResponse struct {
 	Parent      string `json:"parent,omitempty"`
 }
 
-// SnapshotMaxNameLen is PROXMOX's cap on a snapshot name, not one Nexara
-// invented — this was unverified for a long time and the answer is that
-// upstream states it outright.
+// The snapshot-name rule itself lives in internal/proxmox, on the two
+// Create*Snapshot methods — see the "Snapshot names" block in
+// client_guests.go for the upstream citations and for why it sits at the
+// client. The handlers are not its only caller: internal/scheduler and
+// internal/guesttools both create snapshots without passing through here.
 //
-// pve-common registers the standard option every snapname parameter uses:
-//
-//	register_standard_option('pve-snapshot-name', {
-//	    description => "The name of the snapshot.",
-//	    type => 'string', format => 'pve-configid', maxLength => 40,
-//	});
-//
-// (pve-common src/PVE/JSONSchema.pm.) Its validator answers "value may
-// only be 40 characters long" at 41, and every snapname in qemu-server
-// src/PVE/API2/Qemu.pm and pve-container src/PVE/API2/LXC/Snapshot.pm
-// uses that option — two of them add `optional => 1` and none of them
-// override maxLength. Proxmox's own published API reference agrees: all
-// 16 snapname parameters in pve-docs' apidoc.js carry maxLength 40.
-//
-// It is NOT pve-configid's bound, and conflating the two is the mistake to
-// avoid here. $CONFIGID_RE is `^[a-z][a-z0-9_-]+\z` case-insensitively — a
-// minimum of two characters and NO maximum — which is why the catalogue's
-// pve-configid rule runs to 128. 40 is a snapshot-only cap layered on top
-// of that shape. The storage plugins add nothing further: pve-storage
-// validates no snapshot name of its own, so a ZFS/RBD/LVM object name is
-// not what bounds this.
-//
-// The cap applies to the ADDRESSING endpoints too — delete, rollback and
-// the config reads all take pve-snapshot-name — so a snapshot whose name
-// exceeds 40 could not be reached through PVE's API even if some other
-// tool managed to create one.
-const SnapshotMaxNameLen = 40
+// What stays behind is the HTTP mapping below, which is this layer's job and
+// nobody else's. These aliases keep the declarations (registry_vms.go,
+// registry_containers.go) and this package reading the same names they always
+// did; the type is an ALIAS rather than a definition so the two are one type
+// and no conversion is needed at the call sites.
+const SnapshotMaxNameLen = proxmox.SnapshotMaxNameLen
 
-// snapshotNameRE is pve-configid's shape bounded by SnapshotMaxNameLen: a
-// leading letter, then letters, digits, '-' or '_'. It is built from the
-// constant so the two cannot drift.
-var snapshotNameRE = regexp.MustCompile(
-	fmt.Sprintf(`^[A-Za-z][A-Za-z0-9_-]{1,%d}$`, SnapshotMaxNameLen-1),
-)
-
-// snapshotGuestKind selects which reserved names apply, because Proxmox
-// reserves a DIFFERENT set for VMs and for containers and checks each with
-// its own case sensitivity:
-//
-//   - "current" — both kinds, exact match. It is the pseudo-name the
-//     snapshot listing gives the live config, so a real snapshot called
-//     that could never be addressed. (qemu-server src/PVE/API2/Qemu.pm and
-//     pve-container src/PVE/API2/LXC/Snapshot.pm: `die … if $snapname eq
-//     'current'`.)
-//   - "pending" — VMs only, CASE-INSENSITIVELY. A VM config keeps staged
-//     changes in a `[PENDING]` section, and parse_vm_config matches that
-//     header with /i ahead of the snapshot-section branch, so a snapshot
-//     named "Pending" would be read back as pending changes rather than as
-//     a snapshot. (qemu-server src/PVE/API2/Qemu.pm: `die … if
-//     lc($snapname) eq 'pending'`; the collision is in
-//     src/PVE/QemuServer.pm.)
-//   - "vzdump" — containers only, exact match. vzdump takes a snapshot
-//     literally named that when it backs a container up, and
-//     pve-guest-common's __snapshot_prepare special-cases it.
-//     (pve-container src/PVE/API2/LXC/Snapshot.pm: `die … if $snapname eq
-//     'vzdump'`.)
-//
-// Containers deliberately do NOT reserve "pending", and that asymmetry is
-// upstream's design rather than an oversight to paper over: an LXC config
-// spells its pending section `[pve:pending]` (pve-container
-// src/PVE/LXC/Config.pm), and a colon is not a legal configid character,
-// so there is nothing to collide with. Rejecting it here would refuse a
-// name Proxmox accepts.
-type snapshotGuestKind string
+type snapshotGuestKind = proxmox.SnapshotGuestKind
 
 const (
-	qemuSnapshot snapshotGuestKind = "qemu"
-	lxcSnapshot  snapshotGuestKind = "lxc"
+	qemuSnapshot = proxmox.QemuSnapshot
+	lxcSnapshot  = proxmox.LXCSnapshot
 )
-
-// errUnknownSnapshotGuestKind is returned when validateSnapshotName is
-// handed a kind it has no reserved set for. It is OUR bug, not the
-// caller's, which is why snapshotNameError answers it with a 500 rather
-// than telling the caller their name was bad.
-var errUnknownSnapshotGuestKind = errors.New("snap_name cannot be validated for an unknown guest kind")
-
-// reservedSnapshotName reports whether Proxmox refuses name outright for
-// this guest kind. The second result is false when kind is not one of the
-// two above — the caller must treat that as "could not decide" rather than
-// as "not reserved", so an unhandled kind cannot silently borrow the wrong
-// reserved set.
-func reservedSnapshotName(kind snapshotGuestKind, name string) (reserved, known bool) {
-	switch kind {
-	case qemuSnapshot:
-		return name == "current" || strings.EqualFold(name, "pending"), true
-	case lxcSnapshot:
-		return name == "current" || name == "vzdump", true
-	}
-	return false, false
-}
-
-// validateSnapshotName rejects names Proxmox would refuse, with an
-// actionable message instead of PVE's "invalid configuration ID",
-// "value may only be 40 characters long" or "reserved name".
-//
-// Handlers call snapshotNameError, not this: this is the rule without the
-// HTTP mapping, and a handler that reaches for the obvious-looking name
-// re-creates the bug snapshotNameError exists to prevent — billing our own
-// unregistered-kind bug to the caller as a 400.
-func validateSnapshotName(kind snapshotGuestKind, name string) error {
-	reserved, known := reservedSnapshotName(kind, name)
-	if !known {
-		// Unreachable from the two registered create handlers. Refusing
-		// beats guessing a reserved set, because guessing wrong is silent:
-		// a new guest kind would inherit whichever set happened to be the
-		// fallback and let a reserved name through.
-		return fmt.Errorf("%w %q", errUnknownSnapshotGuestKind, kind)
-	}
-	switch {
-	case name == "":
-		return errors.New("snap_name is required")
-	case reserved:
-		return fmt.Errorf("snap_name %q is reserved by Proxmox", name)
-	case !snapshotNameRE.MatchString(name):
-		return fmt.Errorf("snap_name must start with a letter and contain only letters, digits, '-' and '_' (no spaces), 2-%d characters", SnapshotMaxNameLen)
-	}
-	return nil
-}
 
 // snapshotNameError is what the two create handlers call: it validates the
 // name and returns the HTTP error to hand back, or nil.
 //
 // It exists to keep the two failures apart. Every rule in
-// validateSnapshotName is a caller mistake and earns a 400 naming the
-// problem — except one. An unregistered guest kind is Nexara's own bug,
+// proxmox.ValidateSnapshotName is a caller mistake and earns a 400 naming
+// the problem — except one. An unregistered guest kind is Nexara's own bug,
 // and reporting it as "your snapshot name was bad" would blame the caller
 // for something no request of theirs could fix, while echoing an internal
 // enum value at them. It fails closed either way; this only decides who
 // the failure is attributed to.
 func snapshotNameError(kind snapshotGuestKind, name string) error {
-	err := validateSnapshotName(kind, name)
+	err := proxmox.ValidateSnapshotName(kind, name)
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, errUnknownSnapshotGuestKind):
+	case errors.Is(err, proxmox.ErrUnknownSnapshotGuestKind):
 		// The kind has to be recorded SOMEWHERE. errorHandler renders the
 		// envelope without logging (errors.go), so dropping err here would
 		// leave a bare 500 whose cause exists nowhere — the same outcome
@@ -1305,8 +1201,9 @@ func (h *VMHandler) CreateSnapshot(c fiber.Ctx, p *apischema.Params) error {
 	// enforces both before this runs. This re-checks them at the choke
 	// point and adds what a declaration cannot express: the names Proxmox
 	// reserves, which for a VM are "current" and "pending" and are not the
-	// same set a container reserves. See validateSnapshotName for where
-	// each rule comes from upstream.
+	// same set a container reserves. See the "Snapshot names" block in
+	// internal/proxmox/client_guests.go for where each rule comes from
+	// upstream, and for why the rule itself sits at the client.
 	snapName := p.String("snap_name")
 	if err := snapshotNameError(qemuSnapshot, snapName); err != nil {
 		return err

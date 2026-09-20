@@ -3,6 +3,7 @@ package proxmox
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -536,6 +537,154 @@ func (c *Client) RestoreCT(ctx context.Context, node string, params RestoreParam
 	}
 	return upid, nil
 }
+
+// --- Snapshot names ---
+//
+// The rule below lives at the CLIENT rather than in internal/api/handlers,
+// because the handlers are not the only caller and the next one will not
+// remember: internal/scheduler fires stored snapshot tasks and
+// internal/guesttools snapshots a guest before updating it, and neither goes
+// through a handler. That is the same reasoning that put validateHAConfigID in
+// client_ha.go, and it is what makes the two Create*Snapshot methods the choke
+// point instead of a convention two packages happen to follow.
+//
+// Putting it here also dissolves the "which guest kind is this?" third state at
+// the sites that matter. At the client the kind is structural — CreateVMSnapshot
+// is qemu and CreateCTSnapshot is lxc — so there is nothing to pass wrong.
+
+// SnapshotMaxNameLen is PROXMOX's cap on a snapshot name, not one Nexara
+// invented — this was unverified for a long time and the answer is that
+// upstream states it outright.
+//
+// pve-common registers the standard option every snapname parameter uses:
+//
+//	register_standard_option('pve-snapshot-name', {
+//	    description => "The name of the snapshot.",
+//	    type => 'string', format => 'pve-configid', maxLength => 40,
+//	});
+//
+// (pve-common src/PVE/JSONSchema.pm.) Its validator answers "value may
+// only be 40 characters long" at 41, and every snapname in qemu-server
+// src/PVE/API2/Qemu.pm and pve-container src/PVE/API2/LXC/Snapshot.pm
+// uses that option — two of them add `optional => 1` and none of them
+// override maxLength. Proxmox's own published API reference agrees: all
+// 16 snapname parameters in pve-docs' apidoc.js carry maxLength 40.
+//
+// It is NOT pve-configid's bound, and conflating the two is the mistake to
+// avoid here. $CONFIGID_RE is `^[a-z][a-z0-9_-]+\z` case-insensitively — a
+// minimum of two characters and NO maximum — which is why the catalogue's
+// pve-configid rule runs to 128. 40 is a snapshot-only cap layered on top
+// of that shape. The storage plugins add nothing further: pve-storage
+// validates no snapshot name of its own, so a ZFS/RBD/LVM object name is
+// not what bounds this.
+//
+// The cap applies to the ADDRESSING endpoints too — delete, rollback and
+// the config reads all take pve-snapshot-name — so a snapshot whose name
+// exceeds 40 could not be reached through PVE's API even if some other
+// tool managed to create one. The delete and rollback methods below
+// deliberately do NOT call ValidateSnapshotName: they address a snapshot
+// Proxmox already minted, and a validator stricter than whatever produced
+// that name would strand it.
+const SnapshotMaxNameLen = 40
+
+// snapshotNameRE is pve-configid's shape bounded by SnapshotMaxNameLen: a
+// leading letter, then letters, digits, '-' or '_'. It is built from the
+// constant so the two cannot drift.
+var snapshotNameRE = regexp.MustCompile(
+	fmt.Sprintf(`^[A-Za-z][A-Za-z0-9_-]{1,%d}$`, SnapshotMaxNameLen-1),
+)
+
+// SnapshotGuestKind selects which reserved names apply, because Proxmox
+// reserves a DIFFERENT set for VMs and for containers and checks each with
+// its own case sensitivity:
+//
+//   - "current" — both kinds, exact match. It is the pseudo-name the
+//     snapshot listing gives the live config, so a real snapshot called
+//     that could never be addressed. (qemu-server src/PVE/API2/Qemu.pm and
+//     pve-container src/PVE/API2/LXC/Snapshot.pm: `die … if $snapname eq
+//     'current'`.)
+//   - "pending" — VMs only, CASE-INSENSITIVELY. A VM config keeps staged
+//     changes in a `[PENDING]` section, and parse_vm_config matches that
+//     header with /i ahead of the snapshot-section branch, so a snapshot
+//     named "Pending" would be read back as pending changes rather than as
+//     a snapshot. (qemu-server src/PVE/API2/Qemu.pm: `die … if
+//     lc($snapname) eq 'pending'`; the collision is in
+//     src/PVE/QemuServer.pm.)
+//   - "vzdump" — containers only, exact match. vzdump takes a snapshot
+//     literally named that when it backs a container up, and
+//     pve-guest-common's __snapshot_prepare special-cases it.
+//     (pve-container src/PVE/API2/LXC/Snapshot.pm: `die … if $snapname eq
+//     'vzdump'`.)
+//
+// Containers deliberately do NOT reserve "pending", and that asymmetry is
+// upstream's design rather than an oversight to paper over: an LXC config
+// spells its pending section `[pve:pending]` (pve-container
+// src/PVE/LXC/Config.pm), and a colon is not a legal configid character,
+// so there is nothing to collide with. Rejecting it here would refuse a
+// name Proxmox accepts.
+type SnapshotGuestKind string
+
+const (
+	QemuSnapshot SnapshotGuestKind = "qemu"
+	LXCSnapshot  SnapshotGuestKind = "lxc"
+)
+
+// ErrUnknownSnapshotGuestKind is returned when ValidateSnapshotName is
+// handed a kind it has no reserved set for. It is OUR bug, not the
+// caller's, which is why it is deliberately NOT wrapped in ErrInvalidInput:
+// mapProxmoxError turns ErrInvalidInput into a 400, and billing an
+// unregistered enum value to the caller would tell them their snapshot name
+// was wrong when no name of theirs could have worked.
+//
+// Unreachable through the two Create*Snapshot methods, which each pass a
+// literal.
+var ErrUnknownSnapshotGuestKind = errors.New("snap_name cannot be validated for an unknown guest kind")
+
+// ReservedSnapshotName reports whether Proxmox refuses name outright for
+// this guest kind. The second result is false when kind is not one of the
+// two above — the caller must treat that as "could not decide" rather than
+// as "not reserved", so an unhandled kind cannot silently borrow the wrong
+// reserved set.
+func ReservedSnapshotName(kind SnapshotGuestKind, name string) (reserved, known bool) {
+	switch kind {
+	case QemuSnapshot:
+		return name == "current" || strings.EqualFold(name, "pending"), true
+	case LXCSnapshot:
+		return name == "current" || name == "vzdump", true
+	}
+	return false, false
+}
+
+// ValidateSnapshotName rejects names Proxmox would refuse, with an
+// actionable message instead of PVE's "invalid configuration ID",
+// "value may only be 40 characters long" or "reserved name".
+//
+// The three caller-fault refusals wrap ErrInvalidInput, which is what tells
+// the API layer this never reached Proxmox: mapProxmoxError answers it with
+// a 400 naming the value, where an unwrapped error falls through to a 500
+// reading "Proxmox operation failed". The fourth — an unregistered guest
+// kind — is Nexara's own bug and carries ErrUnknownSnapshotGuestKind
+// instead; see handlers.snapshotNameError for the attribution that hangs
+// off that split.
+func ValidateSnapshotName(kind SnapshotGuestKind, name string) error {
+	reserved, known := ReservedSnapshotName(kind, name)
+	if !known {
+		// Refusing beats guessing a reserved set, because guessing wrong is
+		// silent: a new guest kind would inherit whichever set happened to
+		// be the fallback and let a reserved name through.
+		return fmt.Errorf("%w %q", ErrUnknownSnapshotGuestKind, kind)
+	}
+	switch {
+	case name == "":
+		return fmt.Errorf("%w: snap_name is required", ErrInvalidInput)
+	case reserved:
+		return fmt.Errorf("%w: snap_name %q is reserved by Proxmox", ErrInvalidInput, name)
+	case !snapshotNameRE.MatchString(name):
+		return fmt.Errorf("%w: snap_name must start with a letter and contain only letters, digits, '-' and '_' (no spaces), 2-%d characters", ErrInvalidInput, SnapshotMaxNameLen)
+	}
+	return nil
+}
+
 func (c *Client) ListVMSnapshots(ctx context.Context, node string, vmid int) ([]Snapshot, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err
@@ -557,8 +706,8 @@ func (c *Client) CreateVMSnapshot(ctx context.Context, node string, vmid int, pa
 	if err := validateVMID(vmid); err != nil {
 		return "", err
 	}
-	if params.SnapName == "" {
-		return "", fmt.Errorf("snapshot name is required")
+	if err := ValidateSnapshotName(QemuSnapshot, params.SnapName); err != nil {
+		return "", err
 	}
 	form := url.Values{}
 	form.Set("snapname", params.SnapName)
@@ -670,8 +819,8 @@ func (c *Client) CreateCTSnapshot(ctx context.Context, node string, vmid int, pa
 	if err := validateVMID(vmid); err != nil {
 		return "", err
 	}
-	if params.SnapName == "" {
-		return "", fmt.Errorf("snapshot name is required")
+	if err := ValidateSnapshotName(LXCSnapshot, params.SnapName); err != nil {
+		return "", err
 	}
 	form := url.Values{}
 	form.Set("snapname", params.SnapName)

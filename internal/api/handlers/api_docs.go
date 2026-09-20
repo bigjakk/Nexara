@@ -232,8 +232,8 @@ type APIItems struct {
 //
 // The live example is `snap_name` on the two snapshot-create routes. It
 // declares `format: "pve-configid"`, whose rule permits 2 to 128
-// characters, AND `max_length: 40`, because the handler's own
-// validateSnapshotName caps it there. Both are published; the effective
+// characters, AND `max_length: 40`, because the client's own
+// proxmox.ValidateSnapshotName caps it there. Both are published; the effective
 // contract is their intersection, which is 2 to 40. Reading `permits` or
 // `regex` on its own and concluding that a 64-character name will be
 // accepted is the mistake this section exists to prevent — which is why
@@ -243,7 +243,7 @@ type APIItems struct {
 // class is the half they cannot guess.
 //
 // One narrowing is NOT expressible in either place and is stated in the
-// route's Description instead: validateSnapshotName also rejects the
+// route's Description instead: proxmox.ValidateSnapshotName also rejects the
 // literal name "current", which Proxmox reserves. A schema facet cannot
 // say "anything but this one word", so the prose carries it.
 //

@@ -388,7 +388,7 @@ func narrowedByPublishedFacet(prop apischema.Property, v string) bool {
 // it fails when a narrowing DISAPPEARS.
 //
 // That is not hypothetical. Both entries below were added to stop the
-// payload contradicting itself: snap_name's handler (validateSnapshotName)
+// payload contradicting itself: snap_name's rule (proxmox.ValidateSnapshotName)
 // caps the name at 40 where the pve-configid rule permits 128, and until
 // the MaxLength was declared the payload published "2 to 128 characters"
 // for a route that answers 400 at 41. Delete the two MaxLength lines and
