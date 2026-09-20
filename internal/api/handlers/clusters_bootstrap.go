@@ -102,6 +102,20 @@ func (b bootstrapRequest) String() string {
 	return "bootstrapRequest{username:" + b.Username + " password:REDACTED otp:REDACTED}"
 }
 
+// GoString closes the one route String does not reach. fmt dispatches
+// Stringer for %v, %s, %q, %x and %X but GoStringer for %#v — so without this
+// a `%#v` written while debugging a failed onboarding prints the struct
+// literal with the password and OTP in it, for the value, for a pointer to it
+// and for anything holding one as an EXPORTED field. (An unexported field is
+// not covered: fmt cannot call a method through one. See the note on
+// clusterCredential below.) String has been here since the type was hardened;
+// GoString was the gap.
+func (b bootstrapRequest) GoString() string {
+	return `handlers.bootstrapRequest{Username:"` + b.Username +
+		`", Password:"REDACTED", OTP:"REDACTED", UserID:"` + b.UserID +
+		`", TokenName:"` + b.TokenName + `"}`
+}
+
 func (b bootstrapRequest) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("username", b.Username),
@@ -116,6 +130,99 @@ func (b bootstrapRequest) MarshalJSON() ([]byte, error) {
 		UserID    string `json:"user_id,omitempty"`
 		TokenName string `json:"token_name,omitempty"`
 	}{b.Username, b.UserID, b.TokenName})
+}
+
+// String, GoString, LogValue and MarshalJSON give clusterCredential the same
+// protection bootstrapRequest has had, and closing that asymmetry is the whole
+// point: the two types live in this file, are built within a few lines of each
+// other, and one of them held a plaintext credential that any rendering would
+// publish while the other did not.
+//
+// Secret is the minted (or operator-supplied) API token in plaintext. It exists
+// between resolution and the encrypted column, and everything in that window
+// has the whole struct in lexical scope: the audit-detail map assembled in
+// CreateCluster (clusters.go), the slog.Error on the failed-insert rollback
+// path a few lines above it, and the connectivity test that follows. Nothing
+// renders one today; these methods mean the first thing that does cannot leak.
+//
+// Between them the four cover every route that dispatches on the type:
+// %v/%s/%q/%x/%X, %+v, fmt.Sprint and error wrapping via String; %#v via
+// GoString; structured logs via LogValue; encoding/json via MarshalJSON —
+// including a credential held as an EXPORTED field of a larger struct.
+//
+// What is NOT covered, listed so the set above is not read as "everything".
+// None is reachable today; they are recorded because the next person to
+// create one of these shapes should know it is not covered:
+//
+//   - A verb fmt cannot dispatch these for — %d, %t, %p, %c, %f — falls back
+//     to printing the fields and shows Secret.
+//   - A credential in an UNEXPORTED field. fmt cannot call a method through
+//     one, so %+v and %#v of the outer struct print the raw fields. This is a
+//     real shape in this tree: internal/rolling/orchestrator.go holds a
+//     credential-bearing config in an unexported field today.
+//   - An ANONYMOUS embed. `struct{ clusterCredential; Extra string }` promotes
+//     these methods to the outer type, so json.Marshal emits only the redacted
+//     object and silently drops Extra, and %v renders only the inner. Safe for
+//     the secret, wrong for everything else — embed it as a NAMED field.
+//   - Reflection encoders that ignore MarshalJSON: encoding/xml and
+//     encoding/gob both emit Secret verbatim.
+//
+// TokenID, Source and the provenance fields stay visible. None is a secret, and
+// a rendering that identifies nothing is not worth emitting.
+//
+// VALUE receivers on all four, even though every call site holds a
+// *clusterCredential. A value receiver is in the method set of both the value
+// and the pointer; a pointer receiver is in the pointer's only, and fmt and
+// encoding/json skip it on any value they cannot address — so a pointer
+// receiver here would compile, lint clean and silently leave `%v` of a
+// dereferenced credential wide open.
+//
+// Only the marshal direction is overridden. UnmarshalJSON is a separate
+// interface, and nothing decodes this type — it is assembled in Go, never
+// parsed.
+func (c clusterCredential) String() string {
+	return "clusterCredential{token_id:" + c.TokenID + " secret:REDACTED source:" + c.Source +
+		" user_id:" + c.UserID + " token_name:" + c.TokenName + "}"
+}
+
+func (c clusterCredential) GoString() string {
+	return `handlers.clusterCredential{TokenID:"` + c.TokenID +
+		`", Secret:"REDACTED", Source:"` + c.Source +
+		`", UserID:"` + c.UserID + `", TokenName:"` + c.TokenName + `"}`
+}
+
+func (c clusterCredential) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("token_id", c.TokenID),
+		slog.String("source", c.Source),
+		slog.String("user_id", c.UserID),
+		slog.String("token_name", c.TokenName),
+		slog.Bool("created_user", c.CreatedUser),
+		slog.Bool("created_acl", c.CreatedACL),
+	)
+}
+
+func (c clusterCredential) MarshalJSON() ([]byte, error) {
+	// A POINTER, not a time.Time with omitempty. encoding/json never treats a
+	// struct as empty, so omitempty does nothing on a time.Time and the
+	// manual path — which never mints, and so never sets MintedAt — would
+	// emit "0001-01-01T00:00:00Z" and read as a real date. That is the exact
+	// confusion mintedAtColumn exists to avoid on the DB side; the pointer
+	// does the same job on the JSON side.
+	var mintedAt *time.Time
+	if !c.MintedAt.IsZero() {
+		mintedAt = &c.MintedAt
+	}
+	return json.Marshal(struct {
+		TokenID     string             `json:"token_id"`
+		Source      string             `json:"source"`
+		UserID      string             `json:"user_id,omitempty"`
+		TokenName   string             `json:"token_name,omitempty"`
+		CreatedUser bool               `json:"created_user"`
+		CreatedACL  bool               `json:"created_acl"`
+		MintedAt    *time.Time         `json:"minted_at,omitempty"`
+		Steps       []proxmox.MintStep `json:"steps,omitempty"`
+	}{c.TokenID, c.Source, c.UserID, c.TokenName, c.CreatedUser, c.CreatedACL, mintedAt, c.Steps})
 }
 
 // validate checks the sub-object and fills in the defaults.

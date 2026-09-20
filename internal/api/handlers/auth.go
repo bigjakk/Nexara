@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/mail"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,20 +135,171 @@ type registerRequest struct {
 	DisplayName string `json:"display_name"`
 }
 
+// logoutRequest is the optional POST /auth/logout body, for clients that send
+// the refresh token explicitly instead of relying on the cookie.
 type logoutRequest struct {
 	RefreshToken string `json:"refresh_token"`
+}
+
+// String, GoString, LogValue and MarshalJSON keep the live refresh token out
+// of fmt, slog and encoding/json. Logout runs next to the session-revocation
+// code, which logs on every failure path, and `%v` of the decoded body is the
+// natural thing to add when a logout is being rejected for reasons nobody can
+// see.
+//
+// The json tag stays: this struct is DECODED from the request body, so
+// json:"-" would silently stop body-carrying clients logging out. Only the
+// marshal direction is overridden — UnmarshalJSON is a separate interface, so
+// decoding is untouched.
+//
+// MarshalJSON is here even though nothing in the tree marshals a
+// logoutRequest, and the reason is worth stating because an earlier version
+// of this type left it out on exactly that argument. Production builds its
+// logger with slog.NewJSONHandler (cmd/nexara/main.go:64 and :272), and for a
+// value that is not itself a LogValuer the JSON handler MARSHALS it where the
+// text handler formats it with %+v. A logoutRequest reached as an exported
+// field of some context struct — `slog.Error("logout failed", "ctx",
+// struct{ Req logoutRequest; IP string }{req, ip})` — therefore goes through
+// encoding/json, not through String, and without this method it writes the
+// live refresh token to stdout in cleartext. slog.Any on the type ITSELF is
+// safe either way, because LogValue resolves first; it is the wrapper shape
+// that needs this. So a slog call IS a serialisation here, and "nothing
+// marshals it" was never the right test.
+//
+// It emits the REDACTED marker rather than an empty object so a log line says
+// which it was. The round-trip that implies — marshal then unmarshal yields
+// the literal "REDACTED" as a token — is not reachable: nothing marshals this
+// type outside a log line, and anything that starts to must carry the token
+// itself.
+//
+// The type has exactly one field and that field IS the secret, so the usual
+// non-vacuity pairing — assert a non-credential value SURVIVES the rendering
+// — has nothing to reach for. That does not make the type untestable, only
+// differently testable: requiring the marker REDACTED to be PRESENT is the
+// survivor half. Unlike exact equality against a whole literal it survives
+// any rewording THAT KEEPS THE MARKER, and it fails against a String() that
+// returns "" as well as one that prints the field. It is not free of
+// change-detection: a reword to something like "refresh token withheld",
+// which redacts perfectly well, also fails — the marker is part of the
+// contract, not incidental phrasing. The slog rows pin slightly more than the
+// marker, deliberately: they match on the grouped key too
+// (req.refresh_token=REDACTED, and the quoted form under the JSON handler),
+// because the key is what makes LogValue killable on its own rather than
+// masked by String.
+// TestGuard_LogoutRequestNeverPrintsTheRefreshToken does exactly that, and
+// TestCredentialRedactorsAreInTheValueMethodSet pins the value receivers.
+//
+// Value receivers, like every other redactor in this file: fmt, slog and
+// encoding/json all skip a pointer-receiver method on a value they cannot
+// address.
+func (l logoutRequest) String() string {
+	return "logoutRequest{refresh_token:REDACTED}"
+}
+
+// GoString covers %#v, which dispatches GoStringer rather than Stringer and
+// would otherwise print the struct literal with the live token in it.
+func (l logoutRequest) GoString() string {
+	return `handlers.logoutRequest{RefreshToken:"REDACTED"}`
+}
+
+func (l logoutRequest) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("refresh_token", "REDACTED"))
+}
+
+func (l logoutRequest) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		RefreshToken string `json:"refresh_token"`
+	}{"REDACTED"})
 }
 
 type authResponse struct {
 	User        authUserResponse `json:"user"`
 	AccessToken string           `json:"access_token"`
-	// RefreshToken is always empty. The refresh token is delivered solely as an
-	// HttpOnly cookie (see RefreshCookieName); the native app that used to read it
-	// from the body was removed in v1.9.x. The field is retained so the response
-	// shape stays stable for existing API consumers.
+	// RefreshToken is always empty, and MarshalJSON below is what makes that
+	// true — not the three construction sites, which merely agree with it.
+	// The refresh token is delivered solely as an HttpOnly cookie (see
+	// RefreshCookieName); the native app that used to read it from the body
+	// was removed in v1.9.x.
+	//
+	// The field and its live json tag stay because the shape is a published
+	// contract: frontend/src/types/api.ts declares refresh_token
+	// NON-OPTIONAL and docs/api-reference.md documents it as present and
+	// empty, so json:"-" — the remedy used on auth.TokenPair, which nothing
+	// consumes — would break existing clients here.
 	RefreshToken string   `json:"refresh_token"`
 	ExpiresAt    int64    `json:"expires_at"`
 	Permissions  []string `json:"permissions"`
+}
+
+// MarshalJSON turns three call-site invariants into one type invariant.
+//
+// Every response body this type produces carries "refresh_token":"" whatever
+// the construction site put in the field, so a fourth construction site — a
+// new endpoint, an OIDC path, a debug handler — cannot reopen the v1.9.x leak
+// by forgetting the line. The three existing `RefreshToken: ""` literals are
+// kept as defence in depth; they are no longer what enforces this.
+//
+// AccessToken is deliberately NOT blanked. Unlike String, GoString and
+// LogValue below, this method is the wire format, and the access token is the
+// thing the client came for.
+//
+// State that asymmetry as the trade-off it is, not as an achieved invariant.
+// One method cannot serve both the wire and the log: because MarshalJSON
+// keeps AccessToken, an authResponse reached as an exported field of a
+// wrapper under slog's JSON handler — which marshals rather than formatting —
+// logs a live access token. slog.Any on the response ITSELF is safe, since
+// LogValue resolves first, and so is every fmt verb and the text handler;
+// TestGuard_AuthResponseNeverPrintsEitherToken covers exactly those. Nothing
+// logs an authResponse today, in any shape. Do not start: log the user id, not
+// the response.
+//
+// Copy-and-blank rather than embed-and-shadow: embedding an anonymous struct
+// would reorder the fields and change the emitted bytes, and the byte shape is
+// the contract. `alias` must be a DEFINED type, not a Go type alias — written
+// `type alias = authResponse` it would be the same type, keep this method in
+// its method set, and recurse until the stack dies.
+//
+// NodeCertificate.MarshalJSON in internal/proxmox/types.go shares only that
+// `type Alias T` trick; it is the embed-and-shadow variant, which is the one
+// deliberately NOT used here. Read it for the defined-type idiom, not for the
+// structure.
+//
+// VALUE receiver: all three sites hand `authResponse{...}` to c.JSON as an
+// unaddressable value, and encoding/json skips a pointer-receiver MarshalJSON
+// on one of those — a pointer receiver would compile, lint clean and blank
+// nothing.
+func (a authResponse) MarshalJSON() ([]byte, error) {
+	type alias authResponse
+	blanked := alias(a)
+	blanked.RefreshToken = ""
+	return json.Marshal(blanked)
+}
+
+// String, GoString and LogValue redact BOTH tokens. AccessToken is a live
+// bearer JWT for its whole TTL, so a `%v` of an authResponse in an error, or a
+// slog.Any on the way out of a login handler, hands out a working session.
+// fmt reaches String for %v/%s/%q/%x/%X/%+v/fmt.Sprint and error wrapping, and
+// GoStringer — not Stringer — for %#v, which is why GoString is separate.
+//
+// The user identity and expiry stay visible; they are what makes a redacted
+// line worth logging, and they are already Viewer-readable.
+func (a authResponse) String() string {
+	return "authResponse{user:" + a.User.Email + " access_token:REDACTED refresh_token:REDACTED expires_at:" +
+		strconv.FormatInt(a.ExpiresAt, 10) + "}"
+}
+
+func (a authResponse) GoString() string {
+	return `handlers.authResponse{User:handlers.authUserResponse{Email:"` + a.User.Email +
+		`"}, AccessToken:"REDACTED", RefreshToken:"REDACTED", ExpiresAt:` +
+		strconv.FormatInt(a.ExpiresAt, 10) + `}`
+}
+
+func (a authResponse) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("user_id", a.User.ID.String()),
+		slog.String("email", a.User.Email),
+		slog.Int64("expires_at", a.ExpiresAt),
+	)
 }
 
 type authUserResponse struct {

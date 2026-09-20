@@ -10,13 +10,13 @@ import (
 // TestTokenPair_RefreshTokenIsNeverMarshalled is the guard for the half of the
 // v1.9.x refresh-token-in-body fix that does not live in a call site.
 //
-// That fix is three `RefreshToken: ""` lines in the authResponse literals in
-// internal/api/handlers/auth.go. None of them can stop a FOURTH piece of code
-// from marshalling an auth.TokenPair — a new endpoint, a debug handler, an
-// error path, a wrapper struct that embeds it — and with a live
-// `json:"refresh_token"` tag that would put the token back in a response body
-// with nothing failing. The tag is the latent path; this test is what holds it
-// shut.
+// The other half is authResponse.MarshalJSON in internal/api/handlers/auth.go,
+// which blanks the field on every marshal of that type. It cannot stop a
+// DIFFERENT type from being marshalled — an auth.TokenPair reached by a new
+// endpoint, a debug handler, an error path, a wrapper struct that embeds it —
+// and with a live `json:"refresh_token"` tag that would put the token back in
+// a response body with nothing failing. The tag is the latent path; this test
+// is what holds it shut.
 //
 // The shapes below are the ones a careless caller actually reaches for, not a
 // catalogue for its own sake: the value and the pointer are `return
