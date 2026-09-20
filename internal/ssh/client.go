@@ -8,9 +8,12 @@ package ssh
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +30,49 @@ type ExecResult struct {
 }
 
 // Config holds SSH connection parameters.
+//
+// Password and PrivateKey are live node credentials, held in plaintext for the
+// lifetime of one connection. String, GoString, LogValue and MarshalJSON keep
+// them out of every rendering that dispatches on the type, because this struct
+// is passed BY VALUE into code that logs around it. Of the three construction
+// sites, internal/rolling/orchestrator.go builds one a few lines from a log
+// call naming the node; internal/rolling/nodessh.go and
+// internal/api/handlers/rolling_update.go hand theirs straight to Execute or
+// TestConnection. Nothing renders a Config today, so this is latent rather
+// than a live leak; the point is that the next `%+v` or
+// `slog.Any("cfg", cfg)` someone writes while debugging a failed node upgrade
+// is already closed.
+//
+// Between them the four methods cover: %v, %s, %q, %x, %X, %+v, fmt.Sprint and
+// error wrapping via String; %#v via GoString (fmt dispatches GoStringer there,
+// NOT Stringer, which is the one that is easy to forget); structured logs via
+// LogValue; and encoding/json via MarshalJSON — including a Config reached as
+// an EXPORTED field of a larger struct.
+//
+// What is NOT covered, listed so the set above is not mistaken for
+// "everything". None is reachable today; they are recorded because the next
+// person to create one of these shapes should know it is not covered:
+//
+//   - A verb fmt cannot dispatch these for — %d, %t, %p, %c, %f — falls back
+//     to printing the fields and shows both secrets.
+//   - A Config in an UNEXPORTED field. fmt cannot call a method through one,
+//     so %+v and %#v of the outer struct print the raw fields.
+//   - An ANONYMOUS embed. `struct{ Config; Extra string }` promotes these
+//     methods to the outer type, so json.Marshal emits only the redacted
+//     object and silently drops Extra, and %v renders only the inner. Safe for
+//     the secrets, wrong for everything else — embed it as a NAMED field.
+//   - Reflection encoders that ignore MarshalJSON: encoding/xml and
+//     encoding/gob both emit the secrets verbatim.
+//
+// Host, Port and Username stay visible. None is a secret, and a redacted
+// rendering that identifies nothing is not worth emitting. KnownHostKey is
+// dropped rather than redacted: it is a public key, not a secret, but it adds
+// nothing to a log line that the host does not already say.
+//
+// All four have VALUE receivers on purpose. fmt and encoding/json skip a
+// pointer-receiver method on a value they cannot address, and every call site
+// passes a Config by value, so a pointer receiver here would compile, lint
+// clean and redact nothing.
 type Config struct {
 	Host       string
 	Port       int
@@ -36,6 +82,46 @@ type Config struct {
 	// KnownHostKey is the pinned remote public key. Required — the connection
 	// fails closed when nil. Use ScanHostKey to retrieve it before pinning.
 	KnownHostKey ssh.PublicKey
+}
+
+// String is the redacted rendering reached by %v, %s, fmt.Sprint and error
+// wrapping.
+func (c Config) String() string {
+	return "ssh.Config{host:" + c.Host + " port:" + strconv.Itoa(c.Port) +
+		" username:" + c.Username + " password:REDACTED privatekey:REDACTED}"
+}
+
+// GoString closes the route String cannot: %#v dispatches GoStringer, and
+// without this it prints the struct literal with both secrets in it — for the
+// value, for a pointer to it, and for anything holding one as a field.
+func (c Config) GoString() string {
+	return `ssh.Config{Host:"` + c.Host + `", Port:` + strconv.Itoa(c.Port) +
+		`, Username:"` + c.Username + `", Password:"REDACTED", PrivateKey:"REDACTED"}`
+}
+
+// LogValue keeps the credentials out of structured logs while leaving enough to
+// say which connection a line is about.
+func (c Config) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("host", c.Host),
+		slog.Int("port", c.Port),
+		slog.String("username", c.Username),
+	)
+}
+
+// MarshalJSON closes the encoding/json route. Only the marshal direction is
+// overridden — UnmarshalJSON is a separate interface, so decoding is
+// unaffected. Nothing decodes a Config today; anything that starts to must
+// carry Password, PrivateKey and KnownHostKey itself rather than expect them
+// back out. Dropping the pinned host key here is deliberate and fails closed:
+// a Config round-tripped through JSON has no key, and Execute refuses to
+// connect without one.
+func (c Config) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		Username string `json:"username"`
+	}{c.Host, c.Port, c.Username})
 }
 
 // HostKeyMismatchError indicates the remote presented a key that does not
