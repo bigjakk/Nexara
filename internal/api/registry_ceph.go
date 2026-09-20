@@ -69,11 +69,16 @@ func osdParams(extra apischema.Properties) apischema.Properties {
 // validatePathSegment makes, but earlier, and with a message that names
 // the parameter.
 var cephPoolNameParam = apischema.Property{
-	Type:        apischema.String,
-	Pattern:     apischema.Rule("ceph-pool-name"),
-	MaxLength:   apischema.Ptr(128),
-	Typetext:    "<pool>",
-	Description: "Ceph pool name.",
+	Type:      apischema.String,
+	Pattern:   apischema.Rule("ceph-pool-name"),
+	MaxLength: apischema.Ptr(128),
+	Typetext:  "<pool>",
+	// Percent-encode a name that is not path-safe. The handler decodes the
+	// raw path segment, so a name containing "%", "#", "?" or a space must
+	// arrive encoded: a raw "100%" is a 400, and "100%25" addresses the pool
+	// named "100%". The IP-set entry parameter says the same for the same
+	// reason.
+	Description: "Ceph pool name, percent-encoded where the name is not path-safe.",
 }
 
 // registerCephEndpoints declares the 17 Ceph routes served by CephHandler.

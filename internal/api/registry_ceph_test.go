@@ -459,19 +459,17 @@ func TestCephPoolNameParamAndBodyAgree(t *testing.T) {
 // — RFC 3986 sub-delims and unreserved.
 //
 // The characters that are NOT — "#", "%", "?" and a space, which a client
-// must percent-encode — therefore arrive still encoded and are then escaped
-// a second time by DeleteCephPool's url.PathEscape, so Proxmox is asked for
-// a pool whose name literally contains "%23". That is the same pre-existing
-// double-encoding defect firewallIPSetEntryCIDRParam records on the IP set
-// route, and it lives in the client rather than in this rule.
+// must percent-encode — used to arrive still encoded and be escaped a second
+// time by DeleteCephPool's url.PathEscape, so Proxmox was asked for a pool
+// whose name literally contained "%23". That is FIXED: the handler now
+// decodes the segment (handlers/ceph.go) before the client sees it, so the
+// name the caller meant is the name Proxmox receives. The sibling defect on
+// the IP set route was fixed in the same change.
 //
-// Widening did not CAUSE it, but it does widen its REACH, and that is worth
-// stating plainly rather than filed under "pre-existing": before, a pool
-// named with one of those characters could only exist if something outside
-// Nexara had created it, so the defect needed a pre-existing pool to bite
-// on. Now POST /ceph/pools will create one, and the DELETE that follows
-// addresses the wrong name. Left for separate scoping; not asserted here,
-// because asserting it would freeze the defect as the spec.
+// Widening the rule did not cause that defect, but it did widen its reach
+// before the fix — POST /ceph/pools can create such a pool, where previously
+// only something outside Nexara could — which is why the two landed
+// together rather than the encoding being left for separate scoping.
 func TestCephPoolNameSurvivesThePathSegment(t *testing.T) {
 	const path = cephScope + "/pools/:pool_name"
 	prefix := strings.Replace(cephRoute(path), "store01", "", 1)
@@ -512,10 +510,24 @@ func TestCephPoolNameSurvivesThePathSegment(t *testing.T) {
 // The segment is sent RAW, and that is the case that matters: nothing
 // between the client and the router collapses a dot segment, so ".."
 // really does arrive as ".." and the pattern is the thing that stops it.
-// Sent percent-encoded it arrives as the literal text "%2E%2E" — a
-// different string, which this rule accepts and which is NOT a traversal,
-// because url.PathEscape re-escapes the percent on the way out and Proxmox
-// is asked for a pool named "%2E%2E".
+//
+// The percent-encoded form is a different string, and this rule does NOT
+// stop it — a claim two earlier versions of this comment both got wrong, in
+// opposite directions. What is actually true, traced through the code:
+//
+// Validation runs on the RAW segment. readSource (registry_params.go) reads
+// c.Params, and Fiber's UnescapePath is false, so Parameters.Validate never
+// sees a decoded value. This pattern ACCEPTS "%2E%2E" — "%" is not a dot, a
+// colon, a slash, a backslash or whitespace, so it satisfies the class. The
+// decode happens afterwards, in the handler (handlers/ceph.go), and the
+// value that then reaches proxmox.DeleteCephPool is "..", which
+// validatePathSegment refuses with a 400.
+//
+// So the chain is: pattern accepts -> handler decodes -> CLIENT refuses.
+// The gate for the encoded form is validatePathSegment at the choke point,
+// not this rule, and the cases below (".", "..", "...", "....") exercise
+// only the raw form. Do not read this comment as licence to drop the client
+// guard as belt-and-braces; it is the only thing standing there.
 func TestCephPoolDeleteStillRefusesATraversingName(t *testing.T) {
 	const path = cephScope + "/pools/:pool_name"
 	prefix := strings.Replace(cephRoute(path), "store01", "", 1)

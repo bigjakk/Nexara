@@ -176,14 +176,16 @@ func firewallOptionsParams() apischema.Properties {
 // The cidr format would reject that outright and turn a call that reaches
 // Proxmox today into a 400.
 //
-// (That double encoding is a real defect on this route — the client escapes
-// the value a second time on the way out, so Proxmox is asked for an entry
-// whose id contains a literal "%2F" — but it is a pre-existing one, and
-// fixing it means changing what the route accepts. Flagged for separate
-// scoping rather than smuggled into a migration.)
+// (That double encoding WAS a real defect on this route and is now fixed:
+// the handler decodes the raw segment before the client sees it, so an
+// entry id of "192.0.2.0/24" reaches Proxmox as itself rather than carrying
+// a literal "%2F". Every CIDR entry delete was broken until then — only
+// bare addresses worked.)
 //
 // The leading character class excludes "." so that "." and ".." cannot get
-// through; proxmox.DeleteFirewallIPSetEntry still runs validatePathSegment,
+// through; proxmox.DeleteFirewallIPSetEntry still guards the value —
+// validatePathSegmentAllowingSlash, since a decoded entry id legitimately
+// contains one slash —
 // and its own comment says why — cidr=".." addresses the IP SET, deleting
 // every entry while the audit row still reads as a single-entry change.
 var firewallIPSetEntryCIDRParam = apischema.Property{

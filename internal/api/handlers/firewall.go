@@ -598,7 +598,18 @@ func (h *NetworkHandler) DeleteFirewallIPSetEntry(c fiber.Ctx, p *apischema.Para
 	if err != nil {
 		return err
 	}
-	name, cidr := p.String("name"), p.String("cidr")
+	name := p.String("name")
+	// An entry id is a CIDR, so a correct client percent-encodes its slash and
+	// Fiber hands back exactly that: "192.0.2.0%2F24". Decoding is what makes
+	// the entry Proxmox receives the entry the caller meant — without it
+	// DeleteFirewallIPSetEntry escapes the "%" a second time and the request
+	// addresses an entry literally named "192.0.2.0%2F24", which is why no
+	// CIDR entry could be removed through this route at all. The set NAME is
+	// not decoded because its declared rule (pve-object-id) admits no escape.
+	cidr, err := accessParam(p.String("cidr"), "IP set entry")
+	if err != nil {
+		return err
+	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err

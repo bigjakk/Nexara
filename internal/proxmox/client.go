@@ -60,6 +60,15 @@ func validateNodeName(node string) error {
 // often a different endpoint with different permissions. DELETE
 // /nodes/{node}/network/.. is the worked example: it becomes DELETE
 // /nodes/{node}/network, Proxmox's "revert pending network config".
+//
+// The control-character refusal is not about the path — url.PathEscape encodes
+// those — but about where the value goes AFTERWARDS. Callers put it in a
+// TrackTask description and an audit row with %s, and view:audit is granted to
+// every Viewer by default, so a newline or an ANSI escape smuggled into a name
+// is text other people read. It became reachable when the API layer started
+// percent-DECODING these path parameters: the declarations match the value as
+// it arrives, and no pattern in the catalogue can see a control byte through a
+// "%0A". The sibling below makes the same refusal.
 func validatePathSegment(kind, value string) error {
 	if value == "" {
 		return fmt.Errorf("%w: %s is required", ErrInvalidInput, kind)
@@ -69,6 +78,61 @@ func validatePathSegment(kind, value string) error {
 	}
 	if strings.ContainsAny(value, `/\`) {
 		return fmt.Errorf("%w: %s %q must not contain a path separator", ErrInvalidInput, kind, value)
+	}
+	if hasControlChar(value) {
+		return fmt.Errorf("%w: %s %q contains a control character", ErrInvalidInput, kind, value)
+	}
+	return nil
+}
+
+// validatePathSegmentAllowingSlash is validatePathSegment for the one shape it
+// cannot express: a value that becomes exactly one segment of a Proxmox request
+// path after url.PathEscape, and whose own text legitimately contains a slash.
+//
+// A firewall IP set entry is the only such value in this client. Its id is a
+// CIDR — "192.0.2.0/24" — and the entry lives at
+// /cluster/firewall/ipset/{name}/{cidr}, so the slash has to reach Proxmox as
+// %2F rather than be refused; that is exactly what PVE's own UI sends, and
+// url.PathEscape produces it. The blanket separator ban validatePathSegment
+// makes would turn every CIDR entry into a 400.
+//
+// The slash still cannot be waved through unchecked, because Proxmox decodes
+// the escape before it resolves the path. The capture-server run that proved
+// it is recorded on forbiddenVolumeIDChars (client_storage.go): a volume id is
+// interpolated RAW, so "%2e%2e%2f" reached Proxmox byte-for-byte and decoded
+// to "../" there. That measures the far side, which is the half that matters —
+// an escape this client produces arrives at the same decoder. So the guard is
+// the per-component one
+// validateVolumeID makes — every "/"-delimited piece has to be a real name —
+// which refuses "../.." while taking "192.0.2.0/24".
+//
+// A "%" needs no exclusion here, unlike in validateVolumeID: that value is
+// interpolated raw, this one goes through url.PathEscape, which re-encodes the
+// percent so it arrives as the literal character the caller meant.
+func validatePathSegmentAllowingSlash(kind, value string) error {
+	if value == "" {
+		return fmt.Errorf("%w: %s is required", ErrInvalidInput, kind)
+	}
+	if strings.Contains(value, `\`) {
+		return fmt.Errorf("%w: %s %q must not contain a backslash", ErrInvalidInput, kind, value)
+	}
+	if hasControlChar(value) {
+		return fmt.Errorf("%w: %s %q contains a control character", ErrInvalidInput, kind, value)
+	}
+	components := strings.Split(value, "/")
+	// ONE slash, which is what "AllowingSlash" means: a CIDR is "addr/len" and
+	// an entry that is neither a CIDR nor an address is an alias name with no
+	// slash at all. Refusing the rest is about DESCENT rather than ascent — the
+	// per-component check below stops "../..", but "a/b/c/d" passes it and,
+	// once Proxmox decodes the escapes, lands the request three levels deeper
+	// than the one segment this value is positioned in.
+	if len(components) > 2 {
+		return fmt.Errorf("%w: %s %q has more than one path separator", ErrInvalidInput, kind, value)
+	}
+	for _, component := range components {
+		if component == "" || component == "." || component == ".." {
+			return fmt.Errorf("%w: %s %q has a bad path segment %q", ErrInvalidInput, kind, value, component)
+		}
 	}
 	return nil
 }
