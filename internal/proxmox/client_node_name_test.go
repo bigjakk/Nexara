@@ -24,10 +24,12 @@ import (
 // as the node, so "UPID:.:0:0:0:x::root@pam:" names the node ".". The UPID
 // guard cannot see it — that string holds no separator at all — and the two
 // GET task routes are gated on view:task, which the built-in Viewer role
-// holds. POST /api/v1/tasks is the second way in: it declares "node" as an
-// optional string with no pattern, and reconcileRunningTasks
-// (internal/collector/task_reconcile.go) replays the stored value through
-// GetTaskStatus unattended.
+// holds. POST /api/v1/tasks is the second way in: reconcileRunningTasks
+// (internal/collector/task_reconcile.go) replays its stored "node" through
+// GetTaskStatus unattended. That route carried no pattern when this was
+// written and now carries node-name-or-empty, which closes the route but not
+// the method — the collector, the scheduler and five other packages reach
+// these methods with no declaration in between.
 //
 // Every case drives an EXPORTED method rather than the validator. Asserting on
 // validateNodeName directly would still pass on the day someone drops the call

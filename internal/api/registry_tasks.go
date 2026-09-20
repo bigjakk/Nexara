@@ -179,7 +179,57 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 				Typetext:    "<running|completed|failed|stopped>",
 				Description: "Initial state. Omitted, the row is filed as running, which is what a just-dispatched task is.",
 			},
-			"node":      optString(63, "<name>", "Node the task runs on, as Proxmox names it."),
+			// Not a bare optString, unlike its neighbours: this value does
+			// not stay in the row. reconcileRunningTasks
+			// (internal/collector/task_reconcile.go) reads it back off every
+			// row still marked running and replays it through
+			// GetTaskStatus on each sync tick, with the server's own
+			// credentials and nobody watching — so a name stored here is a
+			// name the collector will keep sending to Proxmox, long after
+			// the request that filed it. It is also handed back to any
+			// view:task holder by the task listing.
+			//
+			// The client refuses a name that could leave its path segment
+			// (proxmox.validateNodeName), so the traversal is closed there
+			// rather than here. What this stops is the row existing at all,
+			// and the cost of not stopping it is worth stating precisely
+			// rather than dramatically: the write succeeds, every tick for
+			// the next 24 hours calls GetTaskStatus and throws the error
+			// away SILENTLY — task_reconcile.go's error branch has no log
+			// line, it just continues — and at staleTaskGrace the row is
+			// flipped to failed/"vanished" and stops being read. So the
+			// damage is a day of futile calls and then a bogus failure in
+			// the activity feed for good, not an unbounded loop. Note also
+			// which layer refuses what: a traversal never reaches Proxmox
+			// at all (validatePathSegment answers locally), while a merely
+			// ill-formed name like "-pve-01" does reach the wire and comes
+			// back as a Proxmox error.
+			//
+			// Every other parameter in the registry that holds ONE node name
+			// already carries this rule; this one was the exception. The
+			// plural ones (haNodesParam, the SDN and vm-import node lists)
+			// carry no rule because they are comma-separated, which a
+			// single-value format cannot express.
+			//
+			// emptyOrNodeName rather than the format, because "" is what the
+			// column has always stored for a task with no node
+			// (migrations/000008_task_history.up.sql defaults it) and
+			// apischema counts "" as a value the caller supplied, which
+			// every format rejects.
+			"node": {
+				Type:      apischema.String,
+				Optional:  true,
+				Pattern:   emptyOrNodeName,
+				MaxLength: apischema.Ptr(63),
+				Typetext:  "<name>",
+				// Says what "" does, which every other -or-empty site states
+				// and which matters more here than at most of them: the
+				// client refuses an empty node outright, so a row filed with
+				// one can never be reconciled — it sits running until
+				// staleTaskGrace and is then marked failed.
+				Description: "Node the task runs on, as Proxmox names it. Empty or omitted files the row " +
+					"with no node, which the collector cannot then reconcile.",
+			},
 			"task_type": optString(128, "<type>", "Proxmox task type, e.g. qmstart."),
 		},
 		Handler: h.Create,

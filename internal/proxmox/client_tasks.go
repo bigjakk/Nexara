@@ -29,9 +29,12 @@ import (
 // /nodes/{node}/certificates/custom, PVE's "remove the custom certificate". The
 // two GETs are reachable from a route that grants only view:task, which the
 // built-in Viewer role holds; and POST /api/v1/tasks (manage:task) stores a
-// caller-supplied upid and node that reconcileRunningTasks later replays
-// through GetTaskStatus unattended, so the traversal need not even be issued by
-// the caller who wrote it.
+// caller-supplied upid — still declared with no pattern, only a length cap —
+// that reconcileRunningTasks later replays through GetTaskStatus unattended,
+// so the traversal need not even be issued by the caller who wrote it. (The
+// node beside it carried no pattern too until registry_tasks.go gained
+// node-name-or-empty; the upid did not change, and this guard is what holds
+// it.)
 //
 // The check belongs HERE rather than at the handler, and rather than in the
 // route declaration, for the two reasons validatePBSTaskUPID records for the

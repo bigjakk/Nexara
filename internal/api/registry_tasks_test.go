@@ -274,3 +274,98 @@ func TestEveryTaskEndpointIsDocumented(t *testing.T) {
 		}
 	}
 }
+
+// TestTaskCreateNodeIsHeldToTheNodeNameRule pins the one node parameter in the
+// registry that used to carry no rule at all.
+//
+// `node` was a bare optString(63) here while every other node parameter in the
+// registry carried node-name or its sentinel twin, and this is the worst place
+// for that exception: the value does not stay in the row it is filed on.
+// reconcileRunningTasks (internal/collector/task_reconcile.go) reads it back
+// off every row still marked running and replays it through GetTaskStatus on
+// each sync tick, with the server's own credentials and nobody watching, and
+// the task listing hands it to any view:task holder.
+//
+// The traversal half is closed at the client — proxmox.validateNodeName
+// refuses a value that could leave its path segment, and refuses it there
+// rather than here so that the collector and the scheduler inherit it too.
+// What this declaration stops is the ROW. Without it the write succeeds, the
+// collector then calls GetTaskStatus once per tick and discards the error
+// silently — task_reconcile.go's error branch has no log line — and at
+// staleTaskGrace (24h) the row is flipped to failed/"vanished". So the cost is
+// a day of futile calls and a bogus failure left in the activity feed, not an
+// unbounded loop.
+//
+// The empty string has to stay acceptable, which is why this is the sentinel
+// twin and not the format: task_history.node is NOT NULL DEFAULT ”
+// (migrations/000008_task_history.up.sql) and apischema counts "" as a value
+// the caller supplied, which every format rejects.
+func TestTaskCreateNodeIsHeldToTheNodeNameRule(t *testing.T) {
+	e := declaredEndpoint(t, fiber.MethodPost, taskHistoryScope)
+
+	for _, tt := range []struct {
+		name string
+		node string
+		want int
+		why  string
+	}{
+		{name: "a real node name", node: `"pve-01"`, want: fiber.StatusNoContent,
+			why: "the ordinary case, and the control that stops this test passing by refusing everything"},
+		// node-name is deliberately LOOSER than PVE's own rule: it admits a
+		// dot (catalogue.go's node-name Divergence). This is the value
+		// validateNodeName used to 500 on, so it is the case that catches
+		// someone "tightening" this site to PVE's literal class.
+		{name: "a dotted name", node: `"pve..01"`, want: fiber.StatusNoContent,
+			why: "the catalogue's documented divergence; refusing it would 400 a name PVE accepts"},
+		{name: "the empty sentinel", node: `""`, want: fiber.StatusNoContent,
+			why: "the column's own default; refusing it would 400 a request that has always worked"},
+		{name: "omitted", node: "", want: fiber.StatusNoContent,
+			why: "optional, and absent is not the same as empty"},
+		{name: "a bare dot", node: `"."`, want: fiber.StatusBadRequest,
+			why: "a segment that disappears when the far side normalises the path"},
+		{name: "a traversal", node: `".."`, want: fiber.StatusBadRequest,
+			why: "the same, one level up"},
+		{name: "a separator", node: `"pve-01/x"`, want: fiber.StatusBadRequest,
+			why: "two segments where the path has room for one"},
+		// NOT the %2e%2e-decodes-on-the-far-side finding: that one is about a
+		// value interpolated RAW (forbiddenVolumeIDChars, client_storage.go).
+		// Here the body is JSON, so nothing percent-decodes it, and on replay
+		// GetTaskStatus writes url.PathEscape(node), which re-encodes the "%"
+		// to "%25" — Proxmox would receive a literal percent in a name, not a
+		// separator. What refuses it is simply the charset.
+		{name: "a percent", node: `"pve-01%2Fx"`, want: fiber.StatusBadRequest,
+			why: "a percent is outside node-name's charset; on this route it was never an escape"},
+		// Nothing but the newline: "pve-01\nX-Evil: 1" would also be refused
+		// for the space and the colon, so it could not show the newline is
+		// what does it.
+		{name: "a newline", node: `"pve-01\n"`, want: fiber.StatusBadRequest,
+			why: "the value is echoed to any view:task holder by the task listing"},
+		{name: "a leading dash", node: `"-pve-01"`, want: fiber.StatusBadRequest,
+			why: "node-name requires an alphanumeric at both ends"},
+		// The one case the PATTERN cannot refuse — node-name-or-empty carries
+		// no length bound — so this is the only witness for the MaxLength,
+		// which this site now spells by hand instead of inheriting from
+		// optString.
+		{name: "over the cap", node: `"` + strings.Repeat("n", 64) + `"`, want: fiber.StatusBadRequest,
+			why: "MaxLength 63 refuses it, not the pattern"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"task_cluster_id":"` + testClusterID + `","upid":"UPID:pve-01:0:0:0:qmstart:100:root@pam:"`
+			if tt.node != "" {
+				body += `,"node":` + tt.node
+			}
+			body += `}`
+
+			cap := &capture{}
+			probe := e
+			probe.Handler = cap.handler()
+			probe.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
+			app := newRegistryApp(t, noAuth(), probe)
+
+			status, env := send(t, app, jsonRequest(http.MethodPost, taskHistoryScope, body))
+			if status != tt.want {
+				t.Fatalf("node=%s: status = %d (%q), want %d — %s", tt.node, status, env.Message, tt.want, tt.why)
+			}
+		})
+	}
+}

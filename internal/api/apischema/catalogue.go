@@ -665,12 +665,13 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 	// come apart badly:
 	//
 	//   - node-name-or-empty was published as "let Proxmox choose the
-	//     node". It has 12 sites and that is true at NONE of them. Clone
+	//     node". It has 13 sites and that is true at NONE of them. Clone
 	//     keeps the guest on the source node, evacuate lets Nexara score a
 	//     target per guest, migrations keeps it where it is, virtio-win
 	//     means any online node, query-url-metadata picks the first online
-	//     one, the two backup-job routes clear a restriction, and the two
-	//     SDN controller routes leave it unset with no node chosen at all.
+	//     one, the two backup-job routes clear a restriction, the two
+	//     SDN controller routes leave it unset with no node chosen at all,
+	//     and POST /tasks files a row the collector then cannot reconcile.
 	//   - uuid-or-empty was published as "clears the association". Wrong
 	//     at 3 of 12, and one of those contradicted its own Description in
 	//     the same payload cell: PUT …/maintenance-windows/:id says
@@ -712,7 +713,7 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 	}
 
 	return []RuleDoc{
-		// Neutral: what "" does differs at all 12 sites. Each states it.
+		// Neutral: what "" does differs at all 13 sites. Each states it.
 		derive("node-name",
 			"a node name, or the empty string.",
 			`The empty string means something different on every route that carries it — "keep it on `+
@@ -755,7 +756,7 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 				`Proxmox names the account "default" — which its Description states, because a single `+
 				`site is the WEAKEST case for putting a meaning here, not the strongest. `+
 				`node-name-or-empty was published with one route's meaning and turned out to be true at `+
-				`none of the twelve it ended up with, and pve-object-id is the widest-reaching pattern `+
+				`none of the thirteen it ended up with, and pve-object-id is the widest-reaching pattern `+
 				`here — its own Permits line lists firewall aliases and IP sets, SDN objects, metric `+
 				`server sections and PVE backup job ids — so a second site is as likely to read "" as a `+
 				`listing filter. Nothing about "leaves the name unset" generalises past the one route `+

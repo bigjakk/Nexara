@@ -76,7 +76,7 @@ import (
 // Adding a route that takes pveObjectNameParam("…") or emptyOrNodeName does not
 // move this list at all, and neither does deleting one, because the shared
 // declaration is what carries the rule. It moves only when a route declares its
-// OWN inline rule reference, which 8 of the 37 entries below do — the ones whose
+// OWN inline rule reference, which 9 of the 38 entries below do — the ones whose
 // container is a register…Endpoints function rather than a named parameter — and
 // then the failure names which of the five things happened.
 var ruleReferenceSites = []string{
@@ -109,6 +109,7 @@ var ruleReferenceSites = []string{
 	"registry_rolling_update.go createRollingUpdateParams [notify_channel_id] = uuid-or-empty",
 	"registry_sdn.go sdnControllerSettings [node] = node-name-or-empty",
 	"registry_sdn.go sdnSubnetIDParam = pve-object-id-colon",
+	"registry_tasks.go registerTaskEndpoints [node] = node-name-or-empty",
 	"registry_virtio_win.go registerVirtioWinEndpoints [node] = node-name-or-empty",
 	"registry_virtio_win.go registerVirtioWinEndpoints [storage] = storage-id-or-empty",
 	"registry_vm_import.go registerVMImportEndpoints [node] = node-name-or-empty",
@@ -464,7 +465,7 @@ type patternSpelling struct {
 //
 // An identifier is resolved one hop, through the package-level bindings that
 // hold a rule — emptyOrNodeName, emptyOrUUID, pbsSafeIDPattern and the rest.
-// That hop is not optional: six such bindings carry a rule to 23 of the 37
+// That hop is not optional: six such bindings carry a rule to 24 of the 38
 // sites in ruleReferenceSites, and recording only the binding would leave every
 // one of its use sites free to be replaced by a literal without the guard
 // noticing — the same defect one layer down, and the more likely one, because

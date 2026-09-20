@@ -58,12 +58,16 @@ func validateVMID(vmid int) error {
 //     catch that — validateTaskUPID sees a string with no separator in it, and
 //     passes — and the two GET task routes are gated on view:task, which the
 //     built-in Viewer role holds.
-//   - POST /api/v1/tasks (registry_tasks.go) declares "node" as an optional
-//     string with a length cap and NO pattern, files the row as running, and
-//     reconcileRunningTasks (internal/collector/task_reconcile.go) replays it
-//     through GetTaskStatus on every sync tick with the server's own
-//     credentials and nobody watching. As with a UPID, the traversal need not
-//     be issued by the caller who wrote it.
+//   - POST /api/v1/tasks (registry_tasks.go) files a caller-supplied "node" on
+//     a row marked running, and reconcileRunningTasks
+//     (internal/collector/task_reconcile.go) replays it through GetTaskStatus
+//     on every sync tick with the server's own credentials and nobody
+//     watching. As with a UPID, the traversal need not be issued by the caller
+//     who wrote it. That route declared "node" as an optional string with a
+//     length cap and NO pattern when this guard was written; it now carries
+//     node-name-or-empty. The guard stays regardless — it is the choke point
+//     for 144 call sites across eight packages, most of which reach these
+//     methods with no route declaration in between at all.
 //
 // Delegating also fixes the status code. This was the one member of the family
 // returning a bare fmt.Errorf instead of wrapping ErrInvalidInput, and
