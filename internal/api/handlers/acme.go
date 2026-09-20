@@ -70,6 +70,49 @@ func (h *ACMEHandler) ListAccounts(c fiber.Ctx, p *apischema.Params) error {
 	return RespondItems(c, accounts)
 }
 
+// defaultACMEAccountName is the name Proxmox gives an ACME account that is
+// registered without one, and therefore the name such an account really exists
+// under once POST .../acme/accounts returns.
+//
+// Upstream says so twice (pve-manager, read 2026-09-20):
+//
+//   - PVE/CertHelpers.pm, standard option 'pve-acme-account-name':
+//     `optional => 1, default => 'default', format => 'pve-configid'`.
+//   - PVE/API2/ACMEAccount.pm, register_method 'register_account' — the POST
+//     /cluster/acme/account this handler dispatches:
+//     `my $account_name = extract_param($param, 'name') // 'default';`
+//
+// That `//` is defined-or, not empty-or: it fires only when the form key is
+// ABSENT. What turns an EMPTY name into an absent one is proxmox.CreateACMEAccount
+// setting the key only `if params.Name != ""`. Drop that guard and an empty name
+// arrives DEFINED, fails the pve-configid format (`qr/[a-z][a-z0-9_-]+/i` in
+// pve-common src/PVE/JSONSchema.pm — note the /i, so uppercase is legal too;
+// what an empty name fails is the two-character minimum) before
+// register_account's body runs, and the route
+// starts 400ing a request that has always worked. It is not this constant that
+// goes wrong — the handler returns at the CreateACMEAccount error and records
+// nothing — but the guard is load-bearing all the same, so
+// TestCreateACMEAccountOmitsAnEmptyName pins it.
+const defaultACMEAccountName = "default"
+
+// acmeAccountNameForAudit is the account name to RECORD for a create.
+//
+// An omitted or empty name is valid input on this route — registry_acme.go
+// declares it optional and permits "" — so the four sinks below used to record
+// the "" the caller sent, naming no account at all while the account existed
+// under defaultACMEAccountName. view:audit is granted to every Viewer by
+// default, so that row is the one most readers see.
+//
+// The substitution is paired with the name_defaulted detail at the call site
+// rather than left implicit: "Proxmox named it" and "the caller asked for
+// default" are different facts, and only the flag separates them.
+func acmeAccountNameForAudit(requested string) string {
+	if requested == "" {
+		return defaultACMEAccountName
+	}
+	return requested
+}
+
 // CreateAccount handles POST /clusters/:cluster_id/acme/accounts.
 func (h *ACMEHandler) CreateAccount(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
@@ -90,17 +133,27 @@ func (h *ACMEHandler) CreateAccount(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
+	// The name the account exists under, which for an omitted or empty
+	// req.Name is not req.Name. Computed once so the four sinks below cannot
+	// drift apart.
+	name := acmeAccountNameForAudit(req.Name)
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
 		Node:         extractNodeFromUPID(upid),
 		ResourceType: "acme_account",
-		ResourceID:   req.Name,
+		ResourceID:   name,
 		Action:       "created",
 		UPID:         upid,
-		Description:  "Create ACME account " + req.Name,
-		Extra:        map[string]any{"name": req.Name, "contact": req.Contact},
+		Description:  "Create ACME account " + name,
+		Extra: map[string]any{
+			"name": name,
+			// Whether the name above is Proxmox's default rather than one the
+			// caller chose. Without it the row cannot tell the two apart.
+			"name_defaulted": req.Name == "",
+			"contact":        req.Contact,
+		},
 	})
-	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_account", req.Name, "created")
+	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_account", name, "created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"upid": upid})
 }
 
