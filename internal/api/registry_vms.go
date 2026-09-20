@@ -361,6 +361,11 @@ var (
 // cannot carry a slash. PVE's replacement is "PUT /pools?poolid=…". Of the
 // six routes taking this parameter, SetVMPool is the only one affected —
 // the other five pass `pool` as a form field and handle nesting fine.
+//
+// What that failure LOOKS like changed once UpdateResourcePool gained
+// validatePathSegment: the separator is now refused at the client, so the
+// caller gets a local 400 naming it instead of whatever Proxmox made of a
+// truncated path. Better, and still not the fix.
 func optPoolID(description string) apischema.Property {
 	p := optString(100, "<pool>", description)
 	p.Pattern = emptyOrPoolID

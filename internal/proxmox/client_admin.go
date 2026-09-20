@@ -50,7 +50,62 @@ func (c *Client) CreateResourcePool(ctx context.Context, params CreatePoolParams
 	}
 	return nil
 }
+
+// --- Addressing an existing resource pool ---
+//
+// GetResourcePool, UpdateResourcePool and DeleteResourcePool each interpolate
+// a caller-supplied pool id into the request PATH, so all three take
+// validatePathSegment: the same guard validateNodeName and validateTaskUPID
+// delegate to, with the same deliberate looseness — no charset, no length cap.
+//
+// They must NOT take a pool-NAME rule. These three address something PVE
+// already minted, and verify_poolname (pve-access-control) is wide: a leading
+// dot or dash is a legal pool name, and a pool created at the PVE console can
+// carry one. Refusing it here is how an object becomes undeletable, which is
+// the trap poolIDParam (internal/api/registry_pools.go) already documents from
+// the declaration side.
+//
+// What validatePathSegment adds over that width is the pair of values that are
+// not names at all. url.PathEscape encodes "/" but leaves "." and ".." alone
+// entirely, so those two travel raw and resolve upward the moment pveproxy
+// normalises the path:
+//
+//	poolID="."   GET /pools     the pool COLLECTION, whose body is a list
+//	                            where a detail object is expected
+//	poolID=".."  DELETE /pools  the collection endpoint, with none of the
+//	                            arguments its own delete form expects
+//
+// Neither is believed to reach a destructive PVE handler today: PVE's own
+// collection-level delete takes the pool id as a PARAMETER, and this client
+// sends none, so a DELETE landing on /pools is a parameter error rather than a
+// mass delete. That is a reading of the PVE API and not something measured
+// against a live cluster from here, which is exactly why it is not the
+// argument for closing the gap — the argument is that a request resolving onto
+// an endpoint the caller did not name is not a thing to reason about case by
+// case. It is closed here rather than at the route, for the reason recorded
+// on the snapshot address methods (client_guests.go, "Addressing an existing
+// snapshot") and on validateTaskUPID: a check in the CALLER is one the next
+// caller inherits nothing from. Until now the ONLY thing refusing anything on
+// these three was apischema's pve-poolid-segment in internal/api/registry_pools.go —
+// which stops a slash, and matches "." and ".." exactly as it matches any
+// other name.
+//
+// validateAccessName (client_access.go) is the precedent and the proof that
+// this is the house rule rather than a preference: PVE group and role ids are
+// the same charset in the same kind of path slot, and that function refuses
+// ".", ".." by name with the same normalisation reasoning. Pool ids were the
+// one family carrying that charset with no client-side guard at all.
+//
+// CreateResourcePool is deliberately not in this list. Its pool id is a form
+// field — form.Set("poolid", …) — not a path segment, so nesting is legal
+// there and no traversal is possible. That asymmetry is the same one
+// poolCreateIDParam records: a pool PVE will happily create under a name this
+// URL shape cannot address.
+
 func (c *Client) GetResourcePool(ctx context.Context, poolID string) (*ResourcePoolDetail, error) {
+	if err := validatePathSegment("pool id", poolID); err != nil {
+		return nil, err
+	}
 	path := "/pools/" + url.PathEscape(poolID)
 	var pool ResourcePoolDetail
 	if err := c.do(ctx, path, &pool); err != nil {
@@ -59,6 +114,9 @@ func (c *Client) GetResourcePool(ctx context.Context, poolID string) (*ResourceP
 	return &pool, nil
 }
 func (c *Client) UpdateResourcePool(ctx context.Context, poolID string, params UpdatePoolParams) error {
+	if err := validatePathSegment("pool id", poolID); err != nil {
+		return err
+	}
 	form := url.Values{}
 	if params.Comment != nil {
 		form.Set("comment", *params.Comment)
@@ -79,6 +137,9 @@ func (c *Client) UpdateResourcePool(ctx context.Context, poolID string, params U
 	return nil
 }
 func (c *Client) DeleteResourcePool(ctx context.Context, poolID string) error {
+	if err := validatePathSegment("pool id", poolID); err != nil {
+		return err
+	}
 	path := "/pools/" + url.PathEscape(poolID)
 	if err := c.doDelete(ctx, path, nil); err != nil {
 		return fmt.Errorf("delete resource pool %s: %w", poolID, err)

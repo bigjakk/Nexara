@@ -623,13 +623,60 @@ func patternRules() []RuleDoc {
 			Origin:       OriginProxmox,
 			Upstream:     "pve-access-control src/PVE/AccessControl.pm verify_poolname",
 			UpstreamRule: `^[A-Za-z0-9\.\-_]+(?:/[A-Za-z0-9\.\-_]+){0,2}\z`,
-			Divergence: "STRICTER by design, and not a judgement about pool names. A nested id contains a " +
-				"slash, so it matches neither a Fiber path segment nor the \"/pools/{poolid}\" form the " +
-				"client builds — a nested pool is unreachable through the per-pool routes whatever rule " +
-				"they carry. The fix is the query form PVE moved to (\"PUT /pools?poolid=…\"), not a looser " +
-				"rule here. The routes that are NOT bound by a path segment — POST /pools, and the `pool` " +
-				"body parameter — take pve-poolid whole.",
-			Accepts: []string{"infra", ".hidden", "-lead", "a.b_c-d"},
+			Divergence: "STRICTER by design in ONE respect, and not a judgement about pool names. A nested " +
+				"id contains a slash, so it matches neither a Fiber path segment nor the " +
+				"\"/pools/{poolid}\" form the client builds — a nested pool is unreachable through the " +
+				"per-pool routes whatever rule they carry. The fix is the query form PVE moved to " +
+				"(\"PUT /pools?poolid=…\"), not a looser rule here. The routes that are NOT bound by a " +
+				"path segment — POST /pools, and the `pool` body parameter — take pve-poolid whole. " +
+				"IT IS NOT STRICTER ABOUT \".\" AND \"..\", which it matches like any other name; the " +
+				"witnesses below say so on purpose, and the note above them says where they are refused.",
+			// "." and ".." are witnesses rather than an oversight, and they
+			// are ACCEPTS because that is what this rule does with them.
+			//
+			// Reading the charset and concluding that the pool path routes
+			// are closed to traversal is the mistake they exist to stop:
+			// url.PathEscape leaves both alone, so "/pools/.." resolves onto
+			// "/pools" the moment pveproxy normalises the path. What refuses
+			// them is proxmox.validatePathSegment, called by the three
+			// addressing methods in internal/proxmox/client_admin.go — added
+			// when this was found, because until then NOTHING did and this
+			// vacuous rule was the only gate. The client is the right layer
+			// for it: a rule here is one only the HTTP callers inherit.
+			//
+			// # The comparison that decides this, and the follow-up it names
+			//
+			// registry_access.go faced the identical question — group and
+			// role ids are this same charset in this same kind of path slot
+			// — and answered it on BOTH layers: proxmox.validateAccessName
+			// refuses the two values by name, AND accessNamePattern carves
+			// them out of the declaration with
+			// `^(?:[A-Za-z0-9._-]{3,}|[A-Za-z0-9_-][A-Za-z0-9._-]?|\.[A-Za-z0-9_-])$`,
+			// three branches because RE2 has no negative lookahead. So the
+			// second layer is not unavailable here, it is unclaimed.
+			//
+			// It stays unclaimed for now, deliberately. Pasting that regex
+			// into this entry makes it character-for-character
+			// accessNamePattern — one rule spelled in two files, which is
+			// the exact duplication this catalogue exists to prevent and
+			// which neither TestNoInlinePatternIsWrittenTwice nor
+			// TestNoInlinePatternRestatesACataloguedRule would see, because
+			// the access copy reaches its sites through a const identifier
+			// rather than a literal. It would also make declaredRuleSites
+			// resolve EIGHT access-domain parameters to a rule named
+			// "pve-poolid-segment" — six through accessNameParam, plus the
+			// groupid and roleid properties that carry the pattern inline. The right move is to PROMOTE the shared
+			// carve-out to one catalogue entry under a domain-neutral name
+			// and point both domains at it; that is a two-domain refactor,
+			// not a line in this entry, and the hazard is closed at the
+			// client in the meantime.
+			//
+			// Note also what tightening here would NOT close: pve-poolid
+			// accepts both too, so PVE will still mint a pool named "."
+			// through POST /pools that no URL of this shape can address.
+			// That pairing is already open for nesting, by the decision the
+			// paragraph above records.
+			Accepts: []string{"infra", ".hidden", "-lead", "a.b_c-d", ".", ".."},
 			Rejects: []string{"", "infra/prod", "infra prod", "a+b"},
 		},
 	}
