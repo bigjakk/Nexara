@@ -227,11 +227,19 @@ func TestExecuteSnapshot_DispatchesNamesProxmoxAccepts(t *testing.T) {
 		resourceType string
 		params       string
 		wantSnapPart string
+		// wantGuestPath is the guest-family segment the request must carry.
+		// Asserting the name alone left the resource_type -> family binding
+		// unchecked: scheduledResourceTypes maps the wire value to a family
+		// and executeSnapshot switches the family to a client call, so the
+		// two halves can be transposed. Swap the map's values and a container
+		// snapshot goes to the qemu endpoint while every snapname assertion
+		// still passes.
+		wantGuestPath string
 	}{
-		{"an ordinary VM name", "vm", `{"snap_name":"nightly"}`, "snapname=nightly"},
-		{"the VM's own non-reserved name", "vm", `{"snap_name":"vzdump"}`, "snapname=vzdump"},
-		{"the container's own non-reserved name", "ct", `{"snap_name":"pending"}`, "snapname=pending"},
-		{"the auto-generated fallback", "vm", `{}`, "snapname=auto-"},
+		{"an ordinary VM name", "vm", `{"snap_name":"nightly"}`, "snapname=nightly", "/qemu/100/"},
+		{"the VM's own non-reserved name", "vm", `{"snap_name":"vzdump"}`, "snapname=vzdump", "/qemu/100/"},
+		{"the container's own non-reserved name", "ct", `{"snap_name":"pending"}`, "snapname=pending", "/lxc/100/"},
+		{"the auto-generated fallback", "vm", `{}`, "snapname=auto-", "/qemu/100/"},
 	}
 
 	for _, tt := range tests {
@@ -257,6 +265,10 @@ func TestExecuteSnapshot_DispatchesNamesProxmoxAccepts(t *testing.T) {
 			}
 			if !strings.Contains((*seen)[0], tt.wantSnapPart) {
 				t.Errorf("request = %q, want it to carry %q", (*seen)[0], tt.wantSnapPart)
+			}
+			if !strings.Contains((*seen)[0], tt.wantGuestPath) {
+				t.Errorf("resource_type %q dispatched to %q, want the %q endpoint — the wire value "+
+					"reached the wrong guest family", tt.resourceType, (*seen)[0], tt.wantGuestPath)
 			}
 		})
 	}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -651,6 +653,48 @@ func (s *Scheduler) finishTaskRun(ctx context.Context, task db.ScheduledTask, no
 	}
 }
 
+// scheduledGuestFamily is the guest family a stored resource_type names.
+//
+// It starts at 1 so that the zero value — what the map lookup below yields for
+// a resource_type nothing here handles — matches neither branch and falls to
+// the default. A family of 0 that happened to mean "VM" would turn an unknown
+// type into a qemu call on whatever resource_id was stored.
+type scheduledGuestFamily int
+
+const (
+	guestFamilyVM scheduledGuestFamily = iota + 1
+	guestFamilyCT
+)
+
+// scheduledResourceTypes is the resource_type vocabulary this scheduler has a
+// branch for, and the single place it is written down.
+//
+// It exists because a value outside it fails in the worst way available: the
+// row is accepted at creation, the UI shows the schedule as armed, and every
+// fire from then on returns "unsupported resource type" into last_error where
+// only someone already looking finds it. The API declaration that admits the
+// value is a separate copy of this list — internal/api/registry_schedules.go
+// carries it as the resource_type Enum — and
+// TestScheduleResourceTypeVocabulary pins the two against each other, for the
+// reason validScheduleActions records for the action vocabulary: two copies of
+// one list drift, and this one drifted to "lxc" in the published docs while
+// the branches below only ever matched "ct".
+//
+// "ct" rather than Proxmox's own "lxc" because "ct" is what is STORED. The SPA
+// has always sent it (SchedulePanel.tsx), these branches have always read it,
+// and internal/api/handlers.snapshotScheduleGuestKind keys on it; renaming the
+// wire value would strand every scheduled_tasks row an install already holds.
+var scheduledResourceTypes = map[string]scheduledGuestFamily{
+	"vm": guestFamilyVM,
+	"ct": guestFamilyCT,
+}
+
+// ResourceTypeKeys returns the resource types a scheduled task may name,
+// sorted. Exported for the guard in package api that compares them against the
+// declared Enum; package api imports this package rather than the other way
+// round, so the comparison reads the list from here.
+func ResourceTypeKeys() []string { return slices.Sorted(maps.Keys(scheduledResourceTypes)) }
+
 func (s *Scheduler) executeSnapshot(ctx context.Context, client *proxmox.Client, task db.ScheduledTask) error {
 	var params snapshotParams
 	if err := json.Unmarshal(task.Params, &params); err != nil {
@@ -670,10 +714,10 @@ func (s *Scheduler) executeSnapshot(ctx context.Context, client *proxmox.Client,
 
 	var upid string
 	var err error
-	switch task.ResourceType {
-	case "vm":
+	switch scheduledResourceTypes[task.ResourceType] {
+	case guestFamilyVM:
 		upid, err = client.CreateVMSnapshot(ctx, task.Node, mustAtoi(task.ResourceID), sp)
-	case "ct":
+	case guestFamilyCT:
 		upid, err = client.CreateCTSnapshot(ctx, task.Node, mustAtoi(task.ResourceID), sp)
 	default:
 		return fmt.Errorf("unsupported resource type for snapshot: %s", task.ResourceType)
@@ -690,10 +734,10 @@ func (s *Scheduler) executeReboot(ctx context.Context, client *proxmox.Client, t
 	vmid := mustAtoi(task.ResourceID)
 	var upid string
 	var err error
-	switch task.ResourceType {
-	case "vm":
+	switch scheduledResourceTypes[task.ResourceType] {
+	case guestFamilyVM:
 		upid, err = client.RebootVM(ctx, task.Node, vmid)
-	case "ct":
+	case guestFamilyCT:
 		upid, err = client.RebootCT(ctx, task.Node, vmid)
 	default:
 		return fmt.Errorf("unsupported resource type for reboot: %s", task.ResourceType)

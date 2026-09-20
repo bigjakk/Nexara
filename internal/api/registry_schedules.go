@@ -61,11 +61,21 @@ var scheduleParamsParam = apischema.Property{
 // manage:schedule on any one cluster authorized a write to every scheduled task
 // in the install.
 //
-// The `action` Enum is the handler's own validScheduleActions map restated one
-// layer earlier, and unlike a Proxmox vocabulary it is safe to restate: the
-// values select a branch in Nexara's OWN scheduler (internal/scheduler), so an
-// unlisted value is not a call Proxmox would reject but a row nothing will ever
-// execute. TestScheduleActionVocabulary pins the two lists against each other.
+// The create body carries TWO vocabularies — `action` and `resource_type` —
+// and both are restated here from the code behind them. Unlike a Proxmox
+// vocabulary that is safe: the values select a branch in Nexara's OWN scheduler
+// (internal/scheduler), so an unlisted value is not a call Proxmox would reject
+// but a row nothing will ever execute. That is the worst failure available on
+// this table, because it is invisible at the moment the caller could still fix
+// it — the row is stored, the schedule reads as armed, and the refusal lands on
+// every fire in last_error.
+//
+// `action` restates the handler's validScheduleActions map;
+// TestScheduleActionVocabulary pins the two. `resource_type` restates
+// scheduler.scheduledResourceTypes, and carried no Enum at all until the
+// published Typetext ("<vm|lxc>") was found to be naming a value the scheduler
+// has never had a branch for; TestScheduleResourceTypeVocabulary pins the
+// declaration, the scheduler and handlers.snapshotScheduleGuestKind together.
 func registerScheduleEndpoints(reg *Registry, h *handlers.ScheduleHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
@@ -75,13 +85,28 @@ func registerScheduleEndpoints(reg *Registry, h *handlers.ScheduleHandler) {
 		Group:       "Tasks",
 		Permissions: clusterCheck("manage", "schedule"),
 		Parameters: clusterParams(apischema.Properties{
+			// The Enum is scheduler.scheduledResourceTypes restated one
+			// layer earlier, on the same terms as `action` below, and it
+			// closes the same hole from the other side: without it any
+			// string of 32 characters or fewer was stored, and the value
+			// this parameter's own Typetext told callers to send — "lxc",
+			// which is Proxmox's word for the guest type — was one the
+			// scheduler has no branch for. Such a row is accepted, shows in
+			// the UI as armed, and then fails on EVERY fire with
+			// "unsupported resource type" into last_error.
+			//
+			// "ct" and not "lxc" because "ct" is what is stored: the SPA has
+			// always sent it, both scheduler switches have always read it,
+			// and handlers.snapshotScheduleGuestKind keys on it. Correcting
+			// the docs to match the system leaves every existing row valid;
+			// correcting the system to match the docs would strand them.
 			"resource_type": {
-				Type:      apischema.String,
-				MinLength: apischema.Ptr(1),
-				MaxLength: apischema.Ptr(32),
-				Typetext:  "<vm|lxc>",
-				Description: "Kind of object the task acts on. Stored verbatim and read back by the " +
-					"scheduler when the task fires.",
+				Type:     apischema.String,
+				Enum:     []string{"vm", "ct"},
+				Typetext: "<vm|ct>",
+				Description: "Kind of object the task acts on — a VM or a container. Stored verbatim and " +
+					"read back by the scheduler when the task fires, which is why it is the " +
+					"scheduler's spelling (\"ct\") and not Proxmox's (\"lxc\").",
 			},
 			"resource_id": {
 				Type:        apischema.String,

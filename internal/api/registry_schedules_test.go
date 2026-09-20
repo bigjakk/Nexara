@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/handlers"
+	"github.com/bigjakk/nexara/internal/scheduler"
 )
 
 // scheduleRouteCount is how many endpoints registerScheduleEndpoints declares.
@@ -98,6 +99,97 @@ func TestScheduleActionVocabulary(t *testing.T) {
 	if !slices.Equal(declaredEnum, want) {
 		t.Errorf("the declared action enum is %v but handlers.validScheduleActions carries %v — an action "+
 			"in one and not the other is a schedule nothing will ever execute", declaredEnum, want)
+	}
+}
+
+// TestScheduleResourceTypeVocabulary pins the declared resource_type Enum
+// against the two places the stored value is read back.
+//
+// This is the same shape as TestScheduleActionVocabulary and it is here
+// because the drift it guards actually happened. resource_type carried no Enum
+// at all — any string of 32 characters or fewer was stored — while its
+// published Typetext read "<vm|lxc>". "lxc" is Proxmox's word for the guest
+// type and it is not the scheduler's: both switches in
+// internal/scheduler/scheduler.go match "vm" and "ct" and return "unsupported
+// resource type" for anything else. A caller following the docs therefore
+// created a schedule that was accepted, shown as armed, and failed on EVERY
+// fire into last_error, where nothing surfaces it.
+//
+// Nothing here writes the vocabulary down. The declaration is read from the
+// registry, the scheduler's branches from scheduler.ResourceTypeKeys, and the
+// snapshot-name check's from handlers.ScheduleResourceTypeKeys — three derived
+// sets, because a test that restates the list is a fourth copy that drifts with
+// the rest. The non-vacuity floor below is what stops all three going empty
+// together and reporting agreement.
+func TestScheduleResourceTypeVocabulary(t *testing.T) {
+	declared := slices.Clone(declaredEndpoint(t, fiber.MethodPost, scheduleScope).Parameters["resource_type"].Enum)
+	slices.Sort(declared)
+
+	// Without this an Enum nobody declared compares equal to a scheduler that
+	// branches on nothing, which is the state this test exists to report.
+	if len(declared) == 0 {
+		t.Fatal("resource_type declares no Enum, so any string is stored and the scheduler decides " +
+			"on its first fire whether the row was ever runnable")
+	}
+
+	if want := scheduler.ResourceTypeKeys(); !slices.Equal(declared, want) {
+		t.Errorf("the declared resource_type enum is %v but the scheduler branches on %v — a type in "+
+			"one and not the other is a schedule that is accepted and then fails on every fire",
+			declared, want)
+	}
+	if want := handlers.ScheduleResourceTypeKeys(); !slices.Equal(declared, want) {
+		t.Errorf("the declared resource_type enum is %v but handlers.snapshotScheduleGuestKind knows "+
+			"%v — a type missing there skips the snap_name check and defers a refusal Proxmox will "+
+			"make on every fire", declared, want)
+	}
+}
+
+// TestScheduleCreateRejectsAnUnrunnableResourceType is the behavioural half:
+// the vocabulary guard above compares lists, and this one sends the value the
+// docs used to advertise through the compiled declaration.
+func TestScheduleCreateRejectsAnUnrunnableResourceType(t *testing.T) {
+	target := strings.ReplaceAll(scheduleScope, ":cluster_id", testClusterID)
+
+	for _, tt := range []struct {
+		name         string
+		resourceType string
+		want         int
+		why          string
+	}{
+		{name: "a VM", resourceType: "vm", want: fiber.StatusNoContent,
+			why: "the ordinary case, and the control that stops this passing by refusing everything"},
+		{name: "a container", resourceType: "ct", want: fiber.StatusNoContent,
+			why: "what the SPA sends and what both scheduler switches read"},
+		{name: "Proxmox's spelling", resourceType: "lxc", want: fiber.StatusBadRequest,
+			why: "what the Typetext used to advertise; the scheduler has no branch for it"},
+		{name: "a node", resourceType: "node", want: fiber.StatusBadRequest,
+			why: "a plausible object kind that no branch handles"},
+		{name: "the wrong case", resourceType: "VM", want: fiber.StatusBadRequest,
+			why: "the scheduler compares exactly, so a case variant is as unrunnable as a typo"},
+		// The Enum replaced a MinLength(1), which is the facet that used to
+		// refuse this one. Kept as a row so the swap cannot quietly widen
+		// what the route takes.
+		{name: "empty", resourceType: "", want: fiber.StatusBadRequest,
+			why: "no branch matches the empty string, and apischema counts it as a value the caller supplied"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cap := &capture{}
+			e := declaredEndpoint(t, fiber.MethodPost, scheduleScope)
+			e.Handler = cap.handler()
+			e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
+			app := newRegistryApp(t, noAuth(), e)
+
+			body := `{"resource_type":"` + tt.resourceType + `","resource_id":"101","node":"pve-01",` +
+				`"action":"snapshot","schedule":"0 3 * * *"}`
+			status, env := send(t, app, jsonRequest(http.MethodPost, target, body))
+			if status != tt.want {
+				t.Fatalf("resource_type %q: status = %d (%q), want %d — %s",
+					tt.resourceType, status, env.Message, tt.want, tt.why)
+			}
+			if tt.want == fiber.StatusBadRequest && cap.called {
+				t.Error("the handler ran for a request the schema rejected")
+			}
+		})
 	}
 }
 

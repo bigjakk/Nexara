@@ -146,24 +146,39 @@ type snapshotScheduleParams struct {
 	SnapName string `json:"snap_name"`
 }
 
-// snapshotScheduleGuestKind maps the stored resource_type onto the guest kind
-// whose reserved names apply, using the SAME two values the scheduler switches
-// on when the task fires (internal/scheduler, executeSnapshot).
+// snapshotScheduleGuestKinds is the stored resource_type -> guest kind table,
+// carrying the SAME two values the scheduler switches on when the task fires
+// (internal/scheduler, executeSnapshot).
 //
-// The second result is false for anything else. That is not a name the check
+// A map rather than a switch so that ScheduleResourceTypeKeys can hand the
+// same set to the guard: a switch is not enumerable, and the keys would
+// otherwise be a third copy of a list that already exists twice.
+var snapshotScheduleGuestKinds = map[string]snapshotGuestKind{
+	"vm": qemuSnapshot,
+	"ct": lxcSnapshot,
+}
+
+// ScheduleResourceTypeKeys returns the resource types this file knows a guest
+// kind for, sorted. Exported for the guard in package api that compares them
+// against the declared Enum and against scheduler.ResourceTypeKeys; package
+// handlers cannot import package api, so the comparison reads this from the
+// other side, exactly as ScheduleActionKeys is read.
+func ScheduleResourceTypeKeys() []string {
+	return slices.Sorted(maps.Keys(snapshotScheduleGuestKinds))
+}
+
+// snapshotScheduleGuestKind maps a stored resource_type onto the guest kind
+// whose reserved names apply.
+//
+// The second result is false for anything else. That is not a name this check
 // can decide — and it does not need to: a snapshot task whose resource_type is
 // neither "vm" nor "ct" is refused wholesale by the scheduler on its first
 // fire, so no snap_name of any shape would have made it run. Refusing here on
 // the NAME would report the wrong problem, and refusing on the TYPE is a
 // separate change from this one.
 func snapshotScheduleGuestKind(resourceType string) (snapshotGuestKind, bool) {
-	switch resourceType {
-	case "vm":
-		return qemuSnapshot, true
-	case "ct":
-		return lxcSnapshot, true
-	}
-	return "", false
+	kind, ok := snapshotScheduleGuestKinds[resourceType]
+	return kind, ok
 }
 
 // validateSnapshotScheduleParams refuses AT CREATION a snap_name Proxmox would
