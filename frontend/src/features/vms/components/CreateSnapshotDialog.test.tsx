@@ -84,6 +84,49 @@ describe("CreateSnapshotDialog", () => {
     ).toBeDisabled();
   });
 
+  // The reserved set is asymmetric by guest kind, so these also prove the
+  // `kind` prop actually reaches the validator — the lib tests alone stay
+  // green if the dialog hardcodes a kind at the call site.
+  it("flags the reserved name pending on a VM", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateSnapshotDialog {...defaultProps} />);
+    await user.type(screen.getByLabelText("Name"), "pending");
+    expect(screen.getByText(/reserved/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /create snapshot/i }),
+    ).toBeDisabled();
+  });
+
+  it("allows pending on a container", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateSnapshotDialog {...defaultProps} kind="ct" />);
+    await user.type(screen.getByLabelText("Name"), "pending");
+    expect(screen.queryByText(/reserved/i)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /create snapshot/i }),
+    ).toBeEnabled();
+  });
+
+  it("flags the reserved name vzdump on a container", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateSnapshotDialog {...defaultProps} kind="ct" />);
+    await user.type(screen.getByLabelText("Name"), "vzdump");
+    expect(screen.getByText(/reserved/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /create snapshot/i }),
+    ).toBeDisabled();
+  });
+
+  it("allows Current — only lowercase current is reserved", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateSnapshotDialog {...defaultProps} />);
+    await user.type(screen.getByLabelText("Name"), "Current");
+    expect(screen.queryByText(/reserved/i)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /create snapshot/i }),
+    ).toBeEnabled();
+  });
+
   it("enables submit for a valid name", async () => {
     const user = userEvent.setup();
     renderWithProviders(<CreateSnapshotDialog {...defaultProps} />);

@@ -81,7 +81,7 @@ export function CreateSnapshotDialog({
       taskStatus.exit_status.startsWith("WARNINGS"));
   const taskFailed = taskStopped && !taskOk;
 
-  const nameError = snapshotNameError(snapName);
+  const nameError = snapshotNameError(snapName, kind);
   const canSubmit = snapName.length > 0 && nameError === null;
 
   // The hosts keep this component mounted while the dialog is closed, so this
