@@ -1164,7 +1164,7 @@ func (c *Client) RemoteMigrateVM(ctx context.Context, node string, vmid int, par
 	}
 
 	form := url.Values{}
-	form.Set("target-endpoint", params.TargetEndpoint.String())
+	form.Set("target-endpoint", params.TargetEndpoint.PropertyString())
 	form.Set("target-bridge", params.TargetBridge)
 	if params.TargetStorage != "" {
 		form.Set("target-storage", params.TargetStorage)
@@ -1198,7 +1198,7 @@ func (c *Client) RemoteMigrateCT(ctx context.Context, node string, vmid int, par
 	}
 
 	form := url.Values{}
-	form.Set("target-endpoint", params.TargetEndpoint.String())
+	form.Set("target-endpoint", params.TargetEndpoint.PropertyString())
 	form.Set("target-bridge", params.TargetBridge)
 	if params.TargetStorage != "" {
 		form.Set("target-storage", params.TargetStorage)

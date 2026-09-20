@@ -3,6 +3,7 @@ package proxmox
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -1260,20 +1261,113 @@ func (c VMConfig) CDROMDrives() []CDROMDrive {
 }
 
 // TargetEndpoint describes a remote Proxmox API endpoint for cross-cluster migration.
+//
+// APIToken is a live, long-lived credential — the target cluster's stored token,
+// as "<tokenid>=<secret>". Five methods keep it from escaping by accident, and
+// the split between them is the whole point:
+//
+//   - PropertyString renders the real thing, and is the ONLY way to get it. It
+//     is deliberately not named String so no call site can reach the credential
+//     by the reflex that fmt would take.
+//   - String, GoString, LogValue and MarshalJSON redact it, between them
+//     covering every rendering that dispatches on the type: %v/%s/%q/%+v/
+//     fmt.Sprint/Error-wrapping go through String, %#v through GoString, slog
+//     through LogValue, and json.Marshal through MarshalJSON — including
+//     json.Marshal of a whole RemoteMigrateVMParams/RemoteMigrateCTParams,
+//     which holds this as a value field under `json:"target-endpoint"`.
+//
+// What is NOT covered, stated plainly, so the set above is not mistaken for
+// "everything":
+//
+//   - A verb fmt cannot dispatch these methods for — %d, %t, %p, %c, %f, %e,
+//     %U, %b, %o — falls back to printing the fields and shows the token.
+//     (%v, %s, %q, %x, %X, %+v and %#v are all covered.)
+//   - Reflection-based encoders that do not consult MarshalJSON: encoding/xml
+//     and encoding/gob both emit the token verbatim.
+//
+// Neither is reachable today — no such verb is applied to this type, xml is
+// imported only by handlers/upload_validation.go and gob nowhere — so no
+// MarshalText or GobEncode is added. They are recorded because the next
+// person to reach for one should know it is not covered.
+//
+// Host and Fingerprint stay visible. A TLS certificate fingerprint is public by
+// definition (see the classification in
+// internal/api/handlers/proxmox_read_credentials_test.go), and keeping the host
+// is what makes a redacted rendering still worth logging.
+//
+// All five have VALUE receivers on purpose, PropertyString included. fmt and
+// encoding/json skip a pointer-receiver method on a value they cannot
+// address, and this type is stored as a value field on both params structs,
+// so a pointer receiver on any of the four redactors silently reopens the
+// route it was added to close. PropertyString's receiver is load-bearing for
+// a plainer reason: callers invoke it on unaddressable values, so a pointer
+// receiver there does not compile at all.
+//
+// The hazard this shape creates is the mirror of the one it closes: writing
+// endpoint.String() at a call site still compiles, still type-checks, and would
+// silently send "apitoken:REDACTED" to Proxmox. TestRemoteMigrate_SendsTheTokenInTheTargetEndpointForm
+// asserts the exact bytes on the wire so that mistake fails a named test instead
+// of breaking cross-cluster migration in production.
 type TargetEndpoint struct {
 	Host        string `json:"host"`
 	APIToken    string `json:"apitoken"`
 	Fingerprint string `json:"fingerprint"`
 }
 
-// String formats the endpoint as a Proxmox property string:
+// PropertyString formats the endpoint as the Proxmox property string the API
+// expects, credential included:
 // apitoken=PVEAPIToken=user@realm!token=SECRET,host=ADDRESS[,fingerprint=HEX]
-func (e TargetEndpoint) String() string {
+//
+// This is the value that goes on the wire. Anything that is not building a
+// request body wants String, LogValue or MarshalJSON instead.
+func (e TargetEndpoint) PropertyString() string {
 	s := "apitoken=PVEAPIToken=" + e.APIToken + ",host=" + e.Host
 	if e.Fingerprint != "" {
 		s += ",fingerprint=" + e.Fingerprint
 	}
 	return s
+}
+
+// String is the redacted rendering, and is what %v, %s and fmt.Sprint reach.
+// It deliberately does NOT look like a property string: a call site that
+// reaches for it by reflex produces something Proxmox rejects outright rather
+// than a plausible-looking request that silently authenticates as nobody.
+func (e TargetEndpoint) String() string {
+	return "TargetEndpoint{host:" + e.Host + " apitoken:REDACTED fingerprint:" + e.Fingerprint + "}"
+}
+
+// GoString closes the one route String cannot. fmt dispatches Stringer for
+// %v, %s, %q, %x and %X, but %#v dispatches GoStringer — and %#v is a normal
+// debugging reflex that would otherwise print the struct literal with the live
+// token in it, for the value, for a pointer to it, and for either params
+// struct that holds one.
+func (e TargetEndpoint) GoString() string {
+	return `proxmox.TargetEndpoint{Host:"` + e.Host + `", APIToken:"REDACTED", Fingerprint:"` + e.Fingerprint + `"}`
+}
+
+// LogValue keeps the credential out of structured logs while leaving enough to
+// identify which endpoint a line is about.
+func (e TargetEndpoint) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("host", e.Host),
+		slog.String("fingerprint", e.Fingerprint),
+	)
+}
+
+// MarshalJSON closes the second emission route: this type is embedded as a
+// value field with a live json tag on both remote-migrate params structs, so
+// marshalling either one would otherwise publish the token under "apitoken".
+// Only the marshal direction is overridden — decoding is unaffected, since
+// UnmarshalJSON is a separate interface. That asymmetry means a
+// marshal-then-unmarshal round-trip yields an endpoint with no APIToken
+// rather than an error. Nothing round-trips these structs today; anything
+// that starts to must carry the credential itself rather than expect it back
+// out of the JSON.
+func (e TargetEndpoint) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Host        string `json:"host"`
+		Fingerprint string `json:"fingerprint"`
+	}{e.Host, e.Fingerprint})
 }
 
 // RemoteMigrateVMParams holds parameters for cross-cluster VM migration via remote_migrate.

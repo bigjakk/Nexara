@@ -71,8 +71,10 @@ import (
 //	NodeSubscription.Key                     decoded by the collector, which
 //	  reads Status and Level and discards the rest. No handler calls it.
 //	TargetEndpoint.APIToken                  write-side only, for remote
-//	  migration. Note it has a String() that prints the secret, and no
-//	  redacting LogValue/MarshalJSON to stop a future %v from publishing it.
+//	  migration. The real property string now lives on PropertyString(), while
+//	  String/GoString/LogValue/MarshalJSON redact every rendering that
+//	  dispatches on the type. Guarded in internal/proxmox by
+//	  TestGuard_TargetEndpointNeverPrintsItsToken.
 //	ClusterJoinInfo, NodeCertificate, NodeListEntry, StorageConfig.fingerprint
 //	  carry TLS fingerprints and public key metadata — public by definition.
 //	VMConfig (a bare map[string]interface{}) is returned raw by the VM and CT
