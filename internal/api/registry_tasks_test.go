@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -365,6 +366,120 @@ func TestTaskCreateNodeIsHeldToTheNodeNameRule(t *testing.T) {
 			status, env := send(t, app, jsonRequest(http.MethodPost, taskHistoryScope, body))
 			if status != tt.want {
 				t.Fatalf("node=%s: status = %d (%q), want %d — %s", tt.node, status, env.Message, tt.want, tt.why)
+			}
+		})
+	}
+}
+
+// TestTaskCreateUPIDIsAnchoredToTheProxmoxPrefix pins the body parameter that
+// used to carry a length cap and nothing else.
+//
+// The cost of no rule is the same one the `node` beside it had, and for the
+// same reason: the value does not stay in the row. reconcileRunningTasks
+// (internal/collector/task_reconcile.go) reads it back off every row still
+// marked running and replays it through GetTaskStatus on each sync tick, with
+// the server's own credentials and nobody watching, and the task listing hands
+// it to any view:task holder.
+//
+// The traversal half is closed at the client — proxmox.validateTaskUPID
+// refuses a value that could leave its path segment, and refuses it there so
+// that the collector and the scheduler inherit it. What this declaration stops
+// is the ROW: a value Proxmox never minted is a task_history entry the
+// collector calls for once a tick until staleTaskGrace and then flips to
+// failed/"vanished", leaving a bogus failure in the activity feed for good.
+//
+// # Why this parameter can carry a pattern when :upid cannot
+//
+// The rows below are the evidence for that, not decoration. On the PATH the
+// UPID arrives percent-encoded — the frontend encodes the colons and Fiber
+// does not decode path parameters — so a pattern would have to match one
+// encoding or the other and would reject the real requests in the other form.
+// Here it is a body value and arrives as itself.
+//
+// # Why the rule is this loose
+//
+// Every accepted row is a real UPID shape taken from this repo or from the
+// development task_history: a container start, a worker id that is empty, one
+// that is dotted, one that carries an "@", a PBS nine-field id, an
+// API-token user with a "!", and the six-field value this route's own tests
+// have always posted. A field count or a per-field charset would refuse some
+// of them, and would refuse them in the direction that hides — a task Nexara
+// dispatched and then did not record is reported nowhere.
+func TestTaskCreateUPIDIsAnchoredToTheProxmoxPrefix(t *testing.T) {
+	e := declaredEndpoint(t, fiber.MethodPost, taskHistoryScope)
+
+	// Without this the table below would pass against a parameter that
+	// declares no rule at all, since every "want 400" row would simply
+	// become a "want 204" someone edited.
+	if e.Parameters["upid"].Pattern == "" {
+		t.Fatal("upid declares no Pattern, so any 512-character string is filed as a Proxmox task id " +
+			"and replayed against the cluster by the collector")
+	}
+
+	for _, tt := range []struct {
+		name string
+		upid string
+		want int
+		why  string
+	}{
+		{name: "a guest start", upid: `UPID:pve-01:001316BE:00B8B463:6A8CE407:qmstart:110:root@pam:`,
+			want: fiber.StatusNoContent, why: "the ordinary case, and the control that stops this test passing by refusing everything"},
+		{name: "an empty worker id", upid: `UPID:pve-01:0000A1B2:00000001:6A8CE407:aptupdate::root@pam:`,
+			want: fiber.StatusNoContent, why: "a node-wide task names no object; PVE mints the field empty"},
+		{name: "a dotted worker id", upid: `UPID:pve-01:0000A1B2:00000001:6A8CE407:srvrestart:osd.1:root@pam:`,
+			want: fiber.StatusNoContent, why: "a ceph mgr id is a legal worker id, so no per-field charset is safe"},
+		{name: "an at-sign in the worker id", upid: `UPID:pve-01:0000A1B2:00000001:6A8CE407:imgdel:105@store02:root@pam:`,
+			want: fiber.StatusNoContent, why: "the volume form of a worker id carries the storage after an @"},
+		{name: "an API token user", upid: `UPID:pve-01:0000A1B2:00C3D4E5:65000000:qmsnapshot:100:nexara@pve!api:`,
+			want: fiber.StatusNoContent, why: "a token user's half carries a !, which is how Nexara's own tasks are minted"},
+		{name: "a PBS nine-field id", upid: `UPID:pbs-01:0000ABCD:00012345:00000000:66F00000:verify:datastore01:root@pam:`,
+			want: fiber.StatusNoContent, why: "PBS mints one field more than PVE, so a field count would refuse it"},
+		{name: "fewer fields than PVE mints", upid: `UPID:pve-01:0000A:qmstart::root@pam:`,
+			want: fiber.StatusNoContent, why: "this route's own tests have always posted this; a field count would break them"},
+		{name: "not a UPID at all", upid: `just-some-text`,
+			want: fiber.StatusBadRequest, why: "nothing Proxmox minted looks like this, and the collector would call for it hourly"},
+		{name: "the wrong case", upid: `upid:pve-01:0:0:0:qmstart:100:root@pam:`,
+			want: fiber.StatusBadRequest, why: "Proxmox mints the prefix upper-case and the far side compares exactly"},
+		{name: "a traversal", upid: "UPID:pve-01:a/../../../status",
+			want: fiber.StatusBadRequest, why: "the shape validateTaskUPID exists for, landing GetTaskStatus on a different endpoint"},
+		{name: "a backslash", upid: "UPID:pve-01:a\\b:0:0:qmstart:100:root@pam:",
+			want: fiber.StatusBadRequest, why: "the other separator validatePathSegment refuses"},
+		{name: "a newline", upid: "UPID:pve-01:a\nb:0:0:qmstart:100:root@pam:",
+			want: fiber.StatusBadRequest, why: "the value reaches the activity feed, where a smuggled escape is text other people read"},
+		{name: "a C1 control", upid: "UPID:pve-01:a\u0085b:0:0:qmstart:100:root@pam:",
+			want: fiber.StatusBadRequest, why: "hasControlChar refuses the C1 range too, and a rule that stopped at C0 would not match it"},
+		{name: "empty", upid: "",
+			want: fiber.StatusBadRequest, why: "required, and an empty upid files a row nothing can ever reconcile"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cap := &capture{}
+			probe := e
+			probe.Handler = cap.handler()
+			probe.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
+			app := newRegistryApp(t, noAuth(), probe)
+
+			// Marshalled rather than concatenated. Half these witnesses are
+			// characters JSON itself escapes, and pasting them into a body
+			// by hand is how "a backslash" becomes \b — a BACKSPACE, which
+			// this rule also refuses, for the other reason. Then the row
+			// passes while testing something else.
+			body, err := json.Marshal(map[string]string{"task_cluster_id": testClusterID, "upid": tt.upid})
+			if err != nil {
+				t.Fatalf("marshalling the body: %v", err)
+			}
+			status, env := send(t, app, jsonRequest(http.MethodPost, taskHistoryScope, string(body)))
+			if status != tt.want {
+				t.Fatalf("upid=%q: status = %d (%q), want %d — %s", tt.upid, status, env.Message, tt.want, tt.why)
+			}
+			if tt.want == fiber.StatusNoContent && cap.params.String("upid") != tt.upid {
+				t.Errorf("upid reached the handler as %q, want %q", cap.params.String("upid"), tt.upid)
+			}
+			// A refused row must not reach the handler at all. Without
+			// this, a 400 raised by some LATER parameter would satisfy the
+			// row while the upid rule sat unexercised.
+			if tt.want == fiber.StatusBadRequest && cap.called {
+				t.Errorf("upid=%q was refused with %d but still reached the handler; the refusal "+
+					"did not come from the parameter rule", tt.upid, tt.want)
 			}
 		})
 	}

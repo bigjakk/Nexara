@@ -163,12 +163,78 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 			"caller holding manage:task on cluster X cannot insert a record claiming cluster Y"},
 		Parameters: apischema.Properties{
 			"task_cluster_id": taskBodyClusterParam,
+			// Patterned, unlike upidParam (registry_vms.go) — READ THAT
+			// COMMENT BEFORE TOUCHING EITHER. The two carry the same kind
+			// of value and cannot carry the same declaration, because
+			// upidParam is a PATH parameter: the frontend percent-encodes
+			// the UPID's colons, Fiber does not decode path parameters, and
+			// a pattern written against the decoded form would reject every
+			// real request while one written against the encoded form would
+			// depend on which client did the encoding. Here the UPID is a
+			// BODY value. It arrives as itself, so there is no second form
+			// to be wrong about and a pattern is possible.
+			//
+			// It is worth having for the reason the `node` beside it is:
+			// this value does not stay in the row. reconcileRunningTasks
+			// (internal/collector/task_reconcile.go) reads it back off
+			// every row still marked running and replays it through
+			// GetTaskStatus on each sync tick, with the server's own
+			// credentials and nobody watching, and the task listing hands
+			// it to any view:task holder.
+			//
+			// # What the rule is, and why it is not more
+			//
+			// Two facts, both read off the tree rather than reasoned from
+			// what a UPID "should" look like:
+			//
+			//   - Every UPID starts "UPID:". That holds for every row in
+			//     the development task_history and every fixture in this
+			//     repo — stated without a count, because a count taken once
+			//     is stale by the next sync — and frontend/src/lib/upid.ts
+			//     reads a value whose first colon-separated field is
+			//     anything else as naming no guest at all.
+			//   - proxmox.validateTaskUPID — the client-side guard that
+			//     actually closes the traversal, and closes it for the
+			//     collector and the scheduler too — refuses a path
+			//     separator and a control character, and nothing else. Its
+			//     comment records at length why nothing else: PVE mints 8
+			//     colon-separated fields and PBS 9, an API-token user's
+			//     half carries a "!", and the worker id is legitimately
+			//     empty ("aptupdate::root@pam:"), non-numeric
+			//     ("vzdump:local"), dotted ("osd.1") and "@"-bearing
+			//     ("imgdel:105@store02"). This route itself round-trips
+			//     values with fewer fields than PVE mints.
+			//
+			// So: the anchor and those two refusals, and no field count, no
+			// charset for the fields and no minimum length beyond the one
+			// non-empty character the anchor implies. An over-tight rule
+			// here would fail in the direction that hides: a real UPID
+			// refused at creation is a task Nexara dispatched and then did
+			// not record, which nothing reports at all.
+			//
+			// The C1 range is excluded alongside the C0 controls because
+			// proxmox.hasControlChar excludes it, and the value reaches an
+			// audit row and the activity feed where a smuggled escape is
+			// text other people read.
+			//
+			// MinLength is gone rather than kept at 1: the pattern already
+			// requires six characters, so the bound could only ever be
+			// looser than the rule beside it and would state nothing a
+			// reader could use. (This parameter's own Typetext has always
+			// been accurate. The one that advertised a value the system
+			// rejects was resource_type's "<vm|lxc>" in
+			// registry_schedules.go, against a scheduler that only ever
+			// handled "vm" and "ct" — a different parameter in a different
+			// file, fixed in the same change as this.)
 			"upid": {
-				Type:        apischema.String,
-				MinLength:   apischema.Ptr(1),
-				MaxLength:   apischema.Ptr(512),
-				Typetext:    "<UPID>",
-				Description: "Proxmox task id, as Proxmox returned it.",
+				Type:      apischema.String,
+				Pattern:   `^UPID:[^/\\[:cntrl:]\x{80}-\x{9f}]+$`,
+				MaxLength: apischema.Ptr(512),
+				Typetext:  "<UPID>",
+				Description: "Proxmox task id, as Proxmox returned it — starting \"UPID:\", with no path " +
+					"separator and no control character. The collector replays it against the cluster " +
+					"until the task finishes, so a value Proxmox did not mint files a row nothing can " +
+					"reconcile.",
 			},
 			"description": optString(512, "<string>", "What the task is, for the activity feed."),
 			"status": {
