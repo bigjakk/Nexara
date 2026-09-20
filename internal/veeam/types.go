@@ -1,7 +1,10 @@
 package veeam
 
 import (
+	"encoding/json"
+	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,6 +29,68 @@ type tokenResponse struct {
 	TokenType    string `json:"token_type"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
+}
+
+// String, GoString, LogValue and MarshalJSON keep both live tokens out of
+// fmt, slog and encoding/json. This struct is decoded in requestToken()
+// (internal/veeam/auth.go) with two error returns immediately below it — the
+// decode failure and the "carried no access_token" check — and `%v` of the
+// decoded response is the obvious thing to add to either when a VBR login is
+// failing for reasons the error text does not explain.
+//
+// Both json tags stay: the struct exists only to be UNMARSHALLED from VBR's
+// OAuth2 grant body, so json:"-" would break authentication outright. Only
+// the marshal direction is overridden — UnmarshalJSON is a separate
+// interface, so decoding is untouched.
+//
+// MarshalJSON is here even though nothing in the tree marshals a
+// tokenResponse, and the reason is worth stating because an earlier version
+// of this type left it out on exactly that argument. Production builds its
+// logger with slog.NewJSONHandler (cmd/nexara/main.go:64 and :272), and for a
+// value that is not itself a LogValuer the JSON handler MARSHALS it where the
+// text handler formats it with %+v. A tokenResponse reached as an exported
+// field of some context struct — `slog.Error("veeam auth failed", "ctx",
+// struct{ Req tokenResponse; URL string }{tr, url})` — therefore goes through
+// encoding/json, not through String, and without this method it writes a live
+// VBR access and refresh token to stdout in cleartext. slog.Any on the type
+// ITSELF is safe either way, because LogValue resolves first; it is the
+// wrapper shape that needs this. So a slog call IS a serialisation here, and
+// "the realistic mistake is a %v, not a serialisation" was simply wrong.
+//
+// TokenType and ExpiresIn stay visible. They are not secrets, and they are
+// what makes the redacted rendering worth emitting at all — see
+// TestGuard_VeeamTokenResponseNeverPrintsItsTokens, which asserts they survive
+// so that a String() returning "" cannot pass an absence-only check.
+//
+// Value receivers: fmt and slog skip a pointer-receiver method on a value they
+// cannot address, and tr is held by value in requestToken().
+//
+// One route stays open and is recorded rather than closed: a tokenResponse
+// held in an UNEXPORTED struct field. fmt cannot call a method through one, so
+// %+v and %#v of the outer struct print the raw fields. Nothing holds one that
+// way today.
+func (t tokenResponse) String() string {
+	return "tokenResponse{access_token:REDACTED token_type:" + t.TokenType +
+		" refresh_token:REDACTED expires_in:" + strconv.Itoa(t.ExpiresIn) + "}"
+}
+
+func (t tokenResponse) GoString() string {
+	return `veeam.tokenResponse{AccessToken:"REDACTED", TokenType:"` + t.TokenType +
+		`", RefreshToken:"REDACTED", ExpiresIn:` + strconv.Itoa(t.ExpiresIn) + `}`
+}
+
+func (t tokenResponse) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("token_type", t.TokenType),
+		slog.Int("expires_in", t.ExpiresIn),
+	)
+}
+
+func (t tokenResponse) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		TokenType string `json:"token_type"`
+		ExpiresIn int    `json:"expires_in"`
+	}{t.TokenType, t.ExpiresIn})
 }
 
 // apiErrorBody is VBR's error envelope, identical across every endpoint.
