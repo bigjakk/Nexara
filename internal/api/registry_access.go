@@ -62,6 +62,11 @@ func accessManage() Permissions { return clusterCheck("manage", handlers.AccessR
 // own the identifier vocabulary (the name@realm shape, the realm's leading
 // letter). Nothing here replaces them; this is the same refusal made one layer
 // earlier, with a message that names the parameter.
+//
+// Three of the four are spelled in the const block below because they are this
+// domain's alone. The fourth, accessNamePattern, is a `var` under it instead:
+// its rule is shared with pool ids and lives in the catalogue, for the reason
+// its own comment gives.
 const (
 	// accessUserIDPattern is the ONE identifier that legitimately carries a
 	// percent-escape: encodeURIComponent turns the "@" of "name@realm" into
@@ -93,32 +98,33 @@ const (
 	// escape here and admitting one would only widen what reaches the decoder.
 	accessTokenIDPattern = `^[A-Za-z][A-Za-z0-9._-]+$`
 
-	// accessNamePattern is a PVE group or role id. proxmox.accessNamePattern is
-	// `^[A-Za-z0-9._-]+$`, which matches ".." — so this is that class MINUS
-	// exactly {".", ".."}, which is what proxmox.validateAccessName refuses by
-	// name. Nothing else is taken away, and that exactness is the point: a group
-	// or role created outside Nexara must not become unreadable and undeletable
-	// through it.
-	//
-	// RE2 has no negative lookahead, so the two excluded strings are carved out
-	// by LENGTH instead. The three branches are:
-	//
-	//	[A-Za-z0-9._-]{3,}            3 or more characters — neither "." nor
-	//	                              ".." can be that long, so the class is
-	//	                              unrestricted here and "..archive" passes
-	//	[A-Za-z0-9_-][A-Za-z0-9._-]?  1 or 2 characters starting with a non-dot
-	//	\.[A-Za-z0-9_-]               2 characters starting with a dot, so ".a"
-	//	                              passes and ".." does not
-	//
-	// The simpler `^\.?[A-Za-z0-9_-][A-Za-z0-9._-]*$` was wrong in exactly the
-	// way this comment used to claim it was not: the optional leading dot eats
-	// the first character of "..archive" and the second then fails the non-dot
-	// class, so a legal group would have been unreachable.
-	accessNamePattern = `^(?:[A-Za-z0-9._-]{3,}|[A-Za-z0-9_-][A-Za-z0-9._-]?|\.[A-Za-z0-9_-])$`
-
 	// accessRealmPattern is proxmox.accessRealmPattern verbatim.
 	accessRealmPattern = `^[A-Za-z][A-Za-z0-9._-]*$`
 )
+
+// accessNamePattern is a PVE group or role id. proxmox.accessNamePattern is
+// `^[A-Za-z0-9._-]+$`, which matches ".." — so what this carries is that class
+// MINUS exactly {".", ".."}, which is what proxmox.validateAccessName refuses
+// by name. Nothing else is taken away, and that exactness is the point: a group
+// or role created outside Nexara must not become unreadable and undeletable
+// through it.
+//
+// THE RULE ITSELF IS NOT SPELLED HERE, and that is the whole reason this line
+// is a binding rather than a regex. Pool ids are the same charset in the same
+// kind of path slot and need the identical carve-out, so the rule lives in the
+// catalogue as path-safe-dotted-name and registry_pools.go's poolIDParam reads
+// the same entry. A second copy here would be one rule in two files — invisible
+// to TestNoInlinePatternIsWrittenTwice and TestNoInlinePatternRestatesACataloguedRule
+// alike, because this identifier is not a literal — and neither copy would then
+// be individually killable, since a mutation to either leaves the other
+// refusing the same values.
+//
+// The catalogue entry carries the reasoning that used to sit here: why the
+// regex has three branches (RE2 has no negative lookahead, so the pair is
+// carved out by length), and why the obvious `^\.?[A-Za-z0-9_-][A-Za-z0-9._-]*$`
+// is wrong in a way that does not look wrong — the optional leading dot eats
+// the first character of "..archive" and makes a legal group unreachable.
+var accessNamePattern = apischema.Rule("path-safe-dotted-name")
 
 // accessUserIDParam is the PVE user id as a PATH parameter.
 //

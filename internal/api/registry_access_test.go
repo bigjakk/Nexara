@@ -402,12 +402,20 @@ func TestAccessTraversalIsRefusedAtTheRoute(t *testing.T) {
 
 	target := pathPrefix + "clusters/" + testClusterID + "/access/groups/.."
 	status, _ := send(t, app, httptest.NewRequest(http.MethodGet, target, nil))
-	// Fiber normalises "/groups/.." out of the URL before routing, so the
-	// request lands on the collection path instead — which this app does not
-	// mount. Either answer is a refusal; what must NOT happen is the handler
-	// running with ".." in hand.
-	if status != fiber.StatusBadRequest && status != fiber.StatusNotFound {
-		t.Errorf("status = %d, want 400 or 404 for a traversal segment", status)
+	// This asserted "400 OR 404", on the belief that Fiber normalises
+	// "/groups/.." out of the URL before routing, so that the request lands on
+	// a collection path this app does not mount. IT DOES NOT. Measured: the
+	// raw ".." reaches the declaration exactly as the escaped spelling below
+	// does, and the 400 comes from the pattern in both cases.
+	//
+	// The belief is easy to arrive at — a normaliser resolving the segment is
+	// precisely what makes ".." dangerous at pveproxy — but it does not follow
+	// that anything on THIS side resolves it first. The tolerance was worse
+	// than wrong prose: 404 is exactly what a normalising Fiber would answer,
+	// so the test stayed green whichever fact held and measured neither. It is
+	// 400 alone now, which is what pins the pattern as the thing refusing this.
+	if status != fiber.StatusBadRequest {
+		t.Errorf("status = %d, want 400 from the pattern for a traversal segment", status)
 	}
 	if cap.called {
 		t.Error("the handler ran for a traversal segment")

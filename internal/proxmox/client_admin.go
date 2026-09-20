@@ -85,16 +85,24 @@ func (c *Client) CreateResourcePool(ctx context.Context, params CreatePoolParams
 // case. It is closed here rather than at the route, for the reason recorded
 // on the snapshot address methods (client_guests.go, "Addressing an existing
 // snapshot") and on validateTaskUPID: a check in the CALLER is one the next
-// caller inherits nothing from. Until now the ONLY thing refusing anything on
-// these three was apischema's pve-poolid-segment in internal/api/registry_pools.go —
-// which stops a slash, and matches "." and ".." exactly as it matches any
-// other name.
+// caller inherits nothing from. When this guard was added the ONLY thing
+// refusing anything on these three was the pool id's rule in
+// internal/api/registry_pools.go — which stopped a slash, and matched "." and
+// ".." exactly as it matched any other name.
 //
 // validateAccessName (client_access.go) is the precedent and the proof that
 // this is the house rule rather than a preference: PVE group and role ids are
 // the same charset in the same kind of path slot, and that function refuses
 // ".", ".." by name with the same normalisation reasoning. Pool ids were the
 // one family carrying that charset with no client-side guard at all.
+//
+// The declaration side has since caught up: both families now read one
+// catalogue entry, apischema's path-safe-dotted-name, which carves the same
+// pair out at the route. That does NOT make this check redundant, and it is
+// not the layer to delete if the two ever look duplicated — this one is the
+// choke point every caller inherits, and the rule over there reaches only the
+// HTTP callers. The two are separately killable by design: the tests below
+// fail on a change here and stay green on a change there.
 //
 // CreateResourcePool is deliberately not in this list. Its pool id is a form
 // field — form.Set("poolid", …) — not a path segment, so nesting is legal

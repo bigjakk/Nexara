@@ -610,74 +610,149 @@ func patternRules() []RuleDoc {
 			// wrong twice: a leading dot or dash IS a valid pool name, and
 			// pools really do nest up to three levels. That invention
 			// would have 400'd pool names Proxmox accepts on five routes.
+			//
+			// It also admits "." and ".." — deliberately left alone, and
+			// the path-safe-dotted-name entry below records that decision
+			// in its commentary, under the heading "The create side stays
+			// loose". Careful with the reason: five of the six routes
+			// carrying the `pool` body field pass it as a FORM field where
+			// nothing traverses, but the sixth — SetVMPool — hands it to
+			// UpdateResourcePool, which builds "/pools/" + PathEscape(id).
+			// What closes that one is proxmox.validatePathSegment at the
+			// client, NOT the absence of a path segment. See the note on
+			// optPoolID in registry_vms.go, which has said so all along.
 			Accepts: []string{"infra", ".hidden", "-lead", "infra/prod", "infra/prod/db"},
 			Rejects: []string{"", "/infra", "infra/", "infra/prod/db/extra", "infra prod"},
 		},
 		{
-			Name: "pve-poolid-segment",
+			Name: "path-safe-dotted-name",
 			Kind: KindPattern,
-			Permits: "a single-segment pve-poolid — the same charset with no slash, so that it fits one " +
-				"URL path segment.",
-			Rule:         `^[A-Za-z0-9._-]+$`,
-			RuleIsRegex:  true,
-			Origin:       OriginProxmox,
-			Upstream:     "pve-access-control src/PVE/AccessControl.pm verify_poolname",
-			UpstreamRule: `^[A-Za-z0-9\.\-_]+(?:/[A-Za-z0-9\.\-_]+){0,2}\z`,
-			Divergence: "STRICTER by design in ONE respect, and not a judgement about pool names. A nested " +
-				"id contains a slash, so it matches neither a Fiber path segment nor the " +
-				"\"/pools/{poolid}\" form the client builds — a nested pool is unreachable through the " +
-				"per-pool routes whatever rule they carry. The fix is the query form PVE moved to " +
-				"(\"PUT /pools?poolid=…\"), not a looser rule here. The routes that are NOT bound by a " +
-				"path segment — POST /pools, and the `pool` body parameter — take pve-poolid whole. " +
-				"IT IS NOT STRICTER ABOUT \".\" AND \"..\", which it matches like any other name; the " +
-				"witnesses below say so on purpose, and the note above them says where they are refused.",
-			// "." and ".." are witnesses rather than an oversight, and they
-			// are ACCEPTS because that is what this rule does with them.
+			Permits: "a name that has to survive as ONE URL path segment: letters, digits, dot, " +
+				"underscore and dash, except the two relative segments \".\" and \"..\". A dot INSIDE " +
+				"the name is ordinary.",
+			Rule:        `^(?:[A-Za-z0-9._-]{3,}|[A-Za-z0-9_-][A-Za-z0-9._-]?|\.[A-Za-z0-9_-])$`,
+			RuleIsRegex: true,
+			Origin:      OriginProxmox,
+			Upstream: "pve-access-control src/PVE/AccessControl.pm — verify_poolname for pool ids, " +
+				"verify_groupname and verify_rolename for group and role ids",
+			UpstreamRule: `verify_poolname: ^[A-Za-z0-9\.\-_]+(?:/[A-Za-z0-9\.\-_]+){0,2}\z. ` +
+				`verify_groupname and verify_rolename: ^[A-Za-z0-9\.\-_]+$. One charset between them, ` +
+				`and all three admit "." and "..".`,
+			Divergence: "STRICTER than every upstream rule above, in the same ONE respect, which is why " +
+				"the two domains share an entry rather than a charset: it refuses a name that is EXACTLY " +
+				"\".\" or \"..\".\n" +
+				"Every consumer concatenates the value into a Proxmox path with url.PathEscape, which " +
+				"escapes \"/\" and leaves both of those alone, so they travel intact and pveproxy " +
+				"resolves them upward the moment it normalises the path: \"/pools/..\" is the pool " +
+				"COLLECTION and \"/access/groups/..\" is the group collection, each a different endpoint " +
+				"with different permissions, reached with the cluster's own token.\n" +
+				"REFUSING THEM COSTS NOTHING REACHABLE, and that is what makes being stricter than " +
+				"upstream safe here rather than an invention. A name that is exactly \".\" or \"..\" " +
+				"cannot survive as a path segment whatever rule is written: pveproxy resolves the " +
+				"segment away, as the paragraph above describes, so the request never addresses an " +
+				"object of that name in the first place. So no object addressable through these routes " +
+				"is made unaddressable by this rule — the pair it takes away was never reachable. " +
+				"(Nothing on the NEXARA side resolves it: Fiber routes a raw \".\" or \"..\" straight " +
+				"through to the parameter, which is measured by TestPoolTraversalIsRefusedAtTheRoute " +
+				"and TestAccessTraversalIsRefusedAtTheRoute. This rule is what stops it, not the " +
+				"router.)\n" +
+				"ALSO STRICTER than verify_poolname in a second respect that belongs to the pool domain " +
+				"alone: a nested id contains a slash, so it matches neither a Fiber path segment nor the " +
+				"\"/pools/{poolid}\" form the client builds. A nested pool is unreachable through the " +
+				"per-pool routes whatever rule they carry, and the fix is the query form PVE moved to " +
+				"(\"PUT /pools?poolid=…\"), not a looser rule here. Group and role ids cannot nest at " +
+				"all, so for them this is no divergence.",
+			// # Why the regex has three branches
 			//
-			// Reading the charset and concluding that the pool path routes
-			// are closed to traversal is the mistake they exist to stop:
-			// url.PathEscape leaves both alone, so "/pools/.." resolves onto
-			// "/pools" the moment pveproxy normalises the path. What refuses
-			// them is proxmox.validatePathSegment, called by the three
-			// addressing methods in internal/proxmox/client_admin.go — added
-			// when this was found, because until then NOTHING did and this
-			// vacuous rule was the only gate. The client is the right layer
-			// for it: a rule here is one only the HTTP callers inherit.
+			// RE2 has no negative lookahead, so the two excluded strings are
+			// carved out by LENGTH instead:
 			//
-			// # The comparison that decides this, and the follow-up it names
+			//	[A-Za-z0-9._-]{3,}            3 or more characters — neither
+			//	                              "." nor ".." can be that long,
+			//	                              so the class is unrestricted
+			//	                              here and "..archive" passes
+			//	[A-Za-z0-9_-][A-Za-z0-9._-]?  1 or 2 characters starting with
+			//	                              a non-dot
+			//	\.[A-Za-z0-9_-]               2 characters starting with a
+			//	                              dot, so ".a" passes and ".."
+			//	                              does not
 			//
-			// registry_access.go faced the identical question — group and
-			// role ids are this same charset in this same kind of path slot
-			// — and answered it on BOTH layers: proxmox.validateAccessName
-			// refuses the two values by name, AND accessNamePattern carves
-			// them out of the declaration with
-			// `^(?:[A-Za-z0-9._-]{3,}|[A-Za-z0-9_-][A-Za-z0-9._-]?|\.[A-Za-z0-9_-])$`,
-			// three branches because RE2 has no negative lookahead. So the
-			// second layer is not unavailable here, it is unclaimed.
+			// DO NOT "SIMPLIFY" IT TO ^\.?[A-Za-z0-9_-][A-Za-z0-9._-]*$.
+			// That form looks equivalent and is not: the optional leading
+			// dot eats the FIRST character of "..archive", the second dot
+			// then fails the non-dot class, and a legal group, role or pool
+			// name becomes unreachable. It was written that way once and
+			// the bug is the reason "..archive" is a witness below.
 			//
-			// It stays unclaimed for now, deliberately. Pasting that regex
-			// into this entry makes it character-for-character
-			// accessNamePattern — one rule spelled in two files, which is
-			// the exact duplication this catalogue exists to prevent and
-			// which neither TestNoInlinePatternIsWrittenTwice nor
-			// TestNoInlinePatternRestatesACataloguedRule would see, because
-			// the access copy reaches its sites through a const identifier
-			// rather than a literal. It would also make declaredRuleSites
-			// resolve EIGHT access-domain parameters to a rule named
-			// "pve-poolid-segment" — six through accessNameParam, plus the
-			// groupid and roleid properties that carry the pattern inline. The right move is to PROMOTE the shared
-			// carve-out to one catalogue entry under a domain-neutral name
-			// and point both domains at it; that is a two-domain refactor,
-			// not a line in this entry, and the hazard is closed at the
-			// client in the meantime.
+			// # Both layers, on purpose
 			//
-			// Note also what tightening here would NOT close: pve-poolid
-			// accepts both too, so PVE will still mint a pool named "."
-			// through POST /pools that no URL of this shape can address.
-			// That pairing is already open for nesting, by the decision the
-			// paragraph above records.
-			Accepts: []string{"infra", ".hidden", "-lead", "a.b_c-d", ".", ".."},
-			Rejects: []string{"", "infra/prod", "infra prod", "a+b"},
+			// This rule is the second of two. proxmox.validateAccessName
+			// (client_access.go) and proxmox.validatePathSegment (client.go,
+			// reached by the three pool addressing methods in
+			// client_admin.go) refuse the same pair BY NAME, one layer down,
+			// and they are the choke point — a rule here is one only the
+			// HTTP callers inherit, and the opt-in shape is what those
+			// client guards were moved off. This one is not redundant with
+			// them: it answers at the declaration, so the refusal is a 400
+			// naming the parameter, /api/v1/api-docs publishes the carve-out
+			// beside the charset, and the schema stops claiming to accept a
+			// value the client will always turn away. The two layers are
+			// separately killable — mutate this rule and the client tests
+			// stay green, mutate validatePathSegment and the declaration
+			// tests stay green. Not "only one package fails" either way:
+			// the second mutation also trips a decode guard in
+			// internal/api/handlers. The property is that neither guard
+			// masks the other, which is what makes both provable.
+			//
+			// # The create side stays loose, deliberately
+			//
+			// Tightening an ADDRESSING rule without its CREATE rule is how
+			// an object becomes undeletable, so the pairing was checked
+			// rather than assumed. pve-poolid — POST /pools and the `pool`
+			// body parameter — still accepts "." and "..", and stays that
+			// way for three reasons:
+			//
+			//  1. THIS CHANGE DOES NOT OPEN THAT GAP. The three pool
+			//     addressing methods already run validatePathSegment, which
+			//     has refused both since the client guard was added, so a
+			//     pool minted under either name was already unaddressable
+			//     through Nexara. The declaration now answers first, with a
+			//     better message; the set of pool ids this API can address
+			//     is unchanged.
+			//  2. pve-poolid IS NOT THE SAME RULE. It is the NESTED
+			//     whole-value rule, so the carve-out would have to apply per
+			//     segment — this three-branch form repeated across three
+			//     optional segments — which is a different regex, not a
+			//     shared one.
+			//  3. pve-poolid IS NOT ONLY A CREATE RULE. Through
+			//     pve-poolid-or-empty it is also how a guest is assigned to
+			//     an EXISTING pool. Narrowing it there is the
+			//     undeletable-object trap pointed the other way: a guest
+			//     could not be put into a pool that exists. Five of those
+			//     six routes pass it as a form field; SetVMPool is the one
+			//     that makes it a path segment, and validatePathSegment is
+			//     what holds that — do NOT read this bullet as saying the
+			//     body field never traverses, because deleting the client
+			//     guard on that premise reopens it.
+			//
+			// The create/address pair is ALREADY asymmetric by an explicit
+			// decision — pve-poolid nests and this rule cannot express
+			// nesting at all, which poolCreateIDParam records from the
+			// declaration side. The dot pair is a strictly smaller instance
+			// of that accepted asymmetry. The access domain has no such
+			// asymmetry: POST /groups and POST /roles carry THIS rule on
+			// their create bodies too.
+			//
+			// The witnesses are the union of what both domains legitimately
+			// mint, taken from the one Accepts list this entry replaces (the access side had no catalogue entry — accessNamePattern was a bare const with no witnesses) and
+			// from the per-route corpora in registry_access_test.go and
+			// client_admin_pool_address_test.go, so the merge cannot have
+			// narrowed either domain without a witness failing.
+			Accepts: []string{
+				"infra", "operators", "PVEAdmin", ".hidden", "-lead", "a.b_c-d",
+				"01pool", "db", "p", ".a", "..archive", "...",
+			},
+			Rejects: []string{"", ".", "..", "%2e%2e", "infra/prod", "infra prod", "a+b", "pool@name"},
 		},
 	}
 }

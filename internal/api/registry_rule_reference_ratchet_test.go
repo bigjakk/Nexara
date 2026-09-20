@@ -76,10 +76,13 @@ import (
 // Adding a route that takes pveObjectNameParam("…") or emptyOrNodeName does not
 // move this list at all, and neither does deleting one, because the shared
 // declaration is what carries the rule. It moves only when a route declares its
-// OWN inline rule reference, which 9 of the 38 entries below do — the ones whose
+// OWN inline rule reference, which 11 of the 41 entries below do — the ones whose
 // container is a register…Endpoints function rather than a named parameter — and
 // then the failure names which of the five things happened.
 var ruleReferenceSites = []string{
+	"registry_access.go accessNameParam = path-safe-dotted-name",
+	"registry_access.go registerAccessEndpoints [groupid] = path-safe-dotted-name",
+	"registry_access.go registerAccessEndpoints [roleid] = path-safe-dotted-name",
 	"registry_acme.go createACMEAccountParams = pve-object-id-or-empty",
 	"registry_alerts.go alertFilterClusterParam = uuid-or-empty",
 	"registry_alerts.go maintenanceWindowParams [node_id] = uuid-or-empty",
@@ -104,7 +107,7 @@ var ruleReferenceSites = []string{
 	"registry_oidc.go oidcConfigParams [default_role_id] = uuid-or-empty",
 	"registry_pbs.go pbsAttachedClusterParam = uuid-or-empty",
 	"registry_pools.go poolCreateIDParam = pve-poolid",
-	"registry_pools.go poolIDParam = pve-poolid-segment",
+	"registry_pools.go poolIDParam = path-safe-dotted-name",
 	"registry_reports.go createScheduleParams [email_channel_id] = uuid-or-empty",
 	"registry_rolling_update.go createRollingUpdateParams [notify_channel_id] = uuid-or-empty",
 	"registry_sdn.go sdnControllerSettings [node] = node-name-or-empty",

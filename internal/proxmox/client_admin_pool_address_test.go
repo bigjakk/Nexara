@@ -13,13 +13,19 @@ import (
 //
 // Until this change nothing in this package constrained that id at all: the
 // three built "/pools/" + url.PathEscape(poolID) straight from the argument.
-// The only rule anywhere was apischema's pve-poolid-segment in
+// The only rule anywhere was the pool id's pattern in
 // internal/api/registry_pools.go, i.e. a check in the CALLER — and that rule
-// is PVE's own verify_poolname charset, which admits a leading dot, so "." and
-// ".." match it exactly as any other name does. It stops a slash and nothing
+// was PVE's own verify_poolname charset, which admits a leading dot, so "." and
+// ".." matched it exactly as any other name did. It stopped a slash and nothing
 // else. This is the same opt-in shape the rest of this client's path-segment
 // guards were moved off (3e757d3 for task ids, 7f4d2ca for HA ids, 82d24d8 for
 // node names, 4852e28 for snapshot names).
+//
+// That declaration has since been tightened too — it now reads apischema's
+// path-safe-dotted-name, the entry PVE group and role ids share, which carves
+// the same pair out at the route. These cases are unaffected by it and must
+// stay that way: they call the client DIRECTLY, which is the point of putting
+// the guard here, so a mutation to either layer fails only its own tests.
 //
 // Two halves, and the second is load-bearing. The refusal half alone is
 // satisfiable by refusing everything, which here would be a REGRESSION rather
@@ -85,12 +91,16 @@ const poolAddressBody = `{"data":{"poolid":"infra","comment":"","members":[]}}`
 // refusedPoolIDs is the corpus that must never reach the wire.
 var refusedPoolIDs = []struct{ name, poolID, why string }{
 	{"empty", "", "there is no pool to address, and the request would target the collection"},
-	// The two live shapes, and the only two the HTTP route can actually
-	// deliver here — pve-poolid-segment's charset stops everything below
-	// this pair. url.PathEscape leaves a dot alone, so both arrive intact
-	// and Proxmox resolves them after it decodes. The resolved targets are
-	// worked out rather than recalled: /pools/. is /pools and /pools/.. is
-	// /pools as well, one level further up having nothing to remove.
+	// The two shapes the HTTP route could deliver here when this guard was
+	// written, and the only two — the pool id's charset stopped everything
+	// below this pair, and it matched these. (The declaration now refuses
+	// them as well, so today an HTTP caller is turned away one layer
+	// earlier; these two rows are what holds the floor under that, for the
+	// next caller who is not an HTTP request.) url.PathEscape leaves a dot
+	// alone, so both arrive intact and Proxmox resolves them after it
+	// decodes. The resolved targets are worked out rather than recalled:
+	// /pools/. is /pools and /pools/.. is /pools as well, one level further
+	// up having nothing to remove.
 	{"a bare dot", ".", "a \".\" segment disappears, landing the call on the pool COLLECTION"},
 	{"a bare traversal", "..", "the same, and on DELETE it addresses an endpoint the caller never named"},
 	{"a traversal", poolAddressTraversal, "reaches /api2/json/access/users/root@pam with the cluster's own token"},

@@ -31,14 +31,31 @@ import (
 // ("PUT /pools?poolid=…"), not a looser rule here. Hence poolCreateIDParam
 // below, which is not bound by either constraint.
 //
-// The catalogue carries the pair — pve-poolid and pve-poolid-segment — side
-// by side, so that the narrowing reads as the URL-shape concession it is
-// rather than as a claim about what a pool may be called.
+// The rule it carries is NOT a pool rule, and the name says so.
+// path-safe-dotted-name is that charset minus exactly {".", ".."} — the two
+// relative segments url.PathEscape leaves intact and pveproxy resolves
+// upward — and registry_access.go's accessNamePattern reads the same entry
+// for PVE group and role ids, which are the same charset in the same kind
+// of path slot and needed the identical carve-out. One entry rather than
+// two copies: a second spelling of it would be invisible to both inline
+// duplication guards, and neither copy would be individually killable.
+//
+// Being stricter than verify_poolname costs nothing reachable here. A pool
+// named exactly "." or ".." cannot be addressed under any rule, because
+// pveproxy resolves the segment away before Proxmox reads it as a name — and
+// proxmox.validatePathSegment has refused both on all three addressing
+// methods since the client guard was added, so this declaration is the same
+// refusal one layer earlier with a message that names the parameter. Note
+// that nothing on THIS side resolves it: Fiber routes a raw ".." straight
+// through to this parameter, so the pattern is what turns it away. The
+// create side (poolCreateIDParam, pve-poolid) is deliberately NOT tightened
+// to match; the catalogue entry's commentary records that decision in full,
+// under the heading "The create side stays loose".
 func poolIDParam(source apischema.Source, description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.String,
 		Source:      source,
-		Pattern:     apischema.Rule("pve-poolid-segment"),
+		Pattern:     apischema.Rule("path-safe-dotted-name"),
 		MaxLength:   apischema.Ptr(100),
 		Typetext:    "<poolid>",
 		Description: description,
@@ -56,6 +73,16 @@ func poolIDParam(source apischema.Source, description string) apischema.Property
 // OTHER routes' URL shape. That is the invented-strictness mistake
 // optPoolID's comment describes, and it is easy to make precisely because
 // one helper looks like it should serve both.
+//
+// The same asymmetry now covers "." and "..", which poolIDParam refuses and
+// this one still accepts. That is a decision rather than an oversight — it
+// is the nesting asymmetry above, one size smaller — and the reasoning is
+// in the catalogue's path-safe-dotted-name entry under "The create side
+// stays loose". The short form: pve-poolid is not only a create rule (it is
+// also how a guest is assigned to an EXISTING pool), and tightening it here
+// would not change what
+// this API can address, because the client has refused both on the
+// addressing methods since before this rule existed.
 func poolCreateIDParam(description string) apischema.Property {
 	p := poolIDParam(apischema.SourceAuto, description)
 	p.Pattern = apischema.Rule("pve-poolid")
