@@ -65,6 +65,41 @@ type migrationContext struct {
 	vmName  string // Human-readable VM name
 	vmLabel string // e.g. "VM 100 (my-vm)" or "CT 200 (my-ct)"
 	userID  uuid.UUID
+
+	// scrubber removes any credential this job put in play from text on its
+	// way to a persisted field. It is nil for a job that never assembled one
+	// (everything but cross-cluster), so reach it through scrub, not
+	// directly. A closure rather than the secret itself: nothing that prints
+	// a migrationContext can then render the credential.
+	scrubber func(string) string
+}
+
+// scrub cleans text that is about to be persisted or logged. Nil-safe in both
+// directions — a nil context and an unarmed one both mean "no credential in
+// play", which is the truth for every non-cross-cluster job.
+func (mc *migrationContext) scrub(s string) string {
+	if mc == nil || mc.scrubber == nil {
+		return s
+	}
+	return mc.scrubber(s)
+}
+
+// armEndpointScrubber points mc's scrubber at the target cluster's token
+// secret. Called once, where the credential is assembled, so that everything
+// this job later writes about a Proxmox failure is covered by construction
+// rather than by each sink remembering.
+func (mc *migrationContext) armEndpointScrubber(apiToken string) {
+	if mc == nil {
+		return
+	}
+	secret := endpointTokenSecret(apiToken)
+	// Not redundant with scrubSecret's guard: arming with an empty secret
+	// would install a closure that does nothing, and mc.scrubber != nil would
+	// then lie about whether this job has a credential in play.
+	if secret == "" {
+		return
+	}
+	mc.scrubber = func(s string) string { return scrubSecret(s, secret) }
 }
 
 // clientForCluster creates a Proxmox client from stored cluster credentials.
@@ -232,7 +267,7 @@ func (o *Orchestrator) Execute(ctx context.Context, jobID uuid.UUID, userID uuid
 	case TypeIntraCluster:
 		upid, err = o.executeIntraCluster(ctx, srcClient, job)
 	case TypeCrossCluster:
-		upid, err = o.executeCrossCluster(ctx, srcClient, srcCluster, job)
+		upid, err = o.executeCrossCluster(ctx, srcClient, srcCluster, job, &mc)
 	default:
 		o.failJob(ctx, jobID, fmt.Sprintf("unknown migration type: %s", job.MigrationType), &mc)
 		return
@@ -715,7 +750,7 @@ func isQEMUDiskKey(key string) bool {
 	return false
 }
 
-func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxmox.Client, _ db.Cluster, job db.MigrationJob) (string, error) {
+func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxmox.Client, _ db.Cluster, job db.MigrationJob, mc *migrationContext) (string, error) {
 	_, tgtCluster, err := o.clientForCluster(ctx, job.TargetClusterID)
 	if err != nil {
 		return "", fmt.Errorf("target cluster client: %w", err)
@@ -737,6 +772,13 @@ func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxm
 		APIToken:    fmt.Sprintf("%s=%s", tgtCluster.TokenID, tgtTokenSecret),
 		Fingerprint: tgtCluster.TlsFingerprint,
 	}
+
+	// The credential now exists, and from here it can come back inside a
+	// Proxmox failure by two routes: synchronously, as the error this
+	// function returns, and asynchronously, as the worker's exit status that
+	// pollTaskStatus reads minutes later. Arming the context here covers the
+	// second one at the point the first is created, so the two cannot drift.
+	mc.armEndpointScrubber(endpoint.APIToken)
 
 	var storageMap StorageMapping
 	var networkMap NetworkMapping
@@ -767,6 +809,7 @@ func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxm
 		}
 	}
 
+	var upid string
 	switch job.VmType {
 	case VMTypeQEMU:
 		params := proxmox.RemoteMigrateVMParams{
@@ -784,7 +827,7 @@ func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxm
 		if len(storageMap) > 0 {
 			params.TargetStorage = formatMapping(storageMap)
 		}
-		return srcClient.RemoteMigrateVM(ctx, job.SourceNode, int(job.Vmid), params)
+		upid, err = srcClient.RemoteMigrateVM(ctx, job.SourceNode, int(job.Vmid), params)
 
 	case VMTypeLXC:
 		params := proxmox.RemoteMigrateCTParams{
@@ -802,11 +845,125 @@ func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxm
 		if len(storageMap) > 0 {
 			params.TargetStorage = formatMapping(storageMap)
 		}
-		return srcClient.RemoteMigrateCT(ctx, job.SourceNode, int(job.Vmid), params)
+		upid, err = srcClient.RemoteMigrateCT(ctx, job.SourceNode, int(job.Vmid), params)
 
 	default:
 		return "", fmt.Errorf("unsupported VM type: %s", job.VmType)
 	}
+
+	// Both guest branches fall through to one exit rather than returning, so
+	// the scrub is written once. This DISCOURAGES a new branch from skipping
+	// it; it does not prevent one — a third case that returns directly still
+	// compiles, and the default arm three lines up already returns unscrubbed.
+	// That one is correct, but NOT because it predates the credential (the
+	// token was assembled ~70 lines earlier and the context is already armed):
+	// its message is "unsupported VM type: " + job.VmType, which structurally
+	// cannot carry the secret.
+	// Nothing enforces the shape, so a new guest type needs its own test, the
+	// way TestExecuteCrossCluster_ScrubsTheTargetTokenFromTheFailure covers
+	// the two that exist.
+	if err != nil {
+		return "", scrubEndpointSecret(err, endpoint.APIToken)
+	}
+	return upid, nil
+}
+
+// redactedTokenSecret is what stands in for the target cluster's token secret
+// once it has been scrubbed out of an error.
+const redactedTokenSecret = "REDACTED"
+
+// scrubbedError carries an error whose text has had a credential removed.
+//
+// Only Error() is overridden, because Error() is the leak path, and it has two
+// Viewer-readable sinks rather than one. Execute hands executeCrossCluster's
+// err.Error() to failJob, which logs it, writes it to
+// migration_jobs.error_message — served back as error_message by the migration
+// handlers, gated on view:migration on the job's source or target cluster —
+// and embeds the same string in the audit row's details JSON, which is
+// readable with view:audit, granted to every Viewer by default.
+//
+// Unwrap is kept so errors.Is sentinel checks (proxmox.ErrNotFound,
+// proxmox.ErrForbidden) still see through the scrub. The cost of keeping it:
+// errors.As still reaches the underlying *proxmox.APIError, whose .Message and
+// .Fields hold the unscrubbed body. So this error must never be handed to
+// handlers.mapProxmoxError, which returns apiErr.Message to the client
+// verbatim. failJob's err.Error() is its only sink today, and Execute is
+// fire-and-forget, so there is no path there now — but making cross-cluster
+// migration synchronous and reaching for the house error-mapper would undo
+// this silently.
+type scrubbedError struct {
+	msg string
+	err error
+}
+
+func (e *scrubbedError) Error() string { return e.msg }
+func (e *scrubbedError) Unwrap() error { return e.err }
+
+// scrubEndpointSecret removes the target cluster's API token secret from err's
+// message.
+//
+// Why here and not in the Proxmox client: APIError.Message carries Proxmox's
+// own words — the raw response body when the {"errors":{…}} envelope does not
+// parse, and the flattened "field: msg" pairs when it does — and either shape
+// can contain a value the vendor chose to echo. The rest of the client reads
+// that text. Scrubbing centrally would mean teaching the client about a
+// credential that only this one call site holds, and would change error text
+// everything else depends on. So the scrub sits at the narrow end — the single
+// function that both assembles the credential and owns the error on its way to
+// a persisted, Viewer-readable column.
+//
+// Scope, stated honestly: this is a STRUCTURAL exposure, not a demonstrated
+// leak. PVE's JSONSchema rejections generally name the parameter and the rule
+// rather than the value, and nothing here has observed PVE echoing a rejected
+// target-endpoint back. What is true is that the endpoint's property string
+// carries a stored, long-lived API token, that the whole response body reaches
+// APIError.Message untouched, and that the only thing standing between the two
+// is an upstream vendor's error-formatting choice we neither control nor
+// re-check on upgrade.
+//
+// It scrubs the SECRET HALF rather than the whole "<tokenid>=<secret>" pair.
+// The secret is the part that authenticates, and it is the narrower needle:
+// every echo shape containing the full pair also contains the secret, while a
+// reformatted or partial echo may contain only the secret. Leaving the token
+// id readable also keeps the failure diagnosable, and it is already visible in
+// the clusters API.
+func scrubEndpointSecret(err error, apiToken string) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	// No empty-secret check here on purpose. scrubSecret owns that guard, and
+	// a second copy of it would make both unkillable: each would mask the
+	// other, so no test could tell either one from a no-op. An empty secret
+	// returns msg unchanged, which falls through to the identity return.
+	scrubbed := scrubSecret(msg, endpointTokenSecret(apiToken))
+	if scrubbed == msg {
+		return err
+	}
+	return &scrubbedError{msg: scrubbed, err: err}
+}
+
+// scrubSecret replaces every occurrence of secret in s. The empty secret is
+// the vacuous case and must short-circuit: strings.ReplaceAll with an empty
+// needle splices the replacement in at every position, mangling the text —
+// and there is nothing to hide in the first place.
+func scrubSecret(s, secret string) string {
+	if secret == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, secret, redactedTokenSecret)
+}
+
+// endpointTokenSecret splits a proxmox.TargetEndpoint.APIToken — built as
+// "<tokenid>=<secret>" at the top of executeCrossCluster — into the half that
+// authenticates. A value with no "=" is treated as secret in full, which is
+// the safe reading: the only reason to be looking at this string is that it is
+// credential material.
+func endpointTokenSecret(apiToken string) string {
+	if _, secret, ok := strings.Cut(apiToken, "="); ok {
+		return secret
+	}
+	return apiToken
 }
 
 func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Client, node, upid string, jobID uuid.UUID, mc *migrationContext) {
@@ -844,10 +1001,29 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 			if !proxmox.TaskSucceeded(status.ExitStatus) {
 				taskStatus = "failed"
 			}
+			// taskStatus above is decided on the raw exit status; what gets
+			// STORED is scrubbed. Deliberately narrow: this keeps the
+			// PERSISTED copy clean, and does not keep the text from a
+			// view:task holder, which it cannot.
+			//
+			// Two reasons, both outside this function. GET
+			// /clusters/:id/tasks/:upid and its /log sibling
+			// (registry_vms.go) serve PVE's own exit status and task log
+			// straight through at view:task, so the raw text is readable
+			// live for as long as Proxmox retains it. And
+			// reconcileRunningTasks (internal/collector) polls every
+			// still-running row with no filter excluding this one and calls
+			// the same ReconcileTaskHistory with an UNSCRUBBED exit status;
+			// both writes are scoped "WHERE upid = $1 AND status =
+			// 'running'", so whichever lands first wins and the other
+			// updates nothing.
+			//
+			// The persisted copy is still worth cleaning: it outlives PVE's
+			// task log, and it feeds the audit join and the report digest.
 			_, _ = o.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 				Upid:       upid,
 				Status:     taskStatus,
-				ExitStatus: status.ExitStatus,
+				ExitStatus: mc.scrub(status.ExitStatus),
 				FinishedAt: now,
 			})
 
@@ -864,14 +1040,17 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 				o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskUpdate, "task", upid, "completed")
 				o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindInventoryChange, "vm", mc.vmDBID, "migrated")
 			} else {
-				errMsg := fmt.Sprintf("Task exit status: %s", status.ExitStatus)
+				// PVE's worker die-message, straight from the vendor, on its
+				// way to migration_jobs.error_message — the same
+				// view:migration column the synchronous rejection lands in.
+				errMsg := mc.scrub(fmt.Sprintf("Task exit status: %s", status.ExitStatus))
 				_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
 					ID:           jobID,
 					Status:       StatusFailed,
 					CompletedAt:  now,
 					ErrorMessage: errMsg,
 				})
-				o.logger.Error("migration failed", "job_id", jobID, "exit_status", status.ExitStatus)
+				o.logger.Error("migration failed", "job_id", jobID, "exit_status", mc.scrub(status.ExitStatus))
 				o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "failed")
 				o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskUpdate, "task", upid, "failed")
 			}
@@ -881,6 +1060,14 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 }
 
 func (o *Orchestrator) failJob(ctx context.Context, jobID uuid.UUID, errMsg string, mc *migrationContext) {
+	// Scrubbed here as well as at executeCrossCluster's exit, because THIS is
+	// the function that writes to all three sinks and a caller reaching it by
+	// some other route would otherwise have to remember. Identity for every
+	// intra-cluster caller (nil scrubber) and idempotent for the cross-cluster
+	// one, so the belt costs nothing. Without it the "covered by construction"
+	// claim on armEndpointScrubber is false the moment anyone adds an early
+	// `return "", err` between arming and that exit.
+	errMsg = mc.scrub(errMsg)
 	o.logger.Error("migration job failed", "job_id", jobID, "error", errMsg)
 	// If ctx was cancelled (graceful shutdown), the DB write would no-op and
 	// the row would orphan in 'migrating' status forever. Use a fresh
