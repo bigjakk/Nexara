@@ -284,6 +284,86 @@ var derivedGroupAllowList = map[string]string{
 	"GET /api/v1/settings/branding/logo-file":    "Settings",
 }
 
+// TestGuard_DerivedGroupAllowListNamesRealSections holds the value column to
+// the Group vocabulary, which the comparison above cannot do.
+//
+// That comparison asks "does the route still derive what we recorded?", so a
+// TYPO in the value fails it immediately. What it cannot see is a value that
+// faithfully records the derivation AND names a section nothing else uses:
+// let the derivation start producing "Branding", record "Branding" here, and
+// derived == recorded holds while the docs grow a card for a section no
+// declared route can join.
+//
+// # Only one of the two remedies is reachable, and the message says so
+//
+// canonicalGroups is BIDIRECTIONAL. groupVocabularyFindings
+// (registry_group_guard_test.go) also requires every canonical entry to be
+// NAMED by a declaration or an overlay entry, and the groupUses it walks reads
+// only those two sources — never a derivation. So "add the new section to
+// canonicalGroups" is not an available fix: it trades this failure for
+// `canonicalGroups lists "X", but no declaration and no overlay entry names
+// it`. The fix is always to give the route a declared Group or an endpointMeta
+// entry. Teaching groupUses about derivation as a third source would change
+// that, and would be the thing to do if derived sections ever stop being a
+// closed set of three.
+func TestGuard_DerivedGroupAllowListNamesRealSections(t *testing.T) {
+	// Already route-sorted by the detector; no second sort here, which would
+	// imply the order is unspecified when it is pinned.
+	findings := derivedSectionVocabularyFindings(derivedGroupAllowList, canonicalGroups)
+
+	if len(derivedGroupAllowList) == 0 {
+		t.Fatal("derivedGroupAllowList is empty, so this guard checked nothing; delete it or " +
+			"re-point it at whatever replaced the list")
+	}
+	for _, f := range findings {
+		t.Error(f)
+	}
+}
+
+// TestDerivedSectionVocabularyFindingsDetects is why the detector above takes
+// its vocabulary as a parameter.
+//
+// All three allow-listed routes derive "Settings", which IS canonical, so no
+// edit to the real data can make the guard fail without also failing the
+// derived-vs-recorded comparison beside it — the guard is real but not
+// individually killable against the shipped maps. Both neighbouring detectors
+// (derivedGroupFindings, groupVocabularyFindings) are parameterized for the
+// same reason; this proves the detector fires when it should, on data the
+// repo does not have to contain.
+func TestDerivedSectionVocabularyFindingsDetects(t *testing.T) {
+	canonical := map[string]string{"Settings": "real section"}
+
+	if got := derivedSectionVocabularyFindings(map[string]string{"GET /x": "Settings"}, canonical); len(got) != 0 {
+		t.Errorf("a canonical section produced findings %v, want none — the detector reports an "+
+			"section that exists, so every finding below would be noise", got)
+	}
+	got := derivedSectionVocabularyFindings(map[string]string{"GET /x": "Branding"}, canonical)
+	if len(got) != 1 {
+		t.Fatalf("a non-canonical section produced %d findings, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "Branding") || !strings.Contains(got[0], "GET /x") {
+		t.Errorf("finding = %q, want it to name both the route and the section", got[0])
+	}
+}
+
+// derivedSectionVocabularyFindings reports each allow-listed route whose
+// recorded section is not in the vocabulary.
+func derivedSectionVocabularyFindings(allow, canonical map[string]string) (findings []string) {
+	for _, route := range slices.Sorted(maps.Keys(allow)) {
+		section := allow[route]
+		if _, ok := canonical[section]; ok {
+			continue
+		}
+		findings = append(findings, fmt.Sprintf(
+			"%s is allow-listed as deriving section %q, which is not in canonicalGroups. Give the "+
+				"route a declared Group, or an endpointMeta entry naming its section — do NOT add "+
+				"%q to canonicalGroups, which only moves the failure to groupVocabularyFindings, "+
+				"since nothing declares or overlays it.",
+			route, section, section))
+	}
+	return findings
+}
+
 // liveDocsPayload renders the REAL /api/v1/api-docs payload: the production
 // handler, holding the declarations setupRoutes pushed into it, reading the
 // route table setupRoutes built, marshalled and decoded the way a caller

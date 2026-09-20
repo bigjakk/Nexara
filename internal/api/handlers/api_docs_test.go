@@ -3,9 +3,12 @@ package handlers
 import (
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -523,6 +526,70 @@ func TestDeclaredEndpointKeys(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("keys[%d] = %q, want %q (sorted order)", i, got[i], want[i])
+		}
+	}
+}
+
+// TestGuard_EndpointMetaEntriesCarryADescription holds the one field of an
+// overlay entry that nothing else requires.
+//
+// The asymmetry is the point. Forty-four registry_*_test.go files already
+// assert strings.TrimSpace(e.Description) != "" for DECLARED routes, 78 times
+// between them — counted, because the previous version of this comment said
+// "roughly twenty" and the whole point of the paragraph below is that a loose
+// count is the defect. The
+// overlay was the single source exempt from that, and these are the routes
+// that can least afford it — there is no declaration behind them, so a blank
+// Description renders an empty cell in /api/v1/api-docs and the reader has
+// nothing at all.
+//
+// Two things this comment previously overstated, corrected rather than
+// quietly dropped, because the overstatement is the same defect class the
+// guard exists to catch:
+//
+//   - It is NOT true that no guard touches Description. One of the thirteen
+//     keys, POST /api/v1/alert-rules, is pinned verbatim by
+//     TestGetDocs_DeclarationBeatsEndpointMeta above. The gap is real for the
+//     other twelve, which is the value here.
+//   - It is NOT true that every other guard on this map checks only keys.
+//     TestGuard_EveryRouteGroupIsCanonical holds overlay Group values to the
+//     vocabulary and TestGuard_DocumentedPermissionMatchesEnforcement compares
+//     overlay Permission values against the call graph. Description is the
+//     field they leave alone, not the only value-level field.
+//
+// Group is deliberately NOT checked here. Blanking one is already reported by
+// TestGuard_NoRouteFallsThroughToADerivedGroup, which registry_group_guard_test.go
+// names as "the guard that owns the 'states nothing' case" — and it reports
+// the more useful fact, naming the invented section the route then renders
+// under. A copy here would be a strict subset of it: never individually
+// killable, and two copies of one invariant mask each other so neither can be
+// shown to work.
+//
+// Permission is not checked either, and the reason is stronger than the one
+// this comment first gave. Six of the thirteen carry none, and they split:
+//
+//   - Four — api-docs, the OIDC callback, logout and register — are in
+//     publicRoutes, so TestGuard_DocumentedPermissionMatchesEnforcement
+//     `continue`s on the exemption BEFORE it compares anything. A fabricated
+//     permission there would never be checked against the call graph at all:
+//     a docs lie with no guard behind it, which is worse than a blank.
+//   - The other two are ordinary blanks, which that guard reads as skip-me.
+//
+// Note GET /api/v1/settings is NOT one of the "enforces nothing" cases, as an
+// earlier draft of this comment had it — it resolves a literal manage for
+// global-scope writes, and a fabricated view claim on it does fail the
+// enforcement guard.
+func TestGuard_EndpointMetaEntriesCarryADescription(t *testing.T) {
+	if len(endpointMeta) == 0 {
+		t.Fatal("endpointMeta is empty, so this guard checked nothing. If the overlay is finally " +
+			"gone, delete this test with it rather than leaving it asserting over nothing.")
+	}
+
+	for _, key := range slices.Sorted(maps.Keys(endpointMeta)) {
+		if strings.TrimSpace(endpointMeta[key].Description) == "" {
+			t.Errorf("endpointMeta[%q] has no Description. This map is the ONLY source for these "+
+				"routes — there is no declaration behind them — so the docs payload renders an "+
+				"empty cell and a reader has nothing.", key)
 		}
 	}
 }
