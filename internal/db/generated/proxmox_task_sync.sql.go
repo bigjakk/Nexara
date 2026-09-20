@@ -22,6 +22,61 @@ func (q *Queries) GetTaskSyncState(ctx context.Context, clusterID uuid.UUID) (in
 	return last_synced_at, err
 }
 
+const listCrossClusterMigrationUPIDs = `-- name: ListCrossClusterMigrationUPIDs :many
+SELECT upid FROM migration_jobs
+WHERE migration_type = 'cross-cluster'
+  AND upid <> ''
+  AND upid = ANY($1::text[])
+`
+
+// ListCrossClusterMigrationUPIDs is the third dedup layer, and unlike its two
+// siblings it is a CREDENTIAL boundary rather than a duplicate-row guard.
+//
+// A cross-cluster migration hands Proxmox the target cluster's decrypted API
+// token in the `target-endpoint` property string, so the worker's die message
+// can echo it back. ingestTask writes PVE's status straight into
+// task_history.exit_status at INSERT — readable at view:task and, via the task
+// join, at view:audit — and 'qmigrate' is not in skipTaskTypes, so nothing else
+// keeps it out. Only internal/migration holds the secret and can scrub it.
+//
+// The two sibling lookups do not cover this, because they answer "is the row
+// already recorded?" and the dangerous window is exactly the one where it is
+// NOT: startAndPollMigration writes the UPID onto the migration_jobs row
+// (SetMigrationJobStarted) and only then inserts the task_history and audit_log
+// rows. For the few statements in between, a sync tick listing this node finds
+// the task unrecorded and ingests it itself. This lookup catches it because
+// migration_jobs.upid is already set throughout that gap — the same ordering
+// ListRunningTaskHistoryByCluster's anti-join rests on. One documented
+// invariant, two guards, rather than two coincidences.
+//
+// The two guards are NOT copies of each other and must stay individually
+// killable: the anti-join guards the reconciler's SELECT, this guards
+// ingestTask's INSERT. Different writes, different call paths, and the tests
+// cross-check that removing either leaves the other's test still passing.
+//
+// `upid <> ”` because that is migration_jobs.upid's not-yet-dispatched
+// default; without it a job parked at pending would match a task row that
+// somehow carried an empty UPID.
+func (q *Queries) ListCrossClusterMigrationUPIDs(ctx context.Context, upids []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listCrossClusterMigrationUPIDs, upids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var upid string
+		if err := rows.Scan(&upid); err != nil {
+			return nil, err
+		}
+		items = append(items, upid)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExistingAuditLogUPIDs = `-- name: ListExistingAuditLogUPIDs :many
 SELECT (details->>'upid')::text AS upid FROM audit_log WHERE details->>'upid' = ANY($1::text[])
 `

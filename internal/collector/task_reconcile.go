@@ -17,13 +17,20 @@ import (
 const staleTaskGrace = 24 * time.Hour
 
 // reconcileRunningTasks updates task_history rows still marked "running" by
-// polling each task's live status from Proxmox. The working set is small (every
-// running task on the cluster — Nexara-dispatched plus the external PVE-native
+// polling each task's live status from Proxmox. The working set is small (the
+// running tasks on the cluster — Nexara-dispatched plus the external PVE-native
 // tasks ingested in Phase 4D), so one GetTaskStatus call per row per sync tick
 // is cheap. Finished tasks are flipped to completed/failed and a task_update
 // event is published so the activity feed refreshes.
 //
 // This is the source of truth that lets the UI stop polling Proxmox per entry.
+//
+// Not quite every running row: ListRunningTaskHistoryByCluster withholds the
+// tasks of cross-cluster migrations, whose die message can carry the target
+// cluster's API token and which only the migration orchestrator can scrub. The
+// exclusion lives in that query and nowhere else — see its comment in
+// queries/tasks.sql for why, and for what this pass gives up by not seeing
+// those rows.
 func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient, cluster db.Cluster) {
 	rows, err := s.queries.ListRunningTaskHistoryByCluster(ctx, cluster.ID)
 	if err != nil {
@@ -54,9 +61,15 @@ func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient
 }
 
 // finalizeTask flips a still-running task_history row to a terminal state and,
-// when a row actually changed, publishes a task_update event. The underlying
-// query is scoped to status='running', so it never clobbers rows already
-// finalized by the migration orchestrator or DRS executor.
+// when a row actually changed, publishes a task_update event.
+//
+// The underlying query is scoped to status='running', which means it never
+// overwrites a row the migration orchestrator or DRS executor has already
+// finalized. Read that narrowly: it does not make those components the winner,
+// only the loser a no-op. Both sides run the same predicate, so whoever writes
+// first decides the stored text. Where that mattered — the cross-cluster
+// migration die message, which the orchestrator scrubs and this pass cannot —
+// it is settled by keeping the row out of the caller's SELECT entirely.
 func (s *Syncer) finalizeTask(ctx context.Context, cluster db.Cluster, upid, status, exitStatus string) {
 	n, err := s.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 		Upid:       upid,

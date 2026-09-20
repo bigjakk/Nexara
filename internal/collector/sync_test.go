@@ -49,9 +49,15 @@ type mockQueries struct {
 
 	existingTaskUPIDs   map[string]bool // ListExistingTaskHistoryUPIDs echoes these back
 	existingAuditUPIDs  map[string]bool // ListExistingAuditLogUPIDs echoes these back
+	crossClusterUPIDs   map[string]bool // ListCrossClusterMigrationUPIDs echoes these back
 	externalTaskCalls   []db.InsertExternalTaskHistoryParams
 	taskHistUPIDErr     error // when set, ListExistingTaskHistoryUPIDs fails (dedup error)
+	crossClusterUPIDErr error // when set, ListCrossClusterMigrationUPIDs fails
 	upsertTaskSyncCalls []db.UpsertTaskSyncStateParams
+
+	// Recorded so a test can assert what reached audit_log.details, which
+	// ingestTask fills with the raw PVE task status alongside task_history.
+	auditWithSourceCalls []db.InsertAuditLogWithSourceParams
 
 	// Guest snapshot inventory
 	vmsByCluster             []db.Vm            // returned by ListVMsByCluster
@@ -341,7 +347,8 @@ func (m *mockQueries) InsertAuditLog(_ context.Context, arg db.InsertAuditLogPar
 	return nil
 }
 
-func (m *mockQueries) InsertAuditLogWithSource(_ context.Context, _ db.InsertAuditLogWithSourceParams) error {
+func (m *mockQueries) InsertAuditLogWithSource(_ context.Context, arg db.InsertAuditLogWithSourceParams) error {
+	m.auditWithSourceCalls = append(m.auditWithSourceCalls, arg)
 	return nil
 }
 
@@ -371,6 +378,19 @@ func (m *mockQueries) ListExistingAuditLogUPIDs(_ context.Context, upids []strin
 	var out []string
 	for _, u := range upids {
 		if m.existingAuditUPIDs[u] {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockQueries) ListCrossClusterMigrationUPIDs(_ context.Context, upids []string) ([]string, error) {
+	if m.crossClusterUPIDErr != nil {
+		return nil, m.crossClusterUPIDErr
+	}
+	var out []string
+	for _, u := range upids {
+		if m.crossClusterUPIDs[u] {
 			out = append(out, u)
 		}
 	}

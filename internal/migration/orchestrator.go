@@ -31,6 +31,30 @@ func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 5*time.Second)
 }
 
+// defaultPollInterval and defaultPollStaleGrace are pollTaskStatus's timings.
+//
+// The grace deliberately equals collector.staleTaskGrace. That sweep used to
+// be what finalized a migration's task row when Proxmox stopped being able to
+// report on it — "node reboot, task-log rotation", in its own words — and
+// withholding cross-cluster rows from the collector took it away. This
+// restores an equivalent inside the only component still watching the row.
+// They are separate constants because neither package depends on the other;
+// change one and change the other.
+//
+// Applied to CONSECUTIVE poll failures rather than to total runtime. That is
+// more CONSERVATIVE than the sweep it replaces, not stricter — it abandons
+// strictly fewer rows, because the old sweep fired on a single error once the
+// task was 24h old, while this needs 24h of unbroken failure. The reason is
+// that a cross-cluster migration can legitimately
+// run for many hours, and a deadline on the whole loop would mark a healthy
+// long transfer as failed while it was still copying. A successful poll clears
+// the timer, so only a migration Proxmox has genuinely stopped answering for
+// hits it.
+const (
+	defaultPollInterval   = 5 * time.Second
+	defaultPollStaleGrace = 24 * time.Hour
+)
+
 // Orchestrator manages migration job execution.
 type Orchestrator struct {
 	queries       *db.Queries
@@ -38,6 +62,12 @@ type Orchestrator struct {
 	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	logger        *slog.Logger
 	eventPub      *events.Publisher
+
+	// pollTaskStatus's timings. Fields rather than constants only so a test
+	// can drive the loop without waiting out a 5s tick or a 24h grace;
+	// production never sets them and NewOrchestrator supplies the defaults.
+	pollInterval   time.Duration
+	pollStaleGrace time.Duration
 }
 
 // NewOrchestrator creates a new migration orchestrator.
@@ -46,10 +76,12 @@ func NewOrchestrator(queries *db.Queries, encryptionKey string, logger *slog.Log
 		logger = slog.Default()
 	}
 	return &Orchestrator{
-		queries:       queries,
-		encryptionKey: encryptionKey,
-		logger:        logger,
-		eventPub:      eventPub,
+		queries:        queries,
+		encryptionKey:  encryptionKey,
+		logger:         logger,
+		eventPub:       eventPub,
+		pollInterval:   defaultPollInterval,
+		pollStaleGrace: defaultPollStaleGrace,
 	}
 }
 
@@ -487,6 +519,15 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 		// Finalize the task history row as failed. ReconcileTaskHistory is
 		// guarded on status='running', so it won't clobber a row the collector
 		// reconciler already finalized.
+		//
+		// err.Error() is UNSCRUBBED, and deliberately so: waitForTask wraps
+		// status.ExitStatus verbatim, but this function is reachable only
+		// through Execute's `TypeIntraCluster && ModeBoth` gate, so no
+		// target-endpoint was ever assembled and there is no credential in
+		// play — mc.scrubber is nil here by construction. That is the ONLY
+		// reason it is safe. Adding a cross-cluster path to ModeBoth means
+		// wrapping this in mc.scrub first; see the writer inventory in
+		// pollTaskStatus.
 		now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 		_, _ = o.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 			Upid:       upid,
@@ -966,21 +1007,85 @@ func endpointTokenSecret(apiToken string) string {
 	return apiToken
 }
 
+// abandonTaskRow finalizes a task_history row with a CONSTANT exit status, for
+// the two exits where this loop gives up without PVE having told it anything.
+//
+// One implementation for both, because there is nothing to vary: a constant
+// needs no scrub, which is the whole reason these exits are safe to write at
+// all. PVE's text is what cannot be persisted unscrubbed; "interrupted" and
+// "vanished" carry none of it.
+//
+// Writes through cleanupCtxFor so a cancelled parent does not silently turn the
+// write into a no-op — which is exactly the orphan these exits exist to
+// prevent, and which pgx would do without a live context.
+func (o *Orchestrator) abandonTaskRow(ctx context.Context, upid, exitStatus string) {
+	dbCtx, cancel := cleanupCtxFor(ctx)
+	defer cancel()
+	_, _ = o.queries.ReconcileTaskHistory(dbCtx, db.ReconcileTaskHistoryParams{
+		Upid:       upid,
+		Status:     "failed",
+		ExitStatus: exitStatus,
+		FinishedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	})
+}
+
+// pollTaskStatus watches a dispatched Proxmox task to completion and finalizes
+// both the migration job and its task_history row.
+//
+// It has to finalize that row on EVERY exit, because for a cross-cluster
+// migration it is the only thing left that can: ListRunningTaskHistoryByCluster
+// withholds the row from the collector's stale-task sweep (the credential
+// boundary — see queries/tasks.sql), and DeleteCompletedTasks never prunes a
+// row still marked running. Returning without a terminal write leaves the
+// Tasks page showing "Running" forever.
 func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Client, node, upid string, jobID uuid.UUID, mc *migrationContext) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(o.pollInterval)
 	defer ticker.Stop()
+
+	// When polling started failing, zeroed by any successful poll. Bounds the
+	// loop on how long Proxmox has been unable to answer, not on how long the
+	// migration has taken — see defaultPollStaleGrace.
+	var unreachableSince time.Time
 
 	for {
 		select {
 		case <-ctx.Done():
+			// failJob writes migration_jobs through cleanupCtxFor, so a SIGTERM
+			// mid-migration leaves the JOB row correct on its own; the task row
+			// is this call's job.
+			//
+			// Note what this costs, because nothing corrects it: PVE will most
+			// likely finish the worker, but the row now says failed, the
+			// anti-join withholds it from the reconciler, and
+			// ReconcileTaskHistory is guarded on status='running' — so no
+			// later sync can revise it. A permanently-wrong terminal state is
+			// the deliberate trade against a row stuck at Running forever, and
+			// failJob already did the same to the job row before this existed.
+			o.abandonTaskRow(ctx, upid, "interrupted")
 			o.failJob(ctx, jobID, "context cancelled", mc)
 			return
 		case <-ticker.C:
 			status, err := client.GetTaskStatus(ctx, node, upid)
 			if err != nil {
 				o.logger.Warn("failed to poll task status", "job_id", jobID, "error", err)
+				// A node that rebooted, or a task log that rotated, never
+				// starts answering again — without a bound this goroutine
+				// polls every 5s forever and the row never leaves "running".
+				// No process death required, which is why this is bounded
+				// rather than documented as a residual.
+				if unreachableSince.IsZero() {
+					unreachableSince = time.Now()
+				} else if time.Since(unreachableSince) > o.pollStaleGrace {
+					o.logger.Error("giving up polling task status",
+						"job_id", jobID, "upid", upid,
+						"unreachable_for", time.Since(unreachableSince))
+					o.abandonTaskRow(ctx, upid, "vanished")
+					o.failJob(ctx, jobID, "task status unavailable past the stale grace", mc)
+					return
+				}
 				continue
 			}
+			unreachableSince = time.Time{}
 
 			if status.Status == "running" {
 				// Update progress (Proxmox doesn't give %, so we just note it's running).
@@ -1006,19 +1111,75 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 			// PERSISTED copy clean, and does not keep the text from a
 			// view:task holder, which it cannot.
 			//
-			// Two reasons, both outside this function. GET
+			// The reason is outside this function. GET
 			// /clusters/:id/tasks/:upid and its /log sibling
 			// (registry_vms.go) serve PVE's own exit status and task log
 			// straight through at view:task, so the raw text is readable
-			// live for as long as Proxmox retains it. And
-			// reconcileRunningTasks (internal/collector) polls every
-			// still-running row with no filter excluding this one and calls
-			// the same ReconcileTaskHistory with an UNSCRUBBED exit status;
-			// both writes are scoped "WHERE upid = $1 AND status =
-			// 'running'", so whichever lands first wins and the other
-			// updates nothing.
+			// live for as long as Proxmox retains it. That is a decided
+			// trade, argued in those two declarations, not an oversight
+			// this scrub was meant to cover.
 			//
-			// The persisted copy is still worth cleaning: it outlives PVE's
+			// On the reconcile path this is the only writer of PVE's text
+			// for the row: ListRunningTaskHistoryByCluster withholds a
+			// cross-cluster migration's row from the collector reconciler,
+			// which would otherwise call the same ReconcileTaskHistory with
+			// an UNSCRUBBED exit status and, on a first-write-wins race,
+			// leave this call updating nothing. Do not remove that filter on
+			// the grounds that this line already scrubs — the two are one
+			// mechanism.
+			//
+			// The collector's other writer of PVE's text is closed too, by a
+			// separate guard: ingestTask would persist the same die message
+			// at INSERT if a sync tick listed this node in the few
+			// statements between the remote_migrate POST returning and the
+			// audit/task rows landing, so seenTaskUPIDs withholds any UPID
+			// named by a cross-cluster migration_jobs row
+			// (ListCrossClusterMigrationUPIDs). Separate guard, not a second
+			// copy: that one covers an INSERT on the ingest path, the
+			// anti-join a SELECT on the reconcile path, and each is killable
+			// without the other.
+			//
+			// The full set of writers to task_history.exit_status, since a
+			// partial inventory here is worse than none — someone extending
+			// one of these will read it:
+			//
+			//  1. this line — scrubbed.
+			//  2. collector finalizeTask — raw PVE text; the anti-join keeps
+			//     cross-cluster rows out of its listing.
+			//  3. collector ingestTask — raw PVE text at INSERT; the
+			//     ListCrossClusterMigrationUPIDs lookup withholds the UPID.
+			//  4. executeBothMigration, ~570 lines up — writes err.Error()
+			//     from waitForTask, which wraps status.ExitStatus verbatim and
+			//     does NOT scrub. Safe only because that function is reachable
+			//     solely through the TypeIntraCluster && ModeBoth gate in
+			//     Execute, so no target-endpoint was ever assembled and
+			//     mc.scrubber is nil. Give ModeBoth a cross-cluster path and
+			//     that call needs mc.scrub before anything else changes.
+			//  5. internal/drs/executor.go — writes waitForTask's exitStatus
+			//     verbatim. Safe only because DRS issues MigrateVM/MigrateCT,
+			//     never RemoteMigrate, and creates no migration_jobs rows at
+			//     all — which also means neither guard above would cover it.
+			//     Pointing DRS at a remote target needs both.
+			//  6. PUT /api/v1/tasks/:upid (manage:task) — no status='running'
+			//     guard at all, but it writes the request body rather than
+			//     vendor text, so there is nothing there to scrub.
+			//  7. executeBothMigration's SUCCESS write, 12 lines below its
+			//     failure sibling in 4 — a literal "OK".
+			//  8. abandonTaskRow, added by the same change as this comment —
+			//     literals "interrupted" and "vanished".
+			//
+			// 7 and 8 are constants, so they carry nothing to scrub. They are
+			// listed because the rule this comment follows is that a PARTIAL
+			// inventory is worse than none: a reader checking whether some new
+			// write needs mc.scrub has to be able to trust that the set is the
+			// set. 8 in particular was introduced by the change that wrote this
+			// paragraph, which is how a list like this goes stale on day one.
+			//
+			// 4 and 5 are structurally safe, not luckily so; neither is
+			// defended by a test, because today neither can reach a
+			// credential.
+			//
+			// The persisted copy is worth cleaning because it outlives PVE's
 			// task log, and it feeds the audit join and the report digest.
 			_, _ = o.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 				Upid:       upid,

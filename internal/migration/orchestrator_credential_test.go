@@ -53,7 +53,21 @@ type execCall struct {
 	args []any
 }
 
-func (s stubDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+func (s stubDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	// Honour the context the way pgx does, and do it BEFORE the recording
+	// check. A real pool refuses a write on a cancelled context — the
+	// statement never reaches Postgres — so a stub that accepted one would
+	// make every "this write happened" assertion unable to fail for the one
+	// mistake that matters on a shutdown path: passing the cancelled parent
+	// instead of the cleanupCtxFor-derived context.
+	//
+	// This is what pins cleanupCtxFor. There is no direct unit test of
+	// migration's copy anywhere (internal/rolling tests only its own), so
+	// every caller that reaches a write through it — failJob, and
+	// pollTaskStatus's ctx.Done() branch — is verified here or nowhere.
+	if err := ctx.Err(); err != nil {
+		return pgconn.CommandTag{}, err
+	}
 	// A test that has not opted into recording writes is asserting there are
 	// none, so keep failing loudly for it.
 	if s.execs == nil {

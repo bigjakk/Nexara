@@ -846,6 +846,35 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 	})
 
 	// ── Proxmox tasks ─────────────────────────────────────────────────
+	//
+	// Both of these are verbatim passthroughs of PVE's own words: GetTaskStatus
+	// returns status.ExitStatus unmodified, GetTaskLog every log line's text.
+	// Neither consults task_history, so neither is covered by the credential
+	// scrub in internal/migration/orchestrator.go — and that scrub's own comment
+	// says so, rather than claiming a reach it does not have.
+	//
+	// It matters for one task shape. A cross-cluster migration puts the target
+	// cluster's decrypted API token in the `target-endpoint` property string it
+	// hands PVE, so a rejection PVE chooses to echo can name it, and the worker's
+	// last log line is `TASK ERROR: <that message>`. A view:task holder can read
+	// it here for as long as Proxmox retains the task log. The orchestrator
+	// scrubs the copy it PERSISTS, which outlives the task log and feeds the
+	// audit join; it does not, and cannot, scrub these.
+	//
+	// Left unscrubbed on purpose. The value of a live task view is that it is
+	// PVE's real output — the operator reading it is debugging the failure these
+	// endpoints exist to explain, already holds view:task on the source cluster,
+	// and can read the same text from the PVE UI. Filtering it would mean
+	// guessing at the vendor's error shapes on every response for every task
+	// type, and would leave the log silently lying about what PVE said. The
+	// exposure is bounded by PVE's task-log retention; the persisted copy is not,
+	// which is why only that one is scrubbed. The SPA's migration dialog fetches
+	// the /log route for exactly this UPID
+	// (frontend/src/features/vms/components/MigrateJobDialog.tsx).
+	//
+	// Revisit if the permission ever widens, or if PVE is observed echoing the
+	// property string back — see the "STRUCTURAL exposure, not a demonstrated
+	// leak" note on scrubEndpointSecret.
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,
 		Path:        clusterScope + "/tasks/:upid",

@@ -151,6 +151,16 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 		// Finalize the task_history row. ReconcileTaskHistory is guarded on
 		// status='running', so it won't clobber a row the collector reconciler
 		// already finalized; status is "completed"/"failed" from waitForTask.
+		//
+		// exitStatus is PVE's text verbatim, UNSCRUBBED. Safe only because DRS
+		// issues MigrateVM/MigrateCT and never RemoteMigrate, so no target
+		// cluster's API token is ever handed to Proxmox on this path and its
+		// die message cannot echo one back. Note DRS also creates no
+		// migration_jobs rows, so neither credential guard that protects
+		// cross-cluster migration (the anti-join in
+		// ListRunningTaskHistoryByCluster, the lookup in seenTaskUPIDs) would
+		// cover this write — giving DRS a remote target needs both, plus a
+		// scrub here.
 		_, _ = e.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 			Upid:       upid,
 			Status:     status,

@@ -964,6 +964,35 @@ type Querier interface {
 	// not mapped yet, pays nothing for a correlation it cannot use.
 	ListClustersWithVeeamPlatform(ctx context.Context) ([]Cluster, error)
 	ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
+	// ListCrossClusterMigrationUPIDs is the third dedup layer, and unlike its two
+	// siblings it is a CREDENTIAL boundary rather than a duplicate-row guard.
+	//
+	// A cross-cluster migration hands Proxmox the target cluster's decrypted API
+	// token in the `target-endpoint` property string, so the worker's die message
+	// can echo it back. ingestTask writes PVE's status straight into
+	// task_history.exit_status at INSERT — readable at view:task and, via the task
+	// join, at view:audit — and 'qmigrate' is not in skipTaskTypes, so nothing else
+	// keeps it out. Only internal/migration holds the secret and can scrub it.
+	//
+	// The two sibling lookups do not cover this, because they answer "is the row
+	// already recorded?" and the dangerous window is exactly the one where it is
+	// NOT: startAndPollMigration writes the UPID onto the migration_jobs row
+	// (SetMigrationJobStarted) and only then inserts the task_history and audit_log
+	// rows. For the few statements in between, a sync tick listing this node finds
+	// the task unrecorded and ingests it itself. This lookup catches it because
+	// migration_jobs.upid is already set throughout that gap — the same ordering
+	// ListRunningTaskHistoryByCluster's anti-join rests on. One documented
+	// invariant, two guards, rather than two coincidences.
+	//
+	// The two guards are NOT copies of each other and must stay individually
+	// killable: the anti-join guards the reconciler's SELECT, this guards
+	// ingestTask's INSERT. Different writes, different call paths, and the tests
+	// cross-check that removing either leaves the other's test still passing.
+	//
+	// `upid <> ''` because that is migration_jobs.upid's not-yet-dispatched
+	// default; without it a job parked at pending would match a task row that
+	// somehow carried an empty UPID.
+	ListCrossClusterMigrationUPIDs(ctx context.Context, upids []string) ([]string, error)
 	ListDRSHistory(ctx context.Context, arg ListDRSHistoryParams) ([]DrsHistory, error)
 	ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsRule, error)
 	ListDistinctAuditActions(ctx context.Context) ([]string, error)
@@ -1170,6 +1199,75 @@ type Querier interface {
 	// Nodes whose root filesystem is at or above 85% usage.
 	ListRootfsFullNodes(ctx context.Context) ([]ListRootfsFullNodesRow, error)
 	ListRunningRollingUpdateJobs(ctx context.Context) ([]RollingUpdateJob, error)
+	// ListRunningTaskHistoryByCluster feeds the collector's reconciler
+	// (internal/collector/task_reconcile.go): the still-running rows whose
+	// running→done transition the collector owns.
+	//
+	// The NOT EXISTS is a CREDENTIAL boundary. A cross-cluster migration hands
+	// Proxmox the target cluster's decrypted API token inside the `target-endpoint`
+	// property string, so the worker's die message can echo it back. The migration
+	// orchestrator scrubs its copy (scrubEndpointSecret in
+	// internal/migration/orchestrator.go); the collector cannot. It holds neither
+	// the secret nor anything that identifies the task as a remote migration —
+	// startAndPollMigration stores task_type 'migrate' for intra- and cross-cluster
+	// alike. Both finalize with the same `upid = $1 AND status = 'running'`
+	// predicate, so before this filter it was first-write-wins: a sync tick landing
+	// in the orchestrator's 5s poll gap stored PVE's UNSCRUBBED text in exit_status
+	// — readable at view:task and, via the task join, at view:audit — and the
+	// scrubbed write then updated nothing.
+	//
+	// One guard per write, and no copies: this covers the reconciler's SELECT,
+	// ListCrossClusterMigrationUPIDs covers ingestTask's INSERT
+	// (queries/proxmox_task_sync.sql). Different writes on different call paths, so
+	// each stays individually killable — the tests cross-check that removing either
+	// leaves the other's test passing. A second copy on THIS write would not be:
+	// it would mask this one and neither could then be tested.
+	//
+	// Keyed on migration_jobs.upid rather than a flag on task_history, so that a
+	// future dispatch path gets the exclusion without having to remember it:
+	// startAndPollMigration writes the UPID onto the job row before it inserts the
+	// task row. That is an ORDERING, not an enforced invariant — the
+	// SetMigrationJobStarted error is only logged, so a single failed UPDATE there
+	// would leave migration_jobs.upid empty and this row visible again. Do not
+	// read that as self-healing: pgxpool transparently replaces a dead connection,
+	// so a conn-level failure on the UPDATE can be followed by a perfectly
+	// successful InsertTaskHistory on a fresh one, leaving upid = '' beside a live
+	// running row with both guards off. Only ctx cancellation reliably takes the
+	// next statement down too.
+	//
+	// The trade, stated plainly: an owner column on task_history WOULD be stronger
+	// against that specific failure, because the flag and the row are one write.
+	// It is weaker against the likelier one — every future insert site has to
+	// remember to set it, which is the repo's "opt-in guard" class, silent and
+	// permanent when forgotten. A failed UPDATE is at least loud. That is the
+	// choice, not a claim that this dominates.
+	//
+	// The `<> ''` keeps the two empty-string sentinels from joining to each other.
+	//
+	// No index on migration_jobs(upid) on purpose: the table holds one row per
+	// migration ever requested and is never pruned, and at that size the anti-join
+	// is cheap under any plan. Revisit if it grows.
+	//
+	// Narrow by design. Intra-cluster migrations stay in the set in every mode
+	// (live, storage, both) — storage and both are migration_MODE values under the
+	// intra-cluster type, and none of their text carries a credential.
+	//
+	// What cross-cluster gives up: the collector's 24h stale-task sweep. Since
+	// DeleteCompletedTasks never prunes a running row, anything this loop fails to
+	// finalize shows "Running" forever, so pollTaskStatus was made to finalize on
+	// every exit — on completion, on ctx.Done() (graceful shutdown), and after the
+	// same 24h grace once Proxmox stops answering about the task at all, which is
+	// the case staleTaskGrace existed for and needs no process death. Both added
+	// exits write a constant, never vendor text.
+	//
+	// One shape is still unbounded: a hard kill (SIGKILL, OOM, node loss) takes the
+	// goroutine with no exit to run, and the row stays 'running'. Closing that needs
+	// a startup or periodic sweep, which is a different mechanism from this filter —
+	// and the same crash already strands migration_jobs in 'migrating', which
+	// nothing reconciles either, so it is one gap rather than a new one.
+	//
+	// 'cross-cluster' is migration.TypeCrossCluster, pinned by
+	// TestGuard_RunningTaskListNamesTheCrossClusterType.
 	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]TaskHistory, error)
 	ListSSHKnownHosts(ctx context.Context, clusterID uuid.UUID) ([]SshKnownHost, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
@@ -1437,6 +1535,11 @@ type Querier interface {
 	// status='running' so it never clobbers rows already finalized by the
 	// migration orchestrator / DRS executor. :execrows lets the caller emit a
 	// task_update event only when a row actually flipped.
+	//
+	// Note what that guard does NOT do: it does not decide WHICH of two racing
+	// writers wins, only that the loser is a no-op. Keeping an unscrubbed
+	// exit_status out of the column is the job of the caller's read
+	// (ListRunningTaskHistoryByCluster above), not of this predicate.
 	ReconcileTaskHistory(ctx context.Context, arg ReconcileTaskHistoryParams) (int64, error)
 	RemoveFavorite(ctx context.Context, arg RemoveFavoriteParams) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
