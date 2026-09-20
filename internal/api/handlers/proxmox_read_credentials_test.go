@@ -119,6 +119,12 @@ import (
 // provider's API credentials and is blanked by hand in acme.go, and no list of
 // name substrings would ever have found it. A field named for its role rather
 // than its content still needs a human to notice.
+//
+// This list has a second consumer:
+// TestGuard_CredentialBearingTypesRedactTheirRenderings in
+// credential_render_guard_test.go reads it to classify every type under
+// internal/ that renders itself. Widening it widens that guard too, which is
+// the intent — one vocabulary, not two.
 var credentialish = []string{
 	"password", "passwd", "token", "secret", "key", "keyring", "passphrase",
 	"credential", "pubkey", "privkey", "psk", "apitoken", "ticket", "salt",

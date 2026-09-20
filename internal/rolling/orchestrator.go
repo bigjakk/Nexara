@@ -2904,9 +2904,13 @@ func (o *Orchestrator) buildFailoverClients(ctx context.Context, clusterID uuid.
 // method through it (reflect.Value.CanInterface is false) and %v/%+v/%#v of
 // this struct print the raw fields, secret included. Exporting the field would
 // close that, and is deliberately not done — nothing outside this package
-// needs it, and an exported credential field is the larger hazard. Name the
-// pieces instead, as the failover log line in createClient above does with
-// t.name and t.config.BaseURL.
+// needs it, and an exported credential field is the larger hazard. Holding the
+// config by POINTER would close it too, since fmt prints a pointer below the
+// top level as its address rather than rendering the pointee, and that is not
+// done either: the config is a small value built per target and handed to
+// NewClient by value, so a pointer buys aliasing and an indirection for
+// nothing. Name the pieces instead, as the failover log line in createClient
+// above does with t.name and t.config.BaseURL.
 type failoverTarget struct {
 	name   string
 	config proxmox.ClientConfig
