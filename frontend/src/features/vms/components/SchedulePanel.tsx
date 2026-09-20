@@ -15,6 +15,7 @@ import {
   useCreateSchedule,
   useDeleteSchedule,
 } from "../api/vm-queries";
+import { snapshotNameError, SNAPSHOT_NAME_RULES } from "../lib/snapshot-name";
 import type { ResourceKind } from "../types/vm";
 
 const selectClass =
@@ -41,6 +42,12 @@ export function SchedulePanel({
   const [action, setAction] = useState("snapshot");
   const [cronExpr, setCronExpr] = useState("0 2 * * *");
   const [snapName, setSnapName] = useState("");
+
+  // Scoped to the snapshot action because handleCreate only sends snap_name
+  // for "snapshot". A bad name left behind by switching the action away would
+  // otherwise disable Create from a field that is no longer on screen.
+  const snapNameError =
+    action === "snapshot" ? snapshotNameError(snapName, kind) : null;
 
   // Filter schedules to this resource.
   const mySchedules = schedules?.filter(
@@ -211,14 +218,36 @@ export function SchedulePanel({
             </div>
             {action === "snapshot" && (
               <div>
-                <Label>Snapshot Name Template (optional)</Label>
+                <Label htmlFor="schedule-snap-name">
+                  Snapshot Name (optional)
+                </Label>
                 <Input
+                  id="schedule-snap-name"
                   value={snapName}
                   onChange={(e) => {
                     setSnapName(e.target.value);
                   }}
-                  placeholder="auto-YYYYMMDD-HHMMSS"
+                  placeholder="Optional"
+                  maxLength={40}
                 />
+                {/* Not a template: the scheduler stores this string and passes
+                    it to Proxmox verbatim, minting "auto-<timestamp>" only
+                    when it is empty (internal/scheduler, executeSnapshot). The
+                    old "auto-YYYYMMDD-HHMMSS" placeholder implied a
+                    substitution that does not exist — and, being a legal name,
+                    would have been taken literally had anyone typed it. */}
+                <p
+                  className={
+                    snapNameError
+                      ? "mt-1 text-xs text-destructive"
+                      : "mt-1 text-xs text-muted-foreground"
+                  }
+                >
+                  {snapNameError ??
+                    (snapName.length === 0
+                      ? "Leave empty to auto-generate a timestamped name for each run."
+                      : `Used as-is on every run — no date is substituted, so a recurring job collides with its own previous snapshot. Leave empty to auto-name each run. ${SNAPSHOT_NAME_RULES}`)}
+                </p>
               </div>
             )}
           </div>
@@ -233,7 +262,9 @@ export function SchedulePanel({
             </Button>
             <Button
               onClick={handleCreate}
-              disabled={createSchedule.isPending || !cronExpr}
+              disabled={
+                createSchedule.isPending || !cronExpr || snapNameError !== null
+              }
             >
               {createSchedule.isPending ? "Creating..." : "Create"}
             </Button>

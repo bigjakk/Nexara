@@ -1122,11 +1122,14 @@ Scheduled tasks run on cron expressions and are attached to a single guest.
 
 1. Open a VM or container's detail page
 2. Go to the **Schedules** tab
-3. Click **Create Scheduled Task**
+3. Click **Add Schedule**
 4. Configure:
    - **Action** — **Snapshot** or **Reboot**
    - **Cron Expression** — minute hour day month weekday (e.g. `0 2 * * *` = daily at 2 AM)
-   - **Snapshot Name Template** (snapshot actions only, optional) — e.g. `auto-YYYYMMDD-HHMMSS`
+   - **Snapshot Name (optional)** (snapshot actions only) — leave it empty and each run is
+     named `auto-<timestamp>`, which is what you almost always want. A name you type is used
+     **verbatim on every run**, with no date substituted, so the second run collides with the
+     first run's snapshot and fails.
 5. Click **Create**
 
 The table lists each schedule with its last status, next run, and last run, and a delete button.
