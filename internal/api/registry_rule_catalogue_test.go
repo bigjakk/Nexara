@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 )
@@ -554,6 +555,351 @@ func declaredRuleSites(t *testing.T) []ruleSite {
 					rule: name, method: e.Method, path: e.Path, param: param + "[]", prop: item,
 				})
 			}
+		}
+	}
+	return out
+}
+
+// baseRuleSiteCounts ratchets how many declared parameters carry each CREATE
+// rule that has a "-existing" twin.
+//
+// This count is the ONLY thing in the package that notices a create site
+// losing its rule, whether one site of several or all of them. Nothing else
+// covers it: formats are not ratcheted (registry_rule_reference_ratchet_test.go
+// says so outright), a bare format substitution narrows nothing so
+// TestGuard_RuleNarrowingSitesAreDeclared stays quiet, and the guard's own
+// emptiness check below is on the TWIN's addressing sites, not on these.
+//
+// What a swap costs is smaller than it first looks, and the honest version is
+// worth writing down. Point registry_ha.go's group Format at node-name and the
+// declaration — and the /api/v1/api-docs payload built from it — stop stating
+// the rule this pairing is about. It does NOT strand an object: both HA ids are
+// `format: pve-configid` upstream too (internal/proxmox/client_ha.go), so PVE
+// refuses "pve.01" itself and the caller gets a confusing 400 rather than
+// something created and unaddressable. The version that really does strand an
+// object is the LENGTH one, because PVE's $CONFIGID_RE states no maximum, and
+// the witnesses in the guard below are what cover that.
+//
+// A count is a weaker identity than the list of sites, because two changes
+// within one rule can cancel — and a list would be no churnier here, since all
+// of these are inline per-route declarations rather than a shared parameter.
+// The count's real advantage is narrower than "less churn": it survives a path
+// or parameter rename, which a list of sites does not. It is not expected to
+// move at all in ordinary work.
+var baseRuleSiteCounts = map[string]int{
+	"pve-configid": 5,
+}
+
+// TestGuard_ExistingRuleSitesAcceptWhatTheCreateRuleMints closes the half of
+// the create/addressing pairing that apischema cannot reach.
+//
+// A "-existing" rule is the loosened twin of a create rule: the create body
+// carries the strict one, and the routes that ADDRESS what it created carry
+// the twin. TestCreateConfigIDIsASubsetOfTheAddressingRule
+// (apischema/catalogue_test.go) holds the PATTERN half of that pairing, and
+// its own note records what it cannot see — the twin carries no length bound
+// in the rule, so the bound lives in a MaxLength at each DECLARATION SITE, in
+// this package. Raising the create ceiling without raising theirs re-opens the
+// gap and nothing over there fails.
+//
+// The failure is the one ceph-pool-name's catalogue entry records, arrived at
+// from the length side rather than the character side: a create body admits a
+// name, Proxmox stores the object under it, and the route that would read or
+// delete it refuses that same value in its own path parameter. The object is
+// one this API created and cannot remove.
+//
+// # This is a ONE-SIDED check, and the direction matters
+//
+// It works in values rather than in numbers, because the create ceiling is
+// spelled as a repetition count inside a regex and reading a bound back out of
+// that leaves this file holding a second copy of it. The witnesses come from
+// createRuleWitnesses, which grows a string one repeated rune at a time.
+//
+// That finds a LOWER BOUND on the create rule's ceiling, not the ceiling. A
+// rule whose longest legal value needs a shape repetition cannot build — a
+// segmented rule like "a/b/c", or one ending in a required character class —
+// keeps its real maximum out of reach. So:
+//
+//   - A site narrower than the probed range FAILS here, and that is sound: the
+//     create rule demonstrably accepts a value the site demonstrably refuses.
+//   - A site narrower than the rule's TRUE ceiling but wider than the probed
+//     range passes. This guard does not see it, and no amount of corroboration
+//     inside this file would change that.
+//
+// An earlier revision tried to close the second case by requiring the probed
+// range to equal the range of the rule's Accepts witnesses. That was worse
+// than the gap: the two can sit below the true ceiling together, so it bought
+// no soundness, and of the catalogue's base rules only pve-configid satisfies
+// it — every other rule keeps its cap in a format function or in a per-site
+// MaxLength, so the check would have fatalled on the next twin anyone added
+// and been deleted as an obstacle. What remains of it is cheap and honest: the
+// rule's own Accepts witnesses are added to the candidate set, so a boundary
+// the catalogue HAS written down is covered even when repetition cannot reach
+// it.
+//
+// # Known out of scope
+//
+// The pairing is found by the "-existing" naming convention, so a rule carried
+// on BOTH a create body and an addressing path parameter under one name is not
+// seen at all. ceph-pool-name is exactly that shape today: registry_ceph.go
+// declares MaxLength 128 at both its sites — cephPoolNameParam addresses,
+// createCephPoolParams [name] mints — and raising only the CREATE one re-opens
+// this same bug with nothing failing. (Check that direction twice before
+// editing it: pve-configid-existing's own Divergence note opens by recording
+// that an earlier version of the same sentence had it backwards.)
+//
+// # What a site can do that this does and does not catch
+//
+// A MinLength or an Enum added at a site refuses a value the create rule mints
+// and fails here. A TIGHTENED PATTERN does not, and the reason is structural
+// rather than an oversight worth fixing here: Property has a single Pattern
+// field, so a tighter pattern REPLACES the catalogued regex rather than adding
+// to it. declaredRuleSites then matches the site against no catalogue entry
+// and it leaves the walk altogether — the blind spot this file documents at
+// length above. registry_rule_reference_ratchet_test.go is what reports that,
+// by reading the declarations as source. Naming this guard as the one that
+// catches it would send the next reader to the wrong file.
+func TestGuard_ExistingRuleSitesAcceptWhatTheCreateRuleMints(t *testing.T) {
+	t.Parallel()
+
+	byName := make(map[string]apischema.RuleDoc)
+	for _, d := range apischema.Catalogue() {
+		byName[d.Name] = d
+	}
+
+	sitesByRule := make(map[string][]ruleSite)
+	for _, s := range declaredRuleSites(t) {
+		sitesByRule[s.rule] = append(sitesByRule[s.rule], s)
+	}
+
+	twins := 0
+	for _, d := range apischema.Catalogue() {
+		if strings.Contains(d.Name, "-existing") && !strings.HasSuffix(d.Name, "-existing") {
+			t.Errorf("%q carries -existing somewhere other than the end of its name. The pairing "+
+				"below matches by SUFFIX, so this rule is not seen at all and its addressing sites "+
+				"are held to nothing. Rename it, or teach the pairing the new shape.", d.Name)
+			continue
+		}
+		baseName, isVariant := strings.CutSuffix(d.Name, "-existing")
+		if !isVariant {
+			continue
+		}
+		// Counted here rather than after the base lookup: a twin whose
+		// base is missing is a broken pair, not an absent one, and the
+		// backstop at the end must not then report that no twin exists.
+		twins++
+
+		base, ok := byName[baseName]
+		if !ok {
+			t.Errorf("%s is catalogued but its create rule %q is not: a loosened twin with nothing "+
+				"to be a twin OF cannot be held to anything", d.Name, baseName)
+			continue
+		}
+
+		t.Run(d.Name, func(t *testing.T) {
+			sites := sitesByRule[d.Name]
+			if len(sites) == 0 {
+				t.Fatalf("no declared parameter carries %s, so this pairing is unguarded. Either the "+
+					"rule lost its last site — in which case the create rule's ceiling is now "+
+					"answerable to nothing — or the sites regressed to an inline literal, which "+
+					"ruleReferenceSites reports.", d.Name)
+			}
+
+			// The pairing is the API's invariant only if the CREATE routes
+			// really carry the create rule. See baseRuleSiteCounts.
+			want, pinned := baseRuleSiteCounts[baseName]
+			if !pinned {
+				t.Fatalf("%s has a -existing twin but no entry in baseRuleSiteCounts, so nothing "+
+					"holds its create sites in place. Add one with the count this run reports: %d.",
+					baseName, len(sitesByRule[baseName]))
+			}
+			if got := len(sitesByRule[baseName]); got != want {
+				t.Fatalf("%[1]d declared parameters carry %[2]s, want %[3]d.\n"+
+					"FEWER: either a create site had its Format swapped — which nothing else in "+
+					"this package reports, and which leaves the object minted under one rule and "+
+					"addressed under another — or a create route was legitimately deleted. For a "+
+					"deletion, lower the pin; for a swap, restore the Format.\n"+
+					"MORE: a new create route. Confirm it really should mint %[2]s values, then "+
+					"raise the pin.\n"+
+					"The catalogue's %[2]s entry states this count in prose as well, and nothing "+
+					"points at it from here — update its Divergence note too.",
+					got, baseName, want)
+			}
+
+			witnesses := createRuleWitnesses(t, base)
+
+			// Keyed by the declared facets the routes share, so one bad
+			// ceiling on a shared parameter reports once with its blast
+			// radius rather than once per route. The SITE loop is the outer
+			// one: a site refusing several witnesses is one failing site
+			// with several failing witnesses, not several failing sites.
+			type failure struct {
+				refused []string
+				routes  []string
+			}
+			failures := make(map[string]*failure)
+			for _, s := range sites {
+				var refused []string
+				for _, w := range witnesses {
+					if !siteAccepts(s.prop, w) {
+						refused = append(refused, w)
+					}
+				}
+				if len(refused) == 0 {
+					continue
+				}
+				key := s.param + " (" + declaredNarrowingFacets(s.prop) + ")"
+				f := failures[key]
+				if f == nil {
+					f = &failure{}
+					failures[key] = f
+				}
+				f.routes = append(f.routes, s.String())
+				for _, w := range refused {
+					if !slices.Contains(f.refused, w) {
+						f.refused = append(f.refused, w)
+					}
+				}
+			}
+
+			for _, key := range slices.Sorted(maps.Keys(failures)) {
+				f := failures[key]
+				t.Errorf("%s refuses %s, which %s accepts, across %d route(s) including %s.\n\n"+
+					"An object created under such a name could be neither read nor deleted through "+
+					"this API. Widen the site to cover what %s mints, or narrow %s to match the "+
+					"site — but do not leave them apart.",
+					key, describeWitnesses(f.refused), baseName, len(f.routes), f.routes[0],
+					baseName, baseName)
+			}
+		})
+	}
+
+	if twins == 0 {
+		t.Fatal("no catalogued rule ends in -existing, so this guard checked nothing. The naming " +
+			"convention it keys on has changed; re-point it before deleting it.")
+	}
+}
+
+// declaredNarrowingFacets renders the facets a site can narrow a rule with, so
+// a failure message says what refused the value. Rendering only MaxLength made
+// a MinLength narrowing print a MaxLength that was in fact correct, and left an
+// Enum narrowing printing no cause at all.
+func declaredNarrowingFacets(p apischema.Property) string {
+	bound := func(v *int) string {
+		if v == nil {
+			return "unset"
+		}
+		return strconv.Itoa(*v)
+	}
+	s := "MinLength=" + bound(p.MinLength) + " MaxLength=" + bound(p.MaxLength)
+	if len(p.Enum) > 0 {
+		s += " Enum=" + strings.Join(p.Enum, "|")
+	}
+	return s
+}
+
+// describeWitnesses renders refused values for a failure message, shortening
+// the long ones to their head and a rune count so a 128-character witness does
+// not bury the sentence that explains it.
+func describeWitnesses(ws []string) string {
+	if len(ws) == 0 {
+		// Unreachable while the caller skips sites that refused nothing,
+		// and spelled out rather than returned as an empty string so a
+		// later refactor cannot produce a failure message that names no
+		// value at all.
+		return "NOTHING (a failure was recorded with no refused witness — this is a bug in the guard)"
+	}
+	parts := make([]string, 0, len(ws))
+	for _, w := range ws {
+		const head = 24
+		if n := utf8.RuneCountInString(w); n > head {
+			r := []rune(w)
+			parts = append(parts, strconv.Quote(string(r[:head]))+"… ("+strconv.Itoa(n)+" characters)")
+			continue
+		}
+		parts = append(parts, strconv.Quote(w))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// createRuleWitnesses returns values the create rule d demonstrably accepts,
+// for the addressing sites to be held to.
+//
+// Two sources, deliberately different in kind:
+//
+//   - A grown string, one repeated rune at a time, from d's own shortest
+//     Accepts entry: its first rune leads, its last rune fills. This reaches
+//     the length boundary without this function knowing the rule's alphabet,
+//     and it is the only source that finds a ceiling nobody wrote down — the
+//     case this guard exists for, where someone raises the create bound and
+//     leaves the addressing sites behind.
+//   - Every Accepts witness the rule actually accepts. These cost nothing and
+//     cover shapes repetition cannot build, which is the partial answer to the
+//     lower-bound limitation the test's own comment sets out.
+//
+// The growth is bounded by a ceiling that fatals rather than silently
+// returning the largest value tried: a rule with no maximum cannot bound its
+// addressing sites, and passing quietly would be the wrong answer to it.
+func createRuleWitnesses(t *testing.T, d apischema.RuleDoc) []string {
+	t.Helper()
+
+	var prop apischema.Property
+	switch d.Kind {
+	case apischema.KindFormat:
+		prop = apischema.Property{Type: apischema.String, Format: d.Name}
+	case apischema.KindPattern:
+		prop = apischema.Property{Type: apischema.String, Pattern: d.Rule}
+	default:
+		t.Fatalf("%s is neither a format nor a pattern, so there is no way to apply it to a probe "+
+			"value the way a declaration would", d.Name)
+	}
+
+	seed := ""
+	for _, v := range d.Accepts {
+		if v == "" {
+			continue
+		}
+		if seed == "" || utf8.RuneCountInString(v) < utf8.RuneCountInString(seed) {
+			seed = v
+		}
+	}
+	if seed == "" {
+		t.Fatalf("%s has no non-empty Accepts witness to build a length probe from", d.Name)
+	}
+
+	// Comfortably past any ceiling in the catalogue, so that reaching it
+	// means the rule is effectively unbounded rather than merely large.
+	const ceiling = 1024
+	runes := []rune(seed)
+	lead, fill := string(runes[0]), string(runes[len(runes)-1])
+
+	var shortest, longest string
+	for n := 1; n <= ceiling; n++ {
+		v := lead + strings.Repeat(fill, n-1)
+		if !siteAccepts(prop, v) {
+			continue
+		}
+		if shortest == "" {
+			shortest = v
+		}
+		longest = v
+	}
+	switch {
+	case shortest == "":
+		t.Fatalf("%s accepted no value built from its own shortest witness %q; the probe cannot "+
+			"reach this rule's alphabet, so it has produced no evidence about this rule at all",
+			d.Name, seed)
+	case utf8.RuneCountInString(longest) == ceiling:
+		t.Fatalf("%s still accepts a %d-character value, so it has no ceiling this probe can find. "+
+			"An unbounded create rule cannot be held against a bounded addressing site: give the "+
+			"rule a bound, or raise the probe ceiling if the real one is simply higher.",
+			d.Name, ceiling)
+	}
+
+	out := []string{shortest, longest}
+	for _, v := range d.Accepts {
+		if siteAccepts(prop, v) && !slices.Contains(out, v) {
+			out = append(out, v)
 		}
 	}
 	return out
