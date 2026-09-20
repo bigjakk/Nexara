@@ -1051,9 +1051,14 @@ func TestGuard_EveryNamedRuleInThePayloadSaysWhatItPermits(t *testing.T) {
 		// misattribution that did not happen. bothFields below is what
 		// reports that case, and it reports the true thing.
 		//
-		// This holds for every catalogued pattern as things stand — all 13
-		// are RuleIsRegex — but note that nothing enforces it in general.
-		// orEmptyRules panics on a non-regex base, which covers only the 5
+		// This holds for every catalogued pattern as things stand — all of
+		// them are RuleIsRegex — but note that nothing enforces it in
+		// general. The count is deliberately not written down here: it has
+		// already rotted once (13 → 14 when pve-object-id-or-empty was
+		// catalogued) while the claim itself stayed true, and a number that
+		// rots independently of the sentence it supports is a number that
+		// teaches readers to distrust the sentence.
+		// orEmptyRules panics on a non-regex base, which covers only the
 		// entries it derives from; a hand-written pattern entry with
 		// RuleIsRegex false would be indexed by its prose and publish no
 		// regex, and this check would simply not fire for it.

@@ -63,6 +63,33 @@ import (
 // which is the case where a second, subtly different copy is the likely
 // mistake. A pattern used once stays at its declaration with its reasoning;
 // promote it when a second site wants it.
+//
+// THE "-or-empty" VARIANTS ARE NOT SUBJECT TO THAT COUNT, and
+// pve-object-id-or-empty is the entry that shows why — it has ONE site, and
+// belongs here anyway. The second-site rule is about DUPLICATION: a rule two
+// declarations both spell is a rule that will end up spelled two different
+// ways. A sentinel variant is not at risk of that, because the widening is
+// not a regex anybody retypes; it is orEmpty, which lives in this file. What
+// a hand-derivation at the declaration risks instead is INVISIBILITY, and
+// that is not a function of how many sites there are:
+//
+//   - Both guard families in internal/api resolve a site to a catalogue
+//     entry, by different readings: the inline-pattern guards match the
+//     COMPILED regex against the entry's, and the rule-reference ratchet
+//     reads the SOURCE for an apischema.Rule call. A pattern assembled at
+//     the declaration satisfies neither — it equals no entry's text, and it
+//     is not a call. Tighten it and nothing fails.
+//   - /api/v1/api-docs resolves a pattern to its rule the same way
+//     (ruleByPattern in api_docs.go), so an uncatalogued sentinel publishes
+//     a bare regex with no name and no "permits" line beside it — the exact
+//     lookup task the first paragraph of this file says the catalogue exists
+//     to end, arrived at from the derivation side.
+//
+// Both are fixed by one derive() call, which is the whole cost. So the test
+// for a sentinel variant is "is a declaration building it by hand", not "do
+// two declarations want it", and the answer to the first is what promotes
+// it. What the single site does NOT earn is a meaning in its Permits line;
+// see the note on derive below.
 
 // RuleKind says how a named rule is applied to a value.
 type RuleKind string
@@ -460,11 +487,14 @@ func patternRules() []RuleDoc {
 			Origin:       OriginProxmox,
 			Upstream:     "pve-common src/PVE/JSONSchema.pm pve_verify_configid ($CONFIGID_RE)",
 			UpstreamRule: `^[a-z][a-z0-9_-]+\z (case-insensitive) — a letter then ONE OR MORE, so minimum 2`,
-			Divergence: "LOOSER by one character, on purpose. Proxmox's own configid allows a single " +
-				"character where Nexara's create rule (validateSnapshotName) requires two, so a snapshot, HA " +
-				"group or HA rule made OUTSIDE Nexara can carry a name our own create refuses. This is the " +
-				"rule the routes that ADDRESS an existing object use, so that such an object stays " +
-				"deletable; the create bodies keep the pve-configid format.",
+			Divergence: "LOOSER by one character, on purpose — and note the direction, which an " +
+				"earlier version of this sentence had backwards. THIS rule accepts a single character; " +
+				"Proxmox's own $CONFIGID_RE requires two (a letter then one-or-more), as the UpstreamRule " +
+				"line directly above states. That is deliberate because this is the rule the routes " +
+				"ADDRESSING an existing object use: being stricter here than the thing that named the " +
+				"object is how an object becomes undeletable, and the cost of being looser is nothing, " +
+				"since a name this admits and Proxmox does not simply 404s. The create bodies keep the " +
+				"pve-configid format and its two-character minimum.",
 			Accepts: []string{"a", "snap1", "pre-upgrade_2"},
 			Rejects: []string{"", "1snap", "snap.1", ".", "..", "-snap"},
 		},
@@ -710,24 +740,39 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 		derive("pve-poolid",
 			"a resource pool id, nesting included, or the empty string.",
 			`The pool selector sends pool:"" to unpool a guest, but that is ONE of six sites.`),
+		// Neutral, and this is the one entry where that is a DECISION
+		// rather than a reading of the sites: there is only one site, so
+		// nothing here could have disagreed with it. See the why below.
+		derive("pve-object-id",
+			"a PVE object id, or the empty string.",
+			`ONE site: the account name on POST …/acme/accounts, where "" leaves the name unset and `+
+				`Proxmox names the account "default" — which its Description states, because a single `+
+				`site is the WEAKEST case for putting a meaning here, not the strongest. `+
+				`node-name-or-empty was published with one route's meaning and turned out to be true at `+
+				`none of the twelve it ended up with, and pve-object-id is the widest-reaching pattern `+
+				`here — its own Permits line lists firewall aliases and IP sets, SDN objects, metric `+
+				`server sections and PVE backup job ids — so a second site is as likely to read "" as a `+
+				`listing filter. Nothing about "leaves the name unset" generalises past the one route `+
+				`that has a name to leave unset.`),
 	}
 }
 
 // emptyWidening opens every derived Divergence.
 //
-// It is stated once rather than five times because it is the same fact
-// each time, and it is stated at all because Origin does not say it: a
+// It is stated once rather than once per variant because it is the same
+// fact each time, and it is stated at all because Origin does not say it: a
 // derived entry inherits the BASE rule's Origin, so node-name-or-empty
 // reads "proxmox" for a widening Proxmox had no part in — pve_verify_node_name
 // rejects "" outright, and the empty value the variant exists for never
 // reaches Proxmox at all. Origin answers where the CHARACTER RULE came
-// from and nothing else, which for uuid-or-empty is Nexara anyway. (The
-// docs payload does not publish Origin, for this reason among others; see
+// from and nothing else, which for the two variants whose base is Nexara's
+// — uuid-or-empty and pve-object-id-or-empty — is Nexara anyway. (The docs
+// payload does not publish Origin, for this reason among others; see
 // handlers.APIRule.)
 const emptyWidening = "The empty string is NEXARA's widening: every base rule rejects it, and no rule " +
 	"this one is derived from admits it. The Origin below is the BASE's — it records where the " +
-	"CHARACTER RULE came from and says nothing about the sentinel. (uuid is Nexara's own to begin " +
-	"with, so for uuid-or-empty there is no upstream in the picture at all.)"
+	"CHARACTER RULE came from and says nothing about the sentinel. (uuid and pve-object-id are " +
+	"Nexara's own to begin with, so for their variants there is no upstream in the picture at all.)"
 
 // carryRejects is the subset of a base rule's rejects that its -or-empty
 // variant still rejects: the ones its REGEX turns away. It panics if that

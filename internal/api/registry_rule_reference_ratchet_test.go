@@ -32,7 +32,9 @@ import (
 // and a MaxLength of 8 narrows every route that takes it — 33 Endpoint
 // declarations in registry_firewall.go and registry_sdn.go, five ACME path
 // parameters through acmeObjectNameParam (a bare call to it), and the two ACME
-// body names that call it directly — and ALL SIX guards in
+// body names that call it directly (createACMEAccountParams now overrides the
+// Pattern with the catalogued sentinel and so is reached by the MaxLength half
+// only; createACMEPluginParams still takes both) — and ALL SIX guards in
 // registry_rule_catalogue_test.go stay green. (Their own note counts 20 routes;
 // that is the routes whose accepted set demonstrably changed, not the reach.)
 // Only unrelated domain tests notice, and only because they happen to exercise
@@ -74,10 +76,11 @@ import (
 // Adding a route that takes pveObjectNameParam("…") or emptyOrNodeName does not
 // move this list at all, and neither does deleting one, because the shared
 // declaration is what carries the rule. It moves only when a route declares its
-// OWN inline rule reference, which 8 of the 36 entries below do — the ones whose
+// OWN inline rule reference, which 8 of the 37 entries below do — the ones whose
 // container is a register…Endpoints function rather than a named parameter — and
 // then the failure names which of the five things happened.
 var ruleReferenceSites = []string{
+	"registry_acme.go createACMEAccountParams = pve-object-id-or-empty",
 	"registry_alerts.go alertFilterClusterParam = uuid-or-empty",
 	"registry_alerts.go maintenanceWindowParams [node_id] = uuid-or-empty",
 	"registry_backup.go backupJobParams [node] = node-name-or-empty",
@@ -156,15 +159,39 @@ var ruleReferenceSites = []string{
 // helper call, an arithmetic one — reads as "names no rule" and simply never
 // enters the list. It is not reported as a regression; it is not covered.
 //
-// That is not a hypothetical shape, and the live one is mundane rather than
-// exotic: createACMEAccountParams in registry_acme.go takes the property
-// pveObjectNameParam built and prefixes its Pattern with the empty-string
-// alternation, an assignment whose right-hand side is a "+" of a literal and
-// the property's own field. It is a sentinel variant of a catalogued rule,
-// derived AT THE DECLARATION rather than by the catalogue's own orEmpty.
-// Tighten that line and no guard in this repo says anything — not the ones
-// next door, because the result matches no catalogue entry, and not this one,
-// because that expression was never a reference to begin with.
+// That is not a hypothetical shape. Three declarations are built that way
+// today, and they are mundane rather than exotic — the single device path and
+// the comma-separated device list in registry_nodes.go, each a "+" tree
+// assembled around devicePathBody, and the recipient element in
+// registry_reports.go, which reaches handlers.EmailAddressPattern through a
+// selector into another package.
+//
+// NONE OF THE THREE IS A LOSS HERE, and the reason is worth stating so that
+// nobody "fixes" them into the list: each reaches a single definition a reader
+// can open, and neither devicePathBody nor EmailAddressPattern is a catalogue
+// entry, so there is no rule reference for this ratchet to have lost.
+// registry_rule_catalogue_test.go exempts the same shape for the same reason
+// and names devicePathBody outright. What the walk owes them is nothing; what
+// it owes a CATALOGUED rule assembled this way is everything, because that one
+// silently opts out of the catalogue.
+//
+// THERE WAS A FOURTH, AND IT WAS THAT SECOND KIND. createACMEAccountParams in
+// registry_acme.go took the property pveObjectNameParam built and prefixed its
+// Pattern with `^$|`, an assignment whose right-hand side was a "+" of a
+// literal and the property's own field: a sentinel variant of a catalogued
+// rule, derived AT THE DECLARATION rather than by the catalogue's own orEmpty.
+// Tightening that line to `^[a-z][a-z0-9]{0,7}$` — which turns "", every
+// uppercase name and every name past 8 characters into a 400 — passed the
+// whole of ./internal/api/... Nothing next door fired, because the result
+// matched no catalogue entry; nothing here did, because the expression was
+// never a reference.
+//
+// The fix was not to teach this walk to fold a "+" tree. It was to catalogue
+// the variant as pve-object-id-or-empty, which turned the expression back into
+// an apischema.Rule call and put the site in the list above, where the same
+// mutation now reports RETIRED. A hand-derived sentinel is the one instance of
+// this shape with an answer cheaper than widening the resolver, and it should
+// get that answer rather than this one.
 //
 // Resolution is also by NAME rather than by scope. A function-local variable
 // shadowing one of those bindings would be read as the binding, and a var spec
@@ -437,7 +464,7 @@ type patternSpelling struct {
 //
 // An identifier is resolved one hop, through the package-level bindings that
 // hold a rule — emptyOrNodeName, emptyOrUUID, pbsSafeIDPattern and the rest.
-// That hop is not optional: six such bindings carry a rule to 23 of the 36
+// That hop is not optional: six such bindings carry a rule to 23 of the 37
 // sites in ruleReferenceSites, and recording only the binding would leave every
 // one of its use sites free to be replaced by a literal without the guard
 // noticing — the same defect one layer down, and the more likely one, because
