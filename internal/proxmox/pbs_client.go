@@ -221,11 +221,13 @@ func (c *PBSClient) UpdateSnapshotNotes(ctx context.Context, store, backupType, 
 // of this shape — a pool name, an interface name, a volume group: it refuses
 // the empty string, "." and "..", any "/" or "\", and any control character.
 //
-// NOT a node name, which is the one exception and the family's loose end:
-// validateNodeName (client.go) refuses only "", "/" and "..", so it accepts a
-// bare ".", a backslash, a percent and any control character. Nothing here
-// depends on that — GetTaskStatus guards the node with the weak rule and the
-// UPID with this one — but do not read this sentence as saying the two agree.
+// A node name is now the same rule: validateNodeName (client.go) delegates
+// here too. It was the family's loose end when this note was first written —
+// refusing only "", "/" and a ".." SUBSTRING, so it took a bare ".", a
+// backslash and any control character — and the bare "." was reachable,
+// because extractNodeFromUPID reads the node out of a UPID the API layer has
+// already decoded. Nothing on the PBS side ever depended on the weaker rule:
+// these routes address the literal node "localhost".
 //
 // A UPID carries none of those. It is "UPID" followed by colon-separated hex, a
 // worker type, a worker id and a user@realm; the colon and the "@" both survive

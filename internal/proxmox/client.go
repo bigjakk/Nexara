@@ -40,15 +40,69 @@ func validateVMID(vmid int) error {
 	return nil
 }
 
-// validateNodeName rejects empty names and path traversal attempts.
+// validateNodeName guards a caller-supplied node name before it becomes
+// exactly one segment of a Proxmox request path. 144 methods on this client
+// open with it — every one that addresses a node.
+//
+// It DELEGATES rather than carrying a rule of its own, which it did until this
+// change, and the difference was a live gap and not a stylistic one. The rule
+// it carried refused "", any "/", and ".." as a SUBSTRING — so a bare "." went
+// through, and a "." is a path segment that disappears: /nodes/./tasks/{upid}
+// resolves onto /nodes/tasks/{upid} the moment pveproxy normalises the path.
+// Two callers CHOOSE this value rather than reading it back from Proxmox, so
+// the gap was reachable:
+//
+//   - extractNodeFromUPID (internal/api/handlers/vms.go) takes colon-field 1 of
+//     a UPID that taskUPID has already percent-DECODED, so
+//     "UPID:.:0:0:0:x::root@pam:" names the node ".". The UPID guard cannot
+//     catch that — validateTaskUPID sees a string with no separator in it, and
+//     passes — and the two GET task routes are gated on view:task, which the
+//     built-in Viewer role holds.
+//   - POST /api/v1/tasks (registry_tasks.go) declares "node" as an optional
+//     string with a length cap and NO pattern, files the row as running, and
+//     reconcileRunningTasks (internal/collector/task_reconcile.go) replays it
+//     through GetTaskStatus on every sync tick with the server's own
+//     credentials and nobody watching. As with a UPID, the traversal need not
+//     be issued by the caller who wrote it.
+//
+// Delegating also fixes the status code. This was the one member of the family
+// returning a bare fmt.Errorf instead of wrapping ErrInvalidInput, and
+// mapProxmoxError (internal/api/handlers/proxmox_error.go) turns ErrInvalidInput
+// into a 400 and everything it does not recognise into a 500 — so an empty node
+// name surfaced as a 500 reading like a Proxmox outage rather than as the
+// caller's own bad input.
+//
+// No pattern and no length cap, deliberately. validateHAConfigID records the
+// no-cap half at length; do NOT read it for the other half, because it reaches
+// the opposite conclusion there and says so — it chose a pattern precisely so
+// the client would not be looser than the declarations it replaced. The
+// no-pattern reasoning for a node name is the next three sentences and nothing
+// else. Proxmox's own rule is pve_verify_node_name in pve-common
+// src/PVE/JSONSchema.pm — `^([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)\z`:
+// letters, digits and dash, alphanumeric at both ends, with no maximum stated.
+// Transcribing it HERE would buy nothing a segment guard does not already buy —
+// such a name cannot leave its path segment however long it is — while handing
+// the client a way to refuse a name Proxmox itself minted. The collector, the
+// scheduler and the DRS, rolling and migration engines all reach these methods
+// with node names PVE chose and no route declaration in between, and an
+// over-tight guard on that path fails SILENTLY: see the note on validateTaskUPID,
+// where the same reasoning is worked through for the unattended replay. The
+// documented limit belongs at the route declarations, which carry apischema's
+// node-name format (internal/api/apischema/catalogue.go); this function only has
+// to keep the value inside its own segment.
+//
+// A "%" is not refused, unlike in validateVolumeID. Every path this package
+// builds from a node name writes url.PathEscape(node), which re-encodes a
+// percent to %25 so it arrives as the character the caller meant — the same
+// distinction validatePathSegmentAllowingSlash records.
+//
+// The ".."-as-a-SUBSTRING ban is gone ON PURPOSE; do not put it back. ".."
+// traverses only as a whole segment, this value is always escaped into one
+// segment, and validatePathSegment refuses the whole-segment form outright.
+// What the substring form refused instead was "pve..01" — a name the node-name
+// format itself accepts, and which failed as a 500 before this change.
 func validateNodeName(node string) error {
-	if node == "" {
-		return fmt.Errorf("node name cannot be empty")
-	}
-	if strings.Contains(node, "/") || strings.Contains(node, "..") {
-		return fmt.Errorf("invalid node name: %q", node)
-	}
-	return nil
+	return validatePathSegment("node name", node)
 }
 
 // validatePathSegment guards a caller-supplied value that becomes exactly one

@@ -335,10 +335,12 @@ func esxiSourceParams() apischema.Properties {
 // handler made: storage and volume, then target_node and target_storage.
 // `node` is required as well although the handler never checked it —
 // proxmox.GetImportMetadata does, through validateNodeName, which answers
-// "node name cannot be empty", so every request without it has always
-// failed; the rejection now names the field instead of arriving as an
+// "invalid input: node name is required", so every request without it has
+// always failed; the rejection now names the field instead of arriving as an
 // upstream sentence. That is the same call the download-url body's `url`
-// makes.
+// makes. (The wording is validatePathSegment's since validateNodeName began
+// delegating to it; before that it was an unwrapped "node name cannot be
+// empty", which mapProxmoxError could only answer with a 500.)
 //
 // vmid is the one rule the schema cannot state in full. 0 means
 // "auto-allocate from /cluster/nextid" and any explicit value must be

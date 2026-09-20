@@ -267,7 +267,13 @@ func formatRules() []RuleDoc {
 			Divergence: "LOOSER: PVE's class is letters, digits and DASH only, so \"pve.01\" is a node name " +
 				"here and not to Proxmox. The 63-character cap is this package's, bounding a path segment; " +
 				"PVE states none.",
-			Accepts: []string{"pve-01", "n", "node1", "pve.01"},
+			// "pve..01" is a name with two dots in it, not a traversal:
+			// ".." walks the path only as a WHOLE segment, and a dotted
+			// node name is one segment that merely contains the characters.
+			// It is a witness rather than a curiosity because
+			// proxmox.validateNodeName once refused ".." as a substring and
+			// so 500'd on a name this format admits.
+			Accepts: []string{"pve-01", "n", "node1", "pve.01", "pve..01"},
 			Rejects: []string{"", "-pve", "pve-", "pve_01", strings.Repeat("n", 64)},
 		},
 		{

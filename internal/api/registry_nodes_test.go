@@ -1,15 +1,20 @@
 package api
 
 import (
+	"context"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // These tests drive the REAL declarations — the ones setupRoutes mounts —
@@ -937,5 +942,71 @@ func TestEveryNodeEndpointIsDocumented(t *testing.T) {
 				t.Errorf("%s: parameter %q has no description", key, name)
 			}
 		}
+	}
+}
+
+// TestNodeNameClientAcceptsEveryNameTheFormatDoes closes the loop between the
+// declaration and the client, from the client's side.
+//
+// TestNodeNameFormatIsNoLooserThanTheShellGuard above pins the direction that
+// keeps a bad name out. This pins the other direction: a name the declaration
+// ADMITS must reach Proxmox, because the layer that refuses it is the one with
+// no way to say so. proxmox.validateNodeName is not reached only from a
+// declared route — the collector, the scheduler and the DRS, rolling and
+// migration engines all call the same methods with node names PVE chose — and
+// reconcileRunningTasks swallows the error and eventually files the task as
+// vanished, so an over-tight client guard surfaces as missing data rather than
+// as a 400 anyone can trace.
+//
+// It drives the witnesses from apischema.LookupRule rather than a list
+// restated here, so a name added to the format is a name this test starts
+// demanding of the client on the same commit. "pve..01" is the one that
+// motivated it: proxmox.validateNodeName used to refuse ".." as a SUBSTRING
+// and so 500'd on a name the format accepts.
+func TestNodeNameClientAcceptsEveryNameTheFormatDoes(t *testing.T) {
+	rule, ok := apischema.LookupRule("node-name")
+	if !ok {
+		t.Fatal("apischema has no node-name rule; this guard would pass vacuously")
+	}
+	if len(rule.Accepts) == 0 {
+		t.Fatal("node-name carries no Accepts witnesses; this guard would pass vacuously")
+	}
+
+	for _, node := range rule.Accepts {
+		// url.PathEscape in the name so that a witness added later cannot
+		// corrupt the output of the run that catches the regression.
+		t.Run(url.PathEscape(node), func(t *testing.T) {
+			// RequestURI and not URL.Path: net/http has already decoded Path
+			// by the time this runs, which makes "%2F.." and "/.."
+			// indistinguishable.
+			var seen []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen = append(seen, r.RequestURI)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":null}`))
+			}))
+			defer srv.Close()
+
+			client, err := proxmox.NewClient(proxmox.ClientConfig{
+				BaseURL:     srv.URL,
+				TokenID:     "user@pam!test",
+				TokenSecret: "secret-token-value",
+			})
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+
+			if _, err := client.GetNodeStatus(context.Background(), node); err != nil {
+				t.Fatalf("the client refuses %q, which the node-name format accepts: %v — "+
+					"a route may declare this name and then never be able to act on it", node, err)
+			}
+			want := "/api2/json/nodes/" + url.PathEscape(node) + "/status"
+			if len(seen) != 1 {
+				t.Fatalf("issued %d requests %q, want exactly 1", len(seen), seen)
+			}
+			if seen[0] != want {
+				t.Errorf("request target = %q, want %q", seen[0], want)
+			}
+		})
 	}
 }

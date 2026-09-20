@@ -216,7 +216,7 @@ func probeVMImportEndpoint(t *testing.T, method, path string, cap *capture) Endp
 // `node` on the two source-reading routes is the one addition, and it is not
 // a tightening of behaviour: resolveNode answers "node is required" for an
 // empty one on the metadata route, and proxmox.validateNodeName answers
-// "node name cannot be empty" on the import, so a request without it has
+// "node name is required" on the import, so a request without it has
 // always failed — the rejection now names the field instead of arriving as
 // an upstream sentence.
 func TestVMImportRequiredSetsMatchTheHandlers(t *testing.T) {
