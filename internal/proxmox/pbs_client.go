@@ -192,10 +192,57 @@ func (c *PBSClient) UpdateSnapshotNotes(ctx context.Context, store, backupType, 
 	return nil
 }
 
+// validatePBSTaskUPID guards a caller-supplied UPID that becomes exactly one
+// segment of /nodes/localhost/tasks/{upid}/…
+//
+// It exists because the API layer percent-DECODES this path parameter (see
+// pbsTaskUPIDFromParams in internal/api/handlers/backup.go). Before that decode
+// the value could not carry a traversal — "%2E%2E" was escaped a second time
+// and named a task literally called "%2E%2E" — and after it, "A%2F..%2F..%2Fstatus"
+// really does mean "A/../../status". url.PathEscape alone does not stop that:
+// it turns the slashes back into "%2F", and the far side decodes those before
+// it resolves the path. The capture-server run recorded on
+// forbiddenVolumeIDChars (client_storage.go) is the evidence, and it is worth
+// stating precisely: it watched a RAW "%2e%2e%2f" arrive byte-for-byte. That
+// the far side then resolves it as "../" is the inference, and an escape this
+// client produces reaches the same decoder. The request lands on whatever the traversal counts
+// out to, a different endpoint reachable from a route granting only
+// view:backup. Count the segments before quoting a destination: an earlier
+// version of this comment named /nodes/localhost/status, which is one ".." too
+// far.
+//
+// The check belongs HERE rather than at the handler, and rather than in the
+// route declaration, for two reasons. The declaration matches the value as it
+// ARRIVES, where "%2E%2E" carries no dot, so it cannot see through an escape;
+// and this client is the choke point every caller goes through, so a second
+// route added later inherits the guard instead of having to remember it.
+//
+// validatePathSegment is the shared rule the PVE client applies to most values
+// of this shape — a pool name, an interface name, a volume group: it refuses
+// the empty string, "." and "..", any "/" or "\", and any control character.
+//
+// NOT a node name, which is the one exception and the family's loose end:
+// validateNodeName (client.go) refuses only "", "/" and "..", so it accepts a
+// bare ".", a backslash, a percent and any control character. Nothing here
+// depends on that — GetTaskStatus guards the node with the weak rule and the
+// UPID with this one — but do not read this sentence as saying the two agree.
+//
+// A UPID carries none of those. It is "UPID" followed by colon-separated hex, a
+// worker type, a worker id and a user@realm; the colon and the "@" both survive
+// the check, and a separator would have to come from the worker id — which no
+// recorded UPID carries, nor do the fixtures the registry's own
+// TestBackupPathSegmentsAreAnchored calls "a value the API itself hands back".
+// A UPID that did carry a slash could not be addressed through one path segment
+// in any case, so a refusal here is a clearer failure than a request that
+// silently resolves somewhere else.
+func validatePBSTaskUPID(upid string) error {
+	return validatePathSegment("UPID", upid)
+}
+
 // GetTaskLog returns log lines for a PBS task.
 func (c *PBSClient) GetTaskLog(ctx context.Context, upid string) ([]PBSTaskLogEntry, error) {
-	if upid == "" {
-		return nil, fmt.Errorf("UPID cannot be empty")
+	if err := validatePBSTaskUPID(upid); err != nil {
+		return nil, err
 	}
 	path := "/nodes/localhost/tasks/" + url.PathEscape(upid) + "/log?start=0&limit=5000"
 	var entries []PBSTaskLogEntry
@@ -303,8 +350,8 @@ func (c *PBSClient) GetTasks(ctx context.Context, limit int) ([]PBSTask, error) 
 
 // GetTaskStatus returns the status of a specific task.
 func (c *PBSClient) GetTaskStatus(ctx context.Context, upid string) (*PBSTaskStatus, error) {
-	if upid == "" {
-		return nil, fmt.Errorf("UPID cannot be empty")
+	if err := validatePBSTaskUPID(upid); err != nil {
+		return nil, err
 	}
 	path := "/nodes/localhost/tasks/" + url.PathEscape(upid) + "/status"
 	var status PBSTaskStatus

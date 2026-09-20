@@ -85,6 +85,36 @@ func pbsIDFromParams(p *apischema.Params) (uuid.UUID, error) {
 	return parseParamUUID(p.String("pbs_id"))
 }
 
+// pbsTaskUPIDFromParams reads the :upid path parameter of the two PBS task
+// routes and percent-decodes it.
+//
+// The decode is not optional here, the way it is for an id whose vocabulary
+// happens to survive encodeURIComponent untouched. A UPID is colon-separated by
+// construction — "UPID:<node>:<pid>:…:<user>@<realm>:" — and neither a colon nor
+// an "@" is something a correct client may leave raw in a path segment, so the
+// SPA always sends "UPID%3A…". Fiber runs with UnescapePath at its default of
+// false and returns the raw segment, and PBSClient.GetTaskLog then
+// url.PathEscape-s it into the outbound path, escaping the "%" a second time.
+// PBS was being asked for a task named "UPID%3A…" and answering that no such
+// task exists — on every task, on every server, for as long as the routes have
+// existed.
+//
+// This is NOT the decode taskUPID (vms.go) does for the PVE task routes, and the
+// difference is where each falls back. taskUPID keeps the raw text when the
+// unescape fails and leans on extractNodeFromUPID to reject what comes out;
+// accessParam fails closed with a 400, which is the right shape here because
+// there is no second check downstream to catch a value that was never a valid
+// escape. The PBS routes address a fixed node ("localhost"), which is exactly
+// why they never reached for taskUPID and never inherited its decode.
+//
+// The traversal the decode makes expressible is refused at the choke point, in
+// PBSClient.GetTaskLog/GetTaskStatus, not here — see the note on
+// validatePBSTaskUPID. The route's declared pattern cannot stand in for it: it
+// matches the value AS IT ARRIVES, where "%2E%2E" carries no dot at all.
+func pbsTaskUPIDFromParams(p *apischema.Params) (string, error) {
+	return accessParam(p.String("upid"), "UPID")
+}
+
 // requirePBSPerm gates an operation on a PBS server. If the PBS server is
 // linked to a cluster, the caller must have (action, "backup") on that cluster
 // — so a user with cluster-scoped backup rights cannot drive a PBS bound to a
@@ -336,7 +366,10 @@ func (h *BackupHandler) GetTaskLog(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	upid := p.String("upid")
+	upid, err := pbsTaskUPIDFromParams(p)
+	if err != nil {
+		return err
+	}
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
@@ -541,7 +574,10 @@ func (h *BackupHandler) GetTaskStatus(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	upid := p.String("upid")
+	upid, err := pbsTaskUPIDFromParams(p)
+	if err != nil {
+		return err
+	}
 
 	client, err := h.createPBSClient(c, pbsID)
 	if err != nil {
