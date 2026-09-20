@@ -2896,6 +2896,17 @@ func (o *Orchestrator) buildFailoverClients(ctx context.Context, clusterID uuid.
 
 // failoverTarget is an alternate cluster endpoint to try when the primary
 // api_url node is unreachable, paired with the node name for logging.
+//
+// config holds the cluster's decrypted token secret. Log or format `t.config`
+// and the secret is redacted — proxmox.ClientConfig carries String, GoString,
+// LogValue and MarshalJSON for exactly that. Log or format the whole
+// failoverTarget and it is NOT: `config` is unexported, so fmt cannot call a
+// method through it (reflect.Value.CanInterface is false) and %v/%+v/%#v of
+// this struct print the raw fields, secret included. Exporting the field would
+// close that, and is deliberately not done — nothing outside this package
+// needs it, and an exported credential field is the larger hazard. Name the
+// pieces instead, as the failover log line in createClient above does with
+// t.name and t.config.BaseURL.
 type failoverTarget struct {
 	name   string
 	config proxmox.ClientConfig

@@ -51,6 +51,22 @@ import (
 // identity_secret_guard_test.go is the guard that covers that route for the
 // identity handlers.
 //
+// A second limitation, worth naming because it looks like coverage: the walk
+// is FLAT and string-only. readStructs lists three handler-RESPONSE structs,
+// and TestReadStructsStripCredentials iterates each one's own fields and
+// skips everything whose Kind is not reflect.String. A non-string field is
+// still examined by NAME — it is reported if its json name looks
+// credential-shaped — but its own fields are never reached, so a
+// credential-bearing STRUCT held as a field is never opened, exported or not,
+// on a listed struct or not. (isCredentialish("config") is false, so even the
+// name check is silent here.) internal/rolling's
+// failoverTarget, which holds a proxmox.ClientConfig in `config`, is out of
+// scope twice over: it is not a response struct, and a struct field would be
+// passed over even if it were. Field visibility is not what decides this; do
+// not reach for exporting a field as a way of buying coverage here. The fix
+// for that shape is redaction on the TYPE, not another classifier: see the
+// ClientConfig entry below.
+//
 // The sweep that produced this file also looked at every other internal/proxmox
 // struct with a credential-shaped field and settled each one. None needed a
 // change, and none is enforced here, so the findings are recorded rather than
@@ -75,6 +91,18 @@ import (
 //	  String/GoString/LogValue/MarshalJSON redact every rendering that
 //	  dispatches on the type. Guarded in internal/proxmox by
 //	  TestGuard_TargetEndpointNeverPrintsItsToken.
+//	ClientConfig.TokenSecret                 never returned by a handler — it
+//	  is a constructor argument, built as a literal and passed straight to
+//	  NewClient/NewPBSClient at every one of its fourteen non-test sites —
+//	  including failoverTarget.config, which holds one only to hand it over. It is
+//	  recorded here, and NOT added to readStructs, on purpose: with no handler
+//	  response to shape there is no respond func to write, and inventing one
+//	  would be a second mechanism that proves nothing. The exposure is
+//	  rendering, not responding, so the fix is on the type —
+//	  String/GoString/LogValue/MarshalJSON, guarded in internal/proxmox by
+//	  TestGuard_ClientConfigNeverPrintsItsTokenSecret. That is also as much of
+//	  the failoverTarget shape as anything can cover: `t.config` selected from
+//	  one is redacted; only %v of the whole failoverTarget is not.
 //	ClusterJoinInfo, NodeCertificate, NodeListEntry, StorageConfig.fingerprint
 //	  carry TLS fingerprints and public key metadata — public by definition.
 //	VMConfig (a bare map[string]interface{}) is returned raw by the VM and CT

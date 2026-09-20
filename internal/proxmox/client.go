@@ -1,8 +1,10 @@
 package proxmox
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -10,12 +12,153 @@ import (
 )
 
 // ClientConfig holds the configuration for creating a new Proxmox API client.
+//
+// TokenSecret is the cluster's live, long-lived API token secret in plaintext.
+// It arrives here straight out of crypto.Decrypt and lives until newAPIClient
+// folds it into an Authorization header, and the fourteen non-test
+// construction sites are spread across six packages — most of them a few lines
+// from a log call naming the cluster or node the config belongs to. String,
+// GoString, LogValue and MarshalJSON keep it out of every rendering that
+// dispatches on the type, so the first `%+v`, `%#v`, `slog.Any("cfg", cfg)` or
+// `json.Marshal` someone writes while debugging a failed connection is already
+// closed rather than merely unwritten.
+//
+// Between them the four cover: %v, %s, %q, %x, %X, %+v, fmt.Sprint and error
+// wrapping via String; %#v via GoString (fmt dispatches GoStringer there, NOT
+// Stringer — that is the one that is easy to forget); structured logs via
+// LogValue; and encoding/json via MarshalJSON, including a ClientConfig
+// reached as an EXPORTED field of a larger struct. MarshalJSON is not
+// optional even though nothing marshals one today: cmd/nexara/main.go builds
+// the production logger with slog.NewJSONHandler (:64 and :272, the only two
+// handler constructions outside tests), and for a KindAny value that is not
+// itself a LogValuer the JSON handler MARSHALS rather than calling String — so
+// a wrapper struct holding a ClientConfig leaks through slog with only the
+// print trio in place.
+//
+// Adding MarshalJSON is safe because nothing serialises this type: it has no
+// json tags, is never persisted, and every literal in the tree is passed
+// straight to NewClient or NewPBSClient. The single exception is
+// internal/rolling/orchestrator.go's failoverTarget.config, which is handed to
+// NewClient too.
+//
+// What is NOT covered, listed so the set above is not mistaken for
+// "everything". None is reachable today; they are recorded because the next
+// person to create one of these shapes should know it is not covered:
+//
+//   - A verb fmt cannot dispatch these for — %d, %t, %p, %c, %f — falls back
+//     to printing the fields and shows the secret.
+//   - A ClientConfig in an UNEXPORTED field. fmt cannot call a method through
+//     one (reflect.Value.CanInterface is false), so %+v and %#v of the OUTER
+//     struct print the raw fields. This is a live shape:
+//     internal/rolling/orchestrator.go's failoverTarget holds one in
+//     `config`. Selecting the field — `t.config` — IS covered, because that
+//     value can be interfaced; only walking the enclosing struct is not.
+//     Do NOT read that as "the classifier would have caught an exported one".
+//     The struct-field classifier in
+//     internal/api/handlers/proxmox_read_credentials_test.go could not cover
+//     this type either way: readStructs() lists three handler-RESPONSE
+//     structs and walks each one's own fields, skipping anything that is not
+//     a string — so a ClientConfig field is passed over whether it is
+//     exported or not, and failoverTarget was never in scope to begin with.
+//   - An ANONYMOUS embed. `struct{ ClientConfig; Extra string }` promotes
+//     these methods to the outer type, so json.Marshal emits only the
+//     redacted object and silently drops Extra, and %v renders only the
+//     inner. Safe for the secret, wrong for everything else — embed it as a
+//     NAMED field.
+//   - Reflection encoders that ignore MarshalJSON: encoding/xml and
+//     encoding/gob both emit the secret verbatim.
+//
+// BaseURL, TokenID and TLSFingerprint stay visible, and a rendering that
+// identifies nothing is not worth emitting. All three are pinned as survivors
+// on every case of TestGuard_ClientConfigNeverPrintsItsTokenSecret, so a
+// redactor that got over-eager and dropped one fails a named test.
+//
+// Timeout is emitted by all four methods but is deliberately NOT pinned. It is
+// not a credential, nothing depends on it surviving, and its representation
+// differs per route — "30s" from String, and from LogValue under a text
+// handler but the nanosecond integer under the JSON handler production
+// actually uses, the nanosecond integer from GoString, a JSON string from
+// MarshalJSON — so asserting it would cost
+// four survivor-set variants to protect a field nobody is protecting. Drop it
+// from a rendering if it ever gets in the way; its presence is a convenience,
+// not a guarantee.
+//
+// TokenID is the principal ("user@realm!tokenname"), not the credential: the
+// repo already treats it as non-secret — db.Cluster carries it as
+// `json:"token_id"`, handlers.clusterCredential keeps it visible in exactly
+// this shape, and the rollback slog.Error in handlers/clusters.go logs it as a
+// bare attr, independently of that type's LogValue. A TLS certificate
+// fingerprint is public by definition; see the classification in
+// internal/api/handlers/proxmox_read_credentials_test.go.
+//
+// Unlike proxmox.TargetEndpoint there is no PropertyString sibling, because
+// nothing needs the whole struct rendered in credential-bearing form:
+// newAPIClient reads TokenID and TokenSecret as fields and builds the
+// Authorization header itself (buildAuthHeader, api_client.go), so the
+// unredacted route never goes through a method fmt could reach by reflex.
+//
+// All four have VALUE receivers on purpose. fmt and encoding/json skip a
+// pointer-receiver method on a value they cannot address, and every call site
+// passes a ClientConfig by value, so a pointer receiver here would compile,
+// lint clean and redact nothing.
 type ClientConfig struct {
 	BaseURL        string
 	TokenID        string
 	TokenSecret    string
 	TLSFingerprint string // SHA-256 fingerprint; empty = use system CA pool.
 	Timeout        time.Duration
+}
+
+// String is the redacted rendering reached by %v, %s, %q, %x, %X, fmt.Sprint
+// and error wrapping.
+func (c ClientConfig) String() string {
+	return "proxmox.ClientConfig{base_url:" + c.BaseURL +
+		" token_id:" + c.TokenID +
+		" token_secret:REDACTED tls_fingerprint:" + c.TLSFingerprint +
+		" timeout:" + c.Timeout.String() + "}"
+}
+
+// GoString closes the route String cannot: %#v dispatches GoStringer, and
+// without this it prints the struct literal with the secret in it — for the
+// value, for a pointer to it, and for anything holding one as an exported
+// field.
+func (c ClientConfig) GoString() string {
+	// Timeout as its nanosecond integer, which is what %#v prints for a
+	// time.Duration. GoString is supposed to read like the Go literal that
+	// would rebuild the value; "30s" would not compile.
+	return `proxmox.ClientConfig{BaseURL:"` + c.BaseURL +
+		`", TokenID:"` + c.TokenID +
+		`", TokenSecret:"REDACTED", TLSFingerprint:"` + c.TLSFingerprint +
+		`", Timeout:` + strconv.FormatInt(int64(c.Timeout), 10) + `}`
+}
+
+// LogValue keeps the secret out of structured logs while leaving enough to say
+// which endpoint a line is about.
+func (c ClientConfig) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("base_url", c.BaseURL),
+		slog.String("token_id", c.TokenID),
+		slog.String("tls_fingerprint", c.TLSFingerprint),
+		slog.Duration("timeout", c.Timeout),
+	)
+}
+
+// MarshalJSON closes the encoding/json route, which slog.NewJSONHandler takes
+// for any ClientConfig it reaches through a wrapper rather than directly.
+//
+// Only the marshal direction is overridden — UnmarshalJSON is a separate
+// interface, so decoding is unaffected. Nothing decodes a ClientConfig today;
+// anything that starts to must carry TokenSecret itself rather than expect it
+// back out, and that fails closed: newAPIClient rejects an empty TokenSecret
+// outright, so a round-tripped config cannot build a client that
+// authenticates as nobody.
+func (c ClientConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		BaseURL        string `json:"base_url"`
+		TokenID        string `json:"token_id"`
+		TLSFingerprint string `json:"tls_fingerprint"`
+		Timeout        string `json:"timeout"`
+	}{c.BaseURL, c.TokenID, c.TLSFingerprint, c.Timeout.String()})
 }
 
 // Client communicates with a single Proxmox VE host.
