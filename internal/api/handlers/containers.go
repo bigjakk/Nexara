@@ -527,13 +527,16 @@ func (h *ContainerHandler) CreateSnapshot(c fiber.Ctx, p *apischema.Params) erro
 		return err
 	}
 
-	// The schema's "pve-configid" format covers the shape; this covers the
-	// one rule that is not a shape — Proxmox reserves the name "current"
-	// for the live state, and a snapshot called that can never be rolled
-	// back to.
+	// The declaration states the whole rule — the "pve-configid" format for
+	// the shape and MaxLength for SnapshotMaxNameLen — and the schema
+	// enforces both before this runs. This re-checks them at the choke
+	// point and adds what a declaration cannot express: the names Proxmox
+	// reserves, which for a container are "current" and "vzdump" and are
+	// NOT the VM's set — a container snapshot may be called "pending".
+	// See validateSnapshotName for where each rule comes from upstream.
 	snapName := p.String("snap_name")
-	if err := validateSnapshotName(snapName); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	if err := snapshotNameError(lxcSnapshot, snapName); err != nil {
+		return err
 	}
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)

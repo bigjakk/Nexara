@@ -2,14 +2,18 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/recover"
 
+	"github.com/bigjakk/nexara/internal/api/handlers"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -1077,5 +1081,386 @@ func TestEveryVMEndpointCompiles(t *testing.T) {
 				t.Errorf("%s %s: parameter %q has no description", e.Method, e.Path, name)
 			}
 		}
+	}
+}
+
+// snapshotCreateRoutes are the two routes that take a snapshot NAME in the
+// body, with the reserved name Proxmox applies to that guest kind and only
+// that one.
+//
+// Both entries are needed because the rules are not the same on both
+// routes: the length cap is, the reserved set is not.
+var snapshotCreateRoutes = []struct {
+	kind string
+	path string
+	// reserved is the kind-specific reserved name; "current" is reserved
+	// for both and is asserted separately.
+	reserved string
+	// otherKind is the OTHER route's reserved name, which this route's
+	// description must not claim. It is what catches a description copied
+	// across from the sibling declaration.
+	otherKind string
+	// casingNote is prose the description must carry when a reservation on
+	// this route is NOT exact-match, so a caller can predict the 400. Empty
+	// when every reservation here is exact.
+	casingNote string
+	probe      func(t *testing.T, method, path string, cap *capture) Endpoint
+	render     func(path string) string
+}{
+	{
+		kind: "vm", path: clusterScope + "/vms/:vm_id/snapshots",
+		reserved: "pending", otherKind: "vzdump",
+		// PVE compares "pending" with lc(), so "Pending" is refused too.
+		casingNote: "casing",
+		probe:      probeEndpoint,
+		render: func(p string) string {
+			return strings.NewReplacer(":cluster_id", testClusterID, ":vm_id", testVMID).Replace(p)
+		},
+	},
+	{
+		// Both container reservations are exact-match upstream, so there is
+		// no casing caveat to state.
+		kind: "container", path: containerScope + "/:ct_id/snapshots",
+		reserved: "vzdump", otherKind: "pending",
+		probe: probeCTEndpoint, render: ctRoute,
+	},
+}
+
+// TestSnapshotNameCapAgreesAcrossLayers is the pin under a number that
+// went years without anyone checking it.
+//
+// 40 is not Nexara's: pve-common registers pve-snapshot-name with
+// `maxLength => 40`, and every snapname parameter upstream uses that
+// standard option (see handlers.SnapshotMaxNameLen for the citation). The
+// risk is no longer that the number is wrong — it is that the three places
+// stating it drift apart, which is exactly what happened before the
+// declaration carried a MaxLength at all: the payload published "2 to 128
+// characters" for a route that answered 400 at 41.
+//
+// So this asserts all three say the same thing: the declared MaxLength,
+// the published prose, and the boundary the route actually enforces. The
+// MaxLength now references the constant rather than restating it, which
+// removes one drift axis; the prose is still hand-written, and is the one
+// this test is really holding.
+func TestSnapshotNameCapAgreesAcrossLayers(t *testing.T) {
+	wantPhrase := fmt.Sprintf("2-%d characters", handlers.SnapshotMaxNameLen)
+
+	for _, rt := range snapshotCreateRoutes {
+		t.Run(rt.kind, func(t *testing.T) {
+			e := declaredEndpoint(t, fiber.MethodPost, rt.path)
+			prop := e.Parameters["snap_name"]
+
+			if prop.MaxLength == nil {
+				t.Fatal("snap_name declares no MaxLength; the docs then publish pve-configid's " +
+					"128 for a route that refuses 41")
+			}
+			if *prop.MaxLength != handlers.SnapshotMaxNameLen {
+				t.Errorf("snap_name MaxLength = %d, want handlers.SnapshotMaxNameLen (%d) — "+
+					"the schema and the handler must refuse the same names",
+					*prop.MaxLength, handlers.SnapshotMaxNameLen)
+			}
+			if !strings.Contains(prop.Description, wantPhrase) {
+				t.Errorf("snap_name description = %q, want it to state %q — a caller reads the "+
+					"prose, and it is the only one of the three layers nothing derives",
+					prop.Description, wantPhrase)
+			}
+		})
+	}
+}
+
+// TestSnapshotNameDescriptionNamesItsOwnReservedSet holds the prose to the
+// reserved names that actually apply to that guest kind.
+//
+// Proxmox reserves "current" for both, "pending" for VMs only and "vzdump"
+// for containers only, and the two declarations sit in different files, so
+// the cheap mistake is to copy one description onto the other route and
+// publish a rule that does not hold there.
+func TestSnapshotNameDescriptionNamesItsOwnReservedSet(t *testing.T) {
+	for _, rt := range snapshotCreateRoutes {
+		t.Run(rt.kind, func(t *testing.T) {
+			desc := declaredEndpoint(t, fiber.MethodPost, rt.path).Parameters["snap_name"].Description
+
+			for _, want := range []string{"current", rt.reserved} {
+				if !strings.Contains(desc, want) {
+					t.Errorf("snap_name description = %q, want it to name the reserved %q",
+						desc, want)
+				}
+			}
+			if strings.Contains(desc, rt.otherKind) {
+				t.Errorf("snap_name description = %q names %q, which Proxmox reserves for the "+
+					"OTHER guest kind and accepts here", desc, rt.otherKind)
+			}
+			if rt.casingNote != "" && !strings.Contains(desc, rt.casingNote) {
+				t.Errorf("snap_name description = %q, want it to say %q — a reservation on this "+
+					"route is case-insensitive upstream, and a caller who reads only the bare name "+
+					"cannot predict the 400 that %q earns",
+					desc, rt.casingNote, strings.ToUpper(rt.reserved[:1])+rt.reserved[1:])
+			}
+		})
+	}
+}
+
+// TestSnapshotNameCapIsEnforcedBySchema answers "which layer refuses it".
+//
+// The probe swaps the real handler out, so reaching it means the schema
+// let the value through. A name at the cap must reach the handler and one
+// character over must not — which puts the refusal in the declaration,
+// where the docs can show it, rather than only in validateSnapshotName
+// where a caller reading the payload could not predict it.
+func TestSnapshotNameCapIsEnforcedBySchema(t *testing.T) {
+	for _, rt := range snapshotCreateRoutes {
+		t.Run(rt.kind, func(t *testing.T) {
+			atCap := strings.Repeat("a", handlers.SnapshotMaxNameLen)
+			overCap := strings.Repeat("a", handlers.SnapshotMaxNameLen+1)
+
+			cap := &capture{}
+			app := newRegistryApp(t, noAuth(), rt.probe(t, fiber.MethodPost, rt.path, cap))
+			body := `{"snap_name":"` + atCap + `"}`
+			if status, env := send(t, app, jsonRequest(http.MethodPost, rt.render(rt.path), body)); status != fiber.StatusNoContent {
+				t.Fatalf("a %d-character name: status = %d (%q), want 204 — the cap is %d, so this one is legal",
+					len(atCap), status, env.Message, handlers.SnapshotMaxNameLen)
+			}
+			if !cap.called {
+				t.Error("a name at the cap did not reach the handler")
+			}
+
+			cap = &capture{}
+			app = newRegistryApp(t, noAuth(), rt.probe(t, fiber.MethodPost, rt.path, cap))
+			body = `{"snap_name":"` + overCap + `"}`
+			status, env := send(t, app, jsonRequest(http.MethodPost, rt.render(rt.path), body))
+			if status != fiber.StatusBadRequest {
+				t.Fatalf("a %d-character name: status = %d (%q), want 400", len(overCap), status, env.Message)
+			}
+			if cap.called {
+				t.Error("a name over the cap reached the handler; the schema has to be the layer that " +
+					"refuses it, or the docs payload cannot show the rule")
+			}
+			if !strings.Contains(env.Message, "snap_name") {
+				t.Errorf("message = %q, want it to name snap_name", env.Message)
+			}
+		})
+	}
+}
+
+// realHandlerEndpoint is the production declaration with ONLY its
+// permission gate relaxed — the handler itself is the real one, bound to
+// the stub server's zero-valued handler structs. That is enough for any
+// request the handler refuses before it reaches its database.
+func realHandlerEndpoint(t *testing.T, method, path string) Endpoint {
+	t.Helper()
+	e := declaredEndpoint(t, method, path)
+	e.Permissions = Permissions{SelfService: "reserved-name fixture; authorization is exercised separately"}
+	return e
+}
+
+// newRecoveringRegistryApp is newRegistryApp with a recover in front.
+//
+// It exists for the test below, whose failure mode is a real handler
+// running FURTHER than it should: against the stub server's zero-valued
+// handler structs that is a nil dereference, and an unrecovered panic
+// takes the whole package's test binary down instead of failing one
+// assertion. With the recover in place the same mistake reports as a 500,
+// which is a legible failure and does not hide anything else in the run.
+func newRecoveringRegistryApp(t *testing.T, es ...Endpoint) *fiber.App {
+	t.Helper()
+	reg := NewRegistry()
+	for _, e := range es {
+		reg.Register(e)
+	}
+	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
+	app.Use(recover.New())
+	mountRegistry(app, reg, noAuth())
+	return app
+}
+
+// TestSnapshotCreateHandlerPassesItsOwnGuestKind closes the gap the
+// reserved-name split opens: validateSnapshotName now takes the guest kind
+// from its CALLER, and a caller that passes the wrong one is silent.
+//
+// Swap the two constants and every test in the handlers package still
+// passes — they call validateSnapshotName directly and never see which
+// kind the handler chose. So this drives the REAL handler, with a name
+// that is reserved for exactly one of the two kinds.
+//
+// The schema cannot be what refuses these: "pending" and "vzdump" are both
+// valid pve-configid values, which the first subtest asserts rather than
+// assumes. A 400 from these routes therefore came from the handler, and
+// naming the wrong kind would let the name through to a nil database
+// instead.
+func TestSnapshotCreateHandlerPassesItsOwnGuestKind(t *testing.T) {
+	for _, rt := range snapshotCreateRoutes {
+		t.Run(rt.kind, func(t *testing.T) {
+			target := rt.render(rt.path)
+			body := `{"snap_name":"` + rt.reserved + `"}`
+
+			// The schema must NOT be what refuses it: rt.reserved is a valid
+			// pve-configid, so a probe that replaces the handler has to see
+			// the request arrive. Asserting this rather than assuming it is
+			// what makes the next subtest's 400 attributable to the handler.
+			cap := &capture{}
+			app := newRegistryApp(t, noAuth(), rt.probe(t, fiber.MethodPost, rt.path, cap))
+			if status, env := send(t, app, jsonRequest(http.MethodPost, target, body)); status != fiber.StatusNoContent {
+				t.Fatalf("the schema refused %q: status = %d (%q), want 204 — it is a valid "+
+					"pve-configid, so the handler has to be the layer that refuses it",
+					rt.reserved, status, env.Message)
+			}
+
+			// The real handler, with only its permission gate relaxed. It
+			// refuses before it reaches its (nil) database, so a 400 here
+			// can only have come from validateSnapshotName — and only if the
+			// handler named the guest kind whose reserved set contains this
+			// name. Naming the other kind lets it through to the database
+			// and reports 500.
+			realApp := newRecoveringRegistryApp(t, realHandlerEndpoint(t, fiber.MethodPost, rt.path))
+			status, env := send(t, realApp, jsonRequest(http.MethodPost, target, body))
+			if status != fiber.StatusBadRequest || !strings.Contains(env.Message, "reserved") {
+				t.Errorf("status = %d (%q), want 400 naming the reserved name — Proxmox refuses "+
+					"%q for a %s, so this handler must be naming that guest kind",
+					status, env.Message, rt.reserved, rt.kind)
+			}
+
+			// The OTHER kind's reserved name is legal here and must get PAST
+			// validation. This is the half that catches a union of the two
+			// reserved sets, which the 400 above would be perfectly happy
+			// with.
+			//
+			// 500 is the assertion rather than "not 400" because it says
+			// where the request got to: the stub server's handler structs
+			// have no database, so reaching one is a recovered nil
+			// dereference. Anything else — a 400, a 204 — means the request
+			// stopped somewhere before that, which is the failure.
+			otherBody := `{"snap_name":"` + rt.otherKind + `"}`
+			status, env = send(t, realApp, jsonRequest(http.MethodPost, target, otherBody))
+			if status != fiber.StatusInternalServerError {
+				t.Errorf("status = %d (%q) for %q, want 500 — Proxmox reserves that name for the "+
+					"OTHER guest kind and accepts it for a %s, so it must reach the database",
+					status, env.Message, rt.otherKind, rt.kind)
+			}
+		})
+	}
+}
+
+// TestSnapshotNameParamRefusesTraversal proves the claim snapshotNameParam's
+// doc comment makes: its Pattern, not percent-escaping, is what keeps a
+// path segment from walking out of the snapshot it addresses.
+//
+// Asserting the Pattern is DECLARED is a different and weaker statement
+// than asserting it REFUSES this — a rule can be present and still admit
+// the thing it was put there for. So this sends the payload.
+//
+// Escaping is explicitly not the guard. Proxmox decodes a percent-escape
+// before it resolves the path (the capture-server run recorded at
+// internal/proxmox/client.go and in validateVolumeID's doc comment proved
+// "%2e%2e%2f" arrives byte-for-byte and becomes "../" on the far side), so
+// a value that reaches the client is a value that reaches the path. Both
+// spellings below must be refused here, at the declaration, whether Fiber
+// hands the decoded form to validation or the raw one: the decoded form
+// carries separators and dots, the raw form carries percents, and the
+// pve-configid-existing pattern admits neither.
+func TestSnapshotNameParamRefusesTraversal(t *testing.T) {
+	routes := []struct {
+		method string
+		path   string
+		render func(string) string
+	}{
+		{fiber.MethodDelete, clusterScope + "/vms/:vm_id/snapshots/:snap_name", nil},
+		{fiber.MethodPost, clusterScope + "/vms/:vm_id/snapshots/:snap_name/rollback", nil},
+		{fiber.MethodDelete, containerScope + "/:ct_id/snapshots/:snap_name", ctRoute},
+		{fiber.MethodPost, containerScope + "/:ct_id/snapshots/:snap_name/rollback", ctRoute},
+	}
+	// Each is a snapshot name a caller could put in the path segment, with
+	// the layer that must refuse it. Naming the layer is the point: a test
+	// that accepted "400 or 404" would pass just as happily if the Pattern
+	// disappeared and the router happened to miss, which is the failure
+	// this whole file exists to catch.
+	payloads := []struct {
+		value string
+		want  int
+		why   string
+	}{
+		// NOT because Fiber decodes it — Fiber's UnescapePath is false and
+		// validation runs on the RAW segment. The declaration refuses this
+		// on the leading "%": pve-configid-existing is
+		// ^[A-Za-z][A-Za-z0-9_-]*$, which admits no percent at all. That is
+		// why the snapshot routes need no handler-side decode to be safe,
+		// and it is a different mechanism from the ceph pool route, whose
+		// rule DOES admit "%" and which relies on the client guard instead.
+		{"%2e%2e%2f", fiber.StatusBadRequest, "the encoded traversal decodes and the Pattern refuses it"},
+		{"..%2fetc", fiber.StatusBadRequest, "half-encoded traversal"},
+		{"..", fiber.StatusBadRequest, "the bare parent-directory segment"},
+		{`a\b`, fiber.StatusBadRequest, "a Windows-style separator"},
+		{"a%00", fiber.StatusBadRequest, "a NUL escape"},
+		// The one case the ROUTER handles: a literal slash makes the URL
+		// stop matching this route's shape before any parameter is read.
+		{"a/b", fiber.StatusNotFound, "a literal separator does not match the route"},
+	}
+
+	for _, rt := range routes {
+		for _, payload := range payloads {
+			name := rt.method + " " + rt.path + " " + payload.value
+			t.Run(name, func(t *testing.T) {
+				cap := &capture{}
+				probe := probeEndpoint
+				if rt.render != nil {
+					probe = probeCTEndpoint
+				}
+				e := probe(t, rt.method, rt.path, cap)
+				app := newRegistryApp(t, noAuth(), e)
+
+				render := rt.render
+				if render == nil {
+					render = func(p string) string {
+						return strings.NewReplacer(":cluster_id", testClusterID, ":vm_id", testVMID).Replace(p)
+					}
+				}
+				// Substitute :snap_name BEFORE render. ctRoute renders it as
+				// "snap01" and the VM renderer leaves it alone, so patching
+				// the rendered string would miss the VM routes entirely —
+				// they would test the literal ":snap_name", which the
+				// Pattern also refuses, and pass for the wrong reason.
+				target := render(strings.Replace(rt.path, ":snap_name", payload.value, 1))
+
+				status, env := send(t, app, httptest.NewRequest(rt.method, target, nil))
+				if cap.called {
+					t.Fatalf("snap_name %q reached the handler; it would be interpolated into a "+
+						"Proxmox path, and Proxmox decodes the escape before it resolves that path",
+						payload.value)
+				}
+				if status != payload.want {
+					t.Errorf("snap_name %q: status = %d (%q), want %d — %s",
+						payload.value, status, env.Message, payload.want, payload.why)
+				}
+				if payload.want == fiber.StatusBadRequest && !strings.Contains(env.Message, "snap_name") {
+					t.Errorf("snap_name %q: message = %q, want the DECLARATION to be what refused "+
+						"it, naming the parameter", payload.value, env.Message)
+				}
+			})
+		}
+
+		// The control. Without it every assertion above would still hold if
+		// the route refused everything, and the test would be measuring
+		// nothing.
+		t.Run(rt.method+" "+rt.path+" accepts a real name", func(t *testing.T) {
+			cap := &capture{}
+			probe := probeEndpoint
+			if rt.render != nil {
+				probe = probeCTEndpoint
+			}
+			app := newRegistryApp(t, noAuth(), probe(t, rt.method, rt.path, cap))
+			render := rt.render
+			if render == nil {
+				render = func(p string) string {
+					return strings.NewReplacer(":cluster_id", testClusterID, ":vm_id", testVMID).Replace(p)
+				}
+			}
+			target := strings.Replace(render(rt.path), ":snap_name", "snap01", 1)
+			if status, env := send(t, app, httptest.NewRequest(rt.method, target, nil)); status != fiber.StatusNoContent {
+				t.Fatalf("status = %d (%q), want 204 — a legitimate snapshot name must reach the "+
+					"handler, or the refusals above prove nothing", status, env.Message)
+			}
+			if !cap.called {
+				t.Error("a legitimate snapshot name did not reach the handler")
+			}
+		})
 	}
 }

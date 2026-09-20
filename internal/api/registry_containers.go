@@ -209,16 +209,21 @@ func registerContainerEndpoints(reg *Registry, h *handlers.ContainerHandler) {
 		Group:       "Containers",
 		Permissions: clusterCheck("execute", "container"),
 		Parameters: ctParams(apischema.Properties{
-			// The 40 is validateSnapshotName's, not pve-configid's — see the
-			// same declaration in registry_vms.go for why MaxLength states
-			// it here rather than leaving it to the handler, and why that
-			// file's comment records having once concluded the opposite.
+			// The 40 is Proxmox's cap on a snapshot name, not pve-configid's
+			// — see handlers.SnapshotMaxNameLen for the upstream citation,
+			// and the same declaration in registry_vms.go for why MaxLength
+			// states it here rather than leaving it to the handler.
+			//
+			// The reserved names differ from the VM route's on purpose:
+			// Proxmox reserves "vzdump" for containers and "pending" for
+			// VMs, and neither reserves the other's. validateSnapshotName
+			// documents why.
 			"snap_name": {
 				Type:        apischema.String,
 				Format:      "pve-configid",
-				MaxLength:   apischema.Ptr(40),
+				MaxLength:   apischema.Ptr(handlers.SnapshotMaxNameLen),
 				Typetext:    "<name>",
-				Description: `Snapshot name: 2-40 characters, starting with a letter. "current" is reserved by Proxmox.`,
+				Description: `Snapshot name: 2-40 characters, starting with a letter. "current" and "vzdump" are reserved by Proxmox.`,
 			},
 			"description": {
 				Type:        apischema.String,

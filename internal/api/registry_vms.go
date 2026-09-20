@@ -252,19 +252,54 @@ func nodeParams(extra apischema.Properties) apischema.Properties {
 // routes that act on a snapshot that already exists.
 //
 // It is deliberately looser than the pve-configid format the CREATE body
-// uses: Proxmox's own configid allows a single character, and Nexara's
-// create rule (validateSnapshotName) requires two. A snapshot made
-// outside Nexara can therefore carry a name our own create would refuse,
-// and rejecting it here would make an existing snapshot undeletable. The
-// length cap is generous for the same reason: it is here to bound the
-// path segment, not to re-state whatever limit the Proxmox of the day
-// enforced when the snapshot was taken.
+// uses, because its job is to ADDRESS whatever exists rather than to
+// restate a create rule: Proxmox is the authority on whether that snapshot
+// is there, and a second refusal here could only turn "no such snapshot"
+// into a 400 the caller cannot act on, or make an object Nexara did not
+// create undeletable through Nexara.
+//
+// "Looser" means the LENGTH and the two-character minimum, and nothing
+// else. The Pattern below is still what makes this safe to interpolate
+// into a Proxmox path: it admits letters, digits, '-' and '_' only, so no
+// separator, dot or percent can reach the URL through it. That guard is
+// load-bearing rather than decorative — Proxmox decodes a percent-escape
+// BEFORE it resolves the path (the capture-server run recorded on
+// forbiddenVolumeIDChars, internal/proxmox/client_storage.go, watched
+// "%2e%2e%2f" arrive intact; the far side resolving it as "../" is the
+// inference that follows), so
+// escaping this value is not what contains it. Dropping the Pattern in the
+// name of being permissive would hand a path segment to Proxmox unchecked:
+// TestSnapshotNameParamRefusesTraversal sends "%2e%2e%2f" and the rest at
+// all four routes and fails the moment one of them reaches a handler, and
+// TestContainerSnapshotNameRules fails if the Pattern goes missing at all.
+//
+// The one-character allowance is NOT because upstream permits one:
+// $CONFIGID_RE is `[a-z][a-z0-9_-]+` — a letter then ONE OR MORE, so
+// upstream's minimum is two as well. Nothing in Proxmox takes a
+// single-character configid: pve-ha-group-id and pve-ha-rule-id
+// (pve-ha-manager src/PVE/HA/Tools.pm) are the bare format with no
+// override, so the HA rules that share this pattern have the same minimum
+// the snapshot ones do. The catalogue's pve-configid-existing entry once
+// justified the one-character allowance by saying PROXMOX accepts one —
+// backwards, and contradicting its own UpstreamRule on the line above. That
+// has been corrected: the entry now states that THIS rule accepts one where
+// Proxmox requires two, which is the true direction and the same conclusion.
+//
+// The 128 is a path-segment bound and nothing more. It is NOT a claim that
+// a longer snapshot is reachable: PVE's own delete and rollback take the
+// pve-snapshot-name standard option too, so upstream caps them at 40 as
+// well (see handlers.SnapshotMaxNameLen) and a 41-character snapshot could
+// not be addressed through the Proxmox API whatever Nexara declares here.
+// The cap stays generous because it is not this parameter's business to
+// re-state whatever limit the Proxmox of the day enforced when the
+// snapshot was taken — a second refusal here would only turn upstream's
+// clear error into our vaguer one.
 //
 // The rule is the catalogue's pve-configid-existing, shared with
-// haConfigIDParam (registry_ha.go), which is looser than pve-configid for
-// exactly this reason and records the difference against upstream. It is a
-// Pattern and not a Format on purpose — see the guard in the container
-// snapshot tests.
+// haConfigIDParam (registry_ha.go) — looser than pve-configid by that one
+// character, for the addressing reason above rather than the upstream one
+// the paragraph corrects. It is a Pattern and not a Format on purpose —
+// see the guard in the container snapshot tests.
 var snapshotNameParam = apischema.Property{
 	Type:        apischema.String,
 	Pattern:     apischema.Rule("pve-configid-existing"),
@@ -637,39 +672,41 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("execute", "vm"),
 		Parameters: vmParams(apischema.Properties{
-			// The 40 in the description is NOT this format's bound and must
-			// not be "corrected" to 128 to match it. pve-configid allows 2
-			// to 128 (Proxmox's own $CONFIGID_RE states no maximum at all);
-			// the 40 is validateSnapshotName's, in the handler, and it is
-			// what a caller actually hits — so the description states the
-			// effective contract rather than the schema's half of it.
+			// The 40 is NOT this format's bound and must not be "corrected"
+			// to 128 to match it. pve-configid allows 2 to 128 (Proxmox's
+			// own $CONFIGID_RE states no maximum at all); 40 is the
+			// narrower cap Proxmox puts on SNAPSHOT names specifically, via
+			// the pve-snapshot-name standard option that every upstream
+			// snapname parameter uses. handlers.SnapshotMaxNameLen carries
+			// the citation, and is referenced rather than restated so the
+			// declaration and the handler cannot end up stating different
+			// numbers.
 			//
-			// That reasoning once concluded the opposite — that no
-			// MaxLength should be declared here, because it would put an
-			// unverified Nexara bound in a second place. What changed is
-			// that the docs payload now publishes the rule TEXT, so the
-			// choice is no longer "one copy of 40 or two" but "state the
-			// bound or publish a rule the route provably rejects".
+			// An earlier pass concluded no MaxLength should be declared
+			// here at all, on the grounds that it would put an unverified
+			// Nexara bound in a second place. Both halves of that turned
+			// out wrong: the docs payload now publishes the rule TEXT, so
+			// omitting the bound publishes "2 to 128 characters" for a
+			// route that answers 400 at 41 — and the bound was never
+			// Nexara's to begin with.
+			//
+			// The description spells "pending" out as case-insensitive
+			// because it is: PVE compares it with lc(), so "Pending" is
+			// refused too, and prose naming only the lowercase form would
+			// leave a caller unable to predict that 400. "current" really is
+			// exact-match upstream, so "Current" is accepted.
 			"snap_name": {
 				Type:   apischema.String,
 				Format: "pve-configid",
-				// MaxLength mirrors validateSnapshotName's 40, and it is
-				// declared here rather than left to the handler because the
-				// docs payload now publishes the RULE TEXT for a format.
-				// Without it a caller reads permits "2 to 128 characters"
-				// beside a description saying 2-40, with nothing to say
-				// which governs — and the answer is 40, enforced one layer
-				// down where the schema cannot show it.
-				//
 				// This narrows the create side only. snapshotNameParam, the
-				// ADDRESSING parameter on delete and rollback, keeps 128 so
-				// a longer snapshot made outside Nexara stays reachable.
-				// Whether 40 is the right number at all is a question for
-				// upstream; this only stops the schema and the prose
-				// disagreeing in public.
-				MaxLength:   apischema.Ptr(40),
+				// ADDRESSING parameter on delete and rollback, stays at 128
+				// because its job is to bound a path segment, not to
+				// re-state Proxmox's rule; PVE caps its own delete and
+				// rollback at 40 as well, so a longer snapshot is out of
+				// reach there whatever Nexara declares.
+				MaxLength:   apischema.Ptr(handlers.SnapshotMaxNameLen),
 				Typetext:    "<name>",
-				Description: `Snapshot name: 2-40 characters, starting with a letter. "current" is reserved by Proxmox.`,
+				Description: `Snapshot name: 2-40 characters, starting with a letter. Proxmox reserves "current", and "pending" in any casing.`,
 			},
 			"description": {
 				Type:        apischema.String,
