@@ -208,6 +208,16 @@ func TestNodeNameAcceptCorpusStillReachesProxmoxUnchanged(t *testing.T) {
 //
 // The baseline itself is asserted as accepted on every row. Without that a
 // member replaced by a blanket refusal would pass the whole table.
+//
+// The snapshot-addressing guard is deliberately NOT a row here, and that was
+// weighed rather than overlooked. The four methods in client_guests.go call
+// validatePathSegment("snapshot name", …) directly, so the row would re-enter
+// the validatePathSegment row above under a different kind label — the same
+// function, unable to drift independently of it, which is the vacuity this
+// table's own doc warns against. The risk that does exist there is a CALL SITE
+// one — someone swapping those four for the create rule, which the table
+// cannot see — and client_guests_snapshot_address_test.go covers it by driving
+// the exported methods and asserting both halves.
 func TestPathGuardFamilyShareTheirCoreRefusals(t *testing.T) {
 	family := []struct {
 		name     string

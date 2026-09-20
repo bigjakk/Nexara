@@ -584,7 +584,9 @@ func (c *Client) RestoreCT(ctx context.Context, node string, params RestoreParam
 // tool managed to create one. The delete and rollback methods below
 // deliberately do NOT call ValidateSnapshotName: they address a snapshot
 // Proxmox already minted, and a validator stricter than whatever produced
-// that name would strand it.
+// that name would strand it. That does not leave them unguarded — see
+// "Addressing an existing snapshot" below for the weaker path-segment rule
+// they carry instead.
 const SnapshotMaxNameLen = 40
 
 // snapshotNameRE is pve-configid's shape bounded by SnapshotMaxNameLen: a
@@ -685,6 +687,66 @@ func ValidateSnapshotName(kind SnapshotGuestKind, name string) error {
 	return nil
 }
 
+// --- Addressing an existing snapshot ---
+//
+// DeleteVMSnapshot, RollbackVMSnapshot, DeleteCTSnapshot and
+// RollbackCTSnapshot each interpolate a caller-supplied snapshot name into the
+// request PATH, so they take validatePathSegment: the same guard
+// validateNodeName delegates to, with the same deliberate looseness — no
+// charset, no length cap, no minimum.
+//
+// They must NOT take ValidateSnapshotName. That rule describes what Nexara is
+// willing to MINT. These four address something Proxmox already minted, and a
+// name a human took at the PVE console, or an older Proxmox, or vzdump itself
+// produced is one the operator now has to be able to delete. Refusing it here
+// is how an object becomes undeletable — the invented-strictness shape, and
+// the reason registry_vms.go declares snapshotNameParam with MaxLength 128 and
+// no two-character minimum rather than the create rule's 40 and 2.
+//
+// Escaping is not the guard, which is what made the emptiness check these
+// replaced insufficient. url.PathEscape encodes "/" but leaves "." and ".."
+// entirely alone, so those two need only the NORMALISATION half and no decode
+// at all — they travel raw and resolve upward the moment pveproxy normalises
+// the path. A separator it does escape, to "%2F", relies on the further step
+// that Proxmox decodes before it resolves; the capture-server run recorded on
+// forbiddenVolumeIDChars (client_storage.go) is the evidence for that far-side
+// behaviour, having watched "%2e%2e%2f" arrive byte-for-byte and become "../"
+// upstream. So on the two DELETE methods:
+//
+//	snapname="."   DELETE /nodes/{node}/qemu/{vmid}/snapshot
+//	               the snapshot COLLECTION rather than one snapshot
+//	snapname=".."  DELETE /nodes/{node}/qemu/{vmid}
+//	               the GUEST — the same target as DestroyVM
+//
+// The second one is the reason this is not a cosmetic tightening: a caller
+// asking to delete a snapshot deletes the whole VM, and the audit row and the
+// task description still read "snapshot_delete" because both are built from
+// the arguments rather than from the path. Commit 3e757d3 closed the same
+// shape for task ids and 7f4d2ca for HA ids, on the rationale "guard at the
+// client, not at whichever caller remembers".
+//
+// Whichever caller remembers is what this was until now: the only thing
+// constraining these names was snapshotNameParam's Pattern in
+// internal/api/registry_vms.go — a check in the CALLER, which a non-HTTP
+// caller inherits nothing from. Today there is no such caller, and that is
+// worth recording rather than assuming: the four handlers in
+// internal/api/handlers are the only call sites in the tree, internal/scheduler
+// and internal/guesttools reach the CREATE methods only, and the central
+// snapshots "prune" (handlers/guest_snapshots.go) deletes cache ROWS, not
+// snapshots. So this closes a gap nothing reaches yet, on the same terms as
+// UpdateFirewallIPSetEntry, which is guarded with no route reaching it at all:
+// the next caller inherits the check instead of having to remember it.
+//
+// A "%" is deliberately NOT refused, unlike in validateVolumeID. These four
+// write url.PathEscape(snapname), which re-encodes a percent to %25, so
+// "%2e%2e%2f" arrives as the literal name the caller meant rather than as
+// "../". A volume id is interpolated raw, which is the whole difference.
+//
+// The control-character refusal is not about the path — url.PathEscape encodes
+// those — but about where the name goes afterwards: all four handlers file
+// snap_name in a TrackTask Extra map, and view:audit is granted to every
+// Viewer by default.
+
 func (c *Client) ListVMSnapshots(ctx context.Context, node string, vmid int) ([]Snapshot, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err
@@ -731,8 +793,10 @@ func (c *Client) DeleteVMSnapshot(ctx context.Context, node string, vmid int, sn
 	if err := validateVMID(vmid); err != nil {
 		return "", err
 	}
-	if snapname == "" {
-		return "", fmt.Errorf("snapshot name is required")
+	// Addressing, not minting: the path-segment rule and deliberately NOT
+	// ValidateSnapshotName — see "Addressing an existing snapshot" above.
+	if err := validatePathSegment("snapshot name", snapname); err != nil {
+		return "", err
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/snapshot/" + url.PathEscape(snapname)
 	var upid string
@@ -748,8 +812,10 @@ func (c *Client) RollbackVMSnapshot(ctx context.Context, node string, vmid int, 
 	if err := validateVMID(vmid); err != nil {
 		return "", err
 	}
-	if snapname == "" {
-		return "", fmt.Errorf("snapshot name is required")
+	// Addressing, not minting: the path-segment rule and deliberately NOT
+	// ValidateSnapshotName — see "Addressing an existing snapshot" above.
+	if err := validatePathSegment("snapshot name", snapname); err != nil {
+		return "", err
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/snapshot/" + url.PathEscape(snapname) + "/rollback"
 	var upid string
@@ -841,8 +907,10 @@ func (c *Client) DeleteCTSnapshot(ctx context.Context, node string, vmid int, sn
 	if err := validateVMID(vmid); err != nil {
 		return "", err
 	}
-	if snapname == "" {
-		return "", fmt.Errorf("snapshot name is required")
+	// Addressing, not minting: the path-segment rule and deliberately NOT
+	// ValidateSnapshotName — see "Addressing an existing snapshot" above.
+	if err := validatePathSegment("snapshot name", snapname); err != nil {
+		return "", err
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/snapshot/" + url.PathEscape(snapname)
 	var upid string
@@ -858,8 +926,10 @@ func (c *Client) RollbackCTSnapshot(ctx context.Context, node string, vmid int, 
 	if err := validateVMID(vmid); err != nil {
 		return "", err
 	}
-	if snapname == "" {
-		return "", fmt.Errorf("snapshot name is required")
+	// Addressing, not minting: the path-segment rule and deliberately NOT
+	// ValidateSnapshotName — see "Addressing an existing snapshot" above.
+	if err := validatePathSegment("snapshot name", snapname); err != nil {
+		return "", err
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/snapshot/" + url.PathEscape(snapname) + "/rollback"
 	var upid string

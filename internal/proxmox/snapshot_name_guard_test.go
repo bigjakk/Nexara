@@ -32,8 +32,10 @@ import (
 // create-side validator there would strand any snapshot whose name predates
 // this code or came from another tool — the invented-strictness shape, and the
 // reason registry_vms.go declares the addressing side with MaxLength 128 and no
-// two-character minimum. Their own (separate) path-guard gap is tracked apart
-// from this.
+// two-character minimum. Their own (separate) path-guard gap — the snapshot
+// name is a PATH segment there, so "." and ".." had to be refused even though
+// the create rule must not be — is closed by validatePathSegment and covered by
+// client_guests_snapshot_address_test.go, not by this guard.
 //
 // WHAT IT DOES NOT CATCH, stated rather than implied: it matches the literal
 // `X.Set("snapname", …)` shape, so building the field name from a variable, or
