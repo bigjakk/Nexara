@@ -60,9 +60,25 @@ type ConsoleScope struct {
 const WSScopeHub = "hub"
 
 // TokenPair holds an access token and a refresh token.
+//
+// RefreshToken is json:"-" on purpose, and that is the whole point of this
+// comment. Returning a refresh token in a response body was the v1.9.x leak;
+// the fix for it lives in the three authResponse construction sites in
+// internal/api/handlers/auth.go, which hard-code an empty string, and the
+// token now travels only in an HttpOnly, SameSite=Strict cookie scoped to
+// handlers.RefreshCookiePath.
+//
+// Those three call sites cannot protect this type. With a live
+// `json:"refresh_token"` tag here, the next thing that marshals a TokenPair —
+// a new endpoint, a debug handler, an error path, a %+v on a JSON-ish
+// wrapper — reopens the leak with nothing failing. The tag is where the
+// hazard lives, so the tag is where it is closed.
+//
+// Nothing in the tree marshals or unmarshals this type today, so json:"-"
+// costs nothing; TestTokenPair_RefreshTokenIsNeverMarshalled pins it.
 type TokenPair struct {
 	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	RefreshToken string `json:"-"`
 	ExpiresAt    int64  `json:"expires_at"`
 }
 
