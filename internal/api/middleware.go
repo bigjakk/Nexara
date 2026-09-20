@@ -370,8 +370,8 @@ func compressionSkipped(c fiber.Ctx) bool {
 	// the CAUSATION half: this prefix is the exact scope in which a browser
 	// attaches a credential without the caller asking, and therefore the only
 	// region of the API where an attacker could ever provoke a response they
-	// cannot themselves read. The boundary is not a judgement call — it is
-	// refreshCookiePath from handlers/auth_cookies.go, verbatim.
+	// cannot themselves read. The boundary is not a judgement call — it IS
+	// handlers.RefreshCookiePath, the same constant, not a copy of it.
 	//
 	// Stated plainly: as the handlers stand today this rule is REDUNDANT with
 	// rule 1. Every credential-bearing response is a POST or a PUT, and no
@@ -402,23 +402,33 @@ func compressionSkipped(c fiber.Ctx) bool {
 	return p == authCookieScope || strings.HasPrefix(p, authCookieScopePrefix)
 }
 
-// authCookieScope and authCookieScopePrefix name the part of the API the
-// refresh cookie is scoped to, and therefore the only part a browser will
-// authenticate automatically. Two spellings because both are needed: the
-// prefix matches children, the bare scope matches the subtree root, and
-// limiterPath has already stripped trailing slashes by the time either is
-// compared against.
+// authCookieScopePrefix names the part of the API the refresh cookie is scoped
+// to, and therefore the only part a browser will authenticate automatically.
+// It is handlers.RefreshCookiePath itself — the Path attribute the cookie is
+// actually issued with — rather than a literal that matches it today.
 //
-// Kept in sync by hand with refreshCookiePath in
-// internal/api/handlers/auth_cookies.go, which is unexported. The trailing
-// slash is load-bearing there (RFC 6265 §5.1.4 — without it the cookie would
-// also match a neighbour like /api/v1/auth-debug) and is kept here so the two
-// read as the same value; TestCompressionSkipped_Decisions pins that this
-// exclusion does not match that neighbour either.
-const (
-	authCookieScope       = "/api/v1/auth"
-	authCookieScopePrefix = authCookieScope + "/"
-)
+// That indirection is the point. This value and the cookie's Path have to be
+// the same string or the compression exclusion stops mirroring the credential
+// it exists to protect, and until now a comment was the only thing holding
+// them together. The trailing slash is the part that bites: RFC 6265 §5.1.4
+// makes "/api/v1/auth" match a neighbour like "/api/v1/auth-debug", so
+// dropping it would widen both the cookie AND this exclusion onto a path that
+// is not auth at all. Deriving the value means it cannot drift here without
+// also drifting on the wire, where TestRefreshCookie_PathIsTheExportedScope
+// sees it; TestCompressionSkipped_Decisions pins that the exclusion does not
+// reach that neighbour, and TestCompressionExclusion_TracksTheRefreshCookiePath
+// pins that it is still derived rather than re-copied.
+//
+// The direction is forced: internal/api imports internal/api/handlers, so the
+// constant has to be exported from handlers and read here. Exporting it the
+// other way round would be an import cycle.
+const authCookieScopePrefix = handlers.RefreshCookiePath
+
+// authCookieScope is the same subtree without the trailing slash — needed
+// because limiterPath has already stripped trailing slashes by the time it is
+// compared, so the bare subtree root has to be matched by equality rather than
+// by the prefix. Derived, not written out, for the reason above.
+var authCookieScope = strings.TrimSuffix(authCookieScopePrefix, "/")
 
 // clusterCreateLimiter caps POST /api/v1/clusters at 10/min/IP.
 //

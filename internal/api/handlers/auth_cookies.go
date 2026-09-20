@@ -13,13 +13,24 @@ import (
 // (it had no DOM cookie jar) was removed in v1.9.x.
 const RefreshCookieName = "nexara_refresh_token"
 
-// refreshCookiePath scopes the cookie to children of the auth subtree so it
+// RefreshCookiePath scopes the cookie to children of the auth subtree so it
 // is only sent on /api/v1/auth/* requests, minimising exposure. The trailing
 // slash matters: per RFC 6265 §5.1.4, "/api/v1/auth" without a trailing
 // slash would also match a hypothetical neighbour like "/api/v1/auth-debug",
 // so we keep the trailing slash to constrain the cookie to legitimate
 // children only.
-const refreshCookiePath = "/api/v1/auth/"
+//
+// Exported because it is a security boundary two packages have to agree on:
+// internal/api excludes exactly this subtree from response compression (the
+// BREACH precondition is "a credential the browser attaches by itself", which
+// is what this Path defines) and from the general rate limiter. Those used to
+// be a hand-copied literal kept in step by a comment; they now derive from
+// this constant, so the agreement is mechanical rather than remembered.
+//
+// The dependency runs handlers -> internal/api and not the other way because
+// internal/api already imports this package; the reverse would be an import
+// cycle. See authCookieScopePrefix in internal/api/middleware.go.
+const RefreshCookiePath = "/api/v1/auth/"
 
 // cookieSecureMode is the SECURE_COOKIES policy, set once at startup via
 // SetCookieSecureMode. See refreshCookieSecure.
@@ -62,7 +73,7 @@ func setRefreshCookie(c fiber.Ctx, token string, ttl time.Duration) {
 	c.Cookie(&fiber.Cookie{
 		Name:     RefreshCookieName,
 		Value:    token,
-		Path:     refreshCookiePath,
+		Path:     RefreshCookiePath,
 		HTTPOnly: true,
 		Secure:   refreshCookieSecure(c),
 		SameSite: "Strict",
@@ -77,7 +88,7 @@ func clearRefreshCookie(c fiber.Ctx) {
 	c.Cookie(&fiber.Cookie{
 		Name:     RefreshCookieName,
 		Value:    "",
-		Path:     refreshCookiePath,
+		Path:     RefreshCookiePath,
 		HTTPOnly: true,
 		Secure:   refreshCookieSecure(c),
 		SameSite: "Strict",
