@@ -87,18 +87,20 @@ var pbsJobIDParam = apischema.Property{
 // traversal cannot ride in on either half. That is the whole reason
 // upidParam can carry no anchor of its own. The PBS routes address the
 // fixed node "localhost", so there is no node half here to carry a guard:
-// what the route would build is /nodes/localhost/tasks/../status, resolving
-// onto the node status endpoint instead of the task the caller named.
+// what the route would build is /nodes/localhost/tasks/../status.
 //
-// Both of those sentences are about the CLIENT rather than this file, and
-// both moved after this declaration was written, which is why the anchor
-// stays. validateNodeName (internal/proxmox/client.go) began refusing a
-// bare "." only when it was changed to delegate to validatePathSegment;
-// before that the node half of a VM task route accepted one. And the PBS
-// UPID is now refused at the choke point too, by validatePBSTaskUPID
-// (pbs_client.go). What the anchor adds is one cheap refusal a layer
-// earlier, on the value as it ARRIVES — the only layer that does not
-// depend on the client keeping its guard.
+// The two claims above about the node half and the UPID guard are about the
+// CLIENT rather than this file, and both moved after this declaration was
+// written, which is why the anchor stays. validateNodeName
+// (internal/proxmox/client.go) began refusing a bare "." only when it was
+// changed to delegate to validatePathSegment; before that the node half of a
+// VM task route accepted one. And the PBS UPID is now refused at the choke
+// point too, by validatePBSTaskUPID (pbs_client.go). What the anchor adds is
+// one cheap refusal a layer earlier, on the value as it ARRIVES — the only
+// layer that does not depend on the client keeping its guard. (PBS would refuse the ".." path
+// too: its REST server's normalize_path rejects any path component that
+// starts with "." — validatePBSTaskUPID cites the upstream source — but
+// Nexara should not be the layer that sends it.)
 //
 // The anchor is a leading alphanumeric and nothing more. A UPID starts with
 // the literal "UPID" in both the raw form and the percent-encoded form the

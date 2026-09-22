@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // PBSClient communicates with a single Proxmox Backup Server.
@@ -195,50 +196,72 @@ func (c *PBSClient) UpdateSnapshotNotes(ctx context.Context, store, backupType, 
 // validatePBSTaskUPID guards a caller-supplied UPID that becomes exactly one
 // segment of /nodes/localhost/tasks/{upid}/…
 //
-// It exists because the API layer percent-DECODES this path parameter (see
-// pbsTaskUPIDFromParams in internal/api/handlers/backup.go). Before that decode
-// the value could not carry a traversal — "%2E%2E" was escaped a second time
-// and named a task literally called "%2E%2E" — and after it, "A%2F..%2F..%2Fstatus"
-// really does mean "A/../../status". url.PathEscape alone does not stop that:
-// it turns the slashes back into "%2F", and the far side decodes those before
-// it resolves the path. The capture-server run recorded on
-// forbiddenVolumeIDChars (client_storage.go) is the evidence, and it is worth
-// stating precisely: it watched a RAW "%2e%2e%2f" arrive byte-for-byte. That
-// the far side then resolves it as "../" is the inference, and an escape this
-// client produces reaches the same decoder. The request lands on whatever the traversal counts
-// out to, a different endpoint reachable from a route granting only
-// view:backup. Count the segments before quoting a destination: an earlier
-// version of this comment named /nodes/localhost/status, which is one ".." too
-// far.
-//
-// The check belongs HERE rather than at the handler, and rather than in the
-// route declaration, for two reasons. The declaration matches the value as it
-// ARRIVES, where "%2E%2E" carries no dot, so it cannot see through an escape;
+// The API layer percent-DECODES this path parameter (pbsTaskUPIDFromParams in
+// internal/api/handlers/backup.go), so what arrives here is the value the
+// caller meant rather than the escaped text the route declaration matched. The
+// check belongs HERE rather than at the handler, and rather than in the route
+// declaration, for two reasons. The declaration matches the value as it
+// ARRIVES, where "A%2F.." carries no slash, so it cannot see through an escape;
 // and this client is the choke point every caller goes through, so a second
 // route added later inherits the guard instead of having to remember it.
 //
-// validatePathSegment is the shared rule the PVE client applies to most values
-// of this shape — a pool name, an interface name, a volume group: it refuses
-// the empty string, "." and "..", any "/" or "\", and any control character.
+// It refuses the empty string, a "/", a control character, and a "." or ".."
+// segment — bare, or standing between backslashes — and it is deliberately NOT
+// validatePathSegment, which refuses every backslash. PBS writes the worker id through escape_id
+// (proxmox-schema src/upid.rs): "/" becomes "-", and every other byte outside
+// [A-Za-z0-9_.], plus a LEADING ".", becomes "\xNN". A backup task's worker id
+// is "<store>:<type>/<id>" (proxmox-backup src/api2/backup/mod.rs), so it goes
+// out as "datastore01\x3avm-100"; a verification job's is "<store>:<job id>",
+// so "datastore01\x3av\x2d0001"; a GC on a datastore with a dash in its name is
+// "datastore\x2d01". A backslash is in most real PBS UPIDs, and the user field
+// can carry a raw one too — PBS allows any of [^\s:/[:cntrl:]] in a user name —
+// so do not tighten this to "\x" followed by two hex digits. The first version
+// of this guard delegated to validatePathSegment and answered 400 for every
+// one of them, which left the task log and status routes working only for
+// tasks whose worker id needed no escaping. Passing it is safe: url.PathEscape
+// sends it as "%5C", and PBS decodes that back into the literal UPID it minted.
 //
-// A node name is now the same rule: validateNodeName (client.go) delegates
-// here too. It was the family's loose end when this note was first written —
-// refusing only "", "/" and a ".." SUBSTRING, so it took a bare ".", a
-// backslash and any control character — and the bare "." was reachable,
-// because extractNodeFromUPID reads the node out of a UPID the API layer has
-// already decoded. Nothing on the PBS side ever depended on the weaker rule:
-// these routes address the literal node "localhost".
+// None of this is the pveproxy traversal validatePathSegment exists for,
+// because PBS does not decode before it splits the path and checks it for
+// dots. proxmox-rest-server's normalize_path splits the RAW path on "/" and
+// refuses any component that starts with ".", and only then does
+// proxmox-router percent-decode each component on its own — so on PBS an
+// escaped "%2F" stays inside the segment it arrived in, and a bare ".." is an
+// error rather than a step upward. That is read from upstream source, not
+// observed on a live server. It is why the refusals here are defence in depth
+// rather than the only thing between a view:backup caller and another PBS
+// endpoint: they give a value no PBS minted a clear local 400 instead of a PBS
+// error, and they keep holding behind a reverse proxy that normalises the path
+// before PBS sees it — including one that reads "\" as a separator, which is
+// what the dot pieces between backslashes are refused for.
 //
-// A UPID carries none of those. It is "UPID" followed by colon-separated hex, a
-// worker type, a worker id and a user@realm; the colon and the "@" both survive
-// the check, and a separator would have to come from the worker id — which no
-// recorded UPID carries, nor do the fixtures the registry's own
-// TestBackupPathSegmentsAreAnchored calls "a value the API itself hands back".
-// A UPID that did carry a slash could not be addressed through one path segment
-// in any case, so a refusal here is a clearer failure than a request that
-// silently resolves somewhere else.
+// That last refusal has a known cost, accepted on purpose. escape_id never
+// writes such a piece — every backslash it writes is followed by an "x" — but
+// PBS writes the USER field raw, and a PBS user name may be any run of
+// [^\s:/[:cntrl:]]: a user called "a\..\b@pbs" is legal, and every task that
+// user starts carries the piece. Exempting the user field would not narrow the
+// defence, it would remove it, since a caller-supplied value puts its
+// traversal wherever the exemption lies. So such a user's task logs cannot be
+// read through Nexara; TestPBSClientTaskReadsRefuseAPathThatIsNotOneSegment
+// pins the choice.
 func validatePBSTaskUPID(upid string) error {
-	return validatePathSegment("UPID", upid)
+	if upid == "" {
+		return fmt.Errorf("%w: UPID is required", ErrInvalidInput)
+	}
+	if strings.Contains(upid, "/") {
+		return fmt.Errorf("%w: UPID %q must not contain a path separator", ErrInvalidInput, upid)
+	}
+	if hasControlChar(upid) {
+		return fmt.Errorf("%w: UPID %q contains a control character", ErrInvalidInput, upid)
+	}
+	// A value with no backslash splits into one piece, itself, so this is
+	// also the refusal of a bare "." or "..".
+	for _, piece := range strings.Split(upid, `\`) {
+		if piece == "." || piece == ".." {
+			return fmt.Errorf("%w: UPID %q has a \".\" or \"..\" segment", ErrInvalidInput, upid)
+		}
+	}
+	return nil
 }
 
 // GetTaskLog returns log lines for a PBS task.

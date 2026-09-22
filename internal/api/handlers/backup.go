@@ -107,10 +107,15 @@ func pbsIDFromParams(p *apischema.Params) (uuid.UUID, error) {
 // escape. The PBS routes address a fixed node ("localhost"), which is exactly
 // why they never reached for taskUPID and never inherited its decode.
 //
-// The traversal the decode makes expressible is refused at the choke point, in
-// PBSClient.GetTaskLog/GetTaskStatus, not here — see the note on
-// validatePBSTaskUPID. The route's declared pattern cannot stand in for it: it
-// matches the value AS IT ARRIVES, where "%2E%2E" carries no dot at all.
+// What the decode makes expressible — a real "/" or a control byte, as in
+// "A%2F..%2F..%2Fstatus" or "A%0Ab" — is refused at the choke point, in
+// PBSClient.GetTaskLog/GetTaskStatus, not here; see the note on
+// validatePBSTaskUPID. (A bare ".." and "%2E%2E" never reach the decode: the
+// route's pattern wants a leading alphanumeric.) That guard has to pass the
+// backslash this decode produces from "%5C", because PBS escapes a task's
+// worker id to "\xNN" and most real PBS UPIDs carry one. The route's declared
+// pattern cannot stand in for it: it matches the value AS IT ARRIVES, where
+// "A%2F.." carries no slash at all.
 func pbsTaskUPIDFromParams(p *apischema.Params) (string, error) {
 	return accessParam(p.String("upid"), "UPID")
 }

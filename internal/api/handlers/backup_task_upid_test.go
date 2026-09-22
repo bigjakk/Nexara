@@ -45,7 +45,7 @@ const pbsUPIDEncKey = "0123456789abcdef0123456789abcdef0123456789abcdef012345678
 
 // pbsUPIDSample is a PBS UPID in the shape PBS itself emits: the literal
 // "UPID", the node, three hex fields, the start time, the worker type, the
-// worker id, and the user@realm that started it. Ten colons and an "@", every
+// worker id, and the user@realm that started it. Nine colons and an "@", every
 // one of which encodeURIComponent percent-encodes.
 const pbsUPIDSample = "UPID:pbs-01:0000ABCD:00012345:00000000:66F00000:garbage_collection:datastore01:root@pam:"
 
@@ -319,12 +319,25 @@ func TestPBSTaskRoutesReachPBSAsTheTaskTheCallerMeant(t *testing.T) {
 
 	upids := []string{
 		pbsUPIDSample,
-		// Verify, sync and prune: the other three worker types a PBS task
-		// listing is full of. Different worker ids, same ten colons, and — on
-		// the last one — a different realm, so the "@" is exercised twice over.
+		// Verify and a prune job on a plain datastore: different worker
+		// types, the same nine colons, and — on the second — a different
+		// realm, so the "@" is exercised twice over. (A prune job's worker id
+		// is the bare store name; a manual prune's is "<store>:<ns>", which
+		// escapes.)
 		"UPID:pbs-01:00001234:0000ABCD:00000000:66F00001:verify:datastore01:root@pam:",
-		"UPID:pbs-01:00005678:0000BEEF:00000000:66F00002:syncjob:s-0001:root@pam:",
-		"UPID:pbs-01:00009ABC:0000CAFE:00000000:66F00003:prune:datastore01:backup@pbs:",
+		"UPID:pbs-01:00009ABC:0000CAFE:00000000:66F00003:prunejob:datastore01:backup@pbs:",
+		// The shapes most PBS tasks actually carry. PBS writes the worker id
+		// through escape_id (proxmox-schema src/upid.rs), which turns every
+		// byte outside [A-Za-z0-9_.], and a leading ".", into "\xNN": a
+		// backup's "<store>:<type>/<id>"
+		// becomes "datastore01\x3avm-100", a verification job's
+		// "<store>:<job id>" escapes its colon and the id's dash, and a GC on
+		// a dashed datastore escapes the dash. encodeURIComponent sends each
+		// backslash as "%5C", the handler decodes it back, and the client has
+		// to pass it — refusing a backslash answered 400 for all three.
+		`UPID:pbs-01:0000ABCD:00012345:0000001D:66F00004:backup:datastore01\x3avm-100:root@pam:`,
+		`UPID:pbs-01:0000ABCE:00012346:0000001E:66F00005:verificationjob:datastore01\x3av\x2d0001:root@pam:`,
+		`UPID:pbs-01:0000ABCF:00012347:0000001F:66F00006:garbage_collection:datastore\x2d01:root@pam:`,
 	}
 
 	for _, upid := range upids {
@@ -353,14 +366,23 @@ func TestPBSTaskRoutesReachPBSAsTheTaskTheCallerMeant(t *testing.T) {
 // TestPBSTaskUPIDDecodeRefusesWhatItNowMakesReachable is the other half of the
 // decode.
 //
-// Before it, "%2E%2E" named a task literally called "%2E%2E" and no guard
-// needed to see a dot; after it the same request really does mean "..", and the
-// guard in PBSClient is what refuses it. These cases all satisfy the route's
-// declared pattern — a leading alphanumeric — which is the point: the
-// declaration matches the value AS IT ARRIVES and cannot see through an escape,
-// so it is not the anchor of record.
+// Before it, "A%2F.." named a task literally called "A%2F.." and no guard
+// needed to see a slash; after it the same request really does carry one, and
+// the guard in PBSClient is what refuses it. A bare "..", and "%2E%2E", never
+// get that far: the route's declared pattern — a leading alphanumeric — turns
+// both away first. So every case here starts with a letter and satisfies that
+// pattern, which is the point: the declaration matches the value AS IT
+// ARRIVES and cannot see through an escape, so for these it is not the anchor
+// of record.
 //
-// Nothing may reach PBS in any of them.
+// Nothing may reach PBS in any of them. That is defence in depth rather than
+// the last line: PBS splits the raw path on "/" before it decodes anything, so
+// it would not have traversed on these either (validatePBSTaskUPID records the
+// upstream source). What the refusal buys is a clear local 400 for a value no
+// PBS minted, and a guard that keeps holding behind a proxy that normalises
+// paths — including one that reads a backslash as a separator, which is why a
+// dot piece between backslashes is refused while a backslash itself, which PBS
+// puts in most real UPIDs, is not.
 func TestPBSTaskUPIDDecodeRefusesWhatItNowMakesReachable(t *testing.T) {
 	h := newPBSUPIDHarness(t)
 
@@ -370,14 +392,11 @@ func TestPBSTaskUPIDDecodeRefusesWhatItNowMakesReachable(t *testing.T) {
 		// wire.
 		segment string
 	}{
-		// "A/../../status" once decoded: PathEscape turns the slashes back into
-		// "%2F", and PBS resolves those before it routes — the run recorded on
-		// forbiddenVolumeIDChars (client_storage.go) records for a Proxmox
-		// server: it watched a raw "%2e%2e%2f" arrive byte-for-byte. The
-		// request would land on /nodes/localhost/status, a different endpoint.
+		// "A/../../status" once decoded: a slash no real PBS UPID contains,
+		// since escape_id writes every "/" in a worker id as "-".
 		{"traversal through an encoded slash", "A%2F..%2F..%2Fstatus"},
 		{"a single encoded separator", "A%2Fb"},
-		{"an encoded backslash", "A%5C..%5Cstatus"},
+		{"a dot piece between encoded backslashes", "A%5C..%5Cstatus"},
 		// A control byte no catalogued pattern can see: the rule matches the
 		// value as it arrives, where "%0A" is three ordinary characters.
 		{"encoded newline", "A%0Ab"},

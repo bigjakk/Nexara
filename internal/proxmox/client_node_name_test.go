@@ -231,6 +231,10 @@ func TestPathGuardFamilyShareTheirCoreRefusals(t *testing.T) {
 		// why records the exemption, so it cannot be copied onto a member
 		// that has not earned it.
 		why string
+		// skipBackslash exempts a member whose accepted values legitimately
+		// carry a "\", and whyBackslash records why, on the same terms.
+		skipBackslash bool
+		whyBackslash  string
 	}{
 		{
 			name:     "validateNodeName",
@@ -263,7 +267,16 @@ func TestPathGuardFamilyShareTheirCoreRefusals(t *testing.T) {
 		{
 			name:     "validatePBSTaskUPID",
 			validate: validatePBSTaskUPID,
-			baseline: validNodeTaskUPID,
+			// A PBS UPID, not a PVE one: the two mint different shapes, and a
+			// PVE baseline is what let this row pin a refusal no real PBS
+			// UPID survives.
+			baseline: realPBSTaskUPIDs["backup"],
+			// PBS escapes its worker id to "\xNN" (proxmox-schema escape_id),
+			// so most real PBS UPIDs carry one — refusing it answered 400 for
+			// the backup, verification-job and dashed-datastore GC tasks. PBS
+			// splits the raw path on "/" only; see the guard's doc comment.
+			skipBackslash: true,
+			whyBackslash:  "PBS escapes the worker id to \\xNN; see the guard's doc comment",
 		},
 		{
 			name:     "validateHAConfigID",
@@ -333,9 +346,13 @@ func TestPathGuardFamilyShareTheirCoreRefusals(t *testing.T) {
 				{"a bare traversal", ".."},
 				{"a NUL", member.baseline + "\x00"},
 				{"a newline", member.baseline + "\n"},
-				// Raw string: a backslash and an "x", not an escape.
-				{"a backslash", member.baseline + `\x`},
 				{"a traversal", member.baseline + "/../.."},
+			}
+			if !member.skipBackslash {
+				// Raw string: a backslash and an "x", not an escape.
+				probes = append(probes, struct{ name, value string }{"a backslash", member.baseline + `\x`})
+			} else if member.whyBackslash == "" {
+				t.Error("skipBackslash with no reason recorded")
 			}
 			if !member.skipSeparator {
 				probes = append(probes, struct{ name, value string }{"a separator", member.baseline + "/x"})
