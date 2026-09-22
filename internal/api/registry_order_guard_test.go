@@ -420,17 +420,16 @@ func TestRegistryOrderExemptionsAllCarryAReason(t *testing.T) {
 }
 
 // orderProbeEndpoints builds GET probe endpoints for the given paths, in
-// order, declaring a string parameter for every :param segment so
-// checkPathParams is satisfied.
+// order, declaring a string parameter for every :param segment. Nothing
+// registers them — registryShadowedRoutes reads only Method and Path — so
+// the parameters keep each probe a complete declaration rather than
+// satisfying any check.
 func orderProbeEndpoints(paths ...string) []Endpoint {
 	out := make([]Endpoint, 0, len(paths))
 	for _, path := range paths {
 		params := apischema.Properties{}
-		for _, seg := range pathSegments(path) {
-			if strings.HasPrefix(seg, ":") {
-				params[strings.TrimSuffix(strings.TrimPrefix(seg, ":"), "?")] =
-					apischema.Property{Type: apischema.String}
-			}
+		for _, name := range pathParamNames(path) {
+			params[name] = apischema.Property{Type: apischema.String}
 		}
 		out = append(out, registryProbeEndpoint(path,
 			Permissions{Public: "synthetic route for the ordering guard test"},

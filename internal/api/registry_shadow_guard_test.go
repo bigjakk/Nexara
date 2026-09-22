@@ -85,12 +85,19 @@ func pathSegments(path string) []string {
 }
 
 // isOptionalSegment reports whether seg is Fiber v3's optional-parameter
-// syntax (":name?"). apischema's extraction layer deliberately supports
-// this — see TestRegistryOmitsUnseenKeysRatherThanPassingEmptyStrings'
-// "an optional path segment that was not supplied" case in
-// registry_request_test.go, and readSource's SourcePath comment in
-// registry_params.go — so Register does not, and should not, refuse it;
-// this guard has to understand it instead.
+// syntax (":name?"). Register refuses it — checkPathParams refuses "?" in
+// every registry path, because an optional :cluster_id? could be sent empty
+// and let the cluster gate fall back to :id — so no registered route
+// carries one today. This guard models it anyway: the refusal is another
+// file's decision and one edit from being relaxed, and a guard that
+// silently narrowed the day it was would fail the wrong way round.
+//
+// pathIsCapturedBy makes the opposite call for "*" and "+" in the pattern,
+// leaning on the same kind of refusal instead of modelling them (see its doc
+// comment below, and registryShadowedRoutes' in
+// registry_order_guard_test.go). The difference is cost, not principle: this
+// model was already written and tested when the refusal arrived, while a
+// wildcard's unbounded width would be new modelling.
 func isOptionalSegment(seg string) bool {
 	return strings.HasPrefix(seg, ":") && strings.HasSuffix(seg, "?")
 }
@@ -309,16 +316,21 @@ func TestRegistryLegacyRouteConflicts_DifferentSegmentCountNeverConflicts(t *tes
 // TestRegistryLegacyRouteConflicts_OptionalTrailingSegmentWidensTheMatch
 // proves the review-flagged gap is closed: a registry route ending in
 // :name? matches BOTH the full width and one segment short (Fiber v3's
-// optional-parameter syntax, deliberately supported by the extraction
-// layer — see isOptionalSegment's doc comment), so it must be checked
-// against legacy routes at both widths, not just its own declared one.
+// optional-parameter syntax), so it must be checked against legacy routes
+// at both widths, not just its own declared one.
+//
+// Register refuses such a path (see isOptionalSegment's doc comment), so
+// the probe is handed to registryLegacyRouteConflicts directly instead of
+// being registered. That also means this test cannot notice the refusal
+// being relaxed — TestRegisterRejectsMalformedDeclarations and
+// TestRegistryOmitsUnseenKeysRatherThanPassingEmptyStrings hold that. It
+// proves only that this guard would still be right if it were.
 func TestRegistryLegacyRouteConflicts_OptionalTrailingSegmentWidensTheMatch(t *testing.T) {
-	reg := NewRegistry()
-	reg.Register(registryProbeEndpoint("/api/v1/vms/:id?",
-		Permissions{Public: "synthetic route for the shadow guard test"}, noopParamsHandler,
-		apischema.Properties{"id": {Type: apischema.String, Optional: true}}))
+	// Only Method and Path: registryLegacyRouteConflicts reads nothing else,
+	// and a probe Register would refuse is not a declaration to dress up.
+	probe := Endpoint{Method: "GET", Path: "/api/v1/vms/:id?"}
 
-	got := registryLegacyRouteConflicts(reg.Endpoints(), []string{
+	got := registryLegacyRouteConflicts([]Endpoint{probe}, []string{
 		"GET /api/v1/vms",         // one segment short of the declared path: still captured
 		"GET /api/v1/vms/summary", // full width: still captured
 		"GET /api/v1/vms/a/b",     // too wide even for the optional segment: not captured

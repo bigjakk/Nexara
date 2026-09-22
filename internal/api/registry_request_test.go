@@ -358,12 +358,23 @@ func TestRegistryOmitsUnseenKeysRatherThanPassingEmptyStrings(t *testing.T) {
 		}
 	})
 
-	t.Run("an optional path segment that was not supplied", func(t *testing.T) {
-		// The path branch of the same rule. c.Params returns "" both for
-		// an unmatched optional segment and for one matched empty, and
-		// passing that "" on would mark the parameter supplied.
+	t.Run("an optional path segment is refused, and read as absent if one arrives", func(t *testing.T) {
+		// The path branch of the same rule, held at two layers.
+		//
+		// Register refuses the shape: checkPathParams refuses "?" in every
+		// registry path, because an optional :cluster_id? matched empty let
+		// a cluster gate fall back to :id. This route has no cluster gate at
+		// all, and that is the point — it holds the refusal as unconditional.
+		//
+		// readSource is the layer under it. c.Params returns "" both for an
+		// unmatched optional segment and for one matched empty, and readSource
+		// reads that "" as absent rather than as a supplied value. Nothing
+		// registered can reach that branch while the refusal holds, so the
+		// route is also mounted past Register, as
+		// TestRegistryAnswers500ForADeclarationBug does, to keep the branch
+		// tested for the day the refusal is relaxed.
 		cap := &capture{}
-		app := newRegistryApp(t, noAuth(), Endpoint{
+		e := Endpoint{
 			Method:      fiber.MethodGet,
 			Path:        "/api/v1/widgets/:name?",
 			Description: "Get a widget, or all of them.",
@@ -373,7 +384,19 @@ func TestRegistryOmitsUnseenKeysRatherThanPassingEmptyStrings(t *testing.T) {
 				"name": {Type: apischema.String, Optional: true, Default: "all", Source: apischema.SourcePath},
 			},
 			Handler: cap.handler(),
-		})
+		}
+		switch msg := registerPanic(t, e); {
+		case msg == "":
+			t.Fatal("Register accepted GET /api/v1/widgets/:name?; it must refuse an optional path segment")
+		case !strings.Contains(msg, `uses "?" in its path`):
+			t.Fatalf("Register refused GET /api/v1/widgets/:name? for another reason: %s", msg)
+		}
+
+		reg := NewRegistry()
+		e.pathParams = pathParamNames(e.Path)
+		reg.endpoints = append(reg.endpoints, e)
+		app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
+		mountRegistry(app, reg, noAuth())
 
 		status, env := send(t, app, httptest.NewRequest(http.MethodGet, "/api/v1/widgets", nil))
 		if status != fiber.StatusNoContent {
@@ -384,7 +407,6 @@ func TestRegistryOmitsUnseenKeysRatherThanPassingEmptyStrings(t *testing.T) {
 				"an unmatched optional path segment must not read as supplied", v, supplied)
 		}
 
-		cap.called = false
 		status, env = send(t, app, httptest.NewRequest(http.MethodGet, "/api/v1/widgets/alpha", nil))
 		if status != fiber.StatusNoContent {
 			t.Fatalf("status = %d (%q), want 204", status, env.Message)
