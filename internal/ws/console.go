@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strconv"
 	"sync"
 	"time"
@@ -77,6 +78,9 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	// Cap any single browser→backend frame so a malicious tab cannot push a
 	// multi-megabyte payload at us. Applied before any ReadMessage call.
 	conn.SetReadLimit(MaxBrowserConsoleMessageBytes)
+
+	// Close the browser socket on EVERY return; see closeBrowserSocket.
+	defer closeBrowserSocket(conn)
 
 	// Every value below comes from the scope the gate VALIDATED, not from a
 	// second read of the query string. The gate checked c.Query, which returns
@@ -221,8 +225,7 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	// Browser → Proxmox
 	go func() {
 		defer wg.Done()
-		defer pxConn.WriteMessage(gorillaWs.CloseMessage,
-			gorillaWs.FormatCloseMessage(gorillaWs.CloseNormalClosure, ""))
+		defer closeRelayLeg(pxConn)
 		for {
 			msgType, msg, readErr := conn.ReadMessage()
 			if readErr != nil {
@@ -274,8 +277,7 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	// Proxmox → Browser
 	go func() {
 		defer wg.Done()
-		defer conn.WriteMessage(fiberWs.CloseMessage,
-			fiberWs.FormatCloseMessage(fiberWs.CloseNormalClosure, ""))
+		defer closeRelayLeg(conn)
 		for {
 			_, msg, readErr := pxConn.ReadMessage()
 			if readErr != nil {
@@ -301,7 +303,83 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	logger.Info("console session closed")
 }
 
-// writeError sends a JSON error message to the browser and closes the connection.
+// closeDrainTimeout bounds how long closing a console waits on a peer that
+// has been sent a Close frame: the browser, before its socket is closed, and
+// either side of the relay, before the other side's reader gives up on it.
+const closeDrainTimeout = 3 * time.Second
+
+// peerConn is the part of a websocket connection closeRelayLeg needs. The
+// browser's connection and the Proxmox one are different types from two
+// websocket packages, and both have these, with these signatures.
+type peerConn interface {
+	NetConn() net.Conn
+	WriteControl(messageType int, data []byte, deadline time.Time) error
+}
+
+// closeBrowserSocket is every console handler's deferred close.
+//
+// The websocket package leaves a hijacked connection open when its handler
+// returns normally — it closes one only after a panic — and fasthttp does not
+// close it either (KeepHijackedConns), so until this every early refusal, and
+// every session end, left the socket for the client to close or the garbage
+// collector to find.
+//
+// It sends a Close frame first. A refusal has normally written one already
+// (writeError), as has the relay's Proxmox-to-browser leg on its way out, and
+// then this one is refused as a second Close and changes nothing. It is here
+// for the path that has not: a panic, which unwinds through this before the
+// websocket package's recover handler can write its {"error":"internal
+// error"} — so the Close carries that reason instead — and which would
+// otherwise wait out the whole drain with no Close to answer.
+//
+// It then reads before it closes. Closing a TCP socket that still holds unread
+// input makes the kernel answer with a reset, which on some client stacks
+// overtakes the error text and the Close frame, so the client reports an
+// abnormal closure instead of the reason. Reading until the client's own
+// Close arrives, or closeDrainTimeout passes, empties that input first; the
+// deadline is what a client that never answers can cost. After a relay the
+// read side has usually failed already — fasthttp's read errors are
+// permanent — so there the drain returns at once. By the time this runs the
+// handler's readers have all returned, so this is the only one.
+func closeBrowserSocket(conn *fiberWs.Conn) {
+	deadline := time.Now().Add(closeDrainTimeout)
+	_ = conn.WriteControl(fiberWs.CloseMessage,
+		fiberWs.FormatCloseMessage(fiberWs.CloseInternalServerErr, "internal error"), deadline)
+	_ = conn.SetReadDeadline(deadline)
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			break
+		}
+	}
+	_ = conn.Close()
+}
+
+// closeRelayLeg ends one direction of a console relay: it bounds how long the
+// OTHER leg — the one reading from `to` — waits for an answer, then sends `to`
+// the Close frame that asks for one.
+//
+// Without the bound a peer that never answers the Close kept the other leg in
+// ReadMessage forever, so the handler never got past wg.Wait: no deferred
+// close, no pxConn.Close, two goroutines and two sockets held for as long as
+// that peer stayed connected. The read deadline goes on the net.Conn rather
+// than through the websocket's SetReadDeadline because both websocket
+// packages count that among the read methods one goroutine may use at a
+// time, and the other leg is reading; a net.Conn's methods may be called from
+// any goroutine. The Close goes out through WriteControl, which both packages
+// let any goroutine call and which takes the same deadline, so a peer that
+// has stopped reading cannot hold this leg in the write either. The frame is
+// built with gorilla's helpers for both connections: CloseMessage and the
+// close-code encoding are RFC 6455's, identical in the two packages.
+func closeRelayLeg(to peerConn) {
+	deadline := time.Now().Add(closeDrainTimeout)
+	_ = to.NetConn().SetReadDeadline(deadline)
+	_ = to.WriteControl(gorillaWs.CloseMessage,
+		gorillaWs.FormatCloseMessage(gorillaWs.CloseNormalClosure, ""), deadline)
+}
+
+// writeError sends a JSON error message to the browser, then a Close frame.
+// It does not close the connection: closeBrowserSocket, which the handler
+// defers, does that once the handler returns.
 func (h *ConsoleHandler) writeError(conn *fiberWs.Conn, msg string) {
 	errMsg := fmt.Sprintf(`{"type":"error","message":%q}`, msg)
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(errMsg))

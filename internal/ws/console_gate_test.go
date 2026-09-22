@@ -2,10 +2,12 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -332,5 +334,164 @@ func TestGuard_ConsoleHandlersReadOnlyTheScope(t *testing.T) {
 	if found != len(handlers) {
 		t.Fatalf("found %d of the %d console handlers; one was renamed or moved, so this guard checks nothing for it",
 			found, len(handlers))
+	}
+}
+
+// TestConsoleHandlers_CloseTheBrowserSocket pins that a console handler that
+// returns — here on its earliest refusal — closes the browser's connection
+// rather than leaving it for the client to close, and how it gets there.
+//
+// The websocket package closes a hijacked connection only after a panic, and
+// fasthttp leaves it open (KeepHijackedConns), so a handler that wrote its
+// Close frame and returned used to hold the socket until the client let go.
+// closeBrowserSocket closes it now, after reading until the client answers the
+// Close or closeDrainTimeout passes, and both arms are pinned: a client that
+// answers is let go at once, and one that never does is let go anyway — but
+// not before the deadline, because closing on unread input is the reset the
+// drain exists to avoid.
+//
+// So the client here sends first, before it reads the refusal, and the EOF has
+// to be a clean one. Input the drain left unread would turn the close into a
+// reset, and a drain that read one message and gave up would leave most of it.
+func TestConsoleHandlers_CloseTheBrowserSocket(t *testing.T) {
+	logger := testLogger()
+	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
+
+	for _, kind := range []string{"console", "vnc"} {
+		for _, tc := range []struct {
+			name     string
+			answers  bool
+			earliest time.Duration // the soonest the server may close, from the Close frame
+			latest   time.Duration // the latest
+		}{
+			{"a client that answers the Close is let go at once", true, 0, closeDrainTimeout - time.Second},
+			{"a client that never answers is let go at the deadline", false,
+				closeDrainTimeout - time.Second, closeDrainTimeout + 3*time.Second},
+		} {
+			t.Run(kind+": "+tc.name, func(t *testing.T) {
+				t.Parallel()
+				app := fiber.New()
+				app.Get("/probe", gateHandlerFor(kind, db.New(&gateLookupDB{}), jwtSvc, logger))
+				port := startGateApp(t, app)
+
+				dialer := *gorillaws.DefaultDialer
+				dialer.Subprotocols = []string{subprotocolNegotiationName}
+				conn, resp, err := dialer.Dial(fmt.Sprintf("ws://127.0.0.1:%d/probe", port), http.Header{})
+				if resp != nil {
+					_ = resp.Body.Close()
+				}
+				if err != nil {
+					t.Fatalf("dial: %v", err)
+				}
+				defer func() { _ = conn.Close() }()
+
+				// Typing into a console the server is about to refuse: input
+				// the handler never reads, in frames under the read limit.
+				for range 10 {
+					if err := conn.WriteMessage(gorillaws.BinaryMessage, make([]byte, 8<<10)); err != nil {
+						t.Fatalf("send: %v", err)
+					}
+				}
+
+				// gorilla's default close handler answers a Close with one of
+				// its own before ReadMessage returns; replacing it is how a
+				// client declines to.
+				if !tc.answers {
+					conn.SetCloseHandler(func(int, string) error { return nil })
+				}
+				_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+				if _, _, err := conn.ReadMessage(); err != nil {
+					t.Fatalf("reading the refusal: %v", err)
+				}
+				// writeError's own Close, carrying the refusal's reason — not
+				// closeBrowserSocket's fallback, which would say "internal error".
+				_, _, err = conn.ReadMessage()
+				var ce *gorillaws.CloseError
+				if !errors.As(err, &ce) || ce.Code != gorillaws.CloseInternalServerErr || ce.Text != "console scope missing" {
+					t.Fatalf("after the refusal: %v, want its Close frame, carrying the refusal's reason", err)
+				}
+				closed := time.Now()
+
+				if err := waitForEOF(conn.NetConn(), closeDrainTimeout+5*time.Second); err != nil {
+					t.Fatal(err)
+				}
+				if took := time.Since(closed); took < tc.earliest || took > tc.latest {
+					t.Errorf("the server closed the socket %v after its Close frame, want between %v and %v",
+						took, tc.earliest, tc.latest)
+				}
+			})
+		}
+	}
+}
+
+// waitForEOF reads raw from a connection whose websocket traffic is over,
+// until the server closes it. A timeout means the server never did; a byte
+// means something arrived after the frames the caller read — though not bytes
+// the websocket reader had already buffered, which are out of its sight; and
+// any error but io.EOF means it closed with a reset rather than a FIN, which
+// is what closing on unread input does.
+func waitForEOF(raw net.Conn, limit time.Duration) error {
+	_ = raw.SetReadDeadline(time.Now().Add(limit))
+	_, err := raw.Read(make([]byte, 1))
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return fmt.Errorf("the server never closed the connection (waited %v)", limit)
+	}
+	if err == nil {
+		return errors.New("read a byte where the server's EOF should be")
+	}
+	if !errors.Is(err, io.EOF) {
+		return fmt.Errorf("the connection ended with %v, want a clean EOF (a FIN, not a reset)", err)
+	}
+	return nil
+}
+
+// TestConsoleHandlers_ClosePromptlyWithAReasonAfterAPanic pins the Close
+// closeBrowserSocket opens with, for the one path that reaches it without
+// having sent one: a panic. It unwinds through the deferred close before the
+// websocket package's recover handler runs, so without that Close the client
+// was told nothing — the recover handler's {"error":"internal error"} could no
+// longer be written — and the drain waited out closeDrainTimeout for the
+// answer to a Close that was never sent. A nil database makes each handler
+// panic at its first lookup, and the websocket package's recover handler logs
+// both panics, stack traces and all, to stderr: expected output, visible only
+// under -v or when the package fails.
+func TestConsoleHandlers_ClosePromptlyWithAReasonAfterAPanic(t *testing.T) {
+	logger := testLogger()
+	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
+
+	for kind, consoleType := range map[string]string{"console": "vm_serial", "vnc": "vm_vnc"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			scope := auth.ConsoleScope{ClusterID: gateClusterA, Node: "pve-01", VMID: 100, Type: consoleType}
+			app := fiber.New()
+			app.Get("/probe", func(c fiber.Ctx) error {
+				validated := scope
+				c.Locals(consoleScopeLocal, &validated)
+				return c.Next()
+			}, gateHandlerFor(kind, nil, jwtSvc, logger))
+			port := startGateApp(t, app)
+
+			dialer := *gorillaws.DefaultDialer
+			dialer.Subprotocols = []string{subprotocolNegotiationName}
+			start := time.Now()
+			conn, resp, err := dialer.Dial(fmt.Sprintf("ws://127.0.0.1:%d/probe", port), http.Header{})
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			defer func() { _ = conn.Close() }()
+
+			_ = conn.SetReadDeadline(time.Now().Add(closeDrainTimeout + 5*time.Second))
+			_, _, err = conn.ReadMessage()
+			var ce *gorillaws.CloseError
+			if !errors.As(err, &ce) || ce.Code != gorillaws.CloseInternalServerErr || ce.Text != "internal error" {
+				t.Fatalf("first frame: %v, want a Close 1011 with the reason \"internal error\"", err)
+			}
+			if took := time.Since(start); took > closeDrainTimeout-time.Second {
+				t.Errorf("the Close came %v after the dial, want it well inside closeDrainTimeout", took)
+			}
+		})
 	}
 }

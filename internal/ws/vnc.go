@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	gorillaWs "github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/auth"
@@ -51,6 +50,9 @@ func (h *VNCHandler) SetProxmoxCache(cache *proxmox.ClientCache) {
 func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	// Cap any single browser→backend frame; see MaxBrowserConsoleMessageBytes.
 	conn.SetReadLimit(MaxBrowserConsoleMessageBytes)
+
+	// Close the browser socket on every return; see closeBrowserSocket.
+	defer closeBrowserSocket(conn)
 
 	// From the validated scope, not the query — for the reason HandleConsole
 	// gives: the gate checks the first copy of a repeated key and conn.Query
@@ -167,8 +169,7 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	// Browser → Proxmox: forward all messages.
 	go func() {
 		defer wg.Done()
-		defer pxConn.WriteMessage(gorillaWs.CloseMessage,
-			gorillaWs.FormatCloseMessage(gorillaWs.CloseNormalClosure, ""))
+		defer closeRelayLeg(pxConn)
 		for {
 			msgType, msg, readErr := conn.ReadMessage()
 			if readErr != nil {
@@ -183,8 +184,7 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	// Proxmox → Browser: forward all messages.
 	go func() {
 		defer wg.Done()
-		defer conn.WriteMessage(fiberWs.CloseMessage,
-			fiberWs.FormatCloseMessage(fiberWs.CloseNormalClosure, ""))
+		defer closeRelayLeg(conn)
 		for {
 			msgType, msg, readErr := pxConn.ReadMessage()
 			if readErr != nil {
@@ -200,7 +200,9 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	logger.Info("VNC session closed")
 }
 
-// writeError sends a JSON error message to the browser and closes the connection.
+// writeError sends a JSON error message to the browser, then a Close frame.
+// It does not close the connection: closeBrowserSocket, which the handler
+// defers, does that once the handler returns.
 func (h *VNCHandler) writeError(conn *fiberWs.Conn, msg string) {
 	errMsg := `{"type":"error","message":` + strconv.Quote(msg) + `}`
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(errMsg))
