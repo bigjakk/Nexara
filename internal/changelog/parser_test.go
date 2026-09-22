@@ -1,6 +1,8 @@
 package changelog
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -333,5 +335,364 @@ func TestParseBody_ReleasePleaseStyleEnd2End(t *testing.T) {
 	}
 	if got[1].Title != "Scope stale-VM pruning to nodes that synced successfully" {
 		t.Errorf("highlight 1 title=%q", got[1].Title)
+	}
+}
+
+func TestParseBody_TypesBulletsBySection(t *testing.T) {
+	body := `## Features
+- add a thing
+
+## Bug Fixes
+- stop dropping a thing
+
+## Refactoring
+- move a thing
+
+## Performance
+- batch a thing
+
+## Documentation
+- describe a thing
+
+## Security
+- lock a thing down`
+
+	want := []ChangeType{
+		ChangeNew, ChangeFix, ChangeImproved, ChangeImproved, ChangeDocs, ChangeSecurity,
+	}
+
+	got, _ := ParseBody(body)
+	if len(got) != len(want) {
+		t.Fatalf("expected %d highlights, got %d: %#v", len(want), len(got), got)
+	}
+	for i, w := range want {
+		if got[i].Type != w {
+			t.Errorf("highlight %d (%q): type = %q, want %q", i, got[i].Title, got[i].Type, w)
+		}
+	}
+}
+
+// A curated Highlights section is the author's own selection and ordering, so
+// there is no section heading to classify by. The dialog keys its chip off a
+// non-empty Type, so leaving it empty is what suppresses the chip.
+func TestParseBody_CuratedHighlightsCarryNoType(t *testing.T) {
+	body := `## Highlights
+
+- **Live VNC console preview** — See a thumbnail without opening the console.
+
+## Bug Fixes
+
+- stop dropping a thing`
+
+	got, _ := ParseBody(body)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 highlight, got %d: %#v", len(got), got)
+	}
+	if got[0].Type != "" {
+		t.Errorf("type = %q, want empty — a curated highlight must render without a chip", got[0].Type)
+	}
+}
+
+func TestParseBody_UnknownHeadingKeepsBulletButNotAType(t *testing.T) {
+	body := `## Notes For Operators
+
+- rotate the cluster token after upgrading`
+
+	got, _ := ParseBody(body)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 highlight, got %d: %#v", len(got), got)
+	}
+	if got[0].Type != "" {
+		t.Errorf("type = %q, want empty — an unmapped heading must not be guessed at", got[0].Type)
+	}
+}
+
+// generate-release-notes.sh matches `^<prefix>(\(scope\))?: `, which the `!` of
+// a conventional breaking-change subject defeats — so every BREAKING change
+// lands under "Other Changes" rather than Features. The published v1.5.0 and
+// v1.7.0 bodies both carry one there. Skipping that section as boilerplate
+// would hide exactly the changes an operator most needs to read.
+func TestParseBody_KeepsBreakingChangesUnderOtherChanges(t *testing.T) {
+	body := `## Features
+- add a thing
+
+## Other Changes
+- chore(deps)!: upgrade Fiber v2 to v3
+- Revert "feat: database seed export/import for fresh deployments"
+- Merge pull request #15 from owner/fix/inventory-write-amplification`
+
+	got, _ := ParseBody(body)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 highlights, got %d: %#v", len(got), got)
+	}
+	// The `!` prefix is stripped like any other, and the marker becomes the chip
+	// rather than being lost with it.
+	if got[1].Title != "Upgrade Fiber v2 to v3" || got[1].Type != ChangeBreaking {
+		t.Errorf("breaking change = %#v, want title %q typed %q",
+			got[1], "Upgrade Fiber v2 to v3", ChangeBreaking)
+	}
+	// A revert stays one title; its inner ": " must not split it at `Revert "feat`.
+	if got[2].Title != `Revert "feat: database seed export/import for fresh deployments"` {
+		t.Errorf("revert = %#v", got[2])
+	}
+	if got[2].Description != "" {
+		t.Errorf("revert gained a description: %q", got[2].Description)
+	}
+}
+
+func TestParseBody_DropsMergeCommits(t *testing.T) {
+	body := `## Features
+- Merge pull request #15 from owner/fix/inventory-write-amplification
+- Merge pull request 'Feat/guest tools' (#8) from feat/guest-tools into master
+- Merge branch 'release/1.2' into master
+- Merge branches 'a' and 'b'
+- Merge remote-tracking branch 'origin/master'
+- Merge tag 'v1.2.3'
+- Merge commit 'a1b2c3d4e5f6789'
+- add a thing`
+
+	got, _ := ParseBody(body)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 highlight, got %d: %#v", len(got), got)
+	}
+	if got[0].Title != "Add a thing" {
+		t.Errorf("highlight 0 = %q", got[0].Title)
+	}
+}
+
+// Every bullet here opens on a merge keyword and none is a merge subject. They
+// are what stops the filter being widened into something that eats real
+// changes: the first needs the payload shape (not just the keyword), the second
+// needs case-sensitivity, and the third needs the leading anchor.
+func TestParseBody_KeepsRealChangesThatOpenLikeMerges(t *testing.T) {
+	body := `## Features
+- Merge branch protection rules into one policy editor
+- merge branch 'stale' cleanup into the collector sweep
+- Document how to Merge branch 'legacy' into master safely`
+
+	got, _ := ParseBody(body)
+	if len(got) != 3 {
+		t.Fatalf("expected all 3 to survive, got %d: %#v", len(got), got)
+	}
+}
+
+// generate-release-notes.sh emits "- <subject>" for any commit without a scope,
+// and commit subjects are lower-case by convention. Before every path
+// capitalized, a release rendered half sentence-case and half not.
+func TestParseBody_CapitalizesUnprefixedTitles(t *testing.T) {
+	body := `## Refactoring
+- share the backup coverage computation between the coverage page and reports`
+
+	got, _ := ParseBody(body)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 highlight, got %d: %#v", len(got), got)
+	}
+	if got[0].Title != "Share the backup coverage computation between the coverage page and reports" {
+		t.Errorf("title = %q — an unprefixed bullet must be capitalized like a prefixed one", got[0].Title)
+	}
+}
+
+// The chip the dialog renders is keyed off these exact strings, and an empty
+// type has to be absent from the payload so the frontend's optional field is
+// genuinely optional. Renaming a constant without touching
+// frontend/src/lib/changelog.ts would otherwise break the chips silently.
+func TestHighlight_TypeWireFormat(t *testing.T) {
+	want := map[ChangeType]string{
+		ChangeNew:      `{"title":"T","type":"new"}`,
+		ChangeImproved: `{"title":"T","type":"improved"}`,
+		ChangeFix:      `{"title":"T","type":"fix"}`,
+		ChangeSecurity: `{"title":"T","type":"security"}`,
+		ChangeDocs:     `{"title":"T","type":"docs"}`,
+		ChangeBreaking: `{"title":"T","type":"breaking"}`,
+		"":             `{"title":"T"}`,
+	}
+	// Driven off allChangeTypes so a new constant with no pinned wire string
+	// fails here instead of shipping unpinned.
+	for _, ct := range append([]ChangeType{""}, allChangeTypes...) {
+		if _, ok := want[ct]; !ok {
+			t.Errorf("ChangeType %q has no pinned wire format", ct)
+		}
+	}
+	for ct, wantJSON := range want {
+		b, err := json.Marshal(Highlight{Title: "T", Type: ct})
+		if err != nil {
+			t.Fatalf("marshal %q: %v", ct, err)
+		}
+		if string(b) != wantJSON {
+			t.Errorf("Highlight{Type: %q} = %s, want %s", ct, b, wantJSON)
+		}
+	}
+}
+
+// An unusable curated section must not blank the release. service.go drops an
+// entry with no highlights, so the version leaves the feed entirely,
+// getEntriesToShow can no longer find the running version, and the popup then
+// skips every release the user had not seen — not just this one.
+func TestParseBody_UnusableHighlightsSectionFallsThrough(t *testing.T) {
+	cases := map[string]string{
+		"empty": `## Highlights
+
+## Features
+
+- add a thing
+
+## Bug Fixes
+
+- stop dropping a thing`,
+		"prose only": `## Highlights
+
+This release is all about reporting.
+
+## Features
+
+- add a thing
+
+## Bug Fixes
+
+- stop dropping a thing`,
+		"only a merge subject": `## Highlights
+
+- Merge branch 'release/1.2' into master
+
+## Features
+
+- add a thing
+
+## Bug Fixes
+
+- stop dropping a thing`,
+	}
+	for name, body := range cases {
+		got, _ := ParseBody(body)
+		if len(got) != 2 {
+			t.Errorf("%s: got %d highlights, want 2 — an unusable Highlights section must fall through: %#v",
+				name, len(got), got)
+			continue
+		}
+		if got[0].Type != ChangeNew || got[1].Type != ChangeFix {
+			t.Errorf("%s: fell through but lost the section types: %#v", name, got)
+		}
+	}
+}
+
+// A first word whose casing is load-bearing must survive. noVNC and xterm.js
+// are both in this project's stack and "vCenter-style" is already in its
+// history, so blanket capitalization would mangle real release notes.
+func TestParseBody_LeavesIdentifierTitlesAlone(t *testing.T) {
+	for body, want := range map[string]string{
+		"- noVNC preview on the VM detail page": "noVNC preview on the VM detail page",
+		"- xterm.js console resize handling":    "xterm.js console resize handling",
+		"- iSCSI portals in the storage wizard": "iSCSI portals in the storage wizard",
+		"- vCenter-style folders for guests":    "vCenter-style folders for guests",
+		"- i18n coverage for the alerts page":   "i18n coverage for the alerts page",
+		"- share the backup coverage report":    "Share the backup coverage report",
+		"- done.":                               "Done.",
+	} {
+		got, _ := ParseBody(body)
+		if len(got) != 1 {
+			t.Errorf("%q: got %d highlights, want 1", body, len(got))
+			continue
+		}
+		if got[0].Title != want {
+			t.Errorf("%q: title = %q, want %q", body, got[0].Title, want)
+		}
+	}
+}
+
+// A tag cut over a range that contained only merges must still render. Dropping
+// them all leaves zero highlights, and service.go then removes the entry from
+// the feed entirely — which suppresses the popup for every unseen release, not
+// just this one.
+func TestParseBody_MergeOnlyReleaseStillRenders(t *testing.T) {
+	body := `## Other Changes
+
+- Merge pull request #16 from owner/fix/thing
+- Merge branch 'release/1.2' into master
+
+## Container Image
+
+- ghcr.io/example/app:1.13.2`
+
+	got, _ := ParseBody(body)
+	if len(got) == 0 {
+		t.Fatal("a merge-only release parsed to nothing — the entry would vanish from the feed")
+	}
+	if len(got) != 2 {
+		t.Errorf("got %d highlights, want both merge subjects back: %#v", len(got), got)
+	}
+	for _, h := range got {
+		if strings.Contains(h.Title, "ghcr.io") {
+			t.Errorf("boilerplate leaked in during the fallback: %q", h.Title)
+		}
+	}
+}
+
+// generate-release-notes.sh emits "Other Changes" last and that is where every
+// `!` subject lands, so a positional cap would drop the breaking change first.
+// v1.11.0 already parses to 59 bullets against a cap of 30.
+func TestApplyCap_KeepsBreakingChanges(t *testing.T) {
+	var body strings.Builder
+	body.WriteString("## Features\n")
+	for i := 0; i < maxHighlightsPerRelease+5; i++ {
+		fmt.Fprintf(&body, "- add filler thing %d\n", i)
+	}
+	body.WriteString("\n## Other Changes\n- feat(api)!: rekey the alert rules\n")
+
+	got, dropped := ParseBody(body.String())
+	if len(got) != maxHighlightsPerRelease {
+		t.Fatalf("got %d highlights, want the cap of %d", len(got), maxHighlightsPerRelease)
+	}
+	if dropped != 6 {
+		t.Errorf("dropped = %d, want 6", dropped)
+	}
+	last := got[len(got)-1]
+	if last.Type != ChangeBreaking {
+		t.Fatalf("the breaking change was capped away; last kept is %#v", last)
+	}
+	if last.Title != "Rekey the alert rules" {
+		t.Errorf("breaking title = %q", last.Title)
+	}
+	// It is kept in place, not hoisted — the list still reads in release order.
+	if got[0].Title != "Add filler thing 0" {
+		t.Errorf("cap reordered the list; first is %q", got[0].Title)
+	}
+}
+
+func TestParseBody_RevertAndBreakingSpellings(t *testing.T) {
+	for body, want := range map[string]struct {
+		title      string
+		changeType ChangeType
+	}{
+		`- Revert "feat: database seed export/import"`: {
+			`Revert "feat: database seed export/import"`, "",
+		},
+		`- Reapply "feat: database seed export/import"`: {
+			`Reapply "feat: database seed export/import"`, "",
+		},
+		`- Revert "feat: seed export" because it broke the collector`: {
+			`Revert "feat: seed export" because it broke the collector`, "",
+		},
+		// CLAUDE.md's mandated spelling for a breaking migration.
+		"- BREAKING: rekey VM-scoped alert rules to (cluster_id, vmid)": {
+			"Rekey VM-scoped alert rules to (cluster_id, vmid)", ChangeBreaking,
+		},
+		"- feat(api)!: one collection envelope": {
+			"One collection envelope", ChangeBreaking,
+		},
+	} {
+		got, _ := ParseBody(body)
+		if len(got) != 1 {
+			t.Errorf("%q: got %d highlights, want 1: %#v", body, len(got), got)
+			continue
+		}
+		if got[0].Title != want.title {
+			t.Errorf("%q: title = %q, want %q", body, got[0].Title, want.title)
+		}
+		if got[0].Type != want.changeType {
+			t.Errorf("%q: type = %q, want %q", body, got[0].Type, want.changeType)
+		}
+		if got[0].Description != "" {
+			t.Errorf("%q: unexpected description %q", body, got[0].Description)
+		}
 	}
 }

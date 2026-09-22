@@ -1,6 +1,21 @@
+/**
+ * Which release-note section the server found a highlight under, used to pick
+ * the chip beside it. The strings are the wire values of `changelog.ChangeType`
+ * in internal/changelog/types.go; TestHighlight_TypeWireFormat pins each one's
+ * JSON, and TestChangeTypesMatchTheFrontendUnion (internal/changelog/
+ * wire_contract_test.go) pins this union against that vocabulary.
+ *
+ * Absent whenever there was nothing to classify by — a curated `## Highlights`
+ * section, or a release body with no headings at all — and the row then renders
+ * without a chip rather than with a guessed one.
+ */
+export type ChangelogChangeType =
+  "new" | "improved" | "fix" | "security" | "docs" | "breaking";
+
 export interface ChangelogHighlight {
   title: string;
   description?: string;
+  type?: ChangelogChangeType;
 }
 
 export interface ChangelogEntry {

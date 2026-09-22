@@ -10,8 +10,109 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { useBrandingStore } from "@/stores/branding-store";
-import type { ChangelogEntry } from "@/lib/changelog";
+import type {
+  ChangelogChangeType,
+  ChangelogEntry,
+  ChangelogHighlight,
+} from "@/lib/changelog";
+
+/**
+ * Chip per change type. The shape follows ResourceTypeBadge — a 500/10 fill with
+ * a 700 foreground in light mode and 400 in dark, which keeps 12px text legible
+ * on both without a separate token.
+ *
+ * `breaking` and `security` instead take VulnerabilityTable's severity styles
+ * (red then orange, and red's heavier 500/40 border over a 500/15 fill), so the
+ * two chips that mean "read this one" rank against each other the same way
+ * severity does everywhere else in the app.
+ */
+const CHANGE_TYPE_CHIPS: Record<
+  ChangelogChangeType,
+  { label: string; className: string }
+> = {
+  new: {
+    label: "New",
+    className:
+      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
+  improved: {
+    label: "Improved",
+    className:
+      "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  },
+  fix: {
+    label: "Fix",
+    className:
+      "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  docs: {
+    label: "Docs",
+    className:
+      "border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-400",
+  },
+  security: {
+    label: "Security",
+    className:
+      "border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-400",
+  },
+  breaking: {
+    label: "Breaking",
+    className: "border-red-500/40 bg-red-500/15 text-red-700 dark:text-red-400",
+  },
+};
+
+function HighlightList({
+  highlights,
+  version,
+}: {
+  highlights: ChangelogHighlight[];
+  version: string;
+}) {
+  // A release parsed out of a curated "## Highlights" section carries no types
+  // at all. Giving that entry the chip column would indent every row against
+  // an empty gutter, so the column only appears once something can fill it.
+  const typed = highlights.some((h) => h.type !== undefined);
+
+  return (
+    <ul className="space-y-2.5">
+      {highlights.map((h, i) => {
+        const chip = h.type ? CHANGE_TYPE_CHIPS[h.type] : undefined;
+        return (
+          <li
+            key={`${version}-${String(i)}`}
+            className={cn(
+              typed &&
+                "sm:grid sm:grid-cols-[5.75rem_1fr] sm:items-start sm:gap-x-3",
+            )}
+          >
+            {typed ? (
+              <div className={cn(chip && "mb-1", "sm:mb-0 sm:mt-0.5")}>
+                {chip ? (
+                  <Badge
+                    variant="outline"
+                    className={cn("font-medium", chip.className)}
+                  >
+                    {chip.label}
+                  </Badge>
+                ) : null}
+              </div>
+            ) : null}
+            <div>
+              <p className="text-sm leading-6">{h.title}</p>
+              {h.description ? (
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {h.description}
+                </p>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 interface ChangelogDialogProps {
   open: boolean;
@@ -33,7 +134,7 @@ export function ChangelogDialog({
   const isEmpty = !loading && entries.length === 0;
 
   // The scroll region carries no visible scrollbar on platforms that use
-  // overlay scrollbars, and the fold usually lands cleanly between cards — so
+  // overlay scrollbars, and the fold usually lands cleanly between rows — so
   // a list with far more below it reads as complete. Track whether there is
   // anything further down and show an explicit cue.
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -149,23 +250,10 @@ export function ChangelogDialog({
                       </a>
                     ) : null}
                   </header>
-                  <ul className="space-y-2">
-                    {entry.highlights.map((h, i) => (
-                      <li
-                        key={`${entry.version}-${String(i)}`}
-                        className="rounded-md border border-border/60 bg-muted/30 p-3"
-                      >
-                        <p className="text-sm font-medium leading-tight">
-                          {h.title}
-                        </p>
-                        {h.description ? (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {h.description}
-                          </p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
+                  <HighlightList
+                    highlights={entry.highlights}
+                    version={entry.version}
+                  />
                   {entry.more_count ? (
                     <p className="text-xs text-muted-foreground">
                       +{entry.more_count} more in the full release notes.
@@ -176,7 +264,7 @@ export function ChangelogDialog({
             </div>
 
             {/* Scroll cue. The list has no visible scrollbar on platforms with
-                overlay scrollbars and the fold normally falls between cards, so
+                overlay scrollbars and the fold normally falls between rows, so
                 without this a partially-shown list looks like the whole list. */}
             {hasMoreBelow ? (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-background via-background/80 to-transparent pt-6 pb-1">
