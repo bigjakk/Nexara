@@ -447,6 +447,22 @@ func expectedQueryTypeForScope(scopeType string) string {
 	}
 }
 
+// sameUUID reports whether a and b are the same UUID. Both must be in the
+// canonical 36-character form, in either case — a UUID's hex digits are
+// case-insensitive, and that form is all the console-token route's uuid format
+// accepts. The other spellings uuid.Parse tolerates ("{…}", "urn:uuid:…", bare
+// hex, and a 38-character form whose braces it never checks) match nothing,
+// and neither does anything that does not parse, including another value that
+// does not parse.
+func sameUUID(a, b string) bool {
+	if len(a) != 36 || len(b) != 36 {
+		return false
+	}
+	ua, errA := uuid.Parse(a)
+	ub, errB := uuid.Parse(b)
+	return errA == nil && errB == nil && ua == ub
+}
+
 // validateConsoleScopeFields is the pure validation core used by
 // validateConsoleScope. Exposed for testing.
 func validateConsoleScopeFields(path, clusterID, node, vmidStr, typeStr string, scope *auth.ConsoleScope) error {
@@ -464,7 +480,11 @@ func validateConsoleScopeFields(path, clusterID, node, vmidStr, typeStr string, 
 		return fmt.Errorf("invalid console scope type %q", scope.Type)
 	}
 
-	if clusterID != scope.ClusterID {
+	// Compared as UUIDs, not as text. The token carries the id the
+	// console-token route's uuid format normalised to lowercase, while
+	// ?cluster_id is whatever the client typed — so a client that sent the
+	// same uppercase id to both was refused here as a mismatch.
+	if !sameUUID(clusterID, scope.ClusterID) {
 		return fmt.Errorf("cluster_id mismatch")
 	}
 	if node != scope.Node {

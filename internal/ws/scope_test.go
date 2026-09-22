@@ -51,8 +51,27 @@ func TestValidateConsoleScopeFields(t *testing.T) {
 		{"vm_vnc on console path", "/ws/console", clusterID, "pve1", "100", "", baseVNC, true},
 		{"node_shell on vnc path", "/ws/vnc", clusterID, "pve1", "", "node_shell", baseShell, true},
 
+		// The token carries the lowercase id the console-token route's uuid
+		// format produced; the query carries whatever the client sent. An
+		// uppercase copy of the SAME id is the same cluster, and the console
+		// and VNC handlers resolve it with uuid.Parse to exactly that.
+		{"cluster id in upper case", "/ws/vnc", "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", "pve1", "100", "", baseVNC, false},
+
 		// Param mismatches
 		{"wrong cluster", "/ws/vnc", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "pve1", "100", "", baseVNC, true},
+		{"wrong cluster in upper case", "/ws/vnc", "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB", "pve1", "100", "", baseVNC, true},
+		{"cluster id that is not a uuid", "/ws/vnc", "not-a-uuid", "pve1", "100", "", baseVNC, true},
+		{"empty cluster id", "/ws/vnc", "", "pve1", "100", "", baseVNC, true},
+		// uuid.Parse accepts these spellings of the same id; the console-token
+		// route does not, and neither does this check.
+		{"braced cluster id", "/ws/vnc", "{" + clusterID + "}", "pve1", "100", "", baseVNC, true},
+		{"urn cluster id", "/ws/vnc", "urn:uuid:" + clusterID, "pve1", "100", "", baseVNC, true},
+		{"undashed cluster id", "/ws/vnc", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "pve1", "100", "", baseVNC, true},
+		{"garbage-wrapped cluster id", "/ws/vnc", "\n" + clusterID + "\x00", "pve1", "100", "", baseVNC, true},
+		// Two values that do not parse are not a match, even when they are
+		// the same text.
+		{"unparsable id on both sides", "/ws/vnc", "not-a-uuid", "pve1", "100", "",
+			&auth.ConsoleScope{ClusterID: "not-a-uuid", Node: "pve1", VMID: 100, Type: "vm_vnc"}, true},
 		{"wrong node", "/ws/vnc", clusterID, "pve2", "100", "", baseVNC, true},
 		{"wrong vmid", "/ws/vnc", clusterID, "pve1", "101", "", baseVNC, true},
 		{"vm_vnc with stray lxc query type", "/ws/vnc", clusterID, "pve1", "100", "lxc", baseVNC, true},
