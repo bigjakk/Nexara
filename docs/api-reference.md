@@ -117,9 +117,13 @@ All errors return a consistent envelope:
 
 `error` is a stable slug derived from the status code (`bad_request`,
 `unauthorized`, `forbidden`, `not_found`, `method_not_allowed`, `conflict`,
-`unprocessable_entity`, `too_many_requests`, `internal_server_error`);
-`message` is the human-readable detail. An optional `details` object is
-reserved in the envelope but no endpoint currently populates it.
+`request_entity_too_large`, `unsupported_media_type`, `unprocessable_entity`,
+`too_many_requests`, `internal_server_error`), unless an endpoint sends a
+more specific one of its own — cluster onboarding's `tfa_required` and
+`token_exists`, and the `*_confirm_required` confirmation gates, among others;
+`message` is the human-readable detail. Some of those endpoint-specific errors
+also carry an optional `details` object of structured context: `token_exists`
+does, and so do most of the `*_confirm_required` gates.
 
 Common HTTP status codes:
 

@@ -2,10 +2,12 @@ package api
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -358,7 +360,116 @@ func TestGuard_APIReferencePermissionsExistInTheCatalogue(t *testing.T) {
 	}
 }
 
+// TestGuard_APIReferenceErrorSlugsMatchStatusText holds the error-envelope
+// paragraph to the slugs errorHandler can actually send. The paragraph lists
+// the slugs DERIVED FROM A STATUS CODE, and statusText is where those come
+// from, so a slug on one side only — a status mapped in errors.go and never
+// documented, or a documented slug nothing sends any more — fails here. The
+// slugs a handler writes itself — tfa_required, token_exists, the
+// *_confirm_required family and a few more — are out of its reach.
+//
+// It cannot tell whether every status the API SENDS has a slug of its own.
+// statusText maps any status it does not list to internal_server_error, which
+// is how the body-limit middleware's 413 went out under that name; only the
+// code that returns a status knows it returns it.
+func TestGuard_APIReferenceErrorSlugsMatchStatusText(t *testing.T) {
+	body, err := os.ReadFile(apiReferencePath())
+	if err != nil {
+		t.Fatalf("reading %s: %v", apiReferencePath(), err)
+	}
+	for _, finding := range errorSlugDrift(documentedErrorSlugs(t, string(body)), statusTextSlugs()) {
+		t.Error(finding)
+	}
+}
+
+// errorSlugRe matches one backticked slug in the error-envelope paragraph.
+var errorSlugRe = regexp.MustCompile("`([a-z_]+)`")
+
+// documentedErrorSlugs reads the slugs out of the error-envelope paragraph,
+// "`error` is a stable slug derived from the status code (...)".
+func documentedErrorSlugs(t *testing.T, md string) map[string]bool {
+	t.Helper()
+	const lead = "`error` is a stable slug derived from the status code ("
+	_, rest, ok := strings.Cut(md, lead)
+	if !ok {
+		t.Fatalf("%s no longer contains %q, the paragraph this guard reads", apiReferencePath(), lead)
+	}
+	list, _, ok := strings.Cut(rest, ")")
+	if !ok {
+		t.Fatalf("the error-slug list in %s is never closed with \")\"", apiReferencePath())
+	}
+	slugs := map[string]bool{}
+	for _, m := range errorSlugRe.FindAllStringSubmatch(list, -1) {
+		slugs[m[1]] = true
+	}
+	if len(slugs) == 0 {
+		t.Fatalf("parsed no slugs from the error-slug list in %s; the parser has stopped "+
+			"recognising them", apiReferencePath())
+	}
+	return slugs
+}
+
+// statusTextSlugs is every value statusText can return, found by asking it
+// about every status code there is.
+func statusTextSlugs() map[string]bool {
+	slugs := map[string]bool{}
+	for code := 100; code <= 599; code++ {
+		slugs[statusText(code)] = true
+	}
+	return slugs
+}
+
+// errorSlugDrift reports every slug that is on one side only.
+func errorSlugDrift(documented, sent map[string]bool) []string {
+	var out []string
+	for slug := range sent {
+		if !documented[slug] {
+			out = append(out, fmt.Sprintf("statusText (errors.go) can send the error slug %q, which the "+
+				"error-envelope paragraph of %s does not list, so no reader of it knows to expect it",
+				slug, apiReferencePath()))
+		}
+	}
+	for slug := range documented {
+		if !sent[slug] {
+			out = append(out, fmt.Sprintf("%s lists the error slug %q, which statusText (errors.go) "+
+				"returns for no status code", apiReferencePath(), slug))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // --- bite-proofs against the real file ----------------------------------
+
+// TestGuard_APIReferenceErrorSlugsMatchStatusText_RejectsDriftEitherWay runs
+// the production comparison over the REAL paragraph and the real statusText
+// with one slug taken off each side in turn, and requires exactly that slug
+// back as the one finding.
+func TestGuard_APIReferenceErrorSlugsMatchStatusText_RejectsDriftEitherWay(t *testing.T) {
+	body, err := os.ReadFile(apiReferencePath())
+	if err != nil {
+		t.Fatalf("reading %s: %v", apiReferencePath(), err)
+	}
+	documented := documentedErrorSlugs(t, string(body))
+	sent := statusTextSlugs()
+
+	const slug = "unsupported_media_type"
+	if !documented[slug] || !sent[slug] {
+		t.Fatalf("precondition: %q must be both documented and sent, or removing it proves nothing", slug)
+	}
+
+	undocumented := maps.Clone(documented)
+	delete(undocumented, slug)
+	if got := errorSlugDrift(undocumented, sent); len(got) != 1 || !strings.Contains(got[0], strconv.Quote(slug)) {
+		t.Errorf("with %q missing from the paragraph, findings = %v, want exactly one naming it", slug, got)
+	}
+
+	unsent := maps.Clone(sent)
+	delete(unsent, slug)
+	if got := errorSlugDrift(documented, unsent); len(got) != 1 || !strings.Contains(got[0], strconv.Quote(slug)) {
+		t.Errorf("with statusText no longer sending %q, findings = %v, want exactly one naming it", slug, got)
+	}
+}
 
 // TestGuard_APIReferenceRowsNameRealRoutes_RejectsAPhantomRow runs the
 // production comparison over the REAL reference with one extra row spliced

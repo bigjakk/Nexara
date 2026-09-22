@@ -208,6 +208,42 @@ func queryValues(c fiber.Ctx) map[string]any {
 	return out
 }
 
+// maxUndeclaredBodyBytes bounds the body read on an endpoint that declares
+// no body parameter. See the comment at its use in bodyValues: without a
+// bound, a Deferred route hands an unauthorized caller a 32 MiB buffer.
+const maxUndeclaredBodyBytes = 64 << 10
+
+// hasContentCoding reports whether the request names any content coding
+// other than identity, on ANY of its Content-Encoding field lines.
+//
+// It walks the headers the way c.Body() does before it decodes — every field
+// line whose name matches case-insensitively, combined into one list (RFC 9110
+// §5.2) — because anything narrower is a bypass. fasthttp's
+// Header.ContentEncoding() returns the first line alone, so a check built on
+// it would pass "identity" followed by a second "gzip" line, and an empty
+// line followed by "gzip", and c.Body() would inflate both. Header.PeekAll
+// would be no better once header normalising is off: it matches the name
+// exactly, so "content-encoding: gzip" after "Content-Encoding: identity"
+// would hide from it and not from c.Body(). Empty list elements are
+// skipped, as §5.6.1.2 requires and as c.Body() does too, so an empty
+// element can hide nothing. "identity" is §12.5.3's synonym for no
+// encoding: §8.4 says a sender SHOULD NOT send it, but c.Body() reads it as
+// the no-op it is, and refusing it would refuse a body that decodes to
+// itself.
+func hasContentCoding(c fiber.Ctx) bool {
+	for name, line := range c.Request().Header.All() {
+		if !bytes.EqualFold(name, []byte(fiber.HeaderContentEncoding)) {
+			continue
+		}
+		for coding := range bytes.SplitSeq(line, []byte{','}) {
+			if coding = bytes.TrimSpace(coding); len(coding) > 0 && !bytes.EqualFold(coding, []byte("identity")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // bodyValues decodes the request body, or reports that there is nothing to
 // decode.
 //
@@ -227,11 +263,6 @@ func queryValues(c fiber.Ctx) map[string]any {
 // unless a parameter explicitly declares SourceBody, which is what makes
 // the GET case answerable at all: GET semantics say the body carries no
 // meaning, and inventing one for it would let a URL and a body disagree.
-// maxUndeclaredBodyBytes bounds the body read on an endpoint that declares
-// no body parameter. See the comment at its use in bodyValues: without a
-// bound, a Deferred route hands an unauthorized caller a 32 MiB buffer.
-const maxUndeclaredBodyBytes = 64 << 10
-
 func (e Endpoint) bodyValues(c fiber.Ctx) (map[string]any, error) {
 	required := e.declaresBodyParam()
 	if !required && !isMutatingMethod(e.Method) {
@@ -283,14 +314,42 @@ func (e Endpoint) bodyValues(c fiber.Ctx) (map[string]any, error) {
 	//
 	// 64 KiB is far above any real "you sent something we do not take"
 	// payload and far below anything worth buffering unauthenticated.
+	//
+	// The bound is on Content-Length, so it measures the body as it CROSSES
+	// THE WIRE — and c.Body() transparently decodes a Content-Encoding (gzip,
+	// deflate, br, zstd) up to Fiber's 32 MiB BodyLimit. Left alone, a gzip
+	// body of about 32 KiB — or about 1 KiB of zstd — passed the check and
+	// inflated to 32 MiB of heap before any permission check ran, which is
+	// the buffer this bound exists to deny. An endpoint that takes no body has
+	// no use for an encoded one, so an encoded body is refused here, unread:
+	// RFC 9110 §8.4 permits a 415 for a content coding the server will not
+	// take, and §12.5.3 asks that the refusal name what it would have taken
+	// in Accept-Encoding.
+	//
+	// This path then reads c.BodyRaw(), which never decodes. That is a second
+	// layer, not the check: it matters only if hasContentCoding ever misses a
+	// coding c.Body() would have decoded, and it turns that miss into a JSON
+	// 400 on compressed bytes instead of 32 MiB of heap. Nothing can test it
+	// while the check above holds.
 	if !required {
 		if n := c.Request().Header.ContentLength(); n < 0 || n > maxUndeclaredBodyBytes {
 			return nil, fiber.NewError(fiber.StatusBadRequest,
 				"this endpoint accepts no request body")
 		}
+		if hasContentCoding(c) {
+			c.Set(fiber.HeaderAcceptEncoding, "identity")
+			return nil, fiber.NewError(fiber.StatusUnsupportedMediaType,
+				"this endpoint accepts no encoded request body")
+		}
 	}
 
-	raw := bytes.TrimSpace(c.Body())
+	var body []byte
+	if required {
+		body = c.Body()
+	} else {
+		body = c.BodyRaw()
+	}
+	raw := bytes.TrimSpace(body)
 	if len(raw) == 0 {
 		return nil, nil
 	}

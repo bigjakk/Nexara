@@ -911,11 +911,11 @@ func TestBodyIsBoundedOnAnEndpointThatDeclaresNoBodyParameter(t *testing.T) {
 }
 
 // A chunked body reports a Content-Length of -1 and cannot be sized before
-// reading, so it is the one shape the bound above cannot measure — and
-// therefore the one an attacker would reach for. It is tested here rather
-// than through app.Test because Fiber's test harness serialises
-// ContentLength verbatim, emitting a literal "Content-Length: -1" header
-// that fasthttp rejects while parsing, before any of this code runs.
+// reading, so it is one of the two shapes the Content-Length bound cannot
+// measure — the other is an encoded body, which the test below covers. It is
+// tested here rather than through app.Test because Fiber's test harness
+// serialises ContentLength verbatim, emitting a literal "Content-Length: -1"
+// header that fasthttp rejects while parsing, before any of this code runs.
 func TestUnsizeableBodyIsRefusedUnreadOnAnEndpointDeclaringNoBodyParameter(t *testing.T) {
 	app := fiber.New()
 	e := Endpoint{
@@ -946,5 +946,211 @@ func TestUnsizeableBodyIsRefusedUnreadOnAnEndpointDeclaringNoBodyParameter(t *te
 	var fe *fiber.Error
 	if !errors.As(err, &fe) || fe.Code != fiber.StatusBadRequest {
 		t.Fatalf("err = %v, want a 400", err)
+	}
+}
+
+// TestEncodedBodyIsRefusedOnAnEndpointDeclaringNoBodyParameter covers the
+// other shape the Content-Length bound cannot measure: an encoded body.
+//
+// Content-Length is the size ON THE WIRE, while c.Body() decodes a
+// Content-Encoding before handing the bytes over — so a gzip body of about
+// 32 KiB passed the 64 KiB check and inflated to 32 MiB (Fiber's BodyLimit) on
+// a route that runs extraction before any permission check. The payload here is
+// a gzipped "{}", which is the discriminating choice: decoded, it is the one
+// body this route accepts (TestBodyIsBoundedOnAnEndpointThatDeclaresNoBodyParameter's
+// first case), so a gate that decoded instead of refusing would answer 200.
+//
+// This one drives the real wire: app.Test writes each Content-Encoding value
+// as its own field line, so the two-line cases reach fasthttp's parser the
+// way a client sends them. The test after it proves the refusal comes before
+// the body is read.
+func TestEncodedBodyIsRefusedOnAnEndpointDeclaringNoBodyParameter(t *testing.T) {
+	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
+	reg := NewRegistry()
+	reached := false
+	reg.Register(Endpoint{
+		Method: "POST", Path: "/api/v1/clusters/:cluster_id/nobody",
+		Description: "Declares no body parameter.", Group: "Test",
+		Permissions: Permissions{Deferred: "the handler decides once it reads the stream"},
+		Parameters:  apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")},
+		Handler: func(c fiber.Ctx, _ *apischema.Params) error {
+			reached = true
+			return c.SendString("ok")
+		},
+	})
+	mountRegistry(app, reg, func(c fiber.Ctx) error { return c.Next() })
+
+	gz := fasthttp.AppendGzipBytes(nil, []byte("{}"))
+
+	for _, tt := range []struct {
+		name  string
+		lines []string // one Content-Encoding field line each
+		body  []byte
+		want  int
+	}{
+		{"a gzipped body is refused undecoded", []string{"gzip"}, gz, fiber.StatusUnsupportedMediaType},
+		{"any other coding is refused too", []string{"br"}, gz, fiber.StatusUnsupportedMediaType},
+		{"a coding listed after identity is refused", []string{"identity, gzip"}, gz, fiber.StatusUnsupportedMediaType},
+		// Repeated field lines are one list (RFC 9110 §5.2), and c.Body()
+		// decodes the whole list, while fasthttp's ContentEncoding() returns
+		// only the first line.
+		{"a coding on a second field line is refused", []string{"identity", "gzip"}, gz, fiber.StatusUnsupportedMediaType},
+		{"a coding after an empty field line is refused", []string{"", "gzip"}, gz, fiber.StatusUnsupportedMediaType},
+		// identity is RFC 9110 §12.5.3's synonym for no encoding; the body is
+		// the plain "{}" the route accepts.
+		{"identity is no encoding at all", []string{"identity"}, []byte("{}"), fiber.StatusOK},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			reached = false
+			req := httptest.NewRequest("POST", "/api/v1/clusters/"+testClusterID+"/nobody", bytes.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			for _, line := range tt.lines {
+				req.Header.Add("Content-Encoding", line)
+			}
+			res, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			defer func() { _ = res.Body.Close() }()
+			got, _ := io.ReadAll(res.Body)
+			if res.StatusCode != tt.want {
+				t.Fatalf("status = %d, want %d (body %s)", res.StatusCode, tt.want, got)
+			}
+			if wantReached := tt.want == fiber.StatusOK; reached != wantReached {
+				t.Errorf("handler reached = %v, want %v", reached, wantReached)
+			}
+			if tt.want != fiber.StatusUnsupportedMediaType {
+				return
+			}
+			var env ErrorResponse
+			if err := json.Unmarshal(got, &env); err != nil || env.Error != "unsupported_media_type" {
+				t.Errorf("body = %s, want an envelope whose error is \"unsupported_media_type\"", got)
+			}
+			// RFC 9110 §12.5.3: a refusal over a content coding ought to say,
+			// in Accept-Encoding, which codings the request could have used.
+			if ae := res.Header.Get("Accept-Encoding"); ae != "identity" {
+				t.Errorf("Accept-Encoding = %q, want \"identity\"", ae)
+			}
+		})
+	}
+}
+
+// recordingReader is a request body stream that records whether anything
+// read from it, so a test can tell a refusal made before the body was
+// touched from one made after it was drained.
+type recordingReader struct {
+	r    io.Reader
+	read bool
+}
+
+func (r *recordingReader) Read(p []byte) (int, error) {
+	r.read = true
+	return r.r.Read(p)
+}
+
+// TestEncodedBodyIsRefusedUnreadOnAnyContentEncodingLine proves the refusal
+// comes before the body is read, for every spelling that puts a coding where
+// c.Body() finds it — "refused" and "refused unread" are different claims,
+// and only the second one denies the buffer. The body is a stream that
+// records reads.
+//
+// Each refused case is first shown to be dangerous: the same request, handed
+// to c.Body(), comes back decoded as "{}". That makes every refused case a
+// real bypass today, rather than a shape c.Body() would decline on its own —
+// one that stopped being a bypass fails at the precondition instead of
+// passing as a refusal nobody needed. The accepted cases show the other
+// half: without them, a bodyValues that never read any stream would make
+// "unread" vacuous, and a check that refused too much — an empty list
+// element, which RFC 9110 §5.6.1.2 says a recipient MUST accept, or
+// "identity" in another case — would pass.
+func TestEncodedBodyIsRefusedUnreadOnAnyContentEncodingLine(t *testing.T) {
+	app := fiber.New()
+	e := Endpoint{
+		Method: "POST", Path: "/api/v1/clusters/:cluster_id/nobody",
+		Parameters: apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")},
+	}
+
+	type fieldLine struct{ name, value string }
+	contentEncoding := func(values ...string) []fieldLine {
+		lines := make([]fieldLine, 0, len(values))
+		for _, v := range values {
+			lines = append(lines, fieldLine{fiber.HeaderContentEncoding, v})
+		}
+		return lines
+	}
+	newRequest := func(lines []fieldLine, exactNames bool, body []byte) (*fasthttp.RequestCtx, *recordingReader) {
+		fctx := &fasthttp.RequestCtx{}
+		if exactNames {
+			fctx.Request.Header.DisableNormalizing()
+		}
+		fctx.Request.Header.SetMethod("POST")
+		fctx.Request.Header.SetContentType("application/json")
+		for _, l := range lines {
+			fctx.Request.Header.Add(l.name, l.value)
+		}
+		stream := &recordingReader{r: bytes.NewReader(body)}
+		fctx.Request.SetBodyStream(stream, len(body))
+		return fctx, stream
+	}
+
+	gz := fasthttp.AppendGzipBytes(nil, []byte("{}"))
+	br := fasthttp.AppendBrotliBytes(nil, []byte("{}"))
+
+	for _, tt := range []struct {
+		name       string
+		lines      []fieldLine
+		exactNames bool // header normalising off: a name keeps the case it arrived in
+		body       []byte
+		refuse     bool
+	}{
+		{"gzip", contentEncoding("gzip"), false, gz, true},
+		{"br", contentEncoding("br"), false, br, true},
+		{"identity then gzip, in one list", contentEncoding("identity, gzip"), false, gz, true},
+		{"identity then gzip, on two field lines", contentEncoding("identity", "gzip"), false, gz, true},
+		{"an empty field line then gzip", contentEncoding("", "gzip"), false, gz, true},
+		// c.Body() matches the field name case-insensitively, so it joins
+		// these two lines; Header.PeekAll matches it exactly, and with
+		// normalising off it would see only the first.
+		{"identity then gzip, under two spellings of the name",
+			[]fieldLine{{"Content-Encoding", "identity"}, {"content-encoding", "gzip"}}, true, gz, true},
+		{"identity alone", contentEncoding("identity"), false, []byte("{}"), false},
+		{"identity in capitals", contentEncoding("IDENTITY"), false, []byte("{}"), false},
+		{"a lone empty field line", contentEncoding(""), false, []byte("{}"), false},
+		{"identity with empty elements and spaces", contentEncoding("identity, , identity"), false, []byte("{}"), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.refuse {
+				twin, _ := newRequest(tt.lines, tt.exactNames, tt.body)
+				tctx := app.AcquireCtx(twin)
+				decoded := string(tctx.Body())
+				app.ReleaseCtx(tctx)
+				if decoded != "{}" {
+					t.Fatalf("precondition: c.Body() made %q of this request, want \"{}\" — "+
+						"a case c.Body() does not decode cannot show the check working", decoded)
+				}
+			}
+
+			fctx, stream := newRequest(tt.lines, tt.exactNames, tt.body)
+			ctx := app.AcquireCtx(fctx)
+			defer app.ReleaseCtx(ctx)
+
+			_, err := e.bodyValues(ctx)
+			if !tt.refuse {
+				if err != nil {
+					t.Fatalf("bodyValues: %v, want the identity body accepted", err)
+				}
+				if !stream.read {
+					t.Fatal("the accepted body was never read, so no case here can show a refusal came before the read")
+				}
+				return
+			}
+			var fe *fiber.Error
+			if !errors.As(err, &fe) || fe.Code != fiber.StatusUnsupportedMediaType {
+				t.Fatalf("err = %v, want a 415", err)
+			}
+			if stream.read {
+				t.Error("the body stream was read before the refusal; an encoded body must be refused unread")
+			}
+		})
 	}
 }

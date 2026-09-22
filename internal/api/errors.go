@@ -44,6 +44,10 @@ func statusText(code int) string {
 		return "method_not_allowed"
 	case 409:
 		return "conflict"
+	case 413:
+		return "request_entity_too_large"
+	case 415:
+		return "unsupported_media_type"
 	case 422:
 		return "unprocessable_entity"
 	case 429:
