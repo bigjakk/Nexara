@@ -1079,6 +1079,13 @@ func TestDetachRemovesVolume(t *testing.T) {
 		{"a path-style cloud-init volume", "ide2", "/mnt/pve/store01/vm-101-cloudinit", boolPtr(true)},
 		{"a plain volume that merely mentions cloudinit is not one", "scsi1", "store01:vm-101-cloudinit-backup", boolPtr(false)},
 		{"a key that was not set destroyed nothing", "scsi5", notInConfig, boolPtr(false)},
+		// The key-name cases are decided AFTER "not set": PVE skips an
+		// unset key whatever its name, so an unused7 or a vmstate that is
+		// not there destroyed nothing either.
+		{"an unusedN key that was not set destroyed nothing", "unused7", notInConfig, boolPtr(false)},
+		{"vmstate frees a hibernated VM's saved state", "vmstate", "store01:vm-101-state-suspend-0", boolPtr(true)},
+		{"vmstate destroys even unresolved", "vmstate", configUnreadable, boolPtr(true)},
+		{"a vmstate that was not set destroyed nothing", "vmstate", notInConfig, boolPtr(false)},
 		{"an unreadable config cannot answer", "ide0", configUnreadable, nil},
 	}
 

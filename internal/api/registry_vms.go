@@ -833,14 +833,28 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 		}),
 		Handler: h.AttachDisk,
 	})
+	// What a detach does to the volume is qemu-server's decision
+	// (src/PVE/API2/Qemu.pm): update_vm's delete loop frees an unusedN key and
+	// vmstate itself, through try_deallocate_drive, and only queues a drive
+	// key — whose pending delete, once applied, goes through
+	// vmconfig_register_unused_drive, which parks an owned volume but frees a
+	// cloud-init drive. detachRemovesVolume (handlers/vm_disk_attach.go)
+	// transcribes that for the audit row's removes_volume. An earlier
+	// Description promised the reversible outcome for every key, on an
+	// endpoint API clients reach with no Nexara dialog in front of them — so
+	// it names both.
 	reg.Register(Endpoint{
-		Method:      fiber.MethodPost,
-		Path:        clusterScope + "/vms/:vm_id/disks/detach",
-		Description: "Detach a disk from a VM. Proxmox keeps the volume as an unused disk rather than deleting it.",
+		Method: fiber.MethodPost,
+		Path:   clusterScope + "/vms/:vm_id/disks/detach",
+		Description: "Detach a disk from a VM. For a drive key such as scsi1, Proxmox parks a volume this VM owns " +
+			"in an unusedN slot rather than deleting it (an ISO or another guest's volume is only unreferenced). " +
+			"Naming an unusedN key or vmstate (a hibernated VM's saved RAM), or a cloud-init drive on any key, " +
+			"deletes the volume from storage instead (a volume this VM owns), and that cannot be undone.",
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("manage", "vm"),
 		Parameters: vmParams(apischema.Properties{
-			"disk": diskKeyParam("Config key of the disk to detach, e.g. scsi1."),
+			"disk": diskKeyParam("Config key of the disk to detach, e.g. scsi1. An unusedN or vmstate key deletes its " +
+				"volume from storage, if this VM owns it, rather than parking it."),
 		}),
 		Handler: h.DetachDisk,
 	})

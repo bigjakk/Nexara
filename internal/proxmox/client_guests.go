@@ -443,9 +443,10 @@ func (c *Client) AttachDisk(ctx context.Context, node string, vmid int, params D
 	return c.SetVMConfig(ctx, node, vmid, fields)
 }
 
-// DetachDisk removes a disk key from a VM's config. PVE parks the volume in
-// an unusedN slot for a regular drive key, and removes it from storage for an
-// unusedN key or a cloud-init drive.
+// DetachDisk removes a disk key from a VM's config. PVE parks an owned
+// volume in an unusedN slot for a regular drive key, and removes an owned
+// volume from storage for an unusedN key, for vmstate (a hibernated VM's saved
+// RAM) or for a cloud-init drive on any key.
 //
 // digest pins the write to a config read, the way AttachDisk does: PVE
 // refuses the PUT if the config moved underneath, which stops a concurrent

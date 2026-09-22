@@ -476,15 +476,34 @@ var cloudInitVolumeRe = regexp.MustCompile(`[:/](?:vm-\d+-)?cloudinit(\.[a-z0-9]
 // exists to avoid: a row that asserts the reversible behaviour for a
 // destructive act reads as reassurance.
 //
-// Two shapes destroy a volume:
+// Three shapes destroy a volume, all by qemu-server's own decisions
+// (src/PVE/API2/Qemu.pm and QemuServer.pm):
 //
 //   - an unusedN key, whose volume is already unhooked, so removing the key
-//     is the only thing left that can happen to it;
-//   - a cloud-init drive on ANY key, which PVE frees rather than parks.
+//     is the only thing left that can happen to it. update_vm's delete loop
+//     frees it on the spot, through try_deallocate_drive;
+//   - vmstate, a hibernated VM's saved RAM, which the same loop frees
+//     through try_deallocate_drive with force — dropping a
+//     `lock: suspended` first so the delete goes through;
+//   - a cloud-init drive on ANY key. A drive key is only QUEUED by that
+//     loop; when the pending delete is applied, vmconfig_delete_or_detach_drive
+//     hands it to vmconfig_register_unused_drive, which parks an owned volume
+//     in an unusedN slot but frees a cloud-init drive.
+//
+// try_deallocate_drive frees only a volume the VM owns (vm_is_volid_owner);
+// for any other it just drops the key. The row cannot see ownership, so it
+// records what the key asked for.
+//
+// A key that is not set destroys nothing, whatever its name: PVE warns
+// "cannot delete … not set in current configuration" and skips it, and a
+// detach of unused7 on a VM with no unused7 returns 200 having done nothing.
+// That is decided FIRST, so the key-name cases below cannot claim a
+// destruction that did not happen.
 //
 // resolved is what detachedVolume found. When it could not read the config,
 // the cloud-init question is unanswerable and so is this one — except for an
-// unusedN key, which is decided by the key alone.
+// unusedN or vmstate key, where the key alone decides what a detach does to
+// the volume if there is one.
 //
 // The key-name test is only sound because PVE validates the option name
 // first: API2/Qemu.pm raises "unknown option" for anything outside the config
@@ -493,15 +512,16 @@ var cloudInitVolumeRe = regexp.MustCompile(`[:/](?:vm-\d+-)?cloudinit(\.[a-z0-9]
 // conclude otherwise.
 func detachRemovesVolume(disk, resolved string) *bool {
 	yes, no := true, false
-	if strings.HasPrefix(disk, "unused") {
-		return &yes
-	}
-	switch {
-	case resolved == notInConfig:
+	if resolved == notInConfig {
 		// PVE warns and skips a key that is not set, returning 200 having
 		// removed nothing. Without this the row claims a destruction that
 		// did not happen, which is worse than saying nothing.
 		return &no
+	}
+	if strings.HasPrefix(disk, "unused") || disk == "vmstate" {
+		return &yes
+	}
+	switch {
 	case resolved == configUnreadable:
 		return nil
 	case cloudInitVolumeRe.MatchString(resolved):
