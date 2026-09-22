@@ -422,6 +422,53 @@ func TestHACreateBodiesRequireOnlyWhatTheHandlersDid(t *testing.T) {
 	}
 }
 
+// TestHARetryCountsCarryOnlyProxmoxsBound pins max_restart and max_relocate
+// to pve-ha-manager's own rule: an integer, minimum 0, no maximum. They once
+// carried a ceiling of 64 with no source, which answered 400 for a value
+// Proxmox accepts; a count well above it must reach the handler, and only a
+// negative one may be refused. The int32 ceiling registry_ha.go keeps is a
+// platform bound, not a policy, so what fails here is any maximum BELOW it.
+func TestHARetryCountsCarryOnlyProxmoxsBound(t *testing.T) {
+	const int32Max = 2147483647
+	for _, route := range []struct{ method, path string }{
+		{fiber.MethodPost, haScope + "/resources"},
+		{fiber.MethodPut, haScope + "/resources/:sid"},
+	} {
+		for _, key := range []string{"max_restart", "max_relocate"} {
+			t.Run(route.method+" "+key, func(t *testing.T) {
+				prop := declaredEndpoint(t, route.method, route.path).Parameters[key]
+				if prop.Maximum != nil && *prop.Maximum < int32Max {
+					t.Errorf("%s declares a maximum of %v; Proxmox has none, and only int32's "+
+						"ceiling is a bound this API may add", key, *prop.Maximum)
+				}
+
+				body := func(n string) string {
+					if route.method == fiber.MethodPost {
+						return `{"sid":"vm:109","` + key + `":` + n + `}`
+					}
+					return `{"` + key + `":` + n + `}`
+				}
+
+				cap := &capture{}
+				app := newRegistryApp(t, noAuth(), probeHAEndpoint(t, route.method, route.path, cap))
+				status, env := send(t, app, jsonRequest(route.method, haRoute(route.path), body("1000")))
+				if status != fiber.StatusNoContent {
+					t.Fatalf("%s=1000: status = %d (%q), want 204 — Proxmox accepts it", key, status, env.Message)
+				}
+				if got := cap.params.Int(key); got != 1000 {
+					t.Errorf("%s reached the handler as %d, want 1000", key, got)
+				}
+
+				status, env = send(t, app, jsonRequest(route.method, haRoute(route.path), body("-1")))
+				if status != fiber.StatusBadRequest || !strings.Contains(env.Message, key+": must be at least 0") {
+					t.Errorf("%s=-1: status = %d (%q), want 400 naming the minimum — Proxmox's minimum is 0",
+						key, status, env.Message)
+				}
+			})
+		}
+	}
+}
+
 // TestHAFlagsCarryNoDefault generalizes the disable case to every 0/1
 // parameter the handlers forward as a *int. A Default on any of them would
 // start writing a property onto an object whose editor never mentioned it.

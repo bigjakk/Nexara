@@ -79,6 +79,22 @@ func haFlag(description string) apischema.Property {
 	}
 }
 
+// haRetryCount is max_restart or max_relocate: a count Proxmox bounds below
+// and not above. pve-ha-manager declares both `type => 'integer', minimum =>
+// 0` with no maximum (src/PVE/HA/Resources.pm), so a policy ceiling here would
+// 400 a value Proxmox accepts — one an operator set through ha-manager or
+// pvesh, say, that a script reads back and resubmits. They were
+// optCount(64, …), a bound with no recorded source. Nexara's own editor never
+// came near it: its inputs stop at 10, as PVE's own ResourceEdit.js does.
+//
+// The ceiling that remains is int32's, not a policy — the one
+// max_workers (registry_cluster_options.go) carries for the same reason: both
+// handlers narrow the value to an int, and a value past int32 would not
+// survive that on every platform the binary could be built for.
+func haRetryCount(description string) apischema.Property {
+	return optCount(2147483647, description)
+}
+
 // haComment is the free-text note every HA object carries.
 //
 // It has NO format and NO pattern, and the empty string is the point: the
@@ -154,8 +170,8 @@ func registerHAEndpoints(reg *Registry, h *handlers.HAHandler) {
 			"state": haStateParam().AsOptional(),
 			"group": optString(128, "<name>",
 				"HA group to place the resource in. Omitted or empty leaves it ungrouped."),
-			"max_restart":  optCount(64, "Times the HA manager may restart the guest on its own node before relocating it."),
-			"max_relocate": optCount(64, "Times the HA manager may relocate the guest before giving up."),
+			"max_restart":  haRetryCount("Times the HA manager may restart the guest on its own node before relocating it."),
+			"max_relocate": haRetryCount("Times the HA manager may relocate the guest before giving up."),
 			"comment":      haComment("resource"),
 			"failback": haFlag("Move the guest back to its highest-priority node once that node returns. " +
 				"Omitted leaves Proxmox's default rather than writing 0."),
@@ -184,8 +200,8 @@ func registerHAEndpoints(reg *Registry, h *handlers.HAHandler) {
 			"group": optString(128, "<name>",
 				"HA group to move the resource into. An EMPTY value removes it from its group, which is "+
 					"what the editor sends when \"none\" is chosen."),
-			"max_restart":  optCount(64, "Times the HA manager may restart the guest on its own node before relocating it."),
-			"max_relocate": optCount(64, "Times the HA manager may relocate the guest before giving up."),
+			"max_restart":  haRetryCount("Times the HA manager may restart the guest on its own node before relocating it."),
+			"max_relocate": haRetryCount("Times the HA manager may relocate the guest before giving up."),
 			"comment":      haComment("resource"),
 			"failback":     haFlag("Move the guest back to its highest-priority node once that node returns."),
 			"digest":       haDigest,
