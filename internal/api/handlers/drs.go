@@ -397,6 +397,14 @@ func (h *DRSHandler) CreateRule(c fiber.Ctx, p *apischema.Params) error {
 }
 
 // DeleteRule handles DELETE /api/v1/clusters/:cluster_id/drs/rules/:rule_id.
+//
+// The delete names the PATH's cluster as well as the rule id, because the
+// declared clusterCheck("manage","drs") authorizes that cluster and nothing
+// else: keyed on the id alone, manage:drs on one cluster deleted another
+// cluster's rule, and the audit row below filed it under the caller's cluster
+// so the owning cluster's log never showed it. Zero rows is a 404 whether the
+// rule is gone or belongs elsewhere — the two are deliberately
+// indistinguishable, so the answer is not an oracle for other clusters' ids.
 func (h *DRSHandler) DeleteRule(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
@@ -408,8 +416,15 @@ func (h *DRSHandler) DeleteRule(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	if err := h.queries.DeleteDRSRule(c.Context(), ruleID); err != nil {
+	deleted, err := h.queries.DeleteDRSRule(c.Context(), db.DeleteDRSRuleParams{
+		ID:        ruleID,
+		ClusterID: clusterID,
+	})
+	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete DRS rule")
+	}
+	if deleted == 0 {
+		return fiber.NewError(fiber.StatusNotFound, "DRS rule not found")
 	}
 
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs_rule", ruleID.String(), "rule_deleted", nil)

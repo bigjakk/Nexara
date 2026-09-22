@@ -47,13 +47,21 @@ func (q *Queries) ClearDRSEvalRequest(ctx context.Context, arg ClearDRSEvalReque
 	return err
 }
 
-const deleteDRSRule = `-- name: DeleteDRSRule :exec
-DELETE FROM drs_rules WHERE id = $1
+const deleteDRSRule = `-- name: DeleteDRSRule :execrows
+DELETE FROM drs_rules WHERE id = $1 AND cluster_id = $2
 `
 
-func (q *Queries) DeleteDRSRule(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteDRSRule, id)
-	return err
+type DeleteDRSRuleParams struct {
+	ID        uuid.UUID `json:"id"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+}
+
+func (q *Queries) DeleteDRSRule(ctx context.Context, arg DeleteDRSRuleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDRSRule, arg.ID, arg.ClusterID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getDRSConfig = `-- name: GetDRSConfig :one
@@ -81,11 +89,24 @@ func (q *Queries) GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsCon
 }
 
 const getDRSRule = `-- name: GetDRSRule :one
-SELECT id, cluster_id, rule_type, vm_ids, node_names, enabled, created_at, updated_at FROM drs_rules WHERE id = $1
+
+SELECT id, cluster_id, rule_type, vm_ids, node_names, enabled, created_at, updated_at FROM drs_rules WHERE id = $1 AND cluster_id = $2
 `
 
-func (q *Queries) GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error) {
-	row := q.db.QueryRow(ctx, getDRSRule, id)
+type GetDRSRuleParams struct {
+	ID        uuid.UUID `json:"id"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+}
+
+// Every by-id statement on drs_rules names the cluster as well. A rule id says
+// nothing about which cluster the rule belongs to, and the routes authorize the
+// cluster in the PATH, so a statement keyed on the id alone lets a grant on one
+// cluster reach a rule on another — which DeleteDRSRule did until it gained the
+// predicate. GetDRSRule and UpdateDRSRule carry it too, so any route that
+// reaches for one inherits the scope; drs_rule_scope_sql_guard_test.go in
+// internal/db holds every by-id statement on the table to it.
+func (q *Queries) GetDRSRule(ctx context.Context, arg GetDRSRuleParams) (DrsRule, error) {
+	row := q.db.QueryRow(ctx, getDRSRule, arg.ID, arg.ClusterID)
 	var i DrsRule
 	err := row.Scan(
 		&i.ID,
@@ -375,29 +396,34 @@ func (q *Queries) UpdateDRSHistoryStatus(ctx context.Context, arg UpdateDRSHisto
 	return err
 }
 
-const updateDRSRule = `-- name: UpdateDRSRule :exec
+const updateDRSRule = `-- name: UpdateDRSRule :execrows
 UPDATE drs_rules
-SET rule_type = $2, vm_ids = $3, node_names = $4, enabled = $5, updated_at = now()
-WHERE id = $1
+SET rule_type = $3, vm_ids = $4, node_names = $5, enabled = $6, updated_at = now()
+WHERE id = $1 AND cluster_id = $2
 `
 
 type UpdateDRSRuleParams struct {
 	ID        uuid.UUID       `json:"id"`
+	ClusterID uuid.UUID       `json:"cluster_id"`
 	RuleType  string          `json:"rule_type"`
 	VmIds     json.RawMessage `json:"vm_ids"`
 	NodeNames json.RawMessage `json:"node_names"`
 	Enabled   bool            `json:"enabled"`
 }
 
-func (q *Queries) UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) error {
-	_, err := q.db.Exec(ctx, updateDRSRule,
+func (q *Queries) UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateDRSRule,
 		arg.ID,
+		arg.ClusterID,
 		arg.RuleType,
 		arg.VmIds,
 		arg.NodeNames,
 		arg.Enabled,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertDRSConfig = `-- name: UpsertDRSConfig :one

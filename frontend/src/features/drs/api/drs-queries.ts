@@ -64,7 +64,11 @@ export function useDeleteDRSRule(clusterId: string) {
       apiClient.delete<{ status: string }>(
         `/api/v1/clusters/${clusterId}/drs/rules/${ruleId}`,
       ),
-    onSuccess: () => {
+    // onSettled, not onSuccess: deleting a rule that is already gone answers
+    // 404, and the list that offered it is the stale part — refetching it on
+    // the failure too is what makes the row disappear. There is deliberately
+    // no onError here, so the app-wide handler still toasts the 404.
+    onSettled: () => {
       void queryClient.invalidateQueries({
         queryKey: ["drs", "rules", clusterId],
       });

@@ -48,21 +48,29 @@ WHERE cluster_id = $1 AND eval_requested_at <= $2;
 -- name: ListDRSRules :many
 SELECT * FROM drs_rules WHERE cluster_id = $1 ORDER BY created_at;
 
+-- Every by-id statement on drs_rules names the cluster as well. A rule id says
+-- nothing about which cluster the rule belongs to, and the routes authorize the
+-- cluster in the PATH, so a statement keyed on the id alone lets a grant on one
+-- cluster reach a rule on another — which DeleteDRSRule did until it gained the
+-- predicate. GetDRSRule and UpdateDRSRule carry it too, so any route that
+-- reaches for one inherits the scope; drs_rule_scope_sql_guard_test.go in
+-- internal/db holds every by-id statement on the table to it.
+
 -- name: GetDRSRule :one
-SELECT * FROM drs_rules WHERE id = $1;
+SELECT * FROM drs_rules WHERE id = $1 AND cluster_id = $2;
 
 -- name: InsertDRSRule :one
 INSERT INTO drs_rules (cluster_id, rule_type, vm_ids, node_names, enabled)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
--- name: UpdateDRSRule :exec
+-- name: UpdateDRSRule :execrows
 UPDATE drs_rules
-SET rule_type = $2, vm_ids = $3, node_names = $4, enabled = $5, updated_at = now()
-WHERE id = $1;
+SET rule_type = $3, vm_ids = $4, node_names = $5, enabled = $6, updated_at = now()
+WHERE id = $1 AND cluster_id = $2;
 
--- name: DeleteDRSRule :exec
-DELETE FROM drs_rules WHERE id = $1;
+-- name: DeleteDRSRule :execrows
+DELETE FROM drs_rules WHERE id = $1 AND cluster_id = $2;
 
 -- name: InsertDRSHistory :one
 INSERT INTO drs_history (cluster_id, source_node, target_node, vm_id, vm_type, reason, score_before, score_after, status, executed_at)

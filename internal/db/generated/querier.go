@@ -244,7 +244,7 @@ type Querier interface {
 	// configurable (TASK_HISTORY_RETENTION); shared by the automatic scheduler sweep
 	// and the manual Clear-Completed endpoint.
 	DeleteCompletedTasks(ctx context.Context, cutoff time.Time) error
-	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
+	DeleteDRSRule(ctx context.Context, arg DeleteDRSRuleParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
 	// DeleteGuestSmbiosForVanishedGuests drops cache rows for guests that are no
@@ -611,7 +611,14 @@ type Querier interface {
 	GetClusterVeeamRPOStats(ctx context.Context, arg GetClusterVeeamRPOStatsParams) (GetClusterVeeamRPOStatsRow, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
-	GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error)
+	// Every by-id statement on drs_rules names the cluster as well. A rule id says
+	// nothing about which cluster the rule belongs to, and the routes authorize the
+	// cluster in the PATH, so a statement keyed on the id alone lets a grant on one
+	// cluster reach a rule on another — which DeleteDRSRule did until it gained the
+	// predicate. GetDRSRule and UpdateDRSRule carry it too, so any route that
+	// reaches for one inherits the scope; drs_rule_scope_sql_guard_test.go in
+	// internal/db holds every by-id statement on the table to it.
+	GetDRSRule(ctx context.Context, arg GetDRSRuleParams) (DrsRule, error)
 	GetEPSSEntries(ctx context.Context, dollar_1 []string) ([]EpssCache, error)
 	GetEPSSEntry(ctx context.Context, cveID string) (EpssCache, error)
 	GetEnabledLDAPConfig(ctx context.Context) (LdapConfig, error)
@@ -1717,7 +1724,7 @@ type Querier interface {
 	// certificate to the new address. Zero rows means "it moved, start over".
 	UpdateClusterTLSFingerprint(ctx context.Context, arg UpdateClusterTLSFingerprintParams) (int64, error)
 	UpdateDRSHistoryStatus(ctx context.Context, arg UpdateDRSHistoryStatusParams) error
-	UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) error
+	UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) (int64, error)
 	UpdateFirewallTemplate(ctx context.Context, arg UpdateFirewallTemplateParams) (FirewallTemplate, error)
 	UpdateLDAPConfig(ctx context.Context, arg UpdateLDAPConfigParams) (LdapConfig, error)
 	UpdateLDAPConfigLastSync(ctx context.Context, id uuid.UUID) error

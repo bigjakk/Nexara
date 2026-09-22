@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { QueryFailureNote } from "@/components/QueryStateNotice";
+import { ApiClientError } from "@/lib/api-client";
 import {
   useDRSRules,
   useDeleteDRSRule,
@@ -78,6 +79,15 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
       deleteManualRule.mutate(deleteTarget.id, {
         onSuccess: () => {
           setDeleteTarget(null);
+        },
+        // A 404 means the rule is already gone — deleted from another tab
+        // or by another operator. The hook refetches the list and the app's
+        // mutation handler toasts the 404; the dialog has nothing left to
+        // confirm, so it closes rather than offering the dead row again.
+        onError: (err) => {
+          if (err instanceof ApiClientError && err.status === 404) {
+            setDeleteTarget(null);
+          }
         },
       });
     }
