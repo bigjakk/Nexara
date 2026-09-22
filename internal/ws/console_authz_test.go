@@ -41,13 +41,13 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 		return c.SendStatus(fiber.StatusOK)
 	}
 
+	// Mounted through mountGated — the function production uses — with the
+	// sentinel in place of each websocket handler. This test used to build
+	// its own copy of the route table, which is exactly how the trailing-slash
+	// bypass stayed invisible: the copy had the same Use-prefix shape as the
+	// real one, and nothing tested the real one.
 	app := fiber.New()
-	app.Use("/ws/console", server.authMiddleware)
-	app.Get("/ws/console", passHandler)
-	app.Use("/ws/vnc", server.authMiddleware)
-	app.Get("/ws/vnc", passHandler)
-	app.Use("/ws", server.authMiddleware)
-	app.Get("/ws", passHandler)
+	server.mountGated(app, passHandler, passHandler, passHandler)
 
 	userID := uuid.New()
 
@@ -290,11 +290,73 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 			wantStatus: fiber.StatusUnauthorized,
 			wantReach:  false,
 		},
-		// Case-insensitive routing bypass: Fiber's default CaseSensitive=false
-		// routes /WS/Console to the /ws/console handler, but c.Path() returns
-		// the literal request path. A strict path-equality scope check would
-		// fall into the "no scope required" branch and accept a regular
-		// access token. The middleware must compare case-insensitively.
+		// Trailing-slash routing bypass. Fiber's default StrictRouting=false
+		// routes "/ws/console/" to the /ws/console handler, but the gate used
+		// to choose its token shape from c.Path(), where the slash made the
+		// path not equal "/ws/console" — so it took the HUB branch and accepted
+		// the hub token any signed-in user can mint. That was a node shell on
+		// any node for any account. The gate is now chosen by the route.
+		{
+			name:       "hub token rejected on trailing-slash /ws/console/",
+			path:       "/ws/console/",
+			token:      hubToken,
+			extra:      "&cluster_id=" + otherCluster + "&node=pve9&type=node_shell",
+			wantStatus: fiber.StatusForbidden,
+			wantReach:  false,
+		},
+		{
+			name:       "hub token rejected on trailing-slash /ws/vnc/",
+			path:       "/ws/vnc/",
+			token:      hubToken,
+			extra:      "&cluster_id=" + otherCluster + "&node=pve9&vmid=999",
+			wantStatus: fiber.StatusForbidden,
+			wantReach:  false,
+		},
+		{
+			name:       "hub token rejected on case- and slash-variant /WS/CONSOLE/",
+			path:       "/WS/CONSOLE/",
+			token:      hubToken,
+			extra:      "&cluster_id=" + otherCluster + "&node=pve9&type=node_shell",
+			wantStatus: fiber.StatusForbidden,
+			wantReach:  false,
+		},
+		// The legitimate token still works on the slash variant: the route
+		// decides the shape, and the scope TYPE is checked against the
+		// route's registered path, not the spelling that reached it.
+		{
+			name:       "scoped vm_vnc token allowed on trailing-slash /ws/vnc/",
+			path:       "/ws/vnc/",
+			token:      vmVNCToken,
+			extra:      "&cluster_id=" + targetCluster + "&node=pve1&vmid=100",
+			wantStatus: fiber.StatusOK,
+			wantReach:  true,
+		},
+		// A repeated scope key. The gate reads the first copy and the
+		// websocket handler's own capture of the query keeps the last, so a
+		// token for (targetCluster, pve1) plus a second cluster_id and node
+		// used to open a console on the second pair.
+		{
+			name:  "duplicate cluster_id and node rejected",
+			path:  "/ws/console",
+			token: consoleToken,
+			extra: "&cluster_id=" + targetCluster + "&node=pve1&type=node_shell" +
+				"&cluster_id=" + otherCluster + "&node=pve9",
+			wantStatus: fiber.StatusBadRequest,
+			wantReach:  false,
+		},
+		{
+			name:       "duplicate type rejected on /ws/vnc",
+			path:       "/ws/vnc",
+			token:      vmVNCToken,
+			extra:      "&cluster_id=" + targetCluster + "&node=pve1&vmid=100&type=&type=lxc",
+			wantStatus: fiber.StatusBadRequest,
+			wantReach:  false,
+		},
+		// Case-insensitive routing: Fiber's default CaseSensitive=false routes
+		// /WS/Console to the /ws/console handler. The gate once chose its token
+		// shape by comparing c.Path(), which is why it had to compare
+		// case-insensitively; it is now chosen by the route it is mounted on
+		// (mountGated), so these rows hold whatever the spelling.
 		{
 			name:       "regular access token rejected on case-variant /WS/Console",
 			path:       "/WS/Console",

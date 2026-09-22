@@ -52,9 +52,19 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	// Cap any single browser→backend frame; see MaxBrowserConsoleMessageBytes.
 	conn.SetReadLimit(MaxBrowserConsoleMessageBytes)
 
-	clusterIDStr := conn.Query("cluster_id")
-	node := conn.Query("node")
-	vmidStr := conn.Query("vmid")
+	// From the validated scope, not the query — for the reason HandleConsole
+	// gives: the gate checks the first copy of a repeated key and conn.Query
+	// holds the last. That includes the guest kind below, which a duplicate
+	// ?type=lxc used to flip from the VM the token named to a container
+	// sharing its VMID.
+	scope, _ := conn.Locals(consoleScopeLocal).(*auth.ConsoleScope)
+	if scope == nil {
+		h.writeError(conn, "console scope missing")
+		return
+	}
+	clusterIDStr := scope.ClusterID
+	node := scope.Node
+	vmidStr := strconv.Itoa(scope.VMID)
 
 	logger := h.logger.With(
 		"cluster_id", clusterIDStr,
@@ -79,6 +89,20 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 		return
 	}
 
+	// The guest kind is the scope's, and only the two VNC types name one. Any
+	// other type is refused rather than read as a VM, before anything is
+	// looked up.
+	var guestType string
+	switch scope.Type {
+	case "vm_vnc":
+		guestType = "qemu"
+	case "ct_vnc":
+		guestType = "lxc"
+	default:
+		h.writeError(conn, "invalid console type")
+		return
+	}
+
 	ctx := context.Background()
 
 	// Look up cluster and create Proxmox client.
@@ -99,11 +123,6 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	}
 
 	// Request VNC proxy ticket — support both QEMU VMs and LXC containers.
-	guestType := conn.Query("type") // "qemu" or "lxc"; defaults to "qemu"
-	if guestType == "" {
-		guestType = "qemu"
-	}
-
 	var vncResp *proxmox.TermProxyResponse
 	var vncPath string
 	switch guestType {

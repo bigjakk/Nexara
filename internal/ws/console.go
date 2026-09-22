@@ -78,10 +78,22 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	// multi-megabyte payload at us. Applied before any ReadMessage call.
 	conn.SetReadLimit(MaxBrowserConsoleMessageBytes)
 
-	clusterIDStr := conn.Query("cluster_id")
-	node := conn.Query("node")
-	consoleType := conn.Query("type")
-	vmidStr := conn.Query("vmid")
+	// Every value below comes from the scope the gate VALIDATED, not from a
+	// second read of the query string. The gate checked c.Query, which returns
+	// the first copy of a repeated key; conn.Query is this package's own
+	// capture, where the last copy wins — so reading it here let
+	// "?cluster_id=A&…&cluster_id=B" pass a check for cluster A and open a
+	// console on B. No scope means this route was reached without the console
+	// gate (see mountGated), and nothing below may run on that.
+	scope, _ := conn.Locals(consoleScopeLocal).(*auth.ConsoleScope)
+	if scope == nil {
+		h.writeError(conn, "console scope missing")
+		return
+	}
+	clusterIDStr := scope.ClusterID
+	node := scope.Node
+	consoleType := scope.Type
+	vmidStr := strconv.Itoa(scope.VMID)
 
 	logger := h.logger.With(
 		"cluster_id", clusterIDStr,
@@ -101,8 +113,14 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 		return
 	}
 
-	if consoleType == "" {
-		consoleType = "node_shell"
+	// No default. The type is one the gate validated, and an unknown or empty
+	// one is refused here rather than read as node_shell — the most powerful
+	// console there is — before anything is looked up.
+	switch consoleType {
+	case "node_shell", "vm_serial", "ct_attach":
+	default:
+		h.writeError(conn, "invalid console type")
+		return
 	}
 
 	ctx := context.Background()

@@ -106,19 +106,7 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 
 	app.Get("/healthz", s.healthz)
 
-	// Register console and VNC routes before generic /ws so they match first.
-	if s.consoleHandler != nil {
-		app.Use("/ws/console", s.authMiddleware)
-		app.Get("/ws/console", websocket.New(s.consoleHandler.HandleConsole, wsConfigWithSubprotocol(s.allowedOrigins)))
-	}
-
-	if s.vncHandler != nil {
-		app.Use("/ws/vnc", s.authMiddleware)
-		app.Get("/ws/vnc", websocket.New(s.vncHandler.HandleVNC, wsConfigWithSubprotocol(s.allowedOrigins)))
-	}
-
-	app.Use("/ws", s.authMiddleware)
-	app.Get("/ws", websocket.New(s.handleWS, wsConfigWithSubprotocol(s.allowedOrigins)))
+	s.mountRoutes(app)
 
 	s.app = app
 	return s
@@ -139,18 +127,50 @@ func (s *Server) Shutdown() error {
 // RegisterRoutes mounts WebSocket routes onto an external Fiber app.
 // Used by the unified binary to serve WS on the same port as the API.
 func (s *Server) RegisterRoutes(app *fiber.App) {
+	s.mountRoutes(app)
+}
+
+// mountRoutes builds the three WebSocket handlers and mounts them behind their
+// gates. NewServer and RegisterRoutes both call it, so the standalone server
+// and the unified binary cannot mount them differently.
+func (s *Server) mountRoutes(app *fiber.App) {
+	cfg := wsConfigWithSubprotocol(s.allowedOrigins)
+	var console, vnc fiber.Handler
 	if s.consoleHandler != nil {
-		app.Use("/ws/console", s.authMiddleware)
-		app.Get("/ws/console", websocket.New(s.consoleHandler.HandleConsole, wsConfigWithSubprotocol(s.allowedOrigins)))
+		console = websocket.New(s.consoleHandler.HandleConsole, cfg)
 	}
-
 	if s.vncHandler != nil {
-		app.Use("/ws/vnc", s.authMiddleware)
-		app.Get("/ws/vnc", websocket.New(s.vncHandler.HandleVNC, wsConfigWithSubprotocol(s.allowedOrigins)))
+		vnc = websocket.New(s.vncHandler.HandleVNC, cfg)
 	}
+	s.mountGated(app, console, vnc, websocket.New(s.handleWS, cfg))
+}
 
-	app.Use("/ws", s.authMiddleware)
-	app.Get("/ws", websocket.New(s.handleWS, wsConfigWithSubprotocol(s.allowedOrigins)))
+// mountGated attaches each route with its gate IN the route's own handler
+// chain, never with Use on a path prefix — and that is a security property,
+// not a style.
+//
+// Under Use("/ws", …) the gate ran for every path beneath /ws and chose which
+// token to demand by re-reading c.Path(), while Fiber's router, with
+// StrictRouting off, sends "/ws/console/" to the /ws/console route. The
+// trailing slash took the hub branch — which accepts the hub token any
+// signed-in user can mint from /api/v1/auth/ws-token — and the request then
+// reached HandleConsole: a node shell on any node of any cluster, for any
+// account, Viewers included. Attached to the route, the gate that runs is the
+// one the same match chose, so no spelling of the path can put the gate and
+// the handler out of step.
+//
+// It takes the terminal handlers as arguments so a test can mount sentinels
+// through this exact function rather than through a copy of its route table —
+// a copy is what hid the bypass. A nil console or VNC handler leaves that
+// route unmounted.
+func (s *Server) mountGated(app *fiber.App, console, vnc, hub fiber.Handler) {
+	if console != nil {
+		app.Get("/ws/console", s.consoleAuthMiddleware, console)
+	}
+	if vnc != nil {
+		app.Get("/ws/vnc", s.consoleAuthMiddleware, vnc)
+	}
+	app.Get("/ws", s.hubAuthMiddleware, hub)
 }
 
 // subprotocolNegotiationName is the static `Sec-WebSocket-Protocol` value the
@@ -219,7 +239,23 @@ func (s *Server) healthz(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-// authMiddleware validates a short-lived scoped JWT before WebSocket upgrade.
+// consoleScopeLocal is the Locals key under which the console gate hands the
+// scope it VALIDATED to HandleConsole and HandleVNC. They read the cluster,
+// node, guest and console type from it rather than from the query string.
+const consoleScopeLocal = "consoleScope"
+
+// consoleScopeQueryKeys are the query parameters a console scope is checked
+// against. Each may appear once; see authenticate.
+var consoleScopeQueryKeys = []string{"cluster_id", "node", "vmid", "type"}
+
+// consoleAuthMiddleware gates /ws/console and /ws/vnc: a console-scoped token
+// whose scope matches the upgrade.
+func (s *Server) consoleAuthMiddleware(c fiber.Ctx) error { return s.authenticate(c, true) }
+
+// hubAuthMiddleware gates the generic /ws hub: a hub-scoped token.
+func (s *Server) hubAuthMiddleware(c fiber.Ctx) error { return s.authenticate(c, false) }
+
+// authenticate validates a short-lived scoped JWT before WebSocket upgrade.
 //
 // Two locations are accepted (in order of preference):
 //
@@ -242,8 +278,12 @@ func (s *Server) healthz(c fiber.Ctx) error {
 // The mint endpoints (/api/v1/auth/console-token + /api/v1/auth/ws-token)
 // run the underlying RBAC check before issuing the scoped JWT, so this
 // middleware is the single chokepoint that enforces "WS upgrades are
-// authenticated only by short-lived single-purpose tokens".
-func (s *Server) authMiddleware(c fiber.Ctx) error {
+// authenticated only by short-lived single-purpose tokens". HandleConsole and
+// HandleVNC make no permission check of their own; everything rests on this.
+//
+// consoleRoute says which of the two shapes the ROUTE demands. It is decided
+// by where the gate is mounted (mountGated), never by re-reading the path.
+func (s *Server) authenticate(c fiber.Ctx, consoleRoute bool) error {
 	if !websocket.IsWebSocketUpgrade(c) {
 		return fiber.ErrUpgradeRequired
 	}
@@ -281,17 +321,15 @@ func (s *Server) authMiddleware(c fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
 	}
 
-	// Compare case-insensitively because Fiber routes case-insensitively by
-	// default (CaseSensitive=false). A request to /WS/Console still hits
-	// the /ws/console handler; a strict equality on c.Path() would let it
-	// fall into the "scope not required" branch and accept a regular
-	// access token. Use EqualFold so the gate matches whatever Fiber's
-	// router matched.
+	// Which token shape to demand comes from the route this gate is mounted
+	// on, not from c.Path(). Deriving it from the path is what let
+	// "/ws/console/" — routed to the console handler, but not EqualFold to
+	// "/ws/console" — fall into the hub branch; an EqualFold had already been
+	// added for the case variants and could not see the slash. See mountGated.
 	path := c.Path()
-	requiresConsoleScope := strings.EqualFold(path, "/ws/console") || strings.EqualFold(path, "/ws/vnc")
 
 	switch {
-	case requiresConsoleScope:
+	case consoleRoute:
 		if claims.ConsoleScope == nil {
 			s.logger.Warn("ws auth: scoped token required on console path",
 				"path", path,
@@ -306,9 +344,25 @@ func (s *Server) authMiddleware(c fiber.Ctx) error {
 				"error": "ws-scoped token cannot be used on this path",
 			})
 		}
+		// One value per key. c.Query below returns the FIRST copy of a
+		// repeated key, while the websocket package's own capture of the
+		// query keeps the LAST — so when HandleConsole read its parameters
+		// from the query, "?cluster_id=A&…&cluster_id=B" passed a check for
+		// A and opened a console on B. The handlers now take every value
+		// from the scope stored below, so a duplicate can no longer steer
+		// them; it is still refused, as a request shape no client of this
+		// server has a reason to send.
+		for _, key := range consoleScopeQueryKeys {
+			if len(c.RequestCtx().QueryArgs().PeekMulti(key)) > 1 {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": "duplicate query parameter " + key,
+				})
+			}
+		}
 		if err := validateConsoleScope(c, claims.ConsoleScope); err != nil {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 		}
+		c.Locals(consoleScopeLocal, claims.ConsoleScope)
 	default:
 		// Generic /ws hub.
 		if claims.ConsoleScope != nil {
@@ -414,9 +468,13 @@ func isValidJWTSegment(s string) bool {
 // validateConsoleScope verifies that a scoped console token is being used on
 // the correct path (/ws/console or /ws/vnc) and that all query parameters
 // match the scope embedded in the token. Any mismatch is a hard reject.
+//
+// The path it checks the scope TYPE against is the route's registered one,
+// not c.Path(): a vm_vnc token belongs on /ws/vnc however the client spelled
+// the path Fiber matched to it.
 func validateConsoleScope(c fiber.Ctx, scope *auth.ConsoleScope) error {
 	return validateConsoleScopeFields(
-		c.Path(),
+		c.Route().Path,
 		c.Query("cluster_id"),
 		c.Query("node"),
 		c.Query("vmid"),
@@ -483,7 +541,9 @@ func validateConsoleScopeFields(path, clusterID, node, vmidStr, typeStr string, 
 	// Compared as UUIDs, not as text. The token carries the id the
 	// console-token route's uuid format normalised to lowercase, while
 	// ?cluster_id is whatever the client typed — so a client that sent the
-	// same uppercase id to both was refused here as a mismatch.
+	// same uppercase id to both was refused here as a mismatch. The handlers
+	// act on the scope's own copy (consoleScopeLocal), never on this one, so
+	// the query only has to name the same cluster.
 	if !sameUUID(clusterID, scope.ClusterID) {
 		return fmt.Errorf("cluster_id mismatch")
 	}
