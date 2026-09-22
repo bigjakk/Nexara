@@ -271,6 +271,19 @@ func checkPathParams(e Endpoint) error {
 		return fmt.Errorf("endpoint %s %s uses the wildcard %q, which the parameter schema cannot describe",
 			e.Method, e.Path, string(e.Path[i]))
 	}
+	if i := strings.IndexAny(e.Path, "?<"); i >= 0 {
+		// An optional parameter (":name?") or a Fiber route constraint
+		// (":name<guid>", written before an optional's "?") lets a request
+		// match with the segment EMPTY. For a cluster-scoped route that is
+		// an authorization bypass rather than a formatting nicety:
+		// /clusters//vms/<id> leaves :cluster_id empty, clusterIDFromParam
+		// falls back to :id, and the gate authorizes whatever that segment
+		// names. The schema already states what a value may be, so a
+		// constraint adds nothing it cannot, and no route needs either.
+		return fmt.Errorf("endpoint %s %s uses %q in its path; optional parameters and route constraints can "+
+			"match an empty segment, and the parameter schema is where a value's shape is declared",
+			e.Method, e.Path, string(e.Path[i]))
+	}
 
 	for _, name := range e.pathParams {
 		prop, ok := e.Parameters[name]

@@ -297,7 +297,7 @@ func validateCheck(field string, c Check, path string, pathParams []string) erro
 	case ScopeCluster:
 		if !namesACluster(pathParams, path) {
 			return fmt.Errorf("%s is %s-scoped but the path does not name the cluster it acts on; "+
-				"it needs :cluster_id as its FIRST path parameter, or to start with %q",
+				"it needs a required :cluster_id as its FIRST path parameter, or to start with %q and name no later :cluster_id",
 				field, ScopeCluster, legacyClusterPrefix)
 		}
 	}
@@ -329,9 +329,19 @@ const legacyClusterPrefix = pathPrefix + "clusters/:id"
 //
 // So :cluster_id must be the FIRST placeholder in the path — the subject
 // the rest of the route hangs off — and the :id fallback is accepted only
-// at the anchored legacy prefix, as a whole segment. A parameter naming
-// some other cluster must be called something else (target_cluster_id),
-// which checkPathParams enforces from the other direction.
+// at the anchored legacy prefix, as a whole segment, and only when no later
+// placeholder is :cluster_id. clusterIDFromParam reads :cluster_id BEFORE
+// it falls back to :id, so on /api/v1/clusters/:id/migrate-to/:cluster_id
+// the later one wins the lookup and the gate authorizes the destination —
+// the same escalation as the second bullet, reached through the legacy :id
+// exemption. A parameter naming some other cluster must be called something
+// else (target_cluster_id), which checkPathParams enforces from the other
+// direction.
+//
+// An OPTIONAL :cluster_id? — or one behind a route constraint — is not this
+// function's to refuse: checkPathParams refuses "?" and "<" in any registry
+// path, because a caller can leave such a segment empty
+// (/api/v1/clusters//vms/<id>) and clusterIDFromParam then falls back to :id.
 //
 // EqualFold because Fiber's own matching is case-insensitive; see
 // checkPathParams.
@@ -344,5 +354,13 @@ func namesACluster(pathParams []string, path string) bool {
 	}
 	// A whole segment, so that /clusters/:idx is not read as /clusters/:id.
 	rest := path[len(legacyClusterPrefix):]
-	return rest == "" || rest[0] == '/'
+	if rest != "" && rest[0] != '/' {
+		return false
+	}
+	for _, name := range pathParams {
+		if strings.EqualFold(name, "cluster_id") {
+			return false
+		}
+	}
+	return true
 }

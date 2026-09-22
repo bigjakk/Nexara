@@ -223,6 +223,60 @@ func TestRegisterRejectsMalformedDeclarations(t *testing.T) {
 			want: "is cluster-scoped but the path does not name the cluster it acts on",
 		},
 		{
+			// clusterIDFromParam reads :cluster_id BEFORE it falls back to
+			// :id, so on the legacy prefix a later :cluster_id wins the
+			// lookup. The gate would authorize the DESTINATION while the
+			// handler acts on the cluster in :id — the escalation the case
+			// above describes, reached through the legacy :id exemption
+			// instead. The prefix alone once satisfied the guard.
+			name: "a later :cluster_id after the legacy /clusters/:id prefix",
+			edit: func(e *Endpoint) {
+				e.Path = "/api/v1/clusters/:id/migrate-to/:cluster_id"
+				e.Parameters["id"] = apischema.StdOption("cluster-id")
+			},
+			want: "is cluster-scoped but the path does not name the cluster it acts on",
+		},
+		{
+			// The same, spelled in another case. Fiber matches parameter
+			// names case-insensitively, so c.Params("cluster_id") reads
+			// :Cluster_Id and the gate authorizes the destination exactly as
+			// above — which is why the guard compares with EqualFold. The
+			// lower-case cluster_id is deleted because, left in, checkPathParams
+			// would refuse it first — it is declared as a path parameter the
+			// path does not spell — for a different reason than this row is
+			// about.
+			name: "a later :Cluster_Id, in another case, after the legacy prefix",
+			edit: func(e *Endpoint) {
+				e.Path = "/api/v1/clusters/:id/migrate-to/:Cluster_Id"
+				delete(e.Parameters, "cluster_id")
+				e.Parameters["id"] = apischema.StdOption("cluster-id")
+				e.Parameters["Cluster_Id"] = apischema.StdOption("cluster-id")
+			},
+			want: "is cluster-scoped but the path does not name the cluster it acts on",
+		},
+		{
+			// An optional :cluster_id? can be sent empty — /clusters//vms/<id>
+			// — and clusterIDFromParam then falls back to :id, so the gate
+			// would authorize whatever that segment names: here, a guest.
+			name: "an optional :cluster_id?",
+			edit: func(e *Endpoint) {
+				e.Path = "/api/v1/clusters/:cluster_id?/vms/:id"
+				e.Parameters["id"] = apischema.Property{Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}
+			},
+			want: `uses "?" in its path`,
+		},
+		{
+			// The same bypass through a route constraint, which Fiber writes
+			// before an optional's "?": ":cluster_id<guid>?" also matches an
+			// empty segment. A substring check for ":cluster_id?" missed it.
+			name: "a constrained, optional :cluster_id<guid>?",
+			edit: func(e *Endpoint) {
+				e.Path = "/api/v1/clusters/:cluster_id<guid>?/vms/:id"
+				e.Parameters["id"] = apischema.Property{Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}
+			},
+			want: `uses "<" in its path`,
+		},
+		{
 			// The other half of the same hole, and the one that escalates
 			// rather than merely confuses: the path spells :id, so a guard
 			// that only protects the spelled name leaves cluster_id free
