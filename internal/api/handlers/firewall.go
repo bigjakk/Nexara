@@ -129,8 +129,10 @@ func (h *NetworkHandler) CreateClusterFirewallRule(c fiber.Ctx, p *apischema.Par
 		return err
 	}
 
-	// type and action are REQUIRED by the schema on this route and optional
-	// on the update one, which is the split the handlers already had.
+	// type and action are REQUIRED and non-empty by the schema on this route
+	// (firewallRuleBody's create spelling) and optional on the update one,
+	// which is the split the handlers already had — including their refusal
+	// of an empty value, which is what the declared MinLength restates.
 	req := firewallRuleFromParams(p)
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -774,7 +776,8 @@ func (h *NetworkHandler) GetFirewallLog(c fiber.Ctx, p *apischema.Params) error 
 	// node is required by the schema and carries the node-name format, which
 	// additionally rejects the empty string the hand-rolled c.Query could not
 	// tell from absent. Both bounds on limit and start live in the schema
-	// now: a negative one used to go straight to Proxmox.
+	// now; a negative one used to reach GetNodeFirewallLog, which drops any
+	// value that is not positive, so it read like 0.
 	nodeName := p.String("node")
 	limit, start := int(p.Int("limit")), int(p.Int("start"))
 	pxClient, err := h.createProxmoxClient(c, clusterID)

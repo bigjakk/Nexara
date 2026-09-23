@@ -391,15 +391,20 @@ func TestACMEURLParametersKeepTheirEmptySentinel(t *testing.T) {
 //
 // directory and tos_url reach their rule through emptyOrACMEURL, a constant in
 // registry_acme.go, so the test above pins them by comparing against it. `name`
-// reaches the CATALOGUE — apischema.Rule("pve-object-id-or-empty") — and no
-// test in apischema can see this site: those hold the RULE to its witnesses,
-// never a declaration to the rule. What watches the reference is
-// registry_rule_reference_ratchet_test.go, which reads the source; this reads
-// the BUILT declaration and the values it admits, which is the half a source
-// walk cannot answer — a MaxLength dropped in the same edit, or an empty string
-// the pattern allows and some other facet turns away, looks identical in the
-// source and is a 400 here. The property is built by pveObjectNameParam and
-// then reassigned, and that reassignment is the line a future edit lands on.
+// reaches the CATALOGUE — apischema.Rule("pve-object-id-or-empty") — through
+// pveObjectNameOrEmptyParam (registry_networks.go), and no test in apischema
+// can see this site: those hold the RULE to its witnesses, never a
+// declaration to the rule. registry_rule_reference_ratchet_test.go does not
+// see it either: it keys on the container that spells the Rule call, which is
+// the helper, and does not follow a call into it — so a Pattern reassigned to
+// a literal here in createACMEAccountParams, after the helper returns,
+// escapes every source-reading guard. This test is what holds the site, as
+// TestFirewallAliasRenameKeepsTheEmptySentinel and
+// TestSDNVNetUpdateZoneKeepsTheEmptySentinel hold the helper's other two
+// callers: it reads the BUILT declaration — the pattern must be the
+// catalogued rule, the MaxLength must survive, and the values it admits are
+// driven through Validate — so a narrowed pattern, a dropped MaxLength, or an
+// empty string some other facet turns away each fail here.
 //
 // "" is not a third state. proxmox.CreateACMEAccount sets the form key only
 // `if params.Name != ""`, identically to directory and tos_url, so an empty name
@@ -417,15 +422,17 @@ func TestACMEAccountNameKeepsItsEmptySentinel(t *testing.T) {
 		t.Error("name is required; Proxmox names the account \"default\" when it is absent")
 	}
 	if want := apischema.Rule("pve-object-id-or-empty"); prop.Pattern != want {
-		t.Errorf("name declares pattern %q, want the catalogued %q (pve-object-id-or-empty). A rule "+
-			"assembled at the declaration instead of named leaves this site out of every guard that "+
-			"resolves a pattern to a catalogue entry — the rule-reference ratchet, the inline-pattern "+
-			"guards, and the rule block /api/v1/api-docs publishes beside it.", prop.Pattern, want)
+		t.Errorf("name declares pattern %q, want the catalogued %q (pve-object-id-or-empty): the "+
+			"empty sentinel on the object-id rule, no narrower. A Pattern reassigned to a literal at this "+
+			"call site is invisible to the guards that read the source, so this is the check that holds it.",
+			prop.Pattern, want)
 	}
 	// The MaxLength pveObjectNameParam carries has to survive the reassignment:
 	// nothing else bounds a value that becomes a Proxmox path segment.
-	if prop.MaxLength == nil || *prop.MaxLength != 64 {
-		t.Errorf("name declares MaxLength %v, want 64 — the bound pveObjectNameParam sets", prop.MaxLength)
+	if prop.MaxLength == nil {
+		t.Error("name declares no MaxLength, want 64 — the bound pveObjectNameParam sets")
+	} else if *prop.MaxLength != 64 {
+		t.Errorf("name declares MaxLength %d, want 64 — the bound pveObjectNameParam sets", *prop.MaxLength)
 	}
 
 	valid := map[string]any{"cluster_id": testClusterID, "contact": "admin@example.com"}

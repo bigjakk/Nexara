@@ -65,13 +65,13 @@ import (
 // promote it when a second site wants it.
 //
 // THE "-or-empty" VARIANTS ARE NOT SUBJECT TO THAT COUNT, and
-// pve-object-id-or-empty is the entry that shows why — it has ONE site, and
-// belongs here anyway. The second-site rule is about DUPLICATION: a rule two
-// declarations both spell is a rule that will end up spelled two different
-// ways. A sentinel variant is not at risk of that, because the widening is
-// not a regex anybody retypes; it is orEmpty, which lives in this file. What
-// a hand-derivation at the declaration risks instead is INVISIBILITY, and
-// that is not a function of how many sites there are:
+// pve-object-id-or-empty is the entry that showed why — it was catalogued
+// with ONE site, and belonged here anyway. The second-site rule is about
+// DUPLICATION: a rule two declarations both spell is a rule that will end up
+// spelled two different ways. A sentinel variant is not at risk of that,
+// because the widening is not a regex anybody retypes; it is orEmpty, which
+// lives in this file. What a hand-derivation at the declaration risks instead
+// is INVISIBILITY, and that is not a function of how many sites there are:
 //
 //   - Both guard families in internal/api resolve a site to a catalogue
 //     entry, by different readings: the inline-pattern guards match the
@@ -88,7 +88,7 @@ import (
 // Both are fixed by one derive() call, which is the whole cost. So the test
 // for a sentinel variant is "is a declaration building it by hand", not "do
 // two declarations want it", and the answer to the first is what promotes
-// it. What the single site does NOT earn is a meaning in its Permits line;
+// it. What a single site does NOT earn is a meaning in its Permits line;
 // see the note on derive below.
 
 // RuleKind says how a named rule is applied to a value.
@@ -795,8 +795,8 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 	//     SDN controller routes leave it unset with no node chosen at all,
 	//     and POST /tasks files a row the collector then cannot reconcile.
 	//   - uuid-or-empty was published as "clears the association". Wrong
-	//     at 3 of 12, and one of those contradicted its own Description in
-	//     the same payload cell: PUT …/maintenance-windows/:id says
+	//     at 3 of the 12 sites it had then, and one of those contradicted its
+	//     own Description in the same payload cell: PUT …/maintenance-windows/:id says
 	//     "Empty or omitted leaves the existing pin alone; this route
 	//     cannot unpin a window."
 	//   - pve-poolid-or-empty was published as "remove the guest from its
@@ -850,14 +850,14 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 		derive("storage-id",
 			`a storage id, or the empty string, which means "leave it unset".`,
 			`The clone dialog sends storage:"" for a linked clone.`),
-		// Neutral: 12 sites, and "" is a filter at two of them, a
+		// Neutral: 14 sites, and "" is a filter at four of them, a
 		// leave-alone at another, and an attaches-none at the rest.
 		derive("uuid",
 			"a UUID, or the empty string.",
-			`Six declaration files reach for it — PBS, alerts, ldap, oidc, reports and rolling updates — `+
-				`each for its own "" sentinel, and they do not agree: the two alert listings read it as `+
-				`"every cluster the caller can see", while PUT …/maintenance-windows/:id reads it as `+
-				`"leave the existing pin alone".`),
+			`Eight declaration files reach for it — PBS, alerts, guest snapshots, ldap, the notification `+
+				`DLQ, oidc, reports and rolling updates — each for its own "" sentinel, and they do not `+
+				`agree: the four listing filters read it as "do not filter", while `+
+				`PUT …/maintenance-windows/:id reads it as "leave the existing pin alone".`),
 		// A meaning that GENERALISES: both sites are listing filters whose
 		// Description reads "Empty or omitted returns every …".
 		derive("pbs-safe-id",
@@ -869,20 +869,23 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 		derive("pve-poolid",
 			"a resource pool id, nesting included, or the empty string.",
 			`The pool selector sends pool:"" to unpool a guest, but that is ONE of six sites.`),
-		// Neutral, and this is the one entry where that is a DECISION
-		// rather than a reading of the sites: there is only one site, so
-		// nothing here could have disagreed with it. See the why below.
+		// Neutral, and this is the one entry where that was a DECISION
+		// rather than a reading of the sites: it was catalogued with one
+		// site, so nothing could have disagreed with it. The two sites
+		// added since agree with each other and not with the first, which
+		// is the decision paying for itself. See the why below.
 		derive("pve-object-id",
 			"a PVE object id, or the empty string.",
-			`ONE site: the account name on POST …/acme/accounts, where "" leaves the name unset and `+
-				`Proxmox names the account "default" — which its Description states, because a single `+
-				`site is the WEAKEST case for putting a meaning here, not the strongest. `+
-				`node-name-or-empty was published with one route's meaning and turned out to be true at `+
-				`none of the thirteen it ended up with, and pve-object-id is the widest-reaching pattern `+
-				`here — its own Permits line lists firewall aliases and IP sets, SDN objects, metric `+
-				`server sections and PVE backup job ids — so a second site is as likely to read "" as a `+
-				`listing filter. Nothing about "leaves the name unset" generalises past the one route `+
-				`that has a name to leave unset.`),
+			`Three sites, all through pveObjectNameOrEmptyParam, and "" sends no field at each — but `+
+				`what that DOES differs: on POST …/acme/accounts it leaves the name unset and Proxmox `+
+				`names the account "default", while the alias rename on PUT …/firewall/aliases/:name and `+
+				`the zone on PUT …/sdn/vnets/:vnet keep the current value. Each Description says which. `+
+				`The entry was catalogued with the ACME site alone, and a single site is the WEAKEST case `+
+				`for putting a meaning here, not the strongest: node-name-or-empty was published with one `+
+				`route's meaning and turned out to be true at none of the thirteen it ended up with, and `+
+				`pve-object-id is the widest-reaching pattern here — its own Permits line lists firewall `+
+				`aliases and IP sets, SDN objects, metric server sections and PVE backup job ids — so the `+
+				`next site is as likely to read "" as a listing filter.`),
 	}
 }
 

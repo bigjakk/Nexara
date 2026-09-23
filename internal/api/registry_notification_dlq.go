@@ -91,21 +91,29 @@ func registerNotificationDLQEndpoints(reg *Registry, h *handlers.NotificationDLQ
 			"state": {
 				Type:     apischema.String,
 				Optional: true,
-				// The handler's own validDLQStates, restated one layer earlier.
-				// It is safe to restate — unlike a Proxmox vocabulary, these are
-				// Nexara's own column values — and
-				// TestNotificationDLQStateVocabulary pins the two lists against
-				// each other.
-				Enum:        []string{"pending", "rate_limited", "retrying", "resolved", "dismissed"},
+				// The handler's own validDLQStates, restated one layer earlier,
+				// plus the EMPTY string. It is safe to restate — unlike a
+				// Proxmox vocabulary, these are Nexara's own column values —
+				// and TestNotificationDLQStateVocabulary pins the two lists
+				// against each other. "" is not a state: it is "do not
+				// filter", which the handler has always read it as
+				// (`if state != ""`) and ListNotificationDLQ still does, so
+				// dropping it would 400 a request that has always worked —
+				// the call the alert listings' enums made too.
+				Enum:        []string{"", "pending", "rate_limited", "retrying", "resolved", "dismissed"},
 				Typetext:    "<pending|rate_limited|retrying|resolved|dismissed>",
-				Description: "Narrow the listing to one state. Omitted, every state is returned.",
+				Description: "Narrow the listing to one state. Empty or omitted returns every state.",
 			},
 			"channel_id": {
-				Type:        apischema.String,
-				Optional:    true,
-				Format:      "uuid",
+				Type:     apischema.String,
+				Optional: true,
+				// Empty-or-uuid rather than the uuid format, which rejects "":
+				// the handler only parsed a non-empty value, so ?channel_id=
+				// meant "every channel".
+				Pattern:     emptyOrUUID,
+				MaxLength:   apischema.Ptr(36),
 				Typetext:    "<uuid>",
-				Description: "Narrow the listing to the entries queued for one notification channel.",
+				Description: "Narrow the listing to the entries queued for one notification channel. Empty or omitted returns every channel.",
 			},
 		},
 		Handler: h.List,

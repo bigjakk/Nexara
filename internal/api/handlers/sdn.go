@@ -342,14 +342,17 @@ func (h *NetworkHandler) CreateSDNSubnet(c fiber.Ctx, p *apischema.Params) error
 		// gets here — and the "subnet is required" check the handler used to
 		// make is the schema's now.
 		Subnet: p.String("subnet"),
-		// The handler filled this in when the body left it empty; the
-		// declaration states the same default instead, so the docs answer
-		// what omitting it does.
+		// The declaration's Default covers an omitted type; an EMPTY one
+		// meant the same thing before the registry, so it still does below.
 		Type:          p.String("type"),
 		Gateway:       settings.Gateway,
 		SNAT:          settings.SNAT,
 		DHCPRange:     settings.DHCPRange,
 		DHCPDNSServer: settings.DHCPDNSServer,
+	}
+
+	if req.Type == "" {
+		req.Type = "subnet"
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)

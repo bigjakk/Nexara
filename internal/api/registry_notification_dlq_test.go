@@ -131,8 +131,16 @@ func TestNotificationDLQRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T)
 // handler's own validDLQStates map. The direction that bites is a schema
 // accepting a state the column has no rows for: the listing comes back empty
 // and reads as "nothing has failed" rather than as a typo.
+//
+// The empty string is in the enum and is not a state: it is the "do not
+// filter" sentinel, and it is set aside before the comparison rather than
+// added to validDLQStates, where it would read as a state the column holds.
 func TestNotificationDLQStateVocabulary(t *testing.T) {
-	got := slices.Clone(declaredEndpoint(t, fiber.MethodGet, dlqScope).Parameters["state"].Enum)
+	declared := declaredEndpoint(t, fiber.MethodGet, dlqScope).Parameters["state"].Enum
+	if !slices.Contains(declared, "") {
+		t.Error("the ?state= enum has no empty member, so ?state= — which has always meant every state — is a 400")
+	}
+	got := slices.DeleteFunc(slices.Clone(declared), func(s string) bool { return s == "" })
 	slices.Sort(got)
 	if want := handlers.DLQStateKeys(); !slices.Equal(got, want) {
 		t.Errorf("the declared ?state= enum is %v but handlers.validDLQStates carries %v", got, want)
@@ -167,6 +175,8 @@ func TestNotificationDLQListBoundsArePinned(t *testing.T) {
 		{query: "?offset=-1", want: fiber.StatusBadRequest},
 		{query: "?state=nonsense", want: fiber.StatusBadRequest},
 		{query: "?channel_id=not-a-uuid", want: fiber.StatusBadRequest},
+		// Empty means "no filter", as it always did.
+		{query: "?state=&channel_id=", want: fiber.StatusNoContent, limit: 50},
 		{query: "?page=2", want: fiber.StatusBadRequest},
 	} {
 		cap := &capture{}

@@ -29,10 +29,11 @@ func (h *NodeHandler) CreateNodeFirewallRule(c fiber.Ctx, p *apischema.Params) e
 	if err != nil {
 		return err
 	}
-	// type and action are REQUIRED by the schema on this route and optional on
-	// the update one, which is the split the handlers already had: Proxmox's
-	// rule update keeps the existing direction and action when they are
-	// omitted, so only a create has to name them.
+	// type and action are REQUIRED and non-empty by the schema on this route
+	// and optional on the update one, which is the split the handlers already
+	// had: Proxmox's rule update keeps the existing direction and action when
+	// they are omitted, and firewallRuleToForm omits an empty one rather than
+	// sending it, so only a create has to name them.
 	rule := firewallRuleFromParams(p)
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -94,8 +95,9 @@ func (h *NodeHandler) GetNodeFirewallLog(c fiber.Ctx, p *apischema.Params) error
 		return err
 	}
 	// Both bounds live in the route's parameter schema now. limit was CLAMPED
-	// here at 5000 and floored nowhere, so a negative one went straight to
-	// Proxmox; the declaration bounds it at both ends instead.
+	// here at 5000 and floored nowhere — a negative one reached
+	// GetNodeFirewallLog, which drops any limit that is not positive, so it
+	// read like 0; the declaration bounds it at both ends instead.
 	limit, start := int(p.Int("limit")), int(p.Int("start"))
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {

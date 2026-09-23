@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -304,6 +305,51 @@ func TestSDNSubnetTypeDefaultMovedIntoTheDeclaration(t *testing.T) {
 	}
 	if got := params.String("type"); got != "subnet" {
 		t.Errorf("an omitted type reads back as %q, want \"subnet\"", got)
+	}
+	// An EMPTY type meant "subnet" too, but a Default never applies to a key
+	// the caller sent — so the schema must let "" through, and
+	// CreateSDNSubnet substitutes it (TestSDNSubnetCreateSendsSubnetForAnEmptyType
+	// in the handlers package pins that half).
+	if _, err := e.Parameters.Validate(sdnParamsWith(t, e, map[string]any{"type": ""})); err != nil {
+		t.Errorf("an empty type was refused (%v); the handler has always read it as \"subnet\"", err)
+	}
+}
+
+// TestSDNVNetUpdateZoneKeepsTheEmptySentinel pins that the VNet update's
+// schema admits the empty zone it always took: sdnVNetUpdateToForm drops an
+// empty zone, so "" has always kept the VNet where it is. The bare object-name
+// rule refuses "", which turned that request into a 400; the declaration
+// carries the -or-empty variant, and still refuses a traversal. The meaning
+// half — that "" really leaves the zone alone — is the client's, and
+// TestUpdateSDNVNetOmitsAnEmptyZone in internal/proxmox pins it.
+//
+// It also holds this call site of pveObjectNameOrEmptyParam: the pattern must
+// be the catalogued rule and the MaxLength must survive, because a Pattern
+// reassigned to a literal after the helper returns is invisible to the guards
+// that read the source (see registry_rule_reference_ratchet_test.go).
+func TestSDNVNetUpdateZoneKeepsTheEmptySentinel(t *testing.T) {
+	e := declaredEndpoint(t, fiber.MethodPut, sdnScope+"/vnets/:vnet")
+	prop := e.Parameters["zone"]
+	if want := apischema.Rule("pve-object-id-or-empty"); prop.Pattern != want {
+		t.Errorf("zone declares pattern %q, want the catalogued pve-object-id-or-empty %q", prop.Pattern, want)
+	}
+	if prop.MaxLength == nil {
+		t.Error("zone declares no MaxLength, want 64 — the bound pveObjectNameParam sets")
+	} else if *prop.MaxLength != 64 {
+		t.Errorf("zone declares MaxLength %d, want 64 — the bound pveObjectNameParam sets", *prop.MaxLength)
+	}
+	for _, tt := range []struct {
+		zone string
+		ok   bool
+	}{
+		{"", true},
+		{"storezone", true},
+		{"..", false},
+	} {
+		_, err := e.Parameters.Validate(sdnParamsWith(t, e, map[string]any{"zone": tt.zone}))
+		if (err == nil) != tt.ok {
+			t.Errorf("zone %q: err = %v, want accepted=%v", tt.zone, err, tt.ok)
+		}
 	}
 }
 

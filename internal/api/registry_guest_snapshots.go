@@ -23,16 +23,23 @@ const guestSnapshotScope = pathPrefix + "guest-snapshots"
 // name to decide which cluster a permission gate authorizes. This route runs no
 // gate at all — it is Advisory, and the handler filters per row — but the
 // refusal is deliberately about the NAME rather than about whether today's
-// shape happens to make it safe. The alias keeps every existing caller working:
-// the central snapshots page sends {"cluster_id": …}.
+// shape happens to make it safe. The alias keeps the spelling this listing has
+// always read: the handler took c.Query("cluster_id") before it was declared.
+// Nexara's own snapshots page sends no filter at all.
+//
+// The EMPTY string is accepted and means "do not filter", which is what that
+// handler did (`if cid != ""`). That is why it carries the empty-or-uuid
+// pattern rather than the uuid format, which rejects "" — the same call
+// alertFilterClusterParam makes for the same query parameter.
 var guestSnapshotFilterClusterParam = apischema.Property{
-	Type:     apischema.String,
-	Alias:    "cluster_id",
-	Optional: true,
-	Format:   "uuid",
-	Typetext: "<uuid>",
-	Description: "Narrow the listing to one cluster. Also accepted as \"cluster_id\", which is what the " +
-		"snapshots page sends. The caller must hold view:vm or view:container on it.",
+	Type:      apischema.String,
+	Alias:     "cluster_id",
+	Optional:  true,
+	Pattern:   emptyOrUUID,
+	MaxLength: apischema.Ptr(36),
+	Typetext:  "<uuid>",
+	Description: "Narrow the listing to one cluster; the caller must hold view:vm or view:container on it. " +
+		"Empty or omitted lists every cluster the caller can see. Also accepted as \"cluster_id\".",
 }
 
 // guestSnapshotScopeReason is the Advisory justification for the listing.

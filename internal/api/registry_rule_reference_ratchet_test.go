@@ -32,16 +32,22 @@ import (
 // and a MaxLength of 8 narrows every route that takes it — 33 Endpoint
 // declarations in registry_firewall.go and registry_sdn.go, five ACME path
 // parameters through acmeObjectNameParam (a bare call to it), and the two ACME
-// body names that call it directly (createACMEAccountParams now overrides the
-// Pattern with the catalogued sentinel and so is reached by the MaxLength half
-// only; createACMEPluginParams still takes both) — and ALL SIX guards in
-// registry_rule_catalogue_test.go stay green. (Their own note counts 20 routes;
-// that is the routes whose accepted set demonstrably changed, not the reach.)
-// Only unrelated domain tests notice, and only because they happen to exercise
-// real values on those routes; a parameter without such a test slips through in
-// silence. TestNoInlinePatternRestatesACataloguedRule compares for EQUALITY, so
-// it catches the verbatim re-inline and is blind to the tightened one for the
-// same reason.
+// body names (createACMEPluginParams calls it directly and takes both halves;
+// createACMEAccountParams goes through pveObjectNameOrEmptyParam, which swaps
+// the Pattern for the catalogued sentinel, so it is reached by the MaxLength
+// half only — as are the alias rename and VNet zone bodies that helper serves
+// on two of those 33). The Pattern half passes all six guards in
+// registry_rule_catalogue_test.go. Of those six, the MaxLength half is seen
+// only by TestGuard_RuleNarrowingSitesAreDeclared, and only through the three
+// pve-object-id-or-empty sites, which inherit the cap under a rule it still
+// recognises — and the three sentinel tests named below pin that cap on
+// purpose. (That file's own note counts 20 routes; that is the routes whose
+// accepted set demonstrably changed, not the reach.) The Pattern half is
+// noticed only by unrelated domain tests, and only because they happen to
+// exercise real values on those routes; a parameter without such a test
+// slips through in silence. TestNoInlinePatternRestatesACataloguedRule
+// compares for EQUALITY, so it catches the verbatim re-inline and is blind to
+// the tightened one for the same reason.
 //
 // So this guard asks a question no value-matching check can: does the SOURCE
 // still name the rule? It reads the declaration files as text, resolves what
@@ -76,14 +82,13 @@ import (
 // Adding a route that takes pveObjectNameParam("…") or emptyOrNodeName does not
 // move this list at all, and neither does deleting one, because the shared
 // declaration is what carries the rule. It moves only when a route declares its
-// OWN inline rule reference, which 11 of the 41 entries below do — the ones whose
+// OWN inline rule reference, which 12 of the 43 entries below do — the ones whose
 // container is a register…Endpoints function rather than a named parameter — and
 // then the failure names which of the five things happened.
 var ruleReferenceSites = []string{
 	"registry_access.go accessNameParam = path-safe-dotted-name",
 	"registry_access.go registerAccessEndpoints [groupid] = path-safe-dotted-name",
 	"registry_access.go registerAccessEndpoints [roleid] = path-safe-dotted-name",
-	"registry_acme.go createACMEAccountParams = pve-object-id-or-empty",
 	"registry_alerts.go alertFilterClusterParam = uuid-or-empty",
 	"registry_alerts.go maintenanceWindowParams [node_id] = uuid-or-empty",
 	"registry_backup.go backupJobParams [node] = node-name-or-empty",
@@ -96,14 +101,17 @@ var ruleReferenceSites = []string{
 	"registry_ceph.go createCephPoolParams [name] = ceph-pool-name",
 	"registry_containers.go createCTParams [storage] = storage-id-or-empty",
 	"registry_containers.go registerContainerEndpoints [size] = disk-resize",
+	"registry_guest_snapshots.go guestSnapshotFilterClusterParam = uuid-or-empty",
 	"registry_ha.go haConfigIDParam = pve-configid-existing",
 	"registry_ldap.go ldapConfigParams [default_role_id] = uuid-or-empty",
 	"registry_metric_servers.go metricServerIDParam = pve-object-id",
 	"registry_migrations.go createMigrationParams [target_node] = node-name-or-empty",
 	"registry_migrations.go createMigrationParams [target_storage] = storage-id-or-empty",
 	"registry_networks.go ifaceParam = pve-object-id-colon",
+	"registry_networks.go pveObjectNameOrEmptyParam = pve-object-id-or-empty",
 	"registry_networks.go pveObjectNameParam = pve-object-id",
 	"registry_nodes.go registerNodeEndpoints [target_node] = node-name-or-empty",
+	"registry_notification_dlq.go registerNotificationDLQEndpoints [channel_id] = uuid-or-empty",
 	"registry_oidc.go oidcConfigParams [default_role_id] = uuid-or-empty",
 	"registry_pbs.go pbsAttachedClusterParam = uuid-or-empty",
 	"registry_pools.go poolCreateIDParam = pve-poolid",
@@ -192,10 +200,18 @@ var ruleReferenceSites = []string{
 //
 // The fix was not to teach this walk to fold a "+" tree. It was to catalogue
 // the variant as pve-object-id-or-empty, which turned the expression back into
-// an apischema.Rule call and put the site in the list above, where the same
-// mutation now reports RETIRED. A hand-derived sentinel is the one instance of
-// this shape with an answer cheaper than widening the resolver, and it should
-// get that answer rather than this one.
+// an apischema.Rule call. That call now lives in pveObjectNameOrEmptyParam
+// (registry_networks.go), the site in the list above, and tightening ITS
+// Pattern reports RETIRED. A Pattern reassigned to a literal at one of the
+// helper's three call sites after it returns is out of this walk's reach —
+// the walk keys on the container that spells the call and does not follow a
+// call into a helper (a reassignment to another apischema.Rule is reported,
+// as a new site) — so those sites are held by their route tests instead:
+// TestACMEAccountNameKeepsItsEmptySentinel,
+// TestFirewallAliasRenameKeepsTheEmptySentinel and
+// TestSDNVNetUpdateZoneKeepsTheEmptySentinel. A hand-derived sentinel is the
+// one instance of this shape with an answer cheaper than widening the
+// resolver, and it should get that answer rather than this one.
 //
 // Resolution is also by NAME rather than by scope. A function-local variable
 // shadowing one of those bindings would be read as the binding, and a var spec

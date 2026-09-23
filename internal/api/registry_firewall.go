@@ -79,6 +79,18 @@ var firewallRulePosParam = apischema.Property{
 // them required on update as well would look tidier and would reject a
 // request that has always worked.
 //
+// The create spelling needs MinLength as well as !Optional to say what the
+// handlers said. apischema's required check refuses only an ABSENT key —
+// present() counts "" as supplied — while the create handlers refused an
+// EMPTY type or action too (`req.Type == "" || req.Action == ""`). Without
+// the length floor {"type":"in","action":""} was still refused, but by
+// Proxmox rather than here: firewallRuleToForm drops the empty action,
+// pve-firewall makes action and type mandatory on create, and
+// mapProxmoxError passes its "action: property is missing and it is not
+// optional" back as a 400.
+// What the floor restores is the refusal happening before the round trip —
+// and, on the guest route, before resolveVMNode's database lookup.
+//
 // The SECURITY-GROUP create is on the optional side too, and that is not an
 // oversight: CreateSecurityGroupRule never checked either field, unlike its
 // cluster and node counterparts. The required set is pinned to what each
@@ -92,10 +104,15 @@ var firewallRulePosParam = apischema.Property{
 // comes back as "unknown parameter" instead of silently creating a rule that
 // ignores half the request.
 func firewallRuleBody(optional bool) apischema.Properties {
+	var nonEmpty *int
+	if !optional {
+		nonEmpty = apischema.Ptr(1)
+	}
 	return apischema.Properties{
 		"type": {
 			Type:        apischema.String,
 			Optional:    optional,
+			MinLength:   nonEmpty,
 			MaxLength:   apischema.Ptr(32),
 			Typetext:    "<in|out|group>",
 			Description: "Direction the rule matches, or group to include a security group.",
@@ -103,6 +120,7 @@ func firewallRuleBody(optional bool) apischema.Properties {
 		"action": {
 			Type:      apischema.String,
 			Optional:  optional,
+			MinLength: nonEmpty,
 			MaxLength: apischema.Ptr(64),
 			Typetext:  "<ACCEPT|DROP|REJECT|group name>",
 			Description: "What to do with a matching packet, or the security group to include when " +
@@ -182,12 +200,18 @@ func firewallOptionsParams() apischema.Properties {
 // a literal "%2F". Every CIDR entry delete was broken until then — only
 // bare addresses worked.)
 //
-// The leading character class excludes "." so that "." and ".." cannot get
-// through; proxmox.DeleteFirewallIPSetEntry still guards the value —
-// validatePathSegmentAllowingSlash, since a decoded entry id legitimately
-// contains one slash —
-// and its own comment says why — cidr=".." addresses the IP SET, deleting
-// every entry while the audit row still reads as a single-entry change.
+// The leading character class excludes "." so that a bare "." or ".." is
+// refused as it ARRIVES — but that is all the pattern can see. The handler
+// decodes the segment after the schema has run, so "%2E" and "%2E%2E" match
+// the pattern (they start with "%") and decode to "." and "..". What refuses
+// those is proxmox.DeleteFirewallIPSetEntry's guard,
+// validatePathSegmentAllowingSlash — the slash-tolerant member of the family,
+// because a decoded CIDR entry id legitimately contains one. It matters:
+// cidr="." addresses the IP SET itself, where a DELETE removes the whole set
+// if it is empty (Proxmox's delete_ipset refuses one that still has entries,
+// and the client never sends force) while the audit row still reads as a
+// single-entry change; ".." lands on the IP-set collection, which has no
+// DELETE. Do not loosen the client guard on the strength of this pattern.
 var firewallIPSetEntryCIDRParam = apischema.Property{
 	Type:        apischema.String,
 	Pattern:     `^[0-9A-Za-z:%][0-9A-Za-z.:%_-]*$`,
@@ -382,7 +406,12 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 			// be tidier and would move a rejection the handler never made.
 			"cidr":    optString(64, "<ip|cidr>", "New address or network. Proxmox requires one, so omitting it is rejected there."),
 			"comment": optString(512, "<string>", "Free-text note stored with the alias."),
-			"rename":  pveObjectNameParam("New name for the alias.").AsOptional(),
+			// Empty-or-name rather than pveObjectNameParam's bare rule, which
+			// refuses "": proxmox.UpdateFirewallAlias sends rename only
+			// `if params.Rename != ""`, so "" has always meant "keep the
+			// name" — the empty-means-unset rule registry_networks.go states
+			// for this domain.
+			"rename": pveObjectNameOrEmptyParam("New name for the alias. Empty or omitted keeps the current one."),
 			// `name` is NOT declared as a body field even though
 			// proxmox.FirewallAliasParams carries one: the handler reads the
 			// alias from the PATH and ignores the body's copy, so a body name
@@ -584,12 +613,18 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 				Optional: true,
 				Default:  500,
 				// The floor is 0 rather than 1 because 0 was always
-				// REACHABLE: c.Query's "500" default only applied to an
-				// absent key, so ?limit=0 has been a working request. It does
-				// not mean "no limit" — proxmox.GetNodeFirewallLog writes the
-				// key only when it is positive, so 0 omits it and Proxmox
-				// applies its own default. What the floor closes is a
-				// NEGATIVE limit, which strconv.Atoi passed straight through.
+				// REACHABLE: c.Query("limit", "500") substituted its default
+				// for an absent or EMPTY value only, so ?limit=0 has been a
+				// working request. It does not mean "no limit" —
+				// proxmox.GetNodeFirewallLog writes the key only when it is
+				// positive, so 0 omits it and Proxmox applies its own default.
+				// A NEGATIVE limit is refused now, deliberately, where it was
+				// a 200 that meant nothing: strconv.Atoi passed one straight
+				// through and the same positive-only check dropped it, so it
+				// read exactly like 0. So is an EMPTY ?limit=, which used to
+				// take the default of 500 lines: the declaration refuses what
+				// it cannot parse instead of substituting, as
+				// TestDRSHistoryLimitIsBounded pins for DRS.
 				Minimum: apischema.Ptr(0.0),
 				// No Maximum, and that DIFFERS from the node firewall log
 				// route on purpose: that handler clamped at 5000, so its
@@ -597,7 +632,7 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 				// clamped, and inventing a ceiling here would 400 a caller
 				// who has been reading bigger pages happily.
 				Typetext:    "<integer>",
-				Description: "Maximum entries to return. 0 or omitted leaves Proxmox's own default.",
+				Description: "Maximum entries to return. Omitted, 500; 0 leaves Proxmox's own default.",
 			},
 			"start": {
 				Type:     apischema.Integer,

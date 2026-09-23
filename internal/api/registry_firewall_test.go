@@ -146,6 +146,25 @@ func TestFirewallRuleRequiredSetMatchesEachHandler(t *testing.T) {
 				if prop.Optional == tt.required {
 					t.Errorf("%s is optional=%v, want optional=%v", field, prop.Optional, !tt.required)
 				}
+				// Required is not the whole of what the create handlers
+				// enforced: they refused an EMPTY type or action as well,
+				// and apischema's required check only refuses an absent
+				// key. So the value itself is driven through the schema — a
+				// Property-shape assertion alone could not tell "required"
+				// from "required and non-empty". The update spelling takes ""
+				// to mean "keep the current value", and must still accept it.
+				_, err := e.Parameters.Validate(firewallParamsWith(t, e, map[string]any{field: ""}))
+				if tt.required && err == nil {
+					t.Errorf("an empty %s was accepted; the create handler answered 400 for it", field)
+				}
+				if tt.required && err != nil && !strings.HasPrefix(err.Error(), field) {
+					t.Errorf("an empty %s was refused as %q; the refusal should name %s", field, err, field)
+				}
+				if !tt.required && err != nil {
+					t.Errorf("an empty %s was refused (%v); this route has always accepted one — an "+
+						"update keeps the current value, and the security-group create never checked it",
+						field, err)
+				}
 			}
 			// Every other rule field is optional on every route.
 			for _, field := range []string{"source", "dest", "sport", "dport", "proto", "macro", "comment", "log", "iface", "enable"} {
@@ -154,6 +173,45 @@ func TestFirewallRuleRequiredSetMatchesEachHandler(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestFirewallAliasRenameKeepsTheEmptySentinel pins that the alias update's
+// schema admits the empty rename it always took: proxmox.UpdateFirewallAlias
+// sends rename only when it is non-empty, so an empty one has always kept the
+// alias's name. The bare object-name rule refuses "", which turned that
+// request into a 400; the declaration carries the -or-empty variant instead,
+// and still refuses a traversal. The meaning half — that "" really leaves the
+// name alone — is the client's, and TestUpdateFirewallAliasOmitsAnEmptyRename
+// in internal/proxmox pins it.
+//
+// It also holds this call site of pveObjectNameOrEmptyParam: the pattern must
+// be the catalogued rule and the MaxLength must survive, because a Pattern
+// reassigned to a literal after the helper returns is invisible to the guards
+// that read the source (see registry_rule_reference_ratchet_test.go).
+func TestFirewallAliasRenameKeepsTheEmptySentinel(t *testing.T) {
+	e := declaredEndpoint(t, fiber.MethodPut, firewallScope+"/aliases/:name")
+	prop := e.Parameters["rename"]
+	if want := apischema.Rule("pve-object-id-or-empty"); prop.Pattern != want {
+		t.Errorf("rename declares pattern %q, want the catalogued pve-object-id-or-empty %q", prop.Pattern, want)
+	}
+	if prop.MaxLength == nil {
+		t.Error("rename declares no MaxLength, want 64 — the bound pveObjectNameParam sets")
+	} else if *prop.MaxLength != 64 {
+		t.Errorf("rename declares MaxLength %d, want 64 — the bound pveObjectNameParam sets", *prop.MaxLength)
+	}
+	for _, tt := range []struct {
+		rename string
+		ok     bool
+	}{
+		{"", true},
+		{"storealias2", true},
+		{"..", false},
+	} {
+		_, err := e.Parameters.Validate(firewallParamsWith(t, e, map[string]any{"rename": tt.rename}))
+		if (err == nil) != tt.ok {
+			t.Errorf("rename %q: err = %v, want accepted=%v", tt.rename, err, tt.ok)
+		}
 	}
 }
 
@@ -225,14 +283,21 @@ func TestIPSetEntryNoMatchKeepsItsTriState(t *testing.T) {
 // TestFirewallPathNamesRefuseATraversalSegment covers every caller-supplied
 // value in this slice that becomes a Proxmox PATH segment.
 //
-// Only ONE of them goes through proxmox.validatePathSegment today — the IP
-// set entry's cidr. For the rest, url.PathEscape leaves "." and ".." alone,
-// so the request resolves onto the PARENT collection once pveproxy
-// normalises it: POST .../ipset/.. creates an IP set instead of adding an
-// entry, and GET .../groups/.. lists the groups instead of one group's
-// rules. Same permission either way, so this is a correctness anchor rather
-// than an escalation fix — but an operation that silently does something
-// else is not a thing to leave declarable.
+// Only DeleteFirewallIPSetEntry — and UpdateFirewallIPSetEntry, which no route
+// reaches — is guarded at the client as well: each checks the set name with
+// proxmox.validatePathSegment and the entry's cidr with
+// validatePathSegmentAllowingSlash (client_firewall.go). For the rest,
+// url.PathEscape leaves "." and ".." alone, so the request resolves upward
+// once pveproxy normalises it: a "." segment drops out and a ".." takes the
+// segment before it along. As the last segment that lands on the PARENT
+// collection or on /cluster/firewall above it — POST .../ipset/. reaches the
+// endpoint that creates IP sets rather than the one that adds an entry, and
+// GET .../groups/. lists the groups instead of one group's rules — and where
+// the client appends a rule position, PUT or DELETE .../groups/./{pos}
+// addresses the group NAMED by the position. Same permission either way, so
+// this is a correctness anchor rather than an escalation fix — but an
+// operation that silently does something else is not a thing to leave
+// declarable.
 func TestFirewallPathNamesRefuseATraversalSegment(t *testing.T) {
 	for _, tt := range []struct {
 		method string
@@ -409,6 +474,7 @@ func TestFirewallCreateBodiesDropFieldsTheHandlerIgnored(t *testing.T) {
 var firewallValidValues = map[string]any{
 	"cluster_id": testClusterID,
 	"node":       testNodeName,
+	"node_name":  testNodeName,
 	"vm_id":      101,
 	"pos":        0,
 	"type":       "in",

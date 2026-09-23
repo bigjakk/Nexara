@@ -135,7 +135,11 @@ func TestGuestSnapshotResyncGateIsEitherGuestPermission(t *testing.T) {
 // anything but the path, because clusterIDFromParam reads that name to decide
 // which cluster a gate authorizes. The filter here is genuinely a query
 // parameter, so it is declared under another name with "cluster_id" as an
-// alias — which is the spelling the snapshots page sends.
+// alias — the spelling the listing read before it was declared.
+//
+// The EMPTY value is the other half: the handler used to read
+// `if cid != ""`, so ?cluster_id= meant "no filter". A uuid format would 400
+// it — every registered format rejects "" — so the rule is empty-or-uuid.
 func TestGuestSnapshotFilterIsNotNamedClusterID(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodGet, guestSnapshotScope)
 	if _, declared := e.Parameters["cluster_id"]; declared {
@@ -147,10 +151,14 @@ func TestGuestSnapshotFilterIsNotNamedClusterID(t *testing.T) {
 		t.Fatal("declares no filter_cluster_id")
 	}
 	if prop.Alias != "cluster_id" {
-		t.Errorf("filter_cluster_id declares alias %q, want cluster_id — that is the spelling the page sends", prop.Alias)
+		t.Errorf("filter_cluster_id declares alias %q, want cluster_id — the spelling the listing always read", prop.Alias)
 	}
-	if prop.Format != "uuid" {
-		t.Errorf("filter_cluster_id declares format %q, want uuid", prop.Format)
+	if prop.Format != "" {
+		t.Errorf("filter_cluster_id declares format %q; every registered format rejects the empty "+
+			"\"no filter\" value", prop.Format)
+	}
+	if prop.Pattern != emptyOrUUID {
+		t.Errorf("filter_cluster_id declares pattern %q, want the empty-or-uuid one", prop.Pattern)
 	}
 
 	for _, tt := range []struct {
@@ -159,6 +167,7 @@ func TestGuestSnapshotFilterIsNotNamedClusterID(t *testing.T) {
 		supplied bool
 	}{
 		{query: "", want: fiber.StatusNoContent, supplied: false},
+		{query: "?cluster_id=", want: fiber.StatusNoContent, supplied: true},
 		{query: "?cluster_id=" + testClusterID, want: fiber.StatusNoContent, supplied: true},
 		{query: "?filter_cluster_id=" + testClusterID, want: fiber.StatusNoContent, supplied: true},
 		{query: "?cluster_id=not-a-uuid", want: fiber.StatusBadRequest},

@@ -45,12 +45,12 @@ const networkScope = clusterScope + "/networks"
 // proxmox.validatePathSegment on the way. url.PathEscape escapes "/" but
 // leaves "." and ".." alone, so an un-anchored name resolves upward once
 // pveproxy normalises the path and lands the request on the PARENT
-// collection — POST .../ipset/.. creates an IP set instead of adding an
-// entry to one, and PUT .../sdn/zones/.. is the SDN apply endpoint. Every
-// one of those is reachable with the same permission the intended call
-// needs, so this is a correctness anchor rather than an escalation fix, but
-// an operation that silently does something else is not a thing to leave
-// declarable.
+// collection or above it — POST .../ipset/. reaches the endpoint that creates
+// IP sets rather than the one that adds an entry, and PUT .../sdn/zones/.. is
+// the SDN apply endpoint. Every one of those is reachable with the same
+// permission the intended call needs, so this is a correctness anchor rather
+// than an escalation fix, but an operation that silently does something else
+// is not a thing to leave declarable.
 //
 // The rule itself is the catalogue's pve-object-id (apischema/catalogue.go),
 // which carries why the leading alphanumeric is the anchor and which Proxmox
@@ -74,6 +74,28 @@ func pveObjectNameParam(description string) apischema.Property {
 		Typetext:    "<name>",
 		Description: description,
 	}
+}
+
+// pveObjectNameOrEmptyParam is pveObjectNameParam for an OPTIONAL field whose
+// empty string is a value, not a mistake: the client method behind each route
+// sends the field only when it is non-empty, so "" reaches Proxmox as no field
+// at all. What that means is the route's to say, and differs — "keep the
+// current one" on an update, "Proxmox names it default" on the ACME account
+// create — so description must say it; the catalogue entry deliberately does
+// not (see pve-object-id-or-empty in apischema/catalogue.go).
+//
+// Built FROM pveObjectNameParam, so the cap and Typetext cannot drift from the
+// bare rule's. And the widening is the catalogue's, reached by name. Spelled
+// here as `^$|` + the base pattern it would be the same regex, and
+// /api/v1/api-docs would still resolve it to pve-object-id-or-empty now that
+// the entry exists — but the guards that read the SOURCE look for the named
+// apischema.Rule call: the rule-reference ratchet would report this site
+// RETIRED, and TestEveryCataloguedPatternIsUsed would find the entry declared
+// nowhere.
+func pveObjectNameOrEmptyParam(description string) apischema.Property {
+	p := pveObjectNameParam(description).AsOptional()
+	p.Pattern = apischema.Rule("pve-object-id-or-empty")
+	return p
 }
 
 // ifaceParam is a network interface name.

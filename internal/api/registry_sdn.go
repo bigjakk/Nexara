@@ -310,9 +310,12 @@ func registerSDNEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 		Parameters: clusterParams(withParams(sdnVNetSettings(), apischema.Properties{
 			"vnet": pveObjectNameParam("VNet to change."),
 			// Optional here and required on create, mirroring
-			// proxmox.UpdateSDNVNetParams: the form builder sends zone only
-			// when it is non-empty, so omitting it keeps the current zone.
-			"zone": pveObjectNameParam("Move the VNet to this zone. Omitted keeps the current one.").AsOptional(),
+			// proxmox.UpdateSDNVNetParams: sdnVNetUpdateToForm sends zone only
+			// when it is non-empty, so an omitted OR empty zone keeps the
+			// current one. Hence empty-or-name rather than
+			// pveObjectNameParam's bare rule, which refuses "" — the
+			// empty-means-unset rule sdnZoneSettings states for this domain.
+			"zone": pveObjectNameOrEmptyParam("Move the VNet to this zone. Empty or omitted keeps the current one."),
 		})),
 		Handler: h.UpdateSDNVNet,
 	})
@@ -358,16 +361,19 @@ func registerSDNEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 			"type": {
 				Type:      apischema.String,
 				Optional:  true,
-				MinLength: apischema.Ptr(1),
 				MaxLength: apischema.Ptr(32),
 				// The default the HANDLER used to fill in, stated here
 				// instead, so the docs answer what omitting it does. Proxmox
 				// accepts only this one value today, which is why it is a
 				// default rather than an enum — the enum would be a list of
 				// one that dates the moment Proxmox adds a second.
+				//
+				// A Default applies only to an ABSENT key, and the handler
+				// also substituted "subnet" for an EMPTY one; it still does
+				// (CreateSDNSubnet), which is why there is no MinLength here.
 				Default:     "subnet",
 				Typetext:    "<subnet>",
-				Description: "Subnet plugin.",
+				Description: "Subnet plugin. Empty or omitted means subnet.",
 			},
 		})),
 		Handler: h.CreateSDNSubnet,

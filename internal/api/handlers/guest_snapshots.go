@@ -84,8 +84,10 @@ func (h *GuestSnapshotHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	// on it (per-row filtering below still applies the precise one). Declared
 	// as filter_cluster_id with "cluster_id" as its alias; see the declaration
 	// for why the name the gate reads cannot be used for a query parameter.
+	// An empty value is the "no filter" it has always been, not a uuid to
+	// parse.
 	var clusterFilter uuid.UUID
-	if cid, supplied := p.OptString("filter_cluster_id"); supplied {
+	if cid := p.String("filter_cluster_id"); cid != "" {
 		clusterFilter, err = parseParamUUID(cid)
 		if err != nil {
 			return err

@@ -383,8 +383,6 @@ func acmeDirectoryParam(description string) apischema.Property {
 // account created under a name this API cannot address again would be a dead
 // row from the moment it was written.
 func createACMEAccountParams() apischema.Properties {
-	name := pveObjectNameParam(
-		"Name for the account. Omitted OR EMPTY, Proxmox calls it \"default\".").AsOptional()
 	// "" is a supplied value apischema does NOT fall back to the default for
 	// (see present() in validate.go), and it reaches Proxmox as no name at all:
 	// proxmox.CreateACMEAccount sets the form key only `if params.Name != ""`,
@@ -392,16 +390,8 @@ func createACMEAccountParams() apischema.Properties {
 	// empty name creates the account Proxmox calls "default". The route was
 	// unvalidated before it was declared, so refusing "" would 400 a request
 	// that has always worked.
-	//
-	// The widening is the CATALOGUE's, reached by name. Spelling it here as
-	// `^$|` + name.Pattern was the same rule and left the site invisible:
-	// an assembled expression matches no catalogue entry, so the
-	// rule-reference ratchet reads it as naming no rule and the inline-pattern
-	// guards compare it for equality against text it does not equal — tighten
-	// it and nothing fails — while /api/v1/api-docs, which resolves a pattern
-	// to its rule the same way, published the bare regex with no name and no
-	// "permits" line beside it. See the Scope note in apischema/catalogue.go.
-	name.Pattern = apischema.Rule("pve-object-id-or-empty")
+	name := pveObjectNameOrEmptyParam(
+		"Name for the account. Omitted OR EMPTY, Proxmox calls it \"default\".")
 	return apischema.Properties{
 		"name":    name,
 		"contact": acmeContactParam(false),

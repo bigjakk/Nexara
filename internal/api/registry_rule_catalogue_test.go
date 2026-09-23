@@ -404,8 +404,13 @@ func narrowedByPublishedFacet(prop apischema.Property, v string) bool {
 // narrowing — it removes the parameter from the walk, and every guard in
 // this file then has nothing to say about it. Swapping pveObjectNameParam's
 // Rule("pve-object-id") for `^[a-z][a-z0-9]*$` with a MaxLength of 8 narrows
-// 20 routes across ACME, firewall and SDN, and all six rule guards here stay
-// green; only unrelated domain tests notice, and only by accident.
+// 20 routes across ACME, firewall and SDN, and a pattern-only swap leaves all
+// six rule guards here green. Of those six, the MaxLength half is caught only
+// by TestGuard_RuleNarrowingSitesAreDeclared, through the three
+// pve-object-id-or-empty sites that inherit the cap, whose sentinel tests
+// (registry_rule_reference_ratchet_test.go names them) also pin it on
+// purpose; the Pattern half is noticed only by unrelated domain tests, and
+// only by accident.
 // TestNoInlinePatternRestatesACataloguedRule catches the VERBATIM re-inline
 // of a catalogued regex, which is the copy-paste case, and is blind to a
 // tightened one for the same reason: it compares for equality.

@@ -99,10 +99,10 @@ func toNotificationDLQResponse(row db.NotificationDlq) notificationDLQResponse {
 }
 
 // validDLQStates is the accepted ?state= vocabulary. It is the same set the
-// declaration's Enum carries in internal/api/registry_notification_dlq.go —
-// TestNotificationDLQStateVocabulary pins the two against each other, because
-// they are two copies of one list and a copy nothing compares is a copy that
-// rots.
+// declaration's Enum carries in internal/api/registry_notification_dlq.go,
+// less the "" no-filter sentinel the Enum adds — TestNotificationDLQStateVocabulary
+// pins the two against each other, because they are two copies of one list and
+// a copy nothing compares is a copy that rots.
 var validDLQStates = map[string]bool{
 	"pending":      true,
 	"rate_limited": true,
@@ -144,8 +144,11 @@ func (h *NotificationDLQHandler) List(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	// An empty channel_id is the "every channel" it has always been, not a
+	// uuid to parse; the same goes for an empty state, which
+	// ListNotificationDLQ reads as no filter.
 	var channelIDPg pgtype.UUID
-	if cidStr, supplied := p.OptString("channel_id"); supplied {
+	if cidStr := p.String("channel_id"); cidStr != "" {
 		cid, perr := parseParamUUID(cidStr)
 		if perr != nil {
 			return perr

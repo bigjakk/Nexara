@@ -725,17 +725,21 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 				Optional: true,
 				Default:  500,
 				// The floor is 0 rather than 1 because 0 was always reachable:
-				// the hand-rolled default only applied to an absent key. It does
-				// NOT mean "no limit" — proxmox.GetNodeFirewallLog writes the key
-				// only when it is positive, so 0 omits it and Proxmox applies its
-				// own default. What the floor closes is a NEGATIVE limit, which
-				// strconv.Atoi passed straight through.
+				// the hand-rolled default was substituted for an absent or EMPTY
+				// value only. It does NOT mean "no limit" —
+				// proxmox.GetNodeFirewallLog writes the key only when it is
+				// positive, so 0 omits it and Proxmox applies its own default.
+				// A NEGATIVE limit is a 400 now, deliberately, where it was a
+				// 200 that meant nothing: strconv.Atoi passed one through and
+				// the same positive-only check dropped it, so it read exactly
+				// like 0. So is an EMPTY ?limit=, rather than the default —
+				// see the cluster firewall log's limit in registry_firewall.go.
 				Minimum: apischema.Ptr(0.0),
 				// The ceiling the handler clamped to; see the syslog limit for
 				// why a bound is better than a silent substitution.
 				Maximum:     apischema.Ptr(5000.0),
 				Typetext:    "<integer>",
-				Description: "Maximum entries to return. 0 or omitted leaves Proxmox's own default.",
+				Description: "Maximum entries to return. Omitted, 500; 0 leaves Proxmox's own default.",
 			},
 			"start": {
 				Type:     apischema.Integer,
