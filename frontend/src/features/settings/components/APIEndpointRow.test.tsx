@@ -215,13 +215,18 @@ const constrained: APIEndpoint = {
   ],
 };
 
-/** A route the server has not migrated: prose only, no schema. */
-const legacy: APIEndpoint = {
-  method: "GET",
-  path: "/api/v1/audit-log",
-  description: "List audit log entries",
-  permission: "view:audit",
-  group: "Audit Log",
+/**
+ * An entry the payload sends with no parameter list. The row cannot tell
+ * which kind it is — a declared route that declares none, or one of the few
+ * that predate the parameter schema, as this one does — and must claim
+ * neither.
+ */
+const withoutParameters: APIEndpoint = {
+  method: "POST",
+  path: "/api/v1/alert-rules",
+  description: "Create an alert rule",
+  permission: "manage:alert",
+  group: "Alerts",
 };
 
 function renderRow(endpoint: APIEndpoint, expanded = false) {
@@ -245,12 +250,12 @@ describe("APIEndpointRow", () => {
     expect(screen.getByText("manage:vm")).toBeInTheDocument();
   });
 
-  it("offers no expand affordance for a legacy endpoint, and no placeholder", () => {
-    const { container } = renderRow(legacy);
+  it("offers no expand affordance for an entry with no parameter list, and no placeholder", () => {
+    const { container } = renderRow(withoutParameters);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(container.querySelector("table")).toBeNull();
-    // Absence is the honest rendering — an endpoint with no published schema
-    // must not be shown as one that takes no parameters.
+    // Absence is the honest rendering — this route takes a body, it just
+    // publishes no schema for it, so "no parameters" would be false.
     expect(screen.queryByText(/no parameters/i)).not.toBeInTheDocument();
   });
 

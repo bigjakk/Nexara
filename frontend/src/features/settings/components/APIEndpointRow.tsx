@@ -426,11 +426,14 @@ export interface APIEndpointRowProps {
 /**
  * One endpoint in the catalog, expandable into its request contract.
  *
- * An endpoint with no parameters renders as a plain row with no chevron and
- * nothing to open. That is deliberate: it has no machine-readable contract to
- * show, and a placeholder ("no parameters") would claim it takes none — which
- * is a different, and usually false, statement. The missing affordance is what
- * tells a reader which endpoints publish one.
+ * An endpoint with no parameters to show renders as a plain row with no
+ * chevron and nothing to open. The payload sends none for an endpoint that
+ * declares no parameters, for one of the few that predate the declaration
+ * layer and publish no schema, and for every endpoint of an older server that
+ * predates the field — and does not say which. So the row claims nothing: a
+ * placeholder ("no parameters") would be false for most of the legacy routes
+ * and for the file uploads, which read form fields no schema describes, and
+ * the missing chevron marks none of the three.
  */
 export function APIEndpointRow({
   endpoint,

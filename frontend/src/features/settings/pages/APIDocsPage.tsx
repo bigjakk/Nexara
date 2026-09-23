@@ -97,8 +97,10 @@ export function APIDocsPage() {
         <h1 className="text-2xl font-bold tracking-tight">API Reference</h1>
         <p className="text-muted-foreground">
           Complete reference of all available Nexara REST API endpoints.
-          Endpoints with a chevron publish a parameter schema — expand one to
-          see the request it accepts.
+          Endpoints with a chevron publish their parameters — expand one to see
+          them. A row without one publishes no parameter list, which is not a
+          promise that it takes no input: a few endpoints predate the parameter
+          schema, and file uploads read form fields it does not describe.
         </p>
       </div>
 

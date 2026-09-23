@@ -1185,11 +1185,14 @@ export interface APIEndpoint {
   permission: string;
   group: string;
   /**
-   * Absent for a route the server has not migrated to the declarative
-   * registry, and absent from an older server that predates the field —
-   * which is why it is optional rather than an empty array. Render nothing
-   * in that case; the gap is honest, and it marks which endpoints publish a
-   * contract.
+   * Absent whenever the server has no parameter list to send: a declared
+   * route that declares no parameters (and so refuses any query key, and on
+   * a POST, PUT or PATCH any key in a JSON body; an upload's multipart fields
+   * are its handler's to read), one of the few routes that predate the
+   * declaration layer and publish no schema, or an older server that
+   * predates the field — which is why it is optional rather than an empty
+   * array. The payload does not tell those cases apart, so an absent list
+   * does not mark a route as legacy.
    */
   parameters?: APIParameter[];
 }

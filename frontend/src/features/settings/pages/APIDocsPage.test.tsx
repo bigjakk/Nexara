@@ -30,15 +30,18 @@ const declared: APIEndpoint = {
   ],
 };
 
-const legacy: APIEndpoint = {
-  method: "GET",
-  path: "/api/v1/audit-log",
-  description: "List audit log entries",
-  permission: "view:audit",
-  group: "Audit Log",
+// An entry the payload sends with no parameter list — here one of the few
+// routes that predate the parameter schema, though the page cannot tell that
+// apart from a declared route that declares none.
+const withoutParameters: APIEndpoint = {
+  method: "POST",
+  path: "/api/v1/alert-rules",
+  description: "Create an alert rule",
+  permission: "manage:alert",
+  group: "Alerts",
 };
 
-const endpoints = [declared, legacy];
+const endpoints = [declared, withoutParameters];
 
 vi.mock("../api/api-docs-queries", () => ({
   useAPIDocs: () => ({ data: endpoints, isLoading: false }),
@@ -56,9 +59,9 @@ describe("APIDocsPage", () => {
   it("lists every endpoint, grouped", () => {
     renderPage();
     expect(screen.getByText("Virtual Machines")).toBeInTheDocument();
-    expect(screen.getByText("Audit Log")).toBeInTheDocument();
+    expect(screen.getByText("Alerts")).toBeInTheDocument();
     expect(screen.getByText(declared.path)).toBeInTheDocument();
-    expect(screen.getByText(legacy.path)).toBeInTheDocument();
+    expect(screen.getByText(withoutParameters.path)).toBeInTheDocument();
   });
 
   it("matches a parameter name in the filter", async () => {
@@ -71,7 +74,7 @@ describe("APIDocsPage", () => {
     await user.type(screen.getByPlaceholderText(/filter endpoints/i), "index");
 
     expect(screen.getByText(declared.path)).toBeInTheDocument();
-    expect(screen.queryByText(legacy.path)).not.toBeInTheDocument();
+    expect(screen.queryByText(withoutParameters.path)).not.toBeInTheDocument();
     expect(
       screen.queryByText(/no endpoints match your search/i),
     ).not.toBeInTheDocument();
@@ -82,8 +85,8 @@ describe("APIDocsPage", () => {
     renderPage();
 
     const input = screen.getByPlaceholderText(/filter endpoints/i);
-    await user.type(input, "audit");
-    expect(screen.getByText(legacy.path)).toBeInTheDocument();
+    await user.type(input, "alert");
+    expect(screen.getByText(withoutParameters.path)).toBeInTheDocument();
     expect(screen.queryByText(declared.path)).not.toBeInTheDocument();
   });
 
@@ -91,8 +94,8 @@ describe("APIDocsPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    // The legacy row has no button, so the only one inside the endpoint
-    // list belongs to the declared route.
+    // The row with no parameter list has no button, so the only one inside
+    // the endpoint list belongs to the declared route.
     const row = screen.getByRole("button", { name: /disks\/attach/ });
     await user.click(row);
 

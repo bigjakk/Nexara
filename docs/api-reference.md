@@ -199,8 +199,10 @@ parameter — a report's `parameters`, for instance — are the handler's to
 validate and are documented with their endpoint. A handful of routes predate
 the declaration layer and still parse their own input; the catalog does not
 mark them, and an empty parameter list is not the tell — a declared endpoint
-that takes no parameters at all renders identically, and still rejects every
-key sent to it.
+that declares no parameters renders identically, and refuses any query key,
+and on a POST, PUT or PATCH any key in a JSON body. (The branding logo and
+favicon uploads are declared that way too, and read their multipart form
+fields themselves.)
 
 ## Response Envelope
 

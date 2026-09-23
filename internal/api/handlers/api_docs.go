@@ -102,10 +102,13 @@ type APIEndpoint struct {
 	Group       string `json:"group"`
 
 	// Parameters is the route's full request contract — path, query and
-	// body alike. It is empty for a legacy route, and that emptiness is
-	// honest rather than a placeholder: the route genuinely has no
-	// machine-readable schema, and the gap is what tells a reader which
-	// endpoints have been migrated.
+	// body alike. It is absent in two different cases the payload does not
+	// tell apart: a declared route that declares no parameters (and so
+	// refuses any query key, and on a POST, PUT or PATCH any key in a JSON
+	// body — a multipart upload's form fields are its handler's to read), and
+	// one of the legacy routes, which has no machine-readable schema. So an
+	// empty list is not the mark of a legacy route — docs/api-reference.md
+	// says the same.
 	Parameters []APIParameter `json:"parameters,omitempty"`
 }
 
@@ -243,9 +246,12 @@ type APIItems struct {
 // class is the half they cannot guess.
 //
 // One narrowing is NOT expressible in either place and is stated in the
-// route's Description instead: proxmox.ValidateSnapshotName also rejects the
-// literal name "current", which Proxmox reserves. A schema facet cannot
-// say "anything but this one word", so the prose carries it.
+// snap_name PARAMETER's Description instead (internal/api/registry_vms.go and
+// internal/api/registry_containers.go): Proxmox reserves some names outright,
+// and the set differs by guest kind — "current" for both, "pending" (in any
+// case) for a VM, "vzdump" for a container; internal/proxmox/client_guests.go
+// holds the rule and cites upstream for each. A schema facet cannot say
+// "anything but these words", so the prose carries it.
 //
 // What is published here is deliberately a SUBSET of the catalogue entry
 // (internal/api/apischema/catalogue.go). The entry also carries the
