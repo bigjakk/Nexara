@@ -178,7 +178,10 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 		return
 	}
 	if err != nil {
-		logger.Error("proxy request failed", "error", err)
+		// Logged through RedactConsoleError, with no ticket yet: see there for
+		// what a refused ticket request's error can carry. Whether the guest
+		// is off is still read from the error as it came back.
+		logger.Error("proxy request failed", "error", pxClient.RedactConsoleError(err, ""))
 		if proxmox.IsGuestNotRunningError(err) {
 			// Tell the browser the guest is powered off so it can park the
 			// console instead of reconnect-looping against a dead guest.
@@ -281,7 +284,10 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 		for {
 			_, msg, readErr := pxConn.ReadMessage()
 			if readErr != nil {
-				logger.Debug("proxmox read error", "error", readErr)
+				// Through RedactConsoleError: a close frame's text is the
+				// peer's to write, and this session's ticket and the API
+				// token are not to be repeated here either.
+				logger.Debug("proxmox read error", "error", pxClient.RedactConsoleError(readErr, vncResp.Ticket))
 				return
 			}
 

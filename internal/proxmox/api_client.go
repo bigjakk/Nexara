@@ -29,6 +29,12 @@ type apiClient struct {
 	tokenID    string // e.g. "user@pam!tokenname" — needed for terminal handshake
 	tlsCfg     *tls.Config
 
+	// tokenSecret is the bare API token secret, which authHeader already holds
+	// in plaintext. It is kept apart so console.go can scrub it out of what a
+	// peer echoes back even when the peer echoes it without the header around
+	// it.
+	tokenSecret string
+
 	// auth injects credentials into each outbound request. Set once at
 	// construction and never mutated for cached clients; BootstrapClient
 	// swaps it exactly once, in Login, before any concurrent use.
@@ -80,10 +86,11 @@ func newAPIClient(cfg ClientConfig, authPrefix string) (*apiClient, error) {
 		// authHeader is retained alongside auth because console.go builds a
 		// websocket http.Header rather than an *http.Request and reads it
 		// directly.
-		authHeader: authHeader,
-		auth:       tokenAuth{header: authHeader},
-		tokenID:    cfg.TokenID,
-		tlsCfg:     tlsCfg,
+		authHeader:  authHeader,
+		auth:        tokenAuth{header: authHeader},
+		tokenID:     cfg.TokenID,
+		tlsCfg:      tlsCfg,
+		tokenSecret: cfg.TokenSecret,
 	}, nil
 }
 

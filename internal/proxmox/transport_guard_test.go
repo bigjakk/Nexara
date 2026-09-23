@@ -2,96 +2,296 @@ package proxmox
 
 import (
 	"context"
+	"crypto/tls"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/gorilla/websocket"
 )
 
-// transportConstructorExempt names the functions allowed to build an
-// http.Transport or http.Client. Everything else in this package must go
-// through buildHTTPClient.
+// guardedTypes are the connection-making types this package may build only
+// inside the functions transportConstructorExempt names for them: a client, a
+// transport, and three dialers. Each key is the type's import path and name,
+// taken from the type itself, so a misspelt entry cannot quietly guard
+// nothing.
+var guardedTypes = func() map[string]bool {
+	types := map[string]bool{}
+	for _, typ := range []reflect.Type{
+		reflect.TypeFor[http.Transport](),
+		reflect.TypeFor[http.Client](),
+		reflect.TypeFor[net.Dialer](),
+		reflect.TypeFor[tls.Dialer](),
+		reflect.TypeFor[websocket.Dialer](),
+	} {
+		types[typ.PkgPath()+"."+typ.Name()] = true
+	}
+	return types
+}()
+
+// guardedUses are ready-made ways of connecting that carry none of the
+// hardening, so using one at all is a fork: the default clients and dialer,
+// which pin no certificate and pass no SSRF guard, and the functions that dial
+// or fetch with them — or with a net.Dialer of their own — under the hood.
+// These are values and functions, which reflect cannot name; the fixture
+// TestGuard_SeesEveryForkedConstruction reads has to use each one and see it
+// flagged, which is what keeps a misspelt entry from guarding nothing.
+var guardedUses = map[string]bool{
+	"net/http.DefaultClient":    true,
+	"net/http.DefaultTransport": true,
+	"net/http.Get":              true,
+	"net/http.Head":             true,
+	"net/http.Post":             true,
+	"net/http.PostForm":         true,
+	"net.Dial":                  true,
+	"net.DialTimeout":           true,
+	"net.DialTCP":               true,
+	"net.DialUDP":               true,
+	"net.DialIP":                true,
+	"net.DialUnix":              true,
+	"crypto/tls.Dial":           true,
+	"crypto/tls.DialWithDialer": true,
+	"github.com/gorilla/websocket.DefaultDialer": true,
+}
+
+// constructorExemption is what one function may build.
+type constructorExemption struct {
+	builds []string // keys of guardedTypes
+	reason string
+}
+
+// transportConstructorExempt names the functions allowed to build a guarded
+// type, and which ones. Everything else in this package must get its
+// connections through them.
 //
-// buildHTTPClient is the sole owner of the SSRF dial guard, TLS fingerprint
-// pinning (with session tickets disabled), and redirect refusal. A second
-// constructor anywhere in this package silently forks that hardening: the next
-// person to tighten one copy has no way to know the other exists, and the
-// forked client is the one that talks to a user-supplied URL.
+// buildHTTPClient is the sole owner of TLS fingerprint pinning (with session
+// tickets disabled) and redirect refusal, and guardedDialer of the SSRF dial
+// guard. A second constructor anywhere in this package silently forks that
+// hardening: the next person to tighten one copy has no way to know the other
+// exists, and the forked client is the one that talks to a user-supplied URL.
 //
 // doMultipart is exempt because it does NOT build a fresh transport — it
 // Clone()s the hardened one to widen the write buffer for uploads, so it
 // inherits every setting by construction. It still needs its own http.Client
 // to drop the request timeout for long uploads, and it re-applies
 // refuseRedirect explicitly.
-var transportConstructorExempt = map[string]string{
-	"buildHTTPClient": "sole owner of the hardened transport",
-	"doMultipart":     "clones the hardened transport; own client only to drop the upload timeout",
+//
+// consoleDialer builds the console's websocket dialer, which no http.Client
+// can stand in for; it connects through guardedDialer and reuses the
+// tls.Config buildHTTPClient built. An exemption covers only the types it
+// names, so consoleDialer building a net.Dialer of its own is still a fork.
+var transportConstructorExempt = map[string]constructorExemption{
+	"buildHTTPClient": {[]string{"net/http.Transport", "net/http.Client"}, "sole owner of the hardened transport"},
+	"doMultipart":     {[]string{"net/http.Client"}, "clones the hardened transport; own client only to drop the upload timeout"},
+	"guardedDialer":   {[]string{"net.Dialer"}, "sole owner of the SSRF dial guard"},
+	"consoleDialer":   {[]string{"github.com/gorilla/websocket.Dialer"}, "the console's websocket dialer; connects through guardedDialer"},
 }
 
-func TestGuard_SingleTransportConstructor(t *testing.T) {
+// guardMention is one construction of a guarded type, type declaration
+// holding one, or use of a guarded value or function.
+type guardMention struct {
+	fn   string // the enclosing function, or "type X" / "var X" at package level
+	name string // a key of guardedTypes or guardedUses
+	pos  token.Position
+}
+
+// guardedMentions returns everything in files the guard judges:
+//
+//   - a construction of a guarded type: a composite literal, new(T), or a
+//     declared variable of the type itself — a pointer variable, a type
+//     assertion or a parameter type builds nothing and is not one;
+//   - a type declaration, at package level or in a function, that holds a
+//     guarded type by value — an alias, a defined type, an embedded or plain
+//     field — because a literal of it builds the guarded type under a name
+//     the construction rule cannot see. A pointer, a function type or an
+//     interface holds nothing, so those are skipped;
+//   - any use of a guarded value or function.
+//
+// Selectors are resolved through each file's imports by path, so an aliased
+// import cannot hide a mention. It reads syntax, not types: a guarded value
+// reached through a variable or a function that returns one is not seen.
+func guardedMentions(fset *token.FileSet, files []*ast.File) []guardMention {
+	var found []guardMention
+	for _, file := range files {
+		imports := map[string]string{} // local name → import path
+		for _, imp := range file.Imports {
+			p, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				continue
+			}
+			local := path.Base(p)
+			if imp.Name != nil {
+				local = imp.Name.Name
+			}
+			imports[local] = p
+		}
+		resolve := func(e ast.Expr) (string, bool) {
+			sel, ok := e.(*ast.SelectorExpr)
+			if !ok {
+				return "", false
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok {
+				return "", false
+			}
+			p, ok := imports[pkg.Name]
+			if !ok {
+				return "", false
+			}
+			return p + "." + sel.Sel.Name, true
+		}
+		record := func(fn string, name string, at ast.Node) {
+			found = append(found, guardMention{fn: fn, name: name, pos: fset.Position(at.Pos())})
+		}
+		// held reports the guarded types a type declaration holds by value.
+		held := func(fn string, typ ast.Expr) {
+			ast.Inspect(typ, func(n ast.Node) bool {
+				switch n.(type) {
+				case *ast.StarExpr, *ast.FuncType, *ast.InterfaceType:
+					return false
+				}
+				if e, ok := n.(ast.Expr); ok {
+					if name, ok := resolve(e); ok && guardedTypes[name] {
+						record(fn, name, e)
+						return false
+					}
+				}
+				return true
+			})
+		}
+		visit := func(fn string, node ast.Node) {
+			ast.Inspect(node, func(n ast.Node) bool {
+				var built ast.Expr
+				switch x := n.(type) {
+				case *ast.TypeSpec:
+					held(fn, x.Type)
+					return false
+				case *ast.CompositeLit:
+					built = x.Type
+				case *ast.CallExpr:
+					if id, ok := x.Fun.(*ast.Ident); ok && id.Name == "new" && len(x.Args) == 1 {
+						built = x.Args[0]
+					}
+				case *ast.ValueSpec:
+					built = x.Type
+				case *ast.SelectorExpr:
+					if name, ok := resolve(x); ok && guardedUses[name] {
+						record(fn, name, x)
+					}
+				}
+				if name, ok := resolve(built); ok && guardedTypes[name] {
+					record(fn, name, built)
+				}
+				return true
+			})
+		}
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if d.Body != nil {
+					visit(d.Name.Name, d.Body)
+				}
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					switch s := spec.(type) {
+					case *ast.TypeSpec:
+						visit("type "+s.Name.Name, s)
+					case *ast.ValueSpec:
+						visit("var "+s.Names[0].Name, s)
+					}
+				}
+			}
+		}
+	}
+	return found
+}
+
+// judgeMentions splits mentions into the forks — every one no exemption
+// allows — and the exemptions actually used, as "function name" pairs.
+func judgeMentions(mentions []guardMention, exempt map[string]constructorExemption) (forks []guardMention, used map[string]bool) {
+	used = map[string]bool{}
+	for _, m := range mentions {
+		if e, ok := exempt[m.fn]; ok && slices.Contains(e.builds, m.name) {
+			used[m.fn+" "+m.name] = true
+			continue
+		}
+		forks = append(forks, m)
+	}
+	return forks, used
+}
+
+// parsePackageSources parses every non-test .go file in the package.
+func parsePackageSources(t *testing.T) (*token.FileSet, []*ast.File) {
+	t.Helper()
 	fset := token.NewFileSet()
 	paths, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
-	if len(paths) == 0 {
-		t.Fatal("no .go files found — the guard would pass vacuously")
-	}
-
-	var checked int
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
+	var files []*ast.File
+	for _, p := range paths {
+		if strings.HasSuffix(p, "_test.go") {
 			continue
 		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
+		file, err := parser.ParseFile(fset, p, nil, 0)
 		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
+			t.Fatalf("parse %s: %v", p, err)
 		}
-		checked++
+		files = append(files, file)
+	}
+	if len(files) == 0 {
+		t.Fatal("no non-test .go files parsed — the guard would pass vacuously")
+	}
+	return fset, files
+}
 
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			if _, exempt := transportConstructorExempt[fn.Name.Name]; exempt {
-				continue
-			}
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				lit, ok := n.(*ast.CompositeLit)
-				if !ok {
-					return true
-				}
-				sel, ok := lit.Type.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				pkg, ok := sel.X.(*ast.Ident)
-				if !ok || pkg.Name != "http" {
-					return true
-				}
-				if sel.Sel.Name != "Transport" && sel.Sel.Name != "Client" {
-					return true
-				}
-				t.Errorf(
-					"%s:%d: %s builds an http.%s directly.\n"+
-						"Use buildHTTPClient — it owns the SSRF dial guard, TLS fingerprint\n"+
-						"pinning and redirect refusal. A second constructor forks that hardening.\n"+
-						"If this is genuinely a special case, add it to transportConstructorExempt\n"+
-						"with a reason.",
-					path, fset.Position(lit.Pos()).Line, fn.Name.Name, sel.Sel.Name,
-				)
-				return true
-			})
-		}
+func TestGuard_SingleTransportConstructor(t *testing.T) {
+	fset, files := parsePackageSources(t)
+	forks, used := judgeMentions(guardedMentions(fset, files), transportConstructorExempt)
+	for _, m := range forks {
+		t.Errorf(
+			"%s: %s builds, declares or uses %s directly.\n"+
+				"Connections in this package come from buildHTTPClient (TLS pinning, redirect\n"+
+				"refusal), guardedDialer (the SSRF dial guard) and consoleDialer (the console's\n"+
+				"websocket dialer, built on both). A second way of connecting forks that\n"+
+				"hardening. If this is genuinely a special case, add it to\n"+
+				"transportConstructorExempt with a reason.",
+			m.pos, m.fn, m.name,
+		)
 	}
 
-	if checked == 0 {
-		t.Fatal("no non-test .go files parsed — the guard would pass vacuously")
+	// Every exemption has to be in use, type by type. One that no longer is
+	// has stopped being a review surface — and is room for a fork to appear
+	// under a name the list already waves through. An exempt function that
+	// does not exist at all is TestGuard_ExemptConstructorsExist's to report.
+	declared := map[string]bool{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				declared[fn.Name.Name] = true
+			}
+		}
+	}
+	for fn, e := range transportConstructorExempt {
+		for _, name := range e.builds {
+			if !guardedTypes[name] {
+				t.Errorf("transportConstructorExempt[%q] names %q, which is not a guarded type", fn, name)
+				continue
+			}
+			if declared[fn] && !used[fn+" "+name] {
+				t.Errorf("transportConstructorExempt[%q] allows %s, which it no longer builds — remove it from the entry", fn, name)
+			}
+		}
 	}
 }
 
@@ -99,28 +299,177 @@ func TestGuard_SingleTransportConstructor(t *testing.T) {
 // transportConstructorExempt no longer names a real function. An exemption list
 // that drifts stops being a review surface.
 func TestGuard_ExemptConstructorsExist(t *testing.T) {
-	fset := token.NewFileSet()
-	paths, _ := filepath.Glob("*.go")
-
+	_, files := parsePackageSources(t)
 	found := map[string]bool{}
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
+	for _, file := range files {
 		for _, decl := range file.Decls {
 			if fn, ok := decl.(*ast.FuncDecl); ok {
 				found[fn.Name.Name] = true
 			}
 		}
 	}
-
-	for name, reason := range transportConstructorExempt {
+	for name, e := range transportConstructorExempt {
 		if !found[name] {
-			t.Errorf("transportConstructorExempt names %q (%q) but no such function exists — remove the stale entry", name, reason)
+			t.Errorf("transportConstructorExempt names %q (%q) but no such function exists — remove the stale entry", name, e.reason)
+		}
+	}
+}
+
+// forkedSource is a file the guard has to read correctly: every shape of
+// fork, under aliased imports, beside every exemption used as it is allowed
+// to be and constructs that build nothing.
+const forkedSource = `package fixture
+
+import (
+	stdtls "crypto/tls"
+	gws "github.com/gorilla/websocket"
+	"net"
+	nethttp "net/http"
+)
+
+var packageLevelDialer = &net.Dialer{}
+
+type aliasedDialer = gws.Dialer
+
+type definedClient nethttp.Client
+
+type embedsATransport struct{ nethttp.Transport }
+
+type holdsATLSDialer struct{ d stdtls.Dialer }
+
+type holdsAPointerOnly struct{ c *nethttp.Client }
+
+type takesAClient func(nethttp.Client)
+
+func buildHTTPClient() (*nethttp.Client, *nethttp.Transport) {
+	return &nethttp.Client{}, &nethttp.Transport{}
+}
+
+func doMultipart(rt nethttp.RoundTripper) *nethttp.Client {
+	_ = rt.(*nethttp.Transport)
+	return &nethttp.Client{}
+}
+
+func guardedDialer() *net.Dialer { return &net.Dialer{} }
+
+func consoleDialer() *gws.Dialer {
+	_ = &net.Dialer{}
+	return &gws.Dialer{}
+}
+
+func forksADialer() { _ = (&net.Dialer{}).DialContext }
+
+func forksATLSDialer() { _ = &stdtls.Dialer{} }
+
+func forksAWebsocketDialer() { _ = gws.Dialer{} }
+
+func declaresALocalAlias() {
+	type d = gws.Dialer
+	_ = d{}
+}
+
+func usesTheDefaultDialer() { _ = gws.DefaultDialer }
+
+func usesTheDefaultClient() { _ = nethttp.DefaultClient }
+
+func usesTheDefaultTransport() { _ = nethttp.DefaultTransport }
+
+func fetches() {
+	_, _ = nethttp.Get("https://192.0.2.10")
+	_, _ = nethttp.Head("https://192.0.2.10")
+	_, _ = nethttp.Post("https://192.0.2.10", "", nil)
+	_, _ = nethttp.PostForm("https://192.0.2.10", nil)
+}
+
+func dials() {
+	_, _ = net.Dial("tcp", "192.0.2.10:8006")
+	_, _ = net.DialTimeout("tcp", "192.0.2.10:8006", 0)
+	_, _ = net.DialTCP("tcp", nil, nil)
+	_, _ = net.DialUDP("udp", nil, nil)
+	_, _ = net.DialIP("ip4:1", nil, nil)
+	_, _ = net.DialUnix("unix", nil, nil)
+	_, _ = stdtls.Dial("tcp", "192.0.2.10:8006", nil)
+	_, _ = stdtls.DialWithDialer(nil, "tcp", "192.0.2.10:8006", nil)
+}
+
+func declaresATransport() { var t nethttp.Transport; _ = &t }
+
+func newsAClient() { _ = new(nethttp.Client) }
+
+func holdsAPointerVariable() { var c *nethttp.Client; _ = c }
+`
+
+// TestGuard_SeesEveryForkedConstruction is the positive control for
+// TestGuard_SingleTransportConstructor: over forkedSource the guard has to
+// report exactly the forks in it — each shape, including through an aliased
+// import, at package level, in a type declaration, and an exempt function
+// building a type its exemption does not name — and nothing that builds
+// nothing. It also has to find every guarded name at least once, so no entry
+// in guardedTypes or guardedUses can stop matching without this failing.
+// Without it, a guard that had stopped seeing a shape would pass the real
+// package quietly.
+func TestGuard_SeesEveryForkedConstruction(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "fixture.go", forkedSource, 0)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	forks, used := judgeMentions(guardedMentions(fset, []*ast.File{file}), transportConstructorExempt)
+
+	got := make([]string, 0, len(forks))
+	seen := map[string]bool{}
+	for _, m := range forks {
+		got = append(got, m.fn+" "+m.name)
+		seen[m.name] = true
+	}
+	slices.Sort(got)
+	want := []string{
+		"consoleDialer net.Dialer",
+		"declaresALocalAlias github.com/gorilla/websocket.Dialer",
+		"declaresATransport net/http.Transport",
+		"dials crypto/tls.Dial",
+		"dials crypto/tls.DialWithDialer",
+		"dials net.Dial",
+		"dials net.DialIP",
+		"dials net.DialTCP",
+		"dials net.DialTimeout",
+		"dials net.DialUDP",
+		"dials net.DialUnix",
+		"fetches net/http.Get",
+		"fetches net/http.Head",
+		"fetches net/http.Post",
+		"fetches net/http.PostForm",
+		"forksADialer net.Dialer",
+		"forksATLSDialer crypto/tls.Dialer",
+		"forksAWebsocketDialer github.com/gorilla/websocket.Dialer",
+		"newsAClient net/http.Client",
+		"type aliasedDialer github.com/gorilla/websocket.Dialer",
+		"type definedClient net/http.Client",
+		"type embedsATransport net/http.Transport",
+		"type holdsATLSDialer crypto/tls.Dialer",
+		"usesTheDefaultClient net/http.DefaultClient",
+		"usesTheDefaultDialer github.com/gorilla/websocket.DefaultDialer",
+		"usesTheDefaultTransport net/http.DefaultTransport",
+		"var packageLevelDialer net.Dialer",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("forks = %q\nwant    %q", got, want)
+	}
+	for name := range guardedTypes {
+		if !seen[name] {
+			t.Errorf("the fixture never shows the guard catching a fork of guarded type %s", name)
+		}
+	}
+	for name := range guardedUses {
+		if !seen[name] {
+			t.Errorf("the fixture never shows the guard catching a use of %s — a misspelt entry would look the same", name)
+		}
+	}
+	for fn, e := range transportConstructorExempt {
+		for _, name := range e.builds {
+			if !used[fn+" "+name] {
+				t.Errorf("the allowed %s in %s was not credited to its exemption", name, fn)
+			}
 		}
 	}
 }

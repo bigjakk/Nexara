@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -126,6 +127,13 @@ func (r clusterRow) Scan(dest ...any) error {
 // something else in every field.
 func openSession(t *testing.T, kind string, scope auth.ConsoleScope, pve *fakeProxmox, query string) *gorillaws.Conn {
 	t.Helper()
+	return openSessionAt(t, kind, scope, pve.srv.URL, query, testLogger())
+}
+
+// openSessionAt is openSession against any stand-in Proxmox at apiURL, with
+// the handler logging to logger.
+func openSessionAt(t *testing.T, kind string, scope auth.ConsoleScope, apiURL, query string, logger *slog.Logger) *gorillaws.Conn {
+	t.Helper()
 	secret, err := crypto.Encrypt("fake-token-secret", sessionKey)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
@@ -133,11 +141,10 @@ func openSession(t *testing.T, kind string, scope auth.ConsoleScope, pve *fakePr
 	queries := db.New(&sessionDB{cluster: db.Cluster{
 		ID:                   uuid.MustParse(scope.ClusterID),
 		Name:                 "cluster01",
-		ApiUrl:               pve.srv.URL,
+		ApiUrl:               apiURL,
 		TokenID:              "root@pam!nexara",
 		TokenSecretEncrypted: secret,
 	}})
-	logger := testLogger()
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
 
 	cfg := wsConfigWithSubprotocol(nil)

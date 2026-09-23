@@ -31,8 +31,8 @@ func NormalizeFingerprint(fp string) string {
 }
 
 // buildHTTPClient constructs the hardened HTTP client every Proxmox client
-// shares: the SSRF dial guard, TLS fingerprint pinning with session tickets
-// disabled, and redirect refusal.
+// shares: the SSRF dial guard (through guardedDialer), TLS fingerprint pinning
+// with session tickets disabled, and redirect refusal.
 //
 // This is the SOLE owner of those settings. Constructing a second
 // http.Transport or http.Client elsewhere in this package would silently fork
@@ -70,14 +70,8 @@ func buildHTTPClient(tlsFingerprint string, timeout time.Duration) (*http.Client
 	}
 
 	transport := &http.Transport{
-		TLSClientConfig: tlsCfg,
-		DialContext: (&net.Dialer{
-			Timeout:   timeout,
-			KeepAlive: 30 * time.Second,
-			// Block dialing to cloud metadata, multicast, broadcast, Class E,
-			// or unspecified IPs even if DNS resolves to one (rebinding defence).
-			Control: netguard.DialControlSSRFGuard,
-		}).DialContext,
+		TLSClientConfig:     tlsCfg,
+		DialContext:         guardedDialer(timeout).DialContext,
 		MaxIdleConnsPerHost: 10,
 		IdleConnTimeout:     90 * time.Second,
 	}
@@ -105,6 +99,27 @@ func buildHTTPClient(tlsFingerprint string, timeout time.Duration) (*http.Client
 		// never minted for.
 		Jar: nil,
 	}, tlsCfg
+}
+
+// guardedDialer is the net.Dialer every connection this package opens is made
+// with, and the sole owner of the SSRF dial guard: buildHTTPClient's transport
+// connects through it, and so does the console websocket dialer
+// (consoleDialer, console.go). A third way of connecting that built its own
+// dialer would skip the guard without anything saying so.
+// TestGuard_SingleTransportConstructor catches the shapes one would most
+// likely take — a dialer, transport or client built here, a type declared
+// around one, a default client or a standard-library dial function used here —
+// but it reads syntax, not types, so it is a tripwire rather than a proof.
+// timeout bounds the connect alone; zero leaves it to the context the dial is
+// given.
+func guardedDialer(timeout time.Duration) *net.Dialer {
+	return &net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 30 * time.Second,
+		// Block dialing to cloud metadata, multicast, broadcast, Class E,
+		// or unspecified IPs even if DNS resolves to one (rebinding defence).
+		Control: netguard.DialControlSSRFGuard,
+	}
 }
 
 // requestAuth injects credentials into one outbound Proxmox request.

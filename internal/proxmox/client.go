@@ -164,6 +164,10 @@ func (c ClientConfig) MarshalJSON() ([]byte, error) {
 // Client communicates with a single Proxmox VE host.
 type Client struct {
 	*apiClient
+
+	// console shortens the bounds on a console's waits for tests. Nothing
+	// else sets it, and its zero value means the defaults — see consoleWaits.
+	console consoleTimeouts
 }
 
 // NewClient creates a Client from the given config.

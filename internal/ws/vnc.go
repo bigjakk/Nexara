@@ -136,7 +136,10 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 		vncPath = "qemu/" + strconv.Itoa(vmid)
 	}
 	if err != nil {
-		logger.Error("vncproxy request failed", "error", err)
+		// Logged through RedactConsoleError, with no ticket yet: see there for
+		// what a refused ticket request's error can carry. Whether the guest
+		// is off is still read from the error as it came back.
+		logger.Error("vncproxy request failed", "error", pxClient.RedactConsoleError(err, ""))
 		if proxmox.IsGuestNotRunningError(err) {
 			// Tell the browser the guest is powered off so it can park the
 			// console instead of reconnect-looping against a dead guest.
@@ -158,8 +161,22 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 
 	logger.Info("VNC session established")
 
-	// Send connected status with the VNC ticket as the password for noVNC RFB auth.
-	connectedMsg := `{"type":"connected","password":` + strconv.Quote(vncResp.Ticket) + `}`
+	// Send connected status with the password noVNC's RFB auth needs.
+	//
+	// Current qemu-server and pve-container generate an eight-character VNC
+	// password whenever websocket=1, which the vncproxy calls always send,
+	// return it as "password", and put it in front of the ticket too, for
+	// clients that still send the whole ticket (src/PVE/API2/Qemu.pm and
+	// src/PVE/API2/LXC.pm, vncproxy; the prefix is marked FIXME for a major
+	// release). The password is all RFB authentication checks, so the browser
+	// is sent that and not the ticket. A PVE that returns no password predates
+	// that change (qemu-server 282ec11d): there the ticket itself was the VNC
+	// password, so it is what is sent.
+	password := vncResp.Password
+	if password == "" {
+		password = vncResp.Ticket
+	}
+	connectedMsg := `{"type":"connected","password":` + strconv.Quote(password) + `}`
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(connectedMsg))
 
 	// Bidirectional proxy: browser WebSocket ↔ Proxmox WebSocket.
