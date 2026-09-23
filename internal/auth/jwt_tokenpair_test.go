@@ -93,15 +93,3 @@ func TestTokenPair_RefreshTokenIsNeverMarshalled(t *testing.T) {
 		}
 	})
 }
-
-// TestTokenPair_RefreshTokenSurvivesInProcess records the other half of the
-// decision: json:"-" suppresses SERIALISATION, not the field. Code that
-// legitimately holds an access/refresh pair in memory keeps working, so the
-// remedy costs nothing — which is why it was chosen over deleting the field.
-func TestTokenPair_RefreshTokenSurvivesInProcess(t *testing.T) {
-	pair := TokenPair{AccessToken: "a", RefreshToken: "r", ExpiresAt: 1}
-	if pair.RefreshToken != "r" {
-		t.Errorf("RefreshToken = %q, want %q — json:\"-\" must not change in-process use",
-			pair.RefreshToken, "r")
-	}
-}

@@ -78,7 +78,12 @@ const WSScopeHub = "hub"
 // is closed.
 //
 // Nothing in the tree marshals or unmarshals this type today, so json:"-"
-// costs nothing; TestTokenPair_RefreshTokenIsNeverMarshalled pins it.
+// costs nothing; TestTokenPair_RefreshTokenIsNeverMarshalled pins it. The
+// field itself stays — json:"-" suppresses serialisation, not the field — so
+// a future in-memory holder of a pair keeps it; nothing reads it today. Its
+// existence needs no test of its own: deleting it fails to compile the
+// package's tests — the struct literal in
+// TestTokenPair_RefreshTokenIsNeverMarshalled is its one reference.
 type TokenPair struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"-"`
