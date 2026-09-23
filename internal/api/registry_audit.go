@@ -8,8 +8,9 @@ import (
 )
 
 // The shared declaration vocabulary this file uses — clusterScope,
-// clusterCheck, globalCheck, clusterParams, withParams, optString and
+// clusterCheck, globalCheck, clusterParams, withParams, optString, optFlag and
 // taskVmidsParam — lives in registry_vms.go and registry_tasks.go.
+// emptyOrUUID lives in registry_pbs.go.
 
 // auditScope is the instance-wide collection.
 const auditScope = pathPrefix + "audit-log"
@@ -20,6 +21,14 @@ const auditScope = pathPrefix + "audit-log"
 // They are declared once because parseAuditFilters parses them once, for all
 // three — and the ONE filter that is not here is the reason this is a function
 // rather than a var. See auditFilterClusterParam.
+//
+// An EMPTY value of any of the narrowing filters here — every parameter but
+// limit and offset, whose empty value is a 400 like any integer's — is "no
+// filter", as it was before the registry, when the handler applied each one
+// only `if x != ""`. That is why the free-text filters and the two time
+// bounds carry no MinLength or pattern — the handler still parses a
+// non-empty time bound as RFC 3339 — and why user_id takes the empty-or-uuid
+// rule rather than the uuid format.
 func auditFilterParams(extra apischema.Properties) apischema.Properties {
 	return withParams(apischema.Properties{
 		"limit": {
@@ -40,29 +49,36 @@ func auditFilterParams(extra apischema.Properties) apischema.Properties {
 			Typetext:    "<integer>",
 			Description: "Rows to skip. Ignored on the export, which always starts at the newest row.",
 		},
-		"resource_type": optString(64, "<string>", "Narrow to one audit_log.resource_type, e.g. vm or cluster."),
+		"resource_type": optString(64, "<string>", "Narrow to one audit_log.resource_type, e.g. vm or cluster. "+
+			"Empty or omitted returns every type."),
+		// Empty-or-uuid rather than the uuid format, which rejects "":
+		// parseAuditFilters parsed only a non-empty value before the
+		// registry, so ?user_id= meant "every user".
 		"user_id": {
 			Type:        apischema.String,
 			Optional:    true,
-			Format:      "uuid",
+			Pattern:     emptyOrUUID,
+			MaxLength:   apischema.Ptr(36),
 			Typetext:    "<uuid>",
-			Description: "Narrow to the entries one user produced.",
+			Description: "Narrow to the entries one user produced. Empty or omitted does not filter by user.",
 		},
-		"action": optString(128, "<string>", "Narrow to one action, e.g. vm_created. GET /api/v1/audit-log/actions lists them."),
-		"source": optString(32, "<string>", "Narrow to one entry source, e.g. nexara or proxmox."),
+		"action": optString(128, "<string>", "Narrow to one action, e.g. vm_created. GET /api/v1/audit-log/actions "+
+			"lists them. Empty or omitted returns every action."),
+		"source": optString(32, "<string>", "Narrow to one entry source, e.g. nexara or proxmox. Empty or omitted "+
+			"returns every source."),
 		"start_time": {
 			Type:        apischema.String,
 			Optional:    true,
 			MaxLength:   apischema.Ptr(64),
 			Typetext:    "<RFC3339 timestamp>",
-			Description: "Oldest entry to return, inclusive.",
+			Description: "Oldest entry to return, inclusive. Empty or omitted sets no lower bound.",
 		},
 		"end_time": {
 			Type:        apischema.String,
 			Optional:    true,
 			MaxLength:   apischema.Ptr(64),
 			Typetext:    "<RFC3339 timestamp>",
-			Description: "Newest entry to return, inclusive.",
+			Description: "Newest entry to return, inclusive. Empty or omitted sets no upper bound.",
 		},
 		"vmids": taskVmidsParam,
 	}, extra)
@@ -86,14 +102,24 @@ func auditFilterParams(extra apischema.Properties) apischema.Properties {
 // refusal is checkMisplaced's (registry_params.go), not "unknown parameter":
 // cluster_id IS declared on that route, as the path parameter, so the query
 // copy is reported as a path parameter sent in the wrong place.
+//
+// On the two routes that DO declare it, the EMPTY string is accepted and means
+// "do not filter" — every cluster the caller can see — which is what the
+// handler read before the registry (`if cid != ""`). Hence the empty-or-uuid
+// pattern rather than the uuid format, which rejects "", as
+// alertFilterClusterParam does for the same query parameter. None of that
+// reaches the per-cluster route: checkMisplaced refuses the key there whatever
+// its value, an empty one included.
 var auditFilterClusterParam = apischema.Property{
-	Type:     apischema.String,
-	Alias:    "cluster_id",
-	Optional: true,
-	Format:   "uuid",
-	Typetext: "<uuid>",
-	Description: "Narrow the listing to one cluster. Also accepted as \"cluster_id\". The caller must hold " +
-		"view:audit on it, or the request is refused rather than silently emptied.",
+	Type:      apischema.String,
+	Alias:     "cluster_id",
+	Optional:  true,
+	Pattern:   emptyOrUUID,
+	MaxLength: apischema.Ptr(36),
+	Typetext:  "<uuid>",
+	Description: "Narrow the listing to one cluster; the caller must hold view:audit on it, or the request is " +
+		"refused rather than silently emptied. Empty or omitted lists every cluster the caller can see. " +
+		"Also accepted as \"cluster_id\".",
 }
 
 // auditScopeReason is the Advisory justification the three enumerating reads

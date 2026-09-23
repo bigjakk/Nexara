@@ -186,13 +186,17 @@ func (h *AuditHandler) parseAuditFilters(p *apischema.Params, access clusterAcce
 	listP.Limit = safeconv.Int32(int(p.Int("limit")))
 	listP.Offset = safeconv.Int32(int(p.Int("offset")))
 
-	if rt, supplied := p.OptString("resource_type"); supplied {
+	// Every filter below applies only when it is NON-EMPTY. An empty one is the
+	// "no filter" it was before the registry, when each was read `if x != ""`
+	// — not a value to match, which for the text filters would have been an
+	// `= ''` that finds nothing, and not a time, a uuid or a VMID list to parse.
+	if rt := p.String("resource_type"); rt != "" {
 		v := pgtype.Text{String: rt, Valid: true}
 		listP.ResourceType = v
 		countP.ResourceType = v
 	}
 
-	if uid, supplied := p.OptString("user_id"); supplied {
+	if uid := p.String("user_id"); uid != "" {
 		parsed, parseErr := parseParamUUID(uid)
 		if parseErr != nil {
 			return listP, countP, query, parseErr
@@ -202,19 +206,19 @@ func (h *AuditHandler) parseAuditFilters(p *apischema.Params, access clusterAcce
 		countP.UserID = v
 	}
 
-	if a, supplied := p.OptString("action"); supplied {
+	if a := p.String("action"); a != "" {
 		v := pgtype.Text{String: a, Valid: true}
 		listP.Action = v
 		countP.Action = v
 	}
 
-	if src, supplied := p.OptString("source"); supplied {
+	if src := p.String("source"); src != "" {
 		v := pgtype.Text{String: src, Valid: true}
 		listP.Source = v
 		countP.Source = v
 	}
 
-	if st, supplied := p.OptString("start_time"); supplied {
+	if st := p.String("start_time"); st != "" {
 		t, parseErr := time.Parse(time.RFC3339, st)
 		if parseErr != nil {
 			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid start_time (use RFC3339)")
@@ -224,7 +228,7 @@ func (h *AuditHandler) parseAuditFilters(p *apischema.Params, access clusterAcce
 		countP.StartTime = v
 	}
 
-	if et, supplied := p.OptString("end_time"); supplied {
+	if et := p.String("end_time"); et != "" {
 		t, parseErr := time.Parse(time.RFC3339, et)
 		if parseErr != nil {
 			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid end_time (use RFC3339)")
@@ -237,7 +241,7 @@ func (h *AuditHandler) parseAuditFilters(p *apischema.Params, access clusterAcce
 	// Per-guest filter over the denormalized audit_log.vmid (000084). Shares
 	// parseVmidsParam — and therefore the bound on list length — with the
 	// identically-named filter on /tasks.
-	if raw, supplied := p.OptString("vmids"); supplied {
+	if raw := p.String("vmids"); raw != "" {
 		vmids, vmidErr := parseVmidsParam(raw)
 		if vmidErr != nil {
 			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid vmids filter")
@@ -250,9 +254,11 @@ func (h *AuditHandler) parseAuditFilters(p *apischema.Params, access clusterAcce
 }
 
 // auditClusterFilter resolves the optional ?cluster_id= on the two
-// instance-wide reads and refuses one the caller may not see. An absent filter
-// comes back as the invalid zero UUID, which reaches SQL as "no cluster
-// filter".
+// instance-wide reads and refuses one the caller may not see. An absent or
+// EMPTY filter comes back as the invalid zero UUID, which reaches SQL as "no
+// cluster filter": the empty value is the "no filter" it was before the
+// registry, never a cluster to authorize, so the caller reads every cluster
+// they can see exactly as when they send nothing.
 //
 // Refusing rather than silently emptying is the point: a filter on a cluster
 // the caller has no view:audit on would otherwise come back as an empty page,
@@ -265,8 +271,8 @@ func (h *AuditHandler) parseAuditFilters(p *apischema.Params, access clusterAcce
 // SCOPE is parseAuditFilters', and a second function that touches these structs
 // without stamping it is exactly the shape the guard exists to refuse.
 func auditClusterFilter(p *apischema.Params, access clusterAccess) (pgtype.UUID, error) {
-	cid, supplied := p.OptString("filter_cluster_id")
-	if !supplied {
+	cid := p.String("filter_cluster_id")
+	if cid == "" {
 		return pgtype.UUID{}, nil
 	}
 	parsed, err := parseParamUUID(cid)

@@ -117,6 +117,24 @@ type Property struct {
 	Alias  string
 	Source Source
 	Items  *Property // element schema when Type == Array
+	// EmptyIsAbsent counts an EMPTY string as no value at all, the way a
+	// JSON null always counts (see present in validate.go): the Default
+	// applies, and Has reports false. It is for a boolean whose handler
+	// read "" as unset before this engine — ?kev= was compared with "true"
+	// and so meant false — because every spelling toBool accepts is
+	// non-empty, so nothing else lets a boolean declaration admit "". Only
+	// the exact empty string is absent; whitespace is still refused.
+	//
+	// checkDeclaration allows it on an OPTIONAL boolean only. On a required
+	// parameter it could never let "" through — an absent required value is
+	// reported missing — so it is refused there as meaningless. A string
+	// needs no such facet — "" is a value there, and a sentinel is spelled
+	// with an -or-empty rule or an enum member — and an empty string taking a
+	// string's default is exactly what the operator ruled out on 2026-09-23,
+	// which TestEmptyTextDefaultsAreRefused pins in package api. An empty
+	// number stays a 400 on purpose too, the ruling TestDRSHistoryLimitIsBounded
+	// pins there for ?limit=.
+	EmptyIsAbsent bool
 }
 
 // Properties is a route's parameter schema, keyed by parameter name.

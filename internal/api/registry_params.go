@@ -22,7 +22,9 @@ import (
 // carry is OMITTED from the map. It is never inserted as "".
 //
 // apischema treats an empty string as a supplied value that does NOT fall
-// back to the default (see present() in validate.go, and the note on it).
+// back to the default (see present() in validate.go, and the note on it) —
+// except for an optional boolean declared EmptyIsAbsent, the one opt-in case
+// where Validate counts an exact "" as absent; the CVE listing's kev is one.
 // So extracting an absent query parameter as "" would mark every optional
 // parameter on every request as supplied, and Params.Has would answer true
 // for a parameter nobody sent — collapsing the three-state read that this
@@ -174,10 +176,13 @@ func sourceDescription(src apischema.Source) string {
 // accepts a lone scalar as a one-element array), several become []string.
 //
 // "?flag" with no "=" arrives as the empty string, and an empty string is
-// a supplied value here, not an absent one. It will fail whatever format,
-// pattern or bound the parameter declares, which is the honest answer:
-// Proxmox spells a true boolean "flag=1", and guessing that a bare key
-// means true would be inventing a value the caller did not send.
+// a supplied value here, not an absent one. A boolean refuses it, and so
+// does any format, pattern, enum or length floor it does not satisfy —
+// unless the parameter is a boolean declared EmptyIsAbsent, such as the CVE
+// listing's kev, which counts it as absent so that it takes its default.
+// Either is the honest answer: Proxmox spells a true boolean "flag=1", and
+// guessing that a bare key means true would be inventing a value the caller
+// did not send.
 func queryValues(c fiber.Ctx) map[string]any {
 	args := c.Request().URI().QueryArgs()
 	if args.Len() == 0 {

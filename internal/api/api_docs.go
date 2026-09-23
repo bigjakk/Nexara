@@ -120,6 +120,9 @@ func docParameters(e Endpoint) []handlers.APIParameter {
 			Items:     docItems(prop.Items),
 			Requires:  slices.Clone(prop.Requires),
 			Rule:      docRule(prop.Format, prop.Pattern),
+
+			// Published for Alias's reason — see handlers.APIParameter.
+			EmptyIsAbsent: prop.EmptyIsAbsent,
 		})
 	}
 	sortDocParameters(out)

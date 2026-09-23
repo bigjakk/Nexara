@@ -229,6 +229,29 @@ const withoutParameters: APIEndpoint = {
   group: "Alerts",
 };
 
+/**
+ * A listing filter whose enum carries "" for "no filter", as the task
+ * listing's ?status= and the CVE listing's ?severity= do.
+ */
+const withEmptyEnumMember: APIEndpoint = {
+  method: "GET",
+  path: "/api/v1/tasks",
+  description: "List task history.",
+  permission: "view:task (filtered)",
+  group: "Tasks",
+  parameters: [
+    {
+      name: "status",
+      type: "string",
+      source: "query",
+      optional: true,
+      enum: ["", "running", "completed"],
+      description:
+        "Narrow the listing to one task state. Empty or omitted returns every state.",
+    },
+  ],
+};
+
 function renderRow(endpoint: APIEndpoint, expanded = false) {
   const onToggle = vi.fn();
   const result = render(
@@ -313,6 +336,18 @@ describe("APIEndpointRow", () => {
     expect(table.getByText("virtio")).toBeInTheDocument();
     expect(table.getByText("format: uuid")).toBeInTheDocument();
     expect(table.getByText("send with bus")).toBeInTheDocument();
+  });
+
+  it('spells an empty enum member as "" rather than rendering an empty chip', () => {
+    const { container } = renderRow(withEmptyEnumMember, true);
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText('""')).toBeInTheDocument();
+    expect(table.getByText("running")).toBeInTheDocument();
+    // Every chip, in the table and in the small-width list alike, says
+    // something. The length check keeps the loop from passing on no chips.
+    const chips = Array.from(container.querySelectorAll("code"));
+    expect(chips.length).toBeGreaterThan(0);
+    for (const chip of chips) expect(chip.textContent).not.toBe("");
   });
 
   describe("constraints", () => {

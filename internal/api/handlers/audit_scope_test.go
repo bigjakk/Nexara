@@ -188,9 +188,9 @@ func auditListMirror(t *testing.T) apischema.Properties {
 	return compiledMirror(t, apischema.Properties{
 		"limit":             {Type: apischema.Integer, Optional: true, Default: 50, Minimum: apischema.Ptr(1.0), Maximum: apischema.Ptr(200.0)},
 		"offset":            {Type: apischema.Integer, Optional: true, Default: 0, Minimum: apischema.Ptr(0.0)},
-		"filter_cluster_id": {Type: apischema.String, Alias: "cluster_id", Optional: true, Format: "uuid"},
+		"filter_cluster_id": {Type: apischema.String, Alias: "cluster_id", Optional: true, Pattern: apischema.Rule("uuid-or-empty"), MaxLength: apischema.Ptr(36)},
 		"resource_type":     {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(64)},
-		"user_id":           {Type: apischema.String, Optional: true, Format: "uuid"},
+		"user_id":           {Type: apischema.String, Optional: true, Pattern: apischema.Rule("uuid-or-empty"), MaxLength: apischema.Ptr(36)},
 		"action":            {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(128)},
 		"source":            {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(32)},
 		"start_time":        {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(64)},

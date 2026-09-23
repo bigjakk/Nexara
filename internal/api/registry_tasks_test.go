@@ -117,22 +117,51 @@ func TestTaskSortVocabulary(t *testing.T) {
 	}
 }
 
+// TestTaskStatusVocabulary holds three enums to one list. The empty string is
+// in two of them and is a state in neither: on the listing it stands for "do
+// not filter" and on the create for "running", the readings each handler gave
+// it before the registry, so it is set aside before the comparison. The update
+// never gave it a meaning. Each case says which.
 func TestTaskStatusVocabulary(t *testing.T) {
 	want := handlers.TaskStatusKeys()
 	for _, tt := range []struct {
 		method string
 		path   string
+		empty  bool
+		why    string
 	}{
-		{fiber.MethodGet, taskHistoryScope},
-		{fiber.MethodPost, taskHistoryScope},
-		{fiber.MethodPut, taskHistoryScope + "/:upid"},
+		{fiber.MethodGet, taskHistoryScope, true, "?status= has always meant every state"},
+		{fiber.MethodPost, taskHistoryScope, true, "the create has always filed an empty status as running"},
+		{fiber.MethodPut, taskHistoryScope + "/:upid", false, "the update wrote whatever status it was " +
+			"given straight into the row, so \"\" was never a sentinel there"},
 	} {
-		got := slices.Clone(declaredEndpoint(t, tt.method, tt.path).Parameters["status"].Enum)
+		declared := declaredEndpoint(t, tt.method, tt.path).Parameters["status"].Enum
+		if slices.Contains(declared, "") != tt.empty {
+			t.Errorf("%s %s: the status enum carries \"\" = %v, want %v — %s",
+				tt.method, tt.path, !tt.empty, tt.empty, tt.why)
+		}
+		got := slices.DeleteFunc(slices.Clone(declared), func(s string) bool { return s == "" })
 		slices.Sort(got)
 		if !slices.Equal(got, want) {
 			t.Errorf("%s %s declares the status enum %v but the handler accepts %v", tt.method, tt.path, got, want)
 		}
 	}
+}
+
+// TestTaskListFiltersKeepTheirEmptySentinel pins the listing's two filters to
+// the meaning the handler gave an empty value before the registry: it read
+// `if cid != ""` and `if status != ""`, so ?cluster_id= and ?status= meant "no
+// filter". The uuid format would refuse the first — every registered format
+// rejects "" — so the filter carries the empty-or-uuid rule with the uuid's own
+// length instead; the status enum carries "" as a member
+// (TestTaskStatusVocabulary). What the handler then does with the empty value,
+// permission check included, is TestTaskListTreatsAnEmptyFilterAsNone's, in the
+// handlers package.
+func TestTaskListFiltersKeepTheirEmptySentinel(t *testing.T) {
+	e := declaredEndpoint(t, fiber.MethodGet, taskHistoryScope)
+	assertEmptyOrUUIDDeclaration(t, e, "filter_cluster_id")
+	assertEmptyFilterSentinel(t, e, "filter_cluster_id", testClusterID, nil)
+	assertEmptyFilterSentinel(t, e, "status", "running", nil)
 }
 
 // TestTaskClusterIsNotNamedClusterID is the escalation guard both the listing
@@ -198,6 +227,18 @@ func TestTaskListBoundsArePinned(t *testing.T) {
 		{query: "?order=ASC", want: fiber.StatusBadRequest},
 		{query: "?status=bogus", want: fiber.StatusBadRequest},
 		{query: "?cluster_id=not-a-uuid", want: fiber.StatusBadRequest},
+		// Empty means "no filter", as it did before the registry.
+		{query: "?cluster_id=&status=", want: fiber.StatusNoContent, limit: 50},
+		{query: "?vmids=", want: fiber.StatusNoContent, limit: 50},
+		// But one empty and one real value for the same filter — repeated in
+		// either order, or through the alias — is refused rather than read as
+		// whichever one a parser kept, and so is an encoded newline.
+		{query: "?cluster_id=&cluster_id=" + testClusterID, want: fiber.StatusBadRequest},
+		{query: "?cluster_id=" + testClusterID + "&cluster_id=", want: fiber.StatusBadRequest},
+		{query: "?filter_cluster_id=&cluster_id=" + testClusterID, want: fiber.StatusBadRequest},
+		{query: "?filter_cluster_id=" + testClusterID + "&cluster_id=", want: fiber.StatusBadRequest},
+		{query: "?status=&status=running", want: fiber.StatusBadRequest},
+		{query: "?cluster_id=%0A", want: fiber.StatusBadRequest},
 		{query: "?vmids=100,101", want: fiber.StatusNoContent, limit: 50},
 		{query: "?page=2", want: fiber.StatusBadRequest},
 	} {
@@ -242,7 +283,8 @@ func TestTaskUpdateKeepsNullMeaningAbsent(t *testing.T) {
 		t.Fatalf("status = %d (%q), want 204 — this is the body the SPA sends", status, env.Message)
 	}
 	if _, supplied := cap.params.OptFloat("progress"); supplied {
-		t.Error("an explicit null progress reads as supplied; the handler would write 0 over the stored value")
+		t.Error("an explicit null progress reads as supplied; the handler would store 0 where it stores NULL " +
+			"for an unknown progress")
 	}
 	if _, supplied := cap.params.OptString("finished_at"); supplied {
 		t.Error("an explicit null finished_at reads as supplied; the \"stopped stamps now\" branch would never fire")

@@ -176,8 +176,8 @@ func taskListMirror(t *testing.T) apischema.Properties {
 		"sort": {Type: apischema.String, Optional: true, Default: "started",
 			Enum: []string{"started", "cluster", "type", "description", "vm", "node", "progress", "status"}},
 		"order":             {Type: apischema.String, Optional: true, Default: "desc", Enum: []string{"asc", "desc"}},
-		"filter_cluster_id": {Type: apischema.String, Alias: "cluster_id", Optional: true, Format: "uuid"},
-		"status":            {Type: apischema.String, Optional: true, Enum: []string{"running", "completed", "failed", "stopped"}},
+		"filter_cluster_id": {Type: apischema.String, Alias: "cluster_id", Optional: true, Pattern: apischema.Rule("uuid-or-empty"), MaxLength: apischema.Ptr(36)},
+		"status":            {Type: apischema.String, Optional: true, Enum: []string{"", "running", "completed", "failed", "stopped"}},
 		"vmids":             {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(6000)},
 	}
 }

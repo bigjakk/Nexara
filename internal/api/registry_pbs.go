@@ -24,10 +24,10 @@ const pbsScope = pathPrefix + "pbs-servers"
 // supplied and the uuid format rejects it, so the create rule has to be a
 // pattern. See pbsAttachedClusterParam.
 //
-// FIVE other files now reach for it — alerts, ldap, oidc, reports and
-// rolling_update — each for its own "" sentinel, which is why the rule
-// itself lives in the catalogue and is DERIVED there from the uuid format
-// rather than transcribed beside it.
+// Other declaration files reach for it too, each for its own "" sentinel —
+// the uuid-or-empty entry in apischema/catalogue.go lists them — which is
+// why the rule itself lives in the catalogue and is DERIVED there from the
+// uuid format rather than transcribed beside it.
 var emptyOrUUID = apischema.Rule("uuid-or-empty")
 
 // pbsServerIDParam is a PBS server's Nexara row id as a PATH parameter.

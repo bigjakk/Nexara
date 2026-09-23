@@ -212,11 +212,12 @@ type securityPostureResponse struct {
 // first.
 //
 // It is exported so the endpoint's declaration in
-// internal/api/registry_cve.go can use it as the parameter's enum: the
-// list that validates the request and the set the scanner writes into the
-// severity column are then held together by
-// TestCVESeveritiesAllHaveAPostureBucket rather than by whoever remembers to
-// edit both.
+// internal/api/registry_cve.go can build the parameter's enum from it: this
+// list plus "", the no-filter value, which is not a severity and so is not
+// here. TestVulnerabilityFiltersAreDeclared holds that enum, less the "", to
+// this list, and TestCVESeveritiesAllHaveAPostureBucket holds every severity
+// here to a per-severity count in the posture summary and pins the list
+// itself — so neither pairing depends on whoever remembers to edit both.
 //
 // A slice rather than the map's keys because the docs render it in order,
 // and a map gives a different order on every run.
@@ -381,13 +382,19 @@ func (h *CVEHandler) ListVulnerabilities(c fiber.Ctx, p *apischema.Params) error
 		return fiber.NewError(fiber.StatusNotFound, "Scan not found")
 	}
 
-	// The schema's enum is CVESeverities and its uuid format is what used
-	// to be a hand-rolled uuid.Parse, so both of the "Invalid …" refusals
-	// below are the schema's now. Read through the Opt accessors because
-	// what matters is whether the caller CHOSE a filter, not whether the
-	// value is non-empty.
-	severity, filterBySeverity := p.OptString("severity")
-	nodeID, filterByNode := p.OptString("node_id")
+	// The schema's enum is CVESeverities plus "", and its empty-or-uuid
+	// pattern is what used to be a hand-rolled uuid.Parse, so both of the
+	// "Invalid …" refusals this handler once made are the schema's now. A
+	// filter applies only when it is NON-EMPTY: an empty ?severity= or
+	// ?node_id= is the "no filter" it was before the registry, not a severity
+	// to match or a uuid to parse, so the question is the value's rather than
+	// whether the caller sent the key.
+	severity := p.String("severity")
+	nodeID := p.String("node_id")
+	// kev reads false when it is omitted, sent as false, or sent EMPTY — the
+	// declaration counts an empty value as absent, as the old
+	// `c.Query("kev") == "true"` read it — and all three fall through to the
+	// node and severity filters below.
 	kevOnly := p.Bool("kev")
 
 	var vulns []db.CveScanVuln
@@ -398,7 +405,7 @@ func (h *CVEHandler) ListVulnerabilities(c fiber.Ctx, p *apischema.Params) error
 		// Applied independently of severity/nodeID since the dashboard
 		// callout deep-links straight here.
 		vulns, err = h.queries.ListCVEScanVulnsKEV(c.Context(), scanID)
-	case filterByNode:
+	case nodeID != "":
 		nid, parseErr := parseParamUUID(nodeID)
 		if parseErr != nil {
 			return parseErr
@@ -411,7 +418,7 @@ func (h *CVEHandler) ListVulnerabilities(c fiber.Ctx, p *apischema.Params) error
 			ScanID:     scanID,
 			ScanNodeID: nid,
 		})
-	case filterBySeverity:
+	case severity != "":
 		vulns, err = h.queries.ListCVEScanVulnsBySeverity(c.Context(), db.ListCVEScanVulnsBySeverityParams{
 			ScanID:   scanID,
 			Severity: severity,

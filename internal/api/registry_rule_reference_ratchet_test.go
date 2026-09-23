@@ -82,7 +82,7 @@ import (
 // Adding a route that takes pveObjectNameParam("…") or emptyOrNodeName does not
 // move this list at all, and neither does deleting one, because the shared
 // declaration is what carries the rule. It moves only when a route declares its
-// OWN inline rule reference, which 12 of the 43 entries below do — the ones whose
+// OWN inline rule reference, which 13 of the 47 entries below do — the ones whose
 // container is a register…Endpoints function rather than a named parameter — and
 // then the failure names which of the five things happened.
 var ruleReferenceSites = []string{
@@ -91,6 +91,8 @@ var ruleReferenceSites = []string{
 	"registry_access.go registerAccessEndpoints [roleid] = path-safe-dotted-name",
 	"registry_alerts.go alertFilterClusterParam = uuid-or-empty",
 	"registry_alerts.go maintenanceWindowParams [node_id] = uuid-or-empty",
+	"registry_audit.go auditFilterClusterParam = uuid-or-empty",
+	"registry_audit.go auditFilterParams [user_id] = uuid-or-empty",
 	"registry_backup.go backupJobParams [node] = node-name-or-empty",
 	"registry_backup.go pbsDatastoreParam = pbs-safe-id",
 	"registry_backup.go pbsJobIDParam = pbs-safe-id",
@@ -101,6 +103,7 @@ var ruleReferenceSites = []string{
 	"registry_ceph.go createCephPoolParams [name] = ceph-pool-name",
 	"registry_containers.go createCTParams [storage] = storage-id-or-empty",
 	"registry_containers.go registerContainerEndpoints [size] = disk-resize",
+	"registry_cve.go registerCVEEndpoints [node_id] = uuid-or-empty",
 	"registry_guest_snapshots.go guestSnapshotFilterClusterParam = uuid-or-empty",
 	"registry_ha.go haConfigIDParam = pve-configid-existing",
 	"registry_ldap.go ldapConfigParams [default_role_id] = uuid-or-empty",
@@ -121,6 +124,7 @@ var ruleReferenceSites = []string{
 	"registry_sdn.go sdnControllerSettings [node] = node-name-or-empty",
 	"registry_sdn.go sdnSubnetIDParam = pve-object-id-colon",
 	"registry_tasks.go registerTaskEndpoints [node] = node-name-or-empty",
+	"registry_tasks.go taskFilterClusterParam = uuid-or-empty",
 	"registry_virtio_win.go registerVirtioWinEndpoints [node] = node-name-or-empty",
 	"registry_virtio_win.go registerVirtioWinEndpoints [storage] = storage-id-or-empty",
 	"registry_vm_import.go registerVMImportEndpoints [node] = node-name-or-empty",
@@ -158,8 +162,8 @@ var ruleReferenceSites = []string{
 // FORMATS ARE NOT RATCHETED. A format is reached by name as a bare string —
 // Format: "uuid" — so the same swap is possible there: replace
 // Format: "node-name" with a tightened Pattern and the site leaves
-// declaredRuleSites just as silently. It is left out because 58 declarations
-// carry a format and 48 of those are "uuid", many written inline in a route
+// declaredRuleSites just as silently. It is left out because 52 declarations
+// carry a format and 42 of those are "uuid", many written inline in a route
 // declaration, so ratcheting them WOULD move on ordinary route churn — the
 // failure mode the container identity above exists to avoid. The exposure is
 // real and is stated here rather than covered.

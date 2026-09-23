@@ -150,22 +150,74 @@ func TestAuditPerClusterListingRefusesAClusterFilter(t *testing.T) {
 	// declared here, as the path parameter — so the message names the path
 	// as the one place it may be sent. Asserting the message, not just the
 	// 400, is what tells this refusal from "unknown parameter".
-	cap := &capture{}
-	probe := e
-	probe.Handler = cap.handler()
-	probe.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
-	app := newRegistryApp(t, noAuth(), probe)
+	//
+	// An EMPTY value is refused the same way. The instance-wide reads take
+	// ?cluster_id= to mean "no filter", but that widening belongs to their
+	// declaration; checkMisplaced asks only whether the key was sent here.
+	for _, value := range []string{testClusterID, ""} {
+		cap := &capture{}
+		probe := e
+		probe.Handler = cap.handler()
+		probe.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
+		app := newRegistryApp(t, noAuth(), probe)
 
-	target := strings.ReplaceAll(path, ":cluster_id", testClusterID) + "?cluster_id=" + testClusterID
-	status, env := send(t, app, httptest.NewRequest(http.MethodGet, target, nil))
-	if status != fiber.StatusBadRequest {
-		t.Errorf("status = %d (%q), want 400", status, env.Message)
+		target := strings.ReplaceAll(path, ":cluster_id", testClusterID) + "?cluster_id=" + value
+		status, env := send(t, app, httptest.NewRequest(http.MethodGet, target, nil))
+		if status != fiber.StatusBadRequest {
+			t.Errorf("?cluster_id=%s: status = %d (%q), want 400", value, status, env.Message)
+		}
+		if !strings.HasPrefix(env.Message, "cluster_id:") || !strings.Contains(env.Message, "request path") {
+			t.Errorf("?cluster_id=%s: message = %q, want checkMisplaced's refusal naming cluster_id and "+
+				"the request path", value, env.Message)
+		}
+		if cap.called {
+			t.Errorf("?cluster_id=%s: the handler ran for a request carrying a filter it does not accept", value)
+		}
 	}
-	if !strings.HasPrefix(env.Message, "cluster_id:") || !strings.Contains(env.Message, "request path") {
-		t.Errorf("message = %q, want checkMisplaced's refusal naming cluster_id and the request path", env.Message)
+
+	// The control: the same empty value on the two instance-wide reads is
+	// the "no filter" it always was, and reaches the handler as "".
+	for _, wide := range []string{auditScope, auditScope + "/export"} {
+		cap := &capture{}
+		app := newRegistryApp(t, noAuth(), probeEndpoint(t, fiber.MethodGet, wide, cap))
+		status, env := send(t, app, httptest.NewRequest(http.MethodGet, wide+"?cluster_id=", nil))
+		if status != fiber.StatusNoContent {
+			t.Errorf("%s?cluster_id=: status = %d (%q), want 204", wide, status, env.Message)
+			continue
+		}
+		if got, supplied := cap.params.OptString("filter_cluster_id"); got != "" || !supplied {
+			t.Errorf("%s?cluster_id=: filter_cluster_id reached the handler as (%q, supplied=%v), "+
+				"want (\"\", true)", wide, got, supplied)
+		}
 	}
-	if cap.called {
-		t.Error("the handler ran for a request carrying a filter it does not accept")
+}
+
+// TestAuditFiltersKeepTheirEmptySentinel pins the two uuid filters to the
+// meaning parseAuditFilters gave an empty value before the registry: it read
+// `if cid != ""` and `if uid != ""`, so ?cluster_id= and ?user_id= meant "no
+// filter". The uuid format would refuse both — every registered format
+// rejects "" — so each carries the empty-or-uuid rule with the uuid's own
+// length instead. The cluster filter is on the two instance-wide reads only;
+// user_id is in auditFilterParams, so the per-cluster listing carries it too.
+// What the handlers then do with the empty value, permission check included,
+// is TestAuditReadsTreatAnEmptyFilterAsNone's, in the handlers package.
+func TestAuditFiltersKeepTheirEmptySentinel(t *testing.T) {
+	for _, tt := range []struct {
+		path string
+		name string
+		base map[string]any
+	}{
+		{auditScope, "filter_cluster_id", nil},
+		{auditScope + "/export", "filter_cluster_id", nil},
+		{auditScope, "user_id", nil},
+		{auditScope + "/export", "user_id", nil},
+		{clusterScope + "/audit-log", "user_id", map[string]any{"cluster_id": testClusterID}},
+	} {
+		t.Run(tt.path+" "+tt.name, func(t *testing.T) {
+			e := declaredEndpoint(t, fiber.MethodGet, tt.path)
+			assertEmptyOrUUIDDeclaration(t, e, tt.name)
+			assertEmptyFilterSentinel(t, e, tt.name, testClusterID, tt.base)
+		})
 	}
 }
 
@@ -205,6 +257,28 @@ func TestAuditListBoundsArePinned(t *testing.T) {
 				{"?limit=201", fiber.StatusBadRequest},
 				{"?offset=-1", fiber.StatusBadRequest},
 				{"?user_id=not-a-uuid", fiber.StatusBadRequest},
+				// Empty means "no filter", as it did before the registry.
+				{"?user_id=", fiber.StatusNoContent},
+				{"?resource_type=", fiber.StatusNoContent},
+				{"?action=", fiber.StatusNoContent},
+				{"?source=", fiber.StatusNoContent},
+				{"?start_time=", fiber.StatusNoContent},
+				{"?end_time=", fiber.StatusNoContent},
+				{"?vmids=", fiber.StatusNoContent},
+				// But one empty and one real value for the same filter —
+				// repeated in either order, or through the alias — is refused
+				// rather than read as whichever one a parser kept, and so is
+				// an encoded newline. The cluster rows answer 400 on the
+				// per-cluster listing too, where checkMisplaced refuses the
+				// key before anything reads its value.
+				{"?user_id=&user_id=" + testClusterID, fiber.StatusBadRequest},
+				{"?user_id=" + testClusterID + "&user_id=", fiber.StatusBadRequest},
+				{"?user_id=%0A", fiber.StatusBadRequest},
+				{"?cluster_id=&cluster_id=" + testClusterID, fiber.StatusBadRequest},
+				{"?cluster_id=" + testClusterID + "&cluster_id=", fiber.StatusBadRequest},
+				{"?filter_cluster_id=&cluster_id=" + testClusterID, fiber.StatusBadRequest},
+				{"?filter_cluster_id=" + testClusterID + "&cluster_id=", fiber.StatusBadRequest},
+				{"?cluster_id=%0A", fiber.StatusBadRequest},
 				{"?vmids=100,101", fiber.StatusNoContent},
 				{"?since=yesterday", fiber.StatusBadRequest},
 			} {

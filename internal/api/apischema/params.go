@@ -22,7 +22,10 @@ import (
 //	    String/Int/… returns the value, Has is true, OptX returns (value, true)
 //
 // The middle and last rows are what a hand-rolled `if req.Index == 0`
-// check cannot tell apart.
+// check cannot tell apart. An empty value for a property marked
+// EmptyIsAbsent — which is always optional, since checkDeclaration refuses
+// the facet on a required one — lands in one of the first two rows, not the
+// last.
 //
 // Reading an undeclared parameter, or reading one with the accessor for
 // another type, panics — see the package comment.

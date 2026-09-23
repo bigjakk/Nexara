@@ -85,11 +85,14 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 	return resp
 }
 
-// validTaskStatuses is the accepted task_history state vocabulary: it bounds
-// the ?status= filter so a typo surfaces as a 400 rather than silently
-// returning an empty page, and it is the same set the declarations' Enums carry
-// in internal/api/registry_tasks.go. TestTaskStatusVocabulary pins the two
-// against each other.
+// validTaskStatuses is the task_history state vocabulary. Nothing reads it at
+// runtime: the declarations' Enums in internal/api/registry_tasks.go are what
+// refuse an unknown status with a 400 before a handler runs — so a typo in
+// ?status= surfaces instead of silently returning an empty page — and they
+// carry the same set, less the "" that the listing's adds for "no filter" and
+// the create's for "running". It is kept as the other side of
+// TestTaskStatusVocabulary, which reads it through TaskStatusKeys and
+// compares it with those Enums.
 var validTaskStatuses = map[string]bool{
 	"running": true, "completed": true, "failed": true, "stopped": true,
 }
@@ -108,9 +111,11 @@ func TaskSortKeys() []string { return slices.Sorted(maps.Keys(taskSortColumns)) 
 // opens with (newest first, as it always has).
 //
 // The SQL matches these on the string, so an unrecognised value would fall
-// through to the default order and silently ignore the caller — the whitelist
-// turns that into a 400 instead, the same way validTaskStatuses does for
-// ?status=. Keep in sync with TaskSortKey in the frontend's
+// through to the default order and silently ignore the caller. The ?sort=
+// declaration's Enum refuses one with a 400 before List runs, and
+// TestTaskSortVocabulary holds that Enum to this map; List still checks
+// against it through parseTaskSort, answering 500 if the declaration ever
+// stops. Keep in sync with TaskSortKey in the frontend's
 // features/tasks/lib/task-columns.ts.
 var taskSortColumns = map[string]bool{
 	"started": true, "cluster": true, "type": true, "description": true,
@@ -215,7 +220,10 @@ func (h *TaskHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	// Optional cluster filter — the caller must have view:task on it. Declared
 	// as filter_cluster_id with "cluster_id" as its alias; see the declaration
 	// for why the name the gate reads cannot be used for a query parameter.
-	if cid, supplied := p.OptString("filter_cluster_id"); supplied {
+	// An EMPTY value is the "no filter" it was before the registry: not a uuid
+	// to parse and not a cluster to authorize, but every cluster the caller
+	// can see, exactly as an omitted one.
+	if cid := p.String("filter_cluster_id"); cid != "" {
 		clusterID, parseErr := parseParamUUID(cid)
 		if parseErr != nil {
 			return parseErr
@@ -228,7 +236,8 @@ func (h *TaskHandler) List(c fiber.Ctx, p *apischema.Params) error {
 		countP.ClusterID = v
 	}
 
-	if status, supplied := p.OptString("status"); supplied {
+	// Likewise an empty status is every state, not a state to match.
+	if status := p.String("status"); status != "" {
 		v := pgtype.Text{String: status, Valid: true}
 		listP.Status = v
 		countP.Status = v
@@ -238,7 +247,9 @@ func (h *TaskHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	// task_history.vmid (parsed from the UPID at insert). Used by the folder
 	// detail view to scope tasks to a folder's VMs. The list SHAPE stays a
 	// handler rule — see taskVmidsParam for why it is declared as a string.
-	if raw, supplied := p.OptString("vmids"); supplied {
+	// An empty list is no filter, as it was before the registry, not a list
+	// for parseVmidsParam to refuse.
+	if raw := p.String("vmids"); raw != "" {
 		vmids, vmidErr := parseVmidsParam(raw)
 		if vmidErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid vmids filter")
@@ -297,12 +308,20 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	// The declaration's Default covers an omitted status. An EMPTY one meant
+	// running as well before the registry — this handler substituted it — so
+	// it still does, rather than filing a row with no state at all.
+	status := p.String("status")
+	if status == "" {
+		status = "running"
+	}
+
 	task, err := h.queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
 		ClusterID:   clusterID,
 		UserID:      uid,
 		Upid:        p.String("upid"),
 		Description: p.String("description"),
-		Status:      p.String("status"),
+		Status:      status,
 		Node:        p.String("node"),
 		TaskType:    p.String("task_type"),
 	})

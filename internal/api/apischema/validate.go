@@ -134,6 +134,20 @@ func (props Properties) Validate(in map[string]any) (*Params, error) {
 				raw, ok = aliasRaw, true
 			}
 		}
+		// An empty value is absent for a property that says so, and takes
+		// the same path as an omitted one below. The comparison is with the
+		// exact empty string: a repeated key arrives as a []string and is
+		// not "", so it still reaches coercion and is refused there. The
+		// declaration is checked first because an absent value with no
+		// Default never reaches validateValue, which is where it is checked
+		// otherwise — and the facet where it may not be declared must fail
+		// closed.
+		if ok && prop.EmptyIsAbsent && raw == "" {
+			if err := checkDeclaration(name, prop); err != nil {
+				return nil, err
+			}
+			ok = false
+		}
 
 		if !ok {
 			if !prop.Optional {
@@ -241,6 +255,10 @@ func aliasIndex(props Properties, names []string) (map[string]string, error) {
 // parameter that must not be blank should carry a Format, a Pattern or a
 // MinLength rather than rely on presence; whatever extracts query and
 // form values should omit a key it did not see rather than pass "".
+//
+// The one exception is opt-in and is not made here: an optional boolean
+// declared EmptyIsAbsent, for which Validate counts an exact "" as absent
+// after this has reported it present.
 func present(in map[string]any, key string) (any, bool) {
 	v, ok := in[key]
 	if !ok || v == nil {
@@ -298,13 +316,28 @@ func validateValue(field string, prop Property, raw any) (any, error) {
 	}
 }
 
+// enumList renders an enum for a refusal message. An empty member — the
+// "no filter" or "unspecified" sentinel several declarations carry — is
+// written as "" rather than as nothing, which would read as a stray comma:
+// "expected one of: , running".
+func enumList(enum []string) string {
+	shown := make([]string, len(enum))
+	for i, v := range enum {
+		if v == "" {
+			v = `""`
+		}
+		shown[i] = v
+	}
+	return strings.Join(shown, ", ")
+}
+
 // checkString applies the enum, pattern and length rules.
 func checkString(field string, prop Property, s string) error {
 	if len(prop.Enum) > 0 && !slices.Contains(prop.Enum, s) {
 		if err := checkEnumReachable(field, prop); err != nil {
 			return err
 		}
-		return newErr(field, "expected one of: "+strings.Join(prop.Enum, ", "))
+		return newErr(field, "expected one of: "+enumList(prop.Enum))
 	}
 	if prop.Pattern != "" {
 		re, err := patternRegexp(prop.Pattern)
@@ -774,6 +807,16 @@ func checkDeclaration(name string, prop Property) error {
 	if prop.Default != nil && !prop.Optional {
 		return fmt.Errorf("apischema: parameter %q is required but declares a default, which could never apply", name)
 	}
+	if prop.EmptyIsAbsent && prop.Type != Boolean {
+		return fmt.Errorf("apischema: parameter %q counts an empty value as absent but is %s, not a boolean", name, prop.Type)
+	}
+	// On a required parameter the facet could never let "" through: an
+	// absent required value is reported missing, so all it would change is
+	// the wording of the 400.
+	if prop.EmptyIsAbsent && !prop.Optional {
+		return fmt.Errorf("apischema: parameter %q counts an empty value as absent but is required, "+
+			"so an empty value could only ever be reported missing", name)
+	}
 	return nil
 }
 
@@ -890,6 +933,10 @@ func compileItems(name string, item Property) error {
 		return fmt.Errorf("apischema: items schema of %q cannot declare an alias", name)
 	case item.Source != SourceAuto:
 		return fmt.Errorf("apischema: items schema of %q cannot declare a source", name)
+	case item.EmptyIsAbsent:
+		// An element is validated on its own, never through the presence
+		// check the facet hooks into, so it would silently not apply.
+		return fmt.Errorf("apischema: items schema of %q cannot count an empty value as absent", name)
 	}
 	return compileProperty(name+"[]", item, nil)
 }

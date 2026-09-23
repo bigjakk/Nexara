@@ -146,12 +146,15 @@ function EnumChips({ values }: { values: string[] }) {
       {/* Keyed by index as well as value: nothing in the schema engine
           rejects a duplicated enum entry, and two identical keys is a
           React warning. */}
+      {/* An empty member — the "no filter" or "unspecified" value several
+          declarations accept — is spelled "" as the server's own refusal
+          message spells it; rendered as it stands it is an empty chip. */}
       {values.map((value, i) => (
         <code
           key={`${value}-${String(i)}`}
           className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]"
         >
-          {value}
+          {value === "" ? '""' : value}
         </code>
       ))}
     </div>

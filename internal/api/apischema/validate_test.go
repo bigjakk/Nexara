@@ -258,6 +258,10 @@ func TestValidateConstraints(t *testing.T) {
 		errStr string
 	}{
 		{"enum", Property{Type: String, Enum: []string{"ide", "sata", "scsi", "virtio"}}, "usb", "expected one of: ide, sata, scsi, virtio"},
+		// An empty member is written as "" — joined as it stands it read
+		// "expected one of: , running, stopped".
+		{"enum with an empty member", Property{Type: String, Enum: []string{"", "running", "stopped"}}, "paused",
+			`expected one of: "", running, stopped`},
 		{"pattern", Property{Type: String, Pattern: `^[a-z]+$`}, "Abc", "does not match the expected pattern ^[a-z]+$"},
 		{"minimum", Property{Type: Integer, Minimum: Ptr(1.0)}, 0, "must be at least 1 (got 0)"},
 		{"maximum", Property{Type: Integer, Maximum: Ptr(30.0)}, 31, "must be at most 30 (got 31)"},
@@ -358,6 +362,106 @@ func TestValidateAlias(t *testing.T) {
 		if _, err := props.Validate(map[string]any{}); err == nil {
 			t.Error("expected the required parameter to be missing")
 		}
+	})
+}
+
+// TestValidateEmptyIsAbsent pins the facet a boolean needs to read an empty
+// value the way ?kev= was read before this engine: as no value at all, so the
+// default applies and Has is false. Every input is also run through the same
+// property WITHOUT the facet, and only the exact empty string may come out
+// differently: the twin refuses it as a boolean, the facet admits it as
+// absent, and every other input is read — or refused — alike by both.
+func TestValidateEmptyIsAbsent(t *testing.T) {
+	withFacet := func(def any) Properties {
+		return Properties{"b": {Type: Boolean, Optional: true, Default: def, EmptyIsAbsent: true}}
+	}
+	twinOf := func(def any) Properties {
+		return Properties{"b": {Type: Boolean, Optional: true, Default: def}}
+	}
+
+	for _, tt := range []struct {
+		name     string
+		def      any
+		in       string
+		want     bool
+		supplied bool
+	}{
+		{"empty takes the default", false, "", false, false},
+		// A true default is what tells "absent" from "false".
+		{"empty takes a true default too", true, "", true, false},
+		{"a real value is still read", false, "true", true, true},
+		{"and so is an explicit false", true, "false", false, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := mustValidate(t, withFacet(tt.def), map[string]any{"b": tt.in})
+			if got := p.Bool("b"); got != tt.want {
+				t.Errorf("Bool(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+			if got := p.Has("b"); got != tt.supplied {
+				t.Errorf("Has after %q = %v, want %v", tt.in, got, tt.supplied)
+			}
+
+			twin, err := twinOf(tt.def).Validate(map[string]any{"b": tt.in})
+			if tt.in == "" {
+				// The one input the facet changes: without it a boolean
+				// refuses "", and refuses it as a boolean.
+				wantValidationError(t, err, "b", "expected a boolean")
+				return
+			}
+			if err != nil {
+				t.Fatalf("the twin refused %q: %v", tt.in, err)
+			}
+			if twin.Bool("b") != p.Bool("b") || twin.Has("b") != p.Has("b") {
+				t.Errorf("%q reads (%v, supplied=%v) with the facet and (%v, supplied=%v) without it",
+					tt.in, p.Bool("b"), p.Has("b"), twin.Bool("b"), twin.Has("b"))
+			}
+		})
+	}
+
+	t.Run("with no default an empty value is unset", func(t *testing.T) {
+		props := Properties{"b": {Type: Boolean, Optional: true, EmptyIsAbsent: true}}
+		p := mustValidate(t, props, map[string]any{"b": ""})
+		if v, supplied := p.OptBool("b"); v || supplied {
+			t.Errorf("OptBool = (%v, %v), want (false, false)", v, supplied)
+		}
+	})
+
+	// Whitespace, a traversal, a separator and a repeated key are not the
+	// empty string, and the facet refuses each one exactly as the twin does.
+	for _, in := range []any{" ", "\n", "..", ".", "%2e%2e", "/", []string{"", "true"}} {
+		t.Run(fmt.Sprintf("%q is not absent", in), func(t *testing.T) {
+			_, err := withFacet(false).Validate(map[string]any{"b": in})
+			wantValidationError(t, err, "b", "expected a boolean")
+			_, err = twinOf(false).Validate(map[string]any{"b": in})
+			wantValidationError(t, err, "b", "expected a boolean")
+		})
+	}
+
+	// The facet decides presence, so it meets the other two rules that ask
+	// about presence: the alias, and Requires.
+	aliased := Properties{"b": {Type: Boolean, Optional: true, Default: false, EmptyIsAbsent: true, Alias: "bb"}}
+	t.Run("an empty value under the alias is absent too", func(t *testing.T) {
+		p := mustValidate(t, aliased, map[string]any{"bb": ""})
+		if p.Bool("b") || p.Has("b") {
+			t.Errorf("b = (%v, supplied=%v), want its default, not supplied", p.Bool("b"), p.Has("b"))
+		}
+	})
+	t.Run("an empty value still collides with its alias", func(t *testing.T) {
+		// The collision is decided on presence before the facet applies,
+		// so "" beside a real value is refused rather than quietly
+		// yielding to it.
+		_, err := aliased.Validate(map[string]any{"b": "", "bb": "true"})
+		wantValidationError(t, err, "b", "cannot be combined with its alias bb")
+	})
+	t.Run("an empty companion does not satisfy Requires", func(t *testing.T) {
+		props := Properties{
+			"a": {Type: String, Optional: true, Requires: []string{"b"}},
+			"b": {Type: Boolean, Optional: true, EmptyIsAbsent: true},
+		}
+		_, err := props.Validate(map[string]any{"a": "x", "b": ""})
+		wantValidationError(t, err, "a", "requires the parameter b to also be set")
+		// The control: a companion with a value does satisfy it.
+		mustValidate(t, props, map[string]any{"a": "x", "b": "false"})
 	})
 }
 
@@ -487,6 +591,29 @@ func TestSchemaDefectsFailClosedAtRequestTime(t *testing.T) {
 			props: Properties{"": {Type: String}},
 			in:    map[string]any{},
 			want:  "empty parameter name",
+		},
+		// Sent EMPTY on purpose: an absent value never reaches
+		// validateValue, so these pass only because the facet's own branch
+		// checks the declaration before honouring it.
+		{
+			name:  "empty-is-absent on a string is not silently honoured",
+			props: Properties{"v": {Type: String, Optional: true, EmptyIsAbsent: true}},
+			in:    map[string]any{"v": ""},
+			want:  "counts an empty value as absent but is string",
+		},
+		{
+			name:  "empty-is-absent on an integer is not silently honoured",
+			props: Properties{"v": {Type: Integer, Optional: true, EmptyIsAbsent: true}},
+			in:    map[string]any{"v": ""},
+			want:  "counts an empty value as absent but is integer",
+		},
+		{
+			// On a required parameter the facet could only change the
+			// wording of the 400 for a missing value.
+			name:  "empty-is-absent on a required parameter is not silently honoured",
+			props: Properties{"v": {Type: Boolean, EmptyIsAbsent: true}},
+			in:    map[string]any{"v": ""},
+			want:  "counts an empty value as absent but is required",
 		},
 	}
 

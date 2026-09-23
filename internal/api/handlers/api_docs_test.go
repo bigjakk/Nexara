@@ -236,6 +236,7 @@ func TestGetDocs_ParameterContract(t *testing.T) {
 				Pattern: `^[A-Za-z][A-Za-z0-9_-]*$`, MinLength: intp(2), MaxLength: intp(40),
 			},
 			{Name: "newname", Type: "string", Source: "body", Optional: true, Alias: "oldname"},
+			{Name: "kev", Type: "boolean", Source: "query", Optional: true, Default: false, EmptyIsAbsent: true},
 			{
 				Name: "tags", Type: "array", Source: "body", Optional: true,
 				Items: &APIItems{Type: "string", Enum: []string{"red", "green"}},
@@ -369,6 +370,11 @@ func TestGetDocs_ParameterContract(t *testing.T) {
 			wantExtra: map[string]any{"alias": "oldname"},
 		},
 		{
+			name:  "an empty value read as omitted survives",
+			param: "kev", wantOptional: "true", wantDefault: "false", wantSource: `"query"`,
+			wantExtra: map[string]any{"empty_is_absent": true},
+		},
+		{
 			name:  "an array carries its element schema",
 			param: "tags", wantOptional: "true", wantDefault: "", wantSource: `"body"`,
 			wantExtra: map[string]any{
@@ -443,11 +449,12 @@ func TestGetDocs_ParameterContract(t *testing.T) {
 		if !ok {
 			t.Fatal("the index parameter left the fixture; this subtest would pass vacuously")
 		}
-		// `index` declares no format, typetext, enum, requires or rule.
+		// `index` declares no format, typetext, enum, requires or rule, and
+		// does not read an empty value as omitted.
 		// `rule` belongs here rather than only in the positive cases: an
 		// integer parameter naming no rule must not carry an empty rule
 		// object, which would read as "a rule applies and permits nothing".
-		for _, key := range []string{"format", "typetext", "enum", "requires", "rule"} {
+		for _, key := range []string{"format", "typetext", "enum", "requires", "rule", "empty_is_absent"} {
 			if _, present := index[key]; present {
 				t.Errorf("index carries an empty %q key; omitempty should have dropped it", key)
 			}

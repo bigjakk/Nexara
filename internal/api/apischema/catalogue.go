@@ -851,13 +851,13 @@ func orEmptyRules(base map[string]RuleDoc) []RuleDoc {
 		derive("storage-id",
 			`a storage id, or the empty string, which means "leave it unset".`,
 			`The clone dialog sends storage:"" for a linked clone.`),
-		// Neutral: 14 sites, and "" is a filter at four of them, a
+		// Neutral: 21 sites, and "" is a filter at eleven of them, a
 		// leave-alone at another, and an attaches-none at the rest.
 		derive("uuid",
 			"a UUID, or the empty string.",
-			`Eight declaration files reach for it — PBS, alerts, guest snapshots, ldap, the notification `+
-				`DLQ, oidc, reports and rolling updates — each for its own "" sentinel, and they do not `+
-				`agree: the four listing filters read it as "do not filter", while `+
+			`Eleven declaration files reach for it — PBS, alerts, audit, CVE, guest snapshots, ldap, the `+
+				`notification DLQ, oidc, reports, rolling updates and tasks — each for its own "" sentinel, `+
+				`and they do not agree: the eleven listing filters read it as "do not filter", while `+
 				`PUT …/maintenance-windows/:id reads it as "leave the existing pin alone".`),
 		// A meaning that GENERALISES: both sites are listing filters whose
 		// Description reads "Empty or omitted returns every …".

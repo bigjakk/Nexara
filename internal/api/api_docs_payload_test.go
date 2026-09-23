@@ -300,6 +300,7 @@ func TestDocParameters_Constraints(t *testing.T) {
 			"blank":     {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(0)},
 			"unbounded": {Type: apischema.Integer, Optional: true},
 			"newname":   {Type: apischema.String, Optional: true, Alias: "oldname"},
+			"kev":       {Type: apischema.Boolean, Optional: true, Default: false, EmptyIsAbsent: true},
 			"tags": {
 				Type:     apischema.Array,
 				Optional: true,
@@ -357,8 +358,9 @@ func TestDocParameters_Constraints(t *testing.T) {
 					t.Errorf("bounds = %v/%v/%v/%v, want all nil",
 						p.Minimum, p.Maximum, p.MinLength, p.MaxLength)
 				}
-				if p.Pattern != "" || p.Alias != "" || p.Items != nil {
-					t.Errorf("pattern/alias/items = %q/%q/%v, want all empty", p.Pattern, p.Alias, p.Items)
+				if p.Pattern != "" || p.Alias != "" || p.Items != nil || p.EmptyIsAbsent {
+					t.Errorf("pattern/alias/items/empty_is_absent = %q/%q/%v/%v, want all empty",
+						p.Pattern, p.Alias, p.Items, p.EmptyIsAbsent)
 				}
 				// Added with the rule block: a parameter that names no rule
 				// must not acquire one. Without this line the "unbounded"
@@ -377,6 +379,15 @@ func TestDocParameters_Constraints(t *testing.T) {
 				if p.Alias != "oldname" {
 					t.Errorf("alias = %q, want %q — omitting it documents the endpoint as "+
 						"rejecting input it accepts", p.Alias, "oldname")
+				}
+			},
+		},
+		{
+			name: "an empty value read as omitted must be shown", param: "kev",
+			check: func(t *testing.T, p handlers.APIParameter) {
+				if !p.EmptyIsAbsent {
+					t.Error("empty_is_absent = false — a boolean admits no empty value, so omitting the facet " +
+						"documents the endpoint as rejecting ?kev= when it accepts it")
 				}
 			},
 		},

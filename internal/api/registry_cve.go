@@ -1,8 +1,6 @@
 package api
 
 import (
-	"slices"
-
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -11,7 +9,8 @@ import (
 
 // The shared declaration vocabulary — clusterScope, clusterCheck,
 // clusterParams, withParams and optTristateBool — lives in
-// registry_vms.go, where the first migrated domain defined it.
+// registry_vms.go, where the first migrated domain defined it. emptyOrUUID
+// lives in registry_pbs.go.
 
 // The CVE domain has no single path prefix: the four groups below hang off
 // the cluster directly rather than off a "/cve" scope, which is how they
@@ -107,31 +106,55 @@ func registerCVEEndpoints(reg *Registry, h *handlers.CVEHandler) {
 			"scan_id": cveScanIDParam,
 			"severity": {
 				Type: apischema.String,
-				// Cloned rather than aliased, for the reason the VM status
-				// route's enum gives: Property.Enum is only deep-copied on
-				// the StdOption path, so sharing the package-level slice
-				// would give every Server's schema the same backing array.
-				Enum:     slices.Clone(handlers.CVESeverities),
+				// CVESeverities plus the EMPTY string, which is not a
+				// severity: the handler checked only a non-empty value and
+				// read ?severity= as every severity (`if severity != ""`),
+				// so leaving it out would 400 a request that always worked.
+				//
+				// Built fresh rather than aliased, for the reason the VM
+				// status route's enum gives: Property.Enum is only
+				// deep-copied on the StdOption path, so sharing the
+				// package-level slice would give every Server's schema the
+				// same backing array. Appending to a one-element literal
+				// always allocates, so no slices.Clone is needed.
+				Enum:     append([]string{""}, handlers.CVESeverities...),
 				Optional: true,
 				Typetext: "<critical|high|medium|low|unknown>",
-				Description: "Return only vulnerabilities at this severity. Omitted returns every " +
-					"severity.",
+				// The handler applies ONE filter, not a combination: kev when it
+				// is true, else node_id when it is non-empty, else this. So the
+				// Description has to say when a severity is ignored — and say
+				// it by value, not by presence: kev=false, or an empty kev or
+				// node_id, does not displace it.
+				Description: "Return only vulnerabilities at this severity. Ignored when kev is true or node_id " +
+					"is non-empty: the filters are not combined, and kev, then node_id, takes precedence. " +
+					"Empty or omitted returns every severity.",
 			},
 			"node_id": {
 				Type:     apischema.String,
 				Optional: true,
-				Format:   "uuid",
-				Typetext: "<uuid>",
-				Description: "Return only vulnerabilities found on this node. Omitted returns every " +
-					"node's.",
+				// Empty-or-uuid rather than the uuid format, which rejects "":
+				// the handler parsed only a non-empty value, so ?node_id=
+				// meant every node's.
+				Pattern:   emptyOrUUID,
+				MaxLength: apischema.Ptr(36),
+				Typetext:  "<uuid>",
+				Description: "Return only vulnerabilities found on this node. Ignored when kev is true; takes " +
+					"precedence over severity. Empty or omitted returns every node's.",
 			},
 			"kev": {
 				Type:     apischema.Boolean,
 				Optional: true,
 				Default:  false,
-				Typetext: "<boolean>",
+				// The handler compared the raw value with "true", so ?kev= was
+				// false — no KEV filter, and the node and severity filters
+				// still applied. An empty value is therefore ABSENT here, which
+				// puts it on the Default like an omitted one; no boolean
+				// spelling is empty, so without this ?kev= would be a 400.
+				EmptyIsAbsent: true,
+				Typetext:      "<boolean>",
 				Description: "Return only vulnerabilities on CISA's Known Exploited Vulnerabilities " +
-					"catalogue. Applied INSTEAD of severity and node_id, not alongside them.",
+					"catalogue. Applied INSTEAD of severity and node_id, not alongside them. Empty or " +
+					"omitted is false.",
 			},
 		}),
 		Handler: h.ListVulnerabilities,

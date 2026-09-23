@@ -263,6 +263,9 @@ func TestCompileRejectsMeaninglessItemFacets(t *testing.T) {
 		{"requires", Property{Type: String, Requires: []string{"other"}}, "cannot declare requires"},
 		{"alias", Property{Type: String, Alias: "other"}, "cannot declare an alias"},
 		{"source", Property{Type: String, Source: SourceQuery}, "cannot declare a source"},
+		// Boolean, the one type the facet is otherwise allowed on, so the
+		// refusal can only be the items rule.
+		{"empty is absent", Property{Type: Boolean, EmptyIsAbsent: true}, "cannot count an empty value as absent"},
 		{"object items", Property{Type: Object}, "only scalar element types are supported"},
 	}
 	for _, tc := range cases {

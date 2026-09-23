@@ -172,6 +172,14 @@ type APIParameter struct {
 	// accepts.
 	Alias string `json:"alias,omitempty"`
 
+	// EmptyIsAbsent says an EMPTY value is accepted and read as if the
+	// parameter had been omitted, so its default applies. It is published
+	// for Alias's reason: the type alone — a boolean — admits no empty
+	// value, so leaving it out would document the endpoint as rejecting
+	// input it accepts. Absent means an empty value is validated like any
+	// other.
+	EmptyIsAbsent bool `json:"empty_is_absent,omitempty"`
+
 	// Items is the element schema when Type is "array". Without it the
 	// table says "array" and stops, which does not tell a caller what to
 	// put in one.

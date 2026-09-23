@@ -1127,6 +1127,12 @@ export interface APIParameter {
    * from the table documents the endpoint as rejecting input it accepts.
    */
   alias?: string;
+  /**
+   * An empty value is accepted and read as if the parameter had been
+   * omitted, so its default applies. Absent means an empty value is
+   * validated like any other.
+   */
+  empty_is_absent?: boolean;
   /** Element schema when `type` is "array". */
   items?: APIItems;
 }

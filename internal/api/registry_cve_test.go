@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
@@ -230,43 +232,110 @@ func TestCVEScanListPagingIsBounded(t *testing.T) {
 
 // TestVulnerabilityFiltersAreDeclared covers the three query parameters
 // the vulnerability listing branches on, and the distinction the handler
-// now depends on: it reads them through OptString, so "the caller chose a
-// filter" is a supplied-ness question rather than a non-emptiness one.
+// depends on: it reads severity and node_id as VALUES, so an empty one is the
+// "no filter" it was before the registry (`if severity != ""`,
+// `nodeID != ""`) rather than a filter the caller chose. The enum carries ""
+// as a member and node_id carries the empty-or-uuid rule — the uuid format
+// would refuse "", as every registered format does.
+//
+// kev is a boolean, which no enum member or rule can widen, and the old
+// handler compared it with "true", so ?kev= was false. Its declaration counts
+// an empty value as absent instead: it reaches the handler on the default,
+// not as a value the caller supplied. What the handler then runs for each
+// filter is TestCVEVulnerabilityListTreatsAnEmptyFilterAsNone's, in the
+// handlers package.
 func TestVulnerabilityFiltersAreDeclared(t *testing.T) {
 	const path = cveScanScope + "/:scan_id/vulnerabilities"
 	e := declaredEndpoint(t, fiber.MethodGet, path)
 
 	severity := e.Parameters["severity"]
-	if !slices.Equal(severity.Enum, handlers.CVESeverities) {
-		t.Errorf("severity enum = %v, want handlers.CVESeverities %v", severity.Enum, handlers.CVESeverities)
+	if !slices.Contains(severity.Enum, "") {
+		t.Error("the severity enum has no empty member, so ?severity= — which has always meant every " +
+			"severity — is a 400")
 	}
-	if len(severity.Enum) > 0 && &severity.Enum[0] == &handlers.CVESeverities[0] {
-		t.Error("the declared severity enum aliases handlers.CVESeverities; clone it")
+	// "" is set aside rather than added to CVESeverities, where it would
+	// read as a severity the scanner writes.
+	got := slices.DeleteFunc(slices.Clone(severity.Enum), func(s string) bool { return s == "" })
+	if !slices.Equal(got, handlers.CVESeverities) {
+		t.Errorf("severity enum less \"\" = %v, want handlers.CVESeverities %v", got, handlers.CVESeverities)
 	}
-	if got := e.Parameters["node_id"].Format; got != "uuid" {
-		t.Errorf("node_id declares format %q, want uuid — the handler's own uuid.Parse is gone", got)
+	for i := range severity.Enum {
+		for j := range handlers.CVESeverities {
+			if &severity.Enum[i] == &handlers.CVESeverities[j] {
+				t.Fatal("the declared severity enum shares handlers.CVESeverities' backing array; build it fresh")
+			}
+		}
 	}
-	if e.Parameters["kev"].Type != "boolean" {
-		t.Errorf("kev is declared as %q, want boolean", e.Parameters["kev"].Type)
+	assertEmptyOrUUIDDeclaration(t, e, "node_id")
+	kev := e.Parameters["kev"]
+	if kev.Type != "boolean" || kev.Default != false || !kev.EmptyIsAbsent {
+		t.Errorf("kev is declared %s, default %#v, EmptyIsAbsent %v; want a boolean defaulting to false "+
+			"that counts an empty value as absent", kev.Type, kev.Default, kev.EmptyIsAbsent)
 	}
+	// The twin without the facet refuses ?kev= — as a boolean, on kev —
+	// which is what makes the empty rows below evidence of the facet rather
+	// than of the type.
+	twin := kev
+	twin.EmptyIsAbsent = false
+	_, twinErr := (apischema.Properties{"kev": twin}).Validate(map[string]any{"kev": ""})
+	var verr *apischema.ValidationError
+	if !errors.As(twinErr, &verr) || verr.Field != "kev" || !strings.Contains(verr.Message, "expected a boolean") {
+		t.Fatalf(`precondition: without EmptyIsAbsent, kev="" gave %v; want the boolean refusal on kev`, twinErr)
+	}
+	// And the docs say so: without the facet in the payload, a boolean
+	// documents ?kev= as refused.
+	published := false
+	for _, dp := range docParameters(e) {
+		if dp.Name == "kev" {
+			published = dp.EmptyIsAbsent
+		}
+	}
+	if !published {
+		t.Error("the api-docs payload does not publish kev's empty_is_absent, so it documents ?kev= as refused")
+	}
+
+	base := map[string]any{"cluster_id": testClusterID, "scan_id": testScanID}
+	assertEmptyFilterSentinel(t, e, "severity", "high", base)
+	assertEmptyFilterSentinel(t, e, "node_id", testNodeID, base)
 
 	target := cveRoute(path)
 	for _, tt := range []struct {
 		query string
 		want  int
-		// filters the handler should see: which of the three were supplied.
-		severity, node bool
+		// What the handler reads for each filter: an empty string is no
+		// filter, whether the caller sent it or left the key out.
+		severity, node string
 		kev            bool
+		// kevSent is whether kev reached the handler as supplied: an empty
+		// one must not, as it was never a KEV filter.
+		kevSent bool
 	}{
 		{query: "", want: fiber.StatusNoContent},
-		{query: "?severity=critical", want: fiber.StatusNoContent, severity: true},
-		{query: "?node_id=" + testNodeID, want: fiber.StatusNoContent, node: true},
-		{query: "?kev=true", want: fiber.StatusNoContent, kev: true},
+		{query: "?severity=critical", want: fiber.StatusNoContent, severity: "critical"},
+		{query: "?node_id=" + testNodeID, want: fiber.StatusNoContent, node: testNodeID},
+		{query: "?kev=true", want: fiber.StatusNoContent, kev: true, kevSent: true},
+		{query: "?kev=false", want: fiber.StatusNoContent, kevSent: true},
 		// The dashboard callout sends kev alone; the table sends kev
 		// alongside a severity and the handler applies kev on its own.
-		{query: "?severity=high&kev=true", want: fiber.StatusNoContent, severity: true, kev: true},
+		{query: "?severity=high&kev=true", want: fiber.StatusNoContent, severity: "high", kev: true, kevSent: true},
+		// Empty means "no filter", as it did before the registry.
+		{query: "?severity=", want: fiber.StatusNoContent},
+		{query: "?node_id=", want: fiber.StatusNoContent},
+		{query: "?severity=&node_id=", want: fiber.StatusNoContent},
+		{query: "?kev=", want: fiber.StatusNoContent},
+		// A bare key arrives as "" too, so it reads as false like the old
+		// `c.Query("kev") == "true"` read it — a 400 before the facet.
+		{query: "?kev", want: fiber.StatusNoContent},
+		{query: "?kev=&severity=high", want: fiber.StatusNoContent, severity: "high"},
+		{query: "?kev=%20", want: fiber.StatusBadRequest},
+		// But one empty and one real value for the same filter, in either
+		// order, is refused rather than read as whichever one a parser kept,
+		// and so is an encoded newline.
+		{query: "?node_id=&node_id=" + testNodeID, want: fiber.StatusBadRequest},
+		{query: "?node_id=" + testNodeID + "&node_id=", want: fiber.StatusBadRequest},
+		{query: "?severity=&severity=high", want: fiber.StatusBadRequest},
+		{query: "?node_id=%0A", want: fiber.StatusBadRequest},
 		{query: "?severity=catastrophic", want: fiber.StatusBadRequest},
-		{query: "?severity=", want: fiber.StatusBadRequest},
 		{query: "?node_id=not-a-uuid", want: fiber.StatusBadRequest},
 		{query: "?kev=maybe", want: fiber.StatusBadRequest},
 		{query: "?nodeid=" + testNodeID, want: fiber.StatusBadRequest},
@@ -284,14 +353,17 @@ func TestVulnerabilityFiltersAreDeclared(t *testing.T) {
 				}
 				return
 			}
-			if _, supplied := cap.params.OptString("severity"); supplied != tt.severity {
-				t.Errorf("severity supplied = %v, want %v", supplied, tt.severity)
+			if got := cap.params.String("severity"); got != tt.severity {
+				t.Errorf("severity = %q, want %q", got, tt.severity)
 			}
-			if _, supplied := cap.params.OptString("node_id"); supplied != tt.node {
-				t.Errorf("node_id supplied = %v, want %v", supplied, tt.node)
+			if got := cap.params.String("node_id"); got != tt.node {
+				t.Errorf("node_id = %q, want %q", got, tt.node)
 			}
 			if got := cap.params.Bool("kev"); got != tt.kev {
 				t.Errorf("kev = %v, want %v", got, tt.kev)
+			}
+			if got := cap.params.Has("kev"); got != tt.kevSent {
+				t.Errorf("kev supplied = %v, want %v", got, tt.kevSent)
 			}
 		})
 	}

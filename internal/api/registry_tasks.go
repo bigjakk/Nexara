@@ -11,7 +11,8 @@ import (
 // and upidParam — lives in registry_vms.go, where the first migrated domain
 // defined it. upidParam in particular is shared with the two PROXMOX task
 // routes there, which is the point: a UPID is one thing, and the two domains
-// that carry it in a path must agree on what one looks like.
+// that carry it in a path must agree on what one looks like. emptyOrNodeName
+// lives there too; emptyOrUUID lives in registry_pbs.go.
 
 // taskHistoryScope is the collection all four routes hang off. It is Nexara's
 // own task_history table, not Proxmox's task list — the per-cluster Proxmox
@@ -30,15 +31,25 @@ const taskHistoryScope = pathPrefix + "tasks"
 // Advisory and the create is Deferred — but the refusal is deliberately about
 // the NAME rather than about whether today's shape happens to make it safe.
 // The alias keeps every existing caller working: both send {"cluster_id": …}.
+//
+// The two part company on the EMPTY string, and that is each handler's history
+// rather than an inconsistency. The listing read `if cid != ""`, so ?cluster_id=
+// meant "no filter" — every cluster the caller can see — which is why the filter
+// carries the empty-or-uuid pattern rather than the uuid format, which rejects
+// "", as alertFilterClusterParam does for the same query parameter. The create
+// handed whatever arrived to uuid.Parse, so an empty cluster was a 400 there and
+// still is.
 var (
 	taskFilterClusterParam = apischema.Property{
-		Type:     apischema.String,
-		Alias:    "cluster_id",
-		Optional: true,
-		Format:   "uuid",
-		Typetext: "<uuid>",
-		Description: "Narrow the listing to one cluster. Also accepted as \"cluster_id\". The caller must " +
-			"hold view:task on it, or the request is refused rather than silently emptied.",
+		Type:      apischema.String,
+		Alias:     "cluster_id",
+		Optional:  true,
+		Pattern:   emptyOrUUID,
+		MaxLength: apischema.Ptr(36),
+		Typetext:  "<uuid>",
+		Description: "Narrow the listing to one cluster; the caller must hold view:task on it, or the request " +
+			"is refused rather than silently emptied. Empty or omitted lists every cluster the caller can " +
+			"see. Also accepted as \"cluster_id\".",
 	}
 	taskBodyClusterParam = apischema.Property{
 		Type:     apischema.String,
@@ -63,14 +74,16 @@ var (
 // copy here would be one that drifts.
 //
 // The length bound is what the declaration adds: 500 VMIDs of up to nine digits
-// plus separators is under 5 KiB, and nothing else capped the raw string.
+// plus separators is under 5 KiB, and nothing else capped the raw string. There
+// is no lower one: both handlers parsed the list only `if raw != ""`, so an
+// empty ?vmids= has always been no filter, and still is.
 var taskVmidsParam = apischema.Property{
 	Type:      apischema.String,
 	Optional:  true,
 	MaxLength: apischema.Ptr(6000),
 	Typetext:  "<vmid[,vmid...]>",
 	Description: "Narrow the listing to these Proxmox VMIDs, comma-separated. At most 500, and " +
-		"whitespace around each entry is ignored.",
+		"whitespace around each entry is ignored. Empty or omitted does not filter by guest.",
 }
 
 // registerTaskEndpoints declares TaskHandler's four routes.
@@ -141,11 +154,16 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 			},
 			"filter_cluster_id": taskFilterClusterParam,
 			"status": {
-				Type:        apischema.String,
-				Optional:    true,
-				Enum:        []string{"running", "completed", "failed", "stopped"},
+				Type:     apischema.String,
+				Optional: true,
+				// The handler's validTaskStatuses plus the EMPTY string, which
+				// is not a state: it is "do not filter", which the handler has
+				// always read it as (`if status != ""`). TestTaskStatusVocabulary
+				// sets it aside before comparing the lists, and holds the update
+				// below to the bare one.
+				Enum:        []string{"", "running", "completed", "failed", "stopped"},
 				Typetext:    "<running|completed|failed|stopped>",
-				Description: "Narrow the listing to one task state. Omitted, every state is returned.",
+				Description: "Narrow the listing to one task state. Empty or omitted returns every state.",
 			},
 			"vmids": taskVmidsParam,
 		},
@@ -238,13 +256,22 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 					"reconcile.",
 			},
 			"description": optString(512, "<string>", "What the task is, for the activity feed."),
+			// The EMPTY string is a member here too, but not as a filter: the
+			// create handler read "" as "unspecified" and filed the row as
+			// running (`if status == "" { status = "running" }`), and Create
+			// still does, because the Default covers only an absent key.
+			// Body parameters of this shape keep that reading — ha_policy, a
+			// report schedule's format and vm-import's source_acquisition do
+			// the same. The refusal of an empty default that the operator
+			// ruled on 2026-09-23 is applied to query parameters only, as
+			// TestEmptyTextDefaultsAreRefused pins it.
 			"status": {
 				Type:        apischema.String,
 				Optional:    true,
 				Default:     "running",
-				Enum:        []string{"running", "completed", "failed", "stopped"},
+				Enum:        []string{"", "running", "completed", "failed", "stopped"},
 				Typetext:    "<running|completed|failed|stopped>",
-				Description: "Initial state. Omitted, the row is filed as running, which is what a just-dispatched task is.",
+				Description: "Initial state. Empty or omitted files the row as running, which is what a just-dispatched task is.",
 			},
 			// Not a bare optString, unlike its neighbours: this value does
 			// not stay in the row. reconcileRunningTasks
@@ -305,21 +332,29 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 		Method: fiber.MethodPut,
 		Path:   taskHistoryScope + "/:upid",
 		Description: "Update a recorded task's state and progress. Requires manage:task on the CLUSTER the " +
-			"recorded task belongs to, which is read from the row rather than supplied.",
+			"recorded task belongs to, which is read from the row rather than supplied. Not a partial " +
+			"update: every field is written on every call, so one left out is cleared rather than kept.",
 		Group: "Tasks",
 		Permissions: Permissions{Deferred: "the cluster is read from the task ROW the :upid resolves to, " +
 			"not from the request, so middleware has nothing to resolve; the handler loads the row and then " +
 			"calls requireClusterPerm(c, \"manage\", \"task\", task.ClusterID)"},
 		Parameters: apischema.Properties{
 			"upid": upidParam,
+			// What an omitted field does is stated per field below, and it is
+			// never "keep the stored value": UpdateTaskHistory
+			// (queries/tasks.sql) sets status, exit_status, progress and
+			// finished_at on every call, and the handler passes an empty
+			// string or NULL for each one the caller left out.
 			"status": {
-				Type:        apischema.String,
-				Optional:    true,
-				Enum:        []string{"running", "completed", "failed", "stopped"},
-				Typetext:    "<running|completed|failed|stopped>",
-				Description: "New state. \"stopped\" with no finished_at stamps the finish time as now.",
+				Type:     apischema.String,
+				Optional: true,
+				Enum:     []string{"running", "completed", "failed", "stopped"},
+				Typetext: "<running|completed|failed|stopped>",
+				Description: "New state. Omitted, the row is left with an empty state. \"stopped\" with no " +
+					"finished_at stamps the finish time as now.",
 			},
-			"exit_status": optString(512, "<string>", "Proxmox's exit status string for the task."),
+			"exit_status": optString(512, "<string>", "Proxmox's exit status string for the task. Omitted, "+
+				"it is stored empty."),
 			"progress": {
 				Type:     apischema.Number,
 				Optional: true,
@@ -327,18 +362,19 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 				Maximum:  apischema.Ptr(100.0),
 				Typetext: "<number>",
 				// No Default, so p.OptFloat reports whether the caller chose:
-				// the handler writes the column only when they did, and the SPA
-				// sends an explicit null for "unknown", which apischema reads
-				// as absent — the same thing.
-				Description: "Percentage complete. Omitted, or sent as null, leaves the stored value alone.",
+				// the handler passes the value when they did and NULL when they
+				// did not. The SPA sends an explicit null for "unknown", which
+				// apischema reads as absent — the same NULL.
+				Description: "Percentage complete. Omitted, or sent as null, clears the stored value.",
 			},
 			"finished_at": {
 				Type:      apischema.String,
 				Optional:  true,
 				MaxLength: apischema.Ptr(64),
 				Typetext:  "<RFC3339 timestamp>",
-				Description: "When the task finished. Omitted, or sent as null, the finish time is stamped " +
-					"only when status is \"stopped\".",
+				Description: "When the task finished. Omitted, or sent as null, the finish time is cleared — " +
+					"unless status is \"stopped\", which stamps it as now. A value that is not RFC 3339 " +
+					"clears it too, whatever the status.",
 			},
 		},
 		Handler: h.Update,

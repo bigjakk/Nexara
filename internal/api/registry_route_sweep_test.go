@@ -812,12 +812,15 @@ var sweepValueOverrides = map[string]any{
 	// apischema has no facet for "the string must contain this substring".
 	"user_filter":  "(uid={{username}})",
 	"group_filter": "(member={{userDN}})",
-	// "node_id" is NOT overridden globally: cve-scans/:scan_id/vulnerabilities
-	// declares a DIFFERENT "node_id" with a strict Format:"uuid" (no empty
-	// alternative), and a blanket "" would break that one instead of fixing
-	// it. The maintenance-window "node_id" (Pattern emptyOrUUID, which DOES
-	// accept "") gets its own value in sweepRouteOverrides below, scoped to
-	// the two routes that actually declare it.
+	// "node_id" is NOT overridden globally: synthesizeValueFor applies these
+	// by name whatever the source, and "node_id" is also a uuid-format PATH
+	// parameter — on the node metrics route, the per-node inventory listings
+	// (/nodes/:node_id/disks, /network-interfaces, /pci-devices) and the two
+	// rolling-update node actions — where a blanket "" would
+	// leave the segment empty and the route unmatched. The maintenance-window
+	// "node_id" (Pattern emptyOrUUID, which DOES accept "") gets its own value
+	// in sweepRouteOverrides below, scoped to the two routes that actually
+	// declare it.
 	//
 	// virtio_win.go's UpdateConfig reads these two under the names
 	// check_timezone/check_schedule (distinct from the plain "timezone"/
@@ -928,9 +931,9 @@ var sweepRouteOverrides = map[string]sweepEndpointOverride{
 	// cluster" — a real node UUID would need a row this sweep's
 	// disconnected DB was never asked to create, so the field's own
 	// documented empty case is the value that reaches furthest. Scoped to
-	// these two routes rather than sweepValueOverrides because
-	// cve-scans/:scan_id/vulnerabilities declares an UNRELATED "node_id"
-	// with a strict Format:"uuid" that does not accept "".
+	// these two routes rather than sweepValueOverrides because "node_id" is
+	// also an UNRELATED uuid-format path parameter elsewhere (see the note in
+	// sweepValueOverrides), which "" would leave empty.
 	"POST " + pathPrefix + "clusters/:cluster_id/maintenance-windows": {
 		values: map[string]any{"node_id": ""},
 	},
