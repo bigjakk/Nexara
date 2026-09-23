@@ -40,9 +40,11 @@ import (
 //     the receiver — `q := h.queries; q.GetVM(…)` — walks straight past
 //     it, as does a lookup that reaches the database through any other
 //     indirection.
-//  3. guestLookupCallees is hand-maintained. A new by-uuid query under a
-//     different name (GetGuest, GetVMByID) is invisible until someone
-//     adds it here, and nothing reminds them to.
+//  3. guestLookupCallees is hand-maintained. A RENAME of one of its
+//     lookups is caught — the choke points stop making the call they are
+//     required to make — but a new, additional by-uuid query under another
+//     name (GetGuest, GetVMByID) is invisible until someone adds it here,
+//     and nothing reminds them to.
 //
 // Doing better needs type-aware dataflow — resolving `h.queries` to its
 // type, following the returned row to the comparison, and proving the
@@ -74,7 +76,15 @@ func TestGuard_GuestLookupsAreClusterScoped(t *testing.T) {
 
 	fset := token.NewFileSet()
 	var findings []string
-	var checked int
+	// lookupCallers counts functions that CALL a guest lookup, and only those.
+	// The choke points count when they make the lookup themselves — which each
+	// is required to — and not merely for existing: counted unconditionally,
+	// they held this at three even when guestLookupCallees matched nothing at
+	// all, so the floor below could never fire in the very case it names. A
+	// rename of ONE lookup is the per-choke-point check's to catch, not the
+	// floor's: the other lookup still keeps the count above zero.
+	var lookupCallers int
+	chokePointsSeen := map[string]bool{}
 
 	for _, path := range paths {
 		astFile, parseErr := parser.ParseFile(fset, path, nil, 0)
@@ -87,17 +97,28 @@ func TestGuard_GuestLookupsAreClusterScoped(t *testing.T) {
 				continue
 			}
 			name := guardFuncKey(fd)
+			calls := callsGuestLookup(fd.Body)
+			if calls {
+				lookupCallers++
+			}
 			if clusterScopeChokePoints[name] {
-				checked++
+				chokePointsSeen[name] = true
+				// A choke point that no longer makes the lookup is not the
+				// comparison for it any more, and a lookup renamed out from
+				// under guestLookupCallees shows up here first: the choke
+				// points are the three places certain to call one.
+				if !calls {
+					findings = append(findings, name+" is listed as a cluster-scope choke point but makes no guest "+
+						"lookup — the lookup moved, or guestLookupCallees no longer names it")
+				}
 				if !comparesClusterID(fd.Body) {
 					findings = append(findings, name+" is listed as a cluster-scope choke point but makes no ClusterID comparison")
 				}
 				continue
 			}
-			if !callsGuestLookup(fd.Body) {
+			if !calls {
 				continue
 			}
-			checked++
 			if !comparesClusterID(fd.Body) {
 				findings = append(findings, name+" ("+path+") loads a guest by uuid but never compares its ClusterID "+
 					"against the cluster in the request path — a caller with a grant on one cluster can reach a guest in another")
@@ -105,15 +126,25 @@ func TestGuard_GuestLookupsAreClusterScoped(t *testing.T) {
 		}
 	}
 
-	// The guard is worthless if it matched nothing: the lookups could have
-	// been renamed out from under it.
-	if checked == 0 {
-		t.Fatal("no guest lookup was found at all; guestLookupCallees is stale")
+	for name := range clusterScopeChokePoints {
+		if !chokePointsSeen[name] {
+			findings = append(findings, name+" is listed as a cluster-scope choke point but no longer exists")
+		}
 	}
 
+	// Reported before the floor below, which is fatal: the choke-point
+	// findings name the more specific cause, and a t.Fatal first would hide
+	// them.
 	sort.Strings(findings)
 	for _, f := range findings {
 		t.Error(f)
+	}
+
+	// The guard is worthless if it matched nothing: the lookups could have
+	// been renamed out from under it.
+	if lookupCallers == 0 {
+		t.Fatal("no guest lookup was found at all: guestLookupCallees is stale, or the handlers' " +
+			"queries field was renamed, and callsGuestLookup matches only x.queries.<lookup>")
 	}
 }
 
