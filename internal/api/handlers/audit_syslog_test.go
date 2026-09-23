@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -78,6 +79,28 @@ func storedSyslog(value string) queuedRow {
 // noSyslogRow is the answer when nothing has ever been saved.
 func noSyslogRow() queuedRow { return queuedRow{err: pgx.ErrNoRows} }
 
+// savedSyslogConfig decodes the value the handler's settings write stored, or
+// fails the test if no write ran.
+func (s *syslogDBTX) savedSyslogConfig(t *testing.T) proxsyslog.Config {
+	t.Helper()
+	for _, q := range s.calls {
+		if !strings.Contains(q.sql, "INSERT INTO settings") {
+			continue
+		}
+		raw, ok := q.args[1].(json.RawMessage)
+		if !ok {
+			t.Fatalf("settings write value is %T, want json.RawMessage", q.args[1])
+		}
+		var cfg proxsyslog.Config
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			t.Fatalf("decode settings value %s: %v", raw, err)
+		}
+		return cfg
+	}
+	t.Fatal("no settings write ran")
+	return proxsyslog.Config{}
+}
+
 // writeAccepted is the row the upsert hands back; the handler discards it, so
 // only the absence of an error matters.
 func writeAccepted() queuedRow { return storedSyslog(`{}`) }
@@ -101,6 +124,8 @@ func newSyslogTestApp(t *testing.T, dbtx db.DBTX, pub *events.Publisher) *fiber.
 	})
 	installStubEngineMiddleware(app)
 
+	app.Get("/audit-log/syslog-config", RequirePermission("manage", "audit"),
+		withRequestParams(t, apischema.Properties{}, nil, handler.GetSyslogConfig))
 	app.Put("/audit-log/syslog-config", RequirePermission("manage", "audit"),
 		withRequestParams(t, syslogConfigMirror(t), nil, handler.UpdateSyslogConfig))
 	app.Post("/audit-log/syslog-test", RequirePermission("manage", "audit"),
@@ -237,6 +262,33 @@ func TestUpdateSyslogConfigAudits(t *testing.T) {
 			},
 		},
 
+		{
+			// The published contract: "0, or omitted, means the RFC 5424
+			// default of 514" and "empty or omitted means udp", as the port
+			// and protocol read before this change. The defaults used to be
+			// applied AFTER validation, so this request got "Port must be
+			// between 1 and 65535" for the 0 it was about to replace.
+			name:   "an enabled config with no port or protocol takes the defaults",
+			stored: noSyslogRow(),
+			body:   `{"enabled":true,"host":"collector.example.com"}`,
+			role:   "admin", wantStatus: http.StatusOK, audited: true,
+			wantNew: syslogAuditConfig{
+				Enabled: true, Host: "collector.example.com", Port: 514, Protocol: "udp", Facility: 16,
+			},
+		},
+		{
+			// TLS collectors listen on 6514 (RFC 5425), not 514, so an omitted
+			// port follows the transport; 514 would save a config whose
+			// forwarder then failed to connect.
+			name:   "a tls config with no port takes 6514",
+			stored: noSyslogRow(),
+			body:   `{"enabled":true,"host":"collector.example.com","protocol":"tls"}`,
+			role:   "admin", wantStatus: http.StatusOK, audited: true,
+			wantNew: syslogAuditConfig{
+				Enabled: true, Host: "collector.example.com", Port: 6514, Protocol: "tls", Facility: 16,
+			},
+		},
+
 		// Nothing was written, so nothing is recorded — the log says what
 		// happened, not what was attempted.
 		{
@@ -281,6 +333,12 @@ func TestUpdateSyslogConfigAudits(t *testing.T) {
 			var got syslogAuditDetails
 			if err := json.Unmarshal(raw, &got); err != nil {
 				t.Fatalf("decode details %s: %v", raw, err)
+			}
+			// The audit row has to name what was STORED — the settings value
+			// loadSyslogConfig reads back at startup — not merely what the
+			// handler meant to store.
+			if saved := toSyslogAuditConfig(capture.savedSyslogConfig(t)); saved != tt.wantNew {
+				t.Errorf("settings value = %+v, want %+v", saved, tt.wantNew)
 			}
 
 			switch {
@@ -436,6 +494,35 @@ func TestSyslogProbeAudits(t *testing.T) {
 			body: `{"host":"unreachable.internal","port":9999,"protocol":"sctp","facility":16}`,
 			role: "admin", wantStatus: http.StatusBadRequest, audited: true, wantSuccess: false,
 			wantTarget: syslogAuditConfig{Host: "unreachable.internal", Port: 9999, Protocol: "sctp", Facility: 16},
+		},
+
+		{
+			// An omitted protocol is udp. The target is the loopback collector,
+			// so the probe succeeds without leaving the host.
+			name: "an omitted protocol probes udp",
+			body: `{"host":"127.0.0.1","port":` + strconv.Itoa(reachable) + `}`,
+			role: "admin", wantStatus: http.StatusOK, audited: true, wantSuccess: true,
+			wantTarget: syslogAuditConfig{Host: "127.0.0.1", Port: reachable, Protocol: "udp", Facility: 16},
+		},
+		{
+			// And 6514 for tls. Nothing listens there on the test host, so the
+			// probe fails — and a failed probe is recorded with its target,
+			// which is the port the default chose.
+			name: "an omitted port probes 6514 over tls",
+			body: `{"host":"127.0.0.1","protocol":"tls"}`,
+			role: "admin", wantStatus: http.StatusBadRequest, audited: true, wantSuccess: false,
+			wantTarget: syslogAuditConfig{Host: "127.0.0.1", Port: 6514, Protocol: "tls", Facility: 16},
+		},
+		{
+			// An omitted port is 514, as published — it used to be refused
+			// before the default could apply. The protocol is one the
+			// dialler rejects, so the probe fails without touching the
+			// network, and the recorded target shows the port it would
+			// have used.
+			name: "an omitted port probes 514",
+			body: `{"host":"collector.example.com","protocol":"sctp"}`,
+			role: "admin", wantStatus: http.StatusBadRequest, audited: true, wantSuccess: false,
+			wantTarget: syslogAuditConfig{Host: "collector.example.com", Port: 514, Protocol: "sctp", Facility: 16},
 		},
 
 		// No connection was attempted, so there is nothing to record.
@@ -704,4 +791,146 @@ func jsonFieldNames(t *testing.T, typ reflect.Type) map[string]bool {
 	}
 	walk(typ, "")
 	return names
+}
+
+// TestApplySyslogDefaults pins what each omitted field means, per transport:
+// the table the published descriptions in registry_audit.go are written
+// against. The handler tests reach it only through requests.
+func TestApplySyslogDefaults(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		in   proxsyslog.Config
+		want proxsyslog.Config
+	}{
+		{"everything omitted", proxsyslog.Config{},
+			proxsyslog.Config{Port: 514, Protocol: "udp", Facility: 16}},
+		{"udp takes 514", proxsyslog.Config{Protocol: "udp"},
+			proxsyslog.Config{Port: 514, Protocol: "udp", Facility: 16}},
+		{"tcp takes 514 too", proxsyslog.Config{Protocol: "tcp"},
+			proxsyslog.Config{Port: 514, Protocol: "tcp", Facility: 16}},
+		{"tls takes 6514", proxsyslog.Config{Protocol: "tls"},
+			proxsyslog.Config{Port: 6514, Protocol: "tls", Facility: 16}},
+		// Protocol is case-insensitive and lowercased only later, by the
+		// update's validation, so the port default must not depend on case.
+		{"TLS in capitals takes 6514", proxsyslog.Config{Protocol: "TLS"},
+			proxsyslog.Config{Port: 6514, Protocol: "TLS", Facility: 16}},
+		{"a chosen port is kept, whatever the transport", proxsyslog.Config{Protocol: "tls", Port: 10514},
+			proxsyslog.Config{Port: 10514, Protocol: "tls", Facility: 16}},
+		{"a chosen facility is kept", proxsyslog.Config{Facility: 4},
+			proxsyslog.Config{Port: 514, Protocol: "udp", Facility: 4}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.in
+			applySyslogDefaults(&got)
+			if got != tt.want {
+				t.Errorf("applySyslogDefaults(%+v) = %+v, want %+v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSyslogProbeReleasesItsForwarder pins TestSyslog's Close.
+// proxsyslog.NewForwarder starts a sender goroutine, with a 1024-slot queue,
+// that a probe never uses, and before the Close every probe left both behind:
+// a goroutine and ~160 KiB per request, on a route with no rate limit of its
+// own.
+//
+// It counts only the goroutines proxsyslog.NewForwarder started, so nothing
+// else the process runs can move the count, and it finds them by the "created
+// by" line each one carries from the moment it exists. A frame of
+// (*Forwarder).run would not do: a sender the scheduler has not run yet has
+// none, and at GOMAXPROCS=1 twenty leaked senders all sat unscheduled, so a
+// count by that name read zero with the leak back. A control forwarder proves
+// the count can see a sender at all first, so a renamed constructor fails
+// here instead of turning every count into a silent zero. The count is
+// polled, because a closed sender can still be on its way out when the stack
+// is dumped; a leaked one never leaves.
+func TestSyslogProbeReleasesItsForwarder(t *testing.T) {
+	collector, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for the collector: %v", err)
+	}
+	defer func() { _ = collector.Close() }()
+	body := `{"host":"127.0.0.1","port":` + strconv.Itoa(collector.LocalAddr().(*net.UDPAddr).Port) + `}`
+
+	app := newSyslogTestApp(t, newSyslogDBTX(), nil)
+	probe := func() {
+		resp := syslogRequest(t, app, http.MethodPost, "/audit-log/syslog-test", body, "admin")
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("probe status = %d, want 200 — the loopback collector should accept it", resp.StatusCode)
+		}
+	}
+	probe() // anything created once per app is created here, not counted below
+
+	ctl := proxsyslog.NewForwarder(nil)
+	seen := forwarderSenders()
+	ctl.Close()
+	if seen == 0 {
+		t.Fatal("forwarderSenders counted no sender while a forwarder was running; the creator it matches has changed")
+	}
+
+	const probes = 20
+	before := forwarderSenders()
+	for range probes {
+		probe()
+	}
+	grew := forwarderSenders() - before
+	for deadline := time.Now().Add(2 * time.Second); grew > 0 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+		grew = forwarderSenders() - before
+	}
+	if grew > 0 {
+		t.Errorf("%d probes left %d more forwarder sender goroutines running; each probe's forwarder has to be closed",
+			probes, grew)
+	}
+}
+
+// TestGetSyslogConfigReportsTheDefaultsBeforeASave pins what the settings page
+// loads when nothing has been saved: forwarding off, with exactly what
+// applySyslogDefaults makes of an empty config — the values registry_audit.go
+// publishes for this case. It compares against both, so a defaultSyslogConfig
+// that restated the values instead of deriving them fails as soon as the two
+// part.
+func TestGetSyslogConfigReportsTheDefaultsBeforeASave(t *testing.T) {
+	app := newSyslogTestApp(t, newSyslogDBTX(noSyslogRow()), nil)
+	resp := syslogRequest(t, app, http.MethodGet, "/audit-log/syslog-config", "", "admin")
+	defer func() { _ = resp.Body.Close() }()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", resp.StatusCode, body)
+	}
+	var got proxsyslog.Config
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode %s: %v", body, err)
+	}
+	if want := (proxsyslog.Config{Port: 514, Protocol: "udp", Facility: 16}); got != want {
+		t.Errorf("GET with nothing saved = %+v, want %+v — what registry_audit.go publishes", got, want)
+	}
+	// And the same as applySyslogDefaults makes of an empty config, so a
+	// defaultSyslogConfig that went back to restating the values would fail
+	// the day the defaults change rather than drift from them.
+	var derived proxsyslog.Config
+	applySyslogDefaults(&derived)
+	if got != derived {
+		t.Errorf("GET with nothing saved = %+v, but applySyslogDefaults gives %+v", got, derived)
+	}
+}
+
+// forwarderSenders counts the goroutines proxsyslog.NewForwarder has started
+// that have not exited, read from a dump of every goroutine's stack by the
+// "created by" line each carries — there from the moment the goroutine is
+// created, unlike a (*Forwarder).run frame, which appears only once the
+// scheduler has run it.
+func forwarderSenders() int {
+	buf := make([]byte, 1<<20)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			return strings.Count(string(buf[:n]),
+				"created by github.com/bigjakk/nexara/internal/syslog.NewForwarder in goroutine")
+		}
+		buf = make([]byte, 2*len(buf))
+	}
 }

@@ -135,7 +135,7 @@ func syslogConfigParams() apischema.Properties {
 			Minimum:     apischema.Ptr(0.0),
 			Maximum:     apischema.Ptr(65535.0),
 			Typetext:    "<integer>",
-			Description: "Collector port. 0, or omitted, means the RFC 5424 default of 514.",
+			Description: "Collector port. 0, or omitted, means 6514 for tls (RFC 5425) and 514 otherwise — UDP's assigned port (RFC 5426), which TCP collectors conventionally reuse; RFC 6587 assigns TCP none.",
 		},
 		"protocol": optString(8, "<udp|tcp|tls>",
 			"Transport. Case-insensitive; empty or omitted means udp. Only checked when enabled."),
@@ -233,9 +233,10 @@ func registerAuditEndpoints(reg *Registry, h *handlers.AuditHandler) {
 		Handler: h.Export,
 	})
 	reg.Register(Endpoint{
-		Method:      fiber.MethodGet,
-		Path:        auditScope + "/syslog-config",
-		Description: "Read the stored audit-forwarding configuration, or the RFC 5424 defaults when none has been saved.",
+		Method: fiber.MethodGet,
+		Path:   auditScope + "/syslog-config",
+		Description: "Read the stored audit-forwarding configuration, or the defaults — forwarding off, udp, " +
+			"port 514, facility 16 (local0) — when none has been saved.",
 		Group:       "Audit Log",
 		Permissions: globalCheck("manage", "audit"),
 		Parameters:  apischema.Properties{},

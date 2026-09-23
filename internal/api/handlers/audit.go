@@ -825,8 +825,9 @@ type syslogAuditDetails struct {
 	New                 syslogAuditConfig  `json:"new"`
 }
 
-// syslogTestAuditDetails is what a forwarding probe records: the target as the
-// caller submitted it, and what came back.
+// syslogTestAuditDetails is what a forwarding probe records: the target as
+// probed — the caller's values, with applySyslogDefaults' meaning for any it
+// omitted — and what came back.
 type syslogTestAuditDetails struct {
 	Target  syslogAuditConfig `json:"target"`
 	Success bool              `json:"success"`
@@ -834,15 +835,16 @@ type syslogTestAuditDetails struct {
 }
 
 // syslogConfigFromParams reads a forwarding config out of the validated
-// parameters.
+// parameters, with applySyslogDefaults' meaning for every field left out.
 //
 // One reader for the store and the probe, so the two cannot drift on which
-// fields they accept — they are one config, declared once as
-// syslogConfigParams (internal/api/registry_audit.go). The zero values it
-// produces for an omitted port, protocol or facility are the same ones a bound
-// struct produced, and each caller substitutes its own default afterwards.
+// fields they accept or on what an omitted one means — they are one config,
+// declared once as syslogConfigParams (internal/api/registry_audit.go). The
+// defaults are applied here, before either caller validates, because applying
+// them after validation is how "0, or omitted, means the RFC 5424 default of
+// 514" came to be both published and unreachable.
 func syslogConfigFromParams(p *apischema.Params) proxsyslog.Config {
-	return proxsyslog.Config{
+	cfg := proxsyslog.Config{
 		Enabled:       p.Bool("enabled"),
 		Host:          p.String("host"),
 		Port:          int(p.Int("port")),
@@ -850,13 +852,17 @@ func syslogConfigFromParams(p *apischema.Params) proxsyslog.Config {
 		Facility:      int(p.Int("facility")),
 		TLSSkipVerify: p.Bool("tls_skip_verify"),
 	}
+	applySyslogDefaults(&cfg)
+	return cfg
 }
 
 // defaultSyslogConfig is what the endpoints report before anything has been
-// saved: forwarding off, and the RFC 5424 defaults the forwarder itself falls
-// back to.
+// saved: forwarding off, and what applySyslogDefaults makes of an empty
+// config — udp, port 514, facility 16 (local0).
 func defaultSyslogConfig() proxsyslog.Config {
-	return proxsyslog.Config{Port: 514, Protocol: "udp", Facility: 16}
+	var cfg proxsyslog.Config
+	applySyslogDefaults(&cfg)
+	return cfg
 }
 
 // storedSyslogConfig reads the saved forwarding config. found is false when
@@ -931,6 +937,35 @@ func (h *AuditHandler) GetSyslogConfig(c fiber.Ctx, _ *apischema.Params) error {
 	return c.JSON(cfg)
 }
 
+// applySyslogDefaults fills in what an omitted or zero field means, as the
+// declarations publish it (registry_audit.go's syslogConfigParams): an empty
+// protocol is udp; port 0 is 6514 for tls, the port RFC 5425 §4.1 assigns,
+// and otherwise 514 — UDP's well-known port (RFC 5426 §3.3), which TCP
+// collectors conventionally reuse because RFC 6587 assigns TCP syslog none;
+// and facility 0 is 16 (local0).
+//
+// syslogConfigFromParams applies it, so both handlers see the defaults before
+// they validate. They used to apply them AFTER validating, and the checks
+// refused what the defaults were about to replace: a probe, or an enabled
+// config, with no port got "Port must be between 1 and 65535", and an enabled
+// config with no protocol got "Protocol must be 'udp', 'tcp', or 'tls'" —
+// against a published contract that made both optional. (A disabled config
+// skipped those checks, so its fallbacks always ran.)
+func applySyslogDefaults(cfg *proxsyslog.Config) {
+	if cfg.Protocol == "" {
+		cfg.Protocol = "udp"
+	}
+	if cfg.Port == 0 {
+		cfg.Port = 514
+		if strings.EqualFold(cfg.Protocol, "tls") {
+			cfg.Port = 6514
+		}
+	}
+	if cfg.Facility == 0 {
+		cfg.Facility = 16
+	}
+}
+
 // UpdateSyslogConfig handles PUT /api/v1/audit-log/syslog-config.
 func (h *AuditHandler) UpdateSyslogConfig(c fiber.Ctx, p *apischema.Params) error {
 	cfg := syslogConfigFromParams(p)
@@ -951,15 +986,6 @@ func (h *AuditHandler) UpdateSyslogConfig(c fiber.Ctx, p *apischema.Params) erro
 	}
 	if cfg.Facility < 0 || cfg.Facility > 23 {
 		return fiber.NewError(fiber.StatusBadRequest, "Facility must be between 0 and 23")
-	}
-	if cfg.Facility == 0 {
-		cfg.Facility = 16 // default local0
-	}
-	if cfg.Port == 0 {
-		cfg.Port = 514
-	}
-	if cfg.Protocol == "" {
-		cfg.Protocol = "udp"
 	}
 
 	data, err := json.Marshal(cfg)
@@ -1030,17 +1056,11 @@ func (h *AuditHandler) TestSyslog(c fiber.Ctx, p *apischema.Params) error {
 	if cfg.Port < 1 || cfg.Port > 65535 {
 		return fiber.NewError(fiber.StatusBadRequest, "Port must be between 1 and 65535")
 	}
-	if cfg.Port == 0 {
-		cfg.Port = 514
-	}
-	if cfg.Protocol == "" {
-		cfg.Protocol = "udp"
-	}
-	if cfg.Facility == 0 {
-		cfg.Facility = 16
-	}
 
+	// NewForwarder starts a sender goroutine with a 1024-slot queue that a probe
+	// never uses; without the Close every probe leaked both.
 	fwd := proxsyslog.NewForwarder(nil)
+	defer fwd.Close()
 	probeErr := fwd.Test(cfg)
 
 	// Recorded whether or not the probe connected. This endpoint opens an
