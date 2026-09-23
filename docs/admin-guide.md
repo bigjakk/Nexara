@@ -1159,7 +1159,7 @@ The cluster, resource type, user, action and time-range filters carry into the e
 
 For continuous delivery, expand **Syslog Forwarding** on the Audit Log tab:
 
-- **Host** and **Port** — your collector (default 514)
+- **Host** and **Port** — your collector. The port follows the protocol (514 for UDP and TCP, 6514 for TLS) until you enter one of your own; leave it blank to use the protocol's default
 - **Protocol** — UDP, TCP, or TLS (with an optional *Skip TLS certificate verification* for self-signed collectors)
 - **Facility** — the syslog facility to stamp on records
 

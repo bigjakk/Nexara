@@ -17,6 +17,7 @@ import {
   type Severity,
 } from "@/components/layout/activity-columns";
 import { parseDetails } from "@/components/layout/task-status";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useEvents,
@@ -400,6 +401,7 @@ export function AuditLogPanel() {
   const [endDate, setEndDate] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const { canManage } = usePermissions();
   const { data: clusters } = useClusters();
   const { data: actions } = useAuditActions();
   const { data: users } = useAuditUsers();
@@ -691,8 +693,10 @@ export function AuditLogPanel() {
         )}
       </div>
 
-      {/* Syslog forwarding config */}
-      <SyslogConfigCard />
+      {/* Syslog forwarding config. Its routes all require a global manage:audit
+          (registry_audit.go), and this tab is open to anyone with view:audit —
+          every Viewer — who would get only a notice whose Retry can 403 again. */}
+      {canManage("audit") && <SyslogConfigCard />}
 
       {/* Table */}
       {isLoading ? (

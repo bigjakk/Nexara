@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 
 // Re-export the canonical audit entry type (owned by the audit feature) so
@@ -96,12 +97,30 @@ export interface SyslogConfig {
   tls_skip_verify: boolean;
 }
 
+/**
+ * What a 200 from PUT /audit-log/syslog-config carries in place of the stored
+ * config when the config was stored but the live forwarder could not connect
+ * to the collector it names (UpdateSyslogConfig, internal/api/handlers/audit.go).
+ */
+export interface SyslogSaveWarning {
+  saved: true;
+  warning: string;
+}
+
 export function useSyslogConfig() {
+  // The syslog routes all require a global manage:audit (registry_audit.go).
+  // Without it this read can only 403, so it is not sent at all. canManage
+  // reads the flat permission list, which carries cluster-scoped grants too
+  // (GetUserPermissions in queries/rbac.sql ignores scope), so a holder of
+  // manage:audit on one cluster only still sends it, and meets the card's
+  // could-not-load notice.
+  const { canManage } = usePermissions();
   return useQuery({
     queryKey: ["syslog-config"],
     queryFn: () =>
       apiClient.get<SyslogConfig>("/api/v1/audit-log/syslog-config"),
     staleTime: 60_000,
+    enabled: canManage("audit"),
   });
 }
 
@@ -109,7 +128,10 @@ export function useSaveSyslogConfig() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (cfg: SyslogConfig) =>
-      apiClient.put<SyslogConfig>("/api/v1/audit-log/syslog-config", cfg),
+      apiClient.put<SyslogConfig | SyslogSaveWarning>(
+        "/api/v1/audit-log/syslog-config",
+        cfg,
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["syslog-config"] });
     },
