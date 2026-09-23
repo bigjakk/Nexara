@@ -771,7 +771,9 @@ func (h *VMImportHandler) RegisterEsxiSource(c fiber.Ctx, p *apischema.Params) e
 	}
 
 	form := esxiStorageForm(req)
-	if err := pxClient.CreateStorage(c.Context(), form); err != nil {
+	// The result only ever carries a PBS encryption key Proxmox generated for
+	// encryption-key=autogen, which an ESXi source never sends.
+	if _, err := pxClient.CreateStorage(c.Context(), form); err != nil {
 		return mapProxmoxError(err)
 	}
 
@@ -848,7 +850,7 @@ func (h *VMImportHandler) EnableImportContent(c fiber.Ctx, p *apischema.Params) 
 	merged := mergeContent(cfg.Content, "import")
 	form := url.Values{}
 	form.Set("content", merged)
-	if err := pxClient.UpdateStorage(c.Context(), storage, form); err != nil {
+	if _, err := pxClient.UpdateStorage(c.Context(), storage, form, nil); err != nil {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]any{"storage": storage, "content": merged})

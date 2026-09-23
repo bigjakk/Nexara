@@ -49,6 +49,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { ChangelogDialog } from "./ChangelogDialog";
 import { AboutDialog } from "./AboutDialog";
 import { FloatingConsole } from "@/features/console/components/FloatingConsole";
+import { PendingPBSKeyNavigationGuard } from "@/features/storage/components/PendingPBSKey";
 import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
 import { SearchBar } from "./SearchBar";
 import { CreateResourceMenu } from "./CreateResourceMenu";
@@ -298,6 +299,7 @@ export function AppShell() {
         <TaskProgressDialog />
         <VMContextDialogs />
         <CreateResourceDialogs />
+        <PendingPBSKeyNavigationGuard />
       </div>
       <FloatingConsole />
       <Toaster position="top-right" richColors closeButton theme={themeMode} />

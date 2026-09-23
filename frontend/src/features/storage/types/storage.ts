@@ -112,7 +112,24 @@ export interface CreateStorageRequest {
 /** Update storage request body */
 export interface UpdateStorageRequest {
   params: Record<string, string>;
+  /**
+   * Comma-separated settings to clear. Proxmox decides which names it will
+   * clear for the storage's type; the API refuses only a setting that params
+   * also sets.
+   */
   delete?: string;
+}
+
+/** Response to a storage create or update. */
+export interface StorageWriteResponse {
+  status: string;
+  storage: string;
+  /**
+   * The PBS encryption key Proxmox generated for params.encryption-key =
+   * "autogen", present only in the response to that request. Nexara keeps no
+   * copy: this is the operator's one chance to save it.
+   */
+  generated_encryption_key?: string;
 }
 
 /** Full storage config from Proxmox (GET /storage/{id}/config) */
@@ -429,7 +446,6 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
     { key: "pool", label: "Ceph Pool", placeholder: "rbd" },
     { key: "username", label: "Ceph User", placeholder: "admin" },
     { key: "krbd", label: "Use Kernel RBD", type: "checkbox" },
-    { key: "keyring", label: "Keyring Path" },
     { key: "namespace", label: "Namespace" },
   ],
   cephfs: [
@@ -495,6 +511,56 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
       label: "TLS Fingerprint",
       placeholder: "AA:BB:CC:...",
     },
-    { key: "encryption-key", label: "Encryption Key" },
+    // encryption-key is not a field here: the dialogs render the PBS
+    // encryption choice themselves (PBSEncryptionField), because storage.cfg
+    // holds only the key's fingerprint and an existing key is shown, never
+    // edited in place.
   ],
+};
+
+/** The Ceph credential field an rbd or cephfs storage shows. */
+export interface CephSecretFieldDef {
+  label: string;
+  /** A keyring runs to several lines; a CephFS secret is one token. */
+  multiline: boolean;
+  placeholder: string;
+  help: string;
+}
+
+/**
+ * The credential an rbd or cephfs storage takes for an EXTERNAL Ceph cluster
+ * — one reached through Monitor Hosts rather than this Proxmox cluster's own
+ * Ceph.
+ *
+ * It is the credential's CONTENTS, never a path: Proxmox writes the value
+ * itself to /etc/pve/priv/ceph/<storage>.keyring for rbd, or .secret for
+ * cephfs (ceph_create_keyfile, pve-storage src/PVE/CephConfig.pm). Which it is
+ * differs by plugin: rbd reads a whole keyring file, while CephFS mounts with
+ * `secretfile=`, which holds the bare key — so the Proxmox GUI asks for a
+ * "Keyring" in RBDEdit.js and a "Secret Key" in CephFSEdit.js, and offers
+ * either only when the storage is not the cluster's own Ceph: given none,
+ * Proxmox derives it from the local admin keyring, which is right only for the
+ * cluster's own Ceph. The GUI also takes it on creation only; the API accepts
+ * a replacement on update too (on_update_hook in RBDPlugin.pm and
+ * CephFSPlugin.pm), and so does the edit dialog.
+ *
+ * Never pre-filled: the config read never returns it (Proxmox keeps it under
+ * /etc/pve/priv, and newStorageConfigResponse blanks it besides), so an empty
+ * field means "leave the stored one alone" and it is sent only when typed.
+ */
+export const CEPH_SECRET_FIELD: Partial<
+  Record<StorageType, CephSecretFieldDef>
+> = {
+  rbd: {
+    label: "Keyring",
+    multiline: true,
+    placeholder: "[client.admin]\n\tkey = ...",
+    help: "The keyring for the Ceph user above, pasted in full — the file's contents, not a path (ceph auth get client.<user> prints it).",
+  },
+  cephfs: {
+    label: "Secret Key",
+    multiline: false,
+    placeholder: "The user's key",
+    help: "The Ceph user's secret key itself, not a path to it (ceph auth get-key client.<user> prints it).",
+  },
 };

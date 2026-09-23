@@ -2,12 +2,15 @@ package proxmox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // ociReferencePattern is a pragmatic validator for Docker/OCI image references.
@@ -449,26 +452,238 @@ func (c *Client) ListStorageConfigs(ctx context.Context) ([]StorageConfig, error
 	}
 	return cfgs, nil
 }
-func (c *Client) CreateStorage(ctx context.Context, params url.Values) error {
+
+// PBSEncryptionKeyAutogen is the encryption-key value that asks Proxmox to
+// generate a PBS client encryption key rather than store one the caller
+// supplies. PBSPlugin's on_add_hook and on_update_hook compare it exactly
+// (`$encryption_key eq 'autogen'`, pve-storage src/PVE/Storage/PBSPlugin.pm),
+// run `proxmox-backup-client key create --kdf none` into
+// /etc/pve/priv/storage/<storage>.enc, and return that file's contents as
+// config.encryption-key in the create or update answer.
+const PBSEncryptionKeyAutogen = "autogen"
+
+// PBSEncryptionKey is a Proxmox Backup Server client encryption key, as the
+// text of its key file: JSON whose `data` member is the key itself. An
+// auto-generated key is created with --kdf none, so no passphrase stands
+// between this text and every backup encrypted with it.
+//
+// Proxmox hands a generated key back exactly once, in the answer to the create
+// or update that generated it; after that it exists only in
+// /etc/pve/priv/storage/<storage>.enc on the cluster. It must never reach a
+// log line, an audit row, an event or an error message, so every rendering of
+// the type prints a placeholder or an address, never the text:
+//
+//   - fmt dispatches every verb it can to Format, which prints the
+//     placeholder. It cannot for %p, or for a %w whose operand is not an
+//     error: those take fmt's bad-verb path, which skips every method and
+//     prints the operand's fields raw. That is why the text sits behind a
+//     pointer — the raw print of this struct is an address.
+//   - encoding/json calls MarshalJSON, which prints the placeholder, including
+//     for a key held as an exported field of a larger struct.
+//   - slog needs no LogValue: its text handler prints a value it has no other
+//     way to render with %+v, which reaches Format, and its JSON handler — the
+//     one cmd/nexara/main.go installs — marshals it, which reaches MarshalJSON.
+//
+// The pointer covers one more route: a key held in an UNEXPORTED field of
+// another struct. fmt cannot call a method through such a field and prints it
+// raw, which here is again an address.
+//
+// Reveal is the one way to the text; with the field unexported, not even a
+// conversion reaches it. As with ClientConfig (client.go), the receivers are
+// values on purpose.
+type PBSEncryptionKey struct {
+	text *string
+}
+
+// newPBSEncryptionKey holds text as a key. The zero PBSEncryptionKey is "no
+// key", and so is an empty text.
+func newPBSEncryptionKey(text string) PBSEncryptionKey {
+	if text == "" {
+		return PBSEncryptionKey{}
+	}
+	return PBSEncryptionKey{text: &text}
+}
+
+// redactedPBSEncryptionKey is what every rendering of a PBSEncryptionKey
+// prints in its place.
+const redactedPBSEncryptionKey = "[redacted PBS encryption key]"
+
+// Format prints the placeholder for every fmt verb.
+func (PBSEncryptionKey) Format(f fmt.State, _ rune) {
+	_, _ = io.WriteString(f, redactedPBSEncryptionKey)
+}
+
+// MarshalJSON prints the placeholder for encoding/json.
+func (PBSEncryptionKey) MarshalJSON() ([]byte, error) {
+	return json.Marshal(redactedPBSEncryptionKey)
+}
+
+// Reveal returns the key's text, or "" for no key. Its one caller is the
+// storage handler writing the response to the request that asked Proxmox to
+// generate the key.
+func (k PBSEncryptionKey) Reveal() string {
+	if k.text == nil {
+		return ""
+	}
+	return *k.text
+}
+
+// StorageWriteResult is what CreateStorage and UpdateStorage keep of
+// Proxmox's answer.
+//
+// Proxmox answers both with {storage, type, config}, where config is whatever
+// the plugin's add or update hook returned — "partial, possibly server
+// generated, configuration properties" (create and update in pve-storage
+// src/PVE/API2/Storage/Config.pm). PBSPlugin is the only plugin that fills it,
+// and only with encryption-key: the key it has just generated for "autogen", or
+// an echo of the key the caller sent.
+type StorageWriteResult struct {
+	// GeneratedEncryptionKey is the key Proxmox generated because the request
+	// carried encryption-key=autogen. It is empty for every other request,
+	// including one that carried a key of its own: that echo is dropped,
+	// because the caller already has the key and a secret nobody asked for is
+	// only a secret to leak. It is also empty when Proxmox's answer did not
+	// carry the key, which a caller that sent autogen has to treat as
+	// "generated, but not delivered".
+	GeneratedEncryptionKey PBSEncryptionKey
+}
+
+// storageWriteResult reads a create or update answer for the key Proxmox
+// generated. Whether one was generated is decided from what was SENT, not from
+// the answer: Proxmox returns config.encryption-key for a pasted key too, and
+// in the answer the echo and a generated key look the same.
+//
+// The answer is only decoded when autogen was sent, and failing to decode it is
+// not an error. By the time the answer arrives the storage has been written,
+// so failing the call would tell the caller the write did not happen; an
+// answer that cannot be read is a key that was not delivered.
+func storageWriteResult(sent url.Values, answer json.RawMessage) StorageWriteResult {
+	if sent.Get("encryption-key") != PBSEncryptionKeyAutogen {
+		return StorageWriteResult{}
+	}
+	var decoded struct {
+		Config struct {
+			EncryptionKey string `json:"encryption-key"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(answer, &decoded); err != nil {
+		return StorageWriteResult{}
+	}
+	return StorageWriteResult{GeneratedEncryptionKey: newPBSEncryptionKey(decoded.Config.EncryptionKey)}
+}
+
+// CreateStorage adds a storage to the cluster. When params carries
+// encryption-key=autogen, the result holds the key Proxmox generated.
+func (c *Client) CreateStorage(ctx context.Context, params url.Values) (StorageWriteResult, error) {
 	if params.Get("storage") == "" {
-		return fmt.Errorf("storage name is required")
+		return StorageWriteResult{}, fmt.Errorf("storage name is required")
 	}
 	if params.Get("type") == "" {
-		return fmt.Errorf("storage type is required")
+		return StorageWriteResult{}, fmt.Errorf("storage type is required")
 	}
-	if err := c.doPost(ctx, "/storage", params, nil); err != nil {
-		return fmt.Errorf("create storage %s: %w", params.Get("storage"), err)
+	var answer json.RawMessage
+	if err := c.doPost(ctx, "/storage", params, &answer); err != nil {
+		return StorageWriteResult{}, fmt.Errorf("create storage %s: %w", params.Get("storage"), err)
 	}
-	return nil
+	return storageWriteResult(params, answer), nil
 }
-func (c *Client) UpdateStorage(ctx context.Context, storage string, params url.Values) error {
+
+// SplitStorageDeleteList reads a storage delete list the way Proxmox reads its
+// own. The update's `delete` is a pve-configid-list (updateSchema in pve-common
+// src/PVE/SectionConfig.pm), which PVE::JSONSchema's check_format splits with
+// split_list (pve-common src/PVE/ParseUtils.pm): commas, semicolons and
+// whitespace all separate names and empty entries drop out — or, when the text
+// holds a NUL, NUL alone separates. Whitespace means the same on both sides:
+// pveproxy UTF-8-decodes every form value (decode_urlencoded in pve-http-server
+// src/PVE/APIServer/AnyEvent.pm), so split_list's \s matches Unicode
+// whitespace, the set unicode.IsSpace tests. The one difference is a list
+// holding a NUL: Proxmox then splits on the NULs alone and refuses any entry
+// that is not a single name — one with another separator in it, or an empty one
+// before the last name — where this splits on every separator and drops every
+// empty entry. So this never keeps together two names Proxmox would read
+// apart, and the only lists it reads differently are ones Proxmox would refuse.
+//
+// Which names are valid is left to Proxmox. check_format holds each against
+// pve-configid ($CONFIGID_RE, pve-common src/PVE/JSONSchema.pm), and update in
+// pve-storage src/PVE/API2/Storage/Config.pm then refuses a name that is not
+// one of the plugin's options ("no such option"), a required one and a fixed
+// one.
+func SplitStorageDeleteList(list string) []string {
+	return strings.FieldsFunc(list, func(r rune) bool {
+		return r == ',' || r == ';' || r == 0 || unicode.IsSpace(r)
+	})
+}
+
+// UpdateStorage writes params to an existing storage and clears the settings
+// named in deleteOptions. When params carries encryption-key=autogen, the result
+// holds the key Proxmox generated.
+//
+// Any setting Proxmox would clear is forwarded, as the released handler
+// forwarded its delete list untouched: Proxmox decides which names may be
+// cleared (see SplitStorageDeleteList). Clearing encryption-key, which only
+// PBSPlugin declares, reaches its on_update_hook as an undefined value
+// (extract_sensitive_params, pve-common src/PVE/Tools.pm) and deletes
+// /etc/pve/priv/storage/<storage>.enc along with the fingerprint in
+// storage.cfg: backups from then on are not encrypted, and the ones already
+// made can only be restored with a copy of the removed key. See
+// storageUpdateForm for the two requests refused before anything is sent.
+func (c *Client) UpdateStorage(ctx context.Context, storage string, params url.Values, deleteOptions []string) (StorageWriteResult, error) {
 	if storage == "" {
-		return fmt.Errorf("storage name is required")
+		return StorageWriteResult{}, fmt.Errorf("storage name is required")
 	}
-	if err := c.doPut(ctx, "/storage/"+url.PathEscape(storage), params, nil); err != nil {
-		return fmt.Errorf("update storage %s: %w", storage, err)
+	form, err := storageUpdateForm(params, deleteOptions)
+	if err != nil {
+		return StorageWriteResult{}, err
 	}
-	return nil
+	var answer json.RawMessage
+	if err := c.doPut(ctx, "/storage/"+url.PathEscape(storage), form, &answer); err != nil {
+		return StorageWriteResult{}, fmt.Errorf("update storage %s: %w", storage, err)
+	}
+	return storageWriteResult(form, answer), nil
+}
+
+// storageUpdateForm is the form UpdateStorage sends: params, plus the delete
+// list rebuilt from deleteOptions.
+//
+// Every entry is read with SplitStorageDeleteList, so an entry that is itself
+// a list counts as the names Proxmox will read out of it, and the names go out
+// joined by commas. That is what makes the checks below sound: they are made on
+// exactly the names Proxmox will act on, and a name cannot hide inside another
+// entry and slip past them.
+//
+// Two requests are refused:
+//
+//   - params carrying a "delete" of its own. It would reach Proxmox as a second
+//     delete list, beside the one checked here.
+//   - a setting both written and cleared. Proxmox refuses that for an ordinary
+//     option ("cannot set and delete property '$k' at the same time!", update
+//     in pve-storage src/PVE/API2/Storage/Config.pm), but NOT for a sensitive
+//     one such as encryption-key: extract_sensitive_params (pve-common
+//     src/PVE/Tools.pm) turns the delete into an undefined value and then lets
+//     the new value override it, so Proxmox would install the new key and
+//     ignore the delete. A request asking for both has no single meaning, so it
+//     is refused here for every setting alike.
+func storageUpdateForm(params url.Values, deleteOptions []string) (url.Values, error) {
+	if params.Has("delete") {
+		return nil, fmt.Errorf("%w: name the settings to clear in the delete list, not as a \"delete\" setting", ErrInvalidInput)
+	}
+	var names []string
+	for _, entry := range deleteOptions {
+		names = append(names, SplitStorageDeleteList(entry)...)
+	}
+	for _, name := range names {
+		if params.Has(name) {
+			return nil, fmt.Errorf("%w: %s cannot be set and cleared in the same request", ErrInvalidInput, name)
+		}
+	}
+	form := url.Values{}
+	for k, v := range params {
+		form[k] = slices.Clone(v)
+	}
+	if len(names) > 0 {
+		form.Set("delete", strings.Join(names, ","))
+	}
+	return form, nil
 }
 func (c *Client) DeleteStorage(ctx context.Context, storage string) error {
 	if storage == "" {

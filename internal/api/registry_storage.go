@@ -41,6 +41,21 @@ func storageRowParams(extra apischema.Properties) apischema.Properties {
 	}, extra)
 }
 
+// generatedKeyDoc is the half of the storage create and update descriptions
+// that documents their one optional response field, generated_encryption_key.
+// The Endpoint has no response schema, so the description is where
+// /api/v1/api-docs publishes it.
+//
+// Proxmox generates the key when params.encryption-key is "autogen" (on_add_hook
+// and on_update_hook in pve-storage src/PVE/Storage/PBSPlugin.pm) and returns it
+// in that one answer; see handlers.storageWriteResponse for why Nexara hands it
+// on and keeps no copy.
+const generatedKeyDoc = "For a pbs pool, params.encryption-key set to autogen makes Proxmox generate a new " +
+	"client encryption key, and only then does the response carry it, once, as " +
+	"generated_encryption_key — a key the caller supplied is not echoed back. Nexara keeps no copy " +
+	"of the key and Proxmox keeps one only on the cluster, so save it elsewhere: without it, " +
+	"backups encrypted with it cannot be restored if the cluster is lost."
+
 // storageUploadReason is the Deferred justification for the one route in
 // this domain that cannot hoist.
 //
@@ -89,7 +104,7 @@ func registerStorageEndpoints(reg *Registry, h *handlers.StorageHandler) {
 		Method: fiber.MethodPost,
 		Path:   storageScope,
 		Description: "Add a storage pool to the cluster. The plugin-specific settings go in params, whose " +
-			"accepted keys are Proxmox's own for the chosen type.",
+			"accepted keys are Proxmox's own for the chosen type. " + generatedKeyDoc,
 		Group:       "Storage",
 		Permissions: clusterCheck("manage", "storage"),
 		Parameters:  clusterParams(createStorageParams()),
@@ -108,7 +123,7 @@ func registerStorageEndpoints(reg *Registry, h *handlers.StorageHandler) {
 		Method: fiber.MethodPut,
 		Path:   storageScope + "/:storage_id",
 		Description: "Change a storage pool's settings. Keys absent from params are left as they are; " +
-			"delete names the ones to clear.",
+			"delete names the ones to clear. " + generatedKeyDoc,
 		Group:       "Storage",
 		Permissions: clusterCheck("manage", "storage"),
 		Parameters:  storageRowParams(updateStorageParams()),
@@ -293,15 +308,28 @@ func createStorageParams() apischema.Properties {
 // no-op rather than an error. That is worth stating rather than tidying
 // into a required `params`, because a caller sending only `delete` is a
 // working request.
+//
+// `delete` stays a string, the shape the storage dialog has always sent: a
+// list separated by commas, semicolons or spaces, as Proxmox's own lists are
+// (proxmox.SplitStorageDeleteList). Its declaration is a bound, not a
+// vocabulary: which settings may be cleared is Proxmox's to decide per plugin,
+// and it refuses the rest itself, as the released handler relied on when it
+// forwarded the list untouched. What proxmox.UpdateStorage adds is the one
+// cross-field rule apischema cannot state — a setting params also writes is
+// refused — and the refusal of a "delete" smuggled in among the settings.
 func updateStorageParams() apischema.Properties {
 	return apischema.Properties{
 		"params": storagePluginParams(
 			"Settings to write, as a flat object of string values. Keys absent from it are left as they " +
 				"are, an empty value is dropped rather than sent, and \"storage\" and \"type\" are ignored: " +
 				"Proxmox marks the backend-identifying options of several plugins fixed and refuses a PUT " +
-				"that carries them."),
+				"that carries them. A \"delete\" key is refused: clearing goes through delete."),
 		"delete": optString(1024, "<key>[,<key>...]",
-			"Comma-separated setting names to clear. Omitted or empty clears nothing."),
+			"Settings to clear, separated by commas — or semicolons or spaces, as in Proxmox's own lists. "+
+				"Proxmox refuses a name that is not a setting of the pool's type, and one it requires or "+
+				"fixes. encryption-key removes a pbs pool's client encryption key, so its backups from then "+
+				"on are not encrypted — and the ones already made can only be restored with a copy of the "+
+				"removed key. Clearing a setting params also sets is refused. Omitted or empty clears nothing."),
 	}
 }
 

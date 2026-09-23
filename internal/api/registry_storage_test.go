@@ -408,9 +408,16 @@ func TestStorageUpdateRequiresNothing(t *testing.T) {
 		want int
 	}{
 		{`{}`, fiber.StatusNoContent},
+		{`{"delete":"nodes"}`, fiber.StatusNoContent},
+		// The longest list the dialog sends.
+		{`{"delete":"nodes,encryption-key"}`, fiber.StatusNoContent},
+		// Which names may be cleared is Proxmox's to decide per plugin, so the
+		// schema passes any list — path is fixed for a dir pool and Proxmox
+		// itself refuses it. See TestStorageUpdateForwardsTheDeleteListAndRefusesAContradiction
+		// in internal/api/handlers for what is forwarded and what is refused.
 		{`{"delete":"path,mkdir"}`, fiber.StatusNoContent},
 		{`{"params":{"path":"/mnt/store01"}}`, fiber.StatusNoContent},
-		{`{"params":{"path":"/mnt/store01"},"delete":"mkdir"}`, fiber.StatusNoContent},
+		{`{"params":{"path":"/mnt/store01"},"delete":"nodes"}`, fiber.StatusNoContent},
 		// An Object parameter asserts only "this is a JSON object", so a
 		// nested value inside params passes the SCHEMA and is refused one
 		// layer on by stringMap, which names the key. That split is
@@ -430,6 +437,47 @@ func TestStorageUpdateRequiresNothing(t *testing.T) {
 				t.Fatalf("status = %d (%q), want %d", status, env.Message, tt.want)
 			}
 		})
+	}
+}
+
+// TestStorageWriteRoutesDocumentTheGeneratedKeyAndTheDeleteList holds the two
+// storage write declarations to documenting what their handlers now do. The
+// declaration IS the published reference — /api/v1/api-docs renders each
+// Description and each parameter's Typetext and Description — and Endpoint
+// has no response schema, so the one optional response field,
+// generated_encryption_key, can only be documented in the prose.
+func TestStorageWriteRoutesDocumentTheGeneratedKeyAndTheDeleteList(t *testing.T) {
+	for _, route := range []struct{ method, path string }{
+		{fiber.MethodPost, storageScope},
+		{fiber.MethodPut, storageScope + "/:storage_id"},
+	} {
+		e := declaredEndpoint(t, route.method, route.path)
+		for _, want := range []string{"generated_encryption_key", "autogen", "keeps no copy"} {
+			if !strings.Contains(e.Description, want) {
+				t.Errorf("%s %s: the description never says %q, so the API docs do not tell a caller "+
+					"that the response can carry a key it gets exactly once: %q",
+					route.method, route.path, want, e.Description)
+			}
+		}
+	}
+
+	// The delete list forwards any setting name, so the docs have to say who
+	// decides which names are good (Proxmox), how the list is separated, what
+	// removing the encryption key does, and the one refusal Nexara adds.
+	del := declaredEndpoint(t, fiber.MethodPut, storageScope+"/:storage_id").Parameters["delete"]
+	if want := "<key>[,<key>...]"; del.Typetext != want {
+		t.Errorf("delete's typetext is %q, want %q", del.Typetext, want)
+	}
+	for _, want := range []string{
+		"semicolons or spaces",
+		"Proxmox refuses a name that is not a setting of the pool's type",
+		"encryption-key removes a pbs pool's client encryption key",
+		"Clearing a setting params also sets is refused",
+	} {
+		if !strings.Contains(del.Description, want) {
+			t.Errorf("delete's description never says %q, so the docs do not tell a caller what it accepts: %q",
+				want, del.Description)
+		}
 	}
 }
 

@@ -3,6 +3,8 @@ import { Check, ChevronsUpDown, Loader2, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Popover,
   PopoverContent,
@@ -19,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useISCSITargets } from "../api/storage-queries";
+import type { CephSecretFieldDef } from "../types/storage";
 
 /** Pause after the last portal keystroke before a discovery scan fires. */
 const SCAN_DEBOUNCE_MS = 600;
@@ -413,6 +416,72 @@ export function NodeRestrictionField({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+interface CephSecretFieldProps {
+  id: string;
+  def: CephSecretFieldDef;
+  value: string;
+  onChange: (value: string) => void;
+  /** In the edit dialog an empty field keeps the credential Proxmox has. */
+  editing: boolean;
+  /** Marks the field required, as the add dialog does. */
+  required?: boolean;
+}
+
+/**
+ * The keyring (rbd) or secret key (cephfs) for an external Ceph cluster — see
+ * CEPH_SECRET_FIELD for what Proxmox does with it. The dialogs show it only
+ * once Monitor Hosts names that cluster, never fill it in, and send it only
+ * when something was typed.
+ */
+export function CephSecretField({
+  id,
+  def,
+  value,
+  onChange,
+  editing,
+  required = false,
+}: CephSecretFieldProps) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>
+        {def.label}
+        {required && <span className="ml-1 text-destructive">*</span>}
+      </Label>
+      {def.multiline ? (
+        <Textarea
+          id={id}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+          }}
+          rows={4}
+          spellCheck={false}
+          autoComplete="off"
+          className="font-mono text-xs"
+          placeholder={def.placeholder}
+        />
+      ) : (
+        <Input
+          id={id}
+          type="password"
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+          }}
+          // Browsers ignore "off" on a password field and offer the saved
+          // Nexara login; "new-password" tells them this is no login field.
+          autoComplete="new-password"
+          placeholder={def.placeholder}
+        />
+      )}
+      <p className="text-xs text-muted-foreground">
+        {def.help}
+        {editing && " Leave it empty to keep the one Proxmox has."}
+      </p>
     </div>
   );
 }

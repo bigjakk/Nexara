@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { createBrowserRouter } from "react-router-dom";
+import { AppRoot } from "@/components/AppRoot";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { RequirePermission } from "@/components/auth/RequirePermission";
 import { AppShell } from "@/components/layout/AppShell";
@@ -425,5 +426,5 @@ const router = createBrowserRouter([
 ]);
 
 export default function App() {
-  return <RouterProvider router={router} />;
+  return <AppRoot router={router} />;
 }

@@ -20,13 +20,25 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useCreateStorage } from "../api/storage-queries";
-import { ISCSITargetField, NodeRestrictionField } from "./StorageFormFields";
+import {
+  CephSecretField,
+  ISCSITargetField,
+  NodeRestrictionField,
+} from "./StorageFormFields";
+import { PBSEncryptionField } from "./PBSEncryptionField";
 import type { StorageType, StorageContentType } from "../types/storage";
 import {
+  CEPH_SECRET_FIELD,
   STORAGE_TYPE_LABELS,
   STORAGE_TYPE_FIELDS,
   STORAGE_TYPE_CONTENT,
 } from "../types/storage";
+import {
+  initialPBSEncryption,
+  pbsEncryptionReady,
+  pbsEncryptionRequest,
+  type PBSEncryptionChoice,
+} from "../lib/pbs-encryption";
 
 interface AddStorageDialogProps {
   clusterId: string;
@@ -71,6 +83,10 @@ export function AddStorageDialog({
   const [nodes, setNodes] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [useLuns, setUseLuns] = useState(true);
+  const [encryption, setEncryption] = useState<PBSEncryptionChoice>(() =>
+    initialPBSEncryption(false),
+  );
+  const [cephSecret, setCephSecret] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const createMutation = useCreateStorage();
@@ -82,14 +98,32 @@ export function AddStorageDialog({
 
   const typeFields = STORAGE_TYPE_FIELDS[storageType];
   const availableContent = STORAGE_TYPE_CONTENT[storageType];
+  const isPBS = storageType === "pbs";
+  // Only an external Ceph cluster takes a credential here; see CEPH_SECRET_FIELD.
+  const cephSecretDef = CEPH_SECRET_FIELD[storageType];
+  const showCephSecret =
+    cephSecretDef !== undefined && (params["monhost"] ?? "").trim() !== "";
 
   const hasAllRequired = useMemo(() => {
     if (!storageName.trim()) return false;
     for (const field of typeFields) {
       if (field.required && !params[field.key]?.trim()) return false;
     }
+    // Required once showing, as the Proxmox GUI has it (allowBlank: false in
+    // RBDEdit.js and CephFSEdit.js): left out, Proxmox would copy this
+    // cluster's own admin keyring for a storage on another cluster.
+    if (showCephSecret && !cephSecret.trim()) return false;
+    if (isPBS && !pbsEncryptionReady(encryption)) return false;
     return true;
-  }, [storageName, params, typeFields]);
+  }, [
+    storageName,
+    params,
+    typeFields,
+    showCephSecret,
+    cephSecret,
+    isPBS,
+    encryption,
+  ]);
 
   function resetForm() {
     setStorageName("");
@@ -98,7 +132,28 @@ export function AddStorageDialog({
     setNodes("");
     setEnabled(true);
     setUseLuns(true);
+    setEncryption(initialPBSEncryption(false));
+    setCephSecret("");
     setError(null);
+    createMutation.reset();
+  }
+
+  // A pasted key, a Ceph credential, a typed password and a failed request's
+  // variables are not kept once the dialog closes. Opened from the storage
+  // tree's context menu the dialog is controlled, and reopening it that way
+  // does not reset the form, so they would otherwise come straight back. The
+  // rest of the form is kept, as it always was.
+  function forgetSecrets() {
+    setEncryption(initialPBSEncryption(false));
+    setCephSecret("");
+    const passwords = new Set(
+      typeFields.filter((f) => f.type === "password").map((f) => f.key),
+    );
+    setParams((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).filter(([key]) => !passwords.has(key)),
+      ),
+    );
     createMutation.reset();
   }
 
@@ -108,6 +163,8 @@ export function AddStorageDialog({
     // Pre-select all available content types for new storage
     setSelectedContent(new Set(STORAGE_TYPE_CONTENT[newType]));
     setUseLuns(true);
+    setEncryption(initialPBSEncryption(false));
+    setCephSecret("");
     setError(null);
   }
 
@@ -152,6 +209,22 @@ export function AddStorageDialog({
       submitParams["disable"] = "1";
     }
 
+    // Sent only when typed, and only while the field is showing: a keyring
+    // typed before Monitor Hosts was cleared again must not go along.
+    if (showCephSecret && cephSecret.trim() !== "") {
+      submitParams["keyring"] = cephSecret;
+    }
+
+    // A key Proxmox generates for "autogen" is not handled here: useCreateStorage
+    // hands it to the app-wide must-save dialog (usePBSKeyStore), which
+    // outlives this dialog and the page it is on.
+    if (isPBS) {
+      const request = pbsEncryptionRequest(encryption);
+      if (request.param !== undefined) {
+        submitParams["encryption-key"] = request.param;
+      }
+    }
+
     createMutation.mutate(
       {
         clusterId,
@@ -184,6 +257,8 @@ export function AddStorageDialog({
           resetForm();
           setStorageType("dir");
           setSelectedContent(new Set(STORAGE_TYPE_CONTENT["dir"]));
+        } else {
+          forgetSecrets();
         }
       }}
     >
@@ -311,11 +386,36 @@ export function AddStorageDialog({
                   onChange={(e) => {
                     handleParamChange(field.key, e.target.value);
                   }}
+                  // A storage credential, never the Nexara login a browser
+                  // would otherwise offer to fill in.
+                  autoComplete={
+                    field.type === "password" ? "new-password" : undefined
+                  }
                   placeholder={field.placeholder}
                 />
               )}
             </div>
           ))}
+
+          {cephSecretDef && showCephSecret && (
+            <CephSecretField
+              id="field-ceph-secret"
+              def={cephSecretDef}
+              value={cephSecret}
+              onChange={setCephSecret}
+              editing={false}
+              required
+            />
+          )}
+
+          {isPBS && (
+            <PBSEncryptionField
+              idPrefix="add"
+              storage={storageName}
+              value={encryption}
+              onChange={setEncryption}
+            />
+          )}
 
           {/* Content Types (iSCSI expresses its single choice as the LUNs toggle) */}
           {isISCSI ? (
@@ -400,12 +500,15 @@ export function AddStorageDialog({
 
           {/* Submit */}
           <div className="flex justify-end gap-2 pt-2">
+            {/* Not disabled while the create runs: closing then is safe,
+                as it is by Escape or the close button — the key Proxmox
+                generates still reaches the must-save dialog. */}
             <Button
               variant="outline"
               onClick={() => {
                 setOpen(false);
+                forgetSecrets();
               }}
-              disabled={createMutation.isPending}
             >
               Cancel
             </Button>

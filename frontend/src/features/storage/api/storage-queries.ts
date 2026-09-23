@@ -1,12 +1,19 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { apiClient, getValidAccessToken } from "@/lib/api-client";
-import type { StorageResponse } from "@/types/api";
+import { signedInUserID, usePBSKeyStore } from "@/stores/pbs-key-store";
+import type { ClusterResponse, StorageResponse } from "@/types/api";
 import type {
   StorageContentItem,
   StorageActionResponse,
   StorageConfigResponse,
   CreateStorageRequest,
   UpdateStorageRequest,
+  StorageWriteResponse,
   OCIPullRequest,
   DownloadURLRequest,
   DownloadApplianceRequest,
@@ -183,16 +190,87 @@ interface CreateStorageParams {
   data: CreateStorageRequest;
 }
 
+// Both storage writes can carry a PBS encryption key: a pasted one in their
+// variables, a generated one in their data. gcTime 0 drops the finished
+// mutation from TanStack's cache as soon as nothing observes it, rather than
+// the default five minutes later — the dialogs reset theirs once the save
+// completes, by which time any generated key is in usePBSKeyStore.
+const STORAGE_WRITE_GC_TIME = 0;
+
+interface WriteFiling {
+  owner: string | undefined;
+  clusterName: string | null;
+}
+
+/**
+ * What a storage write's key would be filed under, taken by the hooks'
+ * onMutate before the request goes out: the user signed in then, whom alone
+ * a generated key is shown to (usePBSKeyStore) — by the time the answer comes
+ * the session may have ended or passed to someone else — and the name of the
+ * cluster the storage is on, from the cluster list AppShell already keeps
+ * loaded, so the must-save dialog can say which cluster the key is for.
+ */
+function writeFiling(queryClient: QueryClient, clusterId: string): WriteFiling {
+  const clusters = queryClient.getQueryData<ClusterResponse[]>(["clusters"]);
+  return {
+    owner: signedInUserID(),
+    clusterName: clusters?.find((c) => c.id === clusterId)?.name ?? null,
+  };
+}
+
+/**
+ * Hands a key Proxmox generated for this write to the must-save dialog.
+ *
+ * Whether one was generated is decided from what was sent — encryption-key
+ * "autogen" — never from the response: a pasted key must not open the dialog,
+ * even from a response that echoed it. The API drops that echo already
+ * (proxmox.storageWriteResult); this is the second line.
+ *
+ * A write sent with no one signed in has no one to show a key to, so it is
+ * not queued at all. The storage dialogs are reachable only signed in; this
+ * only keeps such a key from being shown to whoever signs in next.
+ *
+ * Called from the hooks' own onSuccess, not from the caller's per-call one.
+ * TanStack runs a hook's callbacks from the mutation itself, so the key is
+ * delivered even when the dialog that started the save closed, or the page
+ * changed, before the answer came; a per-call callback reaches only an observer
+ * that is still there.
+ */
+function deliverGeneratedKey(
+  sent: Record<string, string>,
+  response: StorageWriteResponse,
+  cluster: string,
+  { owner, clusterName }: WriteFiling,
+) {
+  if (sent["encryption-key"] !== "autogen") return;
+  if (owner === undefined) return;
+  usePBSKeyStore.getState().deliver({
+    owner,
+    cluster,
+    clusterName,
+    storage: response.storage,
+    keyText: response.generated_encryption_key ?? "",
+  });
+}
+
 export function useCreateStorage() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    gcTime: STORAGE_WRITE_GC_TIME,
     mutationFn: ({ clusterId, data }: CreateStorageParams) =>
-      apiClient.post<{ status: string; storage: string }>(
+      apiClient.post<StorageWriteResponse>(
         `/api/v1/clusters/${clusterId}/storage`,
         data,
       ),
-    onSuccess: (_data, variables) => {
+    onMutate: (variables) => writeFiling(queryClient, variables.clusterId),
+    onSuccess: (response, variables, filing) => {
+      deliverGeneratedKey(
+        variables.data.params,
+        response,
+        variables.clusterId,
+        filing,
+      );
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "storage"],
       });
@@ -212,12 +290,20 @@ export function useUpdateStorage() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    gcTime: STORAGE_WRITE_GC_TIME,
     mutationFn: ({ clusterId, storageId, data }: UpdateStorageParams) =>
-      apiClient.put<{ status: string; storage: string }>(
+      apiClient.put<StorageWriteResponse>(
         `/api/v1/clusters/${clusterId}/storage/${storageId}`,
         data,
       ),
-    onSuccess: (_data, variables) => {
+    onMutate: (variables) => writeFiling(queryClient, variables.clusterId),
+    onSuccess: (response, variables, filing) => {
+      deliverGeneratedKey(
+        variables.data.params,
+        response,
+        variables.clusterId,
+        filing,
+      );
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "storage"],
       });

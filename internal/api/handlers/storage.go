@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -394,10 +395,12 @@ type storageConfigResponse struct {
 // storage.cfg section this read returns should never carry either. Blanking
 // costs nothing on a GET the editor round-trips, because both halves already
 // treat an absent value as "leave the stored one alone": storagePluginForm
-// drops an empty value rather than sending it, and EditStorageDialog only
-// submits a field whose value differs from the one it loaded. They are
-// `omitempty`, so blanking drops the key rather than publishing an empty
-// string that reads as "there is no password set".
+// drops an empty value rather than sending it, EditStorageDialog submits a
+// loaded field only when its value differs from the one it loaded, and it
+// never loads the keyring at all — that field starts empty and is sent only
+// when the operator types one. They are `omitempty`, so blanking drops the key
+// rather than publishing an empty string that reads as "there is no password
+// set".
 //
 // Deliberately NOT blanked:
 //
@@ -528,6 +531,60 @@ func storagePluginForm(params map[string]string) url.Values {
 	return form
 }
 
+// storageWriteResponse is the body of a successful storage create or update.
+type storageWriteResponse struct {
+	Status  string `json:"status"`
+	Storage string `json:"storage"`
+	// GeneratedEncryptionKey is the PBS client encryption key Proxmox generated
+	// for this request's encryption-key=autogen, and it is absent from every
+	// other response — including one for a request that carried a key of its
+	// own. It is the operator's one chance to take a copy. Nexara keeps none:
+	// not in the database, the audit row, an event or a log line. Proxmox keeps
+	// it only on the cluster, so without a copy the backups encrypted with it
+	// cannot be restored if the cluster is lost.
+	GeneratedEncryptionKey string `json:"generated_encryption_key,omitempty"`
+}
+
+// respondStorageWrite writes a create or update response. One that carries a
+// generated key is marked no-store, so that no cache between Nexara and the
+// operator keeps a copy of the one response the key is handed over in.
+func respondStorageWrite(c fiber.Ctx, status int, resp storageWriteResponse) error {
+	if resp.GeneratedEncryptionKey != "" {
+		c.Set(fiber.HeaderCacheControl, "no-store")
+	}
+	return c.Status(status).JSON(resp)
+}
+
+// encryptionKeyChange says in words what a storage write did to a PBS
+// encryption key — "generated", "supplied" or "removed" — or "" when it did
+// not touch one. It is what the audit row records instead of the key:
+// view:audit is granted to every Viewer by default, and a key the operator
+// supplied is as much the whole secret as one Proxmox generated.
+//
+// Only a pbs storage has a key to touch, and for any other type the row must
+// not claim a key changed. A Proxmox before pve-storage 8.3.5 takes
+// encryption-key from a write to any storage type and drops it:
+// API2/Storage/Config.pm extracted one hard-coded sensitive-property list for
+// every type, and of the built-in plugins only PBSPlugin's hooks read the key.
+// A current one refuses it for the other built-in types, which all declare
+// their own sensitive-properties, but still takes and drops it for a plugin
+// that declares none (the fallback in sensitive_properties, pve-storage
+// src/PVE/Storage/Plugin.pm).
+func encryptionKeyChange(storageType string, form url.Values, deleteOptions []string) string {
+	switch {
+	case storageType != "pbs":
+		return ""
+	case slices.Contains(deleteOptions, "encryption-key"):
+		return "removed"
+	case !form.Has("encryption-key"):
+		return ""
+	case form.Get("encryption-key") == proxmox.PBSEncryptionKeyAutogen:
+		return "generated"
+	default:
+		return "supplied"
+	}
+}
+
 // Create handles POST /api/v1/clusters/:cluster_id/storage.
 func (h *StorageHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
@@ -553,16 +610,22 @@ func (h *StorageHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	if err := pxClient.CreateStorage(c.Context(), form); err != nil {
+	result, err := pxClient.CreateStorage(c.Context(), form)
+	if err != nil {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]string{"storage": storage, "type": storageType})
+	audit := map[string]string{"storage": storage, "type": storageType}
+	if change := encryptionKeyChange(storageType, form, nil); change != "" {
+		audit["encryption_key"] = change
+	}
+	details, _ := json.Marshal(audit)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", storage, "create", details)
 
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"status":  "created",
-		"storage": storage,
+	return respondStorageWrite(c, fiber.StatusCreated, storageWriteResponse{
+		Status:                 "created",
+		Storage:                storage,
+		GeneratedEncryptionKey: result.GeneratedEncryptionKey.Reveal(),
 	})
 }
 
@@ -578,19 +641,26 @@ func (h *StorageHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 	form := storagePluginForm(params)
-	if del := p.String("delete"); del != "" {
-		form.Set("delete", del)
-	}
+	// Read the way Proxmox reads its own lists, so the audit row's "removed"
+	// is decided on the names Proxmox will act on. Which names may be cleared
+	// is Proxmox's call; proxmox.UpdateStorage forwards any of them.
+	deleteOptions := proxmox.SplitStorageDeleteList(p.String("delete"))
 
-	if err := pxClient.UpdateStorage(c.Context(), pool.Storage, form); err != nil {
+	result, err := pxClient.UpdateStorage(c.Context(), pool.Storage, form, deleteOptions)
+	if err != nil {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(pool.ClusterID), "storage", pool.ID.String(), "update", nil)
+	var details json.RawMessage
+	if change := encryptionKeyChange(pool.Type, form, deleteOptions); change != "" {
+		details, _ = json.Marshal(map[string]string{"encryption_key": change})
+	}
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(pool.ClusterID), "storage", pool.ID.String(), "update", details)
 
-	return c.JSON(fiber.Map{
-		"status":  "updated",
-		"storage": pool.Storage,
+	return respondStorageWrite(c, fiber.StatusOK, storageWriteResponse{
+		Status:                 "updated",
+		Storage:                pool.Storage,
+		GeneratedEncryptionKey: result.GeneratedEncryptionKey.Reveal(),
 	})
 }
 

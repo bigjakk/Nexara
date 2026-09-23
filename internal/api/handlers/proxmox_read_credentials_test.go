@@ -182,8 +182,8 @@ func readStructs() []readStruct {
 				"fingerprint":   "the PBS server's TLS certificate fingerprint — public, and the edit dialog shows it",
 				"master-pubkey": "a PUBLIC key: PBS encrypts a copy of the backup key to it so the private half can recover it",
 				"encryption-key": "the key's FINGERPRINT on this read — PBSPlugin stores the key under /etc/pve/priv and " +
-					"writes only its fingerprint (or 1) to storage.cfg — and the edit dialog loads it into the " +
-					"Encryption Key field, where a non-empty value is the only sign that encryption is on",
+					"writes only its fingerprint (or 1) to storage.cfg — and the edit dialog shows it read-only as " +
+					"the storage's encryption status, which a non-empty value is the only sign of",
 			},
 		},
 		{

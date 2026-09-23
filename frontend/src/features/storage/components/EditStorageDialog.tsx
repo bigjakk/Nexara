@@ -21,17 +21,30 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useStorageConfig, useUpdateStorage } from "../api/storage-queries";
-import { ISCSITargetField, NodeRestrictionField } from "./StorageFormFields";
+import {
+  CephSecretField,
+  ISCSITargetField,
+  NodeRestrictionField,
+} from "./StorageFormFields";
+import { PBSEncryptionField } from "./PBSEncryptionField";
 import type {
   StorageType,
   StorageContentType,
   StorageConfigResponse,
 } from "../types/storage";
 import {
+  CEPH_SECRET_FIELD,
   STORAGE_TYPE_LABELS,
   STORAGE_TYPE_FIELDS,
   STORAGE_TYPE_CONTENT,
 } from "../types/storage";
+import {
+  initialPBSEncryption,
+  pbsEncryptionReady,
+  pbsEncryptionRequest,
+  pbsKeyStatus,
+  type PBSEncryptionChoice,
+} from "../lib/pbs-encryption";
 
 interface EditStorageDialogProps {
   clusterId: string;
@@ -76,6 +89,10 @@ export function EditStorageDialog({
   const [nodes, setNodes] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [useLuns, setUseLuns] = useState(true);
+  const [encryption, setEncryption] = useState<PBSEncryptionChoice>(() =>
+    initialPBSEncryption(false),
+  );
+  const [cephSecret, setCephSecret] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
 
@@ -92,6 +109,17 @@ export function EditStorageDialog({
   const typeFields = useMemo(() => STORAGE_TYPE_FIELDS[sType], [sType]);
   const availableContent = STORAGE_TYPE_CONTENT[sType];
   const typeLabel = STORAGE_TYPE_LABELS[sType];
+  const isPBS = sType === "pbs";
+  // Only an external Ceph cluster takes a credential here; see CEPH_SECRET_FIELD.
+  const cephSecretDef = CEPH_SECRET_FIELD[sType];
+  const showCephSecret =
+    cephSecretDef !== undefined && (params["monhost"] ?? "").trim() !== "";
+  // A storage that loaded without monitors is the cluster's own Ceph, whose
+  // credential Proxmox derived from the local admin keyring when it was
+  // added. Pointing it at another cluster needs that cluster's credential, so
+  // an empty field cannot mean "keep the one Proxmox has" here.
+  const cephSecretRequired =
+    showCephSecret && (initialParams["monhost"] ?? "").trim() === "";
 
   // Initialize form from config when loaded
   useEffect(() => {
@@ -117,6 +145,12 @@ export function EditStorageDialog({
       setEnabled(getConfigValue(cfg, "disable") !== "1");
       // An iSCSI storage with no explicit content is "images" by default.
       setUseLuns(content === "" || contentSet.has("images"));
+      // The key itself is never loaded — the read carries only its
+      // fingerprint — so the choice starts at "leave it alone".
+      setEncryption(
+        initialPBSEncryption(pbsKeyStatus(cfg["encryption-key"]) !== null),
+      );
+      setCephSecret("");
       setInitialized(true);
     }
   }, [configQuery.data, initialized, typeFields]);
@@ -125,6 +159,19 @@ export function EditStorageDialog({
     if (!configQuery.data) return false;
     return true; // Allow submit anytime form is loaded
   }, [configQuery.data]);
+
+  // The one way the editor closes, whatever closes it: Cancel does not go
+  // through the dialog's onOpenChange, and a Cancel that skipped this would
+  // bring an abandoned choice — Remove the key, say — back on the next open,
+  // ready to be sent with an unrelated change.
+  function closeEditor() {
+    setOpen(false);
+    setInitialized(false);
+    setError(null);
+    setEncryption(initialPBSEncryption(false));
+    setCephSecret("");
+    updateMutation.reset();
+  }
 
   function handleParamChange(key: string, value: string) {
     setParams((prev) => ({ ...prev, [key]: value }));
@@ -197,6 +244,26 @@ export function EditStorageDialog({
       submitParams["disable"] = enabled ? "0" : "1";
     }
 
+    // Never pre-filled, so anything here was typed: send it only then, and
+    // only while the field is showing.
+    if (showCephSecret && cephSecret.trim() !== "") {
+      submitParams["keyring"] = cephSecret;
+    }
+
+    // Keep sends nothing about the key. A key Proxmox generates for
+    // "autogen" is not handled here: useUpdateStorage hands it to the
+    // app-wide must-save dialog (usePBSKeyStore), which outlives this dialog
+    // and the page it is on.
+    if (isPBS) {
+      const request = pbsEncryptionRequest(encryption);
+      if (request.param !== undefined) {
+        submitParams["encryption-key"] = request.param;
+      }
+      if (request.remove) {
+        deleteKeys.push("encryption-key");
+      }
+    }
+
     if (Object.keys(submitParams).length === 0 && deleteKeys.length === 0) {
       setError("No changes to save");
       return;
@@ -213,8 +280,10 @@ export function EditStorageDialog({
       },
       {
         onSuccess: () => {
-          setOpen(false);
-          setInitialized(false);
+          // closeEditor also drops the mutation's copy of the request and
+          // response, either of which can hold a key; by now any generated
+          // one is in usePBSKeyStore.
+          closeEditor();
         },
         onError: (err) => {
           setError(
@@ -229,12 +298,8 @@ export function EditStorageDialog({
     <Dialog
       open={open}
       onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) {
-          setInitialized(false);
-          setError(null);
-          updateMutation.reset();
-        }
+        if (v) setOpen(true);
+        else closeEditor();
       }}
     >
       <DialogTrigger asChild>
@@ -362,11 +427,37 @@ export function EditStorageDialog({
                     onChange={(e) => {
                       handleParamChange(field.key, e.target.value);
                     }}
+                    // A storage credential, never the Nexara login a browser
+                    // would otherwise offer to fill in.
+                    autoComplete={
+                      field.type === "password" ? "new-password" : undefined
+                    }
                     placeholder={field.placeholder}
                   />
                 )}
               </div>
             ))}
+
+            {cephSecretDef && showCephSecret && (
+              <CephSecretField
+                id="edit-ceph-secret"
+                def={cephSecretDef}
+                value={cephSecret}
+                onChange={setCephSecret}
+                editing={!cephSecretRequired}
+                required={cephSecretRequired}
+              />
+            )}
+
+            {isPBS && (
+              <PBSEncryptionField
+                idPrefix="edit"
+                storage={storageName}
+                current={configQuery.data["encryption-key"]}
+                value={encryption}
+                onChange={setEncryption}
+              />
+            )}
 
             {/* Content Types (iSCSI expresses its single choice as the LUNs toggle) */}
             {isISCSI ? (
@@ -455,18 +546,20 @@ export function EditStorageDialog({
             {error && <p className="text-sm text-destructive">{error}</p>}
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setOpen(false);
-                }}
-                disabled={updateMutation.isPending}
-              >
+              {/* Not disabled while the save runs: closing then is safe, as
+                  it is by Escape or the close button — the key Proxmox
+                  generates still reaches the must-save dialog. */}
+              <Button variant="outline" onClick={closeEditor}>
                 Cancel
               </Button>
               <Button
                 onClick={handleSubmit}
-                disabled={!hasChanges || updateMutation.isPending}
+                disabled={
+                  !hasChanges ||
+                  updateMutation.isPending ||
+                  (isPBS && !pbsEncryptionReady(encryption)) ||
+                  (cephSecretRequired && !cephSecret.trim())
+                }
               >
                 {updateMutation.isPending ? "Saving..." : "Save Changes"}
               </Button>
