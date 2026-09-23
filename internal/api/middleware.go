@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"strconv"
@@ -111,6 +112,41 @@ func (s *Server) setupMiddleware() {
 	s.app.Use(logger.New(logger.Config{
 		Format: "${time} | ${status} | ${latency} | ${ip} | ${requestid} | ${method} ${path}\n",
 	}))
+
+	// Refuse a content-coded request before any handler reads its body, so
+	// that nothing ever decodes it. See refuseContentCodedRequests for what it
+	// refuses, and why on the header alone.
+	//
+	// When it runs, fasthttp has copied at most the first 8 KiB of the body
+	// into the request (readBodyWithStreaming, under StreamRequestBody),
+	// undecoded; its read buffer (ReadBufferSize, 16 KiB) may already hold
+	// more, and the rest is still on the socket. fasthttp does not drain what
+	// a handler leaves unread — on a kept-alive connection it parses the
+	// remainder as the next request — which is why the refusal also closes
+	// the connection. TestContentCodingRefusalClosesTheConnection pins that.
+	//
+	// Its position is what makes it cover every route, and it is the only
+	// copy of the check. New runs setupMiddleware before setupRoutes, main.go
+	// mounts the /ws upgraders and the embedded-SPA handler after New, and
+	// Fiber runs app-level handlers in the order they were registered — so the
+	// registry routes, the legacy ones in router.go, the WebSocket upgrades and
+	// the SPA handler all sit behind it. CORS, the body-size guard, the
+	// limiters and compression happen to come after it too; none of them reads
+	// a body, so its place among them carries no weight.
+	//
+	// What runs ahead of it — recover, the security headers, the Proxmox-cache
+	// local, requestid and the logger — reads headers, never a body. It sits
+	// after them rather than first so that a refusal carries the security
+	// headers and a request id and is logged like every other rejection;
+	// TestContentCodingRefusalIsAccessLogged pins the last. The logger is the
+	// one of them that COULD read a body, and after the refusal at that: it
+	// renders its line once the chain returns, its ${body} tag calls c.Body(),
+	// which decodes, and a ${form:…} tag calls c.FormValue, which on a
+	// multipart body gunzips through fasthttp's multipart reader. The format
+	// above uses neither. TestContentCodedRequestIsRefusedBeforeItsBodyIsRead
+	// drives this whole stack with a body stream that records reads, and
+	// fails if any of it starts to.
+	s.app.Use(refuseContentCodedRequests)
 
 	// CORS. Fiber v3 takes []string for the allow-lists (v2 took comma-strings).
 	s.app.Use(cors.New(cors.Config{
@@ -265,6 +301,110 @@ func (s *Server) setupMiddleware() {
 	if s.config.CompressionEnabled {
 		s.app.Use(compress.New(compress.Config{Next: compressionSkipped}))
 	}
+}
+
+// contentCodingRefusal is the message refuseContentCodedRequests answers
+// with.
+const contentCodingRefusal = "request body must be sent uncompressed: no Content-Encoding other than identity is accepted"
+
+// refuseContentCodedRequests answers 415 to any request that names a content
+// coding other than identity, and never touches the body to do it.
+//
+// Fiber's c.Body() transparently decodes gzip, deflate, br and zstd (and the
+// x-gzip and brotli spellings), each step up to the 32 MiB BodyLimit. The
+// bounds Nexara puts on a body both read its Content-Length — the 10 MiB
+// body-size guard, on every path but the storage upload's, and bodyValues'
+// 64 KiB, on an endpoint that declares no body parameter — so they measure
+// the body as it crosses the wire, the compressed bytes, and never what it
+// decodes to. Measured with fasthttp's own encoders, 32 MiB of
+// repeated bytes is 52 bytes of brotli or about 3.5 KB of zstd, and gzip gets
+// there from about 64 KiB at its default level.
+//
+// Those bounds have a gap of their own that this does not close: a chunked
+// body carries no Content-Length for either to read. The 10 MiB guard passes
+// it, bodyValues refuses one only where no body parameter is declared, and
+// BodyLimit caps no read of it — under StreamRequestBody fasthttp streams a
+// body rather than refusing it, and c.Body() then copies every byte the
+// client sends.
+//
+// Several routes read a body before any session exists —
+// POST /api/v1/auth/login, and the legacy register and logout routes, among
+// them. Nor is c.Body() the only decoder: c.FormFile and c.MultipartForm, and
+// c.Bind().Body() whenever the caller labels its body multipart, go through
+// fasthttp's MultipartFormWithLimit, which gunzips by itself. Nexara has no
+// use for a compressed request, so it refuses every one, on every route,
+// here — rather than capping what each of those decoders may inflate.
+//
+// Refused on the header alone, whatever the method and whether or not a body
+// follows. Narrowing it to "a request that carries a body" would take a
+// second reading of the request — Content-Length, which is -1 for a chunked
+// body, or the method, when a GET can carry a body too — and that reading
+// would have to agree with fasthttp's framing on every request or become the
+// bypass. It would buy a conforming client nothing: Content-Encoding describes
+// content, and a request without content has none to describe. A HEAD, an
+// OPTIONS preflight or a WebSocket upgrade carries no Content-Encoding and
+// passes untouched. A client that sends one anyway — as a session-wide default
+// header, or mistaking it for a charset — is refused even on a GET, which
+// before this check it was not.
+//
+// RFC 9110 §8.4 lets an origin server answer 415 to a content coding it does
+// not accept, and §12.5.3 (restated in §15.5.16) asks a server that fails a
+// request over a content coding to say in Accept-Encoding which codings it
+// would have taken: here only identity, the synonym for "no encoding". The
+// same section forbids that header on a 415 sent for any other reason; today
+// this is the only 415 the API sends.
+func refuseContentCodedRequests(c fiber.Ctx) error {
+	if hasContentCoding(c) {
+		c.Set(fiber.HeaderAcceptEncoding, "identity")
+		// The body is left unread on purpose, and fasthttp does not drain what
+		// a handler leaves: on a kept-alive connection it parses whatever is
+		// left of this body as the next request, so a request hidden in it
+		// would be served as if the client — or the reverse proxy in front —
+		// had sent it. Closing the connection after the 415 ends that.
+		c.Response().SetConnectionClose()
+		return fiber.NewError(fiber.StatusUnsupportedMediaType, contentCodingRefusal)
+	}
+	return c.Next()
+}
+
+// hasContentCoding reports whether the request names any content coding
+// other than identity, on ANY of its Content-Encoding field lines.
+//
+// It walks the headers the way c.Body() does before it decodes — every field
+// line whose name matches case-insensitively, combined into one list (RFC 9110
+// §5.2) — because anything narrower is a bypass. fasthttp's
+// Header.ContentEncoding() returns the first line alone, so a check built on
+// it would pass "identity" followed by a second "gzip" line, which c.Body()
+// inflates, and an empty line followed by "gzip", which it inflates too unless
+// fasthttp happened to store that empty value as nil. Header.PeekAll
+// would be no better once header normalising is off: it matches the name
+// exactly, so "content-encoding: gzip" after "Content-Encoding: identity"
+// would hide from it and not from c.Body(). Empty list elements are
+// skipped, as §5.6.1.2 requires and as c.Body() does too, so an empty
+// element can hide nothing. "identity" is §12.5.3's synonym for no
+// encoding: §8.4 says a sender SHOULD NOT send it, but c.Body() reads it as
+// the no-op it is, and refusing it would refuse a body that decodes to
+// itself.
+//
+// It is wider than each decoder it stands in front of, never narrower.
+// c.Body() decodes nothing unless some line is named exactly
+// "Content-Encoding" (the fast path at the top of Fiber's DefaultReq.Body),
+// and MultipartFormWithLimit gunzips only when the first such line is exactly
+// "gzip"; this refuses a coding on any line, under any spelling of the name.
+// With header normalising on, as Nexara runs, every spelling is parsed into
+// "Content-Encoding" and the readings coincide.
+func hasContentCoding(c fiber.Ctx) bool {
+	for name, line := range c.Request().Header.All() {
+		if !bytes.EqualFold(name, []byte(fiber.HeaderContentEncoding)) {
+			continue
+		}
+		for coding := range bytes.SplitSeq(line, []byte{','}) {
+			if coding = bytes.TrimSpace(coding); len(coding) > 0 && !bytes.EqualFold(coding, []byte("identity")) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // compressionSkipped reports whether a request's response must NOT be

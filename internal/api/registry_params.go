@@ -215,39 +215,9 @@ func queryValues(c fiber.Ctx) map[string]any {
 
 // maxUndeclaredBodyBytes bounds the body read on an endpoint that declares
 // no body parameter. See the comment at its use in bodyValues: without a
-// bound, a Deferred route hands an unauthorized caller a 32 MiB buffer.
+// bound, a Deferred route hands an unauthorized caller a buffer as large as
+// the Content-Length it declares.
 const maxUndeclaredBodyBytes = 64 << 10
-
-// hasContentCoding reports whether the request names any content coding
-// other than identity, on ANY of its Content-Encoding field lines.
-//
-// It walks the headers the way c.Body() does before it decodes — every field
-// line whose name matches case-insensitively, combined into one list (RFC 9110
-// §5.2) — because anything narrower is a bypass. fasthttp's
-// Header.ContentEncoding() returns the first line alone, so a check built on
-// it would pass "identity" followed by a second "gzip" line, and an empty
-// line followed by "gzip", and c.Body() would inflate both. Header.PeekAll
-// would be no better once header normalising is off: it matches the name
-// exactly, so "content-encoding: gzip" after "Content-Encoding: identity"
-// would hide from it and not from c.Body(). Empty list elements are
-// skipped, as §5.6.1.2 requires and as c.Body() does too, so an empty
-// element can hide nothing. "identity" is §12.5.3's synonym for no
-// encoding: §8.4 says a sender SHOULD NOT send it, but c.Body() reads it as
-// the no-op it is, and refusing it would refuse a body that decodes to
-// itself.
-func hasContentCoding(c fiber.Ctx) bool {
-	for name, line := range c.Request().Header.All() {
-		if !bytes.EqualFold(name, []byte(fiber.HeaderContentEncoding)) {
-			continue
-		}
-		for coding := range bytes.SplitSeq(line, []byte{','}) {
-			if coding = bytes.TrimSpace(coding); len(coding) > 0 && !bytes.EqualFold(coding, []byte("identity")) {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 // bodyValues decodes the request body, or reports that there is nothing to
 // decode.
@@ -278,9 +248,13 @@ func (e Endpoint) bodyValues(c fiber.Ctx) (map[string]any, error) {
 	// body, and that ordering is load-bearing rather than tidy. Nexara
 	// runs Fiber with StreamRequestBody and DisablePreParseMultipartForm
 	// so that an ISO upload is never buffered; c.Body() defeats both —
-	// fasthttp drains the whole stream into a 32 MiB-capped buffer AND
-	// closes it, so the upload handler that reads the stream itself finds
-	// it already consumed.
+	// fasthttp drains the whole stream into one buffer AND closes it, so
+	// the upload handler, which reads the stream itself, finds none and falls
+	// back to that buffer — the whole upload held in memory. BodyLimit caps
+	// none of that drain: under StreamRequestBody a
+	// body is streamed rather than refused, and the drain copies every byte
+	// the Content-Length declares — or, for a chunked body, every byte the
+	// client sends.
 
 	// A declared-empty body is asked about through the header, not by
 	// reading: this is the "no body at all" case, and it must not become
@@ -308,43 +282,43 @@ func (e Endpoint) bodyValues(c fiber.Ctx) (map[string]any, error) {
 	// failure this package exists to prevent — a body here becomes an
 	// "unknown parameter" 400 further down.
 	//
-	// The BOUND is the load-bearing part. c.Body() drains up to Fiber's
-	// 32 MiB limit, the upload route is exempt from the 10 MiB body-limit
-	// middleware, and a Deferred route runs extraction BEFORE any
-	// permission check — so an unbounded read here lets an authenticated
-	// caller holding no grant force a 32 MiB buffer per concurrent
-	// request, just by sending a JSON content type to a route that wants
-	// multipart. A chunked body reports -1 and cannot be sized before
-	// reading, so it is refused unread rather than trusted.
+	// The BOUND is the load-bearing part. c.Body() drains the whole body,
+	// however large its Content-Length (see above), the upload route is
+	// exempt from the 10 MiB body-limit middleware, and a Deferred route
+	// runs extraction BEFORE any permission check — so an unbounded read
+	// here lets an authenticated caller holding no grant force a buffer as
+	// large as the Content-Length it sends, per concurrent request, just by
+	// sending a JSON content type to a route that wants multipart. A chunked
+	// body reports -1 and cannot be sized before reading, so it is refused
+	// unread rather than trusted.
 	//
 	// 64 KiB is far above any real "you sent something we do not take"
 	// payload and far below anything worth buffering unauthenticated.
 	//
 	// The bound is on Content-Length, so it measures the body as it CROSSES
-	// THE WIRE — and c.Body() transparently decodes a Content-Encoding (gzip,
-	// deflate, br, zstd) up to Fiber's 32 MiB BodyLimit. Left alone, a gzip
-	// body of about 32 KiB — or about 1 KiB of zstd — passed the check and
-	// inflated to 32 MiB of heap before any permission check ran, which is
-	// the buffer this bound exists to deny. An endpoint that takes no body has
-	// no use for an encoded one, so an encoded body is refused here, unread:
-	// RFC 9110 §8.4 permits a 415 for a content coding the server will not
-	// take, and §12.5.3 asks that the refusal name what it would have taken
-	// in Accept-Encoding.
+	// THE WIRE, while c.Body() transparently decodes a Content-Encoding (gzip,
+	// deflate, br, zstd) up to Fiber's 32 MiB BodyLimit — and with fasthttp's
+	// own encoders a few KB of zstd, or 52 bytes of brotli, decode to all of
+	// it. In the server New builds, no such request reaches this code:
+	// refuseContentCodedRequests (middleware.go) answers every request that
+	// names a content coding with a 415 before any route runs, and it is the
+	// one owner of that refusal. There is deliberately no copy of it here: in
+	// the server New builds a copy could never fire, so it would guard only
+	// apps assembled without that middleware — tests — and a check no real
+	// request can reach is one nobody notices breaking.
 	//
-	// This path then reads c.BodyRaw(), which never decodes. That is a second
-	// layer, not the check: it matters only if hasContentCoding ever misses a
-	// coding c.Body() would have decoded, and it turns that miss into a JSON
-	// 400 on compressed bytes instead of 32 MiB of heap. Nothing can test it
-	// while the check above holds.
+	// What this path keeps is a reader that CANNOT decode: it reads
+	// c.BodyRaw(), never c.Body(). That is a second layer rather than a second
+	// copy of the check. It matters only if the app-wide check ever misses a
+	// coding c.Body() would decode, and it turns that miss into a JSON 400 on
+	// the compressed bytes instead of 32 MiB of heap.
+	// TestEncodedBodyIsNeverDecodedOnAnEndpointDeclaringNoBodyParameter drives
+	// it with no such check in front of it. An endpoint that DOES declare a
+	// body parameter reads c.Body() below and has the app-wide check alone.
 	if !required {
 		if n := c.Request().Header.ContentLength(); n < 0 || n > maxUndeclaredBodyBytes {
 			return nil, fiber.NewError(fiber.StatusBadRequest,
 				"this endpoint accepts no request body")
-		}
-		if hasContentCoding(c) {
-			c.Set(fiber.HeaderAcceptEncoding, "identity")
-			return nil, fiber.NewError(fiber.StatusUnsupportedMediaType,
-				"this endpoint accepts no encoded request body")
 		}
 	}
 

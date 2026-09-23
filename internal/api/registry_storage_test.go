@@ -288,7 +288,7 @@ func probeStorageEndpoint(t *testing.T, method, path string, cap *capture) Endpo
 //
 // Nexara runs Fiber with StreamRequestBody and DisablePreParseMultipartForm
 // so an ISO is never buffered. c.Body() defeats both — fasthttp drains the
-// whole stream into a 32 MiB-capped buffer AND closes it — and
+// whole stream into one buffer, however large, AND closes it — and
 // Endpoint.extract calls bodyValues on every mutating verb. bodyValues
 // gates on the Content-Type header BEFORE asking for the body, so a
 // multipart request never reaches c.Body(); declaring a body parameter

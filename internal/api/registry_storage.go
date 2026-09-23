@@ -146,13 +146,14 @@ func registerStorageEndpoints(reg *Registry, h *handlers.StorageHandler) {
 		Permissions: Permissions{Deferred: storageUploadReason},
 		// NO body parameters, deliberately. Fiber runs with StreamRequestBody
 		// and DisablePreParseMultipartForm so an ISO is never buffered, and
-		// c.Body() defeats both — fasthttp drains the whole stream into a
-		// 32 MiB-capped buffer AND closes it, so the handler that reads the
-		// stream itself would find it already consumed. bodyValues gates on
-		// the Content-Type header BEFORE asking for the body, and
-		// multipart/form-data is not JSON, so nothing here touches it. The
-		// three form fields are read out of the multipart stream by the
-		// handler, which is the only place they exist.
+		// c.Body() defeats both — fasthttp drains the whole stream into one
+		// buffer, however large (BodyLimit caps no drain of a streamed body),
+		// AND closes it, so the handler, which reads the stream itself, would
+		// find none and fall back to that buffer — the whole upload held in
+		// memory. bodyValues gates on the Content-Type header BEFORE asking
+		// for the body, and multipart/form-data is not JSON, so nothing here
+		// touches it. The three form fields are read out of the multipart
+		// stream by the handler, which is the only place they exist.
 		Parameters: storageRowParams(nil),
 		Handler:    h.UploadFile,
 	})

@@ -170,8 +170,9 @@ func uploadContentAllowed(content string, canStorage, canImport bool) bool {
 //
 // This handler uses streaming multipart parsing to avoid buffering the entire
 // file in memory. With StreamRequestBody enabled on the server, fasthttp
-// provides a body stream for requests exceeding BodyLimit. We parse the
-// multipart stream directly and pipe the file part to Proxmox.
+// provides a body stream for every request that has a body, whatever
+// BodyLimit is. We parse the multipart stream directly and pipe the file part
+// to Proxmox.
 //
 // The frontend must send form fields in order: content, filesize, file.
 func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
@@ -218,9 +219,11 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Missing multipart boundary")
 	}
 
-	// Get the body stream. For large uploads (> BodyLimit), fasthttp provides
-	// a streaming reader that avoids buffering the entire body in memory.
-	// For smaller bodies, fall back to the in-memory buffer.
+	// Get the body stream. Under StreamRequestBody fasthttp provides one for
+	// every request with a body — at most 8 KiB prefetched, the rest still on
+	// the connection. It is nil only when there is none to read: a request
+	// with no body framing, or one whose stream c.Body() already drained, and
+	// then the in-memory buffer is all there is.
 	// Fiber v3: the underlying fasthttp.RequestCtx is c.RequestCtx() (c.Context()
 	// now returns the Go context.Context).
 	bodyStream := c.RequestCtx().RequestBodyStream()

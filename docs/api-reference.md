@@ -134,8 +134,30 @@ Common HTTP status codes:
 | 403 | Forbidden — insufficient permissions |
 | 404 | Not found |
 | 409 | Conflict — resource already exists |
+| 415 | Unsupported media type — the request named a `Content-Encoding` other than `identity`; see Compressed Request Bodies |
 | 429 | Rate limited |
 | 500 | Internal server error |
+
+## Compressed Request Bodies
+
+Send request bodies uncompressed. A request whose `Content-Encoding` names any
+content coding other than `identity` — `gzip`, `br`, `zstd`, `deflate` or any
+other — is refused on every endpoint with `415` and the `unsupported_media_type`
+envelope before any handler reads the body, so the body is never decompressed.
+The response carries `Accept-Encoding: identity`, which is how RFC 9110
+§12.5.3 has a server say which codings it would have accepted: none but "no
+encoding". The server then closes the connection, because a refused body is
+never read and so nothing can safely follow it there; a client still sending
+a large body at that point may see the connection reset rather than the 415.
+Resend the request, on a new connection, without the header.
+
+The refusal goes by the header alone, so it applies whatever the method and
+whether or not a body follows. A compressed body can be thousands of times
+smaller than what it decodes to, which would make every size limit on a
+request body a limit on the compressed bytes only.
+
+Responses are not affected: a client that sends `Accept-Encoding` still gets a
+compressed response wherever the server compresses one.
 
 ## Rate Limits
 
