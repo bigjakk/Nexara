@@ -36,10 +36,11 @@ const RoleAdministrator = "Administrator"
 //
 // Every /access/* identifier gets a validator rather than relying on
 // url.PathEscape, for the reason spelled out on validatePathSegment: escaping
-// leaves ".." intact, and pveproxy normalises it upward onto a different
-// endpoint with different permissions. The outbound call carries the cluster's
-// API token, so "Proxmox will reject it" is not a defence — the request must
-// never be built at all.
+// leaves ".." intact, and while pveproxy takes it literally, a normalising
+// proxy in front of it resolves it upward onto a different endpoint with
+// different permissions. The outbound call carries the cluster's API token, so
+// "Proxmox will reject it" is not a defence — the request must never be built
+// at all.
 func validateUserID(userid string) error {
 	if userid == "" {
 		return fmt.Errorf("%w: user id is required", ErrInvalidInput)
@@ -131,10 +132,14 @@ func validateAccessName(kind, value string, maxLen int) error {
 		return fmt.Errorf("%w: %s is too long (max %d)", ErrInvalidInput, kind, maxLen)
 	}
 	// "." and ".." pass accessNamePattern because dot is a legal character in a
-	// group or role id. They must still be rejected outright: escaped or not,
-	// pveproxy normalises "/access/groups/." onto "/access/groups", which is
-	// the collection endpoint rather than the member one, and
-	// "/access/groups/.." one level further up, onto "/access".
+	// group or role id — PVE's own pve-groupid and pve-roleid formats admit
+	// both as whole names, and pveproxy, which takes a dot segment literally
+	// (see validatePathSegment), would read them as a group or role of that
+	// name. They are rejected outright anyway, escaped or not: a normalising
+	// proxy in front of pveproxy resolves "/access/groups/." onto
+	// "/access/groups", the collection endpoint rather than the member one, and
+	// "/access/groups/.." one level further up, onto "/access". The cost is a
+	// group or role literally named "." or "..", which Nexara cannot address.
 	if value == "." || value == ".." {
 		return fmt.Errorf("%w: %q is not a valid %s", ErrInvalidInput, value, kind)
 	}

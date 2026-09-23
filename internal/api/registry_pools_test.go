@@ -152,14 +152,16 @@ func TestPoolIDIsLooserThanConfigID(t *testing.T) {
 // real request rather than only in a schema unit test, and — the assertion
 // TestPoolIDIsLooserThanConfigID does not make — that the refusal happens
 // BEFORE the handler runs. A 400 that arrived after the handler had already
-// addressed the pool COLLECTION would be the bug, not the fix.
+// sent the request — which a normalising proxy would land on the pool
+// COLLECTION — would be the bug, not the fix.
 //
 // Both spellings are checked, and BOTH are refused by the parameter rule
 // rather than by the router. That is measured, not assumed: Fiber does not
 // strip a "." or ".." segment out of the path here, so the raw value reaches
 // the declaration exactly as "%2e%2e" does. It is worth stating because the
 // opposite is easy to believe — a path normaliser resolving the segment away
-// is the reason these two values are dangerous DOWNSTREAM, at pveproxy, and
+// is the reason these two values are dangerous DOWNSTREAM, in front of
+// pveproxy (which takes them literally; see proxmox.validatePathSegment), and
 // it does not follow that anything on this side removes them first.
 //
 // The two spellings are NOT redundant, and which one carries the guard is the

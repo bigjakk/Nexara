@@ -13,11 +13,12 @@ import (
 // validatePathSegment.
 //
 // The rule it carried before refused "", any "/", and ".." as a SUBSTRING,
-// which let three things through: a bare "." (a path segment that disappears,
-// so /nodes/./tasks/{upid}/status resolves onto /nodes/tasks/{upid}/status), a
-// backslash, and every control character. It also refused "pve..01", a name
-// the node-name format itself accepts, with an error that did not wrap
-// ErrInvalidInput and so surfaced as a 500.
+// which let three things through: a bare "." (a segment a normalising proxy
+// removes, so there /nodes/./tasks/{upid}/status resolves onto
+// /nodes/tasks/{upid}/status; pveproxy itself reads it as a node named "." —
+// see validatePathSegment), a backslash, and every control character. It also
+// refused "pve..01", a name the node-name format itself accepts, with an error
+// that did not wrap ErrInvalidInput and so surfaced as a 500.
 //
 // The reachable path is the one taskUPID (internal/api/handlers/vms.go) opens:
 // it percent-DECODES the :upid parameter and hands colon-field 1 to the client
@@ -51,8 +52,9 @@ const validNodeTaskUPID = "UPID:pve-01:0:0:0:qmstart:110:root@pam:"
 // where a separator was meant.
 var refusedNodeNames = []struct{ name, node string }{
 	{"empty", ""},
-	// The live gap. A "." segment is removed when the path is normalised, so
-	// the request lands one level up from where the route addressed.
+	// The live gap. A normalising proxy removes a "." segment, so there the
+	// request loses a level from where the route addressed; pveproxy itself
+	// would read it as a node named ".".
 	{"a bare dot", "."},
 	{"a bare traversal", ".."},
 	// Raw strings: these are a backslash followed by a letter, NOT an escape.
@@ -82,11 +84,12 @@ var refusedNodeNames = []struct{ name, node string }{
 // TestNodeNameRefusalsReachTheWireAsNothing drives the guard through three
 // exported methods, chosen for where the node sits in the path each builds.
 //
-// GetNodeStatus puts the node second-to-last, so a traversal moves the request
-// within /nodes. GetTaskStatus passes a VALID UPID alongside, so only the node
-// guard can refuse. StopNodeTask is the DELETE, and it appends nothing after
-// the UPID — the caller owns the whole tail there, which makes it the worst of
-// the three.
+// GetNodeStatus puts the node second-to-last, so behind a normalising proxy a
+// "." keeps the request inside /nodes — /nodes/./status is the node named
+// "status" — while a ".." takes it out, onto /status. GetTaskStatus passes a
+// VALID UPID alongside, so only the node guard can refuse. StopNodeTask is the
+// DELETE, and it appends nothing after the UPID — the caller owns the whole
+// tail there, which makes it the worst of the three.
 //
 // The refusal has to wrap ErrInvalidInput: mapProxmoxError
 // (internal/api/handlers/proxmox_error.go) turns that into a 400 and anything
@@ -380,9 +383,9 @@ func assertNodeNameRefused(t *testing.T, err error, seen *[]string) {
 	t.Helper()
 	if sent := *seen; len(sent) != 0 {
 		// Printed first and in full: this line IS the vulnerability. A "."
-		// segment vanishes when the path is normalised and a "%2F" is decoded
-		// before the path is resolved, so either one lands the request
-		// somewhere the route never addressed.
+		// segment vanishes wherever a proxy normalises the path, and pveproxy
+		// decodes a "%2F" into a separator before it routes, so either one can
+		// land the request somewhere the route never addressed.
 		t.Errorf("the request reached Proxmox as %q; it must never leave the client", sent)
 	}
 	if err == nil {

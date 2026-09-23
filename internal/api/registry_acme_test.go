@@ -220,9 +220,11 @@ func probeACMEEndpoint(t *testing.T, method, path string, cap *capture) Endpoint
 // have validatePBSTaskUPID; ACME has nothing, like the backup domain's store
 // and job ids, which get only a non-empty check
 // (TestBackupPathSegmentsAreAnchored). The declaration is the only anchor, so
-// it is the only thing this test can check and the only thing that stops
-// DELETE /cluster/acme/account/. from resolving onto the account collection,
-// or ".." onto /cluster/acme above it.
+// it is the only thing this test can check and the only thing that stops a
+// normalising proxy in front of pveproxy from resolving DELETE
+// /cluster/acme/account/. onto the account collection, or ".." onto
+// /cluster/acme above it. (pveproxy itself would read either as an account
+// name; see proxmox.validatePathSegment.)
 func TestACMEPathSegmentsAreAnchored(t *testing.T) {
 	traversals := []string{".", ".."}
 
@@ -247,7 +249,8 @@ func TestACMEPathSegmentsAreAnchored(t *testing.T) {
 			}
 			if prop.Pattern == "" {
 				t.Fatalf("%s: %q declares no pattern, and nothing behind it checks one — \".\" and \"..\" "+
-					"would reach url.PathEscape and resolve upward, onto the parent collection and above it",
+					"would pass url.PathEscape untouched, and a normalising proxy in front of pveproxy "+
+					"would resolve them onto the parent collection and above it",
 					seg.route, seg.param)
 			}
 

@@ -224,11 +224,16 @@ func sdnDNSSettings() apischema.Properties {
 //
 // The one thing worth naming is what the path parameters buy. None of the
 // SDN client methods runs proxmox.validatePathSegment, and url.PathEscape
-// leaves "." and ".." alone — so PUT /sdn/zones/.. normalises to
-// PUT /cluster/sdn, which is the APPLY endpoint. Same permission, so it is
-// not an escalation, but "update this zone" silently applying the whole SDN
-// configuration is not a thing to leave declarable. pveObjectNameParam's
-// leading-alphanumeric anchor is what closes it.
+// leaves "." and ".." alone. pveproxy takes such a segment literally (see
+// proxmox.validatePathSegment), but behind a normalising proxy PUT
+// /sdn/zones/.. normalises to PUT /cluster/sdn, which is the APPLY endpoint.
+// That endpoint takes only lock-token and release-lock (pve-network
+// src/PVE/API2/Network/SDN.pm, reload), so a zone update carrying any other
+// field is refused there, and one carrying none applies the pending SDN
+// configuration. Same permission, so it is not an escalation, but "update
+// this zone" landing on "apply everything" is not a thing to leave
+// declarable. pveObjectNameParam's leading-alphanumeric anchor is what closes
+// it.
 func registerSDNEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	// ── Zones ─────────────────────────────────────────────────────────
 	reg.Register(Endpoint{

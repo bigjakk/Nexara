@@ -397,12 +397,13 @@ func TestIPSetEntryDeleteReachesProxmoxAsTheEntryTheCallerMeant(t *testing.T) {
 // decode, and the reason it belongs at the handler rather than after the
 // client's escape.
 //
-// Decoding moves the traversal guards onto the string Proxmox will actually
-// resolve. Before it, "%2E%2E" was a pool literally named "%2E%2E" and the
-// guard never saw a dot; after it, the same request really does mean "..", and
-// validatePathSegment is what refuses it. A malformed escape is refused too:
-// the contract is that a path parameter is percent-encoded, so "%zz" is a bad
-// request rather than a pool name to be guessed at.
+// Decoding moves the traversal guards onto the string the client will actually
+// put in the path. Before it, "%2E%2E" was a pool literally named "%2E%2E" and
+// the guard never saw a dot; after it, the same request really does mean "..",
+// a dot segment on the wire, and validatePathSegment is what refuses it. A
+// malformed escape is refused too: the contract is that a path parameter is
+// percent-encoded, so "%zz" is a bad request rather than a pool name to be
+// guessed at.
 //
 // Nothing may reach Proxmox in any of these cases.
 func TestPathParamDecodeRefusesWhatItNowMakesReachable(t *testing.T) {
@@ -438,6 +439,10 @@ func TestPathParamDecodeRefusesWhatItNowMakesReachable(t *testing.T) {
 		{"ip set entry, traversal through the slash it now allows", ipset, "%2E%2E%2F%2E%2E", ipSetEntryTarget},
 		{"ip set entry, malformed escape", ipset, "a%zzb", ipSetEntryTarget},
 		{"ip set entry, encoded newline", ipset, "a%0Ab", ipSetEntryTarget},
+		// "Descent" names the shape, not a route: pveproxy joins everything
+		// after the set name back into the one cidr value, so it would not go
+		// deeper (see proxmox.validatePathSegmentAllowingSlash). The client's
+		// one-slash rule is what refuses it.
 		{"ip set entry, descent through the slash it now allows", ipset, "a%2Fb%2Fc", ipSetEntryTarget},
 	}
 

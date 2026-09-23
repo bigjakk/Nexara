@@ -751,25 +751,28 @@ func ValidateSnapshotName(kind SnapshotGuestKind, name string) error {
 //
 // Escaping is not the guard, which is what made the emptiness check these
 // replaced insufficient. url.PathEscape encodes "/" but leaves "." and ".."
-// entirely alone, so those two need only the NORMALISATION half and no decode
-// at all — they travel raw and resolve upward the moment pveproxy normalises
-// the path. A separator it does escape, to "%2F", relies on the further step
-// that Proxmox decodes before it resolves; the capture-server run recorded on
-// forbiddenVolumeIDChars (client_storage.go) is the evidence for that far-side
-// behaviour, having watched "%2e%2e%2f" arrive byte-for-byte and become "../"
-// upstream. So on the two DELETE methods:
+// entirely alone, so those two travel raw. pveproxy takes them literally, as a
+// snapshot name its pve-snapshot-name format refuses (see validatePathSegment),
+// but a normalising proxy in front of it resolves them upward, with no decode
+// needed at all. A separator PathEscape does escape, to "%2F", pveproxy itself
+// decodes before it routes, so that one re-routes the request even with no
+// proxy in between. So on the two DELETE methods, behind such a proxy:
 //
 //	snapname="."   DELETE /nodes/{node}/qemu/{vmid}/snapshot
 //	               the snapshot COLLECTION rather than one snapshot
 //	snapname=".."  DELETE /nodes/{node}/qemu/{vmid}
 //	               the GUEST — the same target as DestroyVM
 //
-// The second one is the reason this is not a cosmetic tightening: a caller
-// asking to delete a snapshot deletes the whole VM, and the audit row and the
-// task description still read "snapshot_delete" because both are built from
-// the arguments rather than from the path. Commit 3e757d3 closed the same
-// shape for task ids and 7f4d2ca for HA ids, on the rationale "guard at the
-// client, not at whichever caller remembers".
+// The second one is the reason this is not a cosmetic tightening: destroy_vm
+// takes node and vmid from the path and needs nothing else, so a caller asking
+// to delete a snapshot would destroy a stopped, unprotected, unlocked VM (a
+// "suspended" lock does not stop it) that is in neither HA nor replication and
+// is not a template whose base image a linked clone still uses — the refusals
+// in qemu-server's API destroy_vm and QemuServer::destroy_vm — and the audit
+// row and the task description still read "snapshot_delete" because both are
+// built from the arguments rather than from the path. Commit 3e757d3 closed
+// the same shape for task ids and 7f4d2ca for HA ids, on the rationale "guard
+// at the client, not at whichever caller remembers".
 //
 // Whichever caller remembers is what this was until now: the only thing
 // constraining these names was snapshotNameParam's Pattern in

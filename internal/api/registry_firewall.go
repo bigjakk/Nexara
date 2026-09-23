@@ -206,12 +206,14 @@ func firewallOptionsParams() apischema.Properties {
 // the pattern (they start with "%") and decode to "." and "..". What refuses
 // those is proxmox.DeleteFirewallIPSetEntry's guard,
 // validatePathSegmentAllowingSlash — the slash-tolerant member of the family,
-// because a decoded CIDR entry id legitimately contains one. It matters:
-// cidr="." addresses the IP SET itself, where a DELETE removes the whole set
-// if it is empty (Proxmox's delete_ipset refuses one that still has entries,
-// and the client never sends force) while the audit row still reads as a
-// single-entry change; ".." lands on the IP-set collection, which has no
-// DELETE. Do not loosen the client guard on the strength of this pattern.
+// because a decoded CIDR entry id legitimately contains one. It matters behind
+// a normalising proxy in front of pveproxy (pveproxy itself would read the dot
+// as a cidr and refuse it; see proxmox.validatePathSegment): there cidr="."
+// addresses the IP SET itself, where a DELETE removes the whole set if it is
+// empty (Proxmox's delete_ipset refuses one that still has entries, and the
+// client never sends force) while the audit row still reads as a single-entry
+// change; ".." lands on the IP-set collection, which has no DELETE. Do not
+// loosen the client guard on the strength of this pattern.
 var firewallIPSetEntryCIDRParam = apischema.Property{
 	Type:        apischema.String,
 	Pattern:     `^[0-9A-Za-z:%][0-9A-Za-z.:%_-]*$`,

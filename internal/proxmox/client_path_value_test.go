@@ -36,8 +36,10 @@ func TestValidatePathSegmentAllowingSlash(t *testing.T) {
 		{"backslash", `a\b`, true},
 		{"control character", "a\x00b", true},
 		{"newline", "a\nb", true},
-		// Descent rather than ascent: every component is a real name, so the
-		// per-component check takes it. One slash is the whole allowance.
+		// The shape rule rather than a traversal one: every component is a
+		// real name, so the per-component check takes it, and pveproxy would
+		// join it back into one cidr value anyway (see the function's doc).
+		// One slash is the whole allowance.
 		{"two slashes", "a/b/c", true},
 		{"many slashes", "a/b/c/d", true},
 	}
@@ -107,10 +109,12 @@ func TestIPSetEntryPathEscapesTheValueExactlyOnce(t *testing.T) {
 // TestIPSetEntryRefusesTraversalThroughTheSlashItAllows is the counterweight:
 // tolerating a slash must not tolerate a traversal built out of one.
 //
-// Proxmox decodes a percent-escape before it resolves the path — the capture
-// run recorded on validateVolumeID proved "%2e%2e%2f" arrives byte-for-byte and
-// becomes "../" upstream — so "../.." escaped into one segment would still pop
-// two levels off /cluster/firewall/ipset. Nothing may be sent.
+// pveproxy decodes a percent-escape before it routes, but it removes no dot
+// segment, and at this position its IP-set subclass joins everything after
+// the set name into the one cidr value (see validatePathSegmentAllowingSlash).
+// A proxy in front of it that decoded "../.." out of its escaped segment and
+// then normalised would pop "storeset" and "ipset" both, landing on
+// /cluster/firewall. Nothing may be sent.
 func TestIPSetEntryRefusesTraversalThroughTheSlashItAllows(t *testing.T) {
 	tests := []struct{ set, entry string }{
 		// The entry half.
@@ -123,9 +127,9 @@ func TestIPSetEntryRefusesTraversalThroughTheSlashItAllows(t *testing.T) {
 		{"storeset", "a\nb"},
 		{"storeset", ""},
 		// The SET-NAME half, which went unchecked until this change even though
-		// it sits in the same path expression. ".." there drops the ipset
-		// segment and addresses /cluster/firewall/<entry>; "." addresses the set
-		// NAMED by the entry.
+		// it sits in the same path expression. Behind a normalising proxy ".."
+		// there drops the ipset segment and addresses /cluster/firewall/<entry>,
+		// and "." addresses the set NAMED by the entry.
 		{"..", "192.0.2.10"},
 		{".", "192.0.2.10"},
 		{"a/b", "192.0.2.10"},

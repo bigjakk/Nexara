@@ -237,16 +237,19 @@ func TestCephPoolOperationsReturnTheUPID(t *testing.T) {
 }
 
 // DeleteCephPool puts the pool name in the path, and url.PathEscape does not
-// make that safe on its own: it escapes "/" and leaves ".." untouched, so the
-// segment stays a working traversal. ".." pops the pool collection too, landing
-// DELETE on /nodes/{node}/ceph; "." stops a level short, on /ceph/pool.
+// make that safe on its own: it escapes "/" and leaves ".." untouched. pveproxy
+// would take the segment literally (see validatePathSegment), as the name of
+// the pool to destroy — destroypool declares it a bare string — while a
+// normalising proxy in front of it treats it as a traversal: ".." pops the pool
+// collection too, landing DELETE on /nodes/{node}/ceph, and "." stops a level
+// short, on /ceph/pool.
 //
-// Neither PVE::API2::Ceph nor PVE::API2::Ceph::Pool registers a DELETE at that
-// level, so both 501 rather than doing harm — but the same was true of the
-// three /disks names guarded alongside this one, and "whatever it lands on
-// happens not to take this verb" is a fact about PVE's routing table, not about
-// this code. CreateCephPool needs no equivalent: its name travels in the form
-// body.
+// Neither PVE::API2::Ceph nor PVE::API2::Ceph::Pool registers a DELETE at those
+// two levels, so behind such a proxy both 501 rather than doing harm — but the
+// same was true of the three /disks names guarded alongside this one, and
+// "whatever it lands on happens not to take this verb" is a fact about PVE's
+// routing table, not about this code. CreateCephPool needs no equivalent: its
+// name travels in the form body.
 func TestDeleteCephPoolRejectsPathTraversal(t *testing.T) {
 	const node = "pve-01"
 

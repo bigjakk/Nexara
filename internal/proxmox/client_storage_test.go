@@ -119,8 +119,10 @@ func TestDeleteStorageContent_SendsVolumeIDLiterally(t *testing.T) {
 func TestDeleteStorageContent_RejectsInjectionWithoutIssuingRequest(t *testing.T) {
 	// The rejection has to happen before the request is built: the outbound call
 	// carries the cluster's API token, so "Proxmox will reject it" is not a
-	// defence — a traversal that reaches pveproxy is already a request made with
-	// admin credentials against an attacker-chosen path.
+	// defence — a traversal that leaves the client is already a request made
+	// with admin credentials against an attacker-chosen path. pveproxy itself
+	// would keep it inside the {volume} value (see forbiddenVolumeIDChars); a
+	// normalising proxy in front of it would not.
 	attacks := []string{
 		"../../../../access/users/root@pam",
 		"local:../../../../access/users/root@pam",

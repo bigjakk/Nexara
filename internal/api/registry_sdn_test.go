@@ -358,11 +358,14 @@ func TestSDNVNetUpdateZoneKeepsTheEmptySentinel(t *testing.T) {
 //
 // None of the SDN client methods runs proxmox.validatePathSegment, and
 // url.PathEscape leaves "." and ".." alone — so the request resolves onto
-// the PARENT collection once pveproxy normalises it. The worst of them is
-// PUT /cluster/sdn/zones/.., which normalises to PUT /cluster/sdn: the SDN
-// APPLY endpoint. Same permission, so not an escalation, but "change this
-// zone" silently applying the whole pending configuration is not a thing to
-// leave declarable.
+// the PARENT collection wherever a proxy in front of pveproxy normalises it
+// (pveproxy itself takes the segment literally; see
+// proxmox.validatePathSegment). The worst of them is PUT
+// /cluster/sdn/zones/.., which normalises to PUT /cluster/sdn: the SDN APPLY
+// endpoint, which refuses a zone field but applies the whole pending
+// configuration for an update that carries none (registry_sdn.go has the
+// schema). Same permission, so not an escalation, but "change this zone"
+// landing there is not a thing to leave declarable.
 func TestSDNPathIDsRefuseATraversalSegment(t *testing.T) {
 	for _, tt := range []struct {
 		method string

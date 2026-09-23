@@ -96,9 +96,20 @@ var volumeStorageIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 // stray "%" for us — it would not. net/url is all-or-nothing: URL.EscapedPath
 // returns RawPath verbatim whenever validEncoded accepts it, and validEncoded
 // explicitly allows "%". So "local:iso/%2e%2e%2f%2e%2e%2faccess" reaches
-// Proxmox byte-for-byte and decodes to "../../access" on the far side —
-// verified against a capture server. Do not drop "%" from this set on the
-// assumption that the encoder cleans up after us.
+// Proxmox byte-for-byte — verified against a capture server — and pveproxy
+// decodes it to "../../access" (uri_unescape, before it routes; see
+// validatePathSegment). Do not drop "%" from this set on the assumption that
+// the encoder cleans up after us.
+//
+// Where the escape then goes is narrower than "anywhere". pveproxy itself
+// keeps it in its slot: pve-storage registers the content subclass with an
+// empty fragmentDelimiter (src/PVE/API2/Storage/Status.pm, "because volume IDs
+// may contain a slash"), so everything after /content/ — decoded slashes and
+// dots included — is joined into the one {volume} value, and pveproxy removes
+// no dot segment anyway. The id leaves its slot in front of pveproxy: a proxy
+// that normalises the path resolves a literal "../", and one that decodes
+// before normalising resolves the escaped form too. "?" and "#" act earlier
+// still, in this client's own URL parsing.
 //
 // Everything else is safe to pass through. Bytes >= 0x80 are always
 // percent-encoded (net/url's escape is byte-wise), and the ASCII characters
@@ -116,7 +127,8 @@ const forbiddenVolumeIDChars = "%?#\\"
 // into %2F and break every file-based volume. That makes this function the only
 // thing standing between an operator-supplied string and a URL that is fetched
 // with the cluster's API token, so it rejects traversal outright rather than
-// relying on the far side to normalise.
+// relying on what sits between here and pveproxy to leave it alone (see
+// forbiddenVolumeIDChars on where a traversal can and cannot act).
 //
 // Accepted trade-off: a volume whose name contains one of forbiddenVolumeIDChars
 // cannot be deleted through this client. Proxmox will not mint such a name

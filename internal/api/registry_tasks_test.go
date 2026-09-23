@@ -365,7 +365,7 @@ func TestTaskCreateNodeIsHeldToTheNodeNameRule(t *testing.T) {
 		{name: "omitted", node: "", want: fiber.StatusNoContent,
 			why: "optional, and absent is not the same as empty"},
 		{name: "a bare dot", node: `"."`, want: fiber.StatusBadRequest,
-			why: "a segment that disappears when the far side normalises the path"},
+			why: "a segment that disappears wherever a proxy in front of Proxmox normalises the path"},
 		{name: "a traversal", node: `".."`, want: fiber.StatusBadRequest,
 			why: "the same, one level up"},
 		{name: "a separator", node: `"pve-01/x"`, want: fiber.StatusBadRequest,

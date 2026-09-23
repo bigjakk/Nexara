@@ -194,8 +194,9 @@ func validateVMID(vmid int) error {
 // It DELEGATES rather than carrying a rule of its own, which it did until this
 // change, and the difference was a live gap and not a stylistic one. The rule
 // it carried refused "", any "/", and ".." as a SUBSTRING — so a bare "." went
-// through, and a "." is a path segment that disappears: /nodes/./tasks/{upid}
-// resolves onto /nodes/tasks/{upid} the moment pveproxy normalises the path.
+// through. pveproxy itself would read it as a node named "." (see
+// validatePathSegment), but a normalising proxy in front of it removes the
+// segment, and there /nodes/./tasks/{upid} becomes /nodes/tasks/{upid}.
 // Two callers CHOOSE this value rather than reading it back from Proxmox, so
 // the gap was reachable:
 //
@@ -260,12 +261,61 @@ func validateNodeName(node string) error {
 // segment of a Proxmox request path.
 //
 // url.PathEscape alone is not enough for this. It escapes "/" but leaves "."
-// and ".." untouched, so an escaped "." or ".." still resolves upward once
-// pveproxy normalises the path — "." onto the parent collection, which is
-// often a different endpoint with different permissions, and ".." one level
-// above that. DELETE /nodes/{node}/network/. is the worked example: it
-// becomes DELETE /nodes/{node}/network, Proxmox's "revert pending network
-// config" — and ".." climbs one level further, onto the node itself.
+// and ".." untouched, and what such a segment then does depends on who reads
+// the path first. This is the one place the evidence is recorded; the other
+// guards in this package, and the route declarations, point here.
+//
+// pveproxy itself takes a dot segment LITERALLY: it never applies RFC 3986
+// remove_dot_segments. Read from upstream source — pve-http-server
+// src/PVE/APIServer/AnyEvent.pm, authenticate_and_handle_request, takes
+// uri_unescape($request->uri->path()), percent-decoded with the dots intact,
+// and hands that one string both to auth_handler and, through handle_request
+// and handle_api2_request, to rest_handler; pve-manager PVE/HTTPServer.pm
+// rest_handler passes it unchanged to find_handler; and pve-common
+// src/PVE/RESTHandler.pm find_handler splits it on "/+", drops the empty
+// pieces, and map_path_to_methods matches each component as it stands. A
+// fixed level looks the component up by exact name, where "." and ".." name
+// no child, so the call answers "not implemented". A {param} level captures
+// the component as that parameter's VALUE when the level's regex admits it —
+// register_method's default for a bare {name} is \S+, which admits both. And
+// measured on 2026-09-23 with unauthenticated GETs sent straight to port 8006
+// (curl --path-as-is; no authenticated request was made): auth_handler
+// exempts GET /access/domains by comparing the relative path as a string, and
+// /api2/json/access/domain%73 got that exemption (200) while
+// /access/./domains, /access/x/../domains and /access/%2e/domains were
+// refused (401). The probe measures the auth check; that routing reads the
+// same string is the source reading above.
+//
+// So a "." or ".." sent straight to pveproxy is a parameter value. The
+// parameter's schema may refuse it (pve-node, pve-iface, pve-vmid,
+// pve-storage-id and pve-configid all do), it may name an object literally
+// called "." or ".." (pve-poolid, pve-groupid and pve-roleid admit both), or
+// a handler may use it as it stands (destroypool declares a Ceph pool name as
+// a bare string). Where a subclass is registered with an empty
+// fragmentDelimiter — a storage's content volumes in pve-storage, an IP set's
+// entries in pve-firewall — map_path_to_methods joins everything after it
+// back into ONE value, so nothing in that tail reaches another endpoint at
+// pveproxy at all.
+//
+// The destinations the guards in this package name are RFC 3986's — for a
+// final segment, "." lands on the collection the value sits in and ".." one
+// level above it — and they are what a NORMALISING intermediary would reach:
+// a reverse proxy in front of PVE (an api_url need not point at pveproxy; see
+// APIURLIsDirectToPVEProxy), an HTTP library that cleans paths, curl without
+// --path-as-is. DELETE /nodes/{node}/network/. is the worked example: behind
+// such a proxy it becomes DELETE /nodes/{node}/network, Proxmox's "Revert
+// network configuration changes", and ".." lands on the node itself; at
+// pveproxy it is delete_network for an interface named ".", which pve-iface
+// refuses. A multi-segment payload such as "a/../.." in a value this client
+// escapes reaches the wire as "a%2F..%2F..", which an RFC-conforming
+// normaliser leaves alone (an escaped "/" is not a "/", RFC 3986 §2.2); only
+// one that decodes %2F before removing dot segments would resolve it.
+//
+// The guard stays for both cases: the intermediary may be there, and a dot
+// segment is never a name this client means to send. An escaped "/" is
+// different and needs no intermediary: pveproxy decodes %2F BEFORE it splits
+// the path, so a separator smuggled through the escape does re-route the
+// request there, outside a fragmentDelimiter tail.
 //
 // The control-character refusal is not about the path — url.PathEscape encodes
 // those — but about where the value goes AFTERWARDS. Callers put it in a
@@ -302,15 +352,16 @@ func validatePathSegment(kind, value string) error {
 // url.PathEscape produces it. The blanket separator ban validatePathSegment
 // makes would turn every CIDR entry into a 400.
 //
-// The slash still cannot be waved through unchecked, because Proxmox decodes
-// the escape before it resolves the path. The capture-server run that proved
-// it is recorded on forbiddenVolumeIDChars (client_storage.go): a volume id is
-// interpolated RAW, so "%2e%2e%2f" reached Proxmox byte-for-byte and decoded
-// to "../" there. That measures the far side, which is the half that matters —
-// an escape this client produces arrives at the same decoder. So the guard is
-// the per-component one
-// validateVolumeID makes — every "/"-delimited piece has to be a real name —
-// which refuses "../.." while taking "192.0.2.0/24".
+// The slash still cannot be waved through unchecked. pveproxy decodes the
+// escape before it routes (see validatePathSegment), and at this position what
+// keeps the decoded text in its slot at pveproxy itself is the IP-set
+// subclass's empty fragmentDelimiter: everything after the set name, decoded
+// slashes and dots included, is joined back into the one {cidr} value
+// (pve-firewall src/PVE/API2/Firewall/IPSet.pm sets it because a CIDR carries a
+// slash). A proxy in front of pveproxy that decoded %2F and then removed dot
+// segments would let "../.." climb out of that slot, so the guard is the
+// per-component one validateVolumeID makes — every "/"-delimited piece has to
+// be a real name — which refuses "../.." while taking "192.0.2.0/24".
 //
 // A "%" needs no exclusion here, unlike in validateVolumeID: that value is
 // interpolated raw, this one goes through url.PathEscape, which re-encodes the
@@ -326,12 +377,15 @@ func validatePathSegmentAllowingSlash(kind, value string) error {
 		return fmt.Errorf("%w: %s %q contains a control character", ErrInvalidInput, kind, value)
 	}
 	components := strings.Split(value, "/")
-	// ONE slash, which is what "AllowingSlash" means: a CIDR is "addr/len" and
-	// an entry that is neither a CIDR nor an address is an alias name with no
-	// slash at all. Refusing the rest is about DESCENT rather than ascent — the
-	// per-component check below stops "../..", but "a/b/c/d" passes it and,
-	// once Proxmox decodes the escapes, lands the request three levels deeper
-	// than the one segment this value is positioned in.
+	// ONE slash, which is what "AllowingSlash" means: a CIDR is "addr/len", and
+	// an entry that is neither a CIDR nor an address is an alias, at most
+	// "dc/name" or "guest/name" (pve-firewall src/PVE/Firewall.pm,
+	// pve_verify_ip_or_cidr_or_alias). Refusing the rest is about that SHAPE,
+	// not about where the request would land: the per-component check below
+	// stops "../..", and "a/b/c/d" passes it, but pveproxy does not route it
+	// three levels deeper — the IP-set subclass's fragmentDelimiter joins it
+	// back into the one {cidr} value (see above), which PVE's cidr format then
+	// refuses. No entry PVE accepts has two slashes.
 	if len(components) > 2 {
 		return fmt.Errorf("%w: %s %q has more than one path separator", ErrInvalidInput, kind, value)
 	}

@@ -233,11 +233,13 @@ func (c *Client) UpdateFirewallIPSetEntry(ctx context.Context, setName, cidr str
 		form.Set("comment", params.Comment)
 	}
 	// Both halves of the path, because both are caller-supplied and only one of
-	// them used to be checked. setName=".." drops the ipset segment and
-	// addresses /cluster/firewall/<cidr>, another firewall path entirely, and
-	// setName="." the set NAMED by the cidr; cidr="." addresses the set
-	// itself, and cidr=".." the IP-set collection. None of them is the entry
-	// the caller named.
+	// them used to be checked. pveproxy would read a dot in either half
+	// literally, as a value PVE's ipset-name or cidr schema refuses (see
+	// validatePathSegment); behind a normalising proxy, setName=".." drops the
+	// ipset segment and addresses /cluster/firewall/<cidr>, another firewall
+	// path entirely, and setName="." the set NAMED by the cidr; cidr="."
+	// addresses the set itself, and cidr=".." the IP-set collection. None of
+	// them is the entry the caller named.
 	//
 	// NO ROUTE REACHES THIS METHOD TODAY — the delete below is the only
 	// reachable one, and the tests are this method's only callers. It is
@@ -263,16 +265,18 @@ func (c *Client) UpdateFirewallIPSetEntry(ctx context.Context, setName, cidr str
 }
 func (c *Client) DeleteFirewallIPSetEntry(ctx context.Context, setName, cidr string) error {
 	// Both halves of the path, because both are caller-supplied and only one of
-	// them used to be checked. setName=".." drops the ipset segment and
-	// addresses /cluster/firewall/<cidr>, another firewall path entirely, and
-	// setName="." the set NAMED by the cidr; cidr="." addresses the set itself,
-	// and cidr=".." the IP-set collection, which has no DELETE. Where one lands
-	// on a set — cidr=".", or setName="." — the DELETE removes that whole set
-	// if it is empty (Proxmox's delete_ipset refuses one that still has
-	// entries, and this client never sends force), while the audit row still
-	// reads as a single-entry change. The entry takes the slash-tolerant guard
-	// because the caller hands it in decoded and an entry id is a CIDR:
-	// "192.0.2.0/24" is a name rather than a traversal.
+	// them used to be checked. pveproxy would read a dot in either half
+	// literally, as a value PVE's ipset-name or cidr schema refuses (see
+	// validatePathSegment); behind a normalising proxy, setName=".." drops the
+	// ipset segment and addresses /cluster/firewall/<cidr>, another firewall
+	// path entirely, and setName="." the set NAMED by the cidr; cidr="."
+	// addresses the set itself, and cidr=".." the IP-set collection, which has
+	// no DELETE. Where one lands on a set there — cidr=".", or setName="." —
+	// the DELETE removes that whole set if it is empty (Proxmox's delete_ipset
+	// refuses one that still has entries, and this client never sends force),
+	// while the audit row still reads as a single-entry change. The entry takes
+	// the slash-tolerant guard because the caller hands it in decoded and an
+	// entry id is a CIDR: "192.0.2.0/24" is a name rather than a traversal.
 	if err := validatePathSegment("IP set name", setName); err != nil {
 		return err
 	}

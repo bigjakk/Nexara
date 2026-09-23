@@ -39,12 +39,16 @@ import (
 // handler runs, which makes "%2F.." and "/.." indistinguishable there and
 // hides this whole bug class.
 
-// poolAddressTraversal pops from the poolid slot back to the API root.
+// poolAddressTraversal pops from the poolid slot back to the API root — behind
+// a proxy that decodes the %2F url.PathEscape writes into it and then removes
+// dot segments. pveproxy itself decodes the %2F but removes no dot segment
+// (see validatePathSegment): it reads "a" as the pool id and finds no endpoint
+// below it.
 //
 // The arithmetic, because an unexplained count is worse than none: the target
-// these methods build is /api2/json/pools/{poolid}, so the directory holding
-// the id is /api2/json/pools — two segments below /api2/json. The payload
-// spends one segment ("a") and then pops twice, landing on /api2/json, and
+// these methods build is /api2/json/pools/{poolid}, so the id sits in
+// /api2/json/pools, two segments below /api2/json. The payload spends one
+// segment ("a") and then pops twice, landing on /api2/json, and
 // /access/users/root@pam is appended from there:
 //
 //	/api2/json/pools/a/../../access/users/root@pam
@@ -97,13 +101,14 @@ var refusedPoolIDs = []struct{ name, poolID, why string }{
 	// them as well, so today an HTTP caller is turned away one layer
 	// earlier; these two rows are what holds the floor under that, for the
 	// next caller who is not an HTTP request.) url.PathEscape leaves a dot
-	// alone, so both arrive intact and Proxmox resolves them after it
-	// decodes. The resolved targets are worked out rather than recalled:
-	// /pools/. is /pools, and /pools/.. removes the pools segment as well,
-	// landing on the API root one level further up.
-	{"a bare dot", ".", "a \".\" segment disappears, landing the call on the pool COLLECTION"},
-	{"a bare traversal", "..", "one level further up, the API root — on DELETE, an endpoint the caller never named"},
-	{"a traversal", poolAddressTraversal, "reaches /api2/json/access/users/root@pam with the cluster's own token"},
+	// alone, so both arrive intact. pveproxy would read either as a pool
+	// NAMED "." or ".." (see validatePathSegment); a normalising proxy in
+	// front of it resolves them, and the targets there are worked out rather
+	// than recalled: /pools/. is /pools, and /pools/.. removes the pools
+	// segment as well, landing on the API root one level further up.
+	{"a bare dot", ".", "behind a normalising proxy the \".\" segment disappears, landing the call on the pool COLLECTION"},
+	{"a bare traversal", "..", "behind a normalising proxy it lands one level further up, on the API root — on DELETE, an endpoint the caller never named"},
+	{"a traversal", poolAddressTraversal, "behind a proxy that decodes %2F and normalises, it reaches /api2/json/access/users/root@pam with the cluster's own token"},
 	{"a bare separator", "/", "not a pool id at all"},
 	{"a separator", "infra/prod", "a NESTED pool id; legal to verify_poolname and unreachable through this URL shape"},
 	{"an absolute path", "/cluster/log", "addresses a different tree entirely"},

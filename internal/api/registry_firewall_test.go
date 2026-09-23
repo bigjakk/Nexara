@@ -287,17 +287,18 @@ func TestIPSetEntryNoMatchKeepsItsTriState(t *testing.T) {
 // reaches — is guarded at the client as well: each checks the set name with
 // proxmox.validatePathSegment and the entry's cidr with
 // validatePathSegmentAllowingSlash (client_firewall.go). For the rest,
-// url.PathEscape leaves "." and ".." alone, so the request resolves upward
-// once pveproxy normalises it: a "." segment drops out and a ".." takes the
-// segment before it along. As the last segment that lands on the PARENT
-// collection or on /cluster/firewall above it — POST .../ipset/. reaches the
-// endpoint that creates IP sets rather than the one that adds an entry, and
-// GET .../groups/. lists the groups instead of one group's rules — and where
-// the client appends a rule position, PUT or DELETE .../groups/./{pos}
-// addresses the group NAMED by the position. Same permission either way, so
-// this is a correctness anchor rather than an escalation fix — but an
-// operation that silently does something else is not a thing to leave
-// declarable.
+// url.PathEscape leaves "." and ".." alone. pveproxy takes such a segment
+// literally (see proxmox.validatePathSegment), but a normalising proxy in
+// front of it resolves the request upward: a "." segment drops out and a ".."
+// takes the segment before it along. As the last segment that lands on the
+// PARENT collection or on /cluster/firewall above it — POST .../ipset/.
+// reaches the endpoint that creates IP sets rather than the one that adds an
+// entry, and GET .../groups/. lists the groups instead of one group's rules —
+// and where the client appends a rule position, PUT or DELETE
+// .../groups/./{pos} addresses the group NAMED by the position. Same
+// permission either way, so this is a correctness anchor rather than an
+// escalation fix — but an operation that silently does something else is not
+// a thing to leave declarable.
 func TestFirewallPathNamesRefuseATraversalSegment(t *testing.T) {
 	for _, tt := range []struct {
 		method string

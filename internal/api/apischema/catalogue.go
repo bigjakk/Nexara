@@ -523,11 +523,14 @@ func patternRules() []RuleDoc {
 				`in play here.`,
 			Divergence: "STRICTER than upstream in TWO places, both deliberate, both because a name this API " +
 				"accepts on CREATE has to be one it can still DELETE. Neither is a transcription slip.\n" +
-				"(1) A name made ONLY of dots. Upstream's class admits \".\" and \"..\", and DeleteCephPool " +
-				"concatenates this value into a Proxmox path — \"..\" pops the pool collection and lands " +
-				"DELETE on /nodes/{node}/ceph. RE2 has no negative lookahead, so the exclusion is spelled " +
+				"(1) A name made ONLY of dots. Upstream's class admits \".\" and \"..\", and DeleteCephPool, " +
+				"which concatenates this value into a Proxmox path, refuses both in validatePathSegment: " +
+				"pveproxy would take either literally, as the name of the pool to destroy, but a " +
+				"normalising proxy in front of it would resolve \"..\" by popping the pool collection, " +
+				"landing DELETE on /nodes/{node}/ceph (proxmox.validatePathSegment records the " +
+				"evidence). RE2 has no negative lookahead, so the exclusion is spelled " +
 				"positively: at least one character that is not a dot. That also turns away \"...\", which " +
-				"upstream would take and which names nothing.\n" +
+				"is no dot segment to anyone and which upstream would take as an ordinary pool name.\n" +
 				"(2) The BACKSLASH. This one is not about traversal, it is about an asymmetry between the " +
 				"two client methods: DeleteCephPool runs validatePathSegment (internal/proxmox/client.go), " +
 				"which refuses \"/\" AND \"\\\\\"; CreateCephPool runs no such check, because the name goes " +
@@ -642,27 +645,57 @@ func patternRules() []RuleDoc {
 				"the two domains share an entry rather than a charset: it refuses a name that is EXACTLY " +
 				"\".\" or \"..\".\n" +
 				"Every consumer concatenates the value into a Proxmox path with url.PathEscape, which " +
-				"escapes \"/\" and leaves both of those alone, so they travel intact and pveproxy " +
-				"resolves them upward the moment it normalises the path: \"/pools/.\" is the pool " +
-				"COLLECTION and \"/pools/..\" the API root, \"/access/groups/.\" the group collection and " +
-				"\"/access/groups/..\" the /access index, each a different endpoint with different " +
-				"permissions, reached with the cluster's own token.\n" +
-				"REFUSING THEM COSTS NOTHING REACHABLE, and that is what makes being stricter than " +
-				"upstream safe here rather than an invention. A name that is exactly \".\" or \"..\" " +
-				"cannot survive as a path segment whatever rule is written: pveproxy resolves the " +
-				"segment away, as the paragraph above describes, so the request never addresses an " +
-				"object of that name in the first place. So no object addressable through these routes " +
-				"is made unaddressable by this rule — the pair it takes away was never reachable. " +
-				"(Nothing on the NEXARA side resolves it: Fiber routes a raw \".\" or \"..\" straight " +
-				"through to the parameter, which is measured by TestPoolTraversalIsRefusedAtTheRoute " +
-				"and TestAccessTraversalIsRefusedAtTheRoute. This rule is what stops it, not the " +
-				"router.)\n" +
+				"escapes \"/\" and leaves both of those alone, so they travel intact. What they then " +
+				"address depends on who reads the path first. pveproxy takes a dot segment literally " +
+				"(the evidence is recorded on proxmox.validatePathSegment), so sent straight to it " +
+				"\"/pools/.\" addresses a pool NAMED \".\" and \"/access/groups/..\" a group named " +
+				"\"..\". A normalising proxy in front of pveproxy resolves them upward instead: " +
+				"\"/pools/.\" is the pool COLLECTION and \"/pools/..\" the API root, \"/access/groups/.\" " +
+				"the group collection and \"/access/groups/..\" the /access index, each a different " +
+				"endpoint with different permissions, reached with the cluster's own token.\n" +
+				"REFUSING THEM COSTS ONE PAIR OF NAMES, knowingly. Upstream admits both, so a pool, " +
+				"group or role literally named \".\" or \"..\" can exist on the cluster and is " +
+				"addressable at pveproxy — but not through these routes, and not through the client " +
+				"guards behind them (proxmox.validatePathSegment and proxmox.validateAccessName refuse " +
+				"the same pair), because the same request behind a normalising proxy lands on an " +
+				"endpoint the caller never named. That is the trade: an object named exactly \".\" or " +
+				"\"..\" is unreachable here, in exchange for no deployment being able to turn the " +
+				"address of one object into its collection or the level above. (Nothing on the NEXARA " +
+				"side resolves the segment: Fiber routes a raw \".\" or \"..\" straight through to the " +
+				"parameter, which is measured by TestPoolTraversalIsRefusedAtTheRoute and " +
+				"TestAccessTraversalIsRefusedAtTheRoute. This rule is what stops it, not the router.)\n" +
+				"For a POOL the cost is larger than the pool, and lopsided. This API can itself CREATE " +
+				"such a pool: POST /pools keeps pve-poolid, which admits both (this entry's commentary, " +
+				"\"The create side stays loose\"). It can also create a guest INTO one: VM create, " +
+				"container create and VM import take `pool` under pve-poolid-or-empty, CreateVM and " +
+				"CreateCT send it as a form field, and the create_vm of both qemu-server and " +
+				"pve-container hands it to add_vm_to_pool. What it cannot do is MOVE a guest in or out " +
+				"afterwards, because SetVMPool goes through proxmox.UpdateResourcePool for both halves " +
+				"of a move and that refuses the id — so a guest created into such a pool can never be " +
+				"moved out through Nexara.\n" +
+				"Lifting the limit is more than a client change, and has not been done. Upstream " +
+				"Pool.pm marks the {poolid} path forms deprecated (update_pool_deprecated, " +
+				"delete_pool_deprecated, and read_pool's own description) in favour of PUT, DELETE and " +
+				"GET /pools with poolid as a parameter (that GET answers a one-element list rather than " +
+				"an object), and switching the client to them removes the id from the Nexara-to-PVE " +
+				"path. That fixes only that leg. Nexara's own per-pool routes carry the id in their " +
+				"path too (/pools/:pool_id), and a browser cannot send a \".\" or \"..\" segment at all: " +
+				"the URL parser browsers share resolves one, the \"%2e\", \"%2E%2E\" and \".%2e\" " +
+				"spellings included, before the request leaves (measured with Node 20's fetch). So " +
+				"lifting the dot limit ALSO needs these routes to carry the id outside the path. Group " +
+				"and role ids have only {id} path forms upstream, so for them the trade stands.\n" +
 				"ALSO STRICTER than verify_poolname in a second respect that belongs to the pool domain " +
-				"alone: a nested id contains a slash, so it matches neither a Fiber path segment nor the " +
-				"\"/pools/{poolid}\" form the client builds. A nested pool is unreachable through the " +
-				"per-pool routes whatever rule they carry, and the fix is the query form PVE moved to " +
-				"(\"PUT /pools?poolid=…\"), not a looser rule here. Group and role ids cannot nest at " +
-				"all, so for them this is no divergence.",
+				"alone. A nested id contains a slash. A caller can send one only percent-encoded — " +
+				"\"infra%2Fprod\", which a browser sends intact and Fiber routes as one undecoded " +
+				"segment — and this rule refuses the \"%\", so as declared these routes cannot reach a " +
+				"nested pool. Admitting an encoded slash, and decoding it in the handler, would carry " +
+				"the id as far as the client, but no route rule gets it further: the client's " +
+				"\"/pools/{poolid}\" form cannot carry a slash (validatePathSegment refuses one, " +
+				"pveproxy would split an escaped one, and PVE's own {poolid} forms say \"no support " +
+				"for nested pools\"). So reaching a nested pool needs the client switched to the query " +
+				"forms PVE moved to AND the route changed — either an encoded-slash rule plus a decode, " +
+				"or, as the dot limit requires anyway, the id carried outside the path. Group and role " +
+				"ids cannot nest at all, so for them this is no divergence.",
 			// # Why the regex has three branches
 			//
 			// RE2 has no negative lookahead, so the two excluded strings are

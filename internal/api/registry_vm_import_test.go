@@ -175,9 +175,10 @@ func TestURLProbeKeepsItsStorageGrant(t *testing.T) {
 // this domain's one path segment that is not a uuid.
 //
 // proxmox.GetStorageConfig and DeleteStorage build "/storage/" +
-// url.PathEscape(name), and PathEscape leaves "." and ".." alone — so an
-// un-anchored name resolves onto the storage COLLECTION. The handler only
-// checked the segment was non-empty, which ".." satisfies.
+// url.PathEscape(name), and PathEscape leaves "." and ".." alone — so behind a
+// normalising proxy an un-anchored "." resolves onto the storage COLLECTION
+// (pveproxy itself takes it literally; see proxmox.validatePathSegment). The
+// handler only checked the segment was non-empty, which ".." satisfies.
 func TestImportSourceDeleteAnchorsItsStorageSegment(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodDelete, clusterScope+"/vm-import-sources/:storage")
 	prop := e.Parameters["storage"]

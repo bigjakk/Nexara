@@ -16,15 +16,15 @@ import (
 // called "%2E%2E" — and after it, "UPID:pve-01:a%2F..%2F..%2F..%2Fstatus"
 // arrives here as the real string "UPID:pve-01:a/../../../status".
 // url.PathEscape does NOT defuse that. It leaves "." and ".." alone entirely,
-// so ".." travels raw and resolves upward the moment pveproxy normalises the
-// path; and it puts a separator back as "%2F", which Proxmox decodes before it
-// resolves the path — the capture-server run recorded on
-// forbiddenVolumeIDChars (client_storage.go) is the evidence for that far-side
-// behaviour, having watched "%2e%2e%2f" arrive byte-for-byte and become "../"
-// upstream. How far the request then moves is the caller's to choose, one level
-// per "..": GetTaskStatus appends "/status", so a UPID of "A/../.." resolves
-// exactly onto /nodes/{node}/status. StopNodeTask appends NOTHING, which makes
-// it the worst of the three — the caller owns the whole tail, so
+// and it puts a separator back as "%2F", which pveproxy decodes before it
+// routes (see validatePathSegment) — so the value re-shapes the path there even
+// with nothing in between, though pveproxy resolves none of the dots: the UPID
+// becomes "UPID:pve-01:a" and the ".." after it names no child. A proxy in
+// front of pveproxy that decodes %2F and removes dot segments is where the
+// request moves, and how far is the caller's to choose, one level per "..":
+// GetTaskStatus appends "/status", so a UPID of "A/../.." resolves exactly onto
+// /nodes/{node}/status. StopNodeTask appends NOTHING, which makes it the worst
+// of the three — the caller owns the whole tail, so
 // "A/../../certificates/custom" resolves onto DELETE
 // /nodes/{node}/certificates/custom, PVE's "remove the custom certificate". The
 // two GETs are reachable from a route that grants only view:task, which the

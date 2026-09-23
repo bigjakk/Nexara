@@ -936,11 +936,18 @@ func TestPoolParameterKeepsTheRemovalSentinel(t *testing.T) {
 // into "/pools/{pool}" (internal/proxmox/client_admin.go).
 //
 // Traversal is NOT what this rejects, and the cases are chosen so nobody
-// reads it that way: url.PathEscape encodes "/" as %2F, so
-// "../../access/users" was always one inert literal segment rather than a
-// path escape — it is rejected here for being four levels deep with "."
-// as a segment, not for looking dangerous. What was wrong was the ERROR: a
-// 502 naming Proxmox for a request this API could have refused itself.
+// reads it that way. url.PathEscape does not make "../../access/users" inert —
+// it encodes "/" as %2F, and pveproxy decodes that back into separators before
+// it routes (see proxmox.validatePathSegment) — but proxmox.UpdateResourcePool,
+// which SetVMPool calls, refuses the slash in validatePathSegment before any
+// request is built, and that client guard is what holds a traversal. Nor is
+// this value one: it is a SHAPE, not a destination. At pveproxy it answers 501,
+// because {poolid} is a leaf and the path below it names nothing, and a proxy
+// that decoded %2F and normalised would over-pop it past /api2/json onto
+// /api2/access/users, which is not an API path. This rule rejects it for
+// being four levels deep, not for looking dangerous. What was wrong was the
+// ERROR: a 502 naming Proxmox for a request this API could have refused
+// itself.
 //
 // Note "." and ".." are NOT in this table. pve-poolid's segment charset
 // allows a bare dot, so they are pool ids Proxmox accepts; rejecting them
@@ -1352,7 +1359,9 @@ func TestSnapshotCreateHandlerPassesItsOwnGuestKind(t *testing.T) {
 // Escaping is not the guard. The snapshot methods url.PathEscape the name,
 // which re-encodes a "%" as "%25", so a raw "%2e%2e%2f" reaches Proxmox as a
 // literal name rather than as "../" — but PathEscape leaves a bare "." and
-// ".." alone, and those resolve upward once pveproxy normalises the path.
+// ".." alone, and those resolve upward wherever a proxy in front of pveproxy
+// normalises the path (pveproxy itself takes them literally; see
+// proxmox.validatePathSegment).
 // Both spellings below must be refused here, at the declaration, whether
 // Fiber hands the decoded form to validation or the raw one: the decoded form
 // carries separators and dots, the raw form carries percents, and the

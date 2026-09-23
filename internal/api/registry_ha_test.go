@@ -229,9 +229,10 @@ func TestHASIDAcceptsBothSpellingsOfTheColon(t *testing.T) {
 // TestHAGroupAndRuleNamesRejectTraversal pins the other half of the path
 // story. proxmox.GetHAGroup and DeleteHARule both build their Proxmox path
 // by concatenation with url.PathEscape, which escapes "/" but leaves ".."
-// alone — so a name that decodes to ".." would resolve upward once
-// pveproxy normalises the path. The declared pattern is what stops that
-// reaching the client at all.
+// alone — so a name that decodes to ".." would resolve upward wherever a
+// proxy in front of pveproxy normalises the path (pveproxy itself takes it
+// literally; see proxmox.validatePathSegment). The declared pattern is what
+// stops that reaching the client at all.
 func TestHAGroupAndRuleNamesRejectTraversal(t *testing.T) {
 	for _, tt := range []struct {
 		method string

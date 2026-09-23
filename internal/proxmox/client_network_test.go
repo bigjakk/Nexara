@@ -184,6 +184,8 @@ func TestUpdateNetworkInterface_OmitsDeleteWhenNothingCleared(t *testing.T) {
 }
 
 func TestUpdateNetworkInterface_RejectsDotSegments(t *testing.T) {
+	// pveproxy reads "." here as an interface name, which pve-iface refuses
+	// (see validatePathSegment). Behind a normalising proxy, though,
 	// PUT /nodes/pve1/network/. collapses to /nodes/pve1/network, Proxmox's
 	// reload endpoint — the one that applies every pending change — rather
 	// than the one interface the caller named; ".." lands one level further,

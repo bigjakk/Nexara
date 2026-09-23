@@ -23,34 +23,56 @@ import (
 // storage-id ceiling Proxmox applies to section-config ids generally;
 // pve-poolid itself imposes none.
 //
-// What it cannot express is pve-poolid's NESTING. A nested id
-// ("infra/prod") contains a slash, so it neither matches a Fiber path
-// segment nor survives the "/pools/{poolid}" form the client builds — a
-// nested pool is unreachable through the three per-pool routes whatever
-// pattern this carries, and the fix is the query form PVE moved to
-// ("PUT /pools?poolid=…"), not a looser rule here. Hence poolCreateIDParam
-// below, which is not bound by either constraint.
+// What it cannot express is pve-poolid's NESTING. A nested id contains a
+// slash. A caller can send one only percent-encoded — "infra%2Fprod", which a
+// browser sends intact and Fiber routes as one undecoded segment — and this
+// rule refuses the "%", so as declared these routes cannot reach a nested
+// pool. Admitting an encoded slash, and decoding it in the handler, would
+// carry the id as far as the client, but no route rule gets it further: the
+// client's "/pools/{poolid}" form cannot carry a slash (validatePathSegment
+// refuses one, pveproxy would split an escaped one, and PVE's own {poolid}
+// forms say "no support for nested pools"). So reaching a nested pool needs
+// the client switched to the query forms PVE moved to AND the route changed —
+// either an encoded-slash rule plus a decode, or, as the dot limit requires
+// anyway, the id carried outside the path. Hence poolCreateIDParam below,
+// which is not bound by either constraint.
 //
 // The rule it carries is NOT a pool rule, and the name says so.
 // path-safe-dotted-name is that charset minus exactly {".", ".."} — the two
-// relative segments url.PathEscape leaves intact and pveproxy resolves
-// upward — and registry_access.go's accessNamePattern reads the same entry
-// for PVE group and role ids, which are the same charset in the same kind
-// of path slot and needed the identical carve-out. One entry rather than
-// two copies: a second spelling of it would be invisible to both inline
-// duplication guards, and neither copy would be individually killable.
+// relative segments url.PathEscape leaves intact and a normalising proxy in
+// front of pveproxy resolves upward (pveproxy itself takes them literally; see
+// proxmox.validatePathSegment) — and registry_access.go's accessNamePattern
+// reads the same entry for PVE group and role ids, which are the same charset
+// in the same kind of path slot and needed the identical carve-out. One entry
+// rather than two copies: a second spelling of it would be invisible to both
+// inline duplication guards, and neither copy would be individually killable.
 //
-// Being stricter than verify_poolname costs nothing reachable here. A pool
-// named exactly "." or ".." cannot be addressed under any rule, because
-// pveproxy resolves the segment away before Proxmox reads it as a name — and
-// proxmox.validatePathSegment has refused both on all three addressing
-// methods since the client guard was added, so this declaration is the same
-// refusal one layer earlier with a message that names the parameter. Note
-// that nothing on THIS side resolves it: Fiber routes a raw ".." straight
-// through to this parameter, so the pattern is what turns it away. The
-// create side (poolCreateIDParam, pve-poolid) is deliberately NOT tightened
-// to match; the catalogue entry's commentary records that decision in full,
-// under the heading "The create side stays loose".
+// Being stricter than verify_poolname costs one pair of names, knowingly, and
+// more than the pools themselves. POST /pools can still create such a pool
+// (poolCreateIDParam below), and the VM, container and import create routes
+// can create a guest INTO one, since they send `pool` as a form field; but no
+// guest can be moved in or out of it afterwards, because SetVMPool goes
+// through proxmox.UpdateResourcePool, so a guest created there can never be
+// moved out through Nexara. Switching the client to PVE's non-deprecated
+// forms, which take poolid as a parameter, would fix only the Nexara-to-PVE
+// leg: this route still carries the id in its own path, and a browser
+// resolves a "." or ".." segment before the request leaves, so lifting the
+// dot limit also needs the id moved out of this route's path. The catalogue
+// entry has the full account.
+//
+// pveproxy takes a dot segment literally, so sent straight to it
+// "/pools/." addresses a pool NAMED "." — a name verify_poolname admits —
+// while behind a normalising proxy the same request lands on the pool
+// collection, and ".." on the API root. proxmox.validatePathSegment has
+// refused both on all three addressing methods since the client guard was
+// added, so a pool of either name was already unaddressable through Nexara,
+// and this declaration is the same refusal one layer earlier with a message
+// that names the parameter. Note that nothing on THIS side resolves it: Fiber
+// routes a raw ".." straight through to this parameter, so the pattern is
+// what turns it away. The create side (poolCreateIDParam, pve-poolid) is
+// deliberately NOT tightened to match; the catalogue entry's commentary
+// records that decision in full, under the heading "The create side stays
+// loose".
 func poolIDParam(source apischema.Source, description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.String,

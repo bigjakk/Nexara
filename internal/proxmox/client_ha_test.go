@@ -111,9 +111,12 @@ func TestHAResourceMethods_RejectInjectionWithoutIssuingRequest(t *testing.T) {
 	// Three "..", not four, and the count is worked out rather than guessed:
 	// all three methods build /api2/json/cluster/ha/resources/{sid}
 	// (TestGetHAResource_SendsSIDLiterally pins that target), so the directory
-	// containing the sid is three segments below /api2/json. Three pops
-	// therefore land on /api2/json/access/users/root@pam, which is a real
-	// endpoint reachable with the cluster's own token. A fourth over-pops to
+	// containing the sid is three segments below /api2/json. The sid goes out
+	// raw, so a normalising proxy in front of pveproxy would resolve the dots
+	// (pveproxy itself reads the first ".." as the sid and finds no child ".."
+	// below it — see validatePathSegment), and there three pops land on
+	// /api2/json/access/users/root@pam, which is a real endpoint reachable
+	// with the cluster's own token. A fourth over-pops to
 	// /api2/access/users/root@pam, which is nothing — still refused, so the
 	// test passed either way, but a reader deriving the target from the payload
 	// would get a different answer than the one intended.

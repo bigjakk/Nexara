@@ -65,17 +65,19 @@ func (c *Client) CreateResourcePool(ctx context.Context, params CreatePoolParams
 // the trap poolIDParam (internal/api/registry_pools.go) already documents from
 // the declaration side.
 //
-// What validatePathSegment adds over that width is the pair of values that are
-// not names at all. url.PathEscape encodes "/" but leaves "." and ".." alone
-// entirely, so those two travel raw and resolve upward the moment pveproxy
-// normalises the path:
+// What validatePathSegment adds over that width is the pair of values whose
+// meaning depends on who reads the path first. url.PathEscape encodes "/" but
+// leaves "." and ".." alone entirely, so those two travel raw. pveproxy takes
+// them literally (see validatePathSegment), as a pool NAMED "." or "..", which
+// verify_poolname admits. A normalising proxy in front of pveproxy resolves
+// them upward instead:
 //
 //	poolID="."   GET /pools     the pool COLLECTION, whose body is a list
 //	                            where a detail object is expected
 //	poolID=".."  DELETE /       one level further up: the API root, which
 //	                            has no delete form at all
 //
-// Neither is believed to reach a destructive PVE handler today: PVE's own
+// Neither is believed to reach a destructive PVE handler even there: PVE's own
 // collection-level delete takes the pool id as a PARAMETER, and this client
 // sends none, so a DELETE landing on /pools (poolID=".") is a parameter error
 // rather than a mass delete, and the API root has no delete to reach. That is
@@ -91,10 +93,26 @@ func (c *Client) CreateResourcePool(ctx context.Context, params CreatePoolParams
 // internal/api/registry_pools.go — which stopped a slash, and matched "." and
 // ".." exactly as it matched any other name.
 //
+// The price is a pool literally named "." or "..": Nexara cannot address it,
+// and cannot move a guest into it or out of it, since SetVMPool
+// (internal/api/handlers/vms.go) goes through UpdateResourcePool for both
+// halves of a move. Yet it can create such a pool, because CreateResourcePool
+// sends the id as a form field (see below), and create a guest INTO one,
+// because CreateVM and CreateCT send `pool` as a form field too — and a guest
+// created there can never be moved out through Nexara. Switching these three
+// methods to the forms PVE now prefers — PUT, DELETE and GET /pools with
+// poolid as a parameter; the {poolid} path forms are deprecated upstream —
+// takes the id out of this client's path, but fixes only that leg: Nexara's
+// own pool routes carry the id in their path too, and a browser resolves a
+// "." or ".." segment before the request leaves, so lifting the dot limit
+// also needs those routes to carry the id outside the path. Switching is a
+// decision not taken here. Group and role ids have no such form, so
+// validateAccessName's price stands.
+//
 // validateAccessName (client_access.go) is the precedent and the proof that
 // this is the house rule rather than a preference: PVE group and role ids are
 // the same charset in the same kind of path slot, and that function refuses
-// ".", ".." by name with the same normalisation reasoning. Pool ids were the
+// ".", ".." by name for the same normalising-proxy reason. Pool ids were the
 // one family carrying that charset with no client-side guard at all.
 //
 // The declaration side has since caught up: both families now read one

@@ -43,14 +43,15 @@ const networkScope = clusterScope + "/networks"
 // (url.PathEscape, in internal/proxmox/client_firewall.go and
 // client_network.go) and almost none of them goes through
 // proxmox.validatePathSegment on the way. url.PathEscape escapes "/" but
-// leaves "." and ".." alone, so an un-anchored name resolves upward once
-// pveproxy normalises the path and lands the request on the PARENT
-// collection or above it — POST .../ipset/. reaches the endpoint that creates
-// IP sets rather than the one that adds an entry, and PUT .../sdn/zones/.. is
-// the SDN apply endpoint. Every one of those is reachable with the same
-// permission the intended call needs, so this is a correctness anchor rather
-// than an escalation fix, but an operation that silently does something else
-// is not a thing to leave declarable.
+// leaves "." and ".." alone. pveproxy takes such a segment literally (see
+// proxmox.validatePathSegment), but a normalising proxy in front of it
+// resolves an un-anchored name upward and lands the request on the PARENT
+// collection or above it — there POST .../ipset/. reaches the endpoint that
+// creates IP sets rather than the one that adds an entry, and PUT
+// .../sdn/zones/.. is the SDN apply endpoint. Every one of those is reachable
+// with the same permission the intended call needs, so this is a correctness
+// anchor rather than an escalation fix, but an operation that silently does
+// something else is not a thing to leave declarable.
 //
 // The rule itself is the catalogue's pve-object-id (apischema/catalogue.go),
 // which carries why the leading alphanumeric is the anchor and which Proxmox

@@ -578,12 +578,14 @@ func TestCephPoolNameSurvivesThePathSegment(t *testing.T) {
 // respect in which this rule is deliberately STRICTER than PVE's.
 //
 // PVE's own pattern (^[^:/\s]+$) admits "." and "..", and
-// proxmox.DeleteCephPool concatenates the name into a Proxmox path — ".."
-// pops the pool collection and lands DELETE on /nodes/{node}/ceph, "."
-// stops a level short on /ceph/pool. RE2 has no negative lookahead, so the
-// catalogue's rule excludes them positively, by requiring one character
-// that is not a dot. That also excludes "...", which upstream would take
-// and which names nothing.
+// proxmox.DeleteCephPool concatenates the name into a Proxmox path. pveproxy
+// would take either literally, as the pool's name (see
+// proxmox.validatePathSegment); behind a normalising proxy ".." pops the pool
+// collection and lands DELETE on /nodes/{node}/ceph, and "." stops a level
+// short on /ceph/pool. RE2 has no negative lookahead, so the catalogue's rule
+// excludes them positively, by requiring one character that is not a dot.
+// That also excludes "...", which is no dot segment to anyone and which
+// upstream would take as an ordinary pool name.
 //
 // The segment is sent RAW, and that is the case that matters: nothing
 // between the client and the router collapses a dot segment, so ".."
@@ -618,8 +620,10 @@ func TestCephPoolDeleteStillRefusesATraversingName(t *testing.T) {
 
 			status, _ := send(t, app, httptest.NewRequest(http.MethodDelete, target, nil))
 			if status == fiber.StatusNoContent {
-				t.Fatalf("DELETE %s was accepted; a name made only of dots is a traversal segment "+
-					"once DeleteCephPool concatenates it into a Proxmox path", target)
+				t.Fatalf("DELETE %s was accepted; the rule refuses every name made only of dots — "+
+					"\".\" and \"..\" are dot segments in the Proxmox path DeleteCephPool builds, and the "+
+					"rule's positive spelling (one character that is not a dot) takes the longer runs with them",
+					target)
 			}
 			if cap.called {
 				t.Error("the handler ran for a name the schema must refuse")

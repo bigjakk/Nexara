@@ -56,10 +56,12 @@ func osdParams(extra apischema.Properties) apischema.Properties {
 //
 // The two exclusions are both about keeping create and delete in
 // agreement, and the catalogue entry gives the full reasoning. In short:
-// ".." pops the pool collection and lands DELETE on /nodes/{node}/ceph,
-// and a backslash passes CreateCephPool (the name travels in the form
+// DeleteCephPool's validatePathSegment refuses "." and ".." — behind a
+// normalising proxy ".." pops the pool collection and lands DELETE on
+// /nodes/{node}/ceph, though pveproxy itself would take it as the pool's
+// name — and a backslash passes CreateCephPool (the name travels in the form
 // body, unchecked) but is refused by DeleteCephPool's validatePathSegment,
-// so admitting it would let this API mint a pool it could never remove.
+// so admitting either would let this API mint a pool it could never remove.
 //
 // proxmox.DeleteCephPool also runs validatePathSegment on the value and
 // then url.PathEscape. Note that PathEscape does NOT escape everything

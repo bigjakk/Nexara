@@ -222,9 +222,10 @@ func probeAccessEndpoint(t *testing.T, method, path string, cap *capture) Endpoi
 //
 // Every one of these identifiers becomes a segment of a Proxmox request path,
 // built with url.PathEscape — which escapes "/" but leaves "." and ".." alone —
-// so an un-anchored segment resolves onto the PARENT collection once pveproxy
-// normalises the path. The handlers only ever checked the segment was non-empty,
-// which ".." satisfies.
+// so an un-anchored segment resolves onto the PARENT collection wherever a
+// proxy in front of pveproxy normalises the path (pveproxy itself takes it
+// literally; see proxmox.validatePathSegment). The handlers only ever checked
+// the segment was non-empty, which ".." satisfies.
 //
 // The second half is what keeps the anchor honest: a real value, including the
 // percent-encoded user id every correct client sends, must still pass. An anchor
@@ -410,11 +411,12 @@ func TestAccessTraversalIsRefusedAtTheRoute(t *testing.T) {
 	// does, and the 400 comes from the pattern in both cases.
 	//
 	// The belief is easy to arrive at — a normaliser resolving the segment is
-	// precisely what makes ".." dangerous at pveproxy — but it does not follow
-	// that anything on THIS side resolves it first. The tolerance was worse
-	// than wrong prose: 404 is exactly what a normalising Fiber would answer,
-	// so the test stayed green whichever fact held and measured neither. It is
-	// 400 alone now, which is what pins the pattern as the thing refusing this.
+	// precisely what makes ".." dangerous on the way to pveproxy, which does
+	// not resolve it itself — but it does not follow that anything on THIS
+	// side resolves it first. The tolerance was worse than wrong prose: 404 is
+	// exactly what a normalising Fiber would answer, so the test stayed green
+	// whichever fact held and measured neither. It is 400 alone now, which is
+	// what pins the pattern as the thing refusing this.
 	if status != fiber.StatusBadRequest {
 		t.Errorf("status = %d, want 400 from the pattern for a traversal segment", status)
 	}

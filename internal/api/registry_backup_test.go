@@ -249,14 +249,16 @@ func TestBackupRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 // Every one of these values becomes a SEGMENT of a Proxmox or PBS request
 // path by concatenation with url.PathEscape, which escapes "/" and leaves
 // "." and ".." alone — so an un-anchored store or job id travels as a bare
-// dot segment. pveproxy resolves it: "." drops out and ".." takes the segment
-// before it along, so POST /cluster/backup/{id}/run becomes
-// /cluster/backup/run or /cluster/run. PBS refuses it only because its own
-// normalize_path does, which a normalising reverse proxy in front would
-// undo. Nothing but a non-empty check stood behind those two, which ".."
-// satisfies. The upid is the exception: PBSClient's task reads refuse "." and
-// ".." in validatePBSTaskUPID before any path is built, so for it the anchor
-// is the first of two layers rather than the only one.
+// dot segment. pveproxy takes it literally, as a job id (see
+// proxmox.validatePathSegment); a normalising reverse proxy in front of it
+// resolves it — a final "." onto the collection it sits in, a ".." one level
+// above — so PUT or DELETE /cluster/backup/{id} lands on /cluster/backup or
+// on /cluster. PBS refuses it only because its own normalize_path does, which
+// a normalising reverse proxy in front would undo. Nothing but a non-empty
+// check stood behind those two, which ".." satisfies. The upid is the
+// exception: PBSClient's task reads refuse "." and ".." in
+// validatePBSTaskUPID before any path is built, so for it the anchor is the
+// first of two layers rather than the only one.
 func TestBackupPathSegmentsAreAnchored(t *testing.T) {
 	segments := map[string][]string{
 		"store": {
@@ -301,19 +303,22 @@ func TestBackupPathSegmentsAreAnchored(t *testing.T) {
 			if prop.Pattern == "" {
 				t.Errorf("%s declares %q with no pattern; url.PathEscape leaves \".\" and \"..\" alone, so "+
 					"unless a client guard stops them first (validatePBSTaskUPID does, for upid) the value "+
-					"would travel as a bare dot segment — refused by PBS, resolved upward by pveproxy or a "+
-					"normalising proxy", key, name)
+					"would travel as a bare dot segment — refused by PBS, taken literally by pveproxy, "+
+					"resolved upward by a normalising proxy in front of either", key, name)
 				continue
 			}
 			re, err := regexp.Compile(prop.Pattern)
 			if err != nil {
 				t.Fatalf("%s: parameter %q has an uncompilable pattern %q: %v", key, name, prop.Pattern, err)
 			}
-			// The WHOLE-SEGMENT traversals are what matter, and they are the
-			// only ones that matter: url.PathEscape escapes "/" to "%2F", so a
-			// value carrying one can never split into two segments and
-			// "a/../b" is inert. What it leaves alone is "." and "..", which
-			// resolve upward as soon as the server normalises the path.
+			// The WHOLE-SEGMENT traversals are what this anchor is for.
+			// url.PathEscape escapes "/" to "%2F", which PBS keeps inside its
+			// segment (normalize_path splits the raw path first) but pveproxy
+			// decodes before it splits, so a slash is not inert on the PVE job
+			// routes: the store and job-id classes admit none, and the upid,
+			// PBS-only, is held to one segment by validatePBSTaskUPID. What
+			// PathEscape leaves alone is "." and "..", which a normalising
+			// proxy in front of either server resolves upward.
 			for _, bad := range []string{".", "..", "../..", " .."} {
 				if re.MatchString(bad) {
 					t.Errorf("%s: parameter %q accepts %q", key, name, bad)

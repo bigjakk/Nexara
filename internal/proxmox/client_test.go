@@ -1468,9 +1468,11 @@ func TestValidatePathSegment(t *testing.T) {
 }
 
 func TestDeleteNetworkInterface_RejectsDotSegments(t *testing.T) {
-	// url.PathEscape leaves "." and ".." intact, so DELETE /nodes/pve1/network/.
-	// collapses to Proxmox's revert-pending-network-config endpoint — an action
-	// gated behind a different permission than this delete — and ".." one level
+	// url.PathEscape leaves "." and ".." intact. pveproxy reads either as an
+	// interface name, which pve-iface refuses (see validatePathSegment), but
+	// behind a normalising proxy DELETE /nodes/pve1/network/. collapses to
+	// Proxmox's revert-pending-network-config endpoint — an action gated
+	// behind a different permission than this delete — and ".." one level
 	// further, onto the node itself. "." is the one that reaches the revert.
 	srv, seen := newCaptureServer(t, `{"data":null}`)
 	c := newTestClient(t, srv.URL)
@@ -1495,11 +1497,13 @@ func TestDeleteNetworkInterface_RejectsDotSegments(t *testing.T) {
 }
 
 func TestDeleteFirewallIPSetEntry_RejectsDotDot(t *testing.T) {
-	// cidr=".." would address the IP-set collection above the set, and "."
-	// the set itself, where a DELETE removes the whole set — Proxmox's
-	// delete_ipset refuses only while the set still has entries, as this
-	// client never sends force. TestIPSetEntryRefusesTraversalThroughTheSlashItAllows
-	// drives both values on both halves of the path.
+	// Behind a normalising proxy, cidr=".." would address the IP-set
+	// collection above the set, and "." the set itself, where a DELETE removes
+	// the whole set — Proxmox's delete_ipset refuses only while the set still
+	// has entries, as this client never sends force. (pveproxy itself would
+	// read either as a cidr and refuse it; see validatePathSegment.)
+	// TestIPSetEntryRefusesTraversalThroughTheSlashItAllows drives both values
+	// on both halves of the path.
 	srv, seen := newCaptureServer(t, `{"data":null}`)
 	c := newTestClient(t, srv.URL)
 

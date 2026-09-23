@@ -419,8 +419,8 @@ func (h *CephHandler) DeletePool(c fiber.Ctx, p *apischema.Params) error {
 	// encodeURIComponent output: a pool named "a#b" reaches us as "a%23b".
 	// Decode before DeleteCephPool escapes it again, or Proxmox is asked to
 	// destroy a pool literally named "a%23b" — and DeleteCephPool's traversal
-	// guard would be inspecting the encoded text rather than what Proxmox
-	// resolves, so a "%2E%2E" would satisfy it. Same helper and same ordering
+	// guard would be inspecting the encoded text rather than the name the
+	// caller meant, so a "%2E%2E" would satisfy it. Same helper and same ordering
 	// as the /access identifiers; accessParam's doc comment carries the
 	// reasoning for why the validation stays on the client side of it.
 	poolName, err := accessParam(p.String("pool_name"), "pool name")

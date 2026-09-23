@@ -425,9 +425,11 @@ func (c *Client) DeleteNetworkInterface(ctx context.Context, node string, iface 
 	if err := validateNodeName(node); err != nil {
 		return err
 	}
-	// Without this, iface="." collapses the path to /nodes/{node}/network —
+	// Without this, iface="." reaches pveproxy as an interface named ".",
+	// which pve-iface refuses (see validatePathSegment) — but a normalising
+	// proxy in front of it collapses the path to /nodes/{node}/network,
 	// Proxmox's revert-pending-config endpoint, which Nexara gates behind a
-	// different permission than this delete — and ".." one level further, onto
+	// different permission than this delete, and ".." one level further, onto
 	// the node itself.
 	if err := validatePathSegment("interface name", iface); err != nil {
 		return err

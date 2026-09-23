@@ -60,8 +60,10 @@ const emptyOrACMEURL = `^$|^https?://`
 // identical and the reason is the same: internal/proxmox/client_acme.go builds
 // /cluster/acme/account/<name> and /cluster/acme/plugins/<id> by concatenation
 // with url.PathEscape, and PathEscape escapes "/" but leaves "." and ".." alone,
-// so an un-anchored name resolves upward onto the parent collection once
-// pveproxy normalises the path.
+// so an un-anchored name resolves upward onto the parent collection wherever a
+// proxy in front of pveproxy normalises the path. (pveproxy itself takes the
+// segment literally, as a name pve-configid refuses; see
+// proxmox.validatePathSegment.)
 //
 // One thing IS different, and it is why this is worth a comment rather than a
 // bare call: unlike every other traversal-anchored parameter in the registry,

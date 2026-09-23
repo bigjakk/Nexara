@@ -265,7 +265,9 @@ func nodeParams(extra apischema.Properties) apischema.Properties {
 // Escaping is not a substitute for either layer: the four snapshot methods
 // url.PathEscape the name, which does turn a "%" into "%25" — so
 // "%2e%2e%2f" reaches Proxmox as a literal name — but leaves a bare "." or
-// ".." alone, and those resolve upward once pveproxy normalises the path.
+// ".." alone, and those resolve upward wherever a proxy in front of pveproxy
+// normalises the path (pveproxy itself takes them literally; see
+// proxmox.validatePathSegment).
 // The second layer is the client's own validatePathSegment (client.go),
 // which the snapshot methods in client_guests.go call ("Addressing an
 // existing snapshot"). Dropping the Pattern in the name of being permissive
@@ -343,14 +345,15 @@ var (
 // What the pattern is for is the ERROR, not safety. On SetVMPool the value
 // becomes a path segment — "/pools/" + url.PathEscape(pool)
 // (internal/proxmox/client_admin.go) — and pve-poolid admits "." and "..",
-// which PathEscape leaves alone and pveproxy then resolves upward: "." is the
-// /pools collection itself, ".." the API root. What keeps those out is the
-// client's own validatePathSegment on that path (client_admin.go), not this
-// rule; do not delete that guard on the belief that a body field cannot
-// traverse. What the rule adds is the 400: without it junk was forwarded to
-// Proxmox and came back a 502 quoting a URL the caller never wrote ("Method
-// 'PUT /pools/has spaces!' not implemented") instead of an error naming the
-// field.
+// which PathEscape leaves alone. pveproxy would take them literally, as pool
+// names (see proxmox.validatePathSegment), but a normalising proxy in front of
+// it resolves them upward: "." is the /pools collection itself, ".." the API
+// root. What keeps those out is the client's own validatePathSegment on that
+// path (client_admin.go), not this rule; do not delete that guard on the
+// belief that a body field cannot traverse. What the rule adds is the 400:
+// without it junk was forwarded to Proxmox and came back a 502 quoting a URL
+// the caller never wrote ("Method 'PUT /pools/has spaces!' not implemented")
+// instead of an error naming the field.
 //
 // So the rule is deliberately PVE's own (emptyOrPoolID) rather than a
 // stricter one of our invention: a schema that rejects ids Proxmox accepts

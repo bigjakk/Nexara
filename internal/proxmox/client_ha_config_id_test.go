@@ -69,9 +69,12 @@ func newHAWireServer(t *testing.T) (*httptest.Server, *[]string) {
 //
 // These five methods build their path by concatenation and hand the id to
 // url.PathEscape, which is not a guard: it escapes "/" to %2F and leaves ".."
-// alone, and Proxmox decodes the escape BEFORE it resolves the path — the
-// capture-server run recorded on forbiddenVolumeIDChars (client_storage.go) is
-// the evidence. So an escaped separator traverses exactly like a literal one.
+// alone, and pveproxy decodes the escape BEFORE it routes (see
+// validatePathSegment). So an escaped separator is a separator there. The
+// dots are resolved only in front of pveproxy, which takes them literally: a
+// bare "." or ".." by any normalising proxy, the multi-segment payloads only
+// by one that decodes %2F before it removes dot segments. The destinations
+// below are that proxy's.
 //
 // The path arithmetic, counted rather than assumed: the id sits at depth 6 of
 // /api2/json/cluster/ha/{groups,rules}/{id}, so one ".." lands on /cluster/ha,
@@ -88,8 +91,8 @@ func TestHAGroupAndRuleMethods_RejectPathTraversal(t *testing.T) {
 		name string
 		id   string
 	}{
-		// Traversals. Each reaches a real PVE endpoint that the caller's HA
-		// permission was never checked against.
+		// Traversals. Behind such a proxy, each reaches a real PVE endpoint
+		// that the caller's HA permission was never checked against.
 		{"up to the API root", "../../../access/users/root@pam"},
 		{"onto a guest", "../../../nodes/pve-01/qemu/100"},
 		{"onto a sibling HA collection", "../../ha/resources/vm:100"},
@@ -125,8 +128,10 @@ func TestHAGroupAndRuleMethods_RejectPathTraversal(t *testing.T) {
 						t.Errorf("%s(%q) err = %v, want ErrInvalidInput", method, p.id, err)
 					}
 					if len(*seen) != 0 {
-						t.Errorf("%s(%q) reached the wire as %v; a rejected id must never be sent, "+
-							"because Proxmox decodes the escape before it resolves the path",
+						t.Errorf("%s(%q) reached the wire as %v; a rejected id must never be sent — for the "+
+							"traversal payloads because pveproxy decodes an escaped \"/\" into a separator "+
+							"before it routes, and a proxy that decodes %%2F and normalises would resolve "+
+							"the dots",
 							method, p.id, *seen)
 					}
 				})

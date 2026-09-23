@@ -39,7 +39,11 @@ const (
 	snapshotAddressCTID = 101
 )
 
-// snapshotAddressTraversal pops from the snapshot slot back to the API root.
+// snapshotAddressTraversal pops from the snapshot slot back to the API root —
+// behind a proxy that decodes the %2F url.PathEscape writes into it and then
+// removes dot segments. pveproxy itself decodes the %2F but removes no dot
+// segment (see validatePathSegment), so there the first ".." is the snapshot
+// name and nothing below it routes anywhere.
 //
 // The arithmetic, because an unexplained count is worse than none: the target
 // these methods build is /api2/json/nodes/{node}/{qemu|lxc}/{vmid}/snapshot/{name},
@@ -127,13 +131,14 @@ const snapshotAddressUPID = `{"data":"UPID:pve-01:0000A1B2:00C3D4E5:65000000:qmd
 var refusedSnapshotAddressNames = []struct{ name, snap, why string }{
 	{"empty", "", "there is no snapshot to address"},
 	// The two live shapes. url.PathEscape leaves a dot alone, so both arrive
-	// intact and are resolved by Proxmox after it decodes. The resolved
-	// targets are worked out rather than asserted from memory:
+	// intact. pveproxy would read either as a snapshot name and refuse it (see
+	// validatePathSegment); a normalising proxy in front of it resolves them,
+	// and the targets there are worked out rather than asserted from memory:
 	// /nodes/pve-01/qemu/100/snapshot/. is /nodes/pve-01/qemu/100/snapshot and
 	// /nodes/pve-01/qemu/100/snapshot/.. is /nodes/pve-01/qemu/100.
-	{"a bare dot", ".", "a \".\" segment disappears, landing a DELETE on the snapshot COLLECTION"},
-	{"a bare traversal", "..", "lands a DELETE on the GUEST — the same target as DestroyVM"},
-	{"a traversal", snapshotAddressTraversal, "reaches /api2/json/access/users/root@pam with the cluster's own token"},
+	{"a bare dot", ".", "behind a normalising proxy the \".\" segment disappears, landing a DELETE on the snapshot COLLECTION"},
+	{"a bare traversal", "..", "behind a normalising proxy it lands a DELETE on the GUEST — the same target as DestroyVM"},
+	{"a traversal", snapshotAddressTraversal, "behind a proxy that decodes %2F and normalises, it reaches /api2/json/access/users/root@pam with the cluster's own token"},
 	{"a bare separator", "/", "not a name at all"},
 	{"a separator", "snap01/rollback", "descends out of the slot the method positioned it in"},
 	{"an absolute path", "/cluster/log", "addresses a different tree entirely"},
@@ -273,11 +278,12 @@ func TestSnapshotAddressMethods_AcceptWhatTheCreateRuleRefuses(t *testing.T) {
 //
 // "%" is deliberately absent from these guards, unlike in validateVolumeID, and
 // this is the assertion that makes that safe rather than merely asserted. A
-// volume id is interpolated RAW, so "%2e%2e%2f" reaches Proxmox byte-for-byte
-// and decodes to "../" on the far side — the capture-server run recorded on
-// forbiddenVolumeIDChars (client_storage.go). A snapshot name goes through
-// url.PathEscape, which re-encodes the percent to %25, so the same payload
-// arrives as the literal nine-character name the caller meant. If this ever
+// volume id is interpolated RAW, so "%2e%2e%2f" reaches Proxmox byte-for-byte —
+// the capture-server run recorded on forbiddenVolumeIDChars (client_storage.go)
+// — and pveproxy decodes it to "../" (uri_unescape, before it routes; see
+// validatePathSegment). A snapshot name goes through url.PathEscape, which
+// re-encodes the percent to %25, so the same payload arrives as the literal
+// nine-character name the caller meant. If this ever
 // prints "%2e%2e%2f" rather than "%252e%252e%252f", the escape has been dropped
 // and "%" has to go back into a refusal list.
 func TestSnapshotAddressPercentIsDoubleEscaped(t *testing.T) {
@@ -297,6 +303,6 @@ func TestSnapshotAddressPercentIsDoubleEscaped(t *testing.T) {
 	}
 	if got[0] != want {
 		t.Errorf("request target = %q, want %q — the percent must arrive re-encoded, "+
-			"or Proxmox decodes it to \"../\" and the request leaves its segment", got[0], want)
+			"or Proxmox decodes it to \"../\": a separator and a dot segment the caller never sent", got[0], want)
 	}
 }

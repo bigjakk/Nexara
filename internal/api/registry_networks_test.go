@@ -417,8 +417,9 @@ func TestNetworkInterfaceNumericBoundsMatchTheClientGuard(t *testing.T) {
 // that becomes a Proxmox PATH segment.
 //
 // proxmox.DeleteNetworkInterface already guards it with validatePathSegment,
-// and its own comment says why: iface="." collapses the path to
-// /nodes/{node}/network, which is Proxmox's REVERT endpoint — gated in
+// and its own comment says why: pveproxy would read iface="." as an interface
+// name and refuse it, but a normalising proxy in front of it collapses the
+// path to /nodes/{node}/network, which is Proxmox's REVERT endpoint — gated in
 // Nexara behind a different permission than the delete — and ".." one level
 // further, onto the node. The declaration states the same rule one layer
 // earlier and names the field.

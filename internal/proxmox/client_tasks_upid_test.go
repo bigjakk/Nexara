@@ -19,11 +19,11 @@ import (
 // percent-DECODES the :upid path parameter before the client sees it. What
 // reaches GetTaskStatus is the real string "UPID:pve-01:a/../../../status", and
 // url.PathEscape does not defuse it. It leaves "." and ".." alone outright, and
-// it turns each "/" back into "%2F" — which Proxmox decodes before it resolves
-// the path, the far-side behaviour the capture-server run recorded on
-// forbiddenVolumeIDChars (client_storage.go) watched happen.
-// Where the request then lands is the caller's to pick, one level per "..":
-// GetTaskStatus appends "/status", so "A/../.." resolves onto
+// it turns each "/" back into "%2F" — which pveproxy decodes into a separator
+// before it routes, though it resolves none of the dots (see
+// validatePathSegment). Behind a proxy that decodes %2F and removes dot
+// segments, where the request lands is the caller's to pick, one level per
+// "..": GetTaskStatus appends "/status", so "A/../.." resolves onto
 // /nodes/{node}/status, while StopNodeTask appends nothing at all and hands the
 // caller the whole tail — "A/../../certificates/custom" resolves onto DELETE
 // /nodes/{node}/certificates/custom. The cases below carry representative
@@ -160,9 +160,16 @@ func TestNodeTaskCallsRefuseAUPIDThatIsNotOnePathSegment(t *testing.T) {
 		{"empty", ""},
 		{"a bare dot", "."},
 		{"a bare traversal", ".."},
-		// The probe value. GET .../tasks/UPID%3Apve-01%3Aa%2F..%2F..%2F..%2Fstatus/status
-		// resolves to /nodes/pve-01/status once Proxmox decodes the escapes.
+		// The probe value. GetTaskStatus would send it as
+		// .../tasks/UPID:pve-01:a%2F..%2F..%2F..%2Fstatus/status (url.PathEscape
+		// leaves the colons alone), which, once a proxy decodes the escapes and
+		// removes the dot segments, is /nodes/status/status: three ".." pop the
+		// UPID, "tasks" and the node, so this is the status of a node NAMED
+		// "status". "A/../.." is the value that lands on /nodes/pve-01/status.
+		// pveproxy itself decodes but resolves nothing (see validatePathSegment).
 		{"the probe value", "UPID:pve-01:a/../../../status"},
+		// Named for StopNodeTask, which appends nothing, so there it lands on
+		// /nodes/pve-01/status; the two GETs append "/status" or "/log" to it.
 		{"a traversal onto the node's own status", "A/../../status"},
 		// Dot-free, and therefore refused ONLY by the separator ban. Swapping in
 		// validatePathSegmentAllowingSlash lets exactly these two through, which
@@ -238,12 +245,15 @@ func assertOneNodeTaskRequest(t *testing.T, seen *[]string, want string) {
 func assertNodeTaskUPIDRefused(t *testing.T, err error, seen *[]string) {
 	t.Helper()
 	if sent := *seen; len(sent) != 0 {
-		// Printed first and in full: this line IS the vulnerability. Anything
-		// with a "%2F" or a ".." in it resolves somewhere the route never
-		// addressed once Proxmox decodes the escapes.
+		// Printed first and in full: this line IS the vulnerability. A "%2F"
+		// becomes a separator once pveproxy decodes it, and a ".." is walked
+		// upward by any proxy in front of pveproxy that normalises the path,
+		// so either can land the request somewhere the route never addressed.
 		t.Errorf("the request reached Proxmox as %q; it must never leave the client", sent)
 		if strings.Contains(sent[0], "..") {
-			t.Errorf("…and %q walks the path upward", sent[0])
+			t.Errorf("…and %q carries a \"..\": as a whole segment any normalising proxy would walk it "+
+				"upward; inside an escaped segment, only one that first decodes the escaped separator would",
+				sent[0])
 		}
 	}
 	if err == nil {

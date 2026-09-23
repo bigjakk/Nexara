@@ -233,12 +233,14 @@ var haConfigIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 // declaration at all.
 //
 // url.PathEscape is not a substitute, and the escaping it does is the reason it
-// looks like one. It escapes "/" to %2F and leaves ".." untouched, and Proxmox
-// decodes the escape BEFORE it resolves the path — the capture-server run
-// recorded on forbiddenVolumeIDChars (client_storage.go) is the evidence. So
-// "../../../nodes/pve-01/qemu/100" leaves here as
-// "..%2F..%2F..%2Fnodes%2Fpve-01%2Fqemu%2F100" and arrives as a DELETE three
-// levels up, on a guest, carrying the cluster's API token.
+// looks like one. It escapes "/" to %2F and leaves ".." untouched, and pveproxy
+// decodes the escape BEFORE it routes (see validatePathSegment), so an escaped
+// separator is a separator there. So "../../../nodes/pve-01/qemu/100" leaves
+// here as "..%2F..%2F..%2Fnodes%2Fpve-01%2Fqemu%2F100". pveproxy would split it
+// but not resolve the dots — the id becomes ".." and nothing below it routes —
+// while a proxy in front of it that decodes %2F and removes dot segments would
+// deliver a DELETE three levels up, on a guest, carrying the cluster's API
+// token.
 //
 // The pattern rather than a separator ban, deliberately. validatePathSegment
 // would stop the traversal — PathEscape re-encodes a literal "%" to %25, so

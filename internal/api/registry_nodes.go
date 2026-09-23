@@ -549,7 +549,11 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 			// proxmox.ServiceAction does NOT run validatePathSegment on it the
 			// way its siblings do for a pool name. Requiring a leading
 			// alphanumeric is what keeps "." and ".." out of that segment —
-			// the traversal that lands a request on the parent collection — and
+			// the dot segments a normalising proxy in front of pveproxy would
+			// resolve, and since the action follows the service in the path,
+			// "." there would make the action the service name and ".." would
+			// put the action directly under the node (pveproxy itself takes
+			// the segment literally; see proxmox.validatePathSegment) — and
 			// the class excludes both separators.
 			"service": {
 				Type:        apischema.String,

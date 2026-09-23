@@ -221,19 +221,22 @@ func (c *PBSClient) UpdateSnapshotNotes(ctx context.Context, store, backupType, 
 // tasks whose worker id needed no escaping. Passing it is safe: url.PathEscape
 // sends it as "%5C", and PBS decodes that back into the literal UPID it minted.
 //
-// None of this is the pveproxy traversal validatePathSegment exists for,
-// because PBS does not decode before it splits the path and checks it for
-// dots. proxmox-rest-server's normalize_path splits the RAW path on "/" and
-// refuses any component that starts with ".", and only then does
-// proxmox-router percent-decode each component on its own — so on PBS an
-// escaped "%2F" stays inside the segment it arrived in, and a bare ".." is an
-// error rather than a step upward. That is read from upstream source, not
-// observed on a live server. It is why the refusals here are defence in depth
-// rather than the only thing between a view:backup caller and another PBS
-// endpoint: they give a value no PBS minted a clear local 400 instead of a PBS
-// error, and they keep holding behind a reverse proxy that normalises the path
-// before PBS sees it — including one that reads "\" as a separator, which is
-// what the dot pieces between backslashes are refused for.
+// None of this is the pveproxy exposure validatePathSegment exists for — there
+// an escaped separator is decoded before the path is split, and a dot segment
+// is taken literally rather than refused — because PBS does not decode before
+// it splits the path and checks it for dots. proxmox-rest-server's
+// normalize_path (proxmox repo, proxmox-rest-server/src/lib.rs) splits the RAW
+// path on "/" and refuses any component that starts with ".", and only then
+// does proxmox-router (Router::find_route) percent-decode each component on
+// its own — so on PBS an escaped "%2F" stays inside the segment it arrived in,
+// and a bare ".." is an error rather than a step upward. That is read from
+// upstream source, not observed on a live server. It is why the refusals here
+// are defence in depth rather than the only thing between a view:backup
+// caller and another PBS endpoint: they give a value no PBS minted a clear
+// local 400 instead of a PBS error, and they keep holding behind a reverse
+// proxy that normalises the path before PBS sees it — including one that
+// reads "\" as a separator, which is what the dot pieces between backslashes
+// are refused for.
 //
 // That last refusal has a known cost, accepted on purpose. escape_id never
 // writes such a piece — every backslash it writes is followed by an "x" — but

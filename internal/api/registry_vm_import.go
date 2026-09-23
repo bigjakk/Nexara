@@ -27,8 +27,10 @@ const (
 // It takes the storage-id FORMAT rather than a bespoke pattern, and that is
 // the anchor as well as the shape: proxmox.DeleteStorage and
 // GetStorageConfig build "/storage/" + url.PathEscape(name), and PathEscape
-// leaves "." and ".." alone — so an un-anchored name resolves upward: "."
-// onto the storage COLLECTION, ".." onto the API root above it. The handler
+// leaves "." and ".." alone — so behind a normalising proxy an un-anchored
+// name resolves upward: "." onto the storage COLLECTION, ".." onto the API
+// root above it. (pveproxy itself takes the segment literally, as a storage
+// id pve-storage-id refuses; see proxmox.validatePathSegment.) The handler
 // only ever checked the segment was non-empty, which ".." satisfies.
 // formatStorageID requires a leading letter, which is also PVE's own rule for
 // a storage id, so nothing that could have been created is refused.
