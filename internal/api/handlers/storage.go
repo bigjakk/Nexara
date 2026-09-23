@@ -370,37 +370,48 @@ func (h *StorageHandler) DeleteContent(c fiber.Ctx) error {
 //
 // Build it with newStorageConfigResponse — never with a bare composite literal.
 // The constructor is the one place the write-only credentials are dropped, and
-// proxmox_read_credentials_test.go fails the build if a second construction
-// site appears.
+// TestGuard_StorageConfigResponseHasOneConstructor
+// (proxmox_read_credentials_test.go) fails if any other function declaration
+// in the package, tests aside, writes a composite literal whose type is
+// spelled storageConfigResponse.
 type storageConfigResponse struct {
 	proxmox.StorageConfig
 }
 
 // newStorageConfigResponse is the body of GET .../storage/:storage_id/config,
-// with every field whose WRITE value is a secret blanked — the same rule
-// metric_servers.go applies to the InfluxDB token, and the same reason: the
-// route is gated on view:storage, which every built-in Viewer holds.
+// with password and keyring blanked — the same rule metric_servers.go applies
+// to the InfluxDB token, and the same reason: the route is gated on
+// view:storage, which every built-in Viewer holds.
 //
-// password (cifs/pbs), keyring (rbd/cephfs) and encryption-key (pbs) are
-// write-only: Proxmox accepts them on create/update and the operator has no
-// reason to read them back. Blanking is safe to do on a GET the editor
-// round-trips because both halves already treat an absent value as "leave the
-// stored one alone" — storagePluginForm drops an empty value rather than
-// sending it, and EditStorageDialog only submits a field whose value differs
-// from the one it loaded. A blanked field therefore loads empty, is not
-// resubmitted, and the stored credential survives an unrelated edit. They are
-// `omitempty`, so blanking drops the key from the JSON entirely rather than
-// publishing an empty string that reads as "there is no password set".
+// password (cifs, pbs, esxi) and keyring (rbd, cephfs) are blanked as defence
+// in depth, not because Proxmox returns them. Each plugin lists them among its
+// sensitive-properties (pve-storage 8.3.5 on; before that Config.pm
+// hard-coded the same keys), API2/Storage/Config.pm extracts those before the
+// section is written, and the plugin keeps them under /etc/pve/priv — so the
+// storage.cfg section this read returns should never carry either. Blanking
+// costs nothing on a GET the editor round-trips, because both halves already
+// treat an absent value as "leave the stored one alone": storagePluginForm
+// drops an empty value rather than sending it, and EditStorageDialog only
+// submits a field whose value differs from the one it loaded. They are
+// `omitempty`, so blanking drops the key rather than publishing an empty
+// string that reads as "there is no password set".
 //
-// Deliberately NOT blanked: fingerprint is the PBS server's TLS certificate
-// fingerprint, which the edit dialog reads and shows, and master-pubkey is a
-// PUBLIC key — PBS encrypts a copy of the backup key to it so the private half
-// can recover it. Neither is a secret in either direction, so dropping them
-// would be noise.
+// Deliberately NOT blanked:
+//
+//   - encryption-key (pbs) is the key's FINGERPRINT on this read, not the key.
+//     PBSPlugin's add and update hooks store the key itself under
+//     /etc/pve/priv and write `$decoded_key->{fingerprint} || 1` into
+//     storage.cfg (pve-storage src/PVE/Storage/PBSPlugin.pm), and the edit
+//     dialog shows it as the sign that client-side encryption is on. An
+//     earlier version blanked it, which dropped that signal and protected
+//     nothing.
+//   - fingerprint is the PBS server's TLS certificate fingerprint, which the
+//     edit dialog reads and shows, and master-pubkey is a PUBLIC key (stored as
+//     1 in storage.cfg once set) — PBS encrypts a copy of the backup key to it
+//     so the private half can recover it.
 func newStorageConfigResponse(cfg proxmox.StorageConfig) storageConfigResponse {
 	cfg.Password = ""
 	cfg.Keyring = ""
-	cfg.EncryptionKey = ""
 	return storageConfigResponse{cfg}
 }
 

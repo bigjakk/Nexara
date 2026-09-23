@@ -15,18 +15,21 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// Three GET handlers used to hand a Proxmox config struct straight to the
-// response writer, credential fields and all:
+// Three GET handlers return a Proxmox config struct that carries
+// credential-shaped fields, and blank these:
 //
-//	GET .../storage/:storage_id/config   StorageConfig{password,keyring,encryption-key}
+//	GET .../storage/:storage_id/config   StorageConfig{password,keyring}
 //	GET .../sdn/ipams                    SDNIPAM{token}
 //	GET .../sdn/dns                      SDNDNS{key}
 //
-// All three are gated on view:storage / view:network, which every built-in Viewer
-// holds, so a read-only account could read storage backend passwords, Ceph
-// keyrings, PBS encryption keys and SDN plugin API tokens. metric_servers.go
-// had already established the fix for its own InfluxDB token — blank the
-// write-only credential on the read — and these follow it.
+// All three are gated on view:storage / view:network, which every built-in
+// Viewer holds. metric_servers.go had already established the rule for its own
+// InfluxDB token — blank the write-only credential on the read — and these
+// follow it. For the storage body it is defence in depth: Proxmox keeps a
+// storage plugin's password and keyring under /etc/pve/priv and the read should
+// never carry them (see newStorageConfigResponse). Its encryption-key is NOT
+// blanked: on this read it is the key's fingerprint, which the edit dialog
+// shows, and blanking it protected nothing.
 //
 // The guards below are in three layers because each catches a different
 // mistake:
@@ -174,10 +177,13 @@ func readStructs() []readStruct {
 				}
 				return newStorageConfigResponse(cfg)
 			},
-			stripped: []string{"password", "keyring", "encryption-key"},
+			stripped: []string{"password", "keyring"},
 			keptFields: map[string]string{
 				"fingerprint":   "the PBS server's TLS certificate fingerprint — public, and the edit dialog shows it",
 				"master-pubkey": "a PUBLIC key: PBS encrypts a copy of the backup key to it so the private half can recover it",
+				"encryption-key": "the key's FINGERPRINT on this read — PBSPlugin stores the key under /etc/pve/priv and " +
+					"writes only its fingerprint (or 1) to storage.cfg — and the edit dialog loads it into the " +
+					"Encryption Key field, where a non-empty value is the only sign that encryption is on",
 			},
 		},
 		{
@@ -427,7 +433,7 @@ func TestGuard_StorageConfigResponseHasOneConstructor(t *testing.T) {
 				literals++
 				if fn.Name.Name != "newStorageConfigResponse" {
 					t.Errorf("%s: storageConfigResponse is built in %s, not in newStorageConfigResponse. "+
-						"That construction site does not blank password/keyring/encryption-key — "+
+						"That construction site does not blank password/keyring — "+
 						"build the body through the constructor.",
 						fset.Position(lit.Pos()), fn.Name.Name)
 				}
