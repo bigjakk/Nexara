@@ -646,10 +646,17 @@ var baseRuleSiteCounts = map[string]int{
 //
 // The pairing is found by the "-existing" naming convention, so a rule carried
 // on BOTH a create body and an addressing path parameter under one name is not
-// seen at all. ceph-pool-name is exactly that shape today: registry_ceph.go
-// declares MaxLength 128 at both its sites — cephPoolNameParam addresses,
-// createCephPoolParams [name] mints — and raising only the CREATE one re-opens
-// this same bug with nothing failing. (Check that direction twice before
+// seen at all. ceph-pool-name is exactly that shape today —
+// createCephPoolParams [name] mints, cephPoolNameParam addresses — and what
+// holds that pair together is TestCephPoolNameParamAndBodyAgree
+// (registry_ceph_test.go), not this guard. This guard could not hold it even
+// if it saw it: it reads the create ceiling from the RULE, which for
+// ceph-pool-name has none (the 128 is the create site's MaxLength), and it
+// checks each witness as a literal, while the delete route validates the still
+// percent-encoded segment — which is why the two caps differ on purpose, 128
+// runes to mint and 1536 characters to address. That test drives names at the
+// create cap through both declarations instead, and fails if only the create
+// cap is raised. (Check that direction twice before
 // editing it: pve-configid-existing's own Divergence note opens by recording
 // that an earlier version of the same sentence had it backwards.)
 //

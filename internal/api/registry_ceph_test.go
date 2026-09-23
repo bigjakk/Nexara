@@ -1,10 +1,12 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -422,6 +424,16 @@ func TestCreateCephPoolBody(t *testing.T) {
 // is a pool this API can delete. Two independent patterns would drift, and
 // the direction that bites is a create rule looser than the delete rule:
 // it produces a pool the operator then cannot remove.
+//
+// The PATTERN half is compared directly. The LENGTH half cannot be, and
+// comparing the two MaxLength numbers is what hid the defect: the create
+// body's name is the literal JSON string, while the delete route validates
+// the raw, still percent-encoded path segment, where one rune can cost twelve
+// characters. So that half is driven through both real declarations — with a
+// capturing handler in place of each real one — using names at the create cap
+// in each encoding cost, each sent the way the SPA sends it, through
+// encodeURIComponent. The delete case also decodes what the route handed over
+// and requires the name back, the step the real handler (accessParam) takes.
 func TestCephPoolNameParamAndBodyAgree(t *testing.T) {
 	create := declaredEndpoint(t, fiber.MethodPost, cephScope+"/pools").Parameters["name"]
 	del := declaredEndpoint(t, fiber.MethodDelete, cephScope+"/pools/:pool_name").Parameters["pool_name"]
@@ -429,9 +441,75 @@ func TestCephPoolNameParamAndBodyAgree(t *testing.T) {
 		t.Errorf("create accepts %q but delete accepts %q; a pool created here has to stay deletable",
 			create.Pattern, del.Pattern)
 	}
-	if create.MaxLength == nil || del.MaxLength == nil || *create.MaxLength != *del.MaxLength {
-		t.Errorf("create caps the name at %v and delete at %v", create.MaxLength, del.MaxLength)
+	if create.MaxLength == nil {
+		t.Fatal("the create body's name has no MaxLength, so there is no cap to drive names to")
 	}
+	capRunes := *create.MaxLength
+
+	createApp := newRegistryApp(t, noAuth(), probeCephEndpoint(t, fiber.MethodPost, cephScope+"/pools", &capture{}))
+	delCap := &capture{}
+	deleteApp := newRegistryApp(t, noAuth(), probeCephEndpoint(t, fiber.MethodDelete, cephScope+"/pools/:pool_name", delCap))
+	deletePrefix := cephRoute(cephScope + "/pools/")
+
+	for _, tt := range []struct{ name, unit string }{
+		{"ASCII that needs no escape", "a"},
+		{"ASCII that escapes to three characters", "#"},
+		// A percent sign escapes to three characters too, and is the unit
+		// that makes the decode check below discriminating: a segment
+		// decoded one time too many no longer decodes back to the name.
+		{"a percent sign", "%"},
+		{"a two-byte rune", "é"},
+		{"a three-byte rune", "池"},
+		{"a four-byte rune", "𝕏"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			name := strings.Repeat(tt.unit, capRunes)
+			body, _ := json.Marshal(map[string]any{"name": name, "size": 3, "pg_num": 128})
+			status, env := send(t, createApp, jsonRequest(http.MethodPost, cephRoute(cephScope+"/pools"), string(body)))
+			if status != fiber.StatusNoContent {
+				t.Fatalf("create refused a %d-rune name (%q) — the case is not at the cap it means to test",
+					capRunes, env.Message)
+			}
+			target := deletePrefix + encodeURIComponent(name)
+			status, env = send(t, deleteApp, httptest.NewRequest(http.MethodDelete, target, nil))
+			if status != fiber.StatusNoContent {
+				t.Fatalf("delete refused the same name as the SPA sends it, %d characters encoded (%q): "+
+					"a pool this API created that it cannot delete", len(target)-len(deletePrefix), env.Message)
+			}
+			if got, err := url.PathUnescape(delCap.params.String("pool_name")); err != nil || got != name {
+				t.Errorf("the delete route handed over a segment that decodes to %q (%v), want the name created", got, err)
+			}
+		})
+	}
+
+	// And the create cap is a cap: one rune more is refused, so the cases
+	// above really are at the limit rather than comfortably inside it.
+	body, _ := json.Marshal(map[string]any{"name": strings.Repeat("a", capRunes+1), "size": 3, "pg_num": 128})
+	if status, _ := send(t, createApp, jsonRequest(http.MethodPost, cephRoute(cephScope+"/pools"), string(body))); status != fiber.StatusBadRequest {
+		t.Errorf("create accepted a %d-rune name; status = %d, want 400", capRunes+1, status)
+	}
+}
+
+// encodeURIComponent reproduces the browser function the SPA calls on a pool
+// name before it puts one in a path (frontend/src/features/ceph/api), so the
+// target matches what the SPA sends. url.PathEscape would not: the two differ
+// in both directions — PathEscape leaves ":@&=+$" raw and escapes "!*'()",
+// which encodeURIComponent leaves alone — though not for any unit the test
+// above sends.
+func encodeURIComponent(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+			b.WriteByte(c)
+		case strings.IndexByte("-_.!~*'()", c) >= 0:
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }
 
 // TestCephPoolNameSurvivesThePathSegment drives the names PVE's own rule

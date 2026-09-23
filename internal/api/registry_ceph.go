@@ -2,6 +2,7 @@ package api
 
 import (
 	"slices"
+	"strconv"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -68,18 +69,38 @@ func osdParams(extra apischema.Properties) apischema.Properties {
 // "\", are excluded by the rule itself. The rule here is the same refusal
 // validatePathSegment makes, but earlier, and with a message that names
 // the parameter.
+//
+// The length cap is NOT the create body's 128, and that is what keeps the two
+// in agreement rather than a departure from it. This value is validated as it
+// ARRIVES — Fiber hands over the raw, still percent-encoded segment, and
+// DeletePool decodes only after the schema has run — while the create body's
+// name is the literal JSON string. Percent-encoding spends three characters
+// per byte, and a rune is at most four bytes, so a 128-rune name the create
+// route accepts can reach this route as 128 × 12 = 1536 characters. Capping
+// it at 128 made a pool of 50 "#"s, or of 15 CJK characters, one Nexara could
+// create and not delete.
 var cephPoolNameParam = apischema.Property{
 	Type:      apischema.String,
 	Pattern:   apischema.Rule("ceph-pool-name"),
-	MaxLength: apischema.Ptr(128),
+	MaxLength: apischema.Ptr(cephPoolNameMaxRunes * maxPercentEncodedRuneLen),
 	Typetext:  "<pool>",
 	// Percent-encode a name that is not path-safe. The handler decodes the
 	// raw path segment, so a name containing "%", "#", "?" or a space must
 	// arrive encoded: a raw "100%" is a 400, and "100%25" addresses the pool
 	// named "100%". The IP-set entry parameter says the same for the same
 	// reason.
-	Description: "Ceph pool name, percent-encoded where the name is not path-safe.",
+	Description: "Ceph pool name, percent-encoded where the name is not path-safe. The length limit " +
+		"applies to the encoded segment; a pool is created with a name of at most " +
+		strconv.Itoa(cephPoolNameMaxRunes) + " characters.",
 }
+
+// cephPoolNameMaxRunes is the longest pool name the create route accepts, in
+// runes — the unit apischema's MaxLength counts.
+const cephPoolNameMaxRunes = 128
+
+// maxPercentEncodedRuneLen is how long one rune can become once percent-
+// encoded: four UTF-8 bytes, each written as "%XX".
+const maxPercentEncodedRuneLen = 12
 
 // registerCephEndpoints declares the 17 Ceph routes served by CephHandler.
 //
@@ -254,7 +275,7 @@ func createCephPoolParams() apischema.Properties {
 			// rule looser than the delete rule would produce a pool this
 			// API could not remove.
 			Pattern:     apischema.Rule("ceph-pool-name"),
-			MaxLength:   apischema.Ptr(128),
+			MaxLength:   apischema.Ptr(cephPoolNameMaxRunes),
 			Typetext:    "<pool>",
 			Description: "Name for the new pool.",
 		},
