@@ -5,10 +5,15 @@ package changelog
 // ChangeType classifies a highlight by the release-note section it was found
 // under, so the dialog can chip it "New", "Fix" and so on.
 //
-// It is empty whenever the body offered nothing to classify by — a curated
-// "Highlights" section, or a body with no headings at all. The dialog shows no
-// chip in that case rather than guessing one, which is why the zero value has
-// to stay meaningful.
+// It is empty whenever the body offered no SECTION to classify by — a curated
+// "Highlights" section, a heading the parser does not map (above all "Other
+// Changes", which the release-notes script writes for every subject outside
+// its known prefixes), a bullet before the first heading, or a body with no
+// headings at all — and the dialog then shows no chip rather than guessing
+// one, which is why the zero value has to stay meaningful. The one exception
+// is ChangeBreaking, which comes from the bullet itself (a `!` or a
+// `BREAKING:` prefix) and so is applied wherever such a bullet appears,
+// curated section and heading-less body included.
 type ChangeType string
 
 // The chip vocabulary. It is deliberately coarser than the conventional-commit
@@ -28,9 +33,12 @@ const (
 )
 
 // allChangeTypes is every type the parser can emit. It drives the wire-format
-// table and the cross-language guard, so adding a constant above without adding
-// it here — or without adding it to the frontend — fails the build rather than
-// silently rendering a chipless row.
+// table and the cross-language guard. Emitting a new constant ChangeType value
+// without adding it here fails
+// TestAllChangeTypesCoversEveryConstantAndEveryHeading — which also refuses a
+// conversion of a non-constant outright — and adding it here without adding
+// it to the frontend fails TestChangeTypesMatchTheFrontendUnion, so neither
+// drift ships as a chipless row.
 var allChangeTypes = []ChangeType{
 	ChangeNew,
 	ChangeImproved,

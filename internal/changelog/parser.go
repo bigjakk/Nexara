@@ -25,7 +25,9 @@ const maxHighlightsPerRelease = 30
 //     is one of: " — ", " – ", ": ", " - ".
 //  3. Bullets without a separator become title-only highlights.
 //  4. Each bullet is typed by the heading it sat under, so the dialog can chip
-//     it. A bullet with nothing to classify by carries the empty ChangeType.
+//     it; a bullet marked breaking (`!` or `BREAKING:`) is typed breaking
+//     whatever its heading, curated or none. Any other bullet with nothing to
+//     classify by carries the empty ChangeType.
 //  5. Cap at maxHighlightsPerRelease items.
 //
 // dropped is how many parseable bullets the cap discarded — 0 whenever the

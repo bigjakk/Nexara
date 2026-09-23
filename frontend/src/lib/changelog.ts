@@ -5,9 +5,13 @@
  * JSON, and TestChangeTypesMatchTheFrontendUnion (internal/changelog/
  * wire_contract_test.go) pins this union against that vocabulary.
  *
- * Absent whenever there was nothing to classify by — a curated `## Highlights`
- * section, or a release body with no headings at all — and the row then renders
- * without a chip rather than with a guessed one.
+ * Absent whenever there was no section to classify by — a curated
+ * `## Highlights` section, a heading the parser does not map (above all
+ * `## Other Changes`), a bullet before the first heading, or a release body
+ * with no headings at all — and the row then renders without a chip rather
+ * than with a guessed one. The one exception is "breaking", which comes from
+ * the bullet itself (a `!` or a `BREAKING:` prefix) and so is present
+ * wherever such a bullet appears.
  */
 export type ChangelogChangeType =
   "new" | "improved" | "fix" | "security" | "docs" | "breaking";

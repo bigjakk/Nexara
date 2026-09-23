@@ -70,9 +70,10 @@ function HighlightList({
   highlights: ChangelogHighlight[];
   version: string;
 }) {
-  // A release parsed out of a curated "## Highlights" section carries no types
-  // at all. Giving that entry the chip column would indent every row against
-  // an empty gutter, so the column only appears once something can fill it.
+  // A release parsed out of a curated "## Highlights" section usually carries
+  // no types — only a breaking bullet is typed there. Giving an all-untyped
+  // entry the chip column would indent every row against an empty gutter, so
+  // the column only appears once at least one row can fill it.
   const typed = highlights.some((h) => h.type !== undefined);
 
   return (

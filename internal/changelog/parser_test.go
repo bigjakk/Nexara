@@ -372,24 +372,44 @@ func TestParseBody_TypesBulletsBySection(t *testing.T) {
 	}
 }
 
-// A curated Highlights section is the author's own selection and ordering, so
-// there is no section heading to classify by. The dialog keys its chip off a
-// non-empty Type, so leaving it empty is what suppresses the chip.
-func TestParseBody_CuratedHighlightsCarryNoType(t *testing.T) {
+// A curated section carries no SECTION type: its heading says nothing about
+// what kind of change a bullet is. A bullet marked breaking is the exception —
+// the mark is on the bullet, not the heading, so it is typed breaking there too.
+func TestParseBody_CuratedHighlightsCarryNoSectionType(t *testing.T) {
 	body := `## Highlights
 
 - **Live VNC console preview** — See a thumbnail without opening the console.
+- feat(api)!: one collection envelope
 
 ## Bug Fixes
 
 - stop dropping a thing`
 
 	got, _ := ParseBody(body)
-	if len(got) != 1 {
-		t.Fatalf("expected 1 highlight, got %d: %#v", len(got), got)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 highlights, got %d: %#v", len(got), got)
 	}
 	if got[0].Type != "" {
-		t.Errorf("type = %q, want empty — a curated highlight must render without a chip", got[0].Type)
+		t.Errorf("type = %q, want empty — a non-breaking curated highlight must render without a chip", got[0].Type)
+	}
+	if got[1].Type != ChangeBreaking {
+		t.Errorf("type = %q, want %q — a breaking mark is on the bullet, so a curated section keeps it",
+			got[1].Type, ChangeBreaking)
+	}
+}
+
+// A body with no headings at all has no section to type a bullet by, and the
+// same exception holds: a breaking bullet is still typed breaking.
+func TestParseBody_HeadinglessBodyTypesOnlyBreakingBullets(t *testing.T) {
+	got, _ := ParseBody("- add a thing\n- BREAKING: rekey alert rules")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 highlights, got %d: %#v", len(got), got)
+	}
+	if got[0].Type != "" {
+		t.Errorf("type = %q, want empty — a heading-less bullet has nothing to be typed by", got[0].Type)
+	}
+	if got[1].Type != ChangeBreaking {
+		t.Errorf("type = %q, want %q", got[1].Type, ChangeBreaking)
 	}
 }
 
@@ -507,7 +527,9 @@ func TestHighlight_TypeWireFormat(t *testing.T) {
 		"":             `{"title":"T"}`,
 	}
 	// Driven off allChangeTypes so a new constant with no pinned wire string
-	// fails here instead of shipping unpinned.
+	// fails here instead of shipping unpinned — which holds only because
+	// TestAllChangeTypesCoversEveryConstantAndEveryHeading keeps
+	// allChangeTypes complete.
 	for _, ct := range append([]ChangeType{""}, allChangeTypes...) {
 		if _, ok := want[ct]; !ok {
 			t.Errorf("ChangeType %q has no pinned wire format", ct)
