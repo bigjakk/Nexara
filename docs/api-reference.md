@@ -117,13 +117,28 @@ All errors return a consistent envelope:
 
 `error` is a stable slug derived from the status code (`bad_request`,
 `unauthorized`, `forbidden`, `not_found`, `method_not_allowed`, `conflict`,
-`request_entity_too_large`, `unsupported_media_type`, `unprocessable_entity`,
-`too_many_requests`, `internal_server_error`), unless an endpoint sends a
-more specific one of its own — cluster onboarding's `tfa_required` and
-`token_exists`, and the `*_confirm_required` confirmation gates, among others;
-`message` is the human-readable detail. Some of those endpoint-specific errors
-also carry an optional `details` object of structured context: `token_exists`
-does, and so do most of the `*_confirm_required` gates.
+`precondition_failed`, `request_entity_too_large`, `unsupported_media_type`,
+`unprocessable_entity`, `upgrade_required`, `too_many_requests`,
+`request_header_fields_too_large`, `internal_server_error`, `not_implemented`,
+`bad_gateway`, `service_unavailable`), unless an endpoint sends a more
+specific one of its own — cluster onboarding's `tfa_required` and
+`token_exists`, the `*_confirm_required` confirmation gates, and the two
+below, among others; `message` is the human-readable detail. Some of those
+endpoint-specific errors also carry an optional `details` object of
+structured context: `token_exists` does, and so do most of the
+`*_confirm_required` gates.
+
+- `veeam_auth_failed` (422) — Veeam refused the credential Nexara logged on
+  with. Sent when adding, editing or testing a Veeam server, and by the job
+  actions (start, stop, enable, disable) and the session stop, log and task
+  routes. It is a 422 rather than a 401 on purpose: a 401 from Nexara means
+  the caller's own session has expired, and the web UI would refresh its
+  token and replay the request — spending a second failed logon against the
+  Veeam account.
+- `preflight_conflict` (409) — sent by `POST /clusters/:id/rolling-updates`
+  for a job that drains its guests with `ha_policy` set to `strict`, when the
+  HA or capacity pre-flight check finds a problem. The failing checks come
+  back in a top-level `conflicts` array rather than in `details`.
 
 Common HTTP status codes:
 
@@ -134,9 +149,12 @@ Common HTTP status codes:
 | 403 | Forbidden — insufficient permissions |
 | 404 | Not found |
 | 409 | Conflict — resource already exists |
+| 413 | Request body too large — a `Content-Length` over 10 MiB, on every route but the storage upload |
 | 415 | Unsupported media type — the request named a `Content-Encoding` other than `identity`; see Compressed Request Bodies |
 | 429 | Rate limited |
 | 500 | Internal server error |
+| 502 | Bad gateway — Proxmox VE, PBS or Veeam could not be reached, or answered with an error of its own |
+| 503 | Service unavailable — a background engine the endpoint needs is not running, or no node is online to do the work |
 
 ## Compressed Request Bodies
 
@@ -1374,7 +1392,10 @@ Every schedule carries `run_as`: the user whose grants its runs read under, stam
 Both audit routes share one filter set: `resource_type`, `user_id`, `action`,
 `source`, `start_time`/`end_time` (RFC 3339), and `vmids` — a comma-separated
 list of guest VMIDs, matching the same filter on `/tasks`. `/audit-log` also
-takes `cluster_id`; on `/clusters/:id/audit-log` the path's cluster wins.
+takes `cluster_id`. `/clusters/:id/audit-log` does not: the path already names
+the cluster, so a `?cluster_id=` there is refused with a 400
+(`cluster_id: must be sent in the request path, not as a query parameter`)
+rather than being overridden.
 
 #### Guest identity on an audit entry
 
