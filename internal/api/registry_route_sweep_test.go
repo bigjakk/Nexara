@@ -972,21 +972,32 @@ var sweepRouteOverrides = map[string]sweepEndpointOverride{
 	},
 	// audit-log/syslog-test: TestSyslog (audit.go) checks `cfg.Host == ""`
 	// first, so required-only needs "host" forced the same way every other
-	// "optional in the schema, unconditionally required by the handler"
-	// case here does. "port" is ALSO forced, and that one is not
-	// stylistic: the schema declares Default:0 and documents it as
-	// "0, or omitted, means the RFC 5424 default of 514" (registry_audit.go),
-	// but TestSyslog checks `cfg.Port < 1 || cfg.Port > 65535` BEFORE its
-	// OWN `cfg.Port == 0 → 514` fallback a few lines later (audit.go) — so
-	// the documented "0 means default" behaviour is dead code, unreachable
-	// through this handler, and omitting/defaulting port 400s with "Port
-	// must be between 1 and 65535" instead of ever reaching the network
-	// probe. That is a real handler defect this sweep found; it is reported
-	// (see the task reply), not fixed here — forcing "port" past it with
-	// the generic synthesizer's value (1, comfortably non-zero) is what
-	// lets BOTH variants reach TestSyslog's actual job, the network probe,
-	// which is what sweepExpectedFindings' syslog-test entry below is for.
+	// "optional in the schema, unconditionally required by the handler" case
+	// here does.
+	//
+	// Three values are pinned — host, port and protocol, though protocol only
+	// reaches the request in the with-optional pass; the required-only pass
+	// leaves it out and gets the handler's udp default — and the reason is
+	// that this route opens a REAL connection (proxsyslog.Forwarder.Test) to
+	// whatever it is given. With the generic synthesizer's host, "test01", the
+	// outcome was decided by DNS: the name did not resolve here, so the probe
+	// failed with a 400 — and on a host whose resolver answers test01 (a search
+	// domain, an NXDOMAIN-hijacking resolver) it would have succeeded instead,
+	// and the test would also have sent a datagram to whatever test01 turned
+	// out to be. A loopback literal needs no resolver and never leaves the
+	// host, and a UDP dial and write succeed with no listener, so the probe
+	// runs to completion every time. Port 1 rather than the omitted default of
+	// 514, so a syslog daemon that happens to listen on the box is not sent a
+	// test message. And udp although sweepValueOverrides already pins
+	// "protocol" to it globally, so that a change to that global value cannot
+	// turn this probe into a refused TCP connect.
+	//
+	// If it does fail — loopback down, say — the finding will read "registry
+	// rejected the synthesized request" with message="". That empty message is
+	// TestSyslog's, not a schema refusal: it answers a failed probe with
+	// {"success":false,"error":…}, not the error envelope this sweep reads.
 	"POST " + pathPrefix + "audit-log/syslog-test": {
+		values:        map[string]any{"host": "127.0.0.1", "port": int64(1), "protocol": "udp"},
 		forceRequired: []string{"host", "port"},
 	},
 }
@@ -1037,14 +1048,6 @@ var sweepExpectedFindings = map[string]string{
 	// mapping a DB error the same way it maps "genuinely never enrolled".
 	"POST " + pathPrefix + "auth/totp/setup/verify":              "needs a real pending TOTP secret from a prior POST .../totp/setup in the same session",
 	"POST " + pathPrefix + "auth/totp/recovery-codes/regenerate": "needs TOTP already enabled for the caller, which only a prior real enrollment establishes",
-	// audit.go's TestSyslog opens a REAL network probe to the caller-named
-	// host/port (proxsyslog.Forwarder.Test) and, on failure, answers 400
-	// with a hand-built {"success":false,"error":...} body — NOT the
-	// standard ErrorResponse envelope this sweep's dispatch reads Message
-	// from, which is why the with-optional line above showed an empty
-	// message. No synthesized host reaches an actual listening syslog
-	// collector, on any host reachable from a sandboxed test run or not.
-	"POST " + pathPrefix + "audit-log/syslog-test": "opens a real network probe to a caller-supplied host; no synthesized target is a listening syslog collector",
 }
 
 // satisfiesStringConstraints checks s against every facet String.Validate
@@ -1388,10 +1391,12 @@ func synthesizeSweepRequest(e Endpoint, includeOptional bool) sweepRequest {
 	// Every :name the ROUTE itself declares must have a value regardless of
 	// pass, or Fiber never matches the route at all — a routing failure this
 	// test cannot tell apart from a synthesizer bug. checkPathParams
-	// (registry.go) refuses a path parameter with a non-path Source, but
-	// nothing forbids Optional:true on one; this is therefore a genuine
-	// safety net, not dead code, even though grep confirms no route in
-	// today's registry spells a path segment ":name?".
+	// (registry.go) refuses a path parameter with a non-path Source, and
+	// refuses "?" in a path, so Fiber requires every segment; but nothing
+	// forbids Optional:true on a path parameter's SCHEMA, which would tell
+	// the synthesizer it may leave the value out. This is therefore a
+	// genuine safety net, not dead code, though no route in today's
+	// registry declares one that way.
 	for _, name := range e.pathParams {
 		if _, done := pathValues[name]; done {
 			continue
