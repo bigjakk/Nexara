@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -295,46 +297,111 @@ func gateHandlerFor(kind string, queries *db.Queries, jwtSvc *auth.JWTService, l
 	return fiberws.New(NewConsoleHandler(queries, "unused", jwtSvc, logger).HandleConsole, cfg)
 }
 
-// TestGuard_ConsoleHandlersReadOnlyTheScope is the static half of the
-// duplicate-key fix. The test above can only observe the cluster a handler
-// looks up — its stand-in database stops it before Proxmox — so a handler
-// that went back to reading node, vmid or type from the query would pass it.
-// This fails on any Query, Params, Headers or Cookies call in either handler:
-// everything a console acts on has to come from the scope the gate validated.
-func TestGuard_ConsoleHandlersReadOnlyTheScope(t *testing.T) {
-	banned := map[string]bool{"Query": true, "Params": true, "Headers": true, "Cookies": true}
-	handlers := map[string]string{"console.go": "HandleConsole", "vnc.go": "HandleVNC"}
+// TestGuard_OnlyTheGateReadsTheRequest is the static half of the duplicate-key
+// fix. TestConsoleHandlers_OpenWhatTheScopeNames observes what a handler opens
+// for the scope types it drives; this fails on code in this package that reads
+// the request through one of the accessors it lists, wherever in the package
+// it sits.
+//
+// The whole package, not just the two handlers, because a helper either one
+// calls can read the request as well as the handler can. The hazard is two
+// readings of one query that disagree: any code here holding the
+// *websocket.Conn can call conn.Query — the contrib websocket package's copy
+// of the query string, where the LAST copy of a repeated key wins — while the
+// gate reads c.Query, where the FIRST does. So a selector naming one of the
+// accessors below fails — a call or a method value, on any receiver — outside
+// the functions that ARE the gate, which read the request so that nothing
+// after them has to. Everything a console acts on comes from the scope the
+// gate validated (consoleScopeLocal).
+//
+// It is a NAME check, and says so. It cannot follow a request read into
+// another package, through an interface, or out of a closure created inside
+// a gate function and called later, and it cannot see an accessor it does not
+// list — above all c.Get, which reads a request header: app.Get and the client
+// cache's Get share the name, so banning it would fail this package for
+// nothing. Queries, Request and Body are banned only as calls, for the same
+// reason: sqlc's db.Queries type, *http.Request in a signature and a
+// response's Body field share those names.
+func TestGuard_OnlyTheGateReadsTheRequest(t *testing.T) {
+	banned := map[string]bool{
+		"Query": true, "Params": true, "Headers": true, "Cookies": true,
+		"QueryArgs": true, "FormValue": true, "GetReqHeaders": true, "GetHeaders": true,
+		"GetReqHeader": true, "RequestCtx": true, "OriginalURL": true, "FullURL": true,
+		"Req": true, "BodyRaw": true, "Bind": true,
+	}
+	bannedCalls := map[string]bool{"Queries": true, "Request": true, "Body": true}
+	gate := map[string]bool{
+		"Server.authenticate": true, "validateConsoleScope": true, "tokenFromSubprotocolHeader": true,
+	}
+	handlers := map[string]bool{"ConsoleHandler.HandleConsole": true, "VNCHandler.HandleVNC": true}
 
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
 	fset := token.NewFileSet()
-	found := 0
-	for file, name := range handlers {
-		f, err := parser.ParseFile(fset, file, nil, 0)
+	seen := map[string]bool{}
+	for _, path := range files {
+		// The go tool skips "_" and "." files (editor locks, backups), and
+		// parsing one would fail this guard for nothing.
+		if strings.HasSuffix(path, "_test.go") || strings.HasPrefix(path, "_") || strings.HasPrefix(path, ".") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
-			t.Fatalf("parse %s: %v", file, err)
+			t.Fatalf("parse %s: %v", path, err)
 		}
-		for _, decl := range f.Decls {
-			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd.Name.Name != name || fd.Body == nil {
-				continue
+		ast.Inspect(f, func(n ast.Node) bool {
+			if fd, ok := n.(*ast.FuncDecl); ok {
+				name := funcDeclName(fd)
+				seen[name] = true
+				return !gate[name] // the gate's own reads are the point
 			}
-			found++
-			ast.Inspect(fd.Body, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
+			if sel, ok := n.(*ast.SelectorExpr); ok && banned[sel.Sel.Name] {
+				t.Errorf("%s: .%s reads the request outside the console gate — everything after the gate "+
+					"takes its values from the validated scope (consoleScopeLocal), never from the request",
+					fset.Position(sel.Pos()), sel.Sel.Name)
+			}
+			if call, ok := n.(*ast.CallExpr); ok {
+				if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok && bannedCalls[sel.Sel.Name] {
+					t.Errorf("%s: .%s() reads the request outside the console gate — everything after the "+
+						"gate takes its values from the validated scope (consoleScopeLocal)",
+						fset.Position(sel.Pos()), sel.Sel.Name)
 				}
-				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && banned[sel.Sel.Name] {
-					t.Errorf("%s: %s calls .%s — a console handler takes every value from the validated scope "+
-						"(consoleScopeLocal), never from the request", fset.Position(call.Pos()), name, sel.Sel.Name)
-				}
-				return true
-			})
+			}
+			return true
+		})
+	}
+	for _, names := range []map[string]bool{gate, handlers} {
+		for name := range names {
+			if !seen[name] {
+				t.Errorf("%s is not declared in this package any more; it was renamed or moved, so this "+
+					"guard's list of it is stale", name)
+			}
 		}
 	}
-	if found != len(handlers) {
-		t.Fatalf("found %d of the %d console handlers; one was renamed or moved, so this guard checks nothing for it",
-			found, len(handlers))
+}
+
+// funcDeclName is "Recv.Name" for a method, whatever its receiver's pointer
+// or type parameters, and the bare name for a function.
+func funcDeclName(fd *ast.FuncDecl) string {
+	if fd.Recv == nil || len(fd.Recv.List) == 0 {
+		return fd.Name.Name
 	}
+	typ := fd.Recv.List[0].Type
+	if star, ok := typ.(*ast.StarExpr); ok {
+		typ = star.X
+	}
+	switch x := typ.(type) {
+	case *ast.IndexExpr:
+		typ = x.X
+	case *ast.IndexListExpr:
+		typ = x.X
+	}
+	if id, ok := typ.(*ast.Ident); ok {
+		return id.Name + "." + fd.Name.Name
+	}
+	return fd.Name.Name
 }
 
 // TestConsoleHandlers_CloseTheBrowserSocket pins that a console handler that

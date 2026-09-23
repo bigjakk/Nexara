@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,15 +24,26 @@ import (
 )
 
 // These cases run a console session end to end against a stand-in Proxmox:
-// enough of its API to mint a ticket (the vncproxy POST) and to serve the
-// vncwebsocket the handler then dials. The gate tests stop at the cluster
-// lookup; these go past it, into the relay.
+// enough of its API to mint a ticket (the vncproxy or termproxy POST) and to
+// serve the vncwebsocket the handler then dials. The gate tests stop at the
+// cluster lookup; these go past it, into the relay.
 
-// fakeProxmox is that stand-in. It hands each vncwebsocket it accepts to
-// onSocket, which decides how "Proxmox" behaves once a session is open.
+// fakeProxmox is that stand-in. It records every request it is sent, as
+// "METHOD path", and hands each vncwebsocket it accepts to onSocket, which
+// decides how "Proxmox" behaves once a session is open.
 type fakeProxmox struct {
 	srv      *httptest.Server
 	onSocket func(*gorillaws.Conn)
+
+	mu   sync.Mutex
+	seen []string
+}
+
+// requests is every request the stand-in has been sent so far, in order.
+func (f *fakeProxmox) requests() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.seen...)
 }
 
 func newFakeProxmox(t *testing.T, onSocket func(*gorillaws.Conn)) *fakeProxmox {
@@ -39,8 +51,12 @@ func newFakeProxmox(t *testing.T, onSocket func(*gorillaws.Conn)) *fakeProxmox {
 	f := &fakeProxmox{onSocket: onSocket}
 	upgrader := gorillaws.Upgrader{Subprotocols: []string{"binary"}}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.seen = append(f.seen, r.Method+" "+r.URL.Path)
+		f.mu.Unlock()
 		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/vncproxy"):
+		case r.Method == http.MethodPost &&
+			(strings.HasSuffix(r.URL.Path, "/vncproxy") || strings.HasSuffix(r.URL.Path, "/termproxy")):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `{"data":{"port":"5900","ticket":"PVEVNC:fake",`+
 				`"upid":"UPID:pve-01:00000001:00000001:00000001:vncproxy:100:root@pam:","user":"root@pam"}}`)
@@ -105,8 +121,10 @@ func (r clusterRow) Scan(dest ...any) error {
 
 // openSession serves the handler of the given kind behind a stand-in gate
 // that hands it scope, dials it the way the SPA does, and returns the
-// browser's end of the connection.
-func openSession(t *testing.T, kind string, scope auth.ConsoleScope, pve *fakeProxmox) *gorillaws.Conn {
+// browser's end of the connection. query is appended to the dial URL
+// verbatim — TestConsoleHandlers_OpenWhatTheScopeNames uses it to name
+// something else in every field.
+func openSession(t *testing.T, kind string, scope auth.ConsoleScope, pve *fakeProxmox, query string) *gorillaws.Conn {
 	t.Helper()
 	secret, err := crypto.Encrypt("fake-token-secret", sessionKey)
 	if err != nil {
@@ -138,7 +156,7 @@ func openSession(t *testing.T, kind string, scope auth.ConsoleScope, pve *fakePr
 	dialer := *gorillaws.DefaultDialer
 	dialer.Subprotocols = []string{subprotocolNegotiationName}
 	dialer.HandshakeTimeout = 3 * time.Second
-	conn, resp, err := dialer.Dial(fmt.Sprintf("ws://127.0.0.1:%d/probe", port), http.Header{})
+	conn, resp, err := dialer.Dial(fmt.Sprintf("ws://127.0.0.1:%d/probe%s", port, query), http.Header{})
 	if resp != nil {
 		_ = resp.Body.Close()
 	}
@@ -193,7 +211,7 @@ func TestConsoleRelay_EndsWhenAPeerNeverAnswersTheClose(t *testing.T) {
 			// goroutine would outlive the test.
 			t.Cleanup(func() { close(release) })
 
-			browser := openSession(t, kind, scope, pve)
+			browser := openSession(t, kind, scope, pve, "")
 			browser.SetCloseHandler(func(int, string) error { return nil })
 			readConnected(t, browser)
 			if _, _, err := browser.ReadMessage(); !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure) {
@@ -221,7 +239,7 @@ func TestConsoleRelay_EndsWhenAPeerNeverAnswersTheClose(t *testing.T) {
 			})
 			t.Cleanup(func() { close(release) })
 
-			browser := openSession(t, kind, scope, pve)
+			browser := openSession(t, kind, scope, pve, "")
 			readConnected(t, browser)
 			if err := browser.WriteMessage(gorillaws.CloseMessage,
 				gorillaws.FormatCloseMessage(gorillaws.CloseNormalClosure, "")); err != nil {
