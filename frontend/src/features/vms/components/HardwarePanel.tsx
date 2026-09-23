@@ -21,9 +21,20 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   useVMConfig,
   useSetVMConfig,
   useResizeDisk,
+  useDetachDisk,
   useNodeUSBDevices,
   useNodePCIDevices,
 } from "../api/vm-queries";
@@ -259,6 +270,17 @@ export function HardwarePanel({
   const { data: config, isLoading } = useVMConfig(clusterId, vmId);
   const setConfigMutation = useSetVMConfig();
   const resizeMutation = useResizeDisk();
+
+  // Removing an unusedN key DESTROYS the volume it holds, if this VM owns it:
+  // Proxmox frees it on the spot, where removing a live drive only parks its
+  // volume as unusedN. So it is not staged for Save with the reversible edits.
+  // It is confirmed, then sent at once through the detach route, whose audit
+  // row names the volume the key held.
+  const detachDisk = useDetachDisk();
+  const [unusedToDelete, setUnusedToDelete] = useState<{
+    key: string;
+    volume: string;
+  } | null>(null);
 
   // USB/PCI device listing from node
   const { data: usbDevices } = useNodeUSBDevices(clusterId, nodeName);
@@ -596,6 +618,31 @@ export function HardwarePanel({
 
   function handleRemovePendingDisk(key: string) {
     setPendingNewDisks((prev) => prev.filter((d) => d.key !== key));
+  }
+
+  function openUnusedDelete(key: string, volume: string) {
+    // A failure left over from the last attempt belongs to that one. Cleared
+    // here, on the way in, so it holds however the dialog was last closed.
+    detachDisk.reset();
+    setUnusedToDelete({ key, volume });
+  }
+
+  function closeUnusedDelete() {
+    setUnusedToDelete(null);
+  }
+
+  // The staged changes: disks and devices marked for removal, and new ones
+  // waiting for Save. They are the half of this panel the populate effect
+  // below does NOT re-read when the config changes, so an action that changes
+  // the config has to clear them itself. A Save and an unused-disk delete both
+  // do, through this one list, so the two cannot drift apart. A disk move, or
+  // a change made elsewhere that reaches this panel as a refetch, does not
+  // yet: the fields are re-read and the staged half survives them.
+  function clearStagedChanges() {
+    setDisksToRemove(new Set());
+    setPendingNewDisks([]);
+    setPendingDeviceAdds({});
+    setDeviceRemovals(new Set());
   }
 
   // Populate fields from config
@@ -1137,15 +1184,8 @@ export function HardwarePanel({
 
     setConfigMutation.mutate(
       { clusterId, vmId, fields },
-      {
-        onSuccess: () => {
-          // Clear pending state after successful save
-          setDisksToRemove(new Set());
-          setPendingNewDisks([]);
-          setPendingDeviceAdds({});
-          setDeviceRemovals(new Set());
-        },
-      },
+      // Clear pending state after successful save
+      { onSuccess: clearStagedChanges },
     );
   }
 
@@ -2709,31 +2749,9 @@ export function HardwarePanel({
                 );
               }
               if (key.startsWith("unused")) {
-                if (isRemoved) {
-                  return (
-                    <div
-                      key={key}
-                      className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950"
-                    >
-                      <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">
-                        {key}
-                      </span>
-                      <span className="text-[10px] text-red-600 dark:text-red-400">
-                        marked for removal
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="ml-auto h-6 px-2 text-[10px]"
-                        onClick={() => {
-                          handleUndoRemoveDisk(key);
-                        }}
-                      >
-                        Undo
-                      </Button>
-                    </div>
-                  );
-                }
+                // Never staged, so never "marked for removal": the Remove
+                // button asks first and then deletes (see unusedToDelete).
+                const volume = parsed.volume || str(config[key] ?? "");
                 return (
                   <div
                     key={key}
@@ -2743,7 +2761,7 @@ export function HardwarePanel({
                       {key}
                     </span>
                     <span className="truncate text-[10px] text-amber-600 dark:text-amber-400">
-                      {parsed.volume || str(config[key] ?? "")}
+                      {volume}
                     </span>
                     <span className="rounded bg-amber-200 px-1 py-0.5 text-[9px] font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-300">
                       Unused
@@ -2753,7 +2771,7 @@ export function HardwarePanel({
                       size="sm"
                       className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
                       onClick={() => {
-                        handleRemoveDisk(key);
+                        openUnusedDelete(key, volume);
                       }}
                     >
                       <Trash2 className="h-3 w-3" /> Remove
@@ -3609,6 +3627,76 @@ export function HardwarePanel({
           </div>
         </Section>
       )}
+
+      {/* Held open while the delete is in flight: Cancel cannot un-send it,
+          and closing would hide whether it worked. That also keeps one
+          delete in flight at a time, so a second mutate() cannot detach the
+          first one's onSuccess. */}
+      <AlertDialog
+        open={unusedToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !detachDisk.isPending) closeUnusedDelete();
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete unused disk {unusedToDelete?.key}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete{" "}
+              <span className="font-mono font-semibold">
+                {unusedToDelete?.volume}
+              </span>{" "}
+              from storage, along with all data on it. This action cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {/* Always shown, not gated on hasChanges: the sentence costs
+              nothing when there is nothing to lose, and a warning that is
+              always there is simpler than one that depends on a check. */}
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            Deleting reloads this VM&apos;s configuration; unsaved changes in
+            this panel will be discarded. Save first to keep them.
+          </p>
+          {detachDisk.isError && (
+            <p className="text-sm text-destructive">
+              {detachDisk.error.message}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={detachDisk.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={detachDisk.isPending}
+              onClick={(e) => {
+                // Stays open until the outcome is known: success closes it,
+                // a failure stays on screen.
+                e.preventDefault();
+                if (!unusedToDelete) return;
+                detachDisk.mutate(
+                  { clusterId, vmId, disk: unusedToDelete.key },
+                  {
+                    onSuccess: () => {
+                      // The delete changed the config, so the refetch
+                      // re-populates every field and the unsaved edits are
+                      // gone, as the dialog said. The staged changes would
+                      // outlive it, and a later Save would apply them
+                      // without the edits that went with them.
+                      clearStagedChanges();
+                      closeUnusedDelete();
+                    },
+                  },
+                );
+              }}
+            >
+              {detachDisk.isPending ? "Deleting..." : "Delete Disk"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Feedback + Save */}
       {setConfigMutation.isError && (

@@ -505,11 +505,12 @@ var cloudInitVolumeRe = regexp.MustCompile(`[:/](?:vm-\d+-)?cloudinit(\.[a-z0-9]
 // unusedN or vmstate key, where the key alone decides what a detach does to
 // the volume if there is one.
 //
-// The key-name test is only sound because PVE validates the option name
-// first: API2/Qemu.pm raises "unknown option" for anything outside the config
-// schema, so `unusedx` never reaches a written audit row. The declared
-// pattern (^[a-z]+[0-9]*$) does NOT constrain it — do not read the schema and
-// conclude otherwise.
+// The key-name test is sound because the key is constrained before a row is
+// written: the route's declared pattern and proxmox.Client.DetachDisk both
+// admit only proxmox.DetachableDiskKeyPattern, so a key starting "unused" is
+// one of unused0-unused255, and PVE's own "unknown option" check in
+// API2/Qemu.pm stands behind both. The row is written only after the detach
+// succeeds, so a key refused at any of the three never reaches one.
 func detachRemovesVolume(disk, resolved string) *bool {
 	yes, no := true, false
 	if resolved == notInConfig {

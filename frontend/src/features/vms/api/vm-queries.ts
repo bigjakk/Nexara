@@ -977,6 +977,10 @@ export function useDetachDisk() {
         `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/detach`,
         { disk },
       ),
+    // What useMoveDisk refreshes, for the same reason: a detach can free a
+    // storage volume (an unusedN or vmstate key, or a cloud-init drive), so
+    // the storage views and the resource lists are stale along with the VM's
+    // config.
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
         queryKey: [
@@ -986,6 +990,10 @@ export function useDetachDisk() {
           variables.vmId,
           "config",
         ],
+      });
+      invalidateResourceLists(queryClient, variables.clusterId);
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "storage"],
       });
     },
   });

@@ -361,6 +361,45 @@ func MaxDiskIndex(bus string) (int, bool) {
 	return limit, ok
 }
 
+// DetachableDiskKeyPattern is every VM config key DetachDisk will remove, and
+// nothing else: the drive and unused-disk keys of qemu-server's config schema,
+// plus vmstate.
+//
+// Transcribed from qemu-server rather than guessed:
+//
+//   - src/PVE/QemuServer/Drive.pm, valid_drive_names_with_unused: ide0-ide3,
+//     scsi0-scsi30, virtio0-virtio15 and sata0-sata5 ($MAX_IDE_DISKS = 4,
+//     $MAX_SCSI_DISKS = 31, $MAX_VIRTIO_DISKS = 16, $MAX_SATA_DISKS = 6 — the
+//     same four ceilings maxDiskIndex carries for AttachDisk), efidisk0,
+//     tpmstate0, and unused0-unused255 ($MAX_UNUSED_DISKS = 256).
+//   - src/PVE/QemuServer.pm, $confdesc->{vmstate}: a hibernated VM's saved
+//     RAM, which $update_vm_api's delete loop (src/PVE/API2/Qemu.pm) frees
+//     through try_deallocate_drive just as it frees an unusedN volume.
+//
+// Proxmox's own `delete` parameter is far wider. The only check
+// $update_vm_api makes on a deleted key's name is option_exists, and its
+// delete loop queues any other option for removal, so without this a detach
+// could take net0, boot, cores or onboot out of the VM's config. option_exists
+// is an exact hash lookup, which is why no number here carries a leading zero:
+// "scsi01" is an "unknown option" upstream as well.
+//
+// ide2 is here although it conventionally holds the CD-ROM: upstream it is a
+// drive key like any other, a VM can keep a data disk on it, and it is where a
+// cloud-init drive usually lives. "cdrom" is NOT here, although
+// $update_vm_api accepts it in `delete` as an alias it rewrites to ide2. It is
+// not a config key, so the audit lookup in front of the detach
+// (detachedVolume in internal/api/handlers) would find no "cdrom" in the
+// config and record that nothing was removed for a request that removed ide2.
+// A caller sends ide2 instead.
+//
+// Exported so the API declaration can publish and pre-check the same set
+// (the detach route's disk parameter in internal/api/registry_vms.go);
+// DetachDisk enforces it itself either way.
+const DetachableDiskKeyPattern = `^(?:ide[0-3]|sata[0-5]|scsi(?:[12]?[0-9]|30)|virtio(?:1[0-5]|[0-9])|` +
+	`efidisk0|tpmstate0|unused(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])|vmstate)$`
+
+var detachableDiskKeyRe = regexp.MustCompile(DetachableDiskKeyPattern)
+
 // bareGiBRe matches the only spelling of a size Proxmox's "storage:N"
 // allocation form accepts: a bare integer count of gibibytes.
 var bareGiBRe = regexp.MustCompile(`^[1-9]\d*$`)
@@ -455,6 +494,11 @@ func (c *Client) AttachDisk(ctx context.Context, node string, vmid int, params D
 // because the caller's read is best-effort — a detach Proxmox would accept
 // must not start failing because the audit lookup could not reach the API.
 // Pass "" to write unpinned.
+//
+// disk must be a key DetachableDiskKeyPattern admits. The check is here, not
+// only on the HTTP route, because `delete` is whatever this method is handed
+// and Proxmox removes any config option named in it: a validator in the one
+// caller is a validator the next caller skips.
 func (c *Client) DetachDisk(ctx context.Context, node string, vmid int, disk, digest string) error {
 	if err := validateNodeName(node); err != nil {
 		return err
@@ -462,8 +506,9 @@ func (c *Client) DetachDisk(ctx context.Context, node string, vmid int, disk, di
 	if err := validateVMID(vmid); err != nil {
 		return err
 	}
-	if disk == "" {
-		return fmt.Errorf("disk name is required")
+	if !detachableDiskKeyRe.MatchString(disk) {
+		return fmt.Errorf("%w: %q is not a disk a detach can remove: want a drive key such as scsi1, "+
+			"efidisk0 or tpmstate0, an unusedN key, or vmstate", ErrInvalidInput, disk)
 	}
 
 	fields := map[string]string{

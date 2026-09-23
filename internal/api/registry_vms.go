@@ -848,7 +848,7 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 	// transcribes that for the audit row's removes_volume. An earlier
 	// Description promised the reversible outcome for every key, on an
 	// endpoint API clients reach with no Nexara dialog in front of them — so
-	// it names both.
+	// it names both. Which keys it takes at all is detachDiskKeyParam's rule.
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   clusterScope + "/vms/:vm_id/disks/detach",
@@ -858,11 +858,8 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 			"deletes the volume from storage instead (a volume this VM owns), and that cannot be undone.",
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("manage", "vm"),
-		Parameters: vmParams(apischema.Properties{
-			"disk": diskKeyParam("Config key of the disk to detach, e.g. scsi1. An unusedN or vmstate key deletes its " +
-				"volume from storage, if this VM owns it, rather than parking it."),
-		}),
-		Handler: h.DetachDisk,
+		Parameters:  vmParams(apischema.Properties{"disk": detachDiskKeyParam}),
+		Handler:     h.DetachDisk,
 	})
 
 	// ── Proxmox tasks ─────────────────────────────────────────────────
@@ -978,7 +975,8 @@ var upidParam = apischema.Property{
 }
 
 // diskKeyParam is a guest config key naming a volume — "scsi0", "rootfs",
-// "mp0".
+// "mp0". The VM and container resize and move routes share it; the detach
+// route does not, and must not — see detachDiskKeyParam.
 func diskKeyParam(description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.String,
@@ -987,6 +985,35 @@ func diskKeyParam(description string) apischema.Property {
 		Typetext:    "<config key>",
 		Description: description,
 	}
+}
+
+// detachDiskKeyParam is the disk POST …/disks/detach removes.
+//
+// The value becomes the whole of the `delete` field Proxmox receives, and PVE
+// removes any config option named there. diskKeyParam's ^[a-z]+[0-9]*$ let
+// net0, boot, cores and onboot through, and this route would have taken each
+// of them out of the VM's config under a disk_detach audit row. The set is
+// proxmox.DetachableDiskKeyPattern — qemu-server's drive and unused-disk keys
+// plus vmstate — which carries its upstream sources.
+//
+// It is enforced at two layers on purpose. proxmox.Client.DetachDisk refuses
+// the same pattern and is the choke point, so the rule holds for a caller that
+// never comes through this route. This declaration is what refuses the value
+// with a 400 naming the parameter before the handler reads the VM's config,
+// and what /api/v1/api-docs publishes. Both compile the one constant, so the
+// two cannot disagree about the set.
+//
+// It is not a privilege boundary: PUT …/vms/:vm_id/config forwards a raw
+// `delete` under the same manage:vm, by design. What this holds is the
+// route's own contract — a detach removes a disk, and its audit row names one.
+var detachDiskKeyParam = apischema.Property{
+	Type:     apischema.String,
+	Pattern:  proxmox.DetachableDiskKeyPattern,
+	Typetext: "<drive key|unusedN|vmstate>",
+	Description: "Config key of the disk to detach: a drive key (ide0-ide3, sata0-sata5, scsi0-scsi30, " +
+		"virtio0-virtio15, efidisk0, tpmstate0), unused0-unused255, or vmstate. Any other config key is " +
+		"refused. An unusedN or vmstate key deletes its volume from storage, if this VM owns it, rather " +
+		"than parking it.",
 }
 
 func requiredStorage(description string) apischema.Property {

@@ -638,7 +638,7 @@ other's common case.
 | POST | `/clusters/:id/vms/:vm_id/disks/resize` | Resize a disk |
 | POST | `/clusters/:id/vms/:vm_id/disks/move` | Move a disk to another storage |
 | POST | `/clusters/:id/vms/:vm_id/disks/attach` | Allocate and attach a disk. Omit `index` to take the lowest free slot on the bus; an occupied slot, or one the VM boots from, is refused. `size` takes `500`, `"500"`, `"500G"`, `"512M"` or `"1T"` and may not exceed the target pool's total capacity |
-| POST | `/clusters/:id/vms/:vm_id/disks/detach` | Detach a disk |
+| POST | `/clusters/:id/vms/:vm_id/disks/detach` | Detach a disk by its config key. A drive key (`ide0`–`ide3`, `sata0`–`sata5`, `scsi0`–`scsi30`, `virtio0`–`virtio15`, `efidisk0`, `tpmstate0`) parks a volume the VM owns as `unusedN`, except a cloud-init drive, which is deleted; `unused0`–`unused255` and `vmstate` delete the volume from storage if this VM owns it. Any other config key is refused |
 | POST | `/clusters/:id/vms/:vm_id/media` | Change CD/DVD media |
 | PUT | `/clusters/:id/vms/:vm_id/pool` | Set VM resource pool |
 
