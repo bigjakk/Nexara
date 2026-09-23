@@ -76,8 +76,8 @@ var pbsLegacyPermissions = map[string]struct {
 //
 // It filters on the exact paths rather than on the /pbs-servers prefix,
 // because the 19 backup routes nested under /pbs-servers/:pbs_id are NOT
-// in this domain — they gate through BackupHandler.requirePBSPerm and are
-// still legacy.
+// in this domain — they are declared in registerBackupEndpoints, as Deferred
+// routes that gate through BackupHandler.requirePBSPerm.
 func declaredPBSEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
 	s := newRouteStubServer(t)

@@ -183,14 +183,19 @@ func TestUpdateNetworkInterface_OmitsDeleteWhenNothingCleared(t *testing.T) {
 	}
 }
 
-func TestUpdateNetworkInterface_RejectsDotDot(t *testing.T) {
-	// PUT /nodes/pve1/network/.. collapses to Proxmox's apply-pending-config
-	// endpoint, which Nexara gates behind a different permission.
+func TestUpdateNetworkInterface_RejectsDotSegments(t *testing.T) {
+	// PUT /nodes/pve1/network/. collapses to /nodes/pve1/network, Proxmox's
+	// reload endpoint — the one that applies every pending change — rather
+	// than the one interface the caller named; ".." lands one level further,
+	// on the node itself. Whether PVE would run either with this method's
+	// form fields is its schema's call; the guard does not rest on that.
 	srv, seen := newFormCaptureServer(t)
 	c := newTestClient(t, srv.URL)
 
-	if err := c.UpdateNetworkInterface(context.Background(), "pve1", "..", UpdateNetworkInterfaceParams{Type: "bridge"}); err == nil {
-		t.Fatal(`UpdateNetworkInterface("..") succeeded, want rejection`)
+	for _, iface := range []string{".", ".."} {
+		if err := c.UpdateNetworkInterface(context.Background(), "pve1", iface, UpdateNetworkInterfaceParams{Type: "bridge"}); err == nil {
+			t.Errorf("UpdateNetworkInterface(%q) succeeded, want rejection", iface)
+		}
 	}
 	if len(*seen) != 0 {
 		t.Errorf("issued %d request(s), want none", len(*seen))

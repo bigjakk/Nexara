@@ -99,10 +99,10 @@ var refusedPoolIDs = []struct{ name, poolID, why string }{
 	// next caller who is not an HTTP request.) url.PathEscape leaves a dot
 	// alone, so both arrive intact and Proxmox resolves them after it
 	// decodes. The resolved targets are worked out rather than recalled:
-	// /pools/. is /pools and /pools/.. is /pools as well, one level further
-	// up having nothing to remove.
+	// /pools/. is /pools, and /pools/.. removes the pools segment as well,
+	// landing on the API root one level further up.
 	{"a bare dot", ".", "a \".\" segment disappears, landing the call on the pool COLLECTION"},
-	{"a bare traversal", "..", "the same, and on DELETE it addresses an endpoint the caller never named"},
+	{"a bare traversal", "..", "one level further up, the API root — on DELETE, an endpoint the caller never named"},
 	{"a traversal", poolAddressTraversal, "reaches /api2/json/access/users/root@pam with the cluster's own token"},
 	{"a bare separator", "/", "not a pool id at all"},
 	{"a separator", "infra/prod", "a NESTED pool id; legal to verify_poolname and unreachable through this URL shape"},

@@ -130,7 +130,8 @@ const pbsDeferredReason = "the scope depends on a DB lookup: the handler loads t
 //
 // These are NOT the 19 backup routes under /pbs-servers/:pbs_id, which
 // reach the same decision through BackupHandler.requirePBSPerm and are
-// still legacy. Only the PBSHandler routes are declared here.
+// declared — Deferred — by registerBackupEndpoints (registry_backup.go).
+// Only the PBSHandler routes are declared here.
 func registerPBSEndpoints(reg *Registry, h *handlers.PBSHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,

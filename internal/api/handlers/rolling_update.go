@@ -196,8 +196,10 @@ func rollingIDs(p *apischema.Params) (clusterID, rowID uuid.UUID, err error) {
 // route here is gated cluster-scoped on the cluster in the PATH, and
 // GetRollingUpdateJob selects on the id ALONE — so without this a caller holding
 // manage:rolling_update on cluster A could name a job belonging to cluster B and
-// start, pause, resume, confirm or skip it. CancelJob was the only one that
-// checked; the other six now do.
+// start, pause, resume, confirm or skip it, and one holding only
+// view:rolling_update on A could read B's job and its per-node package lists
+// (GetJob, ListNodes). CancelJob was the only one that checked; the other seven
+// now do.
 //
 // It cannot be hoisted into middleware: the cluster a job belongs to is a column
 // on the row, and middleware runs before any query.

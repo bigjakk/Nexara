@@ -123,8 +123,9 @@ func TestIPSetEntryRefusesTraversalThroughTheSlashItAllows(t *testing.T) {
 		{"storeset", "a\nb"},
 		{"storeset", ""},
 		// The SET-NAME half, which went unchecked until this change even though
-		// it sits in the same path expression. ".." there addresses
-		// /cluster/firewall/ipset — the endpoint that creates a set.
+		// it sits in the same path expression. ".." there drops the ipset
+		// segment and addresses /cluster/firewall/<entry>; "." addresses the set
+		// NAMED by the entry.
 		{"..", "192.0.2.10"},
 		{".", "192.0.2.10"},
 		{"a/b", "192.0.2.10"},

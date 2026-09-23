@@ -548,9 +548,14 @@ func (h *VMHandler) DestroyVM(c fiber.Ctx, p *apischema.Params) error {
 // taskUPID reads the :upid path parameter and the node it names.
 //
 // The schema deliberately puts no pattern on it: the frontend
-// percent-encodes the UPID's colons, Fiber does not decode path
-// parameters, and the only check worth making is that a node name falls
-// out of the decoded form — which is what this does.
+// percent-encodes the UPID's colons and Fiber does not decode path
+// parameters, so a pattern would have to guess which of the two forms
+// arrived. What this adds is that a node name falls out of the decoded form.
+// The traversal guard is not here: the decoded UPID and the node go through
+// the proxmox client's validateTaskUPID (client_tasks.go) and
+// validateNodeName (client.go), which refuse a "/", a bare "." or "..", and
+// control characters in either — a UPID that yields a node name can still
+// carry a "../" segment, and those are what stop it.
 func taskUPID(p *apischema.Params) (upid, node string, err error) {
 	raw := p.String("upid")
 	upid, unescapeErr := url.PathUnescape(raw)

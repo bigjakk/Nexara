@@ -82,7 +82,10 @@ func auditFilterParams(extra apischema.Properties) apischema.Properties {
 // the gate never authorized.
 //
 // So the per-cluster listing simply does not declare it, and a caller who sends
-// one gets "unknown parameter" rather than a value silently overwritten.
+// ?cluster_id= there gets a 400 rather than a value silently overwritten. The
+// refusal is checkMisplaced's (registry_params.go), not "unknown parameter":
+// cluster_id IS declared on that route, as the path parameter, so the query
+// copy is reported as a path parameter sent in the wrong place.
 var auditFilterClusterParam = apischema.Property{
 	Type:     apischema.String,
 	Alias:    "cluster_id",

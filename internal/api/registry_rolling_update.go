@@ -143,11 +143,13 @@ func rollingParallelismParam() apischema.Property {
 // made exactly one static requireClusterPerm call.
 //
 // That uniformity hid something, and it is worth stating here rather than only
-// in the commit message. SEVEN of these routes load a job or a node row BY ID
-// and act on it, while the permission they check is resolved from the cluster in
-// the PATH — so a caller holding manage:rolling_update on cluster A could name a
-// job belonging to cluster B and start, pause, resume, confirm or skip it.
-// CancelJob alone carried the `job.ClusterID != clusterID` check. The other six
+// in the commit message. EIGHT of these routes load a job or a node row BY ID,
+// while the permission they check is resolved from the cluster in the PATH —
+// so a caller holding manage:rolling_update on cluster A could name a job
+// belonging to cluster B and start, pause, resume, confirm or skip it, and a
+// caller holding only view:rolling_update on A could READ B's job and its
+// per-node rows, package lists included, through GetJob and ListNodes.
+// CancelJob alone carried the `job.ClusterID != clusterID` check. All eight
 // now reach the row through handlers.RollingUpdateHandler.jobInCluster, and
 // TestGuard_RollingUpdateJobLookupsAreClusterScoped (in
 // internal/api/handlers/rolling_job_scope_guard_test.go) holds every one of them

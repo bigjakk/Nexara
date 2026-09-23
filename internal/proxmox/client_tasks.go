@@ -29,12 +29,14 @@ import (
 // /nodes/{node}/certificates/custom, PVE's "remove the custom certificate". The
 // two GETs are reachable from a route that grants only view:task, which the
 // built-in Viewer role holds; and POST /api/v1/tasks (manage:task) stores a
-// caller-supplied upid — still declared with no pattern, only a length cap —
-// that reconcileRunningTasks later replays through GetTaskStatus unattended,
-// so the traversal need not even be issued by the caller who wrote it. (The
-// node beside it carried no pattern too until registry_tasks.go gained
-// node-name-or-empty; the upid did not change, and this guard is what holds
-// it.)
+// caller-supplied upid that reconcileRunningTasks later replays through
+// GetTaskStatus unattended, so the traversal need not even be issued by the
+// caller who wrote it. That route now anchors the upid itself (registry_tasks.go:
+// "UPID:" and no "/", "\" or control character) and its node to
+// node-name-or-empty, but neither held for rows stored before those anchors
+// landed, and the collector's replays of those rows reach only the client's
+// guards — this one for the upid, validateNodeName for the node — so those
+// are what hold them.
 //
 // The check belongs HERE rather than at the handler, and rather than in the
 // route declaration, for the two reasons validatePBSTaskUPID records for the

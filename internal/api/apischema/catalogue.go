@@ -643,9 +643,10 @@ func patternRules() []RuleDoc {
 				"\".\" or \"..\".\n" +
 				"Every consumer concatenates the value into a Proxmox path with url.PathEscape, which " +
 				"escapes \"/\" and leaves both of those alone, so they travel intact and pveproxy " +
-				"resolves them upward the moment it normalises the path: \"/pools/..\" is the pool " +
-				"COLLECTION and \"/access/groups/..\" is the group collection, each a different endpoint " +
-				"with different permissions, reached with the cluster's own token.\n" +
+				"resolves them upward the moment it normalises the path: \"/pools/.\" is the pool " +
+				"COLLECTION and \"/pools/..\" the API root, \"/access/groups/.\" the group collection and " +
+				"\"/access/groups/..\" the /access index, each a different endpoint with different " +
+				"permissions, reached with the cluster's own token.\n" +
 				"REFUSING THEM COSTS NOTHING REACHABLE, and that is what makes being stricter than " +
 				"upstream safe here rather than an invention. A name that is exactly \".\" or \"..\" " +
 				"cannot survive as a path segment whatever rule is written: pveproxy resolves the " +

@@ -292,8 +292,9 @@ func TestAccessPathSegmentsAreAnchored(t *testing.T) {
 				t.Fatalf("%s declares no %q parameter", seg.route, seg.param)
 			}
 			if prop.Pattern == "" {
-				t.Fatalf("%s: %q declares no pattern, so \"..\" reaches url.PathEscape and resolves "+
-					"onto the parent collection", seg.route, seg.param)
+				t.Fatalf("%s: %q declares no pattern, so \".\" and \"..\" pass the declaration and are "+
+					"refused only by the proxmox client's validator, one layer late and in its own wording "+
+					"rather than the declaration's parameter-keyed 400", seg.route, seg.param)
 			}
 
 			base := map[string]any{

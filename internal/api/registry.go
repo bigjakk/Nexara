@@ -272,16 +272,18 @@ func checkPathParams(e Endpoint) error {
 			e.Method, e.Path, string(e.Path[i]))
 	}
 	if i := strings.IndexAny(e.Path, "?<"); i >= 0 {
-		// An optional parameter (":name?") or a Fiber route constraint
-		// (":name<guid>", written before an optional's "?") lets a request
-		// match with the segment EMPTY. For a cluster-scoped route that is
-		// an authorization bypass rather than a formatting nicety:
-		// /clusters//vms/<id> leaves :cluster_id empty, clusterIDFromParam
-		// falls back to :id, and the gate authorizes whatever that segment
-		// names. The schema already states what a value may be, so a
-		// constraint adds nothing it cannot, and no route needs either.
-		return fmt.Errorf("endpoint %s %s uses %q in its path; optional parameters and route constraints can "+
-			"match an empty segment, and the parameter schema is where a value's shape is declared",
+		// An optional parameter (":name?") lets a request match with the
+		// segment EMPTY — so does a constrained optional one, since Fiber
+		// writes the constraint before an optional's "?" (":name<guid>?"). For a
+		// cluster-scoped route that is an authorization bypass rather than a
+		// formatting nicety: /clusters//vms/<id> leaves :cluster_id empty,
+		// clusterIDFromParam falls back to :id, and the gate authorizes
+		// whatever that segment names. A route constraint on its own
+		// (":name<guid>") never matches an empty segment; it is refused for a
+		// different reason — the schema is where a value's shape is declared,
+		// so a constraint adds nothing it cannot — and no route needs either.
+		return fmt.Errorf("endpoint %s %s uses %q in its path; an optional parameter can match an empty "+
+			"segment, and the parameter schema, not a route constraint, is where a value's shape is declared",
 			e.Method, e.Path, string(e.Path[i]))
 	}
 
@@ -342,8 +344,11 @@ func checkPathParams(e Endpoint) error {
 		//     the gate never reaches the fallback — and a blanket refusal
 		//     would break an API spelling callers already use.
 		//   - Deferred/Advisory/Public/SelfService install no middleware,
-		//     so there is no gate to diverge from; the four current
-		//     cluster_id aliases are all on such routes.
+		//     so there is no gate to diverge from, and a global Check
+		//     (RequirePermission) resolves no cluster either. Every
+		//     cluster_id alias declared today sits on a Deferred, Advisory,
+		//     SelfService or global-Check route — MapPlatform's
+		//     platform_cluster_id is the global-Check one.
 		if strings.EqualFold(prop.Alias, "cluster_id") && src != apischema.SourcePath && e.runsClusterGate() {
 			return fmt.Errorf("endpoint %s %s declares parameter %q with the alias %q, which a caller may send "+
 				"as a %s value — but the permission middleware resolves the cluster from the path, so the gate "+

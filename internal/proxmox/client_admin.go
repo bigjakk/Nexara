@@ -72,20 +72,21 @@ func (c *Client) CreateResourcePool(ctx context.Context, params CreatePoolParams
 //
 //	poolID="."   GET /pools     the pool COLLECTION, whose body is a list
 //	                            where a detail object is expected
-//	poolID=".."  DELETE /pools  the collection endpoint, with none of the
-//	                            arguments its own delete form expects
+//	poolID=".."  DELETE /       one level further up: the API root, which
+//	                            has no delete form at all
 //
 // Neither is believed to reach a destructive PVE handler today: PVE's own
 // collection-level delete takes the pool id as a PARAMETER, and this client
-// sends none, so a DELETE landing on /pools is a parameter error rather than a
-// mass delete. That is a reading of the PVE API and not something measured
-// against a live cluster from here, which is exactly why it is not the
-// argument for closing the gap — the argument is that a request resolving onto
-// an endpoint the caller did not name is not a thing to reason about case by
-// case. It is closed here rather than at the route, for the reason recorded
-// on the snapshot address methods (client_guests.go, "Addressing an existing
-// snapshot") and on validateTaskUPID: a check in the CALLER is one the next
-// caller inherits nothing from. When this guard was added the ONLY thing
+// sends none, so a DELETE landing on /pools (poolID=".") is a parameter error
+// rather than a mass delete, and the API root has no delete to reach. That is
+// a reading of the PVE API and not something measured against a live cluster
+// from here, which is exactly why it is not the argument for closing the gap
+// — the argument is that a request resolving onto an endpoint the caller did
+// not name is not a thing to reason about case by case. It is closed here
+// rather than at the route, for the reason recorded on the snapshot address
+// methods (client_guests.go, "Addressing an existing snapshot") and on
+// validateTaskUPID: a check in the CALLER is one the next caller inherits
+// nothing from. When this guard was added the ONLY thing
 // refusing anything on these three was the pool id's rule in
 // internal/api/registry_pools.go — which stopped a slash, and matched "." and
 // ".." exactly as it matched any other name.

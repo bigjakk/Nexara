@@ -84,8 +84,8 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 
 	// Every value below comes from the scope the gate VALIDATED, not from a
 	// second read of the query string. The gate checked c.Query, which returns
-	// the first copy of a repeated key; conn.Query is this package's own
-	// capture, where the last copy wins — so reading it here let
+	// the first copy of a repeated key; conn.Query is the contrib websocket
+	// package's capture, where the last copy wins — so reading it here let
 	// "?cluster_id=A&…&cluster_id=B" pass a check for cluster A and open a
 	// console on B. No scope means this route was reached without the console
 	// gate (see mountGated), and nothing below may run on that.

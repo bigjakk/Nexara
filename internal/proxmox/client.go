@@ -256,11 +256,12 @@ func validateNodeName(node string) error {
 // segment of a Proxmox request path.
 //
 // url.PathEscape alone is not enough for this. It escapes "/" but leaves "."
-// and ".." untouched, so an escaped ".." still resolves upward once pveproxy
-// normalises the path — landing the request on the parent collection, which is
-// often a different endpoint with different permissions. DELETE
-// /nodes/{node}/network/.. is the worked example: it becomes DELETE
-// /nodes/{node}/network, Proxmox's "revert pending network config".
+// and ".." untouched, so an escaped "." or ".." still resolves upward once
+// pveproxy normalises the path — "." onto the parent collection, which is
+// often a different endpoint with different permissions, and ".." one level
+// above that. DELETE /nodes/{node}/network/. is the worked example: it
+// becomes DELETE /nodes/{node}/network, Proxmox's "revert pending network
+// config" — and ".." climbs one level further, onto the node itself.
 //
 // The control-character refusal is not about the path — url.PathEscape encodes
 // those — but about where the value goes AFTERWARDS. Callers put it in a

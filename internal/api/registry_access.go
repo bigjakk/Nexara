@@ -33,10 +33,11 @@ func accessManage() Permissions { return clusterCheck("manage", handlers.AccessR
 // Four of the five identifiers below become a SEGMENT of a Proxmox request
 // path (internal/proxmox/client_access.go builds them with url.PathEscape), and
 // PathEscape escapes "/" but leaves "." and ".." alone — so an un-anchored value
-// resolves upward once pveproxy normalises the path and lands the request on the
-// PARENT collection. DELETE /access/groups/.. is the group COLLECTION, not the
-// group the caller named. Keeping those two segments out is what every pattern
-// below is for, which RE2 cannot express as a negative lookahead;
+// resolves upward once pveproxy normalises the path and lands the request on
+// the PARENT collection or above it. DELETE /access/groups/. is the group
+// COLLECTION, not the group the caller named, and /access/groups/.. is one
+// level further up still. Keeping those two segments out is what every
+// pattern below is for, which RE2 cannot express as a negative lookahead;
 // registry_networks.go's pveObjectNamePattern and registry_ceph.go's
 // cephPoolNameParam carry the same anchor for the same reason.
 //

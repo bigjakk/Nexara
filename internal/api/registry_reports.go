@@ -53,13 +53,12 @@ func reportIDParam(description string) apischema.Property {
 // existing caller working: the schedule form and the generate dialog both
 // send {"cluster_id": …}.
 //
-// Worth knowing before a FOURTH parameter takes this shape: checkPathParams
-// compares gateParamNames against the declared NAMES only, never against an
-// Alias, so the alias is not itself guarded. That is harmless on every route
-// that uses it today — all of them are Deferred, and namesACluster refuses a
-// cluster-scoped Check on a path with no /clusters/:id prefix — but an alias
-// of "cluster_id" on a route that DID carry such a prefix would put the gate's
-// own name in a body with nothing firing.
+// The alias itself is guarded too: checkPathParams (registry.go) refuses a
+// "cluster_id" alias on any route whose permission middleware resolves the
+// cluster from the path, since there the gate would read one cluster from the
+// URL while the handler read another from the body. None of these routes runs
+// such a gate — all three are Deferred — which is why the alias is allowed
+// here.
 func reportClusterParam(optional bool, description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.String,

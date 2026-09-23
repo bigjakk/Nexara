@@ -130,10 +130,11 @@ func validateAccessName(kind, value string, maxLen int) error {
 	if len(value) > maxLen {
 		return fmt.Errorf("%w: %s is too long (max %d)", ErrInvalidInput, kind, maxLen)
 	}
-	// "." and "." pass accessNamePattern because dot is a legal character in a
+	// "." and ".." pass accessNamePattern because dot is a legal character in a
 	// group or role id. They must still be rejected outright: escaped or not,
-	// pveproxy normalises "/access/groups/.." up onto "/access/groups", which
-	// is the collection endpoint rather than the member one.
+	// pveproxy normalises "/access/groups/." onto "/access/groups", which is
+	// the collection endpoint rather than the member one, and
+	// "/access/groups/.." one level further up, onto "/access".
 	if value == "." || value == ".." {
 		return fmt.Errorf("%w: %q is not a valid %s", ErrInvalidInput, value, kind)
 	}

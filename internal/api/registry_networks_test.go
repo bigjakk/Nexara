@@ -417,10 +417,11 @@ func TestNetworkInterfaceNumericBoundsMatchTheClientGuard(t *testing.T) {
 // that becomes a Proxmox PATH segment.
 //
 // proxmox.DeleteNetworkInterface already guards it with validatePathSegment,
-// and its own comment says why: iface=".." collapses the path to
+// and its own comment says why: iface="." collapses the path to
 // /nodes/{node}/network, which is Proxmox's REVERT endpoint — gated in
-// Nexara behind a different permission than the delete. The declaration
-// states the same rule one layer earlier and names the field.
+// Nexara behind a different permission than the delete — and ".." one level
+// further, onto the node. The declaration states the same rule one layer
+// earlier and names the field.
 func TestIfaceParamRefusesATraversalSegment(t *testing.T) {
 	for _, tt := range []struct {
 		method string
@@ -432,7 +433,8 @@ func TestIfaceParamRefusesATraversalSegment(t *testing.T) {
 		t.Run(tt.method, func(t *testing.T) {
 			e := declaredEndpoint(t, tt.method, tt.path)
 			if e.Parameters["iface"].Pattern == "" {
-				t.Fatal("iface carries no pattern, so nothing keeps \"..\" out of a Proxmox path segment")
+				t.Fatal("iface carries no pattern, so \".\" and \"..\" pass the declaration and are refused " +
+					"only by the proxmox client's guard, one layer late")
 			}
 			if _, err := e.Parameters.Validate(networkParamsWith(t, e, nil)); err != nil {
 				t.Fatalf("the known-good parameter set was rejected: %v", err)

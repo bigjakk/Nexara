@@ -259,16 +259,19 @@ func nodeParams(extra apischema.Properties) apischema.Properties {
 // create undeletable through Nexara.
 //
 // "Looser" means the LENGTH and the two-character minimum, and nothing
-// else. The Pattern below is still what makes this safe to interpolate
-// into a Proxmox path: it admits letters, digits, '-' and '_' only, so no
-// separator, dot or percent can reach the URL through it. That guard is
-// load-bearing rather than decorative — Proxmox decodes a percent-escape
-// BEFORE it resolves the path (the capture-server run recorded on
-// forbiddenVolumeIDChars, internal/proxmox/client_storage.go, watched
-// "%2e%2e%2f" arrive intact; the far side resolving it as "../" is the
-// inference that follows), so
-// escaping this value is not what contains it. Dropping the Pattern in the
-// name of being permissive would hand a path segment to Proxmox unchecked:
+// else. The Pattern below is the first of two layers that make this safe to
+// interpolate into a Proxmox path: it admits letters, digits, '-' and '_'
+// only, so no separator, dot or percent can reach the URL through it.
+// Escaping is not a substitute for either layer: the four snapshot methods
+// url.PathEscape the name, which does turn a "%" into "%25" — so
+// "%2e%2e%2f" reaches Proxmox as a literal name — but leaves a bare "." or
+// ".." alone, and those resolve upward once pveproxy normalises the path.
+// The second layer is the client's own validatePathSegment (client.go),
+// which the snapshot methods in client_guests.go call ("Addressing an
+// existing snapshot"). Dropping the Pattern in the name of being permissive
+// would leave that as the only refusal: still a refusal, but a 400 that no
+// longer names snap_name, reached only after the handler has loaded the
+// guest.
 // TestSnapshotNameParamRefusesTraversal sends "%2e%2e%2f" and the rest at
 // all four routes and fails the moment one of them reaches a handler, and
 // TestContainerSnapshotNameRules fails if the Pattern goes missing at all.
@@ -339,12 +342,15 @@ var (
 //
 // What the pattern is for is the ERROR, not safety. On SetVMPool the value
 // becomes a path segment — "/pools/" + url.PathEscape(pool)
-// (internal/proxmox/client_admin.go) — but PathEscape encodes "/" as %2F,
-// so a value like "../../access/users" was always one inert literal
-// segment and no traversal was ever possible. What WAS possible was
-// forwarding junk to Proxmox and returning its 502, which quotes a URL the
-// caller never wrote ("Method 'PUT /pools/has spaces!' not implemented")
-// instead of a 400 naming the field.
+// (internal/proxmox/client_admin.go) — and pve-poolid admits "." and "..",
+// which PathEscape leaves alone and pveproxy then resolves upward: "." is the
+// /pools collection itself, ".." the API root. What keeps those out is the
+// client's own validatePathSegment on that path (client_admin.go), not this
+// rule; do not delete that guard on the belief that a body field cannot
+// traverse. What the rule adds is the 400: without it junk was forwarded to
+// Proxmox and came back a 502 quoting a URL the caller never wrote ("Method
+// 'PUT /pools/has spaces!' not implemented") instead of an error naming the
+// field.
 //
 // So the rule is deliberately PVE's own (emptyOrPoolID) rather than a
 // stricter one of our invention: a schema that rejects ids Proxmox accepts
@@ -954,9 +960,15 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 // UPID's colons, Fiber does not decode path parameters, and a pattern
 // written against the decoded form would reject every real request while
 // one written against the encoded form would depend on which client did
-// the encoding. The handler unescapes it and then requires
-// extractNodeFromUPID to find a node in it, which is the check that
-// actually means something.
+// the encoding. On the two /clusters/:cluster_id/tasks/:upid routes the
+// handler unescapes it and requires extractNodeFromUPID to find a node in
+// it, and the traversal guard is at the client: the decoded UPID goes
+// through proxmox.validateTaskUPID (client_tasks.go) and its node through
+// validateNodeName (client.go), each refusing a "/", a bare "." or "..",
+// and control characters — a UPID that yields a node name can still carry
+// a "../" segment, and that pair is what stops it. The third route that
+// takes it, PUT /api/v1/tasks/:upid, only looks the value up in the
+// database and never builds a Proxmox path from it.
 var upidParam = apischema.Property{
 	Type:        apischema.String,
 	MinLength:   apischema.Ptr(1),

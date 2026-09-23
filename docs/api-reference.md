@@ -539,7 +539,7 @@ other's common case.
 
 | Parameter | Description |
 |-----------|-------------|
-| `lastentries` | The newest N lines. The common case, and the one `syslog` cannot express. Capped at 5000; defaults to 500 when no other bound is given. |
+| `lastentries` | The newest N lines, 1 to 5000. The common case, and the one `syslog` cannot express. A value above 5000 is a 400, not clamped; defaults to 500 when no other bound is given. |
 | `since`, `until` | Same accepted forms as above, but sent to Proxmox as **unix timestamps**, so no wall clock — and no node timezone — is involved at any point. A wall-clock string given here is read as UTC. |
 | `startcursor`, `endcursor` | Opaque journal cursors, for resuming a read. |
 

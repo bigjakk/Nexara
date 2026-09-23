@@ -195,20 +195,21 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 			//     anything else as naming no guest at all.
 			//   - proxmox.validateTaskUPID — the client-side guard that
 			//     actually closes the traversal, and closes it for the
-			//     collector and the scheduler too — refuses a path
-			//     separator and a control character, and nothing else. Its
-			//     comment records at length why nothing else: PVE mints 8
-			//     colon-separated fields and PBS 9, an API-token user's
-			//     half carries a "!", and the worker id is legitimately
-			//     empty ("aptupdate::root@pam:"), non-numeric
-			//     ("vzdump:local"), dotted ("osd.1") and "@"-bearing
-			//     ("imgdel:105@store02"). This route itself round-trips
-			//     values with fewer fields than PVE mints.
+			//     collector and the scheduler too — refuses an empty value,
+			//     a bare "." or "..", a path separator and a control
+			//     character, and nothing else. Its comment records at
+			//     length why nothing else: PVE mints 8 colon-separated
+			//     fields and PBS 9, an API-token user's half carries a "!",
+			//     and the worker id is legitimately empty
+			//     ("aptupdate::root@pam:"), non-numeric ("vzdump:local"),
+			//     dotted ("osd.1") and "@"-bearing ("imgdel:105@store02").
+			//     This route itself round-trips values with fewer fields
+			//     than PVE mints.
 			//
-			// So: the anchor and those two refusals, and no field count, no
-			// charset for the fields and no minimum length beyond the one
-			// non-empty character the anchor implies. An over-tight rule
-			// here would fail in the direction that hides: a real UPID
+			// So: the anchor and validateTaskUPID's refusals, and no field
+			// count, no charset for the fields and no minimum length beyond
+			// the one non-empty character the anchor implies. An over-tight
+			// rule here would fail in the direction that hides: a real UPID
 			// refused at creation is a task Nexara dispatched and then did
 			// not record, which nothing reports at all.
 			//

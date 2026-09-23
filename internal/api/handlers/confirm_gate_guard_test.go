@@ -71,10 +71,14 @@ func TestGuard_RequireGatesDoNotWriteResponses(t *testing.T) {
 // route sat outside the guard that exists to catch a gate writing its own
 // response and returning nil.
 //
-// They are, if anything, the ones that matter most: a middleware that
-// answers 403 by writing the response and returning nil would call
-// c.Next() — or fall through to it — and run the handler anyway, with the
-// caller already looking at a refusal.
+// They are, if anything, the ones that matter most. In Fiber the next
+// handler runs only if a middleware calls c.Next(), so one that writes its
+// 403 and returns nil does end the chain — the hazard is the gate that
+// writes a refusal and then reaches c.Next() anyway, running the handler with
+// the caller already looking at a 403. Banning response writes in every
+// require* keeps that shape out of all of them, inline gates and middleware
+// alike; for an inline gate, whose caller checks `if err != nil`, the
+// write-and-return-nil shape is the bypass itself.
 func isRequireGateName(name string) bool {
 	return len(name) >= len("require") && strings.EqualFold(name[:len("require")], "require")
 }

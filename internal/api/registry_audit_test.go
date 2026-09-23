@@ -145,8 +145,11 @@ func TestAuditPerClusterListingRefusesAClusterFilter(t *testing.T) {
 		}
 	}
 
-	// End to end: ?cluster_id= on the per-cluster listing is an unknown
-	// parameter, not a silently ignored one.
+	// End to end: ?cluster_id= on the per-cluster listing is refused, not
+	// silently ignored. The refusal is checkMisplaced's — cluster_id is
+	// declared here, as the path parameter — so the message names the path
+	// as the one place it may be sent. Asserting the message, not just the
+	// 400, is what tells this refusal from "unknown parameter".
 	cap := &capture{}
 	probe := e
 	probe.Handler = cap.handler()
@@ -157,6 +160,9 @@ func TestAuditPerClusterListingRefusesAClusterFilter(t *testing.T) {
 	status, env := send(t, app, httptest.NewRequest(http.MethodGet, target, nil))
 	if status != fiber.StatusBadRequest {
 		t.Errorf("status = %d (%q), want 400", status, env.Message)
+	}
+	if !strings.HasPrefix(env.Message, "cluster_id:") || !strings.Contains(env.Message, "request path") {
+		t.Errorf("message = %q, want checkMisplaced's refusal naming cluster_id and the request path", env.Message)
 	}
 	if cap.called {
 		t.Error("the handler ran for a request carrying a filter it does not accept")

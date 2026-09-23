@@ -210,17 +210,19 @@ func probeACMEEndpoint(t *testing.T, method, path string, cap *capture) Endpoint
 	return e
 }
 
-// TestACMEPathSegmentsAreAnchored is the traversal guard for this domain, and it
-// matters more here than in any other.
+// TestACMEPathSegmentsAreAnchored is the traversal guard for this domain, and
+// here the declaration is the only layer.
 //
 // internal/proxmox/client_acme.go builds /cluster/acme/account/<name> and
 // /cluster/acme/plugins/<id> by concatenation with url.PathEscape, which escapes
-// "/" but leaves "." and ".." alone — and, unlike every other traversal-anchored
-// parameter in the registry, there is NO second validator behind it. The access
-// domain has validateUserID, the PBS domain has validatePathSegment; ACME has
-// nothing. The declaration is the only anchor, so it is the only thing this test
-// can check and the only thing that stops DELETE /cluster/acme/account/.. from
-// resolving onto the account collection.
+// "/" but leaves "." and ".." alone — and there is NO second validator behind
+// it. The access domain has validateUserID and its kin, and the PBS task reads
+// have validatePBSTaskUPID; ACME has nothing, like the backup domain's store
+// and job ids, which get only a non-empty check
+// (TestBackupPathSegmentsAreAnchored). The declaration is the only anchor, so
+// it is the only thing this test can check and the only thing that stops
+// DELETE /cluster/acme/account/. from resolving onto the account collection,
+// or ".." onto /cluster/acme above it.
 func TestACMEPathSegmentsAreAnchored(t *testing.T) {
 	traversals := []string{".", ".."}
 
@@ -244,8 +246,9 @@ func TestACMEPathSegmentsAreAnchored(t *testing.T) {
 				t.Fatalf("%s declares no %q parameter", seg.route, seg.param)
 			}
 			if prop.Pattern == "" {
-				t.Fatalf("%s: %q declares no pattern, and nothing behind it checks one — \"..\" would "+
-					"reach url.PathEscape and resolve onto the parent collection", seg.route, seg.param)
+				t.Fatalf("%s: %q declares no pattern, and nothing behind it checks one — \".\" and \"..\" "+
+					"would reach url.PathEscape and resolve upward, onto the parent collection and above it",
+					seg.route, seg.param)
 			}
 
 			validate := func(value string) error {

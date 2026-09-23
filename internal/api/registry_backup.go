@@ -29,10 +29,14 @@ const pbsBackupScope = pbsScope + "/:pbs_id"
 // It exists for the reason the catalogue's pve-object-id does.
 // internal/proxmox/pbs_client.go builds those paths by concatenation with
 // url.PathEscape, and PathEscape escapes "/" but leaves "." and ".." alone,
-// so an un-anchored value resolves upward once the server normalises the
-// path: DELETE /admin/datastore/../snapshots is the datastore COLLECTION,
-// and POST /admin/sync/../run is not the job the caller named. The handlers
-// only ever checked that the segment was non-empty, which ".." satisfies.
+// so an un-anchored value reaches PBS as a bare dot segment. PBS itself
+// refuses one — its normalize_path rejects any component starting with "."
+// (read from upstream source; pbs_client.go has the detail) — but a reverse
+// proxy that normalises the path first resolves it upward instead: DELETE
+// /admin/datastore/../snapshots onto /admin/snapshots, POST
+// /admin/sync/../run onto /admin/run, neither what the caller named. The
+// handlers only ever checked that the segment was non-empty, which ".."
+// satisfies.
 //
 // The rule is the catalogue's pbs-safe-id, which is PBS's own
 // PROXMOX_SAFE_ID character for character — so nothing PBS would accept is
@@ -282,9 +286,10 @@ func registerBackupEndpoints(reg *Registry, h *handlers.BackupHandler) {
 		Group:       "Backup",
 		Permissions: Permissions{Deferred: backupDeferredReason},
 		Parameters: pbsStoreParams(withParams(snapshotRefParams(apischema.SourceAuto), apischema.Properties{
-			// NOT optFlag: the handler sends protected=true/false either way,
-			// so omitting it has always meant "unprotect". The Default states
-			// that rather than leaving a reader to infer it.
+			// optFlag, i.e. Optional with Default false — NOT optTristateBool,
+			// which has no Default: the handler sends protected=true/false
+			// either way, so omitting it has always meant "unprotect", and the
+			// Default states that rather than leaving a reader to infer it.
 			"protected": optFlag("true protects the snapshot, false releases it. Omitted releases it."),
 		})),
 		Handler: h.ProtectSnapshot,

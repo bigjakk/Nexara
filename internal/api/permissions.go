@@ -338,10 +338,11 @@ const legacyClusterPrefix = pathPrefix + "clusters/:id"
 // else (target_cluster_id), which checkPathParams enforces from the other
 // direction.
 //
-// An OPTIONAL :cluster_id? — or one behind a route constraint — is not this
-// function's to refuse: checkPathParams refuses "?" and "<" in any registry
-// path, because a caller can leave such a segment empty
-// (/api/v1/clusters//vms/<id>) and clusterIDFromParam then falls back to :id.
+// An OPTIONAL :cluster_id? — constrained or not — is not this function's to
+// refuse: checkPathParams refuses "?" in any registry path, because a caller
+// can leave such a segment empty (/api/v1/clusters//vms/<id>) and
+// clusterIDFromParam then falls back to :id. (It refuses "<" too, for the
+// separate reason its own comment gives.)
 //
 // EqualFold because Fiber's own matching is case-insensitive; see
 // checkPathParams.

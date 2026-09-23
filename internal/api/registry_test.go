@@ -266,9 +266,10 @@ func TestRegisterRejectsMalformedDeclarations(t *testing.T) {
 			want: `uses "?" in its path`,
 		},
 		{
-			// The same bypass through a route constraint, which Fiber writes
-			// before an optional's "?": ":cluster_id<guid>?" also matches an
-			// empty segment. A substring check for ":cluster_id?" missed it.
+			// The same bypass through a CONSTRAINED optional parameter — Fiber
+			// writes the constraint before the "?", so ":cluster_id<guid>?"
+			// also matches an empty segment. A substring check for
+			// ":cluster_id?" missed it.
 			name: "a constrained, optional :cluster_id<guid>?",
 			edit: func(e *Endpoint) {
 				e.Path = "/api/v1/clusters/:cluster_id<guid>?/vms/:id"
@@ -624,11 +625,12 @@ func TestPermissionsDescribe(t *testing.T) {
 //
 // The rule is deliberately narrow, and both halves of that narrowness are
 // load-bearing: "id" stays legal (registry_replication.go ships it), and
-// a route with no cluster gate has nothing to diverge from (the four
-// current cluster_id aliases are all Deferred).
+// a route with no cluster gate has nothing to diverge from (no cluster_id
+// alias declared today sits behind a cluster gate).
 func TestRegisterRefusesAClusterIDAliasOnlyWhereAGateRuns(t *testing.T) {
 	h := func(c fiber.Ctx, p *apischema.Params) error { return nil }
 	clusterCheck := Permissions{Check: &Check{Action: "manage", Resource: "vm", Scope: ScopeCluster}}
+	globalGate := Permissions{Check: &Check{Action: "manage", Resource: "veeam", Scope: ScopeGlobal}}
 	deferred := Permissions{Deferred: "the handler resolves the cluster from the row it loads"}
 
 	// The path parameter differs per case on purpose: apischema already
@@ -653,6 +655,9 @@ func TestRegisterRefusesAClusterIDAliasOnlyWhereAGateRuns(t *testing.T) {
 	}{
 		{"cluster_id alias behind a cluster gate is the escalation", clusterCheck, "id", aliased("id", "cluster_id"), true},
 		{"cluster_id alias with no gate has nothing to diverge from", deferred, "id", aliased("id", "cluster_id"), false},
+		// MapPlatform's shape: a global Check resolves no cluster from the
+		// path, so an alias spelled cluster_id has no gate to diverge from.
+		{"cluster_id alias behind a GLOBAL gate resolves no cluster", globalGate, "id", aliased("id", "cluster_id"), false},
 		{"an id alias stays legal — replication ships one", clusterCheck, "cluster_id", aliased("cluster_id", "id"), false},
 		{"an unrelated alias is untouched", clusterCheck, "id", aliased("id", "target"), false},
 	}

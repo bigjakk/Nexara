@@ -49,10 +49,12 @@ var firewallTemplateIDParam = apischema.Property{
 // requireClusterPerm — because a template belongs to the install rather than
 // to a cluster. The sixth, apply, is cluster-scoped: it writes rules into
 // ONE cluster's firewall, and the cluster is the first parameter in its
-// path. Declaring apply as global would let a caller holding the grant
-// instance-wide act on a cluster they hold nothing on; declaring the other
-// five as cluster-scoped is not even expressible, since their paths name no
-// cluster.
+// path. Declaring apply as global would REFUSE the operator whose
+// manage:network is scoped to that cluster — a global check is satisfied only
+// by a global grant (internal/auth/rbac.go), and a global grant already
+// covers every cluster, so it would add no one and shut out every
+// cluster-scoped holder. Declaring the other five as cluster-scoped is not
+// even expressible, since their paths name no cluster.
 func registerFirewallTemplateEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,

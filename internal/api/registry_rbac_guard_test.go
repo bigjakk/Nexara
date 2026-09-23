@@ -24,9 +24,12 @@ import (
 //
 // The fix reads the DECLARATION instead of the route table — see
 // registryEnforcementGaps, registryPublicRouteKeys and
-// registryEnforcedActions below — and rbac_route_guard_test.go's three
-// TestGuard_* functions were extended to call them (search that file for
-// "registry" to find the edits).
+// registryEnforcedActions below. rbac_route_guard_test.go calls the first two
+// from its production guards (search that file for "registry"). The third,
+// with registryDocumentedPermissionViolation, lost its one production call
+// site when the endpointMeta overlay entries it compared against were
+// removed — TestGuard_DocumentedPermissionMatchesEnforcement records why — and
+// is now exercised only by its own unit tests, against synthetic data.
 //
 // A second review pass added registrySelfServiceRouteKeys further down:
 // Public got folded into a reviewed, enumerable list
@@ -127,10 +130,10 @@ func enforcementShape(p Permissions) string {
 //
 // Split out from registryEnforcementGaps so a test can drive the DECISION
 // with a fabricated key and a hand-built graph, proving the logic without
-// needing a real handlers-package symbol of the new Handler signature to
-// reference — none exists until Phase 4 migrates one. routeHandlerKey
-// itself is exercised against 550+ real symbols by every run of
-// TestGuard_EveryRouteEnforcesPermission already; nothing here needs to
+// depending on any one real handler. routeHandlerKey itself is exercised
+// against real symbols elsewhere — by TestGuard_EveryRouteEnforcesPermission
+// for the legacy routes it still walks, and by registryEnforcementGaps for
+// every Deferred and Advisory registry route — so nothing here needs to
 // re-prove that it resolves a real one.
 func enforcementGapMessage(method, path, shape, key string, graph *callGraph) string {
 	switch {
@@ -224,10 +227,11 @@ func registryEnforcedActions(p Permissions) map[string]bool {
 
 // actionMatchesDeclaration reports whether at least one action named in
 // declared ("view:vm" or "view:vm|view:node" — endpointMeta's Permission
-// format) is present in enforced. Shared by
-// TestGuard_DocumentedPermissionMatchesEnforcement's legacy call-graph path
-// and its registry Check/Alternatives path (registryEnforcedActions above),
-// so the two cannot silently define "matches" differently.
+// format) is present in enforced. Its only production caller is
+// TestGuard_DocumentedPermissionMatchesEnforcement's legacy call-graph path,
+// through documentedPermissionViolation. The registry Check/Alternatives path
+// that shared it (registryEnforcedActions above) lost its call site when the
+// endpointMeta overlay entries it compared against were removed.
 func actionMatchesDeclaration(declared string, enforced map[string]bool) bool {
 	for _, alt := range strings.Split(declared, "|") {
 		action, _, found := strings.Cut(strings.TrimSpace(alt), ":")
@@ -574,9 +578,9 @@ func TestRegistryEnforcedActions(t *testing.T) {
 	}
 }
 
-// TestActionMatchesDeclaration pins the shared "does declared name an
-// enforced action" comparison both the legacy call-graph path and the
-// registry Check/Alternatives path route through.
+// TestActionMatchesDeclaration pins the "does declared name an enforced
+// action" comparison that TestGuard_DocumentedPermissionMatchesEnforcement's
+// legacy call-graph path — its only production caller — routes through.
 func TestActionMatchesDeclaration(t *testing.T) {
 	if !actionMatchesDeclaration("view:vm|view:container", map[string]bool{"view": true}) {
 		t.Error(`want a match: "view" is the action behind the second alternative`)
@@ -737,9 +741,8 @@ func TestNormalizePermissionList(t *testing.T) {
 
 // TestGuard_RegistrySelfServiceRoutesAreReviewed is the production guard:
 // every registered registry endpoint declaring Permissions.SelfService
-// must also be listed in selfServiceRoutes. It iterates zero times today —
-// nothing is migrated yet — and starts doing real work the moment Phase 4
-// registers a SelfService endpoint.
+// must also be listed in selfServiceRoutes. It walks every SelfService
+// declaration the registry holds.
 func TestGuard_RegistrySelfServiceRoutesAreReviewed(t *testing.T) {
 	s := newRouteStubServer(t)
 	registered := map[string]bool{}

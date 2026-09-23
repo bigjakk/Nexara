@@ -27,11 +27,11 @@ const (
 // It takes the storage-id FORMAT rather than a bespoke pattern, and that is
 // the anchor as well as the shape: proxmox.DeleteStorage and
 // GetStorageConfig build "/storage/" + url.PathEscape(name), and PathEscape
-// leaves "." and ".." alone — so an un-anchored name resolves onto the
-// storage COLLECTION. The handler only ever checked the segment was
-// non-empty, which ".." satisfies. formatStorageID requires a leading
-// letter, which is also PVE's own rule for a storage id, so nothing that
-// could have been created is refused.
+// leaves "." and ".." alone — so an un-anchored name resolves upward: "."
+// onto the storage COLLECTION, ".." onto the API root above it. The handler
+// only ever checked the segment was non-empty, which ".." satisfies.
+// formatStorageID requires a leading letter, which is also PVE's own rule for
+// a storage id, so nothing that could have been created is refused.
 var importSourceStorageParam = func() apischema.Property {
 	p := apischema.StdOption("storage-id")
 	p.Description = "Proxmox storage id of the import source to remove, as " +

@@ -94,11 +94,12 @@ func TestFirewallTemplateRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T
 // TestApplyTemplateIsClusterScopedNotGlobal is the one permission decision
 // in this slice that could go wrong quietly.
 //
-// The other three template routes are global because a template belongs to
-// the install. Apply is not: it writes rules into ONE cluster's firewall.
-// Declaring it global would let a caller holding manage:network
-// instance-wide act on a cluster they hold nothing on, and the route would
-// still look correct next to its three siblings.
+// The other template routes are global because a template belongs to the
+// install. Apply is not: it writes rules into ONE cluster's firewall.
+// Declaring it global would refuse every operator whose manage:network is
+// scoped to that cluster — a global check needs a global grant, and a global
+// grant already covers every cluster, so it would admit no one new — and the
+// route would still look correct next to its siblings.
 func TestApplyTemplateIsClusterScopedNotGlobal(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPost, clusterScope+"/firewall-templates/:id/apply")
 	if e.Permissions.Check == nil {

@@ -1349,15 +1349,16 @@ func TestSnapshotCreateHandlerPassesItsOwnGuestKind(t *testing.T) {
 // than asserting it REFUSES this — a rule can be present and still admit
 // the thing it was put there for. So this sends the payload.
 //
-// Escaping is explicitly not the guard. Proxmox decodes a percent-escape
-// before it resolves the path (the capture-server run recorded at
-// internal/proxmox/client.go and in validateVolumeID's doc comment proved
-// "%2e%2e%2f" arrives byte-for-byte and becomes "../" on the far side), so
-// a value that reaches the client is a value that reaches the path. Both
-// spellings below must be refused here, at the declaration, whether Fiber
-// hands the decoded form to validation or the raw one: the decoded form
+// Escaping is not the guard. The snapshot methods url.PathEscape the name,
+// which re-encodes a "%" as "%25", so a raw "%2e%2e%2f" reaches Proxmox as a
+// literal name rather than as "../" — but PathEscape leaves a bare "." and
+// ".." alone, and those resolve upward once pveproxy normalises the path.
+// Both spellings below must be refused here, at the declaration, whether
+// Fiber hands the decoded form to validation or the raw one: the decoded form
 // carries separators and dots, the raw form carries percents, and the
-// pve-configid-existing pattern admits neither.
+// pve-configid-existing pattern admits neither. The client's own guard —
+// validatePathSegment (client.go), called from the snapshot methods in
+// client_guests.go ("Addressing an existing snapshot") — is the second layer.
 func TestSnapshotNameParamRefusesTraversal(t *testing.T) {
 	routes := []struct {
 		method string
@@ -1386,7 +1387,7 @@ func TestSnapshotNameParamRefusesTraversal(t *testing.T) {
 		// why the snapshot routes need no handler-side decode to be safe,
 		// and it is a different mechanism from the ceph pool route, whose
 		// rule DOES admit "%" and which relies on the client guard instead.
-		{"%2e%2e%2f", fiber.StatusBadRequest, "the encoded traversal decodes and the Pattern refuses it"},
+		{"%2e%2e%2f", fiber.StatusBadRequest, "a raw percent, which the Pattern admits nowhere"},
 		{"..%2fetc", fiber.StatusBadRequest, "half-encoded traversal"},
 		{"..", fiber.StatusBadRequest, "the bare parent-directory segment"},
 		{`a\b`, fiber.StatusBadRequest, "a Windows-style separator"},
@@ -1423,8 +1424,8 @@ func TestSnapshotNameParamRefusesTraversal(t *testing.T) {
 
 				status, env := send(t, app, httptest.NewRequest(rt.method, target, nil))
 				if cap.called {
-					t.Fatalf("snap_name %q reached the handler; it would be interpolated into a "+
-						"Proxmox path, and Proxmox decodes the escape before it resolves that path",
+					t.Fatalf("snap_name %q reached the handler; the declaration is the first layer that "+
+						"keeps a snapshot path segment from walking out of the snapshot it addresses",
 						payload.value)
 				}
 				if status != payload.want {
