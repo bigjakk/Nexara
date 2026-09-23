@@ -170,9 +170,11 @@ func registerHAEndpoints(reg *Registry, h *handlers.HAHandler) {
 			"state": haStateParam().AsOptional(),
 			"group": optString(128, "<name>",
 				"HA group to place the resource in. Omitted or empty leaves it ungrouped."),
-			"max_restart":  haRetryCount("Times the HA manager may restart the guest on its own node before relocating it."),
-			"max_relocate": haRetryCount("Times the HA manager may relocate the guest before giving up."),
-			"comment":      haComment("resource"),
+			"max_restart": haRetryCount("Times the HA manager may restart the guest on its own node before relocating it. " +
+				"Omitted leaves Proxmox's default of 1; send 0 for none."),
+			"max_relocate": haRetryCount("Times the HA manager may relocate the guest before giving up. " +
+				"Omitted leaves Proxmox's default of 1; send 0 for none."),
+			"comment": haComment("resource"),
 			"failback": haFlag("Move the guest back to its highest-priority node once that node returns. " +
 				"Omitted leaves Proxmox's default rather than writing 0."),
 		}),

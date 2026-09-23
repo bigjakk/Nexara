@@ -3,6 +3,7 @@ package proxmox
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"testing"
 )
 
@@ -141,6 +142,96 @@ func TestHAResourceMethods_RejectInjectionWithoutIssuingRequest(t *testing.T) {
 			}
 			if len(*seen) != 0 {
 				t.Errorf("issued %d request(s) %v, want none", len(*seen), *seen)
+			}
+		})
+	}
+}
+
+// TestCreateHAResource_RetryCounts pins how the create form carries
+// max_restart and max_relocate. Proxmox defaults both to 1, but only for a key
+// that is absent — a 0 it is sent is stored as 0 (see the comment in
+// CreateHAResource) — so nil and 0 are different requests. The form used to
+// send a count only when it was > 0, which made every explicit 0 a 1.
+func TestCreateHAResource_RetryCounts(t *testing.T) {
+	ptr := func(i int) *int { return &i }
+	tests := []struct {
+		name       string
+		params     CreateHAResourceParams
+		wantForm   map[string]string
+		wantAbsent []string
+	}{
+		{
+			name:     "an explicit 0 is sent rather than left to Proxmox's default of 1",
+			params:   CreateHAResourceParams{SID: "vm:100", MaxRestart: ptr(0), MaxRelocate: ptr(0)},
+			wantForm: map[string]string{"max_restart": "0", "max_relocate": "0"},
+		},
+		{
+			name:       "an omitted count sends no key, so Proxmox's default applies",
+			params:     CreateHAResourceParams{SID: "vm:100"},
+			wantAbsent: []string{"max_restart", "max_relocate"},
+		},
+		{
+			name:     "a positive count is sent as given",
+			params:   CreateHAResourceParams{SID: "vm:100", MaxRestart: ptr(3), MaxRelocate: ptr(2)},
+			wantForm: map[string]string{"max_restart": "3", "max_relocate": "2"},
+		},
+		{
+			// Each key follows its own field: a 0 on one must neither drag
+			// the other into the form nor be written under its name.
+			name:       "only max_restart",
+			params:     CreateHAResourceParams{SID: "vm:100", MaxRestart: ptr(0)},
+			wantForm:   map[string]string{"max_restart": "0"},
+			wantAbsent: []string{"max_relocate"},
+		},
+		{
+			name:       "only max_relocate",
+			params:     CreateHAResourceParams{SID: "vm:100", MaxRelocate: ptr(0)},
+			wantForm:   map[string]string{"max_relocate": "0"},
+			wantAbsent: []string{"max_restart"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				calls   int
+				gotForm url.Values
+			)
+			srv := newTestServer(t, map[string]http.HandlerFunc{
+				"/api2/json/cluster/ha/resources": func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					if r.Method != http.MethodPost {
+						t.Errorf("method: want POST, got %s", r.Method)
+					}
+					if err := r.ParseForm(); err != nil {
+						t.Errorf("ParseForm: %v", err)
+					}
+					gotForm = r.PostForm
+					jsonResponse(w, nil)
+				},
+			})
+			defer srv.Close()
+			c := newTestClient(t, srv.URL)
+
+			if err := c.CreateHAResource(context.Background(), tt.params); err != nil {
+				t.Fatalf("CreateHAResource: %v", err)
+			}
+			// Without a form that arrived, every absence check below would
+			// pass for the wrong reason.
+			if calls != 1 {
+				t.Fatalf("the create reached Proxmox %d times, want 1", calls)
+			}
+			if got := gotForm.Get("sid"); got != "vm:100" {
+				t.Errorf("sid form param: want %q, got %q", "vm:100", got)
+			}
+			for k, want := range tt.wantForm {
+				if got, ok := gotForm[k]; !ok || len(got) != 1 || got[0] != want {
+					t.Errorf("%s form param: want [%q], got %q (present=%v)", k, want, got, ok)
+				}
+			}
+			for _, k := range tt.wantAbsent {
+				if _, ok := gotForm[k]; ok {
+					t.Errorf("%s form param should be absent, got %q", k, gotForm.Get(k))
+				}
 			}
 		})
 	}

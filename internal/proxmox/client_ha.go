@@ -158,11 +158,20 @@ func (c *Client) CreateHAResource(ctx context.Context, params CreateHAResourcePa
 	if params.Group != "" {
 		form.Set("group", params.Group)
 	}
-	if params.MaxRestart > 0 {
-		form.Set("max_restart", strconv.Itoa(params.MaxRestart))
+	// Sent whenever the caller chose a value, 0 included. Both counts are
+	// `optional => 1, default => 1, minimum => 0` in pve-ha-manager
+	// (src/PVE/HA/Resources.pm), and that default only ever reaches a key that
+	// is ABSENT: the create call (src/PVE/API2/HA/Resources.pm) stores every
+	// defined value through pve-common's SectionConfig check_config, 0 among
+	// them, and checked_resources_config (src/PVE/HA/Config.pm) fills in 1
+	// only `if !defined`. So an omitted key means 1 and a 0 means 0, which is
+	// why these are pointers. They were ints sent only when `> 0`, which turned
+	// every explicit 0 into a 1.
+	if params.MaxRestart != nil {
+		form.Set("max_restart", strconv.Itoa(*params.MaxRestart))
 	}
-	if params.MaxRelocate > 0 {
-		form.Set("max_relocate", strconv.Itoa(params.MaxRelocate))
+	if params.MaxRelocate != nil {
+		form.Set("max_relocate", strconv.Itoa(*params.MaxRelocate))
 	}
 	if params.Comment != "" {
 		form.Set("comment", params.Comment)

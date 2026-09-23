@@ -226,18 +226,21 @@ func (h *HAHandler) CreateResource(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 	sid := p.String("sid")
+	// The two retry counts and failback are *int, so that omitting a key
+	// means "do not send this property" — Proxmox then applies its own
+	// default, 1 for all three — rather than "send 0". p.OptInt is what tells
+	// the two apart: apischema marks only a key the caller sent as supplied,
+	// never one filled from a declared default. The counts used to be read
+	// with p.Int, which returns 0 for both, and the client dropped every 0 —
+	// so an explicit 0 became Proxmox's 1.
 	req := proxmox.CreateHAResourceParams{
 		SID:         sid,
 		State:       p.String("state"),
 		Group:       p.String("group"),
-		MaxRestart:  int(p.Int("max_restart")),
-		MaxRelocate: int(p.Int("max_relocate")),
+		MaxRestart:  optIntPtr(p.OptInt("max_restart")),
+		MaxRelocate: optIntPtr(p.OptInt("max_relocate")),
 		Comment:     p.String("comment"),
-		// A *int, so that omitting the key means "do not send this
-		// property" rather than "send 0" — the distinction a plain bool
-		// could not express and the schema now carries by declaring no
-		// default.
-		Failback: optIntPtr(p.OptInt("failback")),
+		Failback:    optIntPtr(p.OptInt("failback")),
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -257,11 +260,13 @@ func (h *HAHandler) CreateResource(c fiber.Ctx, p *apischema.Params) error {
 	if req.Group != "" {
 		detailMap["group"] = req.Group
 	}
-	if req.MaxRestart != 0 {
-		detailMap["max_restart"] = req.MaxRestart
+	// An explicit 0 is recorded, because it is what was sent; an omitted count
+	// is not, because Proxmox chose that value and this request never stated it.
+	if req.MaxRestart != nil {
+		detailMap["max_restart"] = *req.MaxRestart
 	}
-	if req.MaxRelocate != 0 {
-		detailMap["max_relocate"] = req.MaxRelocate
+	if req.MaxRelocate != nil {
+		detailMap["max_relocate"] = *req.MaxRelocate
 	}
 	if req.Comment != "" {
 		detailMap["comment"] = req.Comment

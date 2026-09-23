@@ -1991,12 +1991,16 @@ type UpdateClusterOptionsParams struct {
 }
 
 // CreateHAResourceParams holds parameters for POST /cluster/ha/resources.
+//
+// MaxRestart, MaxRelocate and Failback are pointers because nil ("send no
+// key, so Proxmox applies its default") and 0 are different requests, and
+// Proxmox's default for all three is 1. See CreateHAResource.
 type CreateHAResourceParams struct {
 	SID         string `json:"sid"`
 	State       string `json:"state,omitempty"`
 	Group       string `json:"group,omitempty"`
-	MaxRestart  int    `json:"max_restart,omitempty"`
-	MaxRelocate int    `json:"max_relocate,omitempty"`
+	MaxRestart  *int   `json:"max_restart,omitempty"`
+	MaxRelocate *int   `json:"max_relocate,omitempty"`
 	Comment     string `json:"comment,omitempty"`
 	Failback    *int   `json:"failback,omitempty"`
 }
