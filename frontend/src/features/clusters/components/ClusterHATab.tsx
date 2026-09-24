@@ -54,6 +54,8 @@ import {
   useDeleteHAGroup,
   useUpdateHARule,
   useDeleteHARule,
+  HA_RESOURCE_DEFAULTS,
+  haResourceHasFailback,
   type HAStatusEntry,
   type HAResource,
   type HAGroup,
@@ -64,7 +66,11 @@ import { HARuleForm } from "@/features/ha/components/HARuleForm";
 import { HAMaintenanceCard } from "@/features/ha/components/HAMaintenanceCard";
 import { useClusterVMs, useClusterNodes } from "../api/cluster-queries";
 import type { VMResponse } from "@/types/api";
-import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
+import {
+  isPVEAtLeast,
+  isPVEVersionKnown,
+  PVE_FEATURES,
+} from "@/lib/pve-version";
 
 interface ClusterHATabProps {
   clusterId: string;
@@ -152,6 +158,16 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   // PVE 9 deprecated HA groups in favor of node-affinity rules and soft-disables
   // the groups write API once migrated. Gate group creation/editing accordingly.
   const groupsDeprecated = isPVEAtLeast(pveVersion, PVE_FEATURES.HA_RULES);
+  // The version is "" until the cluster query resolves, and on a cluster that
+  // never synced. That is its own state, not PVE 8: read as PVE 8 it offered
+  // group writes a migrated PVE 9 cluster refuses, and told a PVE 9 cluster it
+  // was too old for rules. Group writes and that message wait for a version.
+  const versionKnown = isPVEVersionKnown(pveVersion);
+  // Group create and edit exist only before PVE 9 migrated groups to rules.
+  const groupWritesAllowed = versionKnown && !groupsDeprecated;
+  // The same boundary from the other side: a resource has a failback of its
+  // own only from PVE 9, where it took over from the group's nofailback.
+  const resourceFailback = haResourceHasFailback(pveVersion);
   const resourcesQuery = useHAResources(clusterId);
   const groupsQuery = useHAGroups(clusterId);
   const rulesQuery = useHARules(clusterId);
@@ -292,7 +308,11 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   const statusEntries = statusQuery.data ?? [];
 
   const hasRules = (rulesQuery.data ?? []).length > 0;
-  const rulesSupported = rulesQuery.isSuccess; // PVE 8.3+
+  // HA rules arrived with PVE 9.0 (pve-ha-manager 5.0.2; 4.0.x has no
+  // API2/HA/Rules.pm). Not the rules query's success: PVE 8 answers the rules
+  // path with 501, which the backend's ListRules turns into an empty 200, so
+  // success alone offered "Add Rule" on a cluster where every save fails.
+  const rulesSupported = isPVEAtLeast(pveVersion, PVE_FEATURES.HA_RULES);
   const hasGroups = (groupsQuery.data ?? []).length > 0;
 
   return (
@@ -466,6 +486,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                   <HAResourceForm
                     mode="create"
                     clusterId={clusterId}
+                    pveVersion={pveVersion}
                     availableVMs={availableVMs}
                     onSuccess={() => {
                       setResCreateOpen(false);
@@ -491,7 +512,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                       <TableHead>Status</TableHead>
                       <TableHead>Group</TableHead>
                       <TableHead>Restart / Relocate</TableHead>
-                      <TableHead>Failback</TableHead>
+                      {resourceFailback && <TableHead>Failback</TableHead>}
                       <TableHead>Comment</TableHead>
                       {canManage("ha") && (
                         <TableHead className="text-right">Actions</TableHead>
@@ -512,7 +533,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                         <TableCell>
                           {canManage("ha") ? (
                             <Select
-                              value={res.state}
+                              value={res.state || HA_RESOURCE_DEFAULTS.state}
                               onValueChange={(v) => {
                                 handleQuickStateChange(res.sid, v);
                               }}
@@ -529,7 +550,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                               </SelectContent>
                             </Select>
                           ) : (
-                            statusBadge(res.state)
+                            statusBadge(res.state || HA_RESOURCE_DEFAULTS.state)
                           )}
                         </TableCell>
                         <TableCell>
@@ -537,15 +558,27 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                         </TableCell>
                         <TableCell>{res.group || "—"}</TableCell>
                         <TableCell className="text-xs">
-                          {res.max_restart ?? 1} / {res.max_relocate}
+                          <ResourceSetting
+                            value={res.max_restart}
+                            fallback={HA_RESOURCE_DEFAULTS.max_restart}
+                          />
+                          {" / "}
+                          <ResourceSetting
+                            value={res.max_relocate}
+                            fallback={HA_RESOURCE_DEFAULTS.max_relocate}
+                          />
                         </TableCell>
-                        <TableCell>
-                          {res.failback === 0 ? (
-                            <Badge variant="outline">Off</Badge>
-                          ) : (
-                            <Badge variant="default">On</Badge>
-                          )}
-                        </TableCell>
+                        {resourceFailback && (
+                          <TableCell>
+                            {(res.failback ?? HA_RESOURCE_DEFAULTS.failback) ===
+                            0 ? (
+                              <Badge variant="outline">Off</Badge>
+                            ) : (
+                              <Badge variant="default">On</Badge>
+                            )}
+                            {res.failback === undefined && <DefaultMark />}
+                          </TableCell>
+                        )}
                         <TableCell
                           className="max-w-[12rem] truncate text-xs text-muted-foreground"
                           title={res.comment ?? ""}
@@ -604,6 +637,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
               <HAResourceForm
                 mode="edit"
                 clusterId={clusterId}
+                pveVersion={pveVersion}
                 resource={resEditing}
                 onSuccess={() => {
                   setResEditing(null);
@@ -615,7 +649,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
       </TabsContent>
 
       <TabsContent value="groups" className="mt-4 space-y-4">
-        {/* HA Rules section (PVE 8.3+) */}
+        {/* HA Rules section (PVE 9.0+) */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>HA Rules</CardTitle>
@@ -634,6 +668,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                   <HARuleForm
                     mode="create"
                     clusterId={clusterId}
+                    pveVersion={pveVersion}
                     allVMs={allVMs}
                     allNodes={allNodes}
                     onSuccess={() => {
@@ -746,7 +781,9 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                 <p className="text-sm text-muted-foreground">
                   {rulesSupported
                     ? "No HA rules configured."
-                    : "HA rules require Proxmox VE 8.3 or newer."}
+                    : versionKnown
+                      ? "HA rules require Proxmox VE 9.0 or newer."
+                      : "Checking the cluster's Proxmox VE version…"}
                 </p>
               ))}
           </CardContent>
@@ -767,6 +804,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
               <HARuleForm
                 mode="edit"
                 clusterId={clusterId}
+                pveVersion={pveVersion}
                 rule={ruleEditing}
                 allVMs={allVMs}
                 allNodes={allNodes}
@@ -780,8 +818,9 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
 
         {/* HA Groups section. On PVE 9+ Proxmox auto-migrates groups to rules
             so this list is normally empty. We still surface it for PVE 8 and
-            for any cluster where groups still exist. */}
-        {(hasGroups || !rulesSupported) && (
+            for any cluster where groups still exist — but not, with nothing
+            to list, while the version is still unknown. */}
+        {(hasGroups || (versionKnown && !rulesSupported)) && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>
@@ -792,7 +831,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                   </span>
                 )}
               </CardTitle>
-              {canManage("ha") && !groupsDeprecated && (
+              {canManage("ha") && groupWritesAllowed && (
                 <Dialog open={grpCreateOpen} onOpenChange={setGrpCreateOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm">
@@ -910,7 +949,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                           </TableCell>
                           {canManage("ha") && (
                             <TableCell className="text-right space-x-1">
-                              {!groupsDeprecated && (
+                              {groupWritesAllowed && (
                                 <Button
                                   aria-label={`Edit group ${g.group}`}
                                   variant="ghost"
@@ -994,6 +1033,46 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         </Dialog>
       </TabsContent>
     </Tabs>
+  );
+}
+
+// --- Resource settings ---
+
+/**
+ * Marks a value as Proxmox's default rather than one the resource sets, so a
+ * resource on the defaults reads differently from one pinned to the same
+ * value.
+ */
+function DefaultMark() {
+  return (
+    <span
+      className="text-muted-foreground"
+      title="Not set on this resource, so Proxmox's default applies"
+    >
+      {" (default)"}
+    </span>
+  );
+}
+
+/**
+ * A count an HA resource may leave unset (see HA_RESOURCE_DEFAULTS). Proxmox
+ * returns the raw config, so an unset one arrives absent, not as 0: shown as
+ * Proxmox's default, marked as a default, while an explicit value — 0 included
+ * — shows as itself.
+ */
+function ResourceSetting({
+  value,
+  fallback,
+}: {
+  value: number | undefined;
+  fallback: number;
+}) {
+  if (value !== undefined) return <>{value}</>;
+  return (
+    <>
+      {fallback}
+      <DefaultMark />
+    </>
   );
 }
 

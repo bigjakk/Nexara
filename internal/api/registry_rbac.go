@@ -61,9 +61,12 @@ var rbacUserIDParam = apischema.Property{
 // each. On create, a role with no permissions is a legitimate thing to make
 // before filling it in. On update it is a TRISTATE — the request struct's field
 // was a *[]uuid.UUID, so absent means "leave the role's permissions alone" and
-// an EMPTY array means "take them all away". That is why it carries no Default
-// on either: a default would collapse the update's two meanings into one, and
-// the handler reads p.Has to tell them apart.
+// an EMPTY array means "take them all away", which the handler tells apart with
+// p.Has — a read no default can fool (apischema.Property.Default). It carries
+// no Default on either route all the same: CreateRole reads the list with
+// p.Strings (parseRolePermissionIDs), so a default would be GRANTED to every
+// role created without one, and on the update it would document an edit as
+// replacing the permissions it leaves alone.
 func rbacPermissionIDsParam(description string) apischema.Property {
 	return apischema.Property{
 		Type:     apischema.Array,
@@ -247,9 +250,10 @@ func createRoleParams() apischema.Properties {
 //
 // All three are TRISTATE, and that is why none of them carries a Default:
 // the request struct's fields are pointers, so an omitted key leaves the
-// stored value alone. A Default would make p.OptString report every request
-// as having supplied the field, and renaming a role would start blanking
-// its description.
+// stored value alone. The handler reads them with p.OptString and p.Has,
+// which never report a default as supplied (apischema.Property.Default), so
+// a Default would not blank a renamed role's description; it would document
+// that it does.
 func updateRoleParams() apischema.Properties {
 	return apischema.Properties{
 		"id":          roleIDParam,

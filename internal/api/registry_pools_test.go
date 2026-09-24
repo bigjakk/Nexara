@@ -309,8 +309,9 @@ func TestPoolCreateRefusesADotSegmentID(t *testing.T) {
 // the handler forwards as a *string.
 //
 // Omitting `comment` must leave the stored one alone; sending it empty must
-// clear it. A Default on the parameter would collapse the two and overwrite
-// every pool comment whose editor never touched the field.
+// clear it. The handler's p.OptString read keeps the two apart whatever the
+// declaration says (apischema.Property.Default), so the declaration check
+// below is about the docs, and the requests after it pin the distinction.
 func TestPoolUpdateCommentStaysTristate(t *testing.T) {
 	const path = clusterScope + "/pools/:pool_id"
 	prop := declaredEndpoint(t, fiber.MethodPut, path).Parameters["comment"]
@@ -318,8 +319,8 @@ func TestPoolUpdateCommentStaysTristate(t *testing.T) {
 		t.Error("comment is required; the edit dialog saves without it")
 	}
 	if prop.Default != nil {
-		t.Errorf("comment declares default %#v; a default makes p.OptString report every request as "+
-			"supplied, which would clear the stored comment on a save that never mentioned it", prop.Default)
+		t.Errorf("comment declares default %#v; an omitted comment is left alone, and a default "+
+			"would document it as written", prop.Default)
 	}
 
 	target := strings.NewReplacer(":cluster_id", testClusterID, ":pool_id", "pool01").Replace(path)

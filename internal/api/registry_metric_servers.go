@@ -63,10 +63,11 @@ var metricServerTokenParam = apischema.Property{
 // They are Proxmox's own status.cfg vocabulary, and the values are theirs to
 // version and reject — so this closes the parameter SET without restating an
 // enum that would date on the next PVE release. What it does pin is the two
-// PVE-style 0/1 flags, which are declared as integers with NO default so that
-// "the caller said nothing" stays distinguishable from "the caller said 0": the
-// handler forwards them as *int, and a default would start writing
-// disable=0 onto every server whose editor never touched the checkbox.
+// PVE-style 0/1 flags, declared as integers with NO default. "The caller said
+// nothing" and "the caller said 0" stay distinguishable either way — the
+// handler forwards them as *int built from p.OptInt, which a default cannot
+// fool (apischema.Property.Default) — but a declared default would document
+// every save that never touched the checkbox as writing it.
 func metricServerTransportParams() apischema.Properties {
 	return apischema.Properties{
 		"disable": {
@@ -185,9 +186,10 @@ func registerMetricServerEndpoints(reg *Registry, h *handlers.MetricServerHandle
 				Minimum:  apischema.Ptr(1.0),
 				Maximum:  apischema.Ptr(65535.0),
 				Typetext: "<integer>",
-				// No Default, so p.OptInt reports whether the caller chose: the
-				// handler forwards a *int, and a default would rewrite the port
-				// on every save that did not mention it.
+				// No Default: the handler forwards a *int from p.OptInt, which
+				// reports whether the caller chose with or without one
+				// (apischema.Property.Default), and a default would document a
+				// port rewrite that no save performs.
 				Description: "Replacement port. Omitted leaves the stored one alone.",
 			},
 			"delete": optString(1024, "<option[,option...]>", "Options to reset to their defaults, comma-separated, as Proxmox spells them."),

@@ -130,10 +130,11 @@ func TestMetricServerCreateTakesIDUnderItsAlias(t *testing.T) {
 // TestMetricServerFlagsStayTristate pins the two PVE 0/1 flags.
 //
 // Proxmox reads an absent option as "leave the stored value alone" and an
-// explicit 0 as "turn it off". A Default on either would collapse the two and
-// write disable=0 onto every server whose editor never touched the checkbox —
-// the same absent-versus-zero distinction that destroyed a VM's boot disk
-// through disks/attach.
+// explicit 0 as "turn it off" — the same absent-versus-zero distinction that
+// destroyed a VM's boot disk through disks/attach. The handler keeps the two
+// apart with p.OptInt, which a declared default cannot fool
+// (apischema.Property.Default); a Default would still document every save
+// that never touched the checkbox as writing it.
 func TestMetricServerFlagsStayTristate(t *testing.T) {
 	const path = metricServerScope + "/:server_id"
 	e := declaredEndpoint(t, fiber.MethodPut, path)
@@ -143,8 +144,8 @@ func TestMetricServerFlagsStayTristate(t *testing.T) {
 			t.Errorf("%s is required on the update; the dialog saves without it", name)
 		}
 		if prop.Default != nil {
-			t.Errorf("%s declares default %#v; the handler forwards it as a pointer, and a default makes "+
-				"every save look like an explicit choice", name, prop.Default)
+			t.Errorf("%s declares default %#v; an omitted one leaves the stored value alone, and a "+
+				"default would document it as written", name, prop.Default)
 		}
 	}
 

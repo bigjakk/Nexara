@@ -481,9 +481,10 @@ func acmePluginFieldParams() apischema.Properties {
 			Minimum:  apischema.Ptr(0.0),
 			// PVE's own ceiling for this key: two days in seconds.
 			Maximum: apischema.Ptr(172800.0),
-			// NO Default: proxmox.CreateACMEPluginParams.ValidationDelay is a
-			// *int and an omitted key means "do not send it", which leaves
-			// Proxmox's own default in force.
+			// NO Default: an omitted key means "do not send it", which leaves
+			// Proxmox's own default in force. The handler's *int comes from
+			// p.OptInt, which a default cannot fool (apischema.Property.Default),
+			// so a declared one would only document a second copy of Proxmox's.
 			Typetext: "<integer>",
 			Description: "Seconds to wait after writing the DNS record before asking the CA to validate " +
 				"it. Omitted, Proxmox's own default applies.",

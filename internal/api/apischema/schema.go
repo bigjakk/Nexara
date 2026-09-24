@@ -88,8 +88,19 @@ type Property struct {
 	Type        Type
 	Description string
 	Optional    bool // PVE uses `optional`, NOT `required` — match that
-	Default     any
-	Enum        []string
+	// Default is what an OMITTED optional parameter reads as through the
+	// plain accessors (String, Int, Bool, …) and Raw, and what the API docs
+	// print as its default. It never counts as supplied: Has reports false
+	// and every OptX accessor returns (default, false), so a handler that
+	// reads through OptX — or a pointer built from one by optIntPtr and its
+	// siblings in package handlers — sees an omitted key as omitted whether
+	// or not a Default is declared (TestThreeStateOptionalReads). A Default
+	// therefore changes the plain reads and the documentation, never what an
+	// OptX read forwards. It applies only to an absent key (a JSON null, or
+	// "" on an EmptyIsAbsent boolean, counts as absent); an explicit value,
+	// the empty string included, is never replaced by it.
+	Default any
+	Enum    []string
 	// Pattern is a regex, compiled once at registration, that checks the
 	// value's shape and never rewrites it. A regex more than one
 	// declaration wants belongs in the rule catalogue (catalogue.go) and

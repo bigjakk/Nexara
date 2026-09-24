@@ -420,8 +420,9 @@ type startImportRequest struct {
 // The three *bool fields stay pointers because proxmox.ImportCreateOptions
 // sends the corresponding Proxmox key only when one is non-nil: omitting
 // onboot, agent or numa means "keep whatever the source metadata derived",
-// which is different from sending it as false. They are declared optional
-// with no default so OptBool reports which of the two the caller meant.
+// which is different from sending it as false. OptBool reports which of the
+// two the caller meant, with or without a declared default, which it never
+// reports as supplied (apischema.Property.Default).
 func startImportRequestFromParams(p *apischema.Params) startImportRequest {
 	return startImportRequest{
 		Node:              p.String("node"),

@@ -67,10 +67,17 @@ func haConfigIDParam(description string) apischema.Property {
 // haFlag is an optional 0/1 integer, which is how Proxmox spells a boolean
 // in the HA API and how every one of these endpoints has always taken one.
 //
-// It carries NO Default, and that matters for the six of them the handler
-// forwards as a *int: omitting the key means "do not send this property",
-// which is different from sending 0. A Default here would start writing
-// nofailback=0 onto every group whose editor never mentioned failback.
+// It carries NO Default. Not because a default would be sent where the key was
+// omitted: the six the handlers forward as a *int are read with p.OptInt,
+// which reports a default as not supplied (see apischema.Property.Default), so
+// optIntPtr still yields nil and nothing reaches Proxmox. What a Default would
+// change is the plain reads — CreateGroup reads restricted and nofailback, and
+// CreateRule strict, with p.Int, and the client sends any non-zero value, so a
+// Default of 1 would be written on every create that omitted the flag — and
+// the documentation, which would advertise a value no route applies: an
+// omitted flag is left as it is on a PUT, and gets Proxmox's own default on a
+// POST (failback 1, restricted, nofailback and strict 0 — pve-ha-manager
+// Resources.pm, Groups.pm, Rules/NodeAffinity.pm).
 func haFlag(description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.Integer,
@@ -81,6 +88,20 @@ func haFlag(description string) apischema.Property {
 		Description: description,
 	}
 }
+
+// haFailbackVersionNote ends both resource failback descriptions, because the
+// property does not exist everywhere this API reaches. A resource's own
+// failback arrived with HA affinity rules in Proxmox VE 9 (pve-ha-manager
+// 5.0.2), taking over from a group's nofailback. PVE 8's resource schema has
+// none (pve-ha-manager 4.0.x, e.g. 4.0.7 at 53d8e48, src/PVE/HA/Resources.pm
+// and the per-type options), and its create and update schemas carry
+// additionalProperties 0 (pve-common stable-bookworm, SectionConfig
+// createSchema and updateSchema), so the key is a 400 from Proxmox there. The
+// SPA never sends it to PVE 8: haResourceHasFailback in
+// features/ha/api/ha-queries.ts gates the resource editor and the rule
+// editor's inline add alike.
+const haFailbackVersionNote = "Proxmox VE 9 and newer only: on 8 a resource has no failback of its own — " +
+	"its HA group's nofailback decides — and Proxmox refuses the key."
 
 // haRetryCount is max_restart or max_relocate: a count Proxmox bounds below
 // and not above. pve-ha-manager declares both `type => 'integer', minimum =>
@@ -101,11 +122,15 @@ func haRetryCount(description string) apischema.Property {
 // haComment is the free-text note every HA object carries.
 //
 // It has NO format and NO pattern, and the empty string is the point: the
-// resource, group and rule editors all send comment unconditionally, so a
-// blank field arrives as "" and means "clear the note". apischema treats
-// "" as a value the caller SUPPLIED (see present() in validate.go) and
-// every registered format rejects it, so a format here would 400 every
-// save from a form whose comment box is empty.
+// group and rule editors send comment on every save, and the resource editor
+// whenever the operator changed it, so a box left or made blank arrives as ""
+// and means "clear the note". Proxmox takes it as exactly that for all three
+// objects: none declares a format on comment, the update stores the "", and
+// SectionConfig's write_config writes a comment only when it is non-empty
+// (pve-common src/PVE/SectionConfig.pm), so the key is gone from the file.
+// apischema treats "" as a value the caller SUPPLIED (see present() in
+// validate.go) and every registered format rejects it, so a format here would
+// 400 every save whose comment box is empty.
 func haComment(what string) apischema.Property {
 	return optString(4096, "<string>",
 		"Free-text note stored on the "+what+". An empty value clears it.")
@@ -179,7 +204,7 @@ func registerHAEndpoints(reg *Registry, h *handlers.HAHandler) {
 				"Omitted leaves Proxmox's default of 1; send 0 for none."),
 			"comment": haComment("resource"),
 			"failback": haFlag("Move the guest back to its highest-priority node once that node returns. " +
-				"Omitted leaves Proxmox's default rather than writing 0."),
+				"Omitted leaves Proxmox's default, which is on. " + haFailbackVersionNote),
 		}),
 		Handler: h.CreateResource,
 	})
@@ -202,13 +227,16 @@ func registerHAEndpoints(reg *Registry, h *handlers.HAHandler) {
 		Parameters: clusterParams(apischema.Properties{
 			"sid":   haSIDParam,
 			"state": haStateParam().AsOptional(),
+			// An empty group goes to Proxmox as delete=group, because Proxmox
+			// refuses group= outright — see UpdateHAResource in client_ha.go.
 			"group": optString(128, "<name>",
 				"HA group to move the resource into. An EMPTY value removes it from its group, which is "+
-					"what the editor sends when \"none\" is chosen."),
+					"what the editor sends when \"none\" is chosen; Nexara asks Proxmox to delete the "+
+					"property, since Proxmox refuses an empty group."),
 			"max_restart":  haRetryCount("Times the HA manager may restart the guest on its own node before relocating it."),
 			"max_relocate": haRetryCount("Times the HA manager may relocate the guest before giving up."),
 			"comment":      haComment("resource"),
-			"failback":     haFlag("Move the guest back to its highest-priority node once that node returns."),
+			"failback":     haFlag("Move the guest back to its highest-priority node once that node returns. " + haFailbackVersionNote),
 			"digest":       haDigest,
 		}),
 		Handler: h.UpdateResource,
@@ -294,7 +322,7 @@ func registerHAEndpoints(reg *Registry, h *handlers.HAHandler) {
 		Handler:     h.GetStatus,
 	})
 
-	// ── Rules (PVE 8.3+) ──────────────────────────────────────────────
+	// ── Rules (PVE 9.0+) ──────────────────────────────────────────────
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,
 		Path:   haScope + "/rules",
@@ -344,8 +372,10 @@ func registerHAEndpoints(reg *Registry, h *handlers.HAHandler) {
 			"strict":   haFlag("Make a node-affinity rule a hard constraint rather than a preference."),
 			"affinity": haAffinityParam(),
 			"comment":  haComment("rule"),
-			"disable": haFlag("Suspend the rule without deleting it. Sending 0 re-enables it, which the client " +
-				"turns into a property DELETE rather than disable=0 — see UpdateHARule in client_ha.go."),
+			// 0 goes to Proxmox as delete=disable, because Proxmox discards a
+			// falsy disable — see UpdateHARule in client_ha.go.
+			"disable": haFlag("Suspend the rule without deleting it. Sending 0 re-enables it: Nexara asks " +
+				"Proxmox to delete the property, since Proxmox ignores disable=0."),
 			"digest": haDigest,
 		}),
 		Handler: h.UpdateRule,
@@ -441,8 +471,9 @@ func haNodesParam() apischema.Property {
 
 // haRuleTypeParam is the rule kind Proxmox's HA rules API takes.
 //
-// Deliberately NOT an enum. PVE 8.3 shipped node-affinity and
-// resource-affinity and 9.x may add more, and haRuleToResponse in
+// Deliberately NOT an enum. PVE 9.0 shipped node-affinity and
+// resource-affinity (pve-ha-manager 5.0.2 and 5.0.3) and later releases may
+// add more, and haRuleToResponse in
 // handlers/drs.go already has a default branch for a type it does not
 // recognise — so the code is written to pass an unknown type through, and
 // an enum here would be the one place that refused to.

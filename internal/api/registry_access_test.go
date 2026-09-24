@@ -521,10 +521,12 @@ func TestAccessForceIsReadFromTheQueryString(t *testing.T) {
 // account attributes whose Proxmox struct field is a POINTER.
 //
 // nil omits the key from the outbound form (leave the stored value alone) and a
-// pointer to the zero value clears it. A Default on any of them would make
-// p.OptString report every request as having supplied it, so a rename would
-// start clearing the e-mail address — and a Default on `enable` would re-enable
-// a deliberately disabled account on every comment edit.
+// pointer to the zero value clears it. The pointers are built from p.OptString
+// and p.OptBool, which report a default as not supplied (see
+// apischema.Property.Default), so a Default could not make a rename clear the
+// e-mail address or re-enable a disabled account; what it would do is document
+// a value an omitted field never gets, and feed the plain reads, such as the
+// CreateUser audit row's comment and groups. See accessUserFieldParams.
 func TestAccessUserFieldsStayTristate(t *testing.T) {
 	tristate := []string{"comment", "email", "firstname", "lastname", "groups", "keys", "enable", "expire"}
 
@@ -544,8 +546,8 @@ func TestAccessUserFieldsStayTristate(t *testing.T) {
 					t.Errorf("%s: %q is required; every account attribute has always been optional", route.path, name)
 				}
 				if prop.Default != nil {
-					t.Errorf("%s: %q declares default %v — it is a tristate, and a default collapses "+
-						"\"left alone\" into \"set to this\"", route.path, name, prop.Default)
+					t.Errorf("%s: %q declares default %v — it is a tristate, an omitted one is left alone, "+
+						"and a default would document otherwise", route.path, name, prop.Default)
 				}
 			}
 		})

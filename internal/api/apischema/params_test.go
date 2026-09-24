@@ -47,6 +47,9 @@ func threeStateProps() Properties {
 		"ratio":  {Type: Number, Optional: true, Default: 1.5},
 		"weight": {Type: Number, Optional: true},
 		"tags":   {Type: Array, Optional: true, Items: &Property{Type: String}},
+		// Optional integer WITH a default: what a 0/1 flag or a retry count
+		// forwarded as a *int would look like if it declared one.
+		"retries": {Type: Integer, Optional: true, Default: 3},
 	}
 }
 
@@ -72,6 +75,16 @@ func TestThreeStateOptionalReads(t *testing.T) {
 		}
 		if got, supplied := p.OptFloat("ratio"); got != 1.5 || supplied {
 			t.Errorf(`OptFloat("ratio") = (%v, %v), want (1.5, false)`, got, supplied)
+		}
+		// OptInt is no exception, and it is the one the handlers' *int
+		// fields are built from (optIntPtr turns an unsupplied read into
+		// nil): a declared default fills the value and leaves supplied
+		// false, so it can never make an omitted key reach Proxmox.
+		if got := p.Int("retries"); got != 3 {
+			t.Errorf(`Int("retries") = %d, want the default 3`, got)
+		}
+		if got, supplied := p.OptInt("retries"); got != 3 || supplied {
+			t.Errorf(`OptInt("retries") = (%d, %v), want (3, false)`, got, supplied)
 		}
 	})
 

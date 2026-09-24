@@ -347,7 +347,7 @@ func TestReplicationEditKeepsTheEmptyStringSentinel(t *testing.T) {
 	app = newRegistryApp(t, noAuth(), probeReplicationEndpoint(t, fiber.MethodPut, path, cap))
 	send(t, app, jsonRequest(http.MethodPut, replicationRoute(path), `{"schedule":"*/30"}`))
 	if _, supplied := cap.params.OptInt("disable"); supplied {
-		t.Error("disable reads as supplied on a body that omitted it; the declaration must carry no default")
+		t.Error("disable reads as supplied on a body that omitted it; every edit would re-enable the job")
 	}
 
 	// And an empty body is a real request — "change nothing".

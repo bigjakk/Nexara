@@ -305,8 +305,8 @@ func TestStartImportKeepsItsSentinels(t *testing.T) {
 			t.Errorf("%s is %s/optional=%v, want an optional boolean", name, prop.Type, prop.Optional)
 		}
 		if prop.Default != nil {
-			t.Errorf("%s declares default %#v; it must have NONE, or the import starts writing the "+
-				"key onto every guest whose requester never mentioned it", name, prop.Default)
+			t.Errorf("%s declares default %#v; it must have NONE — an omitted one keeps the "+
+				"source-derived value, and a default would document it as written", name, prop.Default)
 		}
 	}
 

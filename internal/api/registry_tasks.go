@@ -361,9 +361,11 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 				Minimum:  apischema.Ptr(0.0),
 				Maximum:  apischema.Ptr(100.0),
 				Typetext: "<number>",
-				// No Default, so p.OptFloat reports whether the caller chose:
-				// the handler passes the value when they did and NULL when they
-				// did not. The SPA sends an explicit null for "unknown", which
+				// No Default. The handler passes the value when p.OptFloat says
+				// the caller chose one — a flag no declared default sets
+				// (apischema.Property.Default) — and NULL when they did not, so
+				// a default would only document a progress that no omitted key
+				// stores. The SPA sends an explicit null for "unknown", which
 				// apischema reads as absent — the same NULL.
 				Description: "Percentage complete. Omitted, or sent as null, clears the stored value.",
 			},

@@ -153,8 +153,8 @@ func (h *GuestToolsHandler) UpdateConfig(c fiber.Ctx, p *apischema.Params) error
 		TargetVersion: targetVersion,
 		MaxConcurrent: maxConcurrent,
 		// A *bool, so that omitting the key means "keep the stored value"
-		// rather than "set it to false" — the distinction the schema carries
-		// by declaring no default.
+		// rather than "set it to false" — the distinction p.OptBool carries,
+		// and one a declared default could not blur (apischema.Property.Default).
 		SnapshotBefore: optionalBool(optBoolPtr(p.OptBool("snapshot_before"))),
 	})
 	if err != nil {
@@ -255,8 +255,8 @@ func (h *GuestToolsHandler) SetPolicy(c fiber.Ctx, p *apischema.Params) error {
 		Vmid:      safeconv.Int32(vmid),
 		// A *bool: an exclusion is the operator saying "never touch this
 		// guest", and a client that does not know about the field must not
-		// clear it. The schema declares no default, so an omitted key reads
-		// back as not supplied.
+		// clear it. An omitted key reads back from p.OptBool as not supplied,
+		// whatever the schema declares as a default (apischema.Property.Default).
 		Excluded:      optionalBool(optBoolPtr(p.OptBool("excluded"))),
 		TargetVersion: targetVersion,
 		// The note's length cap is the schema's now.

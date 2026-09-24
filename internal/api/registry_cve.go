@@ -200,15 +200,14 @@ func registerCVEEndpoints(reg *Registry, h *handlers.CVEHandler) {
 		Permissions: clusterCheck("manage", "cve_scan"),
 		Parameters: clusterParams(apischema.Properties{
 			"enabled": optTristateBool(
-				"Whether the scheduler starts scans on its own. OMITTING it keeps the stored value; " +
-					"a default of false here would silently switch scanning off for any client that " +
-					"sent only the interval."),
+				"Whether the scheduler starts scans on its own. OMITTING it keeps the stored value."),
 			"interval_hours": {
 				Type:     apischema.Integer,
 				Optional: true,
-				// No Default, for the same reason as `enabled`: the handler
-				// merges an omitted value with what is stored, and a
-				// default would overwrite it with 24 on every partial save.
+				// No Default, like `enabled`: the handler merges an omitted
+				// value with what is stored, reading it with p.OptInt, which a
+				// default cannot fool (apischema.Property.Default) — so a
+				// Default of 24 would only document a reset no save performs.
 				Minimum:     apischema.Ptr(1.0),
 				Maximum:     apischema.Ptr(168.0),
 				Typetext:    "<integer>",
@@ -257,8 +256,9 @@ func registerCVEEndpoints(reg *Registry, h *handlers.CVEHandler) {
 				Type:     apischema.Integer,
 				Optional: true,
 				// No Default: the handler merges an omitted value with what
-				// is stored, so a default would rewrite the operator's
-				// cooldown to 60 on every partial save.
+				// is stored, reading it with p.OptInt, which a default cannot
+				// fool (apischema.Property.Default) — so a Default of 60 would
+				// only document a reset no partial save performs.
 				Minimum:     apischema.Ptr(0.0),
 				Maximum:     apischema.Ptr(10080.0),
 				Typetext:    "<integer>",

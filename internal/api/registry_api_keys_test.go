@@ -247,8 +247,9 @@ func probeAPIKeyEndpoint(t *testing.T, method, path string, cap *capture) Endpoi
 // TestAPIKeyExpiryBounds pins the three things about expires_in that the old
 // *int64 encoded, plus the one that it got wrong.
 //
-//   - Absent means "never expires", so there must be no Default: with one, every
-//     request would look as though it had asked for a fixed lifetime.
+//   - Absent means "never expires", so there must be no Default. The handler's
+//     p.OptInt read would ignore one (apischema.Property.Default), but the docs
+//     would promise every key a fixed lifetime it never gets.
 //   - Below an hour is refused, which is the handler's own rule moved out.
 //   - Above the cap is refused, which is NEW. The value is multiplied into a
 //     time.Duration — int64 nanoseconds — and a caller asking for 1e18 seconds
@@ -262,7 +263,8 @@ func TestAPIKeyExpiryBounds(t *testing.T) {
 		t.Error("expires_in is required; omitting it has always meant a key that never expires")
 	}
 	if prop.Default != nil {
-		t.Errorf("expires_in declares default %v — that would give every key a fixed lifetime", prop.Default)
+		t.Errorf("expires_in declares default %v — an omitted one never expires, and a default would "+
+			"document a fixed lifetime", prop.Default)
 	}
 	if prop.Minimum == nil || *prop.Minimum != 3600 {
 		t.Errorf("expires_in declares minimum %v, want 3600", prop.Minimum)

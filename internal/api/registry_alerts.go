@@ -549,9 +549,10 @@ func createChannelParams() apischema.Properties {
 // updateChannelParams is the body of PUT /api/v1/notification-channels/:id.
 //
 // Every parameter but the path `id` is optional, and none of them carries a
-// default. `enabled` is the one that matters: the handler reads it through a
-// pointer so that omitting it leaves the stored flag alone, and a Default of
-// true here would re-enable a disabled channel on every rename.
+// default. `enabled` is the one that matters: omitting it leaves the stored
+// flag alone. The handler's p.OptBool read is what keeps it so — a default is
+// never reported as supplied (apischema.Property.Default) — and a Default of
+// true would only document a re-enable that no rename performs.
 //
 // name and channel_type are read as `if x != ""`, so an empty value is absent
 // rather than a clear — which is why neither carries a MinLength that would

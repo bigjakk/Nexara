@@ -289,7 +289,30 @@ func (c *Client) UpdateHAResource(ctx context.Context, sid string, params Update
 		form.Set("state", *params.State)
 	}
 	if params.Group != nil {
-		form.Set("group", *params.Group)
+		if *params.Group == "" {
+			// Taking the resource out of its group has to unset the property;
+			// Proxmox refuses group= outright. The update's `group` is
+			// get_standard_option('pve-ha-group-id') (pve-ha-manager
+			// src/PVE/HA/Tools.pm), `format => 'pve-configid'`, and
+			// PVE::JSONSchema's check_prop runs a format on every defined
+			// value, the empty string included, where pve_verify_configid dies
+			// "invalid configuration ID ''" (pve-common src/PVE/JSONSchema.pm)
+			// — a 400 before the update code runs. The value does arrive as ""
+			// rather than dropped: decode_urlencoded (pve-http-server
+			// src/PVE/APIServer/AnyEvent.pm) splits each pair into a
+			// two-variable list, which keeps a trailing empty field.
+			//
+			// `delete` is SectionConfig's generic unset list, which
+			// update_single_resource_config_inplace (src/PVE/HA/Config.pm)
+			// applies after storing the other values. group is optional and
+			// not fixed there, and deleting a key the resource does not have is
+			// a no-op — on PVE 9 as well, whose update refuses only a NON-empty
+			// group once groups have been migrated to rules. A second key to
+			// unset has to join this one list rather than Set() over it.
+			form.Set("delete", "group")
+		} else {
+			form.Set("group", *params.Group)
+		}
 	}
 	if params.MaxRestart != nil {
 		form.Set("max_restart", strconv.Itoa(*params.MaxRestart))

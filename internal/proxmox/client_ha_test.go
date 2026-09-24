@@ -2,8 +2,11 @@ package proxmox
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
+	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -237,5 +240,217 @@ func TestCreateHAResource_RetryCounts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestHAResourceReads_KeepAnUnsetSettingApartFromZero pins how both HA resource
+// reads decode max_restart, max_relocate and failback. Proxmox answers them from
+// the raw section config, where a property left at its default is ABSENT (see
+// HAResource), so nil has to mean "Proxmox's default" and a pointer to 0 an
+// explicit 0. As plain ints both read as 0, which is how a resource on the
+// defaults came to be displayed, and edited, as 0 / 0.
+//
+// The fixtures give the three keys three different values, so a JSON tag
+// crossed between two fields cannot pass.
+func TestHAResourceReads_KeepAnUnsetSettingApartFromZero(t *testing.T) {
+	ptr := func(i int) *int { return &i }
+	tests := []struct {
+		name string
+		// config is the resource as Proxmox serialises it, digest included.
+		config                                  string
+		wantRestart, wantRelocate, wantFailback *int
+	}{
+		{
+			name:   "a resource on every default carries none of the keys",
+			config: `{"sid":"vm:101","type":"vm","state":"started","digest":"0a1b"}`,
+		},
+		{
+			name:         "explicit zeros stay zeros",
+			config:       `{"sid":"vm:101","type":"vm","max_restart":0,"max_relocate":0,"failback":0,"digest":"0a1b"}`,
+			wantRestart:  ptr(0),
+			wantRelocate: ptr(0),
+			wantFailback: ptr(0),
+		},
+		{
+			name:         "each key lands in its own field",
+			config:       `{"sid":"vm:101","type":"vm","max_restart":3,"max_relocate":2,"failback":1,"digest":"0a1b"}`,
+			wantRestart:  ptr(3),
+			wantRelocate: ptr(2),
+			wantFailback: ptr(1),
+		},
+		{
+			name:         "one key set and the others left to the default",
+			config:       `{"sid":"vm:101","type":"vm","max_relocate":0,"digest":"0a1b"}`,
+			wantRelocate: ptr(0),
+		},
+	}
+	show := func(p *int) string {
+		if p == nil {
+			return "nil"
+		}
+		return strconv.Itoa(*p)
+	}
+	check := func(t *testing.T, got HAResource, wantRestart, wantRelocate, wantFailback *int) {
+		t.Helper()
+		if got.SID != "vm:101" {
+			// Without the resource itself, every nil below would pass for want
+			// of anything decoded.
+			t.Fatalf("decoded sid %q, want vm:101", got.SID)
+		}
+		for _, f := range []struct {
+			key       string
+			got, want *int
+		}{
+			{"max_restart", got.MaxRestart, wantRestart},
+			{"max_relocate", got.MaxRelocate, wantRelocate},
+			{"failback", got.Failback, wantFailback},
+		} {
+			if show(f.got) != show(f.want) {
+				t.Errorf("%s decoded as %s, want %s", f.key, show(f.got), show(f.want))
+			}
+		}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Run("GetHAResource", func(t *testing.T) {
+				srv, _ := newCaptureServer(t, `{"data":`+tt.config+`}`)
+				got, err := newTestClient(t, srv.URL).GetHAResource(context.Background(), "vm:101")
+				if err != nil {
+					t.Fatalf("GetHAResource: %v", err)
+				}
+				check(t, *got, tt.wantRestart, tt.wantRelocate, tt.wantFailback)
+			})
+			t.Run("GetHAResources", func(t *testing.T) {
+				srv, _ := newCaptureServer(t, `{"data":[`+tt.config+`]}`)
+				got, err := newTestClient(t, srv.URL).GetHAResources(context.Background())
+				if err != nil {
+					t.Fatalf("GetHAResources: %v", err)
+				}
+				if len(got) != 1 {
+					t.Fatalf("decoded %d resources, want 1", len(got))
+				}
+				check(t, got[0], tt.wantRestart, tt.wantRelocate, tt.wantFailback)
+			})
+		})
+	}
+}
+
+// TestUpdateHAResource_Form pins the whole PUT form UpdateHAResource builds:
+// exactly the keys the caller set, and nothing for a nil field, so an edit that
+// changed one setting writes one setting. The one translation is an empty
+// group: Proxmox refuses group= (see the comment in UpdateHAResource), so
+// clearing the group goes out as delete=group.
+func TestUpdateHAResource_Form(t *testing.T) {
+	ptr := func(i int) *int { return &i }
+	str := func(s string) *string { return &s }
+	tests := []struct {
+		name   string
+		params UpdateHAResourceParams
+		want   url.Values
+	}{
+		{
+			name:   "a comment alone",
+			params: UpdateHAResourceParams{Comment: str("maintenance window")},
+			want:   url.Values{"comment": {"maintenance window"}},
+		},
+		{
+			// Proxmox stores it as "" and SectionConfig's write_config never
+			// writes an empty comment, so this is what clears one.
+			name:   "an emptied comment is sent empty",
+			params: UpdateHAResourceParams{Comment: str("")},
+			want:   url.Values{"comment": {""}},
+		},
+		{
+			name:   "an explicit 0 is sent",
+			params: UpdateHAResourceParams{MaxRestart: ptr(0)},
+			want:   url.Values{"max_restart": {"0"}},
+		},
+		{
+			name:   "state and failback together",
+			params: UpdateHAResourceParams{State: str("stopped"), Failback: ptr(0)},
+			want:   url.Values{"state": {"stopped"}, "failback": {"0"}},
+		},
+		{
+			name:   "a group is set",
+			params: UpdateHAResourceParams{Group: str("ha-group01")},
+			want:   url.Values{"group": {"ha-group01"}},
+		},
+		{
+			name:   "an empty group is cleared with delete",
+			params: UpdateHAResourceParams{Group: str("")},
+			want:   url.Values{"delete": {"group"}},
+		},
+		{
+			name:   "a group cleared alongside other changes",
+			params: UpdateHAResourceParams{Group: str(""), MaxRelocate: ptr(3)},
+			want:   url.Values{"delete": {"group"}, "max_relocate": {"3"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				calls   int
+				gotForm url.Values
+			)
+			srv := newTestServer(t, map[string]http.HandlerFunc{
+				"/api2/json/cluster/ha/resources/vm:101": func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					if r.Method != http.MethodPut {
+						t.Errorf("method: want PUT, got %s", r.Method)
+					}
+					if err := r.ParseForm(); err != nil {
+						t.Errorf("ParseForm: %v", err)
+					}
+					gotForm = r.PostForm
+					jsonResponse(w, nil)
+				},
+			})
+			defer srv.Close()
+
+			if err := newTestClient(t, srv.URL).UpdateHAResource(context.Background(), "vm:101", tt.params); err != nil {
+				t.Fatalf("UpdateHAResource: %v", err)
+			}
+			if calls != 1 {
+				t.Fatalf("the update reached Proxmox %d times, want 1", calls)
+			}
+			if !reflect.DeepEqual(gotForm, tt.want) {
+				t.Errorf("form = %v, want exactly %v", gotForm, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetHAGroups_KeepsTheComment pins the group comment through the read and
+// back out as JSON, which is the round trip the listing handler makes. The
+// SPA's group editor sends its comment box back on every save, so a comment
+// this struct dropped was shown blank and then cleared by the next save of any
+// other field.
+func TestGetHAGroups_KeepsTheComment(t *testing.T) {
+	srv, _ := newCaptureServer(t, `{"data":[`+
+		`{"group":"ha-group01","nodes":"pve-01:100,pve-02","type":"group","comment":"rack A pair","digest":"0a1b"},`+
+		`{"group":"ha-group02","nodes":"pve-03","type":"group","digest":"0a1b"}]}`)
+	groups, err := newTestClient(t, srv.URL).GetHAGroups(context.Background())
+	if err != nil {
+		t.Fatalf("GetHAGroups: %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("decoded %d groups, want 2", len(groups))
+	}
+
+	for _, tt := range []struct {
+		group HAGroup
+		want  string // the group's JSON, as the listing serves it
+	}{
+		{groups[0], `{"group":"ha-group01","nodes":"pve-01:100,pve-02","restricted":0,"nofailback":0,"comment":"rack A pair"}`},
+		{groups[1], `{"group":"ha-group02","nodes":"pve-03","restricted":0,"nofailback":0}`},
+	} {
+		got, err := json.Marshal(tt.group)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		if string(got) != tt.want {
+			t.Errorf("%s serialises as %s, want %s", tt.group.Group, got, tt.want)
+		}
 	}
 }

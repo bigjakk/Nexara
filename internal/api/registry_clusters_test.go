@@ -266,8 +266,10 @@ func TestFingerprintLimitersAreSeparateInstances(t *testing.T) {
 //
 // The edit handler merges POINTERS onto the stored row, so "the caller did not
 // mention this field" has to stay distinct from "the caller sent the zero
-// value". A Default on any of them would collapse the two and, for is_active,
-// pause every cluster whose editor only changed its name.
+// value". The OptX reads keep them apart even with a Default declared
+// (apischema.Property.Default); what a Default would break is the
+// documentation, which would describe every untouched field — is_active
+// included — as reset to that value.
 func TestClusterUpdateKeepsEveryFieldOptional(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPut, clusterByID)
 	for _, name := range []string{
@@ -279,8 +281,8 @@ func TestClusterUpdateKeepsEveryFieldOptional(t *testing.T) {
 			t.Errorf("%s is required on the edit; the dialog saves whatever subset the operator touched", name)
 		}
 		if prop.Default != nil {
-			t.Errorf("%s declares default %#v; the handler merges pointers, and a default makes every "+
-				"save look like an explicit choice", name, prop.Default)
+			t.Errorf("%s declares default %#v; the handler leaves an omitted field alone, and a "+
+				"default would document it as reset", name, prop.Default)
 		}
 	}
 

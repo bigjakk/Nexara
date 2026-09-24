@@ -321,10 +321,11 @@ func TestRBACIdentifiersAreUUIDs(t *testing.T) {
 // three fields whose request-struct field was a POINTER.
 //
 // nil meant "leave the stored value alone" and a pointer to the zero value
-// meant "set it to this". A Default on any of them would make p.OptString
-// report every request as having supplied the field, so renaming a role would
-// start blanking its description — and a Default on permission_ids would strip
-// every permission from a role whose name was edited.
+// meant "set it to this". The update reads them with p.OptString and p.Has,
+// which a default cannot fool (apischema.Property.Default), so a Default would
+// not blank a renamed role's description or strip its permissions; it would
+// document both — and permission_ids is shared with the create, whose
+// p.Strings read would grant a default to every role made without a list.
 func TestRBACRoleUpdateFieldsStayTristate(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPut, rbacScope+"/roles/:id")
 	for _, name := range []string{"name", "description", "permission_ids"} {
@@ -337,8 +338,8 @@ func TestRBACRoleUpdateFieldsStayTristate(t *testing.T) {
 			t.Errorf("%q is required; every field on the role update has always been optional", name)
 		}
 		if prop.Default != nil {
-			t.Errorf("%q declares default %v — it is a tristate, and a default collapses \"left alone\" "+
-				"into \"set to this\"", name, prop.Default)
+			t.Errorf("%q declares default %v — it is a tristate, an omitted one is left alone, and a "+
+				"default would document otherwise", name, prop.Default)
 		}
 	}
 

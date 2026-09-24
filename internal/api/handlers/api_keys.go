@@ -112,8 +112,8 @@ func (h *APIKeyHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	// Absent means "never expires", which is why this is an OptInt read rather
-	// than a zero test: expires_in carries no default precisely so that the two
-	// stay distinguishable.
+	// than a zero test: the supplied flag tells the two apart, and no declared
+	// default could set it (apischema.Property.Default).
 	var expiresAt pgtype.Timestamptz
 	if seconds, supplied := p.OptInt("expires_in"); supplied {
 		expiresAt = pgtype.Timestamptz{

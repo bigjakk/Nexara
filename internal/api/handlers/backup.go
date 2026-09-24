@@ -997,11 +997,13 @@ type backupJobRequest struct {
 // backupJobRequestFromParams reads the create/update body.
 //
 // The four pointer fields keep the distinction the declaration exists to
-// preserve: `enabled`, `all`, `node` and `comment` are declared optional
-// with NO default, so OptInt/OptString report whether the caller named them
-// at all. Collapsing any of them into a plain value would turn "leave this
-// alone" into "set it to zero" — which for `enabled` means disabling a job
-// on every partial save, and for `node` and `comment` means clearing them.
+// preserve: `enabled`, `all`, `node` and `comment` are optional, and
+// OptInt/OptString report whether the caller named them at all — with or
+// without a declared default, which is never reported as supplied
+// (apischema.Property.Default). Collapsing any of them into a plain value
+// would turn "leave this alone" into "set it to zero" — which for `enabled`
+// means disabling a job on every partial save, and for `node` and `comment`
+// means clearing them.
 func backupJobRequestFromParams(p *apischema.Params) backupJobRequest {
 	req := backupJobRequest{
 		Type:             p.String("type"),

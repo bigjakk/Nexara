@@ -70,9 +70,9 @@ type diskAttachRequest struct {
 	// Index and HasIndex are deliberately two fields. A single int cannot
 	// say "the caller did not choose", and reading its zero value as
 	// slot 0 is the first of the four defects above. HasIndex comes
-	// straight from apischema's OptInt, which is why "index" is declared
-	// Optional with NO default: a default would make every request look
-	// like an explicit choice.
+	// straight from apischema's OptInt, whose supplied flag is false for an
+	// omitted index whatever the schema declares as its default
+	// (apischema.Property.Default).
 	Index    int
 	HasIndex bool
 

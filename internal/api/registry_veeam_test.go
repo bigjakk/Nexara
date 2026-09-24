@@ -483,9 +483,10 @@ func TestVeeamCreateRequiresWhatTheHandlerDid(t *testing.T) {
 //
 // Every connection field was bound as a POINTER precisely so that "the caller
 // never mentioned this" stays distinct from "the caller sent empty or false":
-// an empty tls_fingerprint CLEARS the pin, and a Default on verify_tls or
-// enabled would re-assert them on every partial save — so the edit dialog,
-// which sends only what it has, would start rewriting the rest of the row.
+// an empty tls_fingerprint CLEARS the pin. The handler reads six of these
+// through Opt accessors, which a default cannot fool
+// (apischema.Property.Default), and the seventh, password, with p.String,
+// where a Default would be sent as a new credential; see updateVeeamParams.
 func TestVeeamUpdateKeepsItsTristates(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPut, veeamScope+"/:id")
 	for _, name := range []string{
@@ -499,8 +500,8 @@ func TestVeeamUpdateKeepsItsTristates(t *testing.T) {
 			t.Errorf("%s is required; the handler left an absent field alone", name)
 		}
 		if prop.Default != nil {
-			t.Errorf("%s declares default %#v; it must have NONE, so that omitting it stays "+
-				"distinguishable from sending empty or false", name, prop.Default)
+			t.Errorf("%s declares default %#v; it must have NONE — an omitted one is left alone "+
+				"(see updateVeeamParams)", name, prop.Default)
 		}
 	}
 	// And end to end: the enable/disable toggle's payload reaches the handler
@@ -540,9 +541,10 @@ func probeVeeamEndpoint(t *testing.T, method, path string, cap *capture) Endpoin
 // handler's cross-field rule reads.
 //
 // `(req.ClusterID == nil) != (req.VMID == nil)` became
-// `clusterSupplied != vmidSupplied`, and that translation is only correct while
-// BOTH parameters stay optional with no default: a default on either would make
-// it always-supplied, and the rule would then refuse every clear. apischema
+// `clusterSupplied != vmidSupplied`, and that translation is correct while
+// BOTH parameters stay optional: an Opt accessor never reports a default as
+// supplied (apischema.Property.Default), so a declared default could not make
+// the rule refuse a clear — it would only document the clear as a pin. apischema
 // reads an explicit JSON null as absent (present() in validate.go), which is
 // what keeps `{"cluster_id":null,"vmid":null}` — the payload the unmap button
 // sends — meaning "clear it".
@@ -558,7 +560,8 @@ func TestMapBackupObjectGuestKeepsItsBothOrNeitherShape(t *testing.T) {
 			t.Errorf("%s is required; clearing the mapping sends neither", name)
 		}
 		if prop.Default != nil {
-			t.Errorf("%s declares default %#v; it must have NONE, or every clear would read as a pin", name, prop.Default)
+			t.Errorf("%s declares default %#v; it must have NONE — a clear sends neither, and a default "+
+				"would document it as a pin", name, prop.Default)
 		}
 	}
 	// vmid <= 0 is not a Proxmox guest, and apischema would otherwise take an

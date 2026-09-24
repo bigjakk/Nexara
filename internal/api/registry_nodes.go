@@ -636,11 +636,13 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 			"lastentries": {
 				Type:     apischema.Integer,
 				Optional: true,
-				// NO Default, and that is load-bearing: the handler falls back to
-				// 500 lines only when NOTHING else bounds the read — no window,
-				// no cursor and no line count — which is a cross-field rule a
-				// per-parameter default would collapse. A Default here would make
-				// every cursor-paged request also carry a line count.
+				// NO Default: the handler falls back to 500 lines only when
+				// NOTHING else bounds the read — no window, no cursor and no line
+				// count — which is a cross-field rule no per-parameter default
+				// can express. The handler reads this with p.OptInt, which a
+				// default cannot fool (apischema.Property.Default), so one would
+				// not add a line count to a cursor-paged request; it would
+				// document one that no such request carries.
 				Minimum: apischema.Ptr(1.0),
 				// The ceiling the handler clamped to with min(), read from its
 				// own constant; declared as a bound so an over-large ask is a

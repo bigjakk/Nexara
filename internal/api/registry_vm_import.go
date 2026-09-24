@@ -409,9 +409,10 @@ func startImportParams() apischema.Properties {
 		"description": optString(8192, "<string>", "Free-text note stored on the guest."),
 		// Tristates rather than flags: ImportCreateOptions carries *bool and
 		// sends the key only when one is non-nil, so omitting one means "keep
-		// what the source metadata derived" rather than "off". A Default would
-		// collapse the two and start writing onboot=0 onto every import whose
-		// requester never mentioned it.
+		// what the source metadata derived" rather than "off". The handler
+		// builds the *bool from p.OptBool, which a default cannot fool
+		// (apischema.Property.Default), so a Default would not write onboot=0
+		// onto an import; it would document that it does.
 		"onboot": optTristateBool("Start the guest when its node boots. Omitted keeps the source-derived value."),
 		"agent":  optTristateBool("Enable the QEMU guest agent. Omitted keeps the source-derived value."),
 		"numa":   optTristateBool("Expose a NUMA topology to the guest. Omitted keeps the source-derived value."),

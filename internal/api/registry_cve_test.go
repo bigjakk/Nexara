@@ -372,12 +372,10 @@ func TestVulnerabilityFiltersAreDeclared(t *testing.T) {
 // TestCVEScheduleAndNotificationsStayPartial is the compatibility
 // assertion this domain turns on. Both PUTs MERGE with what is stored, so
 // an omitted parameter has to reach the handler as absent rather than as a
-// default — a Default on any of them would rewrite the operator's stored
-// value on every partial save.
-//
-// The one that would hurt is `enabled`: defaulting it to false would
-// silently switch automatic scanning off for any client that sent only the
-// interval.
+// default. The handlers' OptX reads see it as absent even with a Default
+// declared (apischema.Property.Default), so a Default would not rewrite a
+// stored value; it would document every partial save as resetting it — for
+// `enabled`, as switching automatic scanning off.
 func TestCVEScheduleAndNotificationsStayPartial(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -403,8 +401,8 @@ func TestCVEScheduleAndNotificationsStayPartial(t *testing.T) {
 					t.Errorf("%q is required; both of these endpoints merge with the stored row", name)
 				}
 				if prop.Default != nil {
-					t.Errorf("%q declares default %#v; a default would overwrite the stored value on "+
-						"every partial save", name, prop.Default)
+					t.Errorf("%q declares default %#v; an omitted one keeps the stored value, and a "+
+						"default would document every partial save as resetting it", name, prop.Default)
 				}
 			}
 

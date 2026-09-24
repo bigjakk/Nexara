@@ -795,8 +795,11 @@ func restoreBackupParams() apischema.Properties {
 // so that "the caller never mentioned this" stays distinct from "the caller
 // sent zero or empty": clearedProperties() unsets node and comment only on
 // an explicit empty, and selectionKeys() reads all=0 as "not a selection".
-// A Default on any of them would collapse the two and start disabling jobs,
-// clearing comments and rewriting guest selections on every partial save.
+// A Default would not collapse the two — OptInt and OptString report a
+// default as not supplied (apischema.Property.Default) — but it would
+// document a value an omitted field never gets. What WOULD collapse them,
+// disabling jobs and clearing comments on every partial save, is reading any
+// of the four with a plain accessor (see backupJobRequestFromParams).
 func backupJobParams() apischema.Properties {
 	return apischema.Properties{
 		"enabled": {

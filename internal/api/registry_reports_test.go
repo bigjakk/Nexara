@@ -353,10 +353,12 @@ func TestScheduleCreateRequiresOnlyWhatTheHandlerDid(t *testing.T) {
 }
 
 // TestScheduleUpdateKeepsEveryFieldOptional pins the partial-update
-// contract: the handler seeded every field from the stored row and
-// overwrote only what the caller sent, so a required field — or a DEFAULT on
-// one — would rewrite the rest of the row on the enable/disable toggle,
-// which PUTs `{"enabled": …}` and nothing else.
+// contract: the handler seeds every field from the stored row and overwrites
+// only what the caller sent, so a required field would 400 the
+// enable/disable toggle, which PUTs `{"enabled": …}` and nothing else. A
+// DEFAULT on one would not rewrite anything — every read is an Opt accessor
+// or behind Has, which a default cannot fool (apischema.Property.Default) —
+// but it would document the toggle as rewriting that column.
 func TestScheduleUpdateKeepsEveryFieldOptional(t *testing.T) {
 	const path = reportScope + "/schedules/:id"
 	e := declaredEndpoint(t, fiber.MethodPut, path)
@@ -366,8 +368,8 @@ func TestScheduleUpdateKeepsEveryFieldOptional(t *testing.T) {
 			required = append(required, name)
 		}
 		if prop.Default != nil {
-			t.Errorf("%s declares default %#v; a default on this route is applied to every request, so "+
-				"a partial save would rewrite the column with it", name, prop.Default)
+			t.Errorf("%s declares default %#v; a partial save leaves an omitted column alone, and a "+
+				"default would document it as rewritten", name, prop.Default)
 		}
 	}
 	sort.Strings(required)

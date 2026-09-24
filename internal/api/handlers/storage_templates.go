@@ -145,8 +145,9 @@ func (h *StorageHandler) DownloadURL(c fiber.Ctx, p *apischema.Params) error {
 		ChecksumAlgorithm:      p.String("checksum_algorithm"),
 		DecompressionAlgorithm: p.String("decompression_algorithm"),
 		// A *bool: omitting the key means "do not send it", which leaves
-		// Proxmox's own default (verify). optTristateBool carries no default
-		// precisely so that stays distinguishable from an explicit false.
+		// Proxmox's own default (verify). p.OptBool keeps that distinguishable
+		// from an explicit false, with or without a declared default
+		// (apischema.Property.Default).
 		VerifyCertificates: optBoolPtr(p.OptBool("verify_certificates")),
 	})
 	if err != nil {

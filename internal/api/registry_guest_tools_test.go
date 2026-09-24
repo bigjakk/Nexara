@@ -255,8 +255,11 @@ func TestGuestToolsPolicyRequiresNothingButItsPath(t *testing.T) {
 // snapshot_before is the rollback for a driver swap that can leave a guest
 // unbootable, and excluded is the operator saying "never touch this
 // guest". Both were *bool precisely so that a client which does not know
-// about the field cannot clear them, and a Default on either would turn
-// every save from such a client into a silent disarm.
+// about the field cannot clear them, and the handler keeps that with
+// p.OptBool, which a declared default cannot fool (apischema.Property.Default);
+// the reads below pin that an omitted key reaches it as not supplied. A
+// Default would still be wrong: it would document every such save as setting
+// the field.
 func TestGuestToolsPointerFieldsStayTriState(t *testing.T) {
 	for _, tt := range []struct {
 		path string
@@ -271,8 +274,8 @@ func TestGuestToolsPointerFieldsStayTriState(t *testing.T) {
 				t.Errorf("%s is required; an omitted key has to keep the stored value", tt.name)
 			}
 			if prop.Default != nil {
-				t.Errorf("%s declares default %#v; omitting it must stay distinct from sending false",
-					tt.name, prop.Default)
+				t.Errorf("%s declares default %#v; an omitted one keeps the stored value, and a "+
+					"default would document it as set", tt.name, prop.Default)
 			}
 
 			// Omitted reads as not supplied…

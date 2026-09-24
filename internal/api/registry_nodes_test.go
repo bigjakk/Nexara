@@ -758,10 +758,12 @@ func TestNodeSyslogPagingIsBoundedRatherThanClamped(t *testing.T) {
 }
 
 // TestNodeJournalLastEntriesStaysDefaultless is the journal's counterpart
-// to the disk-attach index: the parameter must carry NO default, because
-// the handler's fallback to 500 lines turns on "the caller bounded this
-// request no other way" — a cross-field rule a per-parameter default would
-// collapse, making every cursor-paged request also carry a line count.
+// to the disk-attach index: the parameter carries NO default, because the
+// handler's fallback to 500 lines turns on "the caller bounded this request
+// no other way" — a cross-field rule no per-parameter default can express.
+// The handler's p.OptInt read would ignore one (apischema.Property.Default);
+// the docs would not, and would promise a line count on every cursor-paged
+// request.
 func TestNodeJournalLastEntriesStaysDefaultless(t *testing.T) {
 	const path = clusterScope + "/nodes/:node_name/journal"
 	e := declaredEndpoint(t, fiber.MethodGet, path)
@@ -770,8 +772,8 @@ func TestNodeJournalLastEntriesStaysDefaultless(t *testing.T) {
 		t.Error("lastentries is required; a caller must be able to page by cursor instead")
 	}
 	if last.Default != nil {
-		t.Errorf("lastentries declares default %#v; it must have NONE, so that omitting it stays "+
-			"distinguishable from asking for a line count", last.Default)
+		t.Errorf("lastentries declares default %#v; it must have NONE — an omitted one asks for no "+
+			"line count, and a default would document one", last.Default)
 	}
 
 	cap := &capture{}

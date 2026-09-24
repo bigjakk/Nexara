@@ -814,13 +814,15 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 			"index": {
 				Type:     apischema.Integer,
 				Optional: true,
-				// NO Default, and that is the whole point of this
-				// endpoint's declaration. A default would make every
-				// request that omitted the index look identical to one
-				// that explicitly asked for slot 0 — and slot 0 on a VM
-				// with a disk is its boot disk. Left defaultless,
-				// p.OptInt("index") answers supplied=false and the handler
-				// picks the lowest FREE slot instead.
+				// NO Default. Omitting the index must not read as asking
+				// for slot 0 — slot 0 on a VM with a disk is its boot disk
+				// — and what guarantees that is the handler's
+				// p.OptInt("index"), which answers supplied=false for an
+				// omitted index, default or not (apischema.Property.Default),
+				// so the handler picks the lowest FREE slot instead. A
+				// default would document a slot no omitted index gets; a
+				// p.Int read, which would hand it back as a chosen slot, is
+				// the mistake to guard against.
 				Minimum:  apischema.Ptr(0.0),
 				Maximum:  apischema.Ptr(30.0),
 				Typetext: "<integer>",
@@ -1065,14 +1067,16 @@ func optCount(maxValue float64, description string) apischema.Property {
 	}
 }
 
-// optTristateBool is an optional boolean with NO default, so that
-// p.OptBool reports whether the caller chose at all.
+// optTristateBool is an optional boolean with NO default, for a parameter
+// its handler reads with p.OptBool and forwards as a *bool: leaving one out
+// means "do not send this key" (or "keep the stored value"), which is
+// different from sending it as false.
 //
-// The three parameters that use it are the three the handler passes to
-// Proxmox as *bool: leaving one out means "do not send this key", which
-// is different from sending it as false. A Default here would collapse
-// those two and start writing numa=0 onto every VM whose creator never
-// mentioned NUMA.
+// p.OptBool keeps those two apart on its own — it never reports a default as
+// supplied (apischema.Property.Default) — so a Default here would not start
+// writing numa=0 onto every VM whose creator never mentioned NUMA. It would
+// document that it does, and hand a value to any plain p.Bool read of the
+// parameter; every user of this helper reads it through p.OptBool instead.
 func optTristateBool(description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.Boolean,

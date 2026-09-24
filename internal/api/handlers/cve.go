@@ -572,8 +572,9 @@ func (h *CVEHandler) UpdateSchedule(c fiber.Ctx, p *apischema.Params) error {
 		intervalHours = existing.IntervalHours
 	}
 
-	// Neither parameter carries a schema default, so "supplied" really does
-	// mean the caller chose — an omitted one keeps what is stored.
+	// "Supplied" means the caller chose — with or without a schema default,
+	// which an Opt read never reports as supplied (apischema.Property.Default)
+	// — so an omitted one keeps what is stored.
 	if v, ok := p.OptBool("enabled"); ok {
 		enabled = v
 	}

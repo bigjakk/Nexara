@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, within, waitFor } from "@testing-library/react";
+import { fireEvent, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { HARuleForm } from "./HARuleForm";
@@ -16,7 +16,12 @@ let mockHAResources: {
   isSuccess: true,
 };
 
-vi.mock("@/features/ha/api/ha-queries", () => ({
+// The real module under the mocked hooks, so the helpers the form imports
+// alongside them (haResourceHasFailback, parseRetryCount) are the real ones.
+vi.mock("@/features/ha/api/ha-queries", async () => ({
+  ...(await vi.importActual<typeof import("@/features/ha/api/ha-queries")>(
+    "@/features/ha/api/ha-queries",
+  )),
   useCreateHARule: () => ({
     mutateAsync: mockCreateHARule,
     isPending: false,
@@ -89,6 +94,7 @@ describe("HARuleForm — inline HA management", () => {
       <HARuleForm
         mode="create"
         clusterId="c1"
+        pveVersion="9.0.6"
         allVMs={vms}
         allNodes={nodes}
         onSuccess={() => undefined}
@@ -114,6 +120,7 @@ describe("HARuleForm — inline HA management", () => {
       <HARuleForm
         mode="create"
         clusterId="c1"
+        pveVersion="9.0.6"
         allVMs={vms}
         allNodes={nodes}
         onSuccess={onSuccess}
@@ -151,6 +158,7 @@ describe("HARuleForm — inline HA management", () => {
       <HARuleForm
         mode="create"
         clusterId="c1"
+        pveVersion="9.0.6"
         allVMs={vms}
         allNodes={nodes}
         onSuccess={onSuccess}
@@ -171,5 +179,87 @@ describe("HARuleForm — inline HA management", () => {
       expect(mockCreateHARule).toHaveBeenCalled();
     });
     expect(mockCreateHAResource).not.toHaveBeenCalled();
+  });
+});
+
+/** Fills a node-affinity rule over vm:100 on pveVersion and presses Create. */
+async function createRuleOn(
+  pveVersion: string,
+  fillInline?: (user: ReturnType<typeof userEvent.setup>) => Promise<void>,
+) {
+  const user = userEvent.setup();
+  renderWithProviders(
+    <HARuleForm
+      mode="create"
+      clusterId="c1"
+      pveVersion={pveVersion}
+      allVMs={vms}
+      allNodes={nodes}
+      onSuccess={() => undefined}
+    />,
+  );
+  await user.type(screen.getByPlaceholderText("my-rule"), "keep-here");
+  await user.click(checkboxIn(screen.getByText("vm:100").closest("label")));
+  await user.click(checkboxIn(screen.getByText("pve1").closest("tr")));
+  if (fillInline) await fillInline(user);
+  await user.click(screen.getByRole("button", { name: "Create" }));
+  await waitFor(() => {
+    expect(mockCreateHAResource).toHaveBeenCalledTimes(1);
+  });
+  return mockCreateHAResource.mock.calls[0]?.[0] as unknown;
+}
+
+describe("HARuleForm — inline add-to-HA per version", () => {
+  beforeEach(() => {
+    mockHAResources = { data: [], isSuccess: true };
+    mockCreateHARule.mockReset();
+    mockCreateHARule.mockResolvedValue(undefined);
+    mockCreateHAResource.mockReset();
+    mockCreateHAResource.mockResolvedValue(undefined);
+  });
+
+  it("adds the guest with failback on PVE 9", async () => {
+    expect(await createRuleOn("9.0.6")).toEqual({
+      sid: "vm:100",
+      state: "started",
+      max_restart: 1,
+      max_relocate: 1,
+      failback: 1,
+    });
+  });
+
+  it("adds the guest without failback, and offers none, on PVE 8", async () => {
+    const body = await createRuleOn("8.4.1", () => {
+      // The inline block is open (a guest is unmanaged) and has no switch.
+      expect(screen.getByLabelText("Max Restart")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("switch", { name: "Failback" }),
+      ).not.toBeInTheDocument();
+      return Promise.resolve();
+    });
+    expect(body).toEqual({
+      sid: "vm:100",
+      state: "started",
+      max_restart: 1,
+      max_relocate: 1,
+    });
+  });
+
+  it("reads an inline count typed in exponent form as the number it is", async () => {
+    // fireEvent, not user.type: user.type leaves "1e1" in a number input as
+    // "10", which would never reach the form in the spelling parseInt misread.
+    const body = await createRuleOn("9.0.6", () => {
+      const restart = screen.getByLabelText("Max Restart");
+      fireEvent.change(restart, { target: { value: "1e1" } });
+      expect((restart as HTMLInputElement).value).toBe("1e1");
+      return Promise.resolve();
+    });
+    expect(body).toEqual({
+      sid: "vm:100",
+      state: "started",
+      max_restart: 10,
+      max_relocate: 1,
+      failback: 1,
+    });
   });
 });

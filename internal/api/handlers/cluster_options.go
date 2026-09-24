@@ -49,9 +49,10 @@ func (h *ClusterOptionsHandler) GetOptions(c fiber.Ctx, p *apischema.Params) err
 //
 // Every property is read as a POINTER, so that omitting a key means "do
 // not send this property to Proxmox" and sending it empty means "send it
-// empty" — the distinction the bound struct expressed with *string and the
-// schema now expresses by declaring no default. The names are the wire
-// names Proxmox itself uses, hyphens and all.
+// empty" — the distinction the bound struct expressed with *string, and
+// which the OptX reads below now carry in their supplied flag (a flag no
+// declared default sets — apischema.Property.Default). The names are the
+// wire names Proxmox itself uses, hyphens and all.
 func (h *ClusterOptionsHandler) UpdateOptions(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {

@@ -134,9 +134,11 @@ func TestAttachDiskSizeRejectsWhatProxmoxWould(t *testing.T) {
 }
 
 // TestAttachDiskIndexIsThreeState is the declaration this whole phase
-// turns on. index must be Optional with NO default, so that omitting it
-// is distinguishable from asking for slot 0 — the ambiguity that let an
-// omitted index overwrite a boot disk.
+// turns on. index must be Optional, so that omitting it is distinguishable
+// from asking for slot 0 — the ambiguity that let an omitted index overwrite
+// a boot disk — and carries no default, which would document omission as a
+// slot. The distinction itself is OptInt's supplied flag, which a declared
+// default cannot set (apischema.Property.Default); the table below pins it.
 func TestAttachDiskIndexIsThreeState(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPost, attachRoutePath)
 	index, ok := e.Parameters["index"]
@@ -147,8 +149,8 @@ func TestAttachDiskIndexIsThreeState(t *testing.T) {
 		t.Error("index is required; the caller must be able to omit it and let the handler pick a free slot")
 	}
 	if index.Default != nil {
-		t.Errorf("index declares a default (%v); a default makes an omitted index indistinguishable from an "+
-			"explicit one, which is the ambiguity this endpoint was rewritten to remove", index.Default)
+		t.Errorf("index declares a default (%v); an omitted index picks a free slot, and a default "+
+			"would document it as that slot", index.Default)
 	}
 
 	tests := []struct {

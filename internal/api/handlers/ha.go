@@ -367,13 +367,24 @@ func (h *HAHandler) DeleteResource(c fiber.Ctx, p *apischema.Params) error {
 	}
 	// Snapshot the resource before deletion so the audit entry has context.
 	// Best-effort: a fetch failure should not block the delete itself.
-	snapshot, _ := pxClient.GetHAResource(c.Context(), sid)
+	snapshot, snapErr := pxClient.GetHAResource(c.Context(), sid)
 	if err := pxClient.DeleteHAResource(c.Context(), sid); err != nil {
 		return mapProxmoxError(err)
 	}
 	detailMap := map[string]any{"sid": sid}
 	if name := resolveSIDName(c.Context(), h.queries, clusterID, sid); name != "" {
 		detailMap["name"] = name
+	}
+	if snapErr != nil {
+		// A retry count or failback missing from the row means "Proxmox's
+		// default" (see below), so a row whose snapshot was never read has to
+		// say so, or its absences would claim a resource on every default. The
+		// error goes to the log, not the row, as haRuleDeleteDetails does it:
+		// view:audit is a default Viewer grant, and a connection error names
+		// the PVE host and port.
+		detailMap["prior_state_unknown"] = true
+		slog.Warn("HA resource delete: could not read the resource to snapshot it; auditing without its settings",
+			"cluster_id", clusterID, "sid", sid, "error", snapErr)
 	}
 	if snapshot != nil {
 		if snapshot.Type != "" {
@@ -388,11 +399,21 @@ func (h *HAHandler) DeleteResource(c fiber.Ctx, p *apischema.Params) error {
 		if snapshot.Comment != "" {
 			detailMap["comment"] = snapshot.Comment
 		}
-		if snapshot.MaxRestart != 0 {
-			detailMap["max_restart"] = snapshot.MaxRestart
+		// Recorded exactly when the resource stored a value, 0 included: an
+		// explicit 0 is a policy (no restarts, no relocation, no failback),
+		// and an absent key is Proxmox's default of 1 — the convention
+		// CreateResource's row already follows for what it sent. These were
+		// ints tested `!= 0`, which dropped every explicit 0 and never
+		// recorded failback at all, so an operator rebuilding the resource
+		// from this row would have brought it back with the defaults.
+		if snapshot.MaxRestart != nil {
+			detailMap["max_restart"] = *snapshot.MaxRestart
 		}
-		if snapshot.MaxRelocate != 0 {
-			detailMap["max_relocate"] = snapshot.MaxRelocate
+		if snapshot.MaxRelocate != nil {
+			detailMap["max_relocate"] = *snapshot.MaxRelocate
+		}
+		if snapshot.Failback != nil {
+			detailMap["failback"] = *snapshot.Failback
 		}
 	}
 	details, _ := json.Marshal(detailMap)
@@ -551,7 +572,7 @@ func (h *HAHandler) DeleteGroup(c fiber.Ctx, p *apischema.Params) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-// --- HA Rules (PVE 8.3+) ---
+// --- HA Rules (PVE 9.0+, pve-ha-manager 5.0.2) ---
 
 // haRuleMissingPhrases are the die() strings PVE uses for an HA rule that is no
 // longer there, from pve-ha-manager src/PVE/API2/HA/Rules.pm: update_rule says

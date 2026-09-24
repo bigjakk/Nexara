@@ -770,8 +770,9 @@ func (h *VMHandler) MoveDisk(c fiber.Ctx, p *apischema.Params) error {
 // the wiring. Note what it does NOT do: it never reads an index without
 // also asking whether the caller supplied one. That single distinction is
 // what separates "attach a disk" from "silently replace the boot disk",
-// and it is only expressible because the schema declares index as
-// Optional with no default.
+// and it is expressible because the schema declares index Optional and
+// OptInt reports whether it was supplied — a flag no declared default can
+// set (apischema.Property.Default).
 //
 // It records an AuditLog rather than a TrackTask, and that is correct:
 // AttachDisk writes the VM's config with a synchronous PUT and Proxmox

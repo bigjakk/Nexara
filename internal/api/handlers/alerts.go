@@ -1402,8 +1402,10 @@ func (h *AlertHandler) UpdateChannel(c fiber.Ctx, p *apischema.Params) error {
 
 	// Every field reads the EMPTY value as absent rather than as a clear,
 	// which is what the pre-migration `if req.X != ""` tests did. `enabled` is
-	// the one exception and the reason it carries no declared default: omitting
-	// it has to leave the stored flag alone.
+	// the one exception: it is read with p.OptBool, so omitting it leaves the
+	// stored flag alone — which a declared default could not change
+	// (apischema.Property.Default); it carries none so the docs do not
+	// describe an omitted flag as reset.
 	name := existing.Name
 	if v := p.String("name"); v != "" {
 		name = v

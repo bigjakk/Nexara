@@ -428,10 +428,10 @@ func registerVeeamEndpoints(reg *Registry, h *handlers.VeeamHandler, connect, co
 				"Nexara's row id for the backup object."),
 			"guest_cluster_id": veeamPlatformClusterParam(
 				"Cluster the guest lives on, which must be the one this object's platform is mapped to."),
-			// NO Default, so that "the caller said nothing" stays distinct from
-			// "the caller sent zero": the handler requires cluster and vmid to be
-			// set together or both absent, and a default here would make every
-			// clear look like a pin to VMID 0.
+			// NO Default: the handler requires cluster and vmid to be set
+			// together or both absent, reading both with Opt accessors, which
+			// a default cannot fool (apischema.Property.Default); a declared
+			// default would document every clear as a pin.
 			"vmid": {
 				Type:     apischema.Integer,
 				Optional: true,
@@ -640,14 +640,16 @@ func createVeeamParams() apischema.Properties {
 // this route: the edit dialog sends only what it has, and the enable/disable
 // toggle would otherwise rewrite the row it touched.
 //
-// SEVEN carry no Default, and that is the load-bearing part: name, base_url,
-// username, password, tls_fingerprint, verify_tls and enabled were all bound as
-// POINTERS precisely so that "the caller never mentioned this" stays distinct
-// from "the caller sent empty or false" — tls_fingerprint's empty string CLEARS
-// the pin, and a Default on verify_tls or enabled would re-assert them on every
-// partial save. The two confirmation flags are the only ones that carry a
-// default; they were not pointers, and optFlag's explicit false is what they
-// read as.
+// SEVEN carry no Default: name, base_url, username, password,
+// tls_fingerprint, verify_tls and enabled were all bound as POINTERS precisely
+// so that "the caller never mentioned this" stays distinct from "the caller
+// sent empty or false" — tls_fingerprint's empty string CLEARS the pin. Six of
+// them the handler reads through Opt accessors, which a default cannot fool
+// (apischema.Property.Default), so there a Default would only document a
+// partial save as resetting them. password it reads with p.String and treats
+// any non-empty value as a new credential, so a Default there WOULD be sent.
+// The two confirmation flags are the only ones that carry a default; they
+// were not pointers, and optFlag's explicit false is what they read as.
 func updateVeeamParams() apischema.Properties {
 	return apischema.Properties{
 		"id": veeamServerIDParam,

@@ -220,10 +220,11 @@ func TestFirewallAliasRenameKeepsTheEmptySentinel(t *testing.T) {
 //
 // proxmox.FirewallOptions.Enable is a *int and firewallOptionsToForm sends
 // the key only when it is non-nil. The options card sends
-// `{"policy_in": "DROP"}` on its own — so a Default of 0 on enable would
-// write enable=0 alongside it and turn the cluster firewall OFF on a policy
-// change. The declaration therefore carries no default, and Has reports the
-// difference.
+// `{"policy_in": "DROP"}` on its own, so enable must reach the handler as
+// omitted — Has and p.OptInt report that, and would with a Default declared
+// too (apischema.Property.Default); the checks below pin that schema half of
+// keeping a policy change from writing the firewall OFF. The declaration
+// carries no default because one would document exactly that write.
 func TestFirewallOptionsKeepEnableTriState(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPut, firewallScope+"/options")
 	enable := requireDeclaredProperty(t, e, "enable")
@@ -231,7 +232,8 @@ func TestFirewallOptionsKeepEnableTriState(t *testing.T) {
 		t.Error("enable is required; the options card sends a policy on its own")
 	}
 	if enable.Default != nil {
-		t.Errorf("enable declares default %v; a default would write enable=0 on every policy-only save", enable.Default)
+		t.Errorf("enable declares default %v; an omitted enable leaves the firewall as it is, and a "+
+			"default would document every policy-only save as setting it", enable.Default)
 	}
 
 	policyOnly, err := e.Parameters.Validate(map[string]any{"cluster_id": testClusterID, "policy_in": "DROP"})

@@ -250,10 +250,11 @@ func probeUserEndpoint(t *testing.T, method, path string, cap *capture) Endpoint
 // fields whose request-struct field was a POINTER.
 //
 // `is_active` is the one that matters most: every refusal in the handler keys
-// on the field having been SUPPLIED rather than on its value, so a Default
-// would make an unrelated display-name edit read as "set the account's active
-// state", either reactivating a disabled account or disabling a live one — and
-// the deactivation path revokes every session the account holds.
+// on the field having been SUPPLIED rather than on its value, and the
+// deactivation path revokes every session the account holds. A Default could
+// not make an unrelated edit read as supplied (apischema.Property.Default) —
+// the reads below pin that an omitted key arrives as omitted — but it would
+// document every such edit as setting the account's active state.
 func TestUserUpdateFieldsStayTristate(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPut, userScope+"/:id")
 	for _, name := range []string{"display_name", "is_active", "role"} {
@@ -266,8 +267,8 @@ func TestUserUpdateFieldsStayTristate(t *testing.T) {
 			t.Errorf("%q is required; every field on the user update has always been optional", name)
 		}
 		if prop.Default != nil {
-			t.Errorf("%q declares default %v — it is a tristate, and a default collapses \"left alone\" "+
-				"into \"set to this\"", name, prop.Default)
+			t.Errorf("%q declares default %v — it is a tristate, an omitted one is left alone, and a "+
+				"default would document otherwise", name, prop.Default)
 		}
 	}
 

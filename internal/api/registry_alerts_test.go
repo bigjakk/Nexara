@@ -659,8 +659,11 @@ func TestChannelTypeEnumCoversTheDispatcherVocabulary(t *testing.T) {
 // the partial-update contract.
 //
 // `enabled` was bound as a POINTER so that omitting it left the stored flag
-// alone. A Default of true here would re-enable a disabled channel on every
-// rename, which is the quietest way a notification path comes back to life.
+// alone, and the handler keeps that with a p.OptBool read, which a default
+// cannot fool (apischema.Property.Default). A Default of true on the update
+// would still be wrong: it would document every omitted `enabled` as a
+// re-enable, while the create's default of true, below, is one the handler
+// really applies.
 func TestChannelUpdateKeepsItsEnabledTristate(t *testing.T) {
 	const path = channelScope + "/:id"
 	e := declaredEndpoint(t, fiber.MethodPut, path)
@@ -669,8 +672,8 @@ func TestChannelUpdateKeepsItsEnabledTristate(t *testing.T) {
 		t.Error("enabled is required; the handler left an absent field alone")
 	}
 	if prop.Default != nil {
-		t.Errorf("enabled declares default %#v; it must have NONE, or a rename would re-enable a "+
-			"disabled channel", prop.Default)
+		t.Errorf("enabled declares default %#v; it must have NONE — an omitted one leaves the stored "+
+			"flag alone, and a default would document a re-enable", prop.Default)
 	}
 	// And the create's default IS true, which is the handler's own.
 	if got := declaredEndpoint(t, fiber.MethodPost, channelScope).Parameters["enabled"].Default; got != true {

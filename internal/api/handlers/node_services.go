@@ -387,11 +387,11 @@ func (h *NodeHandler) GetNodeJournal(c fiber.Ctx, p *apischema.Params) error {
 			return err
 		}
 	}
-	// Read with OptInt rather than Int because the parameter deliberately
-	// carries NO default: 1..MaxJournalEntries is the schema's business, but
-	// "the caller named no line count" is what the fallback below turns on,
-	// and a default would make every windowed or cursor-paged request look
-	// like one that asked for 500 lines.
+	// Read with OptInt rather than Int: 1..MaxJournalEntries is the schema's
+	// business, but "the caller named no line count" is what the fallback
+	// below turns on, and OptInt reports that even if the schema ever declared
+	// a default (apischema.Property.Default) — which a plain Int read would
+	// hand back as a line count on every windowed or cursor-paged request.
 	if n, supplied := p.OptInt("lastentries"); supplied {
 		opts.LastEntries = int(n)
 	}

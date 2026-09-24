@@ -122,8 +122,11 @@ func registerAPIKeyEndpoints(reg *Registry, h *handlers.APIKeyHandler) {
 // createAPIKeyParams is the body of POST /api/v1/api-keys.
 //
 // `expires_in` was a *int64 whose nil meant "never expires", so it carries no
-// Default and the handler reads p.OptInt: a Default of 0 would make every
-// request look like it asked for an immediate expiry.
+// Default and the handler reads p.OptInt, which reports an omitted key as not
+// supplied whatever the declaration says (apischema.Property.Default). A
+// default would therefore not shorten any key's life; it would document a
+// lifetime no omitted key gets (and a Default of 0 would not even register,
+// being below the Minimum).
 //
 // The MINIMUM is the handler's own "at least 3600 seconds" rule moved one layer
 // out. The MAXIMUM is new, and it is a bound rather than a policy: the value is

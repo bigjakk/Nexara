@@ -278,13 +278,14 @@ func TestHAGroupAndRuleNamesRejectTraversal(t *testing.T) {
 // this domain's migration, and the one that would have been easiest to
 // break.
 //
-// Three editors send a field unconditionally so that clearing it CLEARS
-// the stored value: the resource editor sends group:"" for "no group" and
-// comment:"", the group editor sends comment:"", and the rule editor sends
-// comment:"". apischema treats "" as a value the caller SUPPLIED (not an
-// absent one), and every registered format rejects it — so a format on any
-// of these would 400 a save that has always worked, and folding "" into
-// "absent" in the handler would turn the same save into a silent no-op.
+// Three editors send a field empty so that clearing it CLEARS the stored
+// value: the resource editor sends group:"" when "no group" is picked and
+// comment:"" when the note is emptied (it sends only the fields the operator
+// changed), and the group and rule editors send comment:"" whenever the box is
+// blank. apischema treats "" as a value the caller SUPPLIED (not an absent
+// one), and every registered format rejects it — so a format on any of these
+// would 400 a save that has always worked, and folding "" into "absent" in the
+// handler would turn the same save into a silent no-op.
 //
 // This checks both ends: the schema accepts the value, and it arrives
 // marked as supplied, which is what optStringPtr turns into a non-nil
@@ -299,7 +300,7 @@ func TestHAEditFormsKeepTheEmptyStringSentinel(t *testing.T) {
 		{
 			name:  "resource editor clears the group and the comment",
 			path:  haScope + "/resources/:sid",
-			body:  `{"state":"started","group":"","max_restart":1,"max_relocate":1,"failback":1,"comment":""}`,
+			body:  `{"group":"","comment":""}`,
 			empty: []string{"group", "comment"},
 		},
 		{
@@ -363,14 +364,16 @@ func TestHAPartialUpdatesAreAccepted(t *testing.T) {
 
 	// disable=0 has to stay distinguishable from an omitted disable: the
 	// client turns an explicit 0 into a property DELETE that re-enables the
-	// rule, and an omitted one into no key at all. A Default of 0 on the
-	// declaration would collapse the two and re-enable every rule any edit
-	// touched.
+	// rule, and an omitted one into no key at all. This holds whatever the
+	// declaration says about a default — apischema never reports a default as
+	// supplied (see apischema.Property.Default) — so what it pins is that an
+	// omitted key reaches the handler as omitted; TestHAFlagsCarryNoDefault is
+	// what pins the declaration.
 	cap := &capture{}
 	app := newRegistryApp(t, noAuth(), probeHAEndpoint(t, fiber.MethodPut, haScope+"/rules/:rule", cap))
 	send(t, app, jsonRequest(http.MethodPut, haRoute(haScope+"/rules/:rule"), `{"type":"node-affinity"}`))
 	if _, supplied := cap.params.OptInt("disable"); supplied {
-		t.Error("disable reads as supplied on a body that omitted it; the declaration must carry no default")
+		t.Error("disable reads as supplied on a body that omitted it; the re-enable DELETE would go out on every edit")
 	}
 	cap = &capture{}
 	app = newRegistryApp(t, noAuth(), probeHAEndpoint(t, fiber.MethodPut, haScope+"/rules/:rule", cap))
@@ -470,9 +473,12 @@ func TestHARetryCountsCarryOnlyProxmoxsBound(t *testing.T) {
 	}
 }
 
-// TestHAFlagsCarryNoDefault generalizes the disable case to every 0/1
-// parameter the handlers forward as a *int. A Default on any of them would
-// start writing a property onto an object whose editor never mentioned it.
+// TestHAFlagsCarryNoDefault pins every HA 0/1 flag as optional, bounded to
+// 0..1 and WITHOUT a Default, for the reasons on haFlag: a default never
+// reaches Proxmox through the p.OptInt reads (see apischema.Property.Default),
+// but CreateGroup and CreateRule read theirs with p.Int and send any non-zero
+// value, and on every route it would document a value the endpoint does not
+// apply.
 func TestHAFlagsCarryNoDefault(t *testing.T) {
 	flags := map[string][]string{
 		fiber.MethodPost + " " + haScope + "/resources":     {"failback"},
@@ -499,8 +505,8 @@ func TestHAFlagsCarryNoDefault(t *testing.T) {
 				t.Errorf("%s: %q is required; every one of these is optional", key, name)
 			}
 			if prop.Default != nil {
-				t.Errorf("%s: %q declares default %#v; omitting it must stay distinct from sending 0",
-					key, name, prop.Default)
+				t.Errorf("%s: %q declares default %#v; an omitted flag is left alone on a PUT and gets "+
+					"Proxmox's default on a POST (see haFlag)", key, name, prop.Default)
 			}
 			if prop.Minimum == nil || *prop.Minimum != 0 || prop.Maximum == nil || *prop.Maximum != 1 {
 				t.Errorf("%s: %q is not bounded to 0..1 (min %v, max %v)", key, name, prop.Minimum, prop.Maximum)

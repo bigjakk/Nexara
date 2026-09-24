@@ -81,9 +81,10 @@ type nativeCRSStatus struct {
 // optionalBool maps an absent request field to SQL NULL, which the upsert
 // reads as "leave the stored value alone".
 //
-// exclude_veeam_workers is why it exists, and why that parameter is
-// declared with no default: it defaults to TRUE, so absent has to mean
-// "leave the stored value alone" rather than either boolean.
+// exclude_veeam_workers is why it exists: its stored value defaults to TRUE,
+// so absent has to mean "leave the stored value alone" rather than either
+// boolean — which is what p.OptBool reports for an omitted key, whether or
+// not the parameter declares a default (apischema.Property.Default).
 //
 // A plain bool would read an absent key as false, so any client predating
 // the field would silently disarm the protection on its next save and DRS

@@ -268,15 +268,16 @@ func TestDRSConfigBody(t *testing.T) {
 
 	t.Run("exclude_veeam_workers stays tri-state", func(t *testing.T) {
 		// The whole reason the stored column is nullable: omitting the key
-		// must leave the stored value alone, which a Default of false would
-		// silently turn into "disarm the Veeam protection".
+		// must leave the stored value alone. The handler's p.OptBool read
+		// does, default or not (apischema.Property.Default); a Default of
+		// false would document every save as disarming the Veeam protection.
 		prop := declaredEndpoint(t, fiber.MethodPut, path).Parameters["exclude_veeam_workers"]
 		if !prop.Optional {
 			t.Error("exclude_veeam_workers is required; a client predating the field would be refused")
 		}
 		if prop.Default != nil {
-			t.Errorf("exclude_veeam_workers declares default %#v; omitting it must stay distinct from "+
-				"sending false", prop.Default)
+			t.Errorf("exclude_veeam_workers declares default %#v; an omitted one keeps the stored value, "+
+				"and a default would document it as set", prop.Default)
 		}
 
 		cap := &capture{}

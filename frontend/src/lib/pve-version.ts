@@ -12,6 +12,16 @@ export function isPVEAtLeast(current: string, min: string): boolean {
   return a[2] >= b[2];
 }
 
+/**
+ * isPVEVersionKnown reports whether `v` is a version isPVEAtLeast can compare.
+ * A gate that has to tell "too old" from "not known yet" needs it: an empty or
+ * unparseable version makes every isPVEAtLeast answer false, which reads as
+ * the oldest release.
+ */
+export function isPVEVersionKnown(v: string): boolean {
+  return parseVersion(v) !== null;
+}
+
 function parseVersion(v: string): [number, number, number] | null {
   if (!v) return null;
   const match = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(v.trim());

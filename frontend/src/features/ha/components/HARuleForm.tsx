@@ -19,6 +19,8 @@ import {
   useHAGroups,
   useHAResources,
   useUpdateHARule,
+  haResourceHasFailback,
+  parseRetryCount,
   type HARuleEntry,
 } from "@/features/ha/api/ha-queries";
 import { ApiClientError } from "@/lib/api-client";
@@ -53,6 +55,13 @@ function validateRuleName(name: string): string | null {
 
 interface CommonProps {
   clusterId: string;
+  /**
+   * The cluster's Proxmox VE version, which decides whether the inline
+   * add-to-HA may offer and send failback (haResourceHasFailback). The HA tab
+   * only offers rules from PVE 9, where it always may; the gate is here so
+   * this form cannot send PVE 8 a key it refuses whoever renders it.
+   */
+  pveVersion: string;
   allVMs: VMResponse[];
   allNodes: NodeResponse[];
   onSuccess: () => void;
@@ -115,6 +124,7 @@ export function HARuleForm(props: Props) {
   const createResourceMut = useCreateHAResource(props.clusterId);
   const haResourcesQuery = useHAResources(props.clusterId);
   const groupsQuery = useHAGroups(props.clusterId);
+  const hasFailback = haResourceHasFailback(props.pveVersion);
 
   const managedSIDs = useMemo(() => {
     const set = new Set<string>();
@@ -247,21 +257,22 @@ export function HARuleForm(props: Props) {
       // Bring any not-yet-managed selections under HA first, so Proxmox accepts
       // the rule. Sequential — concurrent writes contend on the HA config lock.
       if (autoManage && unmanagedSelected.length > 0) {
-        const maxRestartNum = Number.parseInt(resMaxRestart, 10);
-        const maxRelocateNum = Number.parseInt(resMaxRelocate, 10);
+        // 10 is the inputs' own max; parseRetryCount says why not parseInt.
+        const maxRestartNum = parseRetryCount(resMaxRestart, 10);
+        const maxRelocateNum = parseRetryCount(resMaxRelocate, 10);
         const groupValue = resGroup === "__none__" ? "" : resGroup;
         for (const sid of unmanagedSelected) {
           await createResourceMut.mutateAsync({
             sid,
             state: resState,
             ...(groupValue ? { group: groupValue } : {}),
-            ...(Number.isFinite(maxRestartNum)
+            ...(maxRestartNum !== undefined
               ? { max_restart: maxRestartNum }
               : {}),
-            ...(Number.isFinite(maxRelocateNum)
+            ...(maxRelocateNum !== undefined
               ? { max_relocate: maxRelocateNum }
               : {}),
-            failback: resFailback ? 1 : 0,
+            ...(hasFailback ? { failback: resFailback ? 1 : 0 } : {}),
           });
         }
       }
@@ -508,24 +519,26 @@ export function HARuleForm(props: Props) {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <Label
-                      htmlFor="auto-failback"
-                      className="cursor-pointer text-sm"
-                    >
-                      Failback
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Move back to a higher-priority node when available.
-                    </p>
+                {hasFailback && (
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <Label
+                        htmlFor="auto-failback"
+                        className="cursor-pointer text-sm"
+                      >
+                        Failback
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Move back to a higher-priority node when available.
+                      </p>
+                    </div>
+                    <Switch
+                      id="auto-failback"
+                      checked={resFailback}
+                      onCheckedChange={setResFailback}
+                    />
                   </div>
-                  <Switch
-                    id="auto-failback"
-                    checked={resFailback}
-                    onCheckedChange={setResFailback}
-                  />
-                </div>
+                )}
 
                 <p className="text-[11px] text-muted-foreground">
                   Applied to{" "}

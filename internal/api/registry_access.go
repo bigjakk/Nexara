@@ -553,9 +553,11 @@ func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
 //
 // Every one of them is a TRISTATE on the wire: the Proxmox parameter structs
 // carry *string, so omitting the key leaves the stored comment alone and sending
-// it EMPTY clears it. That is why it has no Default — a default would make every
-// request look like it supplied one, and p.OptString could no longer tell the
-// two apart.
+// it EMPTY clears it. That is why it has no Default — though not because
+// p.OptString would lose the distinction: it reports a default as not supplied
+// (see apischema.Property.Default). A default would reach the plain reads
+// instead, CreateGroup sending p.String("comment") as the new group's note
+// among them, and the docs would advertise a note no omitted key receives.
 func accessCommentParam(description string) apischema.Property {
 	return optString(1024, "<string>", description)
 }
@@ -642,9 +644,12 @@ func updateAccessUserParams() apischema.Properties {
 //
 // Every one of them is a TRISTATE, and keeping that is the whole reason they are
 // declared without defaults: the struct's fields are pointers, so an omitted key
-// leaves the stored value alone and an EMPTY one clears it. A Default here would
-// make p.OptString report every request as having supplied the field, and a
-// rename would start clearing the e-mail address of every account it touched.
+// leaves the stored value alone and an EMPTY one clears it. The pointers come
+// from p.OptString and friends, which report a default as not supplied (see
+// apischema.Property.Default), so a Default would not change what reaches
+// Proxmox; it would document a value an omitted field never gets, and feed the
+// plain reads — CreateUser's audit row records p.String("comment") and
+// p.String("groups").
 //
 // `email` deliberately carries no "email" format for the same reason: the format
 // refuses the empty string, which is the only way to clear a stored address.
@@ -665,7 +670,10 @@ func accessUserFieldParams() apischema.Properties {
 			Type:     apischema.Boolean,
 			Optional: true,
 			// NO Default. A disabled account whose comment is edited must stay
-			// disabled, and a Default of true here would re-enable it.
+			// disabled; the p.OptBool read is what guarantees it, since a
+			// default is never reported as supplied (apischema.Property.Default),
+			// and a Default of true would only document an enable that an
+			// omitted key never gets.
 			Typetext:    "<boolean>",
 			Description: "Whether the account may authenticate. Omitted, it is left as it is.",
 		},
@@ -688,8 +696,10 @@ func createAccessTokenParams() apischema.Properties {
 			Optional: true,
 			// NO Default, deliberately. Omitting the key means "do not send it",
 			// which lets PROXMOX apply its own default — privilege separation
-			// ON. Defaulting it here would start writing an explicit privsep=1
-			// on every mint and would silently own a decision Proxmox makes.
+			// ON. A declared default would not start sending privsep=1 (the
+			// handler reads p.OptBool, which reports a default as not supplied
+			// — apischema.Property.Default), but it would document as ours a
+			// decision Proxmox makes.
 			Typetext: "<boolean>",
 			Description: "Whether the token is privilege-separated — it then holds only the privileges " +
 				"granted to the token itself, never the owning user's. Omitted, Proxmox's own default " +
@@ -750,9 +760,10 @@ func updateAccessACLParams() apischema.Properties {
 		"propagate": {
 			Type:     apischema.Boolean,
 			Optional: true,
-			// NO Default: proxmox.UpdateAccessACLParams.Propagate is a *bool and
-			// an omitted key means "do not send it", leaving Proxmox's own
-			// default in place.
+			// NO Default: an omitted key means "do not send it", leaving
+			// Proxmox's own default in place. The handler's *bool comes from
+			// p.OptBool, which a default cannot fool (apischema.Property.Default),
+			// so a declared one would only document a second copy of Proxmox's.
 			Typetext:    "<boolean>",
 			Description: "Whether the grant applies to paths below this one. Omitted, Proxmox's default applies.",
 		},

@@ -60,6 +60,7 @@ describe("HARuleForm", () => {
       <HARuleForm
         mode="create"
         clusterId="c1"
+        pveVersion="9.0.6"
         allVMs={vms}
         allNodes={nodes}
         onSuccess={() => undefined}
@@ -81,6 +82,7 @@ describe("HARuleForm", () => {
       <HARuleForm
         mode="create"
         clusterId="c1"
+        pveVersion="9.0.6"
         allVMs={vms}
         allNodes={nodes}
         onSuccess={() => undefined}
@@ -109,6 +111,7 @@ describe("HARuleForm", () => {
       <HARuleForm
         mode="create"
         clusterId="c1"
+        pveVersion="9.0.6"
         allVMs={vms}
         allNodes={nodes}
         onSuccess={() => undefined}
@@ -133,6 +136,7 @@ describe("HARuleForm", () => {
       <HARuleForm
         mode="create"
         clusterId="c1"
+        pveVersion="9.0.6"
         allVMs={vms}
         allNodes={nodes}
         onSuccess={() => undefined}
@@ -157,6 +161,7 @@ describe("HARuleForm", () => {
       <HARuleForm
         mode="edit"
         clusterId="c1"
+        pveVersion="9.0.6"
         allVMs={vms}
         allNodes={nodes}
         rule={{

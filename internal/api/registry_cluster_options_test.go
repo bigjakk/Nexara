@@ -247,7 +247,7 @@ func TestClusterOptionsKeepTheirTriState(t *testing.T) {
 		t.Errorf("an explicit console:\"\" read back as (%q, supplied=%v)", value, supplied)
 	}
 	if _, supplied := cap.params.OptString("keyboard"); supplied {
-		t.Error("keyboard reads as supplied on a body that omitted it; none of these may carry a default")
+		t.Error("keyboard reads as supplied on a body that omitted it; UpdateOptions would send it to Proxmox")
 	}
 
 	// And an empty body is a real request — "change nothing".

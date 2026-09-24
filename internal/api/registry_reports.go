@@ -439,10 +439,11 @@ func createScheduleParams() apischema.Properties {
 
 // updateScheduleParams is the body of PUT /api/v1/reports/schedules/:id.
 //
-// EVERY parameter is optional and read through an Opt accessor, so omitting
-// one leaves the stored column alone. That is the whole contract of this
-// route: the enable/disable toggle PUTs `{"enabled": …}` and nothing else,
-// and a Default on any field here would rewrite the rest of the row with it.
+// EVERY parameter is optional and read through an Opt accessor or behind
+// Has, so omitting one leaves the stored column alone — with or without a
+// declared default, which those reads never see as supplied
+// (apischema.Property.Default). That is the whole contract of this route:
+// the enable/disable toggle PUTs `{"enabled": …}` and nothing else.
 //
 // email_channel_id is the one field whose EMPTY value is meaningful rather
 // than absent — it detaches the channel — which is why it carries the
@@ -454,9 +455,10 @@ func updateScheduleParams() apischema.Properties {
 	}
 	for name, prop := range create {
 		p := prop.AsOptional()
-		// AsOptional keeps the Default, and on this route a Default is exactly
-		// what must not survive: `enabled` would then be rewritten to true on
-		// every partial save.
+		// AsOptional keeps the Default, and on this route it must not
+		// survive. The handler would ignore it, but the docs would not: they
+		// would describe an omitted `enabled` as true, a partial save as a
+		// re-enable, when the stored value is left as it is.
 		p.Default = nil
 		out[name] = p
 	}

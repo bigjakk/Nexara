@@ -423,9 +423,10 @@ func (h *AccessHandler) CreateToken(c fiber.Ctx, p *apischema.Params) error {
 	req := proxmox.CreateAccessTokenParams{
 		Comment: p.String("comment"),
 		Expire:  optInt64Ptr(p.OptInt("expire")),
-		// No default, so an omitted key leaves PrivSep nil and the outbound
-		// form carries no privsep at all — which is how Proxmox's own default
-		// (privilege separation ON) stays in force.
+		// An omitted key leaves PrivSep nil — p.OptBool reports it as not
+		// supplied, a declared default included (apischema.Property.Default) —
+		// so the outbound form carries no privsep at all, which is how
+		// Proxmox's own default (privilege separation ON) stays in force.
 		PrivSep: optBoolPtr(p.OptBool("privsep")),
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)

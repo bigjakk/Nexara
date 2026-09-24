@@ -198,8 +198,8 @@ func TestVirtioWinPruneStaysTriState(t *testing.T) {
 		t.Error("prune_enabled is required; an omitted key has to keep the stored value")
 	}
 	if prop.Default != nil {
-		t.Errorf("prune_enabled declares default %#v; omitting it must stay distinct from sending false, "+
-			"because this field deletes files", prop.Default)
+		t.Errorf("prune_enabled declares default %#v; an omitted one keeps the stored value, and a "+
+			"default would document it as set — on a field that deletes files", prop.Default)
 	}
 
 	cap := &capture{}

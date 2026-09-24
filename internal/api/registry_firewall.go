@@ -166,12 +166,14 @@ func firewallOptionsParams() apischema.Properties {
 		"enable": {
 			Type:     apischema.Integer,
 			Optional: true,
-			// NO Default, and that is load-bearing: proxmox.FirewallOptions
-			// carries *int and firewallOptionsToForm sends the key only when
-			// it is non-nil, so "the caller never mentioned enable" and "the
-			// caller sent 0" are different requests. A Default would collapse
-			// them and start writing enable=0 into the cluster firewall on
-			// every policy-only save — i.e. silently disabling the firewall.
+			// NO Default: proxmox.FirewallOptions carries *int and
+			// firewallOptionsToForm sends the key only when it is non-nil, so
+			// "the caller never mentioned enable" and "the caller sent 0" are
+			// different requests — one that leaves the firewall as it is, and
+			// one that turns it off. The handler's p.OptInt read keeps them
+			// apart with or without a default (apischema.Property.Default); a
+			// Default of 0 would document every policy-only save as turning
+			// the firewall off.
 			Minimum:     apischema.Ptr(0.0),
 			Maximum:     apischema.Ptr(1.0),
 			Typetext:    "<integer>",
@@ -492,10 +494,11 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 			"nomatch": {
 				Type:     apischema.Integer,
 				Optional: true,
-				// NO Default, for the reason the firewall options enable
-				// gives: proxmox.FirewallIPSetEntryParams carries *int and
-				// the key is sent only when the caller chose, so "omitted"
-				// and "0" are different requests.
+				// NO Default, as for the firewall options enable:
+				// proxmox.FirewallIPSetEntryParams carries *int and the key is
+				// sent only when the caller chose, so "omitted" (Proxmox's
+				// default) and "0" are different requests, and a declared
+				// default would document the one as the other.
 				Minimum:     apischema.Ptr(0.0),
 				Maximum:     apischema.Ptr(1.0),
 				Typetext:    "<integer>",

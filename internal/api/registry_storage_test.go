@@ -528,8 +528,8 @@ func TestStorageDownloadURLRequiredSetAndChecksumIsNotPaired(t *testing.T) {
 	// verify_certificates must carry NO default: the client sends the key
 	// only when the caller chose, and Proxmox's own default is to verify.
 	if d := e.Parameters["verify_certificates"].Default; d != nil {
-		t.Errorf("verify_certificates declares default %#v; it must have NONE, so that omitting it "+
-			"leaves Proxmox verifying rather than sending verify-certificates=0", d)
+		t.Errorf("verify_certificates declares default %#v; it must have NONE — an omitted one leaves "+
+			"Proxmox's own default (verify) in force, and a default would document a second copy of it", d)
 	}
 
 	for _, tt := range []struct {

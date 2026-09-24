@@ -178,10 +178,11 @@ func registerPoolEndpoints(reg *Registry, h *handlers.PoolHandler) {
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("manage", "pool"),
 		Parameters: poolPathParams(apischema.Properties{
-			// Optional with NO default, so p.Has tells "leave the comment
-			// alone" from "clear it": the handler forwards a *string, and a
-			// default here would start writing an empty comment onto every
-			// pool whose editor never touched the field.
+			// Optional with NO default. The handler forwards a *string from
+			// p.OptString, which tells "leave the comment alone" from "clear
+			// it" with or without a default (apischema.Property.Default); a
+			// default would only document a comment that no omitted key
+			// writes.
 			"comment": optString(1024, "<string>", "Replacement comment. Omitted, the stored one is left alone; sent empty, it is cleared."),
 			"vms":     optString(4096, "<vmid[,vmid...]>", "Guests to add to the pool, as Proxmox's comma-separated VMID list."),
 			"storage": optString(4096, "<storage[,storage...]>", "Storages to add to the pool, comma-separated."),

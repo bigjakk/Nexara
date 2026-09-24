@@ -230,10 +230,15 @@ func registerClusterEndpoints(reg *Registry, h *handlers.ClusterHandler,
 		Permissions: clusterCheck("manage", "cluster"),
 		Parameters: apischema.Properties{
 			"id": clusterIDPathParam,
-			// Every field below is OPTIONAL WITH NO DEFAULT, because the
-			// handler reads each as a pointer and merges only what was sent. A
-			// Default would make every save look like an explicit choice and
-			// overwrite fields the editor never touched.
+			// Every stored field below is OPTIONAL WITH NO DEFAULT, because the
+			// handler reads each as a pointer and merges only what was sent.
+			// The pointers come from OptX reads, which a default cannot fool
+			// (apischema.Property.Default), so a Default would not overwrite an
+			// untouched field; it would document one as reset to that value,
+			// which no save does. The two confirmation flags at the end are the
+			// exception: optFlag, Default false, read with p.Bool — they are
+			// per-request confirmations, not stored fields, so "not sent" and
+			// "false" are meant to be the same.
 			"name":    optString(255, "<string>", "New display name."),
 			"api_url": clusterAPIURLParam(true, "New base URL for the Proxmox API. See the endpoint description for what moving it costs."),
 			// NOT MinLength-bounded, on purpose: the handler answers an explicit
@@ -256,8 +261,9 @@ func registerClusterEndpoints(reg *Registry, h *handlers.ClusterHandler,
 				Optional: true,
 				Typetext: "<boolean>",
 				// No Default: false means "pause this cluster" and absent means
-				// "leave it as it is", and collapsing the two would pause every
-				// cluster whose editor only changed its name.
+				// "leave it as it is". The p.OptBool read keeps the two apart
+				// with or without one (apischema.Property.Default); a Default of
+				// false would document every rename as a pause.
 				Description: "Whether the collector polls this cluster. Omitted, the stored value is kept.",
 			},
 			"allow_private_address": optFlag(

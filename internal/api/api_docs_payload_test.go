@@ -677,9 +677,11 @@ func TestDocEndpoints_TrailingSlashPathStillResolves(t *testing.T) {
 
 // TestGuard_AttachDiskIndexStaysDefaultless pins the one parameter this
 // whole phase exists for, in the payload a caller actually reads. A
-// Default on `index` would make an omitted index mean slot 0, which on a
-// VM with a disk is its boot disk — and the docs would then say so,
-// which is worse than saying nothing.
+// Default on `index` would not change what an omitted index does — the
+// handler's OptInt read still sees it as omitted and picks a free slot
+// (apischema.Property.Default) — but the docs would then say an omitted
+// index means slot 0, which on a VM with a disk is its boot disk, and
+// that is worse than saying nothing.
 func TestGuard_AttachDiskIndexStaysDefaultless(t *testing.T) {
 	s := newRouteStubServer(t)
 

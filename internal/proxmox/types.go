@@ -965,25 +965,62 @@ type CephMon struct {
 	Quorum bool    `json:"quorum,omitempty"`
 }
 
-// HAResource represents an HA-managed resource from GET /cluster/ha/resources.
+// HAResource is one HA resource as GET /cluster/ha/resources and GET
+// /cluster/ha/resources/{sid} return it: the RAW section config, not the HA
+// manager's view of it.
+//
+// MaxRestart, MaxRelocate and Failback are pointers because the raw config
+// leaves a property at its default ABSENT, and nil is the only way to keep that
+// apart from an explicit 0. Both reads come from read_resources_config
+// (pve-ha-manager src/PVE/API2/HA/Resources.pm, index and read), a bare
+// cfs_read_file. The defaults — 1 for all three, declared in the propertyList
+// of src/PVE/HA/Resources.pm — are filled in only by checked_resources_config
+// (src/PVE/HA/Config.pm, `$d->{max_restart} = 1 if !defined(...)`), which the
+// HA stack itself and the HA status and rules endpoints read through, and these
+// two endpoints never do. As plain ints, a resource on the defaults read as
+// 0 / 0, which the SPA displayed and its edit form sent back, switching restart
+// and relocation off; and since failback's default is 1, an explicit 0 is
+// exactly what IS stored, which omitempty dropped so that it read as the
+// default.
+//
+// Nothing materialises a default on the way through: absent means Proxmox's
+// default in the JSON Nexara serves and in the audit rows built from this type,
+// as it does in Proxmox's own API. The SPA owns the display
+// (HA_RESOURCE_DEFAULTS in frontend/src/features/ha/api/ha-queries.ts).
+//
+// All three arrive as JSON numbers: SectionConfig's check_value numifies a
+// boolean or an integer (`return $value + 0`) when it parses the file.
+//
+// State is absent in the same way on a resource added without one, and reads
+// as "" here for Proxmox's "started". PVE 9's auto-rebalance is not modelled at
+// all, so no reader of this type can see it or send it back.
 type HAResource struct {
 	SID         string `json:"sid"`   // "vm:101" or "ct:200"
 	Type        string `json:"type"`  // "vm" or "ct"
-	State       string `json:"state"` // "started", "stopped", "enabled", etc.
+	State       string `json:"state"` // "started", "stopped", "enabled", etc.; "" when unset
 	Group       string `json:"group"` // HA group name (may be empty)
 	Status      string `json:"status"`
-	MaxRelocate int    `json:"max_relocate"`
-	MaxRestart  int    `json:"max_restart"`
+	MaxRelocate *int   `json:"max_relocate,omitempty"`
+	MaxRestart  *int   `json:"max_restart,omitempty"`
 	Comment     string `json:"comment,omitempty"`
-	Failback    int    `json:"failback,omitempty"`
+	Failback    *int   `json:"failback,omitempty"`
 }
 
 // HAGroup represents an HA group from GET /cluster/ha/groups.
+//
+// Restricted and NoFailback can stay plain ints although an unset one is
+// absent, because pve-ha-manager's default for both is 0 (src/PVE/HA/Groups.pm,
+// `default => 0`): absent and 0 mean the same thing, which Go's zero value also
+// says. Comment has to be here even though nothing in Go reads it: the SPA's
+// group editor sends its comment box back on every save, so a comment this
+// struct dropped reached the editor blank and was cleared by the next save of
+// any other field.
 type HAGroup struct {
 	Group      string `json:"group"`      // group name
 	Nodes      string `json:"nodes"`      // "node1:100,node2:50" or "node1,node2"
 	Restricted int    `json:"restricted"` // 1 = VMs can ONLY run on group nodes
 	NoFailback int    `json:"nofailback"`
+	Comment    string `json:"comment,omitempty"`
 }
 
 // ClusterStatusEntry represents an entry from GET /cluster/status.

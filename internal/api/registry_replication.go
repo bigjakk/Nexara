@@ -260,8 +260,9 @@ func replicationCommentParam() apischema.Property {
 //
 // It carries NO Default: the handler forwards it as a *int, so omitting
 // the key means "do not send this property" — different from sending 0,
-// which re-enables a disabled job. A Default here would re-enable every
-// job any edit touched.
+// which re-enables a disabled job. The *int comes from p.OptInt, which a
+// default cannot fool (apischema.Property.Default), so a Default of 0 would
+// not re-enable anything; it would document every edit as a re-enable.
 func replicationDisableParam() apischema.Property {
 	return apischema.Property{
 		Type:        apischema.Integer,

@@ -113,11 +113,12 @@ func registerUserEndpoints(reg *Registry, h *handlers.UserHandler) {
 // updateUserParams is the body of PUT /api/v1/users/:id.
 //
 // All three are TRISTATE — the request struct's fields were pointers — so
-// none carries a Default: an omitted key leaves the stored value alone.
-// A Default on `is_active` would be the dangerous one, since it would either
-// reactivate a disabled account or disable a live one on every unrelated
-// edit, and the handler's "cannot change your own active status" refusal
-// keys on the field having been SUPPLIED rather than on its value.
+// none carries a Default: an omitted key leaves the stored value alone. The
+// handler reads each through an Opt accessor and acts, its "cannot change
+// your own active status" refusal included, only on a field that was
+// SUPPLIED, which a default never is (apischema.Property.Default); a Default
+// would therefore change nothing but the docs, which would then describe
+// every unrelated edit as setting the account's active state.
 //
 // `role` is the legacy two-value column, not an RBAC role. Its vocabulary
 // moves here from the handler's own `!= "admin" && != "user"` check, which
@@ -134,7 +135,7 @@ func updateUserParams() apischema.Properties {
 			Type:     apischema.Boolean,
 			Optional: true,
 			// NO Default. See the function comment: a default here would
-			// flip an account's state on every edit that never mentioned it.
+			// document every edit that never mentioned it as flipping it.
 			Typetext: "<boolean>",
 			Description: "Whether the account may sign in. Omitted, it is left as it is. Setting it false " +
 				"revokes the account's sessions immediately. A caller cannot change their own.",

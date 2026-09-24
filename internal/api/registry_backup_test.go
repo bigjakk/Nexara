@@ -448,10 +448,12 @@ func TestDeleteSnapshotReadsItsBodyNotTheQueryString(t *testing.T) {
 // enabled, all, node and comment were bound as pointers precisely so that
 // "the caller never mentioned this" stays distinct from "the caller sent
 // zero or empty": clearedProperties() unsets node and comment only on an
-// explicit empty, and selectionKeys() reads all=0 as "not a selection". A
-// Default on any of them collapses the two, and the enable/disable toggle —
-// which PUTs `{"enabled":0}` and nothing else — would start clearing the
-// job's comment and node restriction on every save.
+// explicit empty, and selectionKeys() reads all=0 as "not a selection". The
+// handler's OptInt/OptString reads keep that even with a Default declared
+// (apischema.Property.Default) — the end-to-end check below is what pins the
+// toggle, which PUTs `{"enabled":0}` and nothing else — so the declaration
+// check is about the docs: a default would describe an omitted field as set
+// to it, when it is left alone.
 func TestBackupJobBodyKeepsItsFourTristates(t *testing.T) {
 	for _, path := range []string{clusterScope + "/backup-jobs", clusterScope + "/backup-jobs/:job_id"} {
 		method := fiber.MethodPost
@@ -469,8 +471,8 @@ func TestBackupJobBodyKeepsItsFourTristates(t *testing.T) {
 					t.Errorf("%s is required; both handlers bound the body and checked nothing", name)
 				}
 				if prop.Default != nil {
-					t.Errorf("%s declares default %#v; it must have NONE, so that omitting it stays "+
-						"distinguishable from sending zero or empty", name, prop.Default)
+					t.Errorf("%s declares default %#v; it must have NONE — an omitted one is left alone, "+
+						"and a default would document it as set", name, prop.Default)
 				}
 			}
 		})
