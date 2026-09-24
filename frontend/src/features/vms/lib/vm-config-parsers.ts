@@ -37,8 +37,134 @@ export function buildKVString(map: Map<string, string>): string {
 }
 
 // ---------------------------------------------------------------------------
-// net0
+// Property strings, edited in place
 // ---------------------------------------------------------------------------
+
+/**
+ * One comma-separated segment of a Proxmox property string. `key` is null
+ * for a segment with no "=", which holds the value of the format's
+ * default_key (a NIC's model, a VGA type). `raw` is the segment as stored.
+ */
+interface Segment {
+  key: string | null;
+  value: string;
+  raw: string;
+}
+
+/**
+ * Split one segment as pve-common's parse_property_string
+ * (src/PVE/JSONSchema.pm) does: at its first "=", or not at all when it has
+ * none. Key and value are trimmed for reading; `raw` is left as it was.
+ */
+function segment(raw: string): Segment {
+  const idx = raw.indexOf("=");
+  if (idx === -1) return { key: null, value: raw.trim(), raw };
+  return {
+    key: raw.slice(0, idx).trim(),
+    value: raw.slice(idx + 1).trim(),
+    raw,
+  };
+}
+
+function splitSegments(raw: string): Segment[] {
+  return raw === "" ? [] : raw.split(",").map(segment);
+}
+
+function joinSegments(segs: Segment[]): string {
+  return segs.map((s) => s.raw).join(",");
+}
+
+/**
+ * Write `text` in place of the segments `owns` matches: where the first one
+ * stands, dropping any later match. When nothing matches it is appended, or
+ * prepended for a default_key. `text` null removes the matches. Every other
+ * segment keeps its bytes and its position.
+ */
+function setSegment(
+  segs: Segment[],
+  owns: (s: Segment) => boolean,
+  text: string | null,
+  whenAbsent: "append" | "prepend" = "append",
+): Segment[] {
+  const out: Segment[] = [];
+  let found = false;
+  for (const s of segs) {
+    if (!owns(s)) {
+      out.push(s);
+      continue;
+    }
+    if (!found && text !== null) out.push(segment(text));
+    found = true;
+  }
+  if (found || text === null) return out;
+  return whenAbsent === "prepend"
+    ? [segment(text), ...out]
+    : [...out, segment(text)];
+}
+
+/**
+ * pve-common's parse_boolean (src/PVE/JSONSchema.pm), which
+ * parse_property_string applies to every boolean option: 1, on, yes and
+ * true, in any case, are true; 0, off, no and false are false. Anything else
+ * fails Proxmox's check_type there; it reads as off here.
+ */
+function pveBoolean(value: string): boolean {
+  return /^(1|on|yes|true)$/i.test(value);
+}
+
+// ---------------------------------------------------------------------------
+// netN
+// ---------------------------------------------------------------------------
+
+/*
+ * qemu-server's $net_fmt (src/PVE/QemuServer/Network.pm), transcribed:
+ *
+ *   model        the default_key, so a bare segment is the model. One of
+ *                $nic_model_list: e1000, e1000-82540em, e1000-82544gc,
+ *                e1000-82545em, e1000e, i82551, i82557b, i82559er, ne2k_isa,
+ *                ne2k_pci, pcnet, rtl8139, virtio, vmxnet3.
+ *   <model>=MAC  one alias per $nic_model_list entry (keyAlias model, alias
+ *                macaddr): model and MAC in one segment. The form print_net
+ *                writes.
+ *   macaddr      the MAC, when it is not written through that shorthand.
+ *   bridge       pve-bridge-id. Absent means user-mode (NAT) networking.
+ *   queues       integer 0-64, "Number of packet queues to be used on the
+ *                device": virtio-net multiqueue. print_netdev_full and
+ *                print_netdevice_full (src/PVE/QemuServer.pm) use it only
+ *                when the model is virtio, and ignore it on any other.
+ *   rate         number >= 0: MB/s, fractional allowed.
+ *   tag          integer 1-4094.
+ *   trunks       "vlanid[;vlanid...]", each an id or an id-id range.
+ *   mtu          integer 1-65520, VirtIO only; 1 means the bridge's MTU.
+ *   firewall, link_down, host-tunnel
+ *                booleans (see pveBoolean).
+ *
+ * The API re-prints every netN it is sent ($update_vm_api in
+ * src/PVE/API2/Qemu.pm runs parse_net, then print_net), so a NIC written
+ * through it reads back in print_property_string's order: the <model>=MAC
+ * shorthand first, then the other options sorted by key. A NIC edited by
+ * hand keeps whatever order it was written in.
+ */
+
+/**
+ * $net_fmt's own keys. A key=value segment whose key is none of these and
+ * whose value is a MAC is the <model>=MAC shorthand: matched on that shape
+ * rather than against $nic_model_list, so a model Proxmox adds later still
+ * reads as the model.
+ */
+const NET_FMT_KEYS = new Set([
+  "model",
+  "macaddr",
+  "bridge",
+  "queues",
+  "rate",
+  "tag",
+  "trunks",
+  "firewall",
+  "link_down",
+  "mtu",
+  "host-tunnel",
+]);
 
 export interface ParsedNet {
   model: string;
@@ -48,16 +174,49 @@ export interface ParsedNet {
   vlanTag: string;
   rateLimit: string;
   mtu: string;
+  /** queues=. The Hardware panel has no control for it. */
   multiqueue: string;
+  linkDown: boolean;
 }
 
 /**
- * Parse a Proxmox net0 string.
- * Formats:
- *   "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,firewall=1,tag=100"
- *   "virtio,bridge=vmbr0"
+ * The fields buildNet writes, each with the $net_fmt key that stores it, in
+ * the order a new NIC's options are written.
  */
-export function parseNet0(raw: string): ParsedNet {
+const NET_FIELDS = [
+  ["bridge", "bridge"],
+  ["firewall", "firewall"],
+  ["tag", "vlanTag"],
+  ["rate", "rateLimit"],
+  ["mtu", "mtu"],
+  ["queues", "multiqueue"],
+  ["link_down", "linkDown"],
+] as const;
+
+function isNetModelShorthand(seg: Segment): boolean {
+  return (
+    seg.key !== null && !NET_FMT_KEYS.has(seg.key) && MAC_RE.test(seg.value)
+  );
+}
+
+/** The segment naming the model: bare, model=, or <model>=MAC. */
+function isNetModelSegment(seg: Segment): boolean {
+  return (
+    (seg.key === null && seg.value !== "") ||
+    seg.key === "model" ||
+    isNetModelShorthand(seg)
+  );
+}
+
+/**
+ * Parse a netN value, e.g.
+ *   "virtio=02:00:00:00:00:01,bridge=vmbr0,firewall=1,tag=100"
+ *   "virtio,bridge=vmbr0"
+ *   "model=e1000,macaddr=02:00:00:00:00:01,bridge=vmbr0"
+ * Options with no field here (trunks, host-tunnel, a key newer than the
+ * transcription above) are not read; buildNet keeps them.
+ */
+export function parseNet(raw: string): ParsedNet {
   const result: ParsedNet = {
     model: "virtio",
     mac: "",
@@ -67,70 +226,105 @@ export function parseNet0(raw: string): ParsedNet {
     rateLimit: "",
     mtu: "",
     multiqueue: "",
+    linkDown: false,
   };
-  if (!raw) return result;
-
-  const segments = raw.split(",");
-  for (const seg of segments) {
-    const eqIdx = seg.indexOf("=");
-    if (eqIdx === -1) {
-      // bare model name like "virtio"
-      result.model = seg.trim();
+  for (const seg of splitSegments(raw)) {
+    if (seg.key === null) {
+      // A blank segment is skipped, as parse_property_string skips it.
+      if (seg.value !== "") result.model = seg.value;
       continue;
     }
-    const key = seg.slice(0, eqIdx).trim();
-    const val = seg.slice(eqIdx + 1).trim();
-
-    // First segment may be "virtio=AA:BB:CC:DD:EE:FF"
-    if (
-      MAC_RE.test(val) &&
-      !["bridge", "firewall", "tag", "rate", "mtu", "queues"].includes(key)
-    ) {
-      result.model = key;
-      result.mac = val;
-    } else {
-      switch (key) {
-        case "bridge":
-          result.bridge = val;
-          break;
-        case "firewall":
-          result.firewall = val === "1";
-          break;
-        case "tag":
-          result.vlanTag = val;
-          break;
-        case "rate":
-          result.rateLimit = val;
-          break;
-        case "mtu":
-          result.mtu = val;
-          break;
-        case "queues":
-          result.multiqueue = val;
-          break;
-        default:
-          // model=MAC is already handled above; unknown keys ignored
-          break;
-      }
+    if (isNetModelShorthand(seg)) {
+      result.model = seg.key;
+      result.mac = seg.value;
+      continue;
+    }
+    switch (seg.key) {
+      case "model":
+        result.model = seg.value;
+        break;
+      case "macaddr":
+        result.mac = seg.value;
+        break;
+      case "bridge":
+        result.bridge = seg.value;
+        break;
+      case "firewall":
+        result.firewall = pveBoolean(seg.value);
+        break;
+      case "tag":
+        result.vlanTag = seg.value;
+        break;
+      case "rate":
+        result.rateLimit = seg.value;
+        break;
+      case "mtu":
+        result.mtu = seg.value;
+        break;
+      case "queues":
+        result.multiqueue = seg.value;
+        break;
+      case "link_down":
+        result.linkDown = pveBoolean(seg.value);
+        break;
     }
   }
   return result;
 }
 
-export function buildNet0(parsed: ParsedNet): string {
-  const parts: string[] = [];
-  if (parsed.mac) {
-    parts.push(`${parsed.model}=${parsed.mac}`);
-  } else {
-    parts.push(parsed.model);
+/**
+ * Build a netN value on `base`, the value as stored. Only an option whose
+ * field differs from what `base` holds is rewritten, where it stands; every
+ * other segment keeps its bytes and its position, including the options
+ * this editor has no field for. So an untouched NIC rebuilds to exactly
+ * `base`, and comparing the two is the dirty check. With no `base` it builds
+ * a new NIC.
+ */
+export function buildNet(parsed: ParsedNet, base = ""): string {
+  const was = parseNet(base);
+  let segs = splitSegments(base);
+
+  const modelSeg = segs.find(isNetModelSegment);
+  // Where the MAC is written: inside the model's segment when that is the
+  // model=MAC shorthand, or when there is neither a model segment nor a
+  // macaddr= (a new NIC, written the way print_net writes one). Beside a bare
+  // or model= model, it goes in macaddr=.
+  const shorthand = modelSeg
+    ? isNetModelShorthand(modelSeg)
+    : !segs.some((s) => s.key === "macaddr");
+  const macChanged = parsed.mac !== was.mac;
+  // A stored value with no model is one Proxmox refuses: $net_fmt's model is
+  // not optional, and pve-common's check_prop (src/PVE/JSONSchema.pm)
+  // rejects a missing key that is not. It gains a model segment only when
+  // the model, or a MAC with no macaddr= to hold it, is changed here; adding
+  // one unasked would make an untouched NIC differ from what is stored.
+  if (
+    segs.length === 0 ||
+    parsed.model !== was.model ||
+    (shorthand && macChanged)
+  ) {
+    let text = parsed.model;
+    if (shorthand && parsed.mac) text = `${parsed.model}=${parsed.mac}`;
+    else if (modelSeg?.key === "model") text = `model=${parsed.model}`;
+    segs = setSegment(segs, isNetModelSegment, text, "prepend");
   }
-  if (parsed.bridge) parts.push(`bridge=${parsed.bridge}`);
-  if (parsed.firewall) parts.push("firewall=1");
-  if (parsed.vlanTag) parts.push(`tag=${parsed.vlanTag}`);
-  if (parsed.rateLimit) parts.push(`rate=${parsed.rateLimit}`);
-  if (parsed.mtu) parts.push(`mtu=${parsed.mtu}`);
-  if (parsed.multiqueue) parts.push(`queues=${parsed.multiqueue}`);
-  return parts.join(",");
+  if (!shorthand && macChanged) {
+    segs = setSegment(
+      segs,
+      (s) => s.key === "macaddr",
+      parsed.mac ? `macaddr=${parsed.mac}` : null,
+    );
+  }
+  for (const [key, field] of NET_FIELDS) {
+    const value = parsed[field];
+    if (value === was[field]) continue;
+    let text: string | null = null;
+    if (value === true) text = `${key}=1`;
+    else if (typeof value === "string" && value !== "")
+      text = `${key}=${value}`;
+    segs = setSegment(segs, (s) => s.key === key, text);
+  }
+  return joinSegments(segs);
 }
 
 // ---------------------------------------------------------------------------
@@ -172,28 +366,60 @@ export function buildAgent(parsed: ParsedAgent): string {
 // ---------------------------------------------------------------------------
 
 export interface ParsedVGA {
+  /**
+   * "" when the config names no type, which leaves the choice to Proxmox
+   * when the VM starts (get_vga_properties, src/PVE/QemuServer.pm).
+   */
   type: string;
   memory: string;
 }
 
-/**
- * Parse vga field: "std", "qxl,memory=64", "virtio-gl", etc.
- */
-export function parseVGA(raw: string): ParsedVGA {
-  if (!raw) return { type: "std", memory: "" };
-
-  const idx = raw.indexOf(",");
-  if (idx === -1) return { type: raw.trim(), memory: "" };
-
-  const type = raw.slice(0, idx).trim();
-  const rest = raw.slice(idx + 1);
-  const kv = parseKVString(rest);
-  return { type, memory: kv.get("memory") ?? "" };
+/** The segment naming the type: bare ($vga_fmt's default_key) or type=. */
+function isVgaTypeSegment(seg: Segment): boolean {
+  return (seg.key === null && seg.value !== "") || seg.key === "type";
 }
 
-export function buildVGA(parsed: ParsedVGA): string {
-  if (parsed.memory) return `${parsed.type},memory=${parsed.memory}`;
-  return parsed.type;
+/**
+ * Parse vga against qemu-server's $vga_fmt (src/PVE/QemuServer.pm), e.g.
+ * "std", "qxl,memory=64", "std,clipboard=vnc". `type` is an optional
+ * default_key, so "memory=32" alone is a valid value with no type. `memory`
+ * is in MiB. `clipboard` has no field here, and buildVGA keeps it.
+ */
+export function parseVGA(raw: string): ParsedVGA {
+  const result: ParsedVGA = { type: "", memory: "" };
+  for (const seg of splitSegments(raw)) {
+    if (isVgaTypeSegment(seg)) result.type = seg.value;
+    else if (seg.key === "memory") result.memory = seg.value;
+  }
+  return result;
+}
+
+/**
+ * Build vga on `base` the way buildNet builds a NIC: only a changed option
+ * is rewritten, so an untouched value, no vga line included, rebuilds to
+ * exactly `base`. "" means no vga line at all.
+ */
+export function buildVGA(parsed: ParsedVGA, base = ""): string {
+  const was = parseVGA(base);
+  let segs = splitSegments(base);
+  if (parsed.type !== was.type) {
+    let text: string | null = null;
+    if (parsed.type) {
+      text =
+        segs.find(isVgaTypeSegment)?.key === "type"
+          ? `type=${parsed.type}`
+          : parsed.type;
+    }
+    segs = setSegment(segs, isVgaTypeSegment, text, "prepend");
+  }
+  if (parsed.memory !== was.memory) {
+    segs = setSegment(
+      segs,
+      (s) => s.key === "memory",
+      parsed.memory ? `memory=${parsed.memory}` : null,
+    );
+  }
+  return joinSegments(segs);
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +452,8 @@ export interface ParsedAudio {
 }
 
 /**
- * Parse audio0 field: "device=ich9-intel-hda,driver=spice"
+ * Parse audio0 field: "device=ich9-intel-hda,driver=spice". An absent driver
+ * is spice, $audio_fmt's default (src/PVE/QemuServer.pm).
  */
 export function parseAudio(raw: string): ParsedAudio {
   if (!raw) return { device: "", driver: "spice" };
@@ -237,9 +464,33 @@ export function parseAudio(raw: string): ParsedAudio {
   };
 }
 
-export function buildAudio(parsed: ParsedAudio): string {
+/**
+ * Build audio0 on `base` the way buildNet builds a NIC: only a changed
+ * option is rewritten, so an untouched value rebuilds to exactly `base`. No
+ * device means no audio0 at all ($audio_fmt requires one): "". A device
+ * added where there was none is written with its driver spelled out.
+ */
+export function buildAudio(parsed: ParsedAudio, base = ""): string {
   if (!parsed.device) return "";
-  return `device=${parsed.device},driver=${parsed.driver || "spice"}`;
+  if (!base)
+    return `device=${parsed.device},driver=${parsed.driver || "spice"}`;
+  const was = parseAudio(base);
+  let segs = splitSegments(base);
+  if (parsed.device !== was.device) {
+    segs = setSegment(
+      segs,
+      (s) => s.key === "device",
+      `device=${parsed.device}`,
+    );
+  }
+  if (parsed.driver !== was.driver) {
+    segs = setSegment(
+      segs,
+      (s) => s.key === "driver",
+      parsed.driver ? `driver=${parsed.driver}` : null,
+    );
+  }
+  return joinSegments(segs);
 }
 
 // ---------------------------------------------------------------------------
@@ -611,24 +862,6 @@ export function buildTPMState(parsed: ParsedTPMState): string {
   const parts: string[] = [parsed.volume || parsed.storage + ":1"];
   if (parsed.version) parts.push(`version=${parsed.version}`);
   return parts.join(",");
-}
-
-// ---------------------------------------------------------------------------
-// net0 → generic parseNet / buildNet (used for multi-NIC)
-// ---------------------------------------------------------------------------
-
-export function parseNet(raw: string): ParsedNet & { linkDown: boolean } {
-  const result = parseNet0(raw);
-  return {
-    ...result,
-    linkDown: raw.includes("link_down=1"),
-  };
-}
-
-export function buildNet(parsed: ParsedNet & { linkDown: boolean }): string {
-  let s = buildNet0(parsed);
-  if (parsed.linkDown) s += ",link_down=1";
-  return s;
 }
 
 // ---------------------------------------------------------------------------

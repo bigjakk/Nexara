@@ -94,7 +94,11 @@ import {
   buildSMBIOS,
   SMBIOS_TEXT_FIELDS,
 } from "../lib/vm-config-parsers";
-import type { CPUFlagState, SMBIOSTextField } from "../lib/vm-config-parsers";
+import type {
+  CPUFlagState,
+  ParsedNet,
+  SMBIOSTextField,
+} from "../lib/vm-config-parsers";
 import type { VMConfig } from "../types/vm";
 
 const selectClass =
@@ -160,24 +164,23 @@ function bool01(val: unknown): boolean {
   return Number(val) === 1;
 }
 
-/** Multi-NIC state keyed by device name. */
-interface NICEdit {
-  model: string;
-  mac: string;
-  bridge: string;
-  firewall: boolean;
-  vlanTag: string;
-  rateLimit: string;
-  mtu: string;
-  linkDown: boolean;
-}
+/**
+ * One NIC's state: every field parseNet reads, queues= included though it
+ * has no control here. Save rebuilds each NIC on its stored value (buildNet):
+ * an untouched NIC is not sent, and an edited one keeps every option this
+ * panel does not edit exactly as stored.
+ */
+type NICEdit = ParsedNet;
 
 /**
  * A <select> whose configured value may not be in the option list — an
- * inactive storage, a keyboard layout Proxmox added later. Without this a
- * controlled select gets selectedIndex -1 and renders BLANK, which looks
- * identical to the "" option ("Automatic"/"None") while state still holds the
- * real value; one click then silently reassigns it.
+ * inactive storage, a keyboard layout Proxmox added later. Without this, a
+ * controlled select whose value matches no option shows its FIRST option
+ * (react-dom's updateOptions selects the first one not disabled), often the
+ * "" one ("Automatic"/"None"), while state still holds the real value; one
+ * click then silently reassigns it. The option is built from `value`: pass
+ * the STORED value and it stays in the list after another pick, so it can be
+ * picked back.
  */
 function CurrentValueOption({
   value,
@@ -443,9 +446,36 @@ export function HardwarePanel({
   // --- Network is handled by nicEdits state ---
 
   // --- Display ---
-  const [vgaType, setVgaType] = useState("std");
+  // "" is no type set: no vga line, or one with only other options
+  // (memory=32, clipboard=vnc). Proxmox picks the type; shown as "Default".
+  const [vgaType, setVgaType] = useState("");
   const [vgaMemory, setVgaMemory] = useState("");
   const [audioDevice, setAudioDevice] = useState("");
+
+  // The values as STORED behind every select's "(current)" option. Taken
+  // from the loaded config, not the edit state, as cpuFlagRows is: picking
+  // another value then leaves the stored one in the list, so it can be
+  // picked back. Each is read the way the populate effect reads it.
+  const storedNicModels = useMemo(() => {
+    const models: Record<string, string> = {};
+    for (const [key, val] of Object.entries(original ?? {})) {
+      if (/^net\d+$/.test(key)) models[key] = parseNet(str(val)).model;
+    }
+    return models;
+  }, [original]);
+  const storedVgaType = useMemo(
+    () => parseVGA(str(original?.["vga"] ?? "")).type,
+    [original],
+  );
+  const storedSelects = useMemo(() => {
+    const wd = parseWatchdog(str(original?.["watchdog"] ?? ""));
+    return {
+      keyboard: str(original?.["keyboard"] ?? ""),
+      vmstatestorage: str(original?.["vmstatestorage"] ?? ""),
+      watchdogModel: wd.model,
+      watchdogAction: wd.action,
+    };
+  }, [original]);
 
   // --- CD/DVD (all devices with media=cdrom) ---
   const [cdromEdits, setCdromEdits] = useState<Record<string, string>>({});
@@ -756,20 +786,7 @@ export function HardwarePanel({
     // Network (multi-NIC)
     const nics: Record<string, NICEdit> = {};
     for (const [cfgKey, cfgVal] of Object.entries(config)) {
-      if (/^net\d+$/.test(cfgKey)) {
-        const raw = str(cfgVal);
-        const parsed = parseNet(raw);
-        nics[cfgKey] = {
-          model: parsed.model,
-          mac: parsed.mac,
-          bridge: parsed.bridge,
-          firewall: parsed.firewall,
-          vlanTag: parsed.vlanTag,
-          rateLimit: parsed.rateLimit,
-          mtu: parsed.mtu,
-          linkDown: parsed.linkDown,
-        };
-      }
+      if (/^net\d+$/.test(cfgKey)) nics[cfgKey] = parseNet(str(cfgVal));
     }
     setNicEdits(nics);
 
@@ -866,24 +883,8 @@ export function HardwarePanel({
   function updateNicEdit(key: string, partial: Partial<NICEdit>) {
     setNicEdits((prev) => ({
       ...prev,
-      [key]: {
-        ...(prev[key] ?? {
-          model: "virtio",
-          mac: "",
-          bridge: "",
-          firewall: false,
-          vlanTag: "",
-          rateLimit: "",
-          mtu: "",
-          linkDown: false,
-        }),
-        ...partial,
-      },
+      [key]: { ...(prev[key] ?? parseNet("")), ...partial },
     }));
-  }
-
-  function buildNicString(nic: NICEdit): string {
-    return buildNet({ ...nic, multiqueue: "" });
   }
 
   function handleAddDevice(key: string, value: string) {
@@ -989,8 +990,13 @@ export function HardwarePanel({
     const origAcpi = original["acpi"] != null ? bool01(original["acpi"]) : true;
     if (acpi !== origAcpi) fields["acpi"] = acpi ? "1" : "0";
 
-    // Disk config changes (cache, discard, ssd, iothread) via SetVMConfig
+    // Disk config changes (cache, discard, ssd, iothread) via SetVMConfig.
+    // A disk marked for removal is only deleted, never also set: Proxmox
+    // refuses a key that is both ("you can't use '-scsi0' and -delete scsi0'
+    // at the same time", $update_vm_api in src/PVE/API2/Qemu.pm), and the
+    // whole Save fails with it.
     for (const [key, edit] of Object.entries(diskEdits)) {
+      if (disksToRemove.has(key)) continue;
       const origRaw = str(original[key] ?? "");
       const origDisk = parseDisk(origRaw);
       if (
@@ -1060,14 +1066,8 @@ export function HardwarePanel({
     for (const b of optionalBooleans) {
       if (b.value !== b.was) fields[b.key] = b.value ? "1" : "0";
     }
-    // Boot order
-    const origBootDevices = parseBootOrder(str(original["boot"] ?? ""));
-    const enabledDevices = bootOrder
-      .filter((b) => b.enabled)
-      .map((b) => b.device);
-    if (enabledDevices.join(";") !== origBootDevices.join(";")) {
-      fields["boot"] = buildBootOrder(enabledDevices);
-    }
+    // Boot order: see bootToSend.
+    if (bootToSend !== null) fields["boot"] = bootToSend;
     // Startup order
     const origStartup = parseStartup(str(original["startup"] ?? ""));
     const newStartup = buildStartup({
@@ -1084,10 +1084,14 @@ export function HardwarePanel({
       }
     }
 
-    // Network (multi-NIC)
+    // Network (multi-NIC). Each NIC is rebuilt on its stored value, so an
+    // untouched one comes back identical and is not sent, and an edited one
+    // changes only the options edited here. A NIC marked for removal is only
+    // deleted, for the reason a removed disk is.
     for (const [nicKey, nic] of Object.entries(nicEdits)) {
-      const newVal = buildNicString(nic);
+      if (deviceRemovals.has(nicKey)) continue;
       const origVal = str(original[nicKey] ?? "");
+      const newVal = buildNet(nic, origVal);
       if (newVal !== origVal) fields[nicKey] = newVal;
     }
 
@@ -1105,12 +1109,24 @@ export function HardwarePanel({
       deleteFields.push(key);
     }
 
-    // Display
-    const newVga = buildVGA({ type: vgaType, memory: vgaMemory });
+    // Display. Rebuilt on the stored values like the NICs. With no vga line
+    // nothing is written until a type is picked. Default drops the type, and
+    // the whole line when nothing else is left on it.
     const origVga = str(original["vga"] ?? "");
-    if (newVga !== origVga) fields["vga"] = newVga;
-    const newAudio = buildAudio({ device: audioDevice, driver: "spice" });
+    const newVga = buildVGA({ type: vgaType, memory: vgaMemory }, origVga);
+    if (newVga !== origVga) {
+      if (newVga) {
+        fields["vga"] = newVga;
+      } else {
+        deleteFields.push("vga");
+      }
+    }
+    // The driver has no control here; it is carried from the stored value.
     const origAudio = str(original["audio0"] ?? "");
+    const newAudio = buildAudio(
+      { ...parseAudio(origAudio), device: audioDevice },
+      origAudio,
+    );
     if (newAudio !== origAudio) {
       if (newAudio) {
         fields["audio0"] = newAudio;
@@ -1168,8 +1184,15 @@ export function HardwarePanel({
       fields["delete"] = all;
     }
 
-    // Handle disk resizes via the separate resize API
+    // Handle disk resizes via the separate resize API. Not for a disk this
+    // same Save removes: the resize is its own request, raced by the delete.
+    // While the disk is still in the config it grows a volume the operator
+    // is detaching, which Proxmox cannot shrink back ("shrinking disks is not
+    // supported"); once the delete has taken it out, it fails ("disk 'scsi0'
+    // does not exist", resize_vm in src/PVE/API2/Qemu.pm) beside a Save that
+    // succeeded.
     for (const [key, edit] of Object.entries(diskEdits)) {
+      if (disksToRemove.has(key)) continue;
       if (edit.newSize) {
         resizeMutation.mutate({
           clusterId,
@@ -1266,6 +1289,37 @@ export function HardwarePanel({
     ];
   }, [original, freeze, reboot, tdf, allowKsm]);
 
+  /**
+   * The `boot` value Save sends, or null when it sends none: the ticked
+   * devices less every device this same Save removes. Proxmox refuses a boot
+   * order that names a device the request also deletes ("invalid bootorder:
+   * device ... does not exist'", in $update_vm_api, src/PVE/API2/Qemu.pm),
+   * and it refuses it late. That function writes each delete to the VM's
+   * pending changes first, then the other options one at a time in hash
+   * order, and dies on reaching boot before applying any of it. The removal,
+   * and whichever options came before boot, stay pending and apply at the
+   * next start (vm_start_nolock calls vmconfig_apply_pending,
+   * src/PVE/QemuServer.pm) or with the next write that succeeds, after the
+   * request has reported an error.
+   *
+   * It is compared with the stored order less the same devices, because
+   * that is what Proxmox makes of the stored order when no boot is sent: its
+   * delete loop drops each deleted device from it ("remove from bootorder if
+   * necessary"). So removing a ticked device sends no boot of its own.
+   */
+  const bootToSend = useMemo(() => {
+    if (!original) return null;
+    const kept = (device: string) =>
+      !disksToRemove.has(device) && !deviceRemovals.has(device);
+    const stored = parseBootOrder(str(original["boot"] ?? "")).filter(kept);
+    const enabled = bootOrder
+      .filter((b) => b.enabled && kept(b.device))
+      .map((b) => b.device);
+    return enabled.join(";") === stored.join(";")
+      ? null
+      : buildBootOrder(enabled);
+  }, [original, bootOrder, disksToRemove, deviceRemovals]);
+
   const hasChanges = useMemo(() => {
     if (!original) return false;
     if (cores !== str(original["cores"] ?? 1)) return true;
@@ -1319,11 +1373,7 @@ export function HardwarePanel({
     if (localtime !== bool01(original["localtime"])) return true;
     if (optionalScalars.some((f) => f.value !== f.was)) return true;
     if (optionalBooleans.some((b) => b.value !== b.was)) return true;
-    const origBootDevices = parseBootOrder(str(original["boot"] ?? ""));
-    const currentEnabled = bootOrder
-      .filter((b) => b.enabled)
-      .map((b) => b.device);
-    if (currentEnabled.join(";") !== origBootDevices.join(";")) return true;
+    if (bootToSend !== null) return true;
     const origStartup = parseStartup(str(original["startup"] ?? ""));
     if (
       buildStartup({
@@ -1333,21 +1383,23 @@ export function HardwarePanel({
       }) !== buildStartup(origStartup)
     )
       return true;
-    // Multi-NIC changes
+    // Multi-NIC changes, compared as handleSave compares them
     for (const [nicKey, nic] of Object.entries(nicEdits)) {
-      if (buildNicString(nic) !== str(original[nicKey] ?? "")) return true;
+      const origNic = str(original[nicKey] ?? "");
+      if (buildNet(nic, origNic) !== origNic) return true;
     }
     // Generic device changes
     if (Object.keys(pendingDeviceAdds).length > 0) return true;
     if (deviceRemovals.size > 0) return true;
-    if (
-      buildVGA({ type: vgaType, memory: vgaMemory }) !==
-      str(original["vga"] ?? "")
-    )
+    const origVga = str(original["vga"] ?? "");
+    if (buildVGA({ type: vgaType, memory: vgaMemory }, origVga) !== origVga)
       return true;
+    const origAudio = str(original["audio0"] ?? "");
     if (
-      buildAudio({ device: audioDevice, driver: "spice" }) !==
-      str(original["audio0"] ?? "")
+      buildAudio(
+        { ...parseAudio(origAudio), device: audioDevice },
+        origAudio,
+      ) !== origAudio
     )
       return true;
     // CD/DVD drives
@@ -1404,7 +1456,7 @@ export function HardwarePanel({
     localtime,
     optionalScalars,
     optionalBooleans,
-    bootOrder,
+    bootToSend,
     startupOrder,
     startupUp,
     startupDown,
@@ -2100,7 +2152,10 @@ export function HardwarePanel({
                 }}
               >
                 <option value="">Default (guest-handled)</option>
-                <CurrentValueOption value={keyboard} known={keyboardLayouts} />
+                <CurrentValueOption
+                  value={storedSelects.keyboard}
+                  known={keyboardLayouts}
+                />
                 {keyboardLayouts.map((k) => (
                   <option key={k} value={k}>
                     {k}
@@ -2119,7 +2174,7 @@ export function HardwarePanel({
               >
                 <option value="">Automatic</option>
                 <CurrentValueOption
-                  value={vmstatestorage}
+                  value={storedSelects.vmstatestorage}
                   known={diskStorages.map((st) => st.storage)}
                 />
                 {diskStorages.map((st) => (
@@ -2210,7 +2265,7 @@ export function HardwarePanel({
               >
                 <option value="">None</option>
                 <CurrentValueOption
-                  value={watchdogModel}
+                  value={storedSelects.watchdogModel}
                   known={watchdogModels.map((m) => m.value)}
                 />
                 {watchdogModels.map((m) => (
@@ -2229,7 +2284,7 @@ export function HardwarePanel({
                 }}
               >
                 <CurrentValueOption
-                  value={watchdogAction}
+                  value={storedSelects.watchdogAction}
                   known={watchdogActions.map((a) => a.value)}
                 />
                 {watchdogActions.map((a) => (
@@ -2360,6 +2415,10 @@ export function HardwarePanel({
                             updateNicEdit(nicKey, { model: e.target.value });
                           }}
                         >
+                          <CurrentValueOption
+                            value={storedNicModels[nicKey] ?? ""}
+                            known={netModels.map((m) => m.value)}
+                          />
                           {netModels.map((m) => (
                             <option key={m.value} value={m.value}>
                               {m.label}
@@ -2522,6 +2581,20 @@ export function HardwarePanel({
                   setVgaType(e.target.value);
                 }}
               >
+                {/* No type set: no vga line, or one with only other options
+                    (memory=32, clipboard=vnc). qemu-server picks the type
+                    when the VM starts (get_vga_properties,
+                    src/PVE/QemuServer.pm): virtio on aarch64; cirrus for
+                    ostype w2k, wxp and w2k3 and, on a machine version below
+                    2.9, for every guest but Windows Vista/2008 and newer; std
+                    otherwise. Not always std, so it is not shown as std:
+                    Proxmox's own GUI calls it "Default" too (kvm_vga_drivers,
+                    pve-manager www/manager6/Utils.js). */}
+                <option value="">Default</option>
+                <CurrentValueOption
+                  value={storedVgaType}
+                  known={vgaTypes.map((v) => v.value)}
+                />
                 {vgaTypes.map((v) => (
                   <option key={v.value} value={v.value}>
                     {v.label}
