@@ -232,31 +232,39 @@ func (h *NetworkHandler) DeleteClusterFirewallRule(c fiber.Ctx, p *apischema.Par
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-// --- VM Firewall Endpoints ---
+// --- Guest (VM and container) Firewall Endpoints ---
+//
+// These routes serve BOTH guest kinds: :vm_id is a Proxmox VMID, and a VMID
+// names a VM or a container. Proxmox keeps the two firewalls under separate
+// trees (/nodes/{node}/qemu/{vmid}/firewall and /nodes/{node}/lxc/{vmid}/
+// firewall), so the handler hands the client the guest's type from its vms
+// row alongside its node — see proxmox.guestFirewallRulesPath for the
+// upstream citation and for why an unknown type is refused, not defaulted.
 
-// resolveVMNode looks up the node name for a VM in the database.
+// resolveGuest looks up the node a guest runs on and its Proxmox type
+// ("qemu" or "lxc", the vms row's type column) in the database.
 //
 // The lookup is CLUSTER-SCOPED — GetVMByClusterAndVmid takes the cluster the
 // route's path named — so a VMID that exists on some other cluster is a 404
 // here rather than a read of another cluster's guest.
-func (h *NetworkHandler) resolveVMNode(c fiber.Ctx, clusterID uuid.UUID, vmid int32) (string, error) {
+func (h *NetworkHandler) resolveGuest(c fiber.Ctx, clusterID uuid.UUID, vmid int32) (node, guestType string, err error) {
 	vm, err := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
 		ClusterID: clusterID,
 		Vmid:      vmid,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", fiber.NewError(fiber.StatusNotFound, "VM not found")
+			return "", "", fiber.NewError(fiber.StatusNotFound, "Guest not found")
 		}
-		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to look up VM")
+		return "", "", fiber.NewError(fiber.StatusInternalServerError, "Failed to look up guest")
 	}
 
-	node, err := h.queries.GetNode(c.Context(), vm.NodeID)
+	n, err := h.queries.GetNode(c.Context(), vm.NodeID)
 	if err != nil {
-		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to look up node")
+		return "", "", fiber.NewError(fiber.StatusInternalServerError, "Failed to look up node")
 	}
 
-	return node.Name, nil
+	return n.Name, vm.Type, nil
 }
 
 // ListVMFirewallRules handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/firewall/rules.
@@ -271,7 +279,7 @@ func (h *NetworkHandler) ListVMFirewallRules(c fiber.Ctx, p *apischema.Params) e
 	// declares it as a bounded integer, so the hand-rolled Atoi is gone.
 	vmid := int(p.Int("vm_id"))
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
+	nodeName, guestType, err := h.resolveGuest(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -281,7 +289,7 @@ func (h *NetworkHandler) ListVMFirewallRules(c fiber.Ctx, p *apischema.Params) e
 		return err
 	}
 
-	rules, err := pxClient.GetVMFirewallRules(c.Context(), nodeName, vmid)
+	rules, err := pxClient.GetVMFirewallRules(c.Context(), nodeName, guestType, vmid)
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -298,7 +306,7 @@ func (h *NetworkHandler) CreateVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 	vmid := int(p.Int("vm_id"))
 	req := firewallRuleFromParams(p)
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
+	nodeName, guestType, err := h.resolveGuest(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -308,11 +316,11 @@ func (h *NetworkHandler) CreateVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 		return err
 	}
 
-	if err := pxClient.CreateVMFirewallRule(c.Context(), nodeName, vmid, req); err != nil {
+	if err := pxClient.CreateVMFirewallRule(c.Context(), nodeName, guestType, vmid, req); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "action": req.Action, "type": req.Type})
+	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "guest_type": guestType, "node": nodeName, "action": req.Action, "type": req.Type})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("vm/%d", vmid), "firewall_rule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
@@ -328,7 +336,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 	pos := int(p.Int("pos"))
 	req := firewallRuleFromParams(p)
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
+	nodeName, guestType, err := h.resolveGuest(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -338,11 +346,11 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 		return err
 	}
 
-	if err := pxClient.UpdateVMFirewallRule(c.Context(), nodeName, vmid, pos, req, firewallRuleDigest(p)); err != nil {
+	if err := pxClient.UpdateVMFirewallRule(c.Context(), nodeName, guestType, vmid, pos, req, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "position": pos, "action": req.Action, "type": req.Type})
+	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "guest_type": guestType, "node": nodeName, "position": pos, "action": req.Action, "type": req.Type})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -357,7 +365,7 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 	vmid := int(p.Int("vm_id"))
 	pos := int(p.Int("pos"))
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
+	nodeName, guestType, err := h.resolveGuest(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -367,11 +375,11 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 		return err
 	}
 
-	if err := pxClient.DeleteVMFirewallRule(c.Context(), nodeName, vmid, pos, firewallRuleDigest(p)); err != nil {
+	if err := pxClient.DeleteVMFirewallRule(c.Context(), nodeName, guestType, vmid, pos, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "position": pos})
+	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "guest_type": guestType, "node": nodeName, "position": pos})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})

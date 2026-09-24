@@ -11,7 +11,8 @@ import (
 // split of NetworkHandler's 66 routes is explained in registry_networks.go.
 
 // firewallScope is the cluster-wide firewall collection, and
-// guestFirewallScope is the per-guest one. :cluster_id is the FIRST path
+// guestFirewallScope is the per-guest one — a guest being a VM or a
+// container, both addressed by their Proxmox VMID. :cluster_id is the FIRST path
 // parameter of both, which namesACluster (permissions.go) requires of a
 // cluster-scoped Check.
 const (
@@ -42,8 +43,8 @@ var firewallVMIDParam = apischema.Property{
 	Minimum:  apischema.Ptr(1.0),
 	Maximum:  apischema.Ptr(999999999.0),
 	Typetext: "<integer>",
-	Description: "Proxmox VMID of the guest, e.g. 101 — NOT the Nexara uuid that the other " +
-		"/vms/{vm_id} routes take.",
+	Description: "Proxmox VMID of the guest (a VM or a container), e.g. 101 — NOT the Nexara uuid " +
+		"that the other /vms/{vm_id} routes take.",
 }
 
 // firewallRulePosParam is a rule's position in the ruleset it belongs to, as
@@ -118,7 +119,7 @@ var firewallRuleDigestParam = optString(64, "<digest>",
 // mapProxmoxError passes its "action: property is missing and it is not
 // optional" back as a 400.
 // What the floor restores is the refusal happening before the round trip —
-// and, on the guest route, before resolveVMNode's database lookup.
+// and, on the guest route, before resolveGuest's database lookup.
 //
 // The SECURITY-GROUP create is on the optional side too, and that is not an
 // oversight: CreateSecurityGroupRule never checked either field, unlike its
@@ -349,8 +350,8 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,
 		Path:   guestFirewallScope + "/rules",
-		Description: "List one guest's firewall rules in evaluation order. vm_id is the Proxmox VMID " +
-			"here, not the Nexara uuid the other /vms routes take.",
+		Description: "List one guest's (VM or container) firewall rules in evaluation order. vm_id is " +
+			"the Proxmox VMID here, not the Nexara uuid the other /vms routes take.",
 		Group:       "Firewall",
 		Permissions: clusterCheck("view", "network"),
 		Parameters:  clusterParams(apischema.Properties{"vm_id": firewallVMIDParam}),
@@ -359,7 +360,7 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	reg.Register(Endpoint{
 		Method:      fiber.MethodPost,
 		Path:        guestFirewallScope + "/rules",
-		Description: "Add a firewall rule to one guest, at the top of its list.",
+		Description: "Add a firewall rule to one guest (VM or container), at the top of its list.",
 		Group:       "Firewall",
 		Permissions: clusterCheck("manage", "network"),
 		Parameters: clusterParams(withParams(firewallRuleBody(false),
@@ -369,7 +370,7 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPut,
 		Path:   guestFirewallScope + "/rules/:pos",
-		Description: "Change one of a guest's firewall rules. A field left out keeps its current value; " +
+		Description: "Change one of a guest's (VM or container) firewall rules. A field left out keeps its current value; " +
 			"enable is always written and resets to 0 when the body omits it.",
 		Group:       "Firewall",
 		Permissions: clusterCheck("manage", "network"),
@@ -383,7 +384,7 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	reg.Register(Endpoint{
 		Method:      fiber.MethodDelete,
 		Path:        guestFirewallScope + "/rules/:pos",
-		Description: "Delete one of a guest's firewall rules by position. Every rule below it moves up.",
+		Description: "Delete one of a guest's (VM or container) firewall rules by position. Every rule below it moves up.",
 		Group:       "Firewall",
 		Permissions: clusterCheck("delete", "network"),
 		Parameters: clusterParams(apischema.Properties{

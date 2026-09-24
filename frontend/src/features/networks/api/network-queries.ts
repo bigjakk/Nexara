@@ -218,7 +218,10 @@ export function useDeleteClusterFirewallRule(clusterId: string) {
   });
 }
 
-// --- VM Firewall Rules ---
+// --- Guest (VM or container) Firewall Rules ---
+// vmId is the guest's PROXMOX VMID, not Nexara's uuid. The URL is the same for
+// both guest kinds: the server reads the guest's type from its own row and
+// addresses Proxmox's qemu or lxc firewall tree itself.
 
 export function useVMFirewallRules(clusterId: string, vmId: string) {
   return useQuery({

@@ -2,6 +2,7 @@ package proxmox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -101,58 +102,101 @@ func (c *Client) UpdateNodeFirewallRule(ctx context.Context, node string, pos in
 	}
 	return nil
 }
-func (c *Client) GetVMFirewallRules(ctx context.Context, node string, vmid int) ([]FirewallRule, error) {
+
+// ErrUnknownGuestType is returned by the guest-firewall methods when they are
+// handed a guest type other than "qemu" or "lxc". It is Nexara's bug, not the
+// API caller's (the type comes from the vms row, never from a request), so it
+// is deliberately NOT wrapped in ErrInvalidInput: that would be answered as a
+// 400 blaming a caller who sent nothing wrong.
+var ErrUnknownGuestType = errors.New("unknown guest type")
+
+// guestFirewallRulesPath is the rule collection of one guest's firewall:
+// /nodes/{node}/qemu/{vmid}/firewall/rules for a VM and
+// /nodes/{node}/lxc/{vmid}/firewall/rules for a container.
+//
+// Proxmox serves the two as separate, identically-shaped trees:
+// qemu-server src/PVE/API2/Qemu.pm registers PVE::API2::Firewall::VM at
+// '{vmid}/firewall' and pve-container src/PVE/API2/LXC.pm registers
+// PVE::API2::Firewall::CT there; both (pve-firewall
+// src/PVE/API2/Firewall/VM.pm) mount their rules under 'rules' —
+// VMRules and CTRules in src/PVE/API2/Firewall/Rules.pm, which differ only
+// in rule_env ('vm' vs 'ct') and share RulesBase's methods, parameters and
+// digest check.
+//
+// Upstream, neither tree checks that the VMID is a guest of ITS type: both
+// load and save /etc/pve/firewall/{vmid}.fw (Firewall.pm load_vmfw_conf /
+// save_vmfw_conf), and verify_rule treats 'vm' and 'ct' alike. So the qemu
+// path happens to reach a container's rules today. The type is still
+// carried, because that is an accident of implementation, not the API
+// Proxmox documents for a container — and an unexpected type is refused
+// rather than defaulted to qemu, so a row this code does not understand never
+// silently lands on the VM tree.
+func guestFirewallRulesPath(node, guestType string, vmid int) (string, error) {
 	if err := validateNodeName(node); err != nil {
-		return nil, err
+		return "", err
 	}
 	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	switch guestType {
+	case ResourceTypeQEMU, ResourceTypeLXC:
+	default:
+		return "", fmt.Errorf("%w %q for guest %d", ErrUnknownGuestType, guestType, vmid)
+	}
+	return "/nodes/" + url.PathEscape(node) + "/" + guestType + "/" + strconv.Itoa(vmid) + "/firewall/rules", nil
+}
+
+// GetVMFirewallRules lists one guest's firewall rules. guestType is the
+// guest's Proxmox type, "qemu" or "lxc" (see guestFirewallRulesPath).
+func (c *Client) GetVMFirewallRules(ctx context.Context, node, guestType string, vmid int) ([]FirewallRule, error) {
+	path, err := guestFirewallRulesPath(node, guestType, vmid)
+	if err != nil {
 		return nil, err
 	}
-	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/firewall/rules"
 	var rules []FirewallRule
 	if err := c.do(ctx, path, &rules); err != nil {
-		return nil, fmt.Errorf("get firewall rules for VM %d on %s: %w", vmid, node, err)
+		return nil, fmt.Errorf("get firewall rules for %s %d on %s: %w", guestType, vmid, node, err)
 	}
 	return rules, nil
 }
-func (c *Client) CreateVMFirewallRule(ctx context.Context, node string, vmid int, rule FirewallRuleParams) error {
-	if err := validateNodeName(node); err != nil {
-		return err
-	}
-	if err := validateVMID(vmid); err != nil {
+
+// CreateVMFirewallRule adds a rule to one guest's firewall (see
+// GetVMFirewallRules for guestType).
+func (c *Client) CreateVMFirewallRule(ctx context.Context, node, guestType string, vmid int, rule FirewallRuleParams) error {
+	path, err := guestFirewallRulesPath(node, guestType, vmid)
+	if err != nil {
 		return err
 	}
 	form := firewallRuleToForm(rule)
-	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/firewall/rules"
 	if err := c.doPost(ctx, path, form, nil); err != nil {
-		return fmt.Errorf("create firewall rule for VM %d on %s: %w", vmid, node, err)
+		return fmt.Errorf("create firewall rule for %s %d on %s: %w", guestType, vmid, node, err)
 	}
 	return nil
 }
-func (c *Client) UpdateVMFirewallRule(ctx context.Context, node string, vmid int, pos int, rule FirewallRuleParams, digest string) error {
-	if err := validateNodeName(node); err != nil {
-		return err
-	}
-	if err := validateVMID(vmid); err != nil {
+
+// UpdateVMFirewallRule changes one of a guest's firewall rules (see
+// GetVMFirewallRules for guestType).
+func (c *Client) UpdateVMFirewallRule(ctx context.Context, node, guestType string, vmid int, pos int, rule FirewallRuleParams, digest string) error {
+	path, err := guestFirewallRulesPath(node, guestType, vmid)
+	if err != nil {
 		return err
 	}
 	form := firewallRuleDigestForm(firewallRuleToForm(rule), digest)
-	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/firewall/rules/" + strconv.Itoa(pos)
-	if err := c.doPut(ctx, path, form, nil); err != nil {
-		return fmt.Errorf("update firewall rule %d for VM %d on %s: %w", pos, vmid, node, err)
+	if err := c.doPut(ctx, path+"/"+strconv.Itoa(pos), form, nil); err != nil {
+		return fmt.Errorf("update firewall rule %d for %s %d on %s: %w", pos, guestType, vmid, node, err)
 	}
 	return nil
 }
-func (c *Client) DeleteVMFirewallRule(ctx context.Context, node string, vmid int, pos int, digest string) error {
-	if err := validateNodeName(node); err != nil {
+
+// DeleteVMFirewallRule deletes one of a guest's firewall rules (see
+// GetVMFirewallRules for guestType).
+func (c *Client) DeleteVMFirewallRule(ctx context.Context, node, guestType string, vmid int, pos int, digest string) error {
+	path, err := guestFirewallRulesPath(node, guestType, vmid)
+	if err != nil {
 		return err
 	}
-	if err := validateVMID(vmid); err != nil {
-		return err
-	}
-	path := firewallRuleDeletePath("/nodes/"+url.PathEscape(node)+"/qemu/"+strconv.Itoa(vmid)+"/firewall/rules/"+strconv.Itoa(pos), digest)
-	if err := c.doDelete(ctx, path, nil); err != nil {
-		return fmt.Errorf("delete firewall rule %d for VM %d on %s: %w", pos, vmid, node, err)
+	if err := c.doDelete(ctx, firewallRuleDeletePath(path+"/"+strconv.Itoa(pos), digest), nil); err != nil {
+		return fmt.Errorf("delete firewall rule %d for %s %d on %s: %w", pos, guestType, vmid, node, err)
 	}
 	return nil
 }

@@ -96,11 +96,14 @@ func (p *fwRulePVE) only(t *testing.T) fwRuleWrite {
 
 // fwRuleDBTX stands in for the database. It accepts AuditLog's insert and
 // counts it, and answers every single-row read with a row whose text columns
-// all read "pve-01" — which is what the guest routes' resolveVMNode needs: the
-// guest lookup succeeds and the node it names is called pve-01.
+// all read "pve-01" — which is what the guest routes' resolveGuest needs: the
+// guest lookup succeeds and the node it names is called pve-01. The one
+// exception is the guest row's type column, which reads guestType, so a test
+// can make the guest a VM ("qemu") or a container ("lxc").
 type fwRuleDBTX struct {
-	mu     sync.Mutex
-	audits int
+	mu        sync.Mutex
+	audits    int
+	guestType string
 }
 
 func (d *fwRuleDBTX) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
@@ -117,7 +120,12 @@ func (*fwRuleDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return nil, errHACreateUnexpectedQuery
 }
 
-func (*fwRuleDBTX) QueryRow(context.Context, string, ...any) pgx.Row { return fwNodeNameRow{} }
+func (d *fwRuleDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if strings.Contains(sql, "-- name: GetVMByClusterAndVmid ") {
+		return fwGuestRow{guestType: d.guestType}
+	}
+	return fwNodeNameRow{}
+}
 
 func (d *fwRuleDBTX) auditCount() int {
 	d.mu.Lock()
@@ -133,6 +141,27 @@ func (fwNodeNameRow) Scan(dest ...any) error {
 			*s = "pve-01"
 		}
 	}
+	return nil
+}
+
+// fwGuestRow is the vms row GetVMByClusterAndVmid reads: every text column
+// "pve-01" like fwNodeNameRow, except type (the sixth column the generated
+// query selects — id, cluster_id, node_id, vmid, name, type, …).
+type fwGuestRow struct{ guestType string }
+
+func (r fwGuestRow) Scan(dest ...any) error {
+	if err := (fwNodeNameRow{}).Scan(dest...); err != nil {
+		return err
+	}
+	const typeColumn = 5
+	if len(dest) != 21 {
+		return errHACreateUnexpectedQuery
+	}
+	typ, ok := dest[typeColumn].(*string)
+	if !ok {
+		return errHACreateUnexpectedQuery
+	}
+	*typ = r.guestType
 	return nil
 }
 
@@ -180,6 +209,13 @@ func fwRuleRoutes() []fwRuleRoute {
 // and its real handler, wired to the two stand-ins.
 func newFWRuleApp(t *testing.T, r fwRuleRoute, pve *fwRulePVE) (*fiber.App, *fwRuleDBTX) {
 	t.Helper()
+	return newFWRuleAppForGuest(t, r, pve, "qemu")
+}
+
+// newFWRuleAppForGuest is newFWRuleApp with the guest the database holds
+// being of guestType.
+func newFWRuleAppForGuest(t *testing.T, r fwRuleRoute, pve *fwRulePVE, guestType string) (*fiber.App, *fwRuleDBTX) {
+	t.Helper()
 	baseURL := pve.serve(t)
 	encrypted, err := crypto.Encrypt("token-secret-value", haCreateEncKey)
 	if err != nil {
@@ -194,13 +230,13 @@ func newFWRuleApp(t *testing.T, r fwRuleRoute, pve *fwRulePVE) (*fiber.App, *fwR
 		IsActive:             true,
 	}}, haCreateEncKey, nil, nil)
 
-	dbtx := &fwRuleDBTX{}
+	dbtx := &fwRuleDBTX{guestType: guestType}
 	queries := db.New(dbtx)
 	e := declaredEndpoint(t, r.method, r.path)
 	e.Handler = r.pick(handlers.NewNetworkHandler(queries, haCreateEncKey, nil),
 		handlers.NewNodeHandler(queries, haCreateEncKey, nil))
 
-	authed := stubAuth(map[string]bool{"manage:network": true, "delete:network": true})
+	authed := stubAuth(map[string]bool{"view:network": true, "manage:network": true, "delete:network": true})
 	auth := func(c fiber.Ctx) error {
 		handlers.SetProxmoxCacheLocal(c, cache)
 		return authed(c)

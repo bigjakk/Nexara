@@ -56,11 +56,11 @@ func TestFirewallRuleWritesSendTheDigestOnlyWhenSet(t *testing.T) {
 			func(c *Client, d string) error { return c.DeleteNodeFirewallRule(context.Background(), "pve-01", 3, d) }},
 		{"guest update", http.MethodPut, "/api2/json/nodes/pve-01/qemu/101/firewall/rules/3",
 			func(c *Client, d string) error {
-				return c.UpdateVMFirewallRule(context.Background(), "pve-01", 101, 3, rule, d)
+				return c.UpdateVMFirewallRule(context.Background(), "pve-01", "qemu", 101, 3, rule, d)
 			}},
 		{"guest delete", http.MethodDelete, "/api2/json/nodes/pve-01/qemu/101/firewall/rules/3",
 			func(c *Client, d string) error {
-				return c.DeleteVMFirewallRule(context.Background(), "pve-01", 101, 3, d)
+				return c.DeleteVMFirewallRule(context.Background(), "pve-01", "qemu", 101, 3, d)
 			}},
 		{"security group update", http.MethodPut, "/api2/json/cluster/firewall/groups/sg01/3",
 			func(c *Client, d string) error {

@@ -1018,10 +1018,10 @@ update its credentials.
 | DELETE | `/clusters/:id/firewall/rules/:pos` | Delete firewall rule |
 | GET | `/clusters/:id/firewall/options` | Get firewall options |
 | PUT | `/clusters/:id/firewall/options` | Set firewall options |
-| GET | `/clusters/:id/vms/:vm_id/firewall/rules` | List VM firewall rules |
-| POST | `/clusters/:id/vms/:vm_id/firewall/rules` | Create VM firewall rule |
-| PUT | `/clusters/:id/vms/:vm_id/firewall/rules/:pos` | Update VM firewall rule |
-| DELETE | `/clusters/:id/vms/:vm_id/firewall/rules/:pos` | Delete VM firewall rule |
+| GET | `/clusters/:id/vms/:vm_id/firewall/rules` | List guest (VM or container) firewall rules — `:vm_id` is the Proxmox VMID |
+| POST | `/clusters/:id/vms/:vm_id/firewall/rules` | Create guest (VM or container) firewall rule |
+| PUT | `/clusters/:id/vms/:vm_id/firewall/rules/:pos` | Update guest (VM or container) firewall rule |
+| DELETE | `/clusters/:id/vms/:vm_id/firewall/rules/:pos` | Delete guest (VM or container) firewall rule |
 | GET | `/clusters/:id/nodes/:node/firewall/rules` | List node firewall rules |
 | POST | `/clusters/:id/nodes/:node/firewall/rules` | Create node firewall rule |
 | PUT | `/clusters/:id/nodes/:node/firewall/rules/:pos` | Update node firewall rule |
