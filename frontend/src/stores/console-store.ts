@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   ConsoleTab,
   ConsoleStatus,
@@ -172,8 +173,8 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
           try {
             const vmEndpoint =
               tab.kind === "ct"
-                ? `/api/v1/clusters/${tab.clusterID}/containers/${tab.resourceId}`
-                : `/api/v1/clusters/${tab.clusterID}/vms/${tab.resourceId}`;
+                ? apiPath`/api/v1/clusters/${tab.clusterID}/containers/${tab.resourceId}`
+                : apiPath`/api/v1/clusters/${tab.clusterID}/vms/${tab.resourceId}`;
             const vm = await apiClient.get<{
               node_id: string;
               status?: string;
@@ -186,7 +187,7 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
               return;
             }
 
-            const nodesEndpoint = `/api/v1/clusters/${tab.clusterID}/nodes`;
+            const nodesEndpoint = apiPath`/api/v1/clusters/${tab.clusterID}/nodes`;
             const nodes = await apiClient.list<{ id: string; name: string }>(
               nodesEndpoint,
             );

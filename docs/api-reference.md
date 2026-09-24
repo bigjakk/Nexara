@@ -177,6 +177,37 @@ request body a limit on the compressed bytes only.
 Responses are not affected: a client that sends `Accept-Encoding` still gets a
 compressed response wherever the server compresses one.
 
+## Trailing Slashes
+
+Only a `GET`, `HEAD` or `OPTIONS` request may end its path in `/` — the three
+methods Nexara answers as reads. Any other method (`POST`, `PUT`, `PATCH`,
+`DELETE`, and also `TRACE` and `QUERY`, which no route serves) is refused on
+every endpoint with `400` and the `bad_request` envelope before it reaches a
+route: send `DELETE /api/v1/clusters/:id`, not `DELETE /api/v1/clusters/:id/`.
+Reads are unaffected, because the router ignores a trailing slash:
+`GET /api/v1/clusters/` still lists clusters.
+
+The reason is the way browsers build a URL. The URL parser every browser
+shares resolves a `.` or `..` path segment before the request is sent, so a
+request aimed at `.../pools/..` goes out as `/api/v1/clusters/:id/` — the
+object one level up, with a trailing slash. Refusing that slash means a name
+made of dots can never turn a write on one object into a write on its
+collection or its parent when the name is the path's LAST segment. A dot
+segment in the middle of a path leaves no trailing slash
+(`.../pools/../members` goes out as `/api/v1/clusters/:id/members`), so there
+the client must refuse to send it: the web UI does, for every path it builds.
+
+An API client must not send a `.` or `..` path segment at all, and
+percent-encoding one does not help. A proxy may resolve it before Nexara sees
+the request: Traefik does by default (its `sanitizePath` entry-point option),
+after decoding `%2E` to `.`, and drops the slash a final dot segment would
+leave, so `DELETE /api/v1/clusters/:id/pools/..` sent through it arrives as
+`DELETE /api/v1/clusters/:id` — the cluster — with no slash to refuse. That
+request is refused all the same, because a cluster delete must carry
+`confirm` set to the cluster's name (below), and no request rewritten from
+another route carries it. Sent to Nexara unresolved, the same path reaches
+the pool route, whose `pool_id` rule refuses `.` and `..`.
+
 ## Rate Limits
 
 All limiters key on the client IP (`c.IP()` — see `TRUSTED_PROXIES` before
@@ -370,7 +401,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | GET | `/clusters` | List all clusters |
 | GET | `/clusters/:id` | Get cluster details |
 | PUT | `/clusters/:id` | Update cluster |
-| DELETE | `/clusters/:id` | Remove cluster (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential) |
+| DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential) |
 | POST | `/clusters/fetch-fingerprint` | Fetch TLS fingerprint from a Proxmox URL |
 
 #### Onboarding a cluster without a pre-made token
@@ -820,6 +851,11 @@ against the generic settings endpoints, so it cannot be written unvalidated.
 | PUT | `/clusters/:id/pools/:pool_id` | Update pool |
 | DELETE | `/clusters/:id/pools/:pool_id` | Delete pool |
 
+Creating a pool whose id is exactly `.` or `..` is refused with `400`. That is
+Nexara's rule, not Proxmox's — its pool-id format admits both — and it exists
+because no browser can send either as a path segment, so the pool could never
+be read, edited or deleted here afterwards.
+
 ### Proxmox Access Control
 
 Manages a **cluster's own** Proxmox users, API tokens, groups, roles and ACLs —
@@ -1146,8 +1182,8 @@ IP** for job control and session logs.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/veeam-servers/` | Register a Veeam Backup & Replication server (VBR 13.1+). Connects and records the negotiated API revision, product version and licence edition; a failed connection is a failed create |
-| GET | `/veeam-servers/` | List registered Veeam Backup & Replication servers |
+| POST | `/veeam-servers` | Register a Veeam Backup & Replication server (VBR 13.1+). Connects and records the negotiated API revision, product version and licence edition; a failed connection is a failed create |
+| GET | `/veeam-servers` | List registered Veeam Backup & Replication servers |
 | GET | `/veeam-servers/:id` | Get Veeam server details |
 | PUT | `/veeam-servers/:id` | Update a Veeam server. Changing the URL, credentials or TLS handling re-tests the connection; renaming or disabling does not |
 | DELETE | `/veeam-servers/:id` | Remove a Veeam server and its stored credential |

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 export interface ReplicationJob {
   id: string;
@@ -25,7 +26,7 @@ export function useReplicationJobs(clusterId: string) {
     queryKey: ["clusters", clusterId, "replication"],
     queryFn: () =>
       apiClient.list<ReplicationJob>(
-        `/api/v1/clusters/${clusterId}/replication`,
+        apiPath`/api/v1/clusters/${clusterId}/replication`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -41,7 +42,8 @@ export function useCreateReplicationJob(clusterId: string) {
       schedule?: string;
       rate?: string;
       comment?: string;
-    }) => apiClient.post(`/api/v1/clusters/${clusterId}/replication`, data),
+    }) =>
+      apiClient.post(apiPath`/api/v1/clusters/${clusterId}/replication`, data),
     onSuccess: () => {
       void qc.invalidateQueries({
         queryKey: ["clusters", clusterId, "replication"],
@@ -64,7 +66,7 @@ export function useUpdateReplicationJob(clusterId: string) {
       disable?: number;
     }) =>
       apiClient.put(
-        `/api/v1/clusters/${clusterId}/replication/${encodeURIComponent(id)}`,
+        apiPath`/api/v1/clusters/${clusterId}/replication/${id}`,
         data,
       ),
     onSuccess: () => {
@@ -80,7 +82,7 @@ export function useDeleteReplicationJob(clusterId: string) {
   return useMutation({
     mutationFn: (id: string) =>
       apiClient.delete(
-        `/api/v1/clusters/${clusterId}/replication/${encodeURIComponent(id)}`,
+        apiPath`/api/v1/clusters/${clusterId}/replication/${id}`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({
@@ -95,7 +97,7 @@ export function useTriggerReplication(clusterId: string) {
   return useMutation({
     mutationFn: ({ id, node }: { id: string; node: string }) =>
       apiClient.post<{ upid: string }>(
-        `/api/v1/clusters/${clusterId}/replication/${encodeURIComponent(id)}/trigger?node=${encodeURIComponent(node)}`,
+        apiPath`/api/v1/clusters/${clusterId}/replication/${id}/trigger?node=${node}`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({

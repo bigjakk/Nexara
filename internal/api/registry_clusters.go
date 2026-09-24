@@ -284,12 +284,40 @@ func registerClusterEndpoints(reg *Registry, h *handlers.ClusterHandler,
 		Method: fiber.MethodDelete,
 		Path:   clusterByID,
 		Description: "Remove a cluster from Nexara, optionally revoking the Proxmox-side credential Nexara " +
-			"minted for it. Revoking additionally requires GLOBAL manage:cluster — minting it needed that, " +
-			"so removing it asks for the same — and is refused while a rolling update is running.",
+			"minted for it. The request must carry confirm set to the cluster's current name, exactly. " +
+			"Without it the request is refused with 400; with any other value it is refused with 400, or " +
+			"with the 409 or 403 below when one of those applies first; either way nothing is deleted or " +
+			"revoked. The delete is refused with 409 while a rolling update is running, and revoking " +
+			"additionally requires GLOBAL manage:cluster (403 without it) — minting the credential needed " +
+			"that, so removing it asks for the same.",
 		Group:       "Clusters",
 		Permissions: clusterCheck("delete", "cluster"),
 		Parameters: apischema.Properties{
 			"id": clusterIDPathParam,
+			// Required, and compared with the stored name by the handler
+			// (ClusterHandler.Delete), which refuses a mismatch before it
+			// changes anything. A request rewritten from some other route —
+			// a proxy resolving DELETE .../clusters/<id>/pools/.. into
+			// DELETE .../clusters/<id> — never carries it.
+			//
+			// Bounded like the name it must equal: create and edit cap a
+			// name at 255 characters. No stored name is longer — the
+			// handlers refused a name over 255 BYTES from the commit that
+			// added clusters (69a3df4) until these declarations replaced
+			// that check, and a byte bound is the tighter one — so the
+			// bound never leaves a cluster undeletable. No MinLength,
+			// because edit does not require one (an explicit "" is
+			// stored), and a cluster whose name is empty must stay
+			// deletable — by ?confirm= with the empty value. The parameter
+			// still has to be present.
+			"confirm": {
+				Type:      apischema.String,
+				MaxLength: apischema.Ptr(255),
+				Typetext:  "<the cluster's name>",
+				Description: "The cluster's current name, exactly as stored — the same string the web UI " +
+					"asks you to type. Any other value is refused — with 400, or the 409 or 403 the endpoint " +
+					"describes when one of those applies first — and nothing is deleted.",
+			},
 			// A STRING rather than a boolean, and that is a deliberate
 			// non-change: wantsCredentialRevocation reads exactly "1", "true"
 			// and "yes" as opt-in and everything else as no. Declaring it a

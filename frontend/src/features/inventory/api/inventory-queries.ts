@@ -1,5 +1,6 @@
 import { useQueries } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useDashboardMetrics } from "@/hooks/useMetrics";
 import type { ClusterResponse, NodeResponse, VMResponse } from "@/types/api";
@@ -157,7 +158,9 @@ export function useInventoryData() {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.list<NodeResponse>(`/api/v1/clusters/${cluster.id}/nodes`),
+        apiClient.list<NodeResponse>(
+          apiPath`/api/v1/clusters/${cluster.id}/nodes`,
+        ),
       enabled: clusters.length > 0,
     })),
   });
@@ -166,7 +169,7 @@ export function useInventoryData() {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "vms"],
       queryFn: () =>
-        apiClient.list<VMResponse>(`/api/v1/clusters/${cluster.id}/vms`),
+        apiClient.list<VMResponse>(apiPath`/api/v1/clusters/${cluster.id}/vms`),
       enabled: clusters.length > 0,
     })),
   });

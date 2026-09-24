@@ -283,12 +283,16 @@ func registerDRSEndpoints(reg *Registry, h *handlers.DRSHandler) {
 		Group:       "DRS",
 		Permissions: clusterCheck("manage", "drs"),
 		Parameters: clusterParams(apischema.Properties{
-			// Deliberately NOT the percent-tolerant shape haSIDParam
-			// takes: the DRS client sends this name unencoded, and the
-			// handler reads it raw for exactly that reason (see
-			// DRSHandler.DeleteHARule). The pattern is what keeps a
-			// traversal segment out of the Proxmox path the client builds
-			// by concatenation.
+			// Not the percent-tolerant shape haSIDParam takes: an HA rule
+			// name has no character the SPA's apiPath would encode — the
+			// rule is a leading letter, then letters, digits, underscore and
+			// dash — so it arrives exactly as spelled, and the handler's
+			// decodeParamValue (DRSHandler.DeleteHARule) changes nothing
+			// today. The pattern sees only the RAW segment. What keeps a
+			// traversing DECODED name out of the Proxmox path is the client:
+			// DeleteHARule runs validateHAConfigID
+			// (internal/proxmox/client_ha.go) before it escapes the id into
+			// the path.
 			"rule_name": haConfigIDParam("Proxmox HA rule name."),
 		}),
 		Handler: h.DeleteHARule,

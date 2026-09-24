@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient, getValidAccessToken } from "@/lib/api-client";
+import { apiClient, apiFetch } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   ClusterResponse,
   NodeResponse,
@@ -13,7 +14,8 @@ import type {
 export function useCluster(id: string) {
   return useQuery({
     queryKey: ["clusters", id],
-    queryFn: () => apiClient.get<ClusterResponse>(`/api/v1/clusters/${id}`),
+    queryFn: () =>
+      apiClient.get<ClusterResponse>(apiPath`/api/v1/clusters/${id}`),
     enabled: id.length > 0,
   });
 }
@@ -22,7 +24,9 @@ export function useClusterNodes(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes"],
     queryFn: () =>
-      apiClient.list<NodeResponse>(`/api/v1/clusters/${clusterId}/nodes`),
+      apiClient.list<NodeResponse>(
+        apiPath`/api/v1/clusters/${clusterId}/nodes`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -31,7 +35,9 @@ export function useClusterStorage(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "storage"],
     queryFn: () =>
-      apiClient.list<StorageResponse>(`/api/v1/clusters/${clusterId}/storage`),
+      apiClient.list<StorageResponse>(
+        apiPath`/api/v1/clusters/${clusterId}/storage`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -48,7 +54,7 @@ export function useNodeBridges(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "bridges"],
     queryFn: () =>
       apiClient.list<BridgeResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/bridges`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/bridges`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -64,7 +70,7 @@ export function useMachineTypes(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "machine-types"],
     queryFn: () =>
       apiClient.list<MachineTypeResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/machine-types`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/machine-types`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
     staleTime: 300_000,
@@ -82,7 +88,7 @@ export function useCPUModels(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "cpu-models"],
     queryFn: () =>
       apiClient.list<CPUModelResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/cpu-models`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/cpu-models`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
     staleTime: 300_000,
@@ -104,7 +110,7 @@ export function useCPUFlags(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "cpu-flags"],
     queryFn: () =>
       apiClient.list<CPUFlagResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/cpu-flags`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/cpu-flags`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
     staleTime: 300_000,
@@ -116,7 +122,7 @@ export function useNodeDisks(clusterId: string, nodeId: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeId, "disks"],
     queryFn: () =>
       apiClient.list<NodeDiskResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${nodeId}/disks`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeId}/disks`,
       ),
     enabled: clusterId.length > 0 && nodeId.length > 0,
   });
@@ -127,7 +133,7 @@ export function useNodeNetworkInterfaces(clusterId: string, nodeId: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeId, "network-interfaces"],
     queryFn: () =>
       apiClient.list<NodeNetworkInterfaceResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${nodeId}/network-interfaces`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeId}/network-interfaces`,
       ),
     enabled: clusterId.length > 0 && nodeId.length > 0,
   });
@@ -138,7 +144,7 @@ export function useNodePCIDevices(clusterId: string, nodeId: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeId, "pci-devices"],
     queryFn: () =>
       apiClient.list<NodePCIDeviceResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${nodeId}/pci-devices`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeId}/pci-devices`,
       ),
     enabled: clusterId.length > 0 && nodeId.length > 0,
   });
@@ -208,7 +214,7 @@ export function useLiveDisks(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "live"],
     queryFn: () =>
       apiClient.list<LiveDiskResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/list`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/list`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -231,7 +237,7 @@ export function useDiskSMART(
     ],
     queryFn: () =>
       apiClient.get<DiskSMARTResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/smart?disk=${encodeURIComponent(disk)}`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/smart?disk=${disk}`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0 && disk.length > 0,
   });
@@ -242,7 +248,7 @@ export function useNodeZFSPools(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "zfs"],
     queryFn: () =>
       apiClient.list<ZFSPoolResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/zfs`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/zfs`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -259,7 +265,7 @@ export function useCreateZFSPool(clusterId: string, nodeName: string) {
       ashift?: number;
     }) =>
       apiClient.post<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/zfs`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/zfs`,
         params,
       ),
     onSuccess: () => {
@@ -281,9 +287,8 @@ export function useDeleteZFSPool(clusterId: string, nodeName: string) {
       const qp = new URLSearchParams();
       if (params.cleanupDisks) qp.set("cleanup-disks", "true");
       if (params.cleanupConfig) qp.set("cleanup-config", "true");
-      const qs = qp.toString();
       return apiClient.delete<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/zfs/${encodeURIComponent(params.poolName)}${qs ? `?${qs}` : ""}`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/zfs/${params.poolName}?${qp}`,
       );
     },
     onSuccess: () => {
@@ -299,7 +304,7 @@ export function useNodeLVM(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvm"],
     queryFn: () =>
       apiClient.list<LVMVolumeGroupResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvm`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/lvm`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -314,7 +319,7 @@ export function useCreateLVM(clusterId: string, nodeName: string) {
       add_storage?: boolean;
     }) =>
       apiClient.post<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvm`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/lvm`,
         params,
       ),
     onSuccess: () => {
@@ -336,9 +341,8 @@ export function useDeleteLVM(clusterId: string, nodeName: string) {
       const qp = new URLSearchParams();
       if (params.cleanupDisks) qp.set("cleanup-disks", "true");
       if (params.cleanupConfig) qp.set("cleanup-config", "true");
-      const qs = qp.toString();
       return apiClient.delete<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvm/${encodeURIComponent(params.name)}${qs ? `?${qs}` : ""}`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/lvm/${params.name}?${qp}`,
       );
     },
     onSuccess: () => {
@@ -354,7 +358,7 @@ export function useNodeLVMThin(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvmthin"],
     queryFn: () =>
       apiClient.list<LVMThinPoolResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvmthin`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/lvmthin`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -369,7 +373,7 @@ export function useCreateLVMThin(clusterId: string, nodeName: string) {
       add_storage?: boolean;
     }) =>
       apiClient.post<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvmthin`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/lvmthin`,
         params,
       ),
     onSuccess: () => {
@@ -401,7 +405,7 @@ export function useDeleteLVMThin(clusterId: string, nodeName: string) {
       if (params.cleanupDisks) qp.set("cleanup-disks", "true");
       if (params.cleanupConfig) qp.set("cleanup-config", "true");
       return apiClient.delete<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvmthin/${encodeURIComponent(params.lv)}?${qp.toString()}`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/lvmthin/${params.lv}?${qp}`,
       );
     },
     onSuccess: () => {
@@ -432,7 +436,7 @@ export function useNodeDirectories(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "directory"],
     queryFn: () =>
       apiClient.list<DirectoryEntryResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/directory`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/directory`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -448,7 +452,7 @@ export function useCreateDirectory(clusterId: string, nodeName: string) {
       add_storage?: boolean | undefined;
     }) =>
       apiClient.post<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/directory`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/directory`,
         params,
       ),
     onSuccess: () => {
@@ -464,7 +468,7 @@ export function useInitializeGPT(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: (disk: string) =>
       apiClient.post<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/initgpt`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/initgpt`,
         { disk },
       ),
     onSuccess: () => {
@@ -480,7 +484,7 @@ export function useWipeDisk(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: (disk: string) =>
       apiClient.put<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/wipe`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/disks/wipe`,
         { disk },
       ),
     onSuccess: () => {
@@ -513,7 +517,7 @@ export function useEvacuateNode(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: (params: { target_node?: string | undefined }) =>
       apiClient.post<EvacuateResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/evacuate`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/evacuate`,
         params,
       ),
     onSuccess: () => {
@@ -552,7 +556,7 @@ export function useNodeFirewallRules(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "firewall", "rules"],
     queryFn: () =>
       apiClient.list<NodeFirewallRuleResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/firewall/rules`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/firewall/rules`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -563,7 +567,7 @@ export function useCreateNodeFirewallRule(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: (rule: Omit<NodeFirewallRuleResponse, "pos">) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/firewall/rules`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/firewall/rules`,
         rule,
       ),
     onSuccess: () => {
@@ -586,7 +590,7 @@ export function useDeleteNodeFirewallRule(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: (pos: number) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/firewall/rules/${String(pos)}`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/firewall/rules/${pos}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -608,7 +612,7 @@ export function useNodeFirewallLog(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "firewall", "log"],
     queryFn: () =>
       apiClient.list<FirewallLogEntryResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/firewall/log?limit=500`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/firewall/log?limit=500`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -628,7 +632,7 @@ export function useNodeServices(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "services"],
     queryFn: () =>
       apiClient.list<NodeServiceResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/services`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/services`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -639,7 +643,7 @@ export function useServiceAction(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: ({ service, action }: { service: string; action: string }) =>
       apiClient.post<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/services/${encodeURIComponent(service)}/${encodeURIComponent(action)}`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/services/${service}/${action}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -675,13 +679,12 @@ export function useNodeSyslog(
   if (params?.service) searchParams.set("service", params.service);
   if (params?.since) searchParams.set("since", params.since);
   if (params?.until) searchParams.set("until", params.until);
-  const qs = searchParams.toString();
 
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "syslog", params],
     queryFn: () =>
       apiClient.page<SyslogEntryResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/syslog${qs ? `?${qs}` : ""}`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/syslog?${searchParams}`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
     staleTime: 30_000,
@@ -709,7 +712,7 @@ export function useNodeDNS(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "dns"],
     queryFn: () =>
       apiClient.get<NodeDNSResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/dns`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/dns`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -725,7 +728,7 @@ export function useSetNodeDNS(clusterId: string, nodeName: string) {
       dns3: string;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/dns`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/dns`,
         params,
       ),
     onSuccess: () => {
@@ -744,7 +747,7 @@ export function useNodeTime(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "time"],
     queryFn: () =>
       apiClient.get<NodeTimeResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/time`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/time`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -755,7 +758,7 @@ export function useSetNodeTimezone(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: (params: { timezone: string }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/time`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/time`,
         params,
       ),
     onSuccess: () => {
@@ -774,7 +777,7 @@ export function useShutdownNode(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: () =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/shutdown`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/shutdown`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -789,7 +792,7 @@ export function useRebootNode(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: () =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/reboot`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/reboot`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -805,7 +808,7 @@ export function useSetNodeMaintenance(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: (enable: boolean) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/maintenance`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/maintenance`,
         { enable },
       ),
     onSuccess: () => {
@@ -820,7 +823,7 @@ export function useClusterVMs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vms"],
     queryFn: () =>
-      apiClient.list<VMResponse>(`/api/v1/clusters/${clusterId}/vms`),
+      apiClient.list<VMResponse>(apiPath`/api/v1/clusters/${clusterId}/vms`),
     enabled: clusterId.length > 0,
     refetchInterval: 60_000, // WS events handle immediate updates
   });
@@ -846,7 +849,7 @@ export function useVerifyClusterCertificate(clusterId: string) {
   return useMutation({
     mutationFn: () =>
       apiClient.post<VerifyCertificateResult>(
-        `/api/v1/clusters/${clusterId}/verify-certificate`,
+        apiPath`/api/v1/clusters/${clusterId}/verify-certificate`,
         {},
       ),
     onSuccess: () => {
@@ -893,13 +896,9 @@ function filenameFromDisposition(header: string | null): string {
 export function useDownloadNodeReport(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: async () => {
-      const token = (await getValidAccessToken()) ?? "";
-      const res = await fetch(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/report`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          credentials: "same-origin",
-        },
+      const res = await apiFetch(
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/report`,
+        { credentials: "same-origin" },
       );
       if (!res.ok) {
         throw new Error(
@@ -969,7 +968,7 @@ export function useNodeSensors(
     queryKey: ["clusters", clusterId, "nodes", nodeName, "sensors"],
     queryFn: () =>
       apiClient.get<NodeSensorsResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/sensors`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/sensors`,
       ),
     enabled: enabled && clusterId.length > 0 && nodeName.length > 0,
     staleTime: 60_000,

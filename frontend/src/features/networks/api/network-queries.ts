@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath, keepColons } from "@/lib/api-path";
 import type {
   NodeInterfaces,
   NetworkInterface,
@@ -37,7 +38,9 @@ export function useNetworkInterfaces(clusterId: string) {
   return useQuery({
     queryKey: ["networks", "interfaces", clusterId],
     queryFn: () =>
-      apiClient.list<NodeInterfaces>(`/api/v1/clusters/${clusterId}/networks`),
+      apiClient.list<NodeInterfaces>(
+        apiPath`/api/v1/clusters/${clusterId}/networks`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -47,7 +50,7 @@ export function useNodeNetworkInterfaces(clusterId: string, nodeName: string) {
     queryKey: ["networks", "interfaces", clusterId, nodeName],
     queryFn: () =>
       apiClient.list<NetworkInterface>(
-        `/api/v1/clusters/${clusterId}/networks/${nodeName}`,
+        apiPath`/api/v1/clusters/${clusterId}/networks/${nodeName}`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -58,7 +61,7 @@ export function useCreateNetworkInterface(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: (params: CreateNetworkInterfaceRequest) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/networks/${nodeName}`,
+        apiPath`/api/v1/clusters/${clusterId}/networks/${nodeName}`,
         params,
       ),
     onSuccess: () => {
@@ -80,7 +83,7 @@ export function useUpdateNetworkInterface(clusterId: string, nodeName: string) {
       params: UpdateNetworkInterfaceRequest;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/networks/${nodeName}/${iface}`,
+        apiPath`/api/v1/clusters/${clusterId}/networks/${nodeName}/${keepColons(iface)}`,
         params,
       ),
     onSuccess: () => {
@@ -96,7 +99,7 @@ export function useDeleteNetworkInterface(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: (iface: string) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/networks/${nodeName}/${iface}`,
+        apiPath`/api/v1/clusters/${clusterId}/networks/${nodeName}/${keepColons(iface)}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -111,7 +114,7 @@ export function useApplyNetworkConfig(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: () =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/networks/${nodeName}/apply`,
+        apiPath`/api/v1/clusters/${clusterId}/networks/${nodeName}/apply`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -126,7 +129,7 @@ export function useRevertNetworkConfig(clusterId: string, nodeName: string) {
   return useMutation({
     mutationFn: () =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/networks/${nodeName}/revert`,
+        apiPath`/api/v1/clusters/${clusterId}/networks/${nodeName}/revert`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -143,7 +146,7 @@ export function useClusterFirewallRules(clusterId: string) {
     queryKey: ["firewall", "rules", clusterId],
     queryFn: () =>
       apiClient.list<FirewallRule>(
-        `/api/v1/clusters/${clusterId}/firewall/rules`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/rules`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -154,7 +157,7 @@ export function useCreateClusterFirewallRule(clusterId: string) {
   return useMutation({
     mutationFn: (rule: FirewallRuleRequest) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/firewall/rules`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/rules`,
         rule,
       ),
     onSuccess: () => {
@@ -170,7 +173,7 @@ export function useUpdateClusterFirewallRule(clusterId: string) {
   return useMutation({
     mutationFn: ({ pos, rule }: { pos: number; rule: FirewallRuleRequest }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/firewall/rules/${String(pos)}`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/rules/${pos}`,
         rule,
       ),
     onSuccess: () => {
@@ -186,7 +189,7 @@ export function useDeleteClusterFirewallRule(clusterId: string) {
   return useMutation({
     mutationFn: (pos: number) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/firewall/rules/${String(pos)}`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/rules/${pos}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -203,7 +206,7 @@ export function useVMFirewallRules(clusterId: string, vmId: string) {
     queryKey: ["firewall", "vm-rules", clusterId, vmId],
     queryFn: () =>
       apiClient.list<FirewallRule>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/firewall/rules`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/firewall/rules`,
       ),
     enabled: clusterId.length > 0 && vmId.length > 0,
   });
@@ -214,7 +217,7 @@ export function useCreateVMFirewallRule(clusterId: string, vmId: string) {
   return useMutation({
     mutationFn: (rule: FirewallRuleRequest) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/firewall/rules`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/firewall/rules`,
         rule,
       ),
     onSuccess: () => {
@@ -230,7 +233,7 @@ export function useDeleteVMFirewallRule(clusterId: string, vmId: string) {
   return useMutation({
     mutationFn: (pos: number) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/firewall/rules/${String(pos)}`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/firewall/rules/${pos}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -247,7 +250,7 @@ export function useFirewallOptions(clusterId: string) {
     queryKey: ["firewall", "options", clusterId],
     queryFn: () =>
       apiClient.get<FirewallOptions>(
-        `/api/v1/clusters/${clusterId}/firewall/options`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/options`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -258,7 +261,7 @@ export function useSetFirewallOptions(clusterId: string) {
   return useMutation({
     mutationFn: (opts: FirewallOptions) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/firewall/options`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/options`,
         opts,
       ),
     onSuccess: () => {
@@ -275,7 +278,7 @@ export function useSDNZones(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "zones", clusterId],
     queryFn: () =>
-      apiClient.list<SDNZone>(`/api/v1/clusters/${clusterId}/sdn/zones`),
+      apiClient.list<SDNZone>(apiPath`/api/v1/clusters/${clusterId}/sdn/zones`),
     enabled: clusterId.length > 0,
   });
 }
@@ -284,7 +287,7 @@ export function useSDNVNets(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "vnets", clusterId],
     queryFn: () =>
-      apiClient.list<SDNVNet>(`/api/v1/clusters/${clusterId}/sdn/vnets`),
+      apiClient.list<SDNVNet>(apiPath`/api/v1/clusters/${clusterId}/sdn/vnets`),
     enabled: clusterId.length > 0,
   });
 }
@@ -294,7 +297,7 @@ export function useCreateSDNZone(clusterId: string) {
   return useMutation({
     mutationFn: (params: CreateSDNZoneRequest) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/zones`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/zones`,
         params,
       ),
     onSuccess: () => {
@@ -316,7 +319,7 @@ export function useUpdateSDNZone(clusterId: string) {
       params: UpdateSDNZoneRequest;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/zones/${zone}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/zones/${zone}`,
         params,
       ),
     onSuccess: () => {
@@ -332,7 +335,7 @@ export function useDeleteSDNZone(clusterId: string) {
   return useMutation({
     mutationFn: (zone: string) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/zones/${zone}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/zones/${zone}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -347,7 +350,7 @@ export function useCreateSDNVNet(clusterId: string) {
   return useMutation({
     mutationFn: (params: CreateSDNVNetRequest) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/vnets`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/vnets`,
         params,
       ),
     onSuccess: () => {
@@ -369,7 +372,7 @@ export function useUpdateSDNVNet(clusterId: string) {
       params: UpdateSDNVNetRequest;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}`,
         params,
       ),
     onSuccess: () => {
@@ -385,7 +388,7 @@ export function useDeleteSDNVNet(clusterId: string) {
   return useMutation({
     mutationFn: (vnet: string) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -400,7 +403,7 @@ export function useSDNSubnets(clusterId: string, vnet: string) {
     queryKey: ["sdn", "subnets", clusterId, vnet],
     queryFn: () =>
       apiClient.list<SDNSubnet>(
-        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets`,
       ),
     enabled: clusterId.length > 0 && vnet.length > 0,
   });
@@ -411,7 +414,7 @@ export function useCreateSDNSubnet(clusterId: string, vnet: string) {
   return useMutation({
     mutationFn: (params: CreateSDNSubnetRequest) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets`,
         params,
       ),
     onSuccess: () => {
@@ -433,7 +436,7 @@ export function useUpdateSDNSubnet(clusterId: string, vnet: string) {
       params: UpdateSDNSubnetRequest;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets/${subnet}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets/${keepColons(subnet)}`,
         params,
       ),
     onSuccess: () => {
@@ -449,7 +452,7 @@ export function useDeleteSDNSubnet(clusterId: string, vnet: string) {
   return useMutation({
     mutationFn: (subnet: string) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets/${subnet}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets/${keepColons(subnet)}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -464,7 +467,7 @@ export function useApplySDN(clusterId: string) {
   return useMutation({
     mutationFn: () =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/apply`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/apply`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -481,7 +484,7 @@ export function useSDNControllers(clusterId: string) {
     queryKey: ["sdn", "controllers", clusterId],
     queryFn: () =>
       apiClient.list<SDNController>(
-        `/api/v1/clusters/${clusterId}/sdn/controllers`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/controllers`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -492,7 +495,7 @@ export function useCreateSDNController(clusterId: string) {
   return useMutation({
     mutationFn: (req: CreateSDNControllerRequest) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/controllers`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/controllers`,
         req,
       ),
     onSuccess: () => {
@@ -514,7 +517,7 @@ export function useUpdateSDNController(clusterId: string) {
       params: UpdateSDNControllerRequest;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/controllers/${controller}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/controllers/${controller}`,
         params,
       ),
     onSuccess: () => {
@@ -530,7 +533,7 @@ export function useDeleteSDNController(clusterId: string) {
   return useMutation({
     mutationFn: (controller: string) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/controllers/${controller}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/controllers/${controller}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -546,7 +549,7 @@ export function useSDNIPAMs(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "ipams", clusterId],
     queryFn: () =>
-      apiClient.list<SDNIPAM>(`/api/v1/clusters/${clusterId}/sdn/ipams`),
+      apiClient.list<SDNIPAM>(apiPath`/api/v1/clusters/${clusterId}/sdn/ipams`),
     enabled: clusterId.length > 0,
   });
 }
@@ -556,7 +559,7 @@ export function useCreateSDNIPAM(clusterId: string) {
   return useMutation({
     mutationFn: (req: CreateSDNIPAMRequest) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/ipams`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/ipams`,
         req,
       ),
     onSuccess: () => {
@@ -578,7 +581,7 @@ export function useUpdateSDNIPAM(clusterId: string) {
       params: UpdateSDNIPAMRequest;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/ipams/${ipam}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/ipams/${ipam}`,
         params,
       ),
     onSuccess: () => {
@@ -594,7 +597,7 @@ export function useDeleteSDNIPAM(clusterId: string) {
   return useMutation({
     mutationFn: (ipam: string) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/ipams/${ipam}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/ipams/${ipam}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -610,7 +613,7 @@ export function useSDNDNSPlugins(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "dns", clusterId],
     queryFn: () =>
-      apiClient.list<SDNDNS>(`/api/v1/clusters/${clusterId}/sdn/dns`),
+      apiClient.list<SDNDNS>(apiPath`/api/v1/clusters/${clusterId}/sdn/dns`),
     enabled: clusterId.length > 0,
   });
 }
@@ -620,7 +623,7 @@ export function useCreateSDNDNS(clusterId: string) {
   return useMutation({
     mutationFn: (req: CreateSDNDNSRequest) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/dns`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/dns`,
         req,
       ),
     onSuccess: () => {
@@ -642,7 +645,7 @@ export function useUpdateSDNDNS(clusterId: string) {
       params: UpdateSDNDNSRequest;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/dns/${dns}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/dns/${dns}`,
         params,
       ),
     onSuccess: () => {
@@ -658,7 +661,7 @@ export function useDeleteSDNDNS(clusterId: string) {
   return useMutation({
     mutationFn: (dns: string) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/sdn/dns/${dns}`,
+        apiPath`/api/v1/clusters/${clusterId}/sdn/dns/${dns}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -674,7 +677,7 @@ export function useFirewallTemplates() {
   return useQuery({
     queryKey: ["firewall", "templates"],
     queryFn: () =>
-      apiClient.list<FirewallTemplate>(`/api/v1/firewall-templates`),
+      apiClient.list<FirewallTemplate>(apiPath`/api/v1/firewall-templates`),
   });
 }
 
@@ -683,7 +686,7 @@ export function useFirewallTemplate(templateId: string) {
     queryKey: ["firewall", "templates", templateId],
     queryFn: () =>
       apiClient.get<FirewallTemplate>(
-        `/api/v1/firewall-templates/${templateId}`,
+        apiPath`/api/v1/firewall-templates/${templateId}`,
       ),
     enabled: templateId.length > 0,
   });
@@ -693,7 +696,10 @@ export function useCreateFirewallTemplate() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (req: CreateTemplateRequest) =>
-      apiClient.post<FirewallTemplate>(`/api/v1/firewall-templates`, req),
+      apiClient.post<FirewallTemplate>(
+        apiPath`/api/v1/firewall-templates`,
+        req,
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["firewall", "templates"],
@@ -707,7 +713,7 @@ export function useUpdateFirewallTemplate(templateId: string) {
   return useMutation({
     mutationFn: (req: CreateTemplateRequest) =>
       apiClient.put<FirewallTemplate>(
-        `/api/v1/firewall-templates/${templateId}`,
+        apiPath`/api/v1/firewall-templates/${templateId}`,
         req,
       ),
     onSuccess: () => {
@@ -723,7 +729,7 @@ export function useDeleteFirewallTemplate() {
   return useMutation({
     mutationFn: (templateId: string) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/firewall-templates/${templateId}`,
+        apiPath`/api/v1/firewall-templates/${templateId}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -738,7 +744,7 @@ export function useApplyFirewallTemplate(clusterId: string) {
   return useMutation({
     mutationFn: (templateId: string) =>
       apiClient.post<ApplyTemplateResponse>(
-        `/api/v1/clusters/${clusterId}/firewall-templates/${templateId}/apply`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall-templates/${templateId}/apply`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({

@@ -258,6 +258,53 @@ func TestOrEmptyRulesAcceptTheirBasePlusNothingElse(t *testing.T) {
 	}
 }
 
+// TestOrEmptyRulesInheritTheirBaseWitnesses pins what derive() copies into
+// a sentinel variant: every accept witness of its base, plus the empty
+// string, and every reject witness the base's REGEX refuses (carryRejects).
+//
+// The test above holds the variant's RULE to its base's; this holds its
+// WITNESSES. Without it, a derive() that stopped copying them — keeping
+// only "" — would leave every catalogue test green while each variant's
+// sites were checked against nothing but the empty string, and the base
+// witnesses internal/api runs at those sites would be the only check left.
+func TestOrEmptyRulesInheritTheirBaseWitnesses(t *testing.T) {
+	t.Parallel()
+
+	variants := 0
+	for _, d := range Catalogue() {
+		baseName, isVariant := strings.CutSuffix(d.Name, "-or-empty")
+		if !isVariant {
+			continue
+		}
+		variants++
+		base, ok := LookupRule(baseName)
+		if !ok {
+			t.Errorf("%s derives from %q, which is not catalogued", d.Name, baseName)
+			continue
+		}
+		baseRe := regexp.MustCompile(base.Rule)
+
+		wantAccepts := append([]string{""}, base.Accepts...)
+		var wantRejects []string
+		for _, v := range base.Rejects {
+			if v != "" && !baseRe.MatchString(v) {
+				wantRejects = append(wantRejects, v)
+			}
+		}
+		if !slices.Equal(slices.Sorted(slices.Values(d.Accepts)), slices.Sorted(slices.Values(wantAccepts))) {
+			t.Errorf("%s accepts witnesses %q, want its base's %q plus the empty string",
+				d.Name, d.Accepts, base.Accepts)
+		}
+		if !slices.Equal(slices.Sorted(slices.Values(d.Rejects)), slices.Sorted(slices.Values(wantRejects))) {
+			t.Errorf("%s rejects witnesses %q, want every reject of %s that its regex refuses: %q",
+				d.Name, d.Rejects, baseName, wantRejects)
+		}
+	}
+	if variants == 0 {
+		t.Fatal("the catalogue has no -or-empty rule, so this test checked nothing")
+	}
+}
+
 // TestCreateConfigIDIsASubsetOfTheAddressingRule holds the pairing that
 // decides pve-configid's ceiling.
 //
@@ -297,6 +344,98 @@ func TestCreateConfigIDIsASubsetOfTheAddressingRule(t *testing.T) {
 				"under that name could not then be addressed, so it would be neither readable nor "+
 				"deletable through this API", v)
 		}
+	}
+}
+
+// TestPoolIDNewIsPoolIDMinusTheTwoDotSegments holds pve-poolid-new to what
+// its entry says it is: pve-poolid with exactly "." and ".." taken out,
+// nothing more and nothing less.
+//
+// The oracles are the two OTHER entries, never this one's own witnesses,
+// which would agree with it by construction. pve-poolid, as a regex, says
+// what the language is; path-safe-dotted-name, as a regex, says what the
+// carve-out is for a single segment — pve-poolid-new's first three branches
+// claim to be exactly its language, and the second assertion holds them to
+// that. pve-poolid-new itself goes through Validate, the path a request
+// takes.
+//
+// The corpus has two halves. Every string of up to five characters over an
+// alphabet that reaches each CHARACTER boundary the regexes draw: the dot, a
+// letter, a digit, dash and underscore (both in the charset, and neither a
+// dot), the slash that separates segments, and a space, which is outside the
+// charset. Five characters cannot reach the DEPTH boundary — the shortest
+// four-level id, "a/b/c/d", is seven — so the second half joins one to five
+// segments, each drawn from ".", "..", "a", "a.b" and "", which reaches the
+// three-level limit from both sides, dot segments and empty segments
+// included.
+func TestPoolIDNewIsPoolIDMinusTheTwoDotSegments(t *testing.T) {
+	t.Parallel()
+
+	newRule, ok := LookupRule("pve-poolid-new")
+	if !ok {
+		t.Fatal("pve-poolid-new is not catalogued")
+	}
+	lookupRe := func(name string) *regexp.Regexp {
+		d, ok := LookupRule(name)
+		if !ok || !d.RuleIsRegex {
+			t.Fatalf("%s is not catalogued as a regex rule", name)
+		}
+		return regexp.MustCompile(d.Rule)
+	}
+	poolID, segment := lookupRe("pve-poolid"), lookupRe("path-safe-dotted-name")
+
+	corpus := []string{""}
+	for frontier := []string{""}; len(frontier[0]) < 5; {
+		var next []string
+		for _, prefix := range frontier {
+			for _, c := range []string{".", "a", "0", "-", "_", "/", " "} {
+				next = append(next, prefix+c)
+			}
+		}
+		corpus = append(corpus, next...)
+		frontier = next
+	}
+	segments := []string{".", "..", "a", "a.b", ""}
+	for depth, joined := 1, []string{""}; depth <= 5; depth++ {
+		var next []string
+		for _, prefix := range joined {
+			for _, seg := range segments {
+				if depth == 1 {
+					next = append(next, seg)
+				} else {
+					next = append(next, prefix+"/"+seg)
+				}
+			}
+		}
+		corpus = append(corpus, next...)
+		joined = next
+	}
+	slices.Sort(corpus)
+	corpus = slices.Compact(corpus)
+
+	var admitted, refusedDots int
+	for _, v := range corpus {
+		got := accepted(t, newRule, v)
+		if want := poolID.MatchString(v) && v != "." && v != ".."; got != want {
+			t.Errorf("%q: pve-poolid-new accepts = %v, want %v (pve-poolid accepts = %v)",
+				v, got, want, poolID.MatchString(v))
+		}
+		if !strings.Contains(v, "/") && got != segment.MatchString(v) {
+			t.Errorf("%q: pve-poolid-new accepts = %v but path-safe-dotted-name accepts = %v; for a "+
+				"single segment the two must be one language", v, got, segment.MatchString(v))
+		}
+		if got {
+			admitted++
+		}
+		if poolID.MatchString(v) && !got {
+			refusedDots++
+		}
+	}
+	// Anti-vacuity, both ways: a corpus the rule admitted none of, or one in
+	// which pve-poolid never differed from it, would pass every comparison.
+	if admitted < 1000 || refusedDots != 2 {
+		t.Errorf("admitted %d of %d strings and refused %d that pve-poolid admits; want well over a "+
+			"thousand and exactly the two dot segments", admitted, len(corpus), refusedDots)
 	}
 }
 

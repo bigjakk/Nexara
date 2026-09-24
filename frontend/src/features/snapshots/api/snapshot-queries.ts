@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { GuestSnapshotRow } from "../types/snapshots";
 
 /** Central inventory, collected by the backend snapshot sync loop.
@@ -7,7 +8,8 @@ import type { GuestSnapshotRow } from "../types/snapshots";
 export function useGuestSnapshots() {
   return useQuery({
     queryKey: ["guest-snapshots"],
-    queryFn: () => apiClient.page<GuestSnapshotRow>("/api/v1/guest-snapshots"),
+    queryFn: () =>
+      apiClient.page<GuestSnapshotRow>(apiPath`/api/v1/guest-snapshots`),
   });
 }
 
@@ -25,7 +27,7 @@ export function useResyncGuestSnapshots() {
   return useMutation({
     mutationFn: ({ clusterId, vmid }: ResyncGuestSnapshotsParams) =>
       apiClient.post<{ count: number }>(
-        `/api/v1/clusters/${clusterId}/guest-snapshots/resync`,
+        apiPath`/api/v1/clusters/${clusterId}/guest-snapshots/resync`,
         { vmid },
       ),
     onSuccess: () => {

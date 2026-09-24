@@ -725,6 +725,13 @@ func (h *ClusterHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	})
 }
 
+// clusterDeleteConfirmRefusal is the 400 a cluster delete gets when its
+// confirm parameter is not the cluster's current name. It never echoes the
+// name. registry_cluster_delete_test.go (package api) pins the wording, as a
+// client would see it.
+const clusterDeleteConfirmRefusal = "confirm: must be the cluster's current name; " +
+	"send confirm=<the cluster's name> to delete a cluster"
+
 // Delete handles DELETE /api/v1/clusters/:id.
 func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 	id, err := parseParamUUID(p.String("id"))
@@ -753,27 +760,6 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 			"Cluster has an active rolling update job. Cancel it before deleting the cluster.")
 	}
 
-	// Terminal jobs whose cleanup is still pending also hold cluster-side
-	// state, but they must not block deletion — a cluster being deleted is
-	// often one that's gone for good, and its cleanup could never succeed.
-	// Record what leaks so the audit trail explains the cluster-side residue
-	// (paused CRS, disabled HA rules) if the cluster is ever re-added.
-	auditFields := map[string]any{
-		// Carried in the body because the row itself cannot name the cluster —
-		// see the AuditLog call at the end of this function.
-		"cluster_id": id.String(),
-		"name":       cluster.Name,
-		"api_url":    cluster.ApiUrl,
-	}
-	if pending, pendErr := h.queries.ListCleanupPendingJobsForCluster(c.Context(), id); pendErr == nil && len(pending) > 0 {
-		ids := make([]string, len(pending))
-		for i, pj := range pending {
-			ids[i] = pj.ID.String()
-		}
-		auditFields["warning"] = "deleted with unreleased rolling-update state; CRS pause / HA-rule disables may persist on the Proxmox cluster"
-		auditFields["cleanup_pending_job_ids"] = ids
-	}
-
 	// Opt-in Proxmox-side cleanup. Off by default: removing a cluster from
 	// Nexara is a local act, and silently deleting users and tokens on a live
 	// hypervisor is not something to infer from it.
@@ -796,6 +782,48 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 		if err := requirePerm(c, "manage", "cluster"); err != nil {
 			return err
 		}
+	}
+
+	// The caller must name the cluster it is deleting: confirm is the
+	// cluster's current name, exactly. The registry requires the parameter
+	// (registry_clusters.go); this is the half that needs the row.
+	//
+	// What it defends against is a request that was written for something
+	// else. A proxy that resolves dot segments turns a script's
+	// DELETE .../clusters/<id>/pools/.. into DELETE .../clusters/<id>, with
+	// no trailing slash for refuseTrailingSlashWrites to see — Traefik does
+	// that by default (README.md, Reverse Proxy). No such rewritten request
+	// carries the cluster's name as confirm.
+	//
+	// Its place is load-bearing on both sides. It follows the two refusals
+	// above, which only read — the active rolling update (409) and the
+	// revocation's permission (403) — so neither tells a caller who has
+	// guessed a name whether the guess was right: each answers a right and a
+	// wrong one alike. And it precedes everything below that writes — the
+	// delete, the revocation — so a refusal changes nothing.
+	if p.String("confirm") != cluster.Name {
+		return fiber.NewError(fiber.StatusBadRequest, clusterDeleteConfirmRefusal)
+	}
+
+	// Terminal jobs whose cleanup is still pending also hold cluster-side
+	// state, but they must not block deletion — a cluster being deleted is
+	// often one that's gone for good, and its cleanup could never succeed.
+	// Record what leaks so the audit trail explains the cluster-side residue
+	// (paused CRS, disabled HA rules) if the cluster is ever re-added.
+	auditFields := map[string]any{
+		// Carried in the body because the row itself cannot name the cluster —
+		// see the AuditLog call at the end of this function.
+		"cluster_id": id.String(),
+		"name":       cluster.Name,
+		"api_url":    cluster.ApiUrl,
+	}
+	if pending, pendErr := h.queries.ListCleanupPendingJobsForCluster(c.Context(), id); pendErr == nil && len(pending) > 0 {
+		ids := make([]string, len(pending))
+		for i, pj := range pending {
+			ids[i] = pj.ID.String()
+		}
+		auditFields["warning"] = "deleted with unreleased rolling-update state; CRS pause / HA-rule disables may persist on the Proxmox cluster"
+		auditFields["cleanup_pending_job_ids"] = ids
 	}
 
 	if err := h.queries.DeleteCluster(c.Context(), id); err != nil {

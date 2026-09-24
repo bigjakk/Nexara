@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import {
   Dialog,
   DialogContent,
@@ -972,7 +973,7 @@ function MigrationProgress({
     queryKey: ["migration-log", clusterId, job.upid],
     queryFn: () =>
       apiClient.list<TaskLogLine>(
-        `/api/v1/clusters/${clusterId}/tasks/${encodeURIComponent(job.upid)}/log`,
+        apiPath`/api/v1/clusters/${clusterId}/tasks/${job.upid}/log`,
       ),
     enabled: hasUpid,
     refetchInterval: isActive ? 3000 : false,

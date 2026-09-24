@@ -1,8 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { DeleteClusterDialog } from "./DeleteClusterDialog";
 import type { ClusterResponse } from "@/types/api";
+
+const deleteMock = vi.fn();
+
+// Only the transport is replaced; the path useDeleteCluster hands it is built
+// by the real apiPath.
+vi.mock("@/lib/api-client", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/api-client")>(
+      "@/lib/api-client",
+    );
+  return {
+    ...actual,
+    apiClient: {
+      ...actual.apiClient,
+      delete: (...args: unknown[]) => deleteMock(...args) as unknown,
+    },
+  };
+});
 
 // The revoke option is gated on GLOBAL manage:cluster, matching the server.
 let granted: string[] = [];
@@ -15,6 +34,8 @@ vi.mock("@/hooks/usePermissions", () => ({
 
 beforeEach(() => {
   granted = ["manage:cluster", "delete:cluster"];
+  deleteMock.mockReset();
+  deleteMock.mockResolvedValue(undefined);
 });
 
 function cluster(over: Partial<ClusterResponse> = {}): ClusterResponse {
@@ -83,6 +104,28 @@ describe("DeleteClusterDialog", () => {
     expect(screen.queryByLabelText(REVOKE)).not.toBeInTheDocument();
   });
 
+  // Only the name exactly: a prefix of it, or the name in another case, is
+  // not it. The server would refuse either (ClusterHandler.Delete); the
+  // dialog must not send one to find out.
+  it.each(["Prod", "prod cluster", "Prod Cluster "])(
+    "keeps delete blocked, and sends nothing, for %j",
+    async (typed) => {
+      const user = userEvent.setup();
+      renderWithProviders(
+        <DeleteClusterDialog
+          cluster={cluster({ credential_source: "bootstrap" })}
+          open
+          onOpenChange={() => {}}
+        />,
+      );
+      await user.type(screen.getByPlaceholderText("Prod Cluster"), typed);
+      const button = screen.getByRole("button", { name: /delete cluster/i });
+      expect(button).toBeDisabled();
+      await user.click(button);
+      expect(deleteMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps delete blocked until the cluster name is typed", () => {
     renderWithProviders(
       <DeleteClusterDialog
@@ -94,5 +137,35 @@ describe("DeleteClusterDialog", () => {
     expect(
       screen.getByRole("button", { name: /delete cluster/i }),
     ).toBeDisabled();
+  });
+
+  // The server deletes a cluster only when confirm is its current name,
+  // exactly (ClusterHandler.Delete). The dialog already makes the operator
+  // type it; what they typed is what goes out, encoded as a query value.
+  it.each([
+    [false, "/api/v1/clusters/c1?confirm=Prod+Cluster"],
+    [true, "/api/v1/clusters/c1?confirm=Prod+Cluster&revoke_pve_credentials=1"],
+  ])("sends the typed name as confirm (revoking: %s)", async (revoke, want) => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <DeleteClusterDialog
+        cluster={cluster({ credential_source: "bootstrap" })}
+        open
+        onOpenChange={() => {}}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /delete cluster/i });
+    await user.type(
+      screen.getByPlaceholderText("Prod Cluster"),
+      "Prod Cluster",
+    );
+    if (revoke) {
+      await user.click(screen.getByLabelText(REVOKE));
+    }
+    await user.click(button);
+    await waitFor(() => {
+      expect(deleteMock).toHaveBeenCalled();
+    });
+    expect(deleteMock.mock.calls).toEqual([[want]]);
   });
 });

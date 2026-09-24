@@ -5,6 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath, queryParams } from "@/lib/api-path";
 import type {
   ClusterResponse,
   CreateClusterRequest,
@@ -18,7 +19,7 @@ import type {
 export function useClusters() {
   return useQuery({
     queryKey: ["clusters"],
-    queryFn: () => apiClient.list<ClusterResponse>("/api/v1/clusters"),
+    queryFn: () => apiClient.list<ClusterResponse>(apiPath`/api/v1/clusters`),
     // Refresh periodically so cluster status and Ceph health surfaced in the
     // header/dashboard/sidebar stay current without a manual reload.
     refetchInterval: 30_000,
@@ -59,7 +60,9 @@ export function useDashboardData() {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.list<NodeResponse>(`/api/v1/clusters/${cluster.id}/nodes`),
+        apiClient.list<NodeResponse>(
+          apiPath`/api/v1/clusters/${cluster.id}/nodes`,
+        ),
       enabled: clusters.length > 0,
     })),
   });
@@ -68,7 +71,7 @@ export function useDashboardData() {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "vms"],
       queryFn: () =>
-        apiClient.list<VMResponse>(`/api/v1/clusters/${cluster.id}/vms`),
+        apiClient.list<VMResponse>(apiPath`/api/v1/clusters/${cluster.id}/vms`),
       enabled: clusters.length > 0,
     })),
   });
@@ -78,7 +81,7 @@ export function useDashboardData() {
       queryKey: ["clusters", cluster.id, "storage"],
       queryFn: () =>
         apiClient.list<StorageResponse>(
-          `/api/v1/clusters/${cluster.id}/storage`,
+          apiPath`/api/v1/clusters/${cluster.id}/storage`,
         ),
       enabled: clusters.length > 0,
     })),
@@ -185,7 +188,7 @@ export function useCreateCluster() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (req: CreateClusterRequest) =>
-      apiClient.post<CreateClusterResponse>("/api/v1/clusters", req),
+      apiClient.post<CreateClusterResponse>(apiPath`/api/v1/clusters`, req),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["clusters"] });
     },
@@ -229,7 +232,10 @@ export function useUpdateCluster() {
   return useMutation({
     ...errorsHandledLocally,
     mutationFn: ({ id, body }: { id: string; body: UpdateClusterRequest }) =>
-      apiClient.put<UpdateClusterResponse>(`/api/v1/clusters/${id}`, body),
+      apiClient.put<UpdateClusterResponse>(
+        apiPath`/api/v1/clusters/${id}`,
+        body,
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["clusters"] });
     },
@@ -238,6 +244,12 @@ export function useUpdateCluster() {
 
 export interface DeleteClusterRequest {
   id: string;
+  /**
+   * The cluster's name as the operator typed it, which the dialog has checked
+   * against the cluster's name. The server refuses the delete unless it is the
+   * cluster's current name, exactly (ClusterHandler.Delete).
+   */
+  confirm: string;
   /**
    * Also remove the PVE user and API token Nexara created for this cluster.
    * Opt-in, and the server honours it only for clusters it onboarded itself —
@@ -249,9 +261,9 @@ export interface DeleteClusterRequest {
 export function useDeleteCluster() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, revokePveCredentials }: DeleteClusterRequest) =>
+    mutationFn: ({ id, confirm, revokePveCredentials }: DeleteClusterRequest) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${id}${revokePveCredentials === true ? "?revoke_pve_credentials=1" : ""}`,
+        apiPath`/api/v1/clusters/${id}?${queryParams({ confirm, revoke_pve_credentials: revokePveCredentials === true ? "1" : undefined })}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["clusters"] });

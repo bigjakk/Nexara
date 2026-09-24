@@ -1,12 +1,15 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
 // poolRouteCount is how many endpoints registerPoolEndpoints declares. The
@@ -234,6 +237,70 @@ func TestPoolCreateAcceptsANestedID(t *testing.T) {
 		}
 		if tt.want == fiber.StatusNoContent && cap.params.String("poolid") != tt.id {
 			t.Errorf("poolid %q reached the handler as %q", tt.id, cap.params.String("poolid"))
+		}
+	}
+}
+
+// TestPoolCreateRefusesADotSegmentID pins the create side's refusal of the
+// two ids no browser can address — on a real request, before the handler
+// runs, as a 400 that names the parameter — and that everything else a
+// pool id may be still reaches the handler untouched: a nested id, a
+// leading dot or dash, dots inside a name, and a nested id whose segments
+// are dots, which pve-poolid-new admits on purpose.
+//
+// The precondition is what makes the refusal Nexara's rather than a
+// restatement of Proxmox's: pve-poolid, verify_poolname transcribed, admits
+// both ids, so this route accepted them before and a Proxmox whose create
+// predates pve-manager 7eadbed6 would too.
+func TestPoolCreateRefusesADotSegmentID(t *testing.T) {
+	const path = clusterScope + "/pools"
+	target := strings.NewReplacer(":cluster_id", testClusterID).Replace(path)
+
+	loose := apischema.Properties{"poolid": {Type: apischema.String, Pattern: apischema.Rule("pve-poolid")}}
+	for _, id := range []string{".", ".."} {
+		if _, err := loose.Validate(map[string]any{"poolid": id}); err != nil {
+			t.Fatalf("precondition: pve-poolid refuses %q (%v), so refusing it here would be Proxmox's rule, "+
+				"not a Nexara restriction", id, err)
+		}
+	}
+
+	for _, tt := range []struct {
+		id      string
+		refused bool
+	}{
+		{".", true},
+		{"..", true},
+		{"infra/prod", false},
+		{".x", false},
+		{"-x", false},
+		{"..archive", false},
+		{"...", false},
+		{"a/..", false},
+		{"./b", false},
+	} {
+		cap := &capture{}
+		e := declaredEndpoint(t, fiber.MethodPost, path)
+		e.Handler = cap.handler()
+		e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
+		app := newRegistryApp(t, noAuth(), e)
+
+		body, err := json.Marshal(map[string]string{"poolid": tt.id})
+		if err != nil {
+			t.Fatalf("encoding body for %q: %v", tt.id, err)
+		}
+		status, env := send(t, app, jsonRequest(http.MethodPost, target, string(body)))
+		if tt.refused {
+			if status != fiber.StatusBadRequest || env.Error != "bad_request" || !strings.HasPrefix(env.Message, "poolid: ") {
+				t.Errorf("poolid %q: answered %d %+v, want a 400 naming poolid", tt.id, status, env)
+			}
+			if cap.called {
+				t.Errorf("poolid %q: the handler ran; the refusal has to come from the declaration", tt.id)
+			}
+			continue
+		}
+		if status != fiber.StatusNoContent || !cap.called || cap.params.String("poolid") != tt.id {
+			t.Errorf("poolid %q: answered %d %+v and reached the handler as %v, want it passed through",
+				tt.id, status, env, cap.called)
 		}
 	}
 }

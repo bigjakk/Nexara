@@ -16,6 +16,7 @@ import { Plus, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useCreatePBSServer } from "../api/backup-queries";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import {
   privateAddressWarningFromError,
   type PrivateAddressWarning as PrivateAddressDetails,
@@ -83,7 +84,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
     setFetchingFingerprint(true);
     try {
       const resp = await apiClient.post<FingerprintResponse>(
-        "/api/v1/clusters/fetch-fingerprint",
+        apiPath`/api/v1/clusters/fetch-fingerprint`,
         { api_url: apiUrl, allow_private_address: allow },
       );
       setFingerprint(resp);

@@ -35,7 +35,8 @@ import (
 // the client switched to the query forms PVE moved to AND the route changed —
 // either an encoded-slash rule plus a decode, or, as the dot limit requires
 // anyway, the id carried outside the path. Hence poolCreateIDParam below,
-// which is not bound by either constraint.
+// which carries the id in the body and so is bound by neither constraint; it
+// refuses only the two names no browser could address afterwards.
 //
 // The rule it carries is NOT a pool rule, and the name says so.
 // path-safe-dotted-name is that charset minus exactly {".", ".."} — the two
@@ -48,17 +49,17 @@ import (
 // inline duplication guards, and neither copy would be individually killable.
 //
 // Being stricter than verify_poolname costs one pair of names, knowingly, and
-// more than the pools themselves. POST /pools can still create such a pool
-// (poolCreateIDParam below), and the VM, container and import create routes
-// can create a guest INTO one, since they send `pool` as a form field; but no
-// guest can be moved in or out of it afterwards, because SetVMPool goes
-// through proxmox.UpdateResourcePool, so a guest created there can never be
-// moved out through Nexara. Switching the client to PVE's non-deprecated
-// forms, which take poolid as a parameter, would fix only the Nexara-to-PVE
-// leg: this route still carries the id in its own path, and a browser
-// resolves a "." or ".." segment before the request leaves, so lifting the
-// dot limit also needs the id moved out of this route's path. The catalogue
-// entry has the full account.
+// more than the pools themselves. POST /pools no longer creates such a pool
+// (poolCreateIDParam below), but one made outside Nexara can exist, and the
+// VM, container and import create routes can create a guest INTO one, since
+// they send `pool` as a form field; but no guest can be moved in or out of it
+// afterwards, because SetVMPool goes through proxmox.UpdateResourcePool, so a
+// guest created there can never be moved out through Nexara. Switching the
+// client to PVE's non-deprecated forms, which take poolid as a parameter,
+// would fix only the Nexara-to-PVE leg: this route still carries the id in
+// its own path, and a browser resolves a "." or ".." segment before the
+// request leaves, so lifting the dot limit also needs the id moved out of
+// this route's path. The catalogue entry has the full account.
 //
 // pveproxy takes a dot segment literally, so sent straight to it
 // "/pools/." addresses a pool NAMED "." — a name verify_poolname admits —
@@ -69,10 +70,13 @@ import (
 // and this declaration is the same refusal one layer earlier with a message
 // that names the parameter. Note that nothing on THIS side resolves it: Fiber
 // routes a raw ".." straight through to this parameter, so the pattern is
-// what turns it away. The create side (poolCreateIDParam, pve-poolid) is
-// deliberately NOT tightened to match; the catalogue entry's commentary
-// records that decision in full, under the heading "The create side stays
-// loose".
+// what turns it away — for a caller that sends the segment raw. A BROWSER
+// never sends it: it resolves the segment first, so the SPA's request for a
+// pool named ".." never reached this parameter at all, and landed on the
+// cluster instead. frontend/src/lib/api-path.ts refuses to build such a path,
+// and refuseTrailingSlashWrites (middleware.go) refuses the write it
+// becomes. The create side now refuses the pair as well; see
+// poolCreateIDParam.
 func poolIDParam(source apischema.Source, description string) apischema.Property {
 	return apischema.Property{
 		Type:        apischema.String,
@@ -89,25 +93,37 @@ func poolIDParam(source apischema.Source, description string) apischema.Property
 // CreateResourcePool — so nothing between here and PVE has to carry it as a
 // path segment.
 //
-// It therefore takes pve-poolid whole, nesting included. Sharing
-// poolIDParam here would refuse "infra/prod", a pool name PVE's own
-// POST /pools accepts, purely because of a restriction that belongs to the
-// OTHER routes' URL shape. That is the invented-strictness mistake
-// optPoolID's comment describes, and it is easy to make precisely because
-// one helper looks like it should serve both.
+// It therefore takes a pool id nesting included. Sharing poolIDParam here
+// would refuse "infra/prod", a pool name PVE's own POST /pools accepts,
+// purely because of a restriction that belongs to the OTHER routes' URL
+// shape. That is the invented-strictness mistake optPoolID's comment
+// describes, and it is easy to make precisely because one helper looks like
+// it should serve both.
 //
-// The same asymmetry now covers "." and "..", which poolIDParam refuses and
-// this one still accepts. That is a decision rather than an oversight — it
-// is the nesting asymmetry above, one size smaller — and the reasoning is
-// in the catalogue's path-safe-dotted-name entry under "The create side
-// stays loose". The short form: pve-poolid is not only a create rule (it is
-// also how a guest is assigned to an EXISTING pool), and tightening it here
-// would not change what
-// this API can address, because the client has refused both on the
-// addressing methods since before this rule existed.
+// It does NOT take pve-poolid whole, though: it carries pve-poolid-new, which
+// is pve-poolid minus a value that is exactly "." or "..". That refusal is
+// NEXARA's — verify_poolname admits both — and the catalogue entry says so.
+// It exists because no browser can address such a pool: the URL parser every
+// browser shares resolves a "." or ".." path segment before the request
+// leaves, so the SPA's DELETE of a pool named ".." went out as
+// DELETE /api/v1/clusters/<id>/ and removed the CLUSTER. The SPA now refuses
+// to build that path and the server refuses the write it would become, and
+// this stops Nexara creating the pool in the first place. A pool made outside
+// Nexara under either name is still listed, and simply cannot be read,
+// edited or deleted here.
+//
+// Only the WHOLE id is refused. "a/.." and "./b" pass: the hazard needs a
+// "." or ".." SEGMENT, the SPA encodes a pool id as one segment slash and
+// all ("a%2F.."), and no nested id is addressable through the per-pool routes
+// anyway, which the paragraph on poolIDParam above explains.
+//
+// On a cluster whose pve-manager has commit 7eadbed6, Proxmox's own
+// create_pool refuses both names too — it requires a new pool's name to
+// start with a letter — so there this changes only which layer answers. On
+// an older one it is the only thing that does.
 func poolCreateIDParam(description string) apischema.Property {
 	p := poolIDParam(apischema.SourceAuto, description)
-	p.Pattern = apischema.Rule("pve-poolid")
+	p.Pattern = apischema.Rule("pve-poolid-new")
 	return p
 }
 
@@ -138,7 +154,9 @@ func registerPoolEndpoints(reg *Registry, h *handlers.PoolHandler) {
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("manage", "pool"),
 		Parameters: clusterParams(apischema.Properties{
-			"poolid":  poolCreateIDParam("Id for the new pool. May be nested, e.g. \"infra/prod\"."),
+			"poolid": poolCreateIDParam("Id for the new pool. May be nested, e.g. \"infra/prod\". An id that is " +
+				"exactly \".\" or \"..\" is refused: no browser can send either as a path segment, so the " +
+				"pool could not be read, edited or deleted here afterwards."),
 			"comment": optString(1024, "<string>", "Free-text comment stored on the pool."),
 		}),
 		Handler: h.CreatePool,

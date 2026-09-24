@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { apiClient, ApiClientError, storeTokens } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { useAuthStore } from "@/stores/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,7 +59,7 @@ export function OIDCCallbackPage() {
 
     apiClient
       .postPublic<AuthResponse | TOTPRequiredResponse>(
-        "/api/v1/auth/oidc/token-exchange",
+        apiPath`/api/v1/auth/oidc/token-exchange`,
         { code: oidcToken },
       )
       .then((res) => {
@@ -94,7 +95,7 @@ export function OIDCCallbackPage() {
           : { code: totpCode }),
       };
       const res = await apiClient.postPublic<AuthResponse>(
-        "/api/v1/auth/totp/verify-login",
+        apiPath`/api/v1/auth/totp/verify-login`,
         body,
       );
       storeTokens(res);

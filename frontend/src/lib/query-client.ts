@@ -1,6 +1,7 @@
 import { MutationCache, QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApiClientError } from "@/lib/api-client";
+import { PathSegmentError } from "@/lib/api-path";
 
 /**
  * 4xx statuses that do mean "ask again", so they keep the one retry.
@@ -29,11 +30,18 @@ const RETRYABLE_CLIENT_ERRORS = new Set([408, 429]);
  * before it throws, so a retry could never rescue the session, but it did send
  * another /auth/refresh plus another unauthenticated request for every query
  * in flight.
+ *
+ * A path apiPath refused (lib/api-path.ts) is the same kind of answer, given
+ * before any request: the object's name cannot be sent as a path segment, and
+ * it will not become sendable on a second try.
  */
 export function retryUnlessClientError(
   failureCount: number,
   error: Error,
 ): boolean {
+  if (error instanceof PathSegmentError) {
+    return false;
+  }
   if (
     error instanceof ApiClientError &&
     error.status >= 400 &&

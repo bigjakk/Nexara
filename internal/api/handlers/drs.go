@@ -775,12 +775,18 @@ func (h *DRSHandler) DeleteHARule(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	// Read raw, unlike the HA tab's decodeParamValue: the DRS client sends
-	// the rule name unencoded, so decoding here would corrupt a name
-	// containing a literal percent. What matters for the lookup below is
-	// that the same string reaches both findHARule and DeleteHARule, and it
-	// does. The schema has already refused an empty or traversing name.
-	ruleName := p.String("rule_name")
+	// Decoded like the HA tab's routes: the SPA builds this path with apiPath
+	// (frontend/src/lib/api-path.ts), which percent-encodes every segment. The
+	// declared rule (pve-configid-existing) admits no "%" today, so nothing
+	// that arrives changes, but a name with a character the SPA encodes would
+	// reach the client as it was meant the day the rule widens. The schema
+	// checks the RAW segment; the DECODED name is held by the client, whose
+	// DeleteHARule runs validateHAConfigID (internal/proxmox/client_ha.go) on
+	// it before escaping it into the Proxmox path and refuses an empty or
+	// traversing name there, whatever the declared rule admits. What matters
+	// for the lookup below is that the same string reaches both findHARule and
+	// DeleteHARule, and it does.
+	ruleName := decodeParamValue(p.String("rule_name"))
 
 	client, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {

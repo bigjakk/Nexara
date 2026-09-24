@@ -19,6 +19,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import {
   privateAddressWarningFromError,
   type PrivateAddressWarning as PrivateAddressDetails,
@@ -131,7 +132,7 @@ export function EditClusterDialog({
     setFetchingFingerprint(true);
     try {
       const resp = await apiClient.post<FingerprintResponse>(
-        "/api/v1/clusters/fetch-fingerprint",
+        apiPath`/api/v1/clusters/fetch-fingerprint`,
         { api_url: apiUrl, allow_private_address: allow },
       );
       setFingerprint(resp);

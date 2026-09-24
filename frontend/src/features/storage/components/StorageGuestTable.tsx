@@ -21,6 +21,7 @@ import {
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { StatusBadge } from "@/features/inventory/components/StatusBadge";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { formatBytes, formatUptime } from "@/lib/format";
 import type { VMResponse } from "@/types/api";
 import type { StorageContentItem } from "../types/storage";
@@ -62,14 +63,16 @@ export function StorageGuestTable({
   const vmsQuery = useQuery({
     queryKey: ["clusters", clusterId, "vms"],
     queryFn: () =>
-      apiClient.list<VMResponse>(`/api/v1/clusters/${clusterId}/vms`),
+      apiClient.list<VMResponse>(apiPath`/api/v1/clusters/${clusterId}/vms`),
     enabled: clusterId.length > 0,
     staleTime: 30_000,
   });
   const ctsQuery = useQuery({
     queryKey: ["clusters", clusterId, "containers"],
     queryFn: () =>
-      apiClient.list<VMResponse>(`/api/v1/clusters/${clusterId}/containers`),
+      apiClient.list<VMResponse>(
+        apiPath`/api/v1/clusters/${clusterId}/containers`,
+      ),
     enabled: clusterId.length > 0,
     staleTime: 30_000,
   });

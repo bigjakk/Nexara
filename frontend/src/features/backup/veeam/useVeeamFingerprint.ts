@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import {
   privateAddressWarningFromError,
   type PrivateAddressWarning as PrivateAddressDetails,
@@ -44,7 +45,7 @@ export function useVeeamFingerprint() {
     setFetchedFor(null);
     try {
       const resp = await apiClient.post<FingerprintResponse>(
-        "/api/v1/clusters/fetch-fingerprint",
+        apiPath`/api/v1/clusters/fetch-fingerprint`,
         { api_url: url, allow_private_address: allowPrivate },
       );
       setFingerprint(resp);

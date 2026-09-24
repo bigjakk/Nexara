@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   DRSConfig,
   DRSConfigRequest,
@@ -14,7 +15,9 @@ export function useDRSConfig(clusterId: string) {
   return useQuery({
     queryKey: ["drs", "config", clusterId],
     queryFn: () =>
-      apiClient.get<DRSConfig>(`/api/v1/clusters/${clusterId}/drs/config`),
+      apiClient.get<DRSConfig>(
+        apiPath`/api/v1/clusters/${clusterId}/drs/config`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -24,7 +27,7 @@ export function useUpdateDRSConfig(clusterId: string) {
   return useMutation({
     mutationFn: (config: DRSConfigRequest) =>
       apiClient.put<DRSConfig>(
-        `/api/v1/clusters/${clusterId}/drs/config`,
+        apiPath`/api/v1/clusters/${clusterId}/drs/config`,
         config,
       ),
     onSuccess: () => {
@@ -39,7 +42,7 @@ export function useDRSRules(clusterId: string) {
   return useQuery({
     queryKey: ["drs", "rules", clusterId],
     queryFn: () =>
-      apiClient.list<DRSRule>(`/api/v1/clusters/${clusterId}/drs/rules`),
+      apiClient.list<DRSRule>(apiPath`/api/v1/clusters/${clusterId}/drs/rules`),
     enabled: clusterId.length > 0,
   });
 }
@@ -48,7 +51,10 @@ export function useCreateDRSRule(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (rule: CreateRuleRequest) =>
-      apiClient.post<DRSRule>(`/api/v1/clusters/${clusterId}/drs/rules`, rule),
+      apiClient.post<DRSRule>(
+        apiPath`/api/v1/clusters/${clusterId}/drs/rules`,
+        rule,
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["drs", "rules", clusterId],
@@ -62,7 +68,7 @@ export function useDeleteDRSRule(clusterId: string) {
   return useMutation({
     mutationFn: (ruleId: string) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/drs/rules/${ruleId}`,
+        apiPath`/api/v1/clusters/${clusterId}/drs/rules/${ruleId}`,
       ),
     // onSettled, not onSuccess: deleting a rule that is already gone answers
     // 404, and the list that offered it is the stale part — refetching it on
@@ -80,7 +86,9 @@ export function useHARules(clusterId: string) {
   return useQuery({
     queryKey: ["drs", "ha-rules", clusterId],
     queryFn: () =>
-      apiClient.list<DRSRule>(`/api/v1/clusters/${clusterId}/drs/ha-rules`),
+      apiClient.list<DRSRule>(
+        apiPath`/api/v1/clusters/${clusterId}/drs/ha-rules`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -90,7 +98,7 @@ export function useCreateHARule(clusterId: string) {
   return useMutation({
     mutationFn: (rule: CreateHARuleRequest) =>
       apiClient.post<{ status: string; rule_name: string }>(
-        `/api/v1/clusters/${clusterId}/drs/ha-rules`,
+        apiPath`/api/v1/clusters/${clusterId}/drs/ha-rules`,
         rule,
       ),
     onSuccess: () => {
@@ -106,7 +114,7 @@ export function useDeleteHARule(clusterId: string) {
   return useMutation({
     mutationFn: (ruleName: string) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/drs/ha-rules/${ruleName}`,
+        apiPath`/api/v1/clusters/${clusterId}/drs/ha-rules/${ruleName}`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -120,7 +128,7 @@ export function useTriggerEvaluation(clusterId: string) {
   return useMutation({
     mutationFn: () =>
       apiClient.post<EvaluateResponse>(
-        `/api/v1/clusters/${clusterId}/drs/evaluate`,
+        apiPath`/api/v1/clusters/${clusterId}/drs/evaluate`,
       ),
   });
 }
@@ -130,7 +138,7 @@ export function useDRSHistory(clusterId: string, limit: number = 25) {
     queryKey: ["drs", "history", clusterId, limit],
     queryFn: () =>
       apiClient.list<DRSHistoryEntry>(
-        `/api/v1/clusters/${clusterId}/drs/history?limit=${String(limit)}`,
+        apiPath`/api/v1/clusters/${clusterId}/drs/history?limit=${limit}`,
       ),
     enabled: clusterId.length > 0,
   });

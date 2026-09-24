@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 export interface MetricServerConfig {
   id: string;
@@ -19,7 +20,7 @@ export function useMetricServers(clusterId: string) {
     queryKey: ["clusters", clusterId, "metric-servers"],
     queryFn: () =>
       apiClient.list<MetricServerConfig>(
-        `/api/v1/clusters/${clusterId}/metric-servers`,
+        apiPath`/api/v1/clusters/${clusterId}/metric-servers`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -34,7 +35,11 @@ export function useCreateMetricServer(clusterId: string) {
       server: string;
       port: number;
       [key: string]: unknown;
-    }) => apiClient.post(`/api/v1/clusters/${clusterId}/metric-servers`, data),
+    }) =>
+      apiClient.post(
+        apiPath`/api/v1/clusters/${clusterId}/metric-servers`,
+        data,
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({
         queryKey: ["clusters", clusterId, "metric-servers"],
@@ -48,7 +53,7 @@ export function useUpdateMetricServer(clusterId: string) {
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string; [key: string]: unknown }) =>
       apiClient.put(
-        `/api/v1/clusters/${clusterId}/metric-servers/${encodeURIComponent(id)}`,
+        apiPath`/api/v1/clusters/${clusterId}/metric-servers/${id}`,
         data,
       ),
     onSuccess: () => {
@@ -64,7 +69,7 @@ export function useDeleteMetricServer(clusterId: string) {
   return useMutation({
     mutationFn: (id: string) =>
       apiClient.delete(
-        `/api/v1/clusters/${clusterId}/metric-servers/${encodeURIComponent(id)}`,
+        apiPath`/api/v1/clusters/${clusterId}/metric-servers/${id}`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({

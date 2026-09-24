@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 /**
  * Opts a mutation out of the global error toast in lib/query-client.ts.
@@ -78,7 +79,7 @@ export function useACMEAccounts(clusterId: string) {
     queryKey: ["clusters", clusterId, "acme", "accounts"],
     queryFn: () =>
       apiClient.list<ACMEAccount>(
-        `/api/v1/clusters/${clusterId}/acme/accounts`,
+        apiPath`/api/v1/clusters/${clusterId}/acme/accounts`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -94,7 +95,7 @@ export function useCreateACMEAccount(clusterId: string) {
       tos_url?: string;
     }) =>
       apiClient.post<{ upid: string }>(
-        `/api/v1/clusters/${clusterId}/acme/accounts`,
+        apiPath`/api/v1/clusters/${clusterId}/acme/accounts`,
         data,
       ),
     onSuccess: () => {
@@ -108,7 +109,7 @@ export function useDeleteACMEAccount(clusterId: string) {
   return useMutation({
     mutationFn: (name: string) =>
       apiClient.delete(
-        `/api/v1/clusters/${clusterId}/acme/accounts/${encodeURIComponent(name)}`,
+        apiPath`/api/v1/clusters/${clusterId}/acme/accounts/${name}`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] });
@@ -120,7 +121,9 @@ export function useACMEPlugins(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "plugins"],
     queryFn: () =>
-      apiClient.list<ACMEPlugin>(`/api/v1/clusters/${clusterId}/acme/plugins`),
+      apiClient.list<ACMEPlugin>(
+        apiPath`/api/v1/clusters/${clusterId}/acme/plugins`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -134,7 +137,8 @@ export function useCreateACMEPlugin(clusterId: string) {
       api?: string;
       data?: string;
       "validation-delay"?: number;
-    }) => apiClient.post(`/api/v1/clusters/${clusterId}/acme/plugins`, data),
+    }) =>
+      apiClient.post(apiPath`/api/v1/clusters/${clusterId}/acme/plugins`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] });
     },
@@ -146,7 +150,7 @@ export function useDeleteACMEPlugin(clusterId: string) {
   return useMutation({
     mutationFn: (id: string) =>
       apiClient.delete(
-        `/api/v1/clusters/${clusterId}/acme/plugins/${encodeURIComponent(id)}`,
+        apiPath`/api/v1/clusters/${clusterId}/acme/plugins/${id}`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] });
@@ -159,7 +163,7 @@ export function useACMEChallengeSchema(clusterId: string) {
     queryKey: ["clusters", clusterId, "acme", "challenge-schema"],
     queryFn: () =>
       apiClient.list<ACMEChallengeSchema>(
-        `/api/v1/clusters/${clusterId}/acme/challenge-schema`,
+        apiPath`/api/v1/clusters/${clusterId}/acme/challenge-schema`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -169,7 +173,9 @@ export function useACMETOS(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "tos"],
     queryFn: () =>
-      apiClient.get<{ url: string }>(`/api/v1/clusters/${clusterId}/acme/tos`),
+      apiClient.get<{ url: string }>(
+        apiPath`/api/v1/clusters/${clusterId}/acme/tos`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -179,7 +185,7 @@ export function useACMEDirectories(clusterId: string) {
     queryKey: ["clusters", clusterId, "acme", "directories"],
     queryFn: () =>
       apiClient.list<ACMEDirectory>(
-        `/api/v1/clusters/${clusterId}/acme/directories`,
+        apiPath`/api/v1/clusters/${clusterId}/acme/directories`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -211,7 +217,7 @@ export function useNodeACMEConfig(clusterId: string, node: string) {
     queryKey: ["clusters", clusterId, "nodes", node, "acme-config"],
     queryFn: () =>
       apiClient.get<NodeACMEConfig>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/acme-config`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${node}/acme-config`,
       ),
     enabled: clusterId.length > 0 && node.length > 0,
   });
@@ -222,7 +228,7 @@ export function useSetNodeACMEConfig(clusterId: string) {
   return useMutation({
     mutationFn: ({ node, config }: { node: string; config: NodeACMEConfig }) =>
       apiClient.put(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/acme-config`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${node}/acme-config`,
         config,
       ),
     onSuccess: (_data, vars) => {
@@ -245,7 +251,7 @@ export function useNodeCertificates(clusterId: string, node: string) {
     queryKey: ["clusters", clusterId, "nodes", node, "certificates"],
     queryFn: () =>
       apiClient.list<NodeCertificate>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${node}/certificates`,
       ),
     enabled: clusterId.length > 0 && node.length > 0,
   });
@@ -256,7 +262,7 @@ export function useOrderNodeCertificate(clusterId: string) {
   return useMutation({
     mutationFn: ({ node, force }: { node: string; force?: boolean }) =>
       apiClient.post<{ upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates/order`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${node}/certificates/order`,
         { force },
       ),
     onSuccess: () => {
@@ -270,7 +276,7 @@ export function useRenewNodeCertificate(clusterId: string) {
   return useMutation({
     mutationFn: ({ node, force }: { node: string; force?: boolean }) =>
       apiClient.put<{ upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates/renew`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${node}/certificates/renew`,
         { force },
       ),
     onSuccess: () => {

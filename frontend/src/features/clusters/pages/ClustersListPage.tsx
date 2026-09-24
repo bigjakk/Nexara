@@ -6,6 +6,7 @@ import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDial
 import { EditClusterDialog } from "@/features/clusters/components/EditClusterDialog";
 import { DeleteClusterDialog } from "@/features/clusters/components/DeleteClusterDialog";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { NodeResponse, VMResponse, ClusterResponse } from "@/types/api";
 import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,9 @@ export function ClustersListPage() {
     queries: (clusters ?? []).map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.list<NodeResponse>(`/api/v1/clusters/${cluster.id}/nodes`),
+        apiClient.list<NodeResponse>(
+          apiPath`/api/v1/clusters/${cluster.id}/nodes`,
+        ),
       enabled: clusters !== undefined && clusters.length > 0,
     })),
   });
@@ -42,7 +45,7 @@ export function ClustersListPage() {
     queries: (clusters ?? []).map((cluster) => ({
       queryKey: ["clusters", cluster.id, "vms"],
       queryFn: () =>
-        apiClient.list<VMResponse>(`/api/v1/clusters/${cluster.id}/vms`),
+        apiClient.list<VMResponse>(apiPath`/api/v1/clusters/${cluster.id}/vms`),
       enabled: clusters !== undefined && clusters.length > 0,
     })),
   });

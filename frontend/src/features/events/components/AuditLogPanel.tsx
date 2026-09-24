@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getValidAccessToken } from "@/lib/api-client";
+import { apiFetch } from "@/lib/api-client";
+import type { ApiPath } from "@/lib/api-path";
 import {
   SEVERITY_STYLES,
   deriveSeverity,
@@ -375,12 +376,8 @@ function EventRow({
   );
 }
 
-async function triggerDownload(url: string, filename: string) {
-  const token = (await getValidAccessToken()) ?? "";
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-    credentials: "same-origin",
-  });
+async function triggerDownload(url: ApiPath, filename: string) {
+  const res = await apiFetch(url, { credentials: "same-origin" });
   const blob = await res.blob();
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { useAuthStore } from "@/stores/auth-store";
 import type { UserSession } from "@/types/api";
 
@@ -21,7 +22,7 @@ export function useSessions() {
   const userID = useAuthStore((s) => s.user?.id ?? "");
   return useQuery({
     queryKey: sessionsKey(userID),
-    queryFn: () => apiClient.list<UserSession>("/api/v1/auth/sessions"),
+    queryFn: () => apiClient.list<UserSession>(apiPath`/api/v1/auth/sessions`),
     // No user means nothing to ask about, and the endpoint would 401 anyway.
     enabled: userID !== "",
   });
@@ -48,7 +49,7 @@ export function useRevokeSession() {
   return useMutation({
     mutationFn: (session: UserSession) =>
       apiClient.delete<{ message: string }>(
-        `/api/v1/auth/sessions/${session.id}`,
+        apiPath`/api/v1/auth/sessions/${session.id}`,
       ),
     onMutate: (session) => {
       // The same guard logout()/logoutAll() raise before their network call.

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath, queryParams } from "@/lib/api-path";
 import type {
   PBSServer,
   PBSDatastore,
@@ -46,7 +47,7 @@ import type {
 export function usePBSServers() {
   return useQuery({
     queryKey: ["pbs-servers"],
-    queryFn: () => apiClient.list<PBSServer>("/api/v1/pbs-servers"),
+    queryFn: () => apiClient.list<PBSServer>(apiPath`/api/v1/pbs-servers`),
   });
 }
 
@@ -56,7 +57,9 @@ export function usePBSDatastores(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "datastores"],
     queryFn: () =>
-      apiClient.list<PBSDatastore>(`/api/v1/pbs-servers/${pbsId}/datastores`),
+      apiClient.list<PBSDatastore>(
+        apiPath`/api/v1/pbs-servers/${pbsId}/datastores`,
+      ),
     enabled: pbsId.length > 0,
   });
 }
@@ -66,7 +69,7 @@ export function usePBSDatastoreStatus(pbsId: string) {
     queryKey: ["pbs-servers", pbsId, "datastores", "status"],
     queryFn: () =>
       apiClient.list<PBSDatastoreStatus>(
-        `/api/v1/pbs-servers/${pbsId}/datastores/status`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/datastores/status`,
       ),
     enabled: pbsId.length > 0,
     refetchInterval: 120_000,
@@ -76,12 +79,11 @@ export function usePBSDatastoreStatus(pbsId: string) {
 // --- Snapshot Queries (DB-backed) ---
 
 export function usePBSSnapshots(pbsId: string, datastore?: string) {
-  const params = datastore ? `?datastore=${encodeURIComponent(datastore)}` : "";
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "snapshots", datastore ?? "all"],
     queryFn: () =>
       apiClient.list<PBSSnapshot>(
-        `/api/v1/pbs-servers/${pbsId}/snapshots${params}`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/snapshots?${queryParams({ datastore: datastore || undefined })}`,
       ),
     enabled: pbsId.length > 0,
   });
@@ -94,7 +96,7 @@ export function usePBSSnapshotsByBackupID(backupId: string) {
     queryKey: ["pbs-snapshots", backupId],
     queryFn: () =>
       apiClient.list<PBSSnapshot>(
-        `/api/v1/pbs-snapshots?backup_id=${encodeURIComponent(backupId)}`,
+        apiPath`/api/v1/pbs-snapshots?backup_id=${backupId}`,
       ),
     enabled: backupId.length > 0,
   });
@@ -106,7 +108,9 @@ export function usePBSSyncJobs(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "sync-jobs"],
     queryFn: () =>
-      apiClient.list<PBSSyncJob>(`/api/v1/pbs-servers/${pbsId}/sync-jobs`),
+      apiClient.list<PBSSyncJob>(
+        apiPath`/api/v1/pbs-servers/${pbsId}/sync-jobs`,
+      ),
     enabled: pbsId.length > 0,
   });
 }
@@ -117,7 +121,9 @@ export function usePBSVerifyJobs(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "verify-jobs"],
     queryFn: () =>
-      apiClient.list<PBSVerifyJob>(`/api/v1/pbs-servers/${pbsId}/verify-jobs`),
+      apiClient.list<PBSVerifyJob>(
+        apiPath`/api/v1/pbs-servers/${pbsId}/verify-jobs`,
+      ),
     enabled: pbsId.length > 0,
   });
 }
@@ -128,7 +134,9 @@ export function usePBSTasks(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "tasks"],
     queryFn: () =>
-      apiClient.list<PBSTask>(`/api/v1/pbs-servers/${pbsId}/tasks?limit=50`),
+      apiClient.list<PBSTask>(
+        apiPath`/api/v1/pbs-servers/${pbsId}/tasks?limit=50`,
+      ),
     enabled: pbsId.length > 0,
     refetchInterval: 120_000, // WS pbs_change events handle real-time; this is a fallback
   });
@@ -144,7 +152,7 @@ export function usePBSDatastoreMetrics(
     queryKey: ["pbs-servers", pbsId, "metrics", timeframe],
     queryFn: () =>
       apiClient.list<PBSDatastoreMetric>(
-        `/api/v1/pbs-servers/${pbsId}/metrics?timeframe=${timeframe}`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/metrics?timeframe=${timeframe}`,
       ),
     enabled: pbsId.length > 0,
     refetchInterval: timeframe === "latest" ? 120_000 : false,
@@ -163,7 +171,7 @@ export function usePBSDatastoreRRD(
     queryKey: ["pbs-servers", pbsId, "datastores", store, "rrd", timeframe, cf],
     queryFn: () =>
       apiClient.list<PBSDatastoreRRDEntry>(
-        `/api/v1/pbs-servers/${pbsId}/datastores/${encodeURIComponent(store)}/rrd?timeframe=${timeframe}&cf=${cf}`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/datastores/${store}/rrd?timeframe=${timeframe}&cf=${cf}`,
       ),
     enabled: pbsId.length > 0 && store.length > 0,
     refetchInterval: 120_000,
@@ -178,7 +186,7 @@ export function useTriggerGC() {
   return useMutation({
     mutationFn: ({ pbsId, store }: { pbsId: string; store: string }) =>
       apiClient.post<{ upid: string }>(
-        `/api/v1/pbs-servers/${pbsId}/datastores/${encodeURIComponent(store)}/gc`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/datastores/${store}/gc`,
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -202,7 +210,7 @@ export function useDeleteSnapshot() {
       body: DeleteSnapshotRequest;
     }) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/pbs-servers/${pbsId}/datastores/${encodeURIComponent(store)}/snapshots`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/datastores/${store}/snapshots`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -225,7 +233,7 @@ export function useRunSyncJob() {
   return useMutation({
     mutationFn: ({ pbsId, jobId }: { pbsId: string; jobId: string }) =>
       apiClient.post<{ upid: string }>(
-        `/api/v1/pbs-servers/${pbsId}/sync-jobs/${encodeURIComponent(jobId)}/run`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/sync-jobs/${jobId}/run`,
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -241,7 +249,7 @@ export function useRunVerifyJob() {
   return useMutation({
     mutationFn: ({ pbsId, jobId }: { pbsId: string; jobId: string }) =>
       apiClient.post<{ upid: string }>(
-        `/api/v1/pbs-servers/${pbsId}/verify-jobs/${encodeURIComponent(jobId)}/run`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/verify-jobs/${jobId}/run`,
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -261,7 +269,7 @@ export function useRestoreBackup() {
       body: RestoreRequest;
     }) =>
       apiClient.post<{ upid: string; status: string }>(
-        `/api/v1/clusters/${clusterId}/restore`,
+        apiPath`/api/v1/clusters/${clusterId}/restore`,
         body,
       ),
   });
@@ -282,7 +290,7 @@ export function useCreatePBSServer() {
 
   return useMutation({
     mutationFn: (req: CreatePBSServerRequest) =>
-      apiClient.post<PBSServer>("/api/v1/pbs-servers", req),
+      apiClient.post<PBSServer>(apiPath`/api/v1/pbs-servers`, req),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pbs-servers"] });
     },
@@ -294,7 +302,9 @@ export function useDeletePBSServer() {
 
   return useMutation({
     mutationFn: (pbsId: string) =>
-      apiClient.delete<{ status: string }>(`/api/v1/pbs-servers/${pbsId}`),
+      apiClient.delete<{ status: string }>(
+        apiPath`/api/v1/pbs-servers/${pbsId}`,
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pbs-servers"] });
     },
@@ -321,7 +331,7 @@ export function useUpdatePBSServer() {
     // dialog builds its object with `id` included, so passing the whole
     // thing through would 400 every PBS edit.
     mutationFn: ({ id, ...body }: UpdatePBSServerRequest & { id: string }) =>
-      apiClient.put<PBSServer>(`/api/v1/pbs-servers/${id}`, body),
+      apiClient.put<PBSServer>(apiPath`/api/v1/pbs-servers/${id}`, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["pbs-servers"] });
     },
@@ -344,7 +354,7 @@ export function useProtectSnapshot() {
       body: ProtectSnapshotRequest;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/pbs-servers/${pbsId}/datastores/${encodeURIComponent(store)}/snapshots/protect`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/datastores/${store}/snapshots/protect`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -369,7 +379,7 @@ export function useUpdateSnapshotNotes() {
       body: UpdateSnapshotNotesRequest;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/pbs-servers/${pbsId}/datastores/${encodeURIComponent(store)}/snapshots/notes`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/datastores/${store}/snapshots/notes`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -385,7 +395,7 @@ export function usePBSTaskLog(pbsId: string, upid: string) {
     queryKey: ["pbs-servers", pbsId, "tasks", upid, "log"],
     queryFn: () =>
       apiClient.list<PBSTaskLogEntry>(
-        `/api/v1/pbs-servers/${pbsId}/tasks/${encodeURIComponent(upid)}/log`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/tasks/${upid}/log`,
       ),
     enabled: pbsId.length > 0 && upid.length > 0,
   });
@@ -403,7 +413,7 @@ export function useTriggerBackup() {
       body: TriggerBackupRequest;
     }) =>
       apiClient.post<{ upid: string }>(
-        `/api/v1/clusters/${clusterId}/backup`,
+        apiPath`/api/v1/clusters/${clusterId}/backup`,
         body,
       ),
   });
@@ -413,7 +423,9 @@ export function useBackupJobs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "backup-jobs"],
     queryFn: () =>
-      apiClient.list<BackupJob>(`/api/v1/clusters/${clusterId}/backup-jobs`),
+      apiClient.list<BackupJob>(
+        apiPath`/api/v1/clusters/${clusterId}/backup-jobs`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -430,7 +442,7 @@ export function useCreateBackupJob() {
       body: BackupJobParams;
     }) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/backup-jobs`,
+        apiPath`/api/v1/clusters/${clusterId}/backup-jobs`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -455,7 +467,7 @@ export function useUpdateBackupJob() {
       body: BackupJobParams;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/backup-jobs/${encodeURIComponent(jobId)}`,
+        apiPath`/api/v1/clusters/${clusterId}/backup-jobs/${jobId}`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -472,7 +484,7 @@ export function useDeleteBackupJob() {
   return useMutation({
     mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/backup-jobs/${encodeURIComponent(jobId)}`,
+        apiPath`/api/v1/clusters/${clusterId}/backup-jobs/${jobId}`,
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -488,7 +500,7 @@ export function useRunBackupJob() {
   return useMutation({
     mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.post<{ upid: string }>(
-        `/api/v1/clusters/${clusterId}/backup-jobs/${encodeURIComponent(jobId)}/run`,
+        apiPath`/api/v1/clusters/${clusterId}/backup-jobs/${jobId}/run`,
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -514,7 +526,7 @@ export function usePruneDatastore() {
       body: PBSPruneRequest;
     }) =>
       apiClient.post<PBSPruneResult[]>(
-        `/api/v1/pbs-servers/${pbsId}/datastores/${encodeURIComponent(store)}/prune`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/datastores/${store}/prune`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -537,7 +549,7 @@ export function useDatastoreConfig(pbsId: string, store: string) {
     queryKey: ["pbs-servers", pbsId, "datastores", store, "config"],
     queryFn: () =>
       apiClient.get<PBSDatastoreConfig>(
-        `/api/v1/pbs-servers/${pbsId}/datastores/${encodeURIComponent(store)}/config`,
+        apiPath`/api/v1/pbs-servers/${pbsId}/datastores/${store}/config`,
       ),
     enabled: pbsId.length > 0 && store.length > 0,
     staleTime: 120_000,
@@ -564,7 +576,9 @@ export function usePruneJobs(pbsId: string, store: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "prune-jobs"],
     queryFn: () =>
-      apiClient.list<PBSPruneJob>(`/api/v1/pbs-servers/${pbsId}/prune-jobs`),
+      apiClient.list<PBSPruneJob>(
+        apiPath`/api/v1/pbs-servers/${pbsId}/prune-jobs`,
+      ),
     select: (jobs: PBSPruneJob[]) => jobs.filter((j) => j.store === store),
     enabled: pbsId.length > 0 && store.length > 0,
     staleTime: 120_000,
@@ -577,7 +591,7 @@ export function useBackupCoverage() {
   return useQuery({
     queryKey: ["backup-coverage"],
     queryFn: () =>
-      apiClient.list<BackupCoverageEntry>("/api/v1/backup-coverage"),
+      apiClient.list<BackupCoverageEntry>(apiPath`/api/v1/backup-coverage`),
     staleTime: 60_000,
     refetchInterval: 120_000,
   });
@@ -591,7 +605,7 @@ export function useBackupCoverage() {
 export function useVeeamServers() {
   return useQuery({
     queryKey: ["veeam-servers"],
-    queryFn: () => apiClient.list<VeeamServer>("/api/v1/veeam-servers"),
+    queryFn: () => apiClient.list<VeeamServer>(apiPath`/api/v1/veeam-servers`),
   });
 }
 
@@ -600,7 +614,7 @@ export function useCreateVeeamServer() {
 
   return useMutation({
     mutationFn: (req: CreateVeeamServerRequest) =>
-      apiClient.post<VeeamServer>("/api/v1/veeam-servers", req),
+      apiClient.post<VeeamServer>(apiPath`/api/v1/veeam-servers`, req),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["veeam-servers"] });
     },
@@ -612,7 +626,7 @@ export function useUpdateVeeamServer() {
 
   return useMutation({
     mutationFn: ({ id, ...body }: UpdateVeeamServerRequest & { id: string }) =>
-      apiClient.put<VeeamServer>(`/api/v1/veeam-servers/${id}`, body),
+      apiClient.put<VeeamServer>(apiPath`/api/v1/veeam-servers/${id}`, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["veeam-servers"] });
     },
@@ -624,7 +638,7 @@ export function useDeleteVeeamServer() {
 
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.delete<never>(`/api/v1/veeam-servers/${id}`),
+      apiClient.delete<never>(apiPath`/api/v1/veeam-servers/${id}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["veeam-servers"] });
     },
@@ -639,7 +653,9 @@ export function useDeleteVeeamServer() {
 export function useTestVeeamServer() {
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.post<VeeamProbeResult>(`/api/v1/veeam-servers/${id}/test`),
+      apiClient.post<VeeamProbeResult>(
+        apiPath`/api/v1/veeam-servers/${id}/test`,
+      ),
   });
 }
 
@@ -648,7 +664,7 @@ export function useVeeamRepositories(serverId: string) {
     queryKey: ["veeam-servers", serverId, "repositories"],
     queryFn: () =>
       apiClient.list<VeeamRepository>(
-        `/api/v1/veeam-servers/${serverId}/repositories`,
+        apiPath`/api/v1/veeam-servers/${serverId}/repositories`,
       ),
     enabled: serverId.length > 0,
   });
@@ -670,7 +686,7 @@ export function useVeeamRepositoryMetrics(
     ],
     queryFn: () =>
       apiClient.list<VeeamRepositoryMetric>(
-        `/api/v1/veeam-servers/${serverId}/repositories/${repositoryVeeamId}/metrics?range=${range}`,
+        apiPath`/api/v1/veeam-servers/${serverId}/repositories/${repositoryVeeamId}/metrics?range=${range}`,
       ),
     enabled: serverId.length > 0 && repositoryVeeamId.length > 0,
   });
@@ -680,7 +696,7 @@ export function useVeeamJobs(serverId: string) {
   return useQuery({
     queryKey: ["veeam-servers", serverId, "jobs"],
     queryFn: () =>
-      apiClient.list<VeeamJob>(`/api/v1/veeam-servers/${serverId}/jobs`),
+      apiClient.list<VeeamJob>(apiPath`/api/v1/veeam-servers/${serverId}/jobs`),
     enabled: serverId.length > 0,
     // A running job's progress moves; the collector refreshes job state on
     // its own cadence, so this only has to keep the page roughly current.
@@ -693,7 +709,7 @@ export function useVeeamSessions(serverId: string) {
     queryKey: ["veeam-servers", serverId, "sessions"],
     queryFn: () =>
       apiClient.list<VeeamSession>(
-        `/api/v1/veeam-servers/${serverId}/sessions`,
+        apiPath`/api/v1/veeam-servers/${serverId}/sessions`,
       ),
     enabled: serverId.length > 0,
     refetchInterval: 60_000,
@@ -705,7 +721,7 @@ export function useVeeamBackupObjects(serverId: string) {
     queryKey: ["veeam-servers", serverId, "backup-objects"],
     queryFn: () =>
       apiClient.list<VeeamBackupObject>(
-        `/api/v1/veeam-servers/${serverId}/backup-objects`,
+        apiPath`/api/v1/veeam-servers/${serverId}/backup-objects`,
       ),
     enabled: serverId.length > 0,
   });
@@ -716,7 +732,7 @@ export function useVeeamRestorePoints(serverId: string, objectId: string) {
     queryKey: ["veeam-servers", serverId, "backup-objects", objectId, "points"],
     queryFn: () =>
       apiClient.list<VeeamRestorePoint>(
-        `/api/v1/veeam-servers/${serverId}/backup-objects/${objectId}/restore-points`,
+        apiPath`/api/v1/veeam-servers/${serverId}/backup-objects/${objectId}/restore-points`,
       ),
     enabled: serverId.length > 0 && objectId.length > 0,
   });
@@ -731,7 +747,7 @@ export function useVeeamPlatforms(serverId: string) {
     queryKey: ["veeam-servers", serverId, "platforms"],
     queryFn: () =>
       apiClient.list<VeeamPlatform>(
-        `/api/v1/veeam-servers/${serverId}/platforms`,
+        apiPath`/api/v1/veeam-servers/${serverId}/platforms`,
       ),
     enabled: serverId.length > 0,
   });
@@ -757,7 +773,7 @@ export function useMapVeeamPlatform(serverId: string) {
       clusterId: string | null;
     }) =>
       apiClient.put<VeeamPlatform>(
-        `/api/v1/veeam-servers/${serverId}/platforms/${platformId}`,
+        apiPath`/api/v1/veeam-servers/${serverId}/platforms/${platformId}`,
         { cluster_id: clusterId },
       ),
     onSuccess: () => {
@@ -778,7 +794,7 @@ export function useVeeamInfrastructure(serverId: string) {
     queryKey: ["veeam-servers", serverId, "infrastructure"],
     queryFn: () =>
       apiClient.list<VeeamInfrastructureGuest>(
-        `/api/v1/veeam-servers/${serverId}/infrastructure`,
+        apiPath`/api/v1/veeam-servers/${serverId}/infrastructure`,
       ),
     enabled: serverId.length > 0,
   });
@@ -790,7 +806,7 @@ export function useVeeamOrphanedObjects(serverId: string) {
     queryKey: ["veeam-servers", serverId, "orphaned-objects"],
     queryFn: () =>
       apiClient.list<VeeamOrphanedObject>(
-        `/api/v1/veeam-servers/${serverId}/orphaned-objects`,
+        apiPath`/api/v1/veeam-servers/${serverId}/orphaned-objects`,
       ),
     enabled: serverId.length > 0,
   });
@@ -817,7 +833,7 @@ export function useMapVeeamBackupObject(serverId: string) {
       vmid: number | null;
     }) =>
       apiClient.put<{ id: string; match_method: string }>(
-        `/api/v1/veeam-servers/${serverId}/backup-objects/${objectId}/guest`,
+        apiPath`/api/v1/veeam-servers/${serverId}/backup-objects/${objectId}/guest`,
         { cluster_id: clusterId, vmid },
       ),
     onSuccess: () => {
@@ -886,7 +902,7 @@ export function useStartVeeamJob(serverId: string) {
   return useMutation({
     mutationFn: (jobVeeamId: string) =>
       apiClient.post<VeeamJobStartResult>(
-        `/api/v1/veeam-servers/${serverId}/jobs/${jobVeeamId}/start`,
+        apiPath`/api/v1/veeam-servers/${serverId}/jobs/${jobVeeamId}/start`,
       ),
     onSuccess: invalidate,
   });
@@ -897,7 +913,7 @@ export function useStopVeeamJob(serverId: string) {
   return useMutation({
     mutationFn: (jobVeeamId: string) =>
       apiClient.post<VeeamJobStopResult>(
-        `/api/v1/veeam-servers/${serverId}/jobs/${jobVeeamId}/stop`,
+        apiPath`/api/v1/veeam-servers/${serverId}/jobs/${jobVeeamId}/stop`,
       ),
     onSuccess: invalidate,
   });
@@ -922,7 +938,7 @@ export function useSetVeeamJobEnabled(serverId: string) {
       enabled: boolean;
     }) =>
       apiClient.post<{ enabled: boolean }>(
-        `/api/v1/veeam-servers/${serverId}/jobs/${jobVeeamId}/${enabled ? "enable" : "disable"}`,
+        apiPath`/api/v1/veeam-servers/${serverId}/jobs/${jobVeeamId}/${enabled ? "enable" : "disable"}`,
       ),
     onSuccess: invalidate,
   });
@@ -933,7 +949,7 @@ export function useStopVeeamSession(serverId: string) {
   return useMutation({
     mutationFn: (sessionVeeamId: string) =>
       apiClient.post<{ stopping: boolean }>(
-        `/api/v1/veeam-servers/${serverId}/sessions/${sessionVeeamId}/stop`,
+        apiPath`/api/v1/veeam-servers/${serverId}/sessions/${sessionVeeamId}/stop`,
       ),
     onSuccess: invalidate,
   });
@@ -958,7 +974,7 @@ export function useVeeamSessionLogs(
     queryKey: ["veeam-servers", serverId, "sessions", sessionVeeamId, "logs"],
     queryFn: () =>
       apiClient.list<VeeamSessionLogRecord>(
-        `/api/v1/veeam-servers/${serverId}/sessions/${sessionVeeamId}/logs`,
+        apiPath`/api/v1/veeam-servers/${serverId}/sessions/${sessionVeeamId}/logs`,
       ),
     enabled: enabled && serverId.length > 0 && sessionVeeamId.length > 0,
     // A finished session's log does not change, and a caller without
@@ -988,7 +1004,7 @@ export function useVeeamSessionTasks(
     queryKey: ["veeam-servers", serverId, "sessions", sessionVeeamId, "tasks"],
     queryFn: () =>
       apiClient.list<VeeamTaskSession>(
-        `/api/v1/veeam-servers/${serverId}/sessions/${sessionVeeamId}/tasks`,
+        apiPath`/api/v1/veeam-servers/${serverId}/sessions/${sessionVeeamId}/tasks`,
       ),
     enabled: enabled && serverId.length > 0 && sessionVeeamId.length > 0,
     // A finished run's breakdown does not change, and a caller without
@@ -1014,7 +1030,7 @@ export function useVeeamGuestProtection(clusterId: string, vmId: string) {
     queryKey: ["veeam-guest-protection", clusterId, vmId],
     queryFn: () =>
       apiClient.get<VeeamGuestProtection>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/veeam`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/veeam`,
       ),
     enabled: clusterId.length > 0 && vmId.length > 0,
     // A viewer without view:veeam on this cluster gets a 403, and a guest

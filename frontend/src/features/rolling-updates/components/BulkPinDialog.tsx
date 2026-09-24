@@ -17,6 +17,7 @@ import {
   Circle,
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { useQueryClient } from "@tanstack/react-query";
 import type { SSHTestResponse, SSHKnownHost } from "@/types/api";
 
@@ -84,7 +85,7 @@ export function BulkPinDialog({
       for (const [i, n] of nodes.entries()) {
         try {
           const result = await apiClient.post<SSHTestResponse>(
-            `/api/v1/clusters/${clusterId}/ssh-credentials/test`,
+            apiPath`/api/v1/clusters/${clusterId}/ssh-credentials/test`,
             { node_name: n.name },
           );
           if (cancelRef.current) return;
@@ -194,7 +195,7 @@ export function BulkPinDialog({
         );
         try {
           await apiClient.post<SSHKnownHost>(
-            `/api/v1/clusters/${clusterId}/ssh-known-hosts`,
+            apiPath`/api/v1/clusters/${clusterId}/ssh-known-hosts`,
             {
               node_name: row.name,
               expected_fingerprint: expectedFingerprint,

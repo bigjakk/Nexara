@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   EsxiSourceRequest,
   ImportMetadataResponse,
@@ -25,7 +26,7 @@ export function useImportMetadata() {
       volume: string;
     }) =>
       apiClient.post<ImportMetadataResponse>(
-        `/api/v1/clusters/${clusterId}/import-metadata`,
+        apiPath`/api/v1/clusters/${clusterId}/import-metadata`,
         { node, storage, volume },
       ),
   });
@@ -38,7 +39,7 @@ export function useImportSources(clusterId: string) {
     queryKey: ["clusters", clusterId, "import-sources"],
     queryFn: () =>
       apiClient.list<ImportSource>(
-        `/api/v1/clusters/${clusterId}/vm-import-sources`,
+        apiPath`/api/v1/clusters/${clusterId}/vm-import-sources`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -58,7 +59,7 @@ export function useImportSourceContent(
         node: node ?? "",
       });
       return apiClient.get<ImportSourceContent>(
-        `/api/v1/clusters/${clusterId}/vm-import-sources/content?${params.toString()}`,
+        apiPath`/api/v1/clusters/${clusterId}/vm-import-sources/content?${params}`,
       );
     },
     enabled: clusterId.length > 0 && !!storage && !!node,
@@ -80,7 +81,7 @@ export function useQueryURLMetadata() {
       const params = new URLSearchParams({ url });
       if (node) params.set("node", node);
       return apiClient.get<URLMetadataResponse>(
-        `/api/v1/clusters/${clusterId}/query-url-metadata?${params.toString()}`,
+        apiPath`/api/v1/clusters/${clusterId}/query-url-metadata?${params}`,
       );
     },
   });
@@ -97,7 +98,7 @@ export function useStartImport() {
       body: StartImportRequest;
     }) =>
       apiClient.post<VMImportJob>(
-        `/api/v1/clusters/${clusterId}/vm-imports`,
+        apiPath`/api/v1/clusters/${clusterId}/vm-imports`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -112,7 +113,9 @@ export function useImportJobs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vm-imports"],
     queryFn: () =>
-      apiClient.list<VMImportJob>(`/api/v1/clusters/${clusterId}/vm-imports`),
+      apiClient.list<VMImportJob>(
+        apiPath`/api/v1/clusters/${clusterId}/vm-imports`,
+      ),
     enabled: clusterId.length > 0,
     // Poll only while an import is in flight; stop once every job is terminal
     // (matches the CVE-scan / rolling-update query pattern).
@@ -138,7 +141,7 @@ export function useCancelImport() {
       deleteVm: boolean;
     }) =>
       apiClient.post<VMImportJob>(
-        `/api/v1/clusters/${clusterId}/vm-imports/${id}/cancel`,
+        apiPath`/api/v1/clusters/${clusterId}/vm-imports/${id}/cancel`,
         { delete_vm: deleteVm },
       ),
     onSuccess: (_data, variables) => {
@@ -160,7 +163,7 @@ export function useRegisterEsxiSource() {
       body: EsxiSourceRequest;
     }) =>
       apiClient.post<{ status: string; storage: string }>(
-        `/api/v1/clusters/${clusterId}/vm-import-sources/esxi`,
+        apiPath`/api/v1/clusters/${clusterId}/vm-import-sources/esxi`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -185,7 +188,7 @@ export function useDeleteImportSource() {
       storage: string;
     }) =>
       apiClient.delete<{ status: string; storage: string }>(
-        `/api/v1/clusters/${clusterId}/vm-import-sources/${encodeURIComponent(storage)}`,
+        apiPath`/api/v1/clusters/${clusterId}/vm-import-sources/${storage}`,
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -209,7 +212,7 @@ export function useEnableImportContent() {
       storage: string;
     }) =>
       apiClient.post<{ status: string; storage: string; content: string }>(
-        `/api/v1/clusters/${clusterId}/vm-import-sources/enable-content`,
+        apiPath`/api/v1/clusters/${clusterId}/vm-import-sources/enable-content`,
         { storage },
       ),
     onSuccess: (_data, variables) => {

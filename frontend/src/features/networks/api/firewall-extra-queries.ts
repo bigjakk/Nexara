@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 export interface FirewallAlias {
   name: string;
@@ -39,7 +40,7 @@ export function useFirewallAliases(clusterId: string) {
     queryKey: ["clusters", clusterId, "firewall", "aliases"],
     queryFn: () =>
       apiClient.list<FirewallAlias>(
-        `/api/v1/clusters/${clusterId}/firewall/aliases`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/aliases`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -49,7 +50,10 @@ export function useCreateFirewallAlias(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: { name: string; cidr: string; comment?: string }) =>
-      apiClient.post(`/api/v1/clusters/${clusterId}/firewall/aliases`, data),
+      apiClient.post(
+        apiPath`/api/v1/clusters/${clusterId}/firewall/aliases`,
+        data,
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({
         queryKey: ["clusters", clusterId, "firewall", "aliases"],
@@ -63,7 +67,7 @@ export function useDeleteFirewallAlias(clusterId: string) {
   return useMutation({
     mutationFn: (name: string) =>
       apiClient.delete(
-        `/api/v1/clusters/${clusterId}/firewall/aliases/${encodeURIComponent(name)}`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/aliases/${name}`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({
@@ -79,7 +83,7 @@ export function useFirewallIPSets(clusterId: string) {
     queryKey: ["clusters", clusterId, "firewall", "ipset"],
     queryFn: () =>
       apiClient.list<FirewallIPSet>(
-        `/api/v1/clusters/${clusterId}/firewall/ipset`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/ipset`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -89,7 +93,10 @@ export function useCreateFirewallIPSet(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: { name: string; comment?: string }) =>
-      apiClient.post(`/api/v1/clusters/${clusterId}/firewall/ipset`, data),
+      apiClient.post(
+        apiPath`/api/v1/clusters/${clusterId}/firewall/ipset`,
+        data,
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({
         queryKey: ["clusters", clusterId, "firewall", "ipset"],
@@ -103,7 +110,7 @@ export function useDeleteFirewallIPSet(clusterId: string) {
   return useMutation({
     mutationFn: (name: string) =>
       apiClient.delete(
-        `/api/v1/clusters/${clusterId}/firewall/ipset/${encodeURIComponent(name)}`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/ipset/${name}`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({
@@ -118,7 +125,7 @@ export function useFirewallIPSetEntries(clusterId: string, setName: string) {
     queryKey: ["clusters", clusterId, "firewall", "ipset", setName, "entries"],
     queryFn: () =>
       apiClient.list<FirewallIPSetEntry>(
-        `/api/v1/clusters/${clusterId}/firewall/ipset/${encodeURIComponent(setName)}/entries`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/ipset/${setName}/entries`,
       ),
     enabled: clusterId.length > 0 && setName.length > 0,
   });
@@ -129,7 +136,7 @@ export function useAddFirewallIPSetEntry(clusterId: string, setName: string) {
   return useMutation({
     mutationFn: (data: { cidr: string; nomatch?: number; comment?: string }) =>
       apiClient.post(
-        `/api/v1/clusters/${clusterId}/firewall/ipset/${encodeURIComponent(setName)}/entries`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/ipset/${setName}/entries`,
         data,
       ),
     onSuccess: () => {
@@ -148,7 +155,7 @@ export function useDeleteFirewallIPSetEntry(
   return useMutation({
     mutationFn: (cidr: string) =>
       apiClient.delete(
-        `/api/v1/clusters/${clusterId}/firewall/ipset/${encodeURIComponent(setName)}/entries/${encodeURIComponent(cidr)}`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/ipset/${setName}/entries/${cidr}`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({
@@ -164,7 +171,7 @@ export function useFirewallSecurityGroups(clusterId: string) {
     queryKey: ["clusters", clusterId, "firewall", "groups"],
     queryFn: () =>
       apiClient.list<FirewallSecurityGroup>(
-        `/api/v1/clusters/${clusterId}/firewall/groups`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/groups`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -174,7 +181,10 @@ export function useCreateFirewallSecurityGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: { group: string; comment?: string }) =>
-      apiClient.post(`/api/v1/clusters/${clusterId}/firewall/groups`, data),
+      apiClient.post(
+        apiPath`/api/v1/clusters/${clusterId}/firewall/groups`,
+        data,
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({
         queryKey: ["clusters", clusterId, "firewall", "groups"],
@@ -188,7 +198,7 @@ export function useDeleteFirewallSecurityGroup(clusterId: string) {
   return useMutation({
     mutationFn: (group: string) =>
       apiClient.delete(
-        `/api/v1/clusters/${clusterId}/firewall/groups/${encodeURIComponent(group)}`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/groups/${group}`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({
@@ -204,7 +214,7 @@ export function useFirewallLog(clusterId: string, node: string) {
     queryKey: ["clusters", clusterId, "firewall", "log", node],
     queryFn: () =>
       apiClient.list<FirewallLogEntry>(
-        `/api/v1/clusters/${clusterId}/firewall/log?node=${encodeURIComponent(node)}`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/log?node=${node}`,
       ),
     enabled: clusterId.length > 0 && node.length > 0,
     refetchInterval: 10_000,

@@ -246,7 +246,13 @@ func TestEveryCataloguedPatternIsUsed(t *testing.T) {
 		if d.Kind != apischema.KindPattern {
 			continue
 		}
-		if !used[d.Name] {
+		// A base whose sentinel variant is declared IS applied: orEmpty
+		// builds the variant's regex out of the base's, so every site
+		// carrying "<base>-or-empty" enforces the base's language plus the
+		// empty string. pve-poolid is the case — POST /pools moved to
+		// pve-poolid-new, and the base is now reached only through
+		// pve-poolid-or-empty.
+		if !used[d.Name] && !used[d.Name+"-or-empty"] {
 			t.Errorf("catalogue pattern %q is declared nowhere: it documents a rule this API does not "+
 				"apply. Either a declaration should be using it, or the entry should go.", d.Name)
 		}
@@ -282,6 +288,23 @@ func TestCataloguedRulesStillAcceptWhatTheirSitesSend(t *testing.T) {
 
 	for _, d := range apischema.Catalogue() {
 		sites := byRule[d.Name]
+		rejects := d.Rejects
+		// A pattern BASE with no site of its own, whose sentinel variant has
+		// sites — pve-poolid, since POST /pools moved to pve-poolid-new — is
+		// checked at the variant's sites, with its own witnesses. Every
+		// variant site enforces the base's language plus the empty string
+		// (orEmpty builds the variant's regex from the base's), so the
+		// base's accepts must pass there and its rejects, bar the "" the
+		// variant exists for, must fail. Running them here, rather than
+		// trusting the variant's subtest to have run copies of them, is
+		// what keeps this independent of derive() copying the witnesses —
+		// which TestOrEmptyRulesInheritTheirBaseWitnesses (apischema) pins
+		// separately.
+		if variant := d.Name + "-or-empty"; len(sites) == 0 && d.Kind == apischema.KindPattern &&
+			len(byRule[variant]) > 0 {
+			sites = byRule[variant]
+			rejects = slices.DeleteFunc(slices.Clone(d.Rejects), func(v string) bool { return v == "" })
+		}
 		t.Run(d.Name, func(t *testing.T) {
 			t.Parallel()
 
@@ -295,7 +318,8 @@ func TestCataloguedRulesStillAcceptWhatTheirSitesSend(t *testing.T) {
 				// source-level version of that, and reaching here means the
 				// rule is spelled apischema.Rule somewhere that never
 				// becomes a declared parameter, the same finding one layer
-				// down.
+				// down. (A base reached through its sentinel variant does
+				// not get here: it took the variant's sites above.)
 				if d.Kind == apischema.KindPattern {
 					t.Fatalf("no declared parameter carries this rule, so its witnesses check nothing")
 				}
@@ -324,10 +348,10 @@ func TestCataloguedRulesStillAcceptWhatTheirSitesSend(t *testing.T) {
 						"leaves a caller reading permits text that the route will not honour.",
 						site, v, d.Name)
 				}
-				for _, v := range d.Rejects {
+				for _, v := range rejects {
 					if siteAccepts(site.prop, v) {
-						t.Errorf("%s: %q is catalogued as rejected, but this declaration accepts it",
-							site, v)
+						t.Errorf("%s: %q is catalogued as rejected by %q, but this declaration accepts it",
+							site, v, d.Name)
 					}
 				}
 			}

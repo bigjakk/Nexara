@@ -49,7 +49,13 @@ export function DeleteClusterDialog({
 
   function handleDelete() {
     deleteMutation.mutate(
-      { id: cluster.id, revokePveCredentials: canRevoke && revokeCredentials },
+      {
+        id: cluster.id,
+        // What the operator typed, which the button's disabled check has
+        // held equal to the cluster's name; the server checks it again.
+        confirm: confirmName,
+        revokePveCredentials: canRevoke && revokeCredentials,
+      },
       {
         onSuccess: () => {
           onOpenChange(false);

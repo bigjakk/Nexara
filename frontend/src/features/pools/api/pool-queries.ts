@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 export interface ResourcePool {
   poolid: string;
@@ -29,7 +30,9 @@ export function useResourcePools(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "pools"],
     queryFn: () =>
-      apiClient.list<ResourcePool>(`/api/v1/clusters/${clusterId}/pools`),
+      apiClient.list<ResourcePool>(
+        apiPath`/api/v1/clusters/${clusterId}/pools`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -39,7 +42,7 @@ export function useResourcePool(clusterId: string, poolId: string) {
     queryKey: ["clusters", clusterId, "pools", poolId],
     queryFn: () =>
       apiClient.get<ResourcePoolDetail>(
-        `/api/v1/clusters/${clusterId}/pools/${encodeURIComponent(poolId)}`,
+        apiPath`/api/v1/clusters/${clusterId}/pools/${poolId}`,
       ),
     enabled: clusterId.length > 0 && poolId.length > 0,
   });
@@ -49,7 +52,7 @@ export function useCreatePool(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: { poolid: string; comment?: string }) =>
-      apiClient.post(`/api/v1/clusters/${clusterId}/pools`, data),
+      apiClient.post(apiPath`/api/v1/clusters/${clusterId}/pools`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "pools"] });
     },
@@ -70,7 +73,7 @@ export function useUpdatePool(clusterId: string) {
       delete?: string;
     }) =>
       apiClient.put(
-        `/api/v1/clusters/${clusterId}/pools/${encodeURIComponent(poolid)}`,
+        apiPath`/api/v1/clusters/${clusterId}/pools/${poolid}`,
         data,
       ),
     onSuccess: () => {
@@ -83,9 +86,7 @@ export function useDeletePool(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (poolId: string) =>
-      apiClient.delete(
-        `/api/v1/clusters/${clusterId}/pools/${encodeURIComponent(poolId)}`,
-      ),
+      apiClient.delete(apiPath`/api/v1/clusters/${clusterId}/pools/${poolId}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "pools"] });
     },

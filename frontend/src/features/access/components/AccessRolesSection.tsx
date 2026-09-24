@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiClientError } from "@/lib/api-client";
+import { unaddressableHint } from "@/lib/api-path";
 
 import {
   type AccessCapabilities,
@@ -190,10 +191,17 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                     {manageable && (
                       <TableCell className="text-right">
                         {/* Built-in roles are immutable in Proxmox — offering
-                            the controls would only produce a confusing 403. */}
+                            the controls would only produce a confusing 403.
+                            Proxmox also admits a role named "." or "..",
+                            which Nexara cannot address (lib/api-path.ts); that
+                            row shows why in the same place, as text. */}
                         {role.special ? (
                           <span className="text-xs text-muted-foreground">
                             Immutable
+                          </span>
+                        ) : unaddressableHint(role.roleid) !== null ? (
+                          <span className="text-xs text-muted-foreground">
+                            {unaddressableHint(role.roleid)}
                           </span>
                         ) : (
                           <>

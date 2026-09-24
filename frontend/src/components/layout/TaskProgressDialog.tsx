@@ -11,6 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { useTaskStatus } from "@/features/vms/api/vm-queries";
 import type { TaskLogLine } from "@/features/vms/api/vm-queries";
 import { useTaskLogStore } from "@/stores/task-log-store";
@@ -45,7 +46,7 @@ export function TaskProgressDialog() {
     queryKey: ["task-progress-dialog-log", clusterId, upid],
     queryFn: () =>
       apiClient.list<TaskLogLine>(
-        `/api/v1/clusters/${clusterId}/tasks/${encodeURIComponent(upid)}/log`,
+        apiPath`/api/v1/clusters/${clusterId}/tasks/${upid}/log`,
       ),
     enabled: !!upid && clusterId.length > 0,
     refetchInterval: isActive ? 2000 : false,

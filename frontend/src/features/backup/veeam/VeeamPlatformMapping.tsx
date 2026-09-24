@@ -18,6 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { ClusterResponse } from "@/types/api";
 import { useMapVeeamPlatform } from "../api/backup-queries";
 import type { VeeamPlatform, VeeamInfrastructureGuest } from "../types/backup";
@@ -47,7 +48,7 @@ export function VeeamPlatformMapping({
 }) {
   const { data: clusters } = useQuery({
     queryKey: ["clusters"],
-    queryFn: () => apiClient.list<ClusterResponse>("/api/v1/clusters"),
+    queryFn: () => apiClient.list<ClusterResponse>(apiPath`/api/v1/clusters`),
   });
   const mapPlatform = useMapVeeamPlatform(serverId);
   // Which row is in flight, so one pending mutation does not freeze the whole

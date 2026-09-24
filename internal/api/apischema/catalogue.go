@@ -614,18 +614,71 @@ func patternRules() []RuleDoc {
 			// pools really do nest up to three levels. That invention
 			// would have 400'd pool names Proxmox accepts on five routes.
 			//
-			// It also admits "." and ".." — deliberately left alone, and
-			// the path-safe-dotted-name entry below records that decision
-			// in its commentary, under the heading "The create side stays
-			// loose". Careful with the reason: five of the six routes
-			// carrying the `pool` body field pass it as a FORM field where
-			// nothing traverses, but the sixth — SetVMPool — hands it to
-			// UpdateResourcePool, which builds "/pools/" + PathEscape(id).
-			// What closes that one is proxmox.validatePathSegment at the
-			// client, NOT the absence of a path segment. See the note on
-			// optPoolID in registry_vms.go, which has said so all along.
+			// It also admits "." and ".." — deliberately, because it is
+			// now the rule for a pool that already EXISTS. POST /pools
+			// carries pve-poolid-new below, which refuses exactly those
+			// two, so pve-poolid is reached only through its -or-empty
+			// variant: the `pool` body field of the six routes that put a
+			// guest or a backup job into an existing pool. A pool of either
+			// name can exist — verify_poolname admits it, and so did
+			// Proxmox's create until pve-manager 7eadbed6 — and refusing
+			// it there would stop a guest being put into a pool Proxmox
+			// has. Careful with the reason those six are safe: five of
+			// them pass `pool` as a FORM field where nothing traverses,
+			// but the sixth — SetVMPool — hands it to UpdateResourcePool,
+			// which builds "/pools/" + PathEscape(id). What closes that one
+			// is proxmox.validatePathSegment at the client, NOT the absence
+			// of a path segment. See the note on optPoolID in
+			// registry_vms.go, which has said so all along.
 			Accepts: []string{"infra", ".hidden", "-lead", "infra/prod", "infra/prod/db"},
 			Rejects: []string{"", "/infra", "infra/", "infra/prod/db/extra", "infra prod"},
+		},
+		{
+			Name: "pve-poolid-new",
+			Kind: KindPattern,
+			Permits: "a NEW PVE resource pool id: one to three segments of letters, digits, dot, underscore " +
+				"and dash, separated by slashes — except a value that is exactly \".\" or \"..\", which " +
+				"Nexara refuses although Proxmox's pool-id format admits both.",
+			Rule:         `^(?:[A-Za-z0-9._-]{3,}|[A-Za-z0-9_-][A-Za-z0-9._-]?|\.[A-Za-z0-9_-]|[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+){1,2})$`,
+			RuleIsRegex:  true,
+			Origin:       OriginProxmox,
+			Upstream:     "pve-access-control src/PVE/AccessControl.pm verify_poolname",
+			UpstreamRule: `^[A-Za-z0-9\.\-_]+(?:/[A-Za-z0-9\.\-_]+){0,2}\z, plus an explicit "nested too deeply" check at more than 3 levels`,
+			Divergence: "STRICTER than verify_poolname in one respect, and the restriction is Nexara's, not " +
+				"Proxmox's: it refuses a pool id that is EXACTLY \".\" or \"..\", which verify_poolname " +
+				"admits. The SPA addresses a pool as a path segment of its own routes " +
+				"(/pools/{pool_id}), and a browser resolves a \".\" or \"..\" segment before the request " +
+				"leaves it — a DELETE of a pool named \"..\" went out as a DELETE of the cluster " +
+				"(/api/v1/clusters/{id}/). The SPA now refuses to send either and the server refuses a " +
+				"write whose path ends in \"/\", so a pool named either way cannot be read, edited or " +
+				"deleted here; this rule stops the API creating one.\n" +
+				"A NESTED id whose segments are dots — \"a/..\", \"./b\" — is still admitted, on " +
+				"purpose. The browser hazard needs a whole \".\" or \"..\" segment, and the SPA encodes " +
+				"the id as ONE segment, slash included: \"a/..\" goes out as \"a%2F..\", which no URL " +
+				"parser resolves. No nested pool is addressable through the per-pool routes anyway " +
+				"(path-safe-dotted-name refuses the \"%\"), so such an id joins \"infra/prod\" in a " +
+				"class that already exists rather than opening a new one, and refusing it would be a " +
+				"strictness with no hazard behind it.\n" +
+				"LOOSER than a current Proxmox's create in a second respect. Since pve-manager commit " +
+				"7eadbed6 (\"api: create pool: force first character to be a letter for new pools\", " +
+				"July 2025), PVE/API2/Pool.pm create_pool also refuses a new pool whose name — the last " +
+				"segment of a nested one — does not start with a letter, so such a cluster refuses \".\" " +
+				"and \"..\" itself, with its own message, and \".hidden\" and \"-lead\" too. That check " +
+				"is not transcribed: a cluster on an older pve-manager accepts those names, and this API " +
+				"serves both.",
+			// Exactly pve-poolid minus the two strings, not a regex of its
+			// own design: the first three branches are path-safe-dotted-
+			// name's single-segment language (the charset minus "." and
+			// "..", carved out by length because RE2 has no negative
+			// lookahead — that entry explains the branches), and the fourth
+			// is pve-poolid's nested form with at least one slash.
+			// TestPoolIDNewIsPoolIDMinusTheTwoDotSegments holds the
+			// equivalence against both entries over an exhaustive corpus.
+			Accepts: []string{
+				"infra", ".hidden", "-lead", "infra/prod", "infra/prod/db", ".a", "..archive", "...",
+				"a/..", "./b",
+			},
+			Rejects: []string{".", "..", "", "/infra", "infra/", "infra/prod/db/extra", "infra prod"},
 		},
 		{
 			Name: "path-safe-dotted-name",
@@ -664,9 +717,10 @@ func patternRules() []RuleDoc {
 				"side resolves the segment: Fiber routes a raw \".\" or \"..\" straight through to the " +
 				"parameter, which is measured by TestPoolTraversalIsRefusedAtTheRoute and " +
 				"TestAccessTraversalIsRefusedAtTheRoute. This rule is what stops it, not the router.)\n" +
-				"For a POOL the cost is larger than the pool, and lopsided. This API can itself CREATE " +
-				"such a pool: POST /pools keeps pve-poolid, which admits both (this entry's commentary, " +
-				"\"The create side stays loose\"). It can also create a guest INTO one: VM create, " +
+				"For a POOL the cost is larger than the pool, and lopsided. This API no longer CREATES " +
+				"such a pool — POST /pools carries pve-poolid-new, which refuses exactly these two (this " +
+				"entry's commentary, \"The create side refuses them too\") — but one made outside Nexara " +
+				"is still listed, and this API can still create a guest INTO one: VM create, " +
 				"container create and VM import take `pool` under pve-poolid-or-empty, CreateVM and " +
 				"CreateCT send it as a form field, and the create_vm of both qemu-server and " +
 				"pve-container hands it to add_vm_to_pool. What it cannot do is MOVE a guest in or out " +
@@ -682,8 +736,9 @@ func patternRules() []RuleDoc {
 				"path too (/pools/:pool_id), and a browser cannot send a \".\" or \"..\" segment at all: " +
 				"the URL parser browsers share resolves one, the \"%2e\", \"%2E%2E\" and \".%2e\" " +
 				"spellings included, before the request leaves (measured with Node 20's fetch). So " +
-				"lifting the dot limit ALSO needs these routes to carry the id outside the path. Group " +
-				"and role ids have only {id} path forms upstream, so for them the trade stands.\n" +
+				"lifting the dot limit ALSO needs these routes to carry the id outside the path, and " +
+				"pve-poolid-new's refusal lifted with it. Group and role ids have only {id} path forms " +
+				"upstream, so for them the trade stands.\n" +
 				"ALSO STRICTER than verify_poolname in a second respect that belongs to the pool domain " +
 				"alone. A nested id contains a slash. A caller can send one only percent-encoded — " +
 				"\"infra%2Fprod\", which a browser sends intact and Fiber routes as one undecoded " +
@@ -738,44 +793,46 @@ func patternRules() []RuleDoc {
 			// internal/api/handlers. The property is that neither guard
 			// masks the other, which is what makes both provable.
 			//
-			// # The create side stays loose, deliberately
+			// # The create side refuses them too
 			//
 			// Tightening an ADDRESSING rule without its CREATE rule is how
 			// an object becomes undeletable, so the pairing was checked
-			// rather than assumed. pve-poolid — POST /pools and the `pool`
-			// body parameter — still accepts "." and "..", and stays that
-			// way for three reasons:
+			// rather than assumed. POST /pools used to carry pve-poolid and
+			// so accepted "." and "..", on the ground that loosening it
+			// opened no gap: the three pool addressing methods run
+			// validatePathSegment, which refuses both, so a pool minted
+			// under either name was unaddressable through Nexara whatever
+			// the create rule said. That held for the SERVER and missed the
+			// BROWSER. A pool named ".." was not merely unaddressable: the
+			// SPA's DELETE of it went out as a DELETE of the cluster (see
+			// refuseTrailingSlashWrites in internal/api/middleware.go). So
+			// POST /pools now carries pve-poolid-new — pve-poolid with
+			// exactly this rule's two strings taken out — and this API no
+			// longer mints a pool it cannot address. That is a NEW rule
+			// rather than a tightened pve-poolid, for two reasons:
 			//
-			//  1. THIS CHANGE DOES NOT OPEN THAT GAP. The three pool
-			//     addressing methods already run validatePathSegment, which
-			//     has refused both since the client guard was added, so a
-			//     pool minted under either name was already unaddressable
-			//     through Nexara. The declaration now answers first, with a
-			//     better message; the set of pool ids this API can address
-			//     is unchanged.
-			//  2. pve-poolid IS NOT THE SAME RULE. It is the NESTED
-			//     whole-value rule, so the carve-out would have to apply per
-			//     segment — this three-branch form repeated across three
-			//     optional segments — which is a different regex, not a
-			//     shared one.
-			//  3. pve-poolid IS NOT ONLY A CREATE RULE. Through
+			//  1. pve-poolid IS NOT ONLY A CREATE RULE. Through
 			//     pve-poolid-or-empty it is also how a guest is assigned to
-			//     an EXISTING pool. Narrowing it there is the
-			//     undeletable-object trap pointed the other way: a guest
-			//     could not be put into a pool that exists. Five of those
-			//     six routes pass it as a form field; SetVMPool is the one
-			//     that makes it a path segment, and validatePathSegment is
+			//     an EXISTING pool, and that is now all it does. Narrowing it
+			//     there is the undeletable-object trap pointed the other way:
+			//     a guest could not be put into a pool that exists. Five of
+			//     those six routes pass it as a form field; SetVMPool is the
+			//     one that makes it a path segment, and validatePathSegment is
 			//     what holds that — do NOT read this bullet as saying the
 			//     body field never traverses, because deleting the client
 			//     guard on that premise reopens it.
+			//  2. THE CARVE-OUT IS WHOLE-VALUE ONLY. pve-poolid is the NESTED
+			//     rule. pve-poolid-new refuses the two strings as the entire
+			//     id and leaves a nested id with dot segments ("a/..") alone,
+			//     for the reason its own Divergence gives, so it is not this
+			//     rule's carve-out applied per segment either.
 			//
-			// The create/address pair is ALREADY asymmetric by an explicit
-			// decision — pve-poolid nests and this rule cannot express
-			// nesting at all, which poolCreateIDParam records from the
-			// declaration side. The dot pair is a strictly smaller instance
-			// of that accepted asymmetry. The access domain has no such
-			// asymmetry: POST /groups and POST /roles carry THIS rule on
-			// their create bodies too.
+			// The create/address pair stays asymmetric in the way it already
+			// was, by an explicit decision: pve-poolid-new nests and this rule
+			// cannot express nesting at all, which poolCreateIDParam records
+			// from the declaration side. The access domain has no asymmetry:
+			// POST /groups and POST /roles carry THIS rule on their create
+			// bodies too.
 			//
 			// The witnesses are the union of what both domains legitimately
 			// mint, taken from the one Accepts list this entry replaces (the access side had no catalogue entry — accessNamePattern was a bare const with no witnesses) and

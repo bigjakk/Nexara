@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 export interface ClusterOptions {
   console?: string;
@@ -61,7 +62,9 @@ export function useClusterOptions(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "options"],
     queryFn: () =>
-      apiClient.get<ClusterOptions>(`/api/v1/clusters/${clusterId}/options`),
+      apiClient.get<ClusterOptions>(
+        apiPath`/api/v1/clusters/${clusterId}/options`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -71,7 +74,7 @@ export function useUpdateClusterOptions(clusterId: string) {
   return useMutation({
     mutationFn: (data: Partial<ClusterOptions>) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/options`,
+        apiPath`/api/v1/clusters/${clusterId}/options`,
         data,
       ),
     onSuccess: () => {
@@ -87,7 +90,7 @@ export function useClusterDescription(clusterId: string) {
     queryKey: ["clusters", clusterId, "description"],
     queryFn: () =>
       apiClient.get<{ description: string }>(
-        `/api/v1/clusters/${clusterId}/description`,
+        apiPath`/api/v1/clusters/${clusterId}/description`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -98,7 +101,7 @@ export function useUpdateClusterDescription(clusterId: string) {
   return useMutation({
     mutationFn: (description: string) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/description`,
+        apiPath`/api/v1/clusters/${clusterId}/description`,
         { description },
       ),
     onSuccess: () => {
@@ -116,7 +119,7 @@ export function useClusterTags(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "tags"],
     queryFn: () =>
-      apiClient.get<TagsResponse>(`/api/v1/clusters/${clusterId}/tags`),
+      apiClient.get<TagsResponse>(apiPath`/api/v1/clusters/${clusterId}/tags`),
     enabled: clusterId.length > 0,
   });
 }
@@ -130,7 +133,7 @@ export function useUpdateClusterTags(clusterId: string) {
       tag_style?: string;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/tags`,
+        apiPath`/api/v1/clusters/${clusterId}/tags`,
         data,
       ),
     onSuccess: () => {
@@ -143,7 +146,9 @@ export function useClusterConfig(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "config"],
     queryFn: () =>
-      apiClient.get<ClusterConfig>(`/api/v1/clusters/${clusterId}/config`),
+      apiClient.get<ClusterConfig>(
+        apiPath`/api/v1/clusters/${clusterId}/config`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -153,7 +158,7 @@ export function useClusterJoinInfo(clusterId: string) {
     queryKey: ["clusters", clusterId, "config", "join"],
     queryFn: () =>
       apiClient.get<ClusterJoinInfo>(
-        `/api/v1/clusters/${clusterId}/config/join`,
+        apiPath`/api/v1/clusters/${clusterId}/config/join`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -164,7 +169,7 @@ export function useCorosyncNodes(clusterId: string) {
     queryKey: ["clusters", clusterId, "config", "nodes"],
     queryFn: () =>
       apiClient.list<CorosyncNode>(
-        `/api/v1/clusters/${clusterId}/config/nodes`,
+        apiPath`/api/v1/clusters/${clusterId}/config/nodes`,
       ),
     enabled: clusterId.length > 0,
   });

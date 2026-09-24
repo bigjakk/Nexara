@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   RollingUpdateJob,
   RollingUpdateNode,
@@ -16,7 +17,7 @@ export function useRollingUpdateJobs(clusterId: string) {
     queryKey: ["rolling-update-jobs", clusterId],
     queryFn: () =>
       apiClient.list<RollingUpdateJob>(
-        `/api/v1/clusters/${clusterId}/rolling-updates?limit=50`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates?limit=50`,
       ),
     enabled: !!clusterId,
   });
@@ -27,7 +28,7 @@ export function useRollingUpdateJob(clusterId: string, jobId: string) {
     queryKey: ["rolling-update-job", clusterId, jobId],
     queryFn: () =>
       apiClient.get<RollingUpdateJob>(
-        `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates/${jobId}`,
       ),
     enabled: !!clusterId && !!jobId,
     refetchInterval: (query) => {
@@ -45,7 +46,7 @@ export function useRollingUpdateNodes(clusterId: string, jobId: string) {
     queryKey: ["rolling-update-nodes", clusterId, jobId],
     queryFn: () =>
       apiClient.list<RollingUpdateNode>(
-        `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/nodes`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/nodes`,
       ),
     enabled: !!clusterId && !!jobId,
     refetchInterval: (query) => {
@@ -73,7 +74,7 @@ export function useCreateRollingUpdateJob() {
       ...body
     }: CreateRollingUpdateRequest & { clusterId: string }) =>
       apiClient.post<RollingUpdateJob>(
-        `/api/v1/clusters/${clusterId}/rolling-updates`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates`,
         body,
       ),
     onSuccess: (_data, vars) => {
@@ -112,7 +113,7 @@ export function useStartInPlaceNodeUpdate() {
       nodeName: string;
     }) => {
       const job = await apiClient.post<RollingUpdateJob>(
-        `/api/v1/clusters/${clusterId}/rolling-updates`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates`,
         {
           nodes: [nodeName],
           parallelism: 1,
@@ -130,7 +131,7 @@ export function useStartInPlaceNodeUpdate() {
         },
       );
       await apiClient.post<RollingUpdateJob>(
-        `/api/v1/clusters/${clusterId}/rolling-updates/${job.id}/start`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates/${job.id}/start`,
       );
       return job;
     },
@@ -154,7 +155,7 @@ export function useStartRollingUpdateJob() {
   return useMutation({
     mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.post<RollingUpdateJob>(
-        `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/start`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/start`,
       ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
@@ -172,7 +173,7 @@ export function useCancelRollingUpdateJob() {
   return useMutation({
     mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.post(
-        `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/cancel`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/cancel`,
       ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
@@ -190,7 +191,7 @@ export function usePauseRollingUpdateJob() {
   return useMutation({
     mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.post(
-        `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/pause`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/pause`,
       ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
@@ -208,7 +209,7 @@ export function useResumeRollingUpdateJob() {
   return useMutation({
     mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.post(
-        `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/resume`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/resume`,
       ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
@@ -234,7 +235,7 @@ export function useConfirmNodeUpgrade() {
       nodeId: string;
     }) =>
       apiClient.post(
-        `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/nodes/${nodeId}/confirm-upgrade`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/nodes/${nodeId}/confirm-upgrade`,
       ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
@@ -260,7 +261,7 @@ export function useSkipNode() {
       nodeId: string;
     }) =>
       apiClient.post(
-        `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/nodes/${nodeId}/skip`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/nodes/${nodeId}/skip`,
       ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
@@ -278,7 +279,7 @@ export function useNodePackagePreview(clusterId: string, nodeName: string) {
     queryKey: ["node-packages", clusterId, nodeName],
     queryFn: () =>
       apiClient.list<AptPackage>(
-        `/api/v1/clusters/${clusterId}/nodes/${nodeName}/packages`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/packages`,
       ),
     enabled: !!clusterId && !!nodeName,
   });
@@ -296,7 +297,7 @@ export function usePreflightHA() {
       parallelism?: number;
     }) =>
       apiClient.post<HAPreFlightReport>(
-        `/api/v1/clusters/${clusterId}/rolling-updates/preflight-ha`,
+        apiPath`/api/v1/clusters/${clusterId}/rolling-updates/preflight-ha`,
         { nodes, parallelism: parallelism ?? 1 },
       ),
   });
@@ -309,7 +310,7 @@ export function useSSHCredentials(clusterId: string) {
     queryKey: ["ssh-credentials", clusterId],
     queryFn: () =>
       apiClient.get<SSHCredential | null>(
-        `/api/v1/clusters/${clusterId}/ssh-credentials`,
+        apiPath`/api/v1/clusters/${clusterId}/ssh-credentials`,
       ),
     enabled: !!clusterId,
   });
@@ -330,7 +331,7 @@ export function useUpsertSSHCredentials() {
       private_key?: string;
     }) =>
       apiClient.put<SSHCredential>(
-        `/api/v1/clusters/${clusterId}/ssh-credentials`,
+        apiPath`/api/v1/clusters/${clusterId}/ssh-credentials`,
         body,
       ),
     onSuccess: (data, vars) => {
@@ -349,7 +350,7 @@ export function useDeleteSSHCredentials() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ clusterId }: { clusterId: string }) =>
-      apiClient.delete(`/api/v1/clusters/${clusterId}/ssh-credentials`),
+      apiClient.delete(apiPath`/api/v1/clusters/${clusterId}/ssh-credentials`),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
         queryKey: ["ssh-credentials", vars.clusterId],
@@ -368,7 +369,7 @@ export function useTestSSHConnection() {
       nodeName: string;
     }) =>
       apiClient.post<SSHTestResponse>(
-        `/api/v1/clusters/${clusterId}/ssh-credentials/test`,
+        apiPath`/api/v1/clusters/${clusterId}/ssh-credentials/test`,
         { node_name: nodeName },
       ),
   });
@@ -379,7 +380,7 @@ export function useSSHKnownHosts(clusterId: string) {
     queryKey: ["ssh-known-hosts", clusterId],
     queryFn: () =>
       apiClient.list<SSHKnownHost>(
-        `/api/v1/clusters/${clusterId}/ssh-known-hosts`,
+        apiPath`/api/v1/clusters/${clusterId}/ssh-known-hosts`,
       ),
     enabled: !!clusterId,
   });
@@ -398,7 +399,7 @@ export function usePinSSHHostKey() {
       expectedFingerprint: string;
     }) =>
       apiClient.post<SSHKnownHost>(
-        `/api/v1/clusters/${clusterId}/ssh-known-hosts`,
+        apiPath`/api/v1/clusters/${clusterId}/ssh-known-hosts`,
         { node_name: nodeName, expected_fingerprint: expectedFingerprint },
       ),
     onSuccess: (_data, vars) => {
@@ -413,7 +414,9 @@ export function useDeleteSSHKnownHost() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ clusterId, id }: { clusterId: string; id: string }) =>
-      apiClient.delete(`/api/v1/clusters/${clusterId}/ssh-known-hosts/${id}`),
+      apiClient.delete(
+        apiPath`/api/v1/clusters/${clusterId}/ssh-known-hosts/${id}`,
+      ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
         queryKey: ["ssh-known-hosts", vars.clusterId],

@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useConsoleStore } from "@/stores/console-store";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -39,7 +40,9 @@ export function QuickConnect() {
     queries: (clusters ?? []).map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.list<NodeResponse>(`/api/v1/clusters/${cluster.id}/nodes`),
+        apiClient.list<NodeResponse>(
+          apiPath`/api/v1/clusters/${cluster.id}/nodes`,
+        ),
       enabled: open,
     })),
   });
@@ -48,7 +51,7 @@ export function QuickConnect() {
     queries: (clusters ?? []).map((cluster) => ({
       queryKey: ["clusters", cluster.id, "vms"],
       queryFn: () =>
-        apiClient.list<VMResponse>(`/api/v1/clusters/${cluster.id}/vms`),
+        apiClient.list<VMResponse>(apiPath`/api/v1/clusters/${cluster.id}/vms`),
       enabled: open,
     })),
   });

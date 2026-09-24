@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { Fragment, useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +56,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+import { unaddressableHint } from "@/lib/api-path";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useResourcePools,
@@ -65,6 +76,28 @@ interface ClusterPoolsTabProps {
   clusterId: string;
 }
 
+/**
+ * Why Nexara cannot address this pool, or null when it can.
+ *
+ * Two kinds of pool id are out of reach. One no browser can send as a path
+ * segment — exactly "." or ".." (unaddressableHint, lib/api-path.ts). And a
+ * NESTED one ("infra/prod"): the SPA sends it as one encoded segment
+ * ("infra%2Fprod"), and the per-pool routes refuse the "%"
+ * (path-safe-dotted-name; poolIDParam in internal/api/registry_pools.go says
+ * why), so every read, edit or delete of it would come back a 400. Not
+ * sending it also means a nested id made of dot segments ("../../x") never
+ * reaches a reverse proxy that might decode the slash and resolve the dots.
+ */
+function poolHint(poolid: string): string | null {
+  const hint = unaddressableHint(poolid);
+  if (hint !== null) {
+    return hint;
+  }
+  return poolid.includes("/")
+    ? `Nexara cannot manage the nested pool "${poolid}": it addresses a pool by a single path segment. Use the Proxmox web UI.`
+    : null;
+}
+
 export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
   const { canManage } = useAuth();
   const poolsQuery = useResourcePools(clusterId);
@@ -76,6 +109,7 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
   const [comment, setComment] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editPoolId, setEditPoolId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const handleCreate = (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -155,9 +189,8 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
             </TableHeader>
             <TableBody>
               {poolsQuery.data.map((pool) => (
-                <>
+                <Fragment key={pool.poolid}>
                   <TableRow
-                    key={pool.poolid}
                     className="cursor-pointer"
                     onClick={() => {
                       setExpanded(
@@ -178,28 +211,44 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                     </TableCell>
                     {canManage("pool") && (
                       <TableCell className="text-right">
-                        <Button
-                          aria-label={`Edit ${pool.poolid}`}
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditPoolId(pool.poolid);
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          aria-label={`Delete ${pool.poolid}`}
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deletePool.mutate(pool.poolid);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        {/* A pool Nexara cannot address (poolHint) keeps its
+                            row, and shows why in place of its actions — the
+                            requests would be refused anyway, by apiPath or by
+                            the route. Visible text rather than a tooltip on
+                            a disabled button: a disabled Button takes no
+                            pointer events and no focus, so its title never
+                            shows. The "Immutable" label on built-in roles is
+                            the same pattern. */}
+                        {poolHint(pool.poolid) !== null ? (
+                          <span className="text-xs text-muted-foreground">
+                            {poolHint(pool.poolid)}
+                          </span>
+                        ) : (
+                          <>
+                            <Button
+                              aria-label={`Edit ${pool.poolid}`}
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditPoolId(pool.poolid);
+                              }}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              aria-label={`Delete ${pool.poolid}`}
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteTarget(pool.poolid);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </>
+                        )}
                       </TableCell>
                     )}
                   </TableRow>
@@ -214,12 +263,53 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                       </TableCell>
                     </TableRow>
                   )}
-                </>
+                </Fragment>
               ))}
             </TableBody>
           </Table>
         )}
       </CardContent>
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete pool {deleteTarget}?</AlertDialogTitle>
+            {/* What Proxmox does, from delete_pool in pve-manager
+                PVE/API2/Pool.pm: it refuses while the pool contains a guest,
+                a storage or a nested pool (a destroyed guest or storage does
+                not count), and on success it also deletes the ACL entries on
+                /pool/<poolid> (PVE::AccessControl::delete_pool_acl). */}
+            <AlertDialogDescription>
+              Proxmox refuses to delete a pool that still has members — guests,
+              storage or nested pools — so remove those first. Deleting the pool
+              also removes the permissions granted on it. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deletePool.isPending}
+              onClick={(e: React.MouseEvent) => {
+                e.preventDefault();
+                if (deleteTarget === null) return;
+                deletePool.mutate(deleteTarget, {
+                  onSettled: () => {
+                    setDeleteTarget(null);
+                  },
+                });
+              }}
+            >
+              {deletePool.isPending ? "Deleting..." : "Delete Pool"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Edit Comment Dialog */}
       {editPoolId != null && (
@@ -627,7 +717,22 @@ function AddStorageDialog({
 
 // --- Pool Members (expandable row with add/remove) ---
 
-function PoolMembers({
+function PoolMembers(props: {
+  clusterId: string;
+  poolId: string;
+  canManage: boolean;
+}) {
+  // A pool Nexara cannot address shows why instead of its members: reading
+  // them needs the same path, which apiPath refuses to build or the route
+  // refuses to take (poolHint).
+  const hint = poolHint(props.poolId);
+  if (hint !== null) {
+    return <p className="py-2 text-xs text-muted-foreground">{hint}</p>;
+  }
+  return <AddressablePoolMembers {...props} />;
+}
+
+function AddressablePoolMembers({
   clusterId,
   poolId,
   canManage,

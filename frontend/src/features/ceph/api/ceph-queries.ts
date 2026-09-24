@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   CephStatus,
   CephOSD,
@@ -23,7 +24,9 @@ export function useCephStatus(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "status"],
     queryFn: () =>
-      apiClient.get<CephStatus>(`/api/v1/clusters/${clusterId}/ceph/status`),
+      apiClient.get<CephStatus>(
+        apiPath`/api/v1/clusters/${clusterId}/ceph/status`,
+      ),
     enabled: clusterId.length > 0,
     refetchInterval: 60_000,
   });
@@ -33,7 +36,7 @@ export function useCephOSDs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "osds"],
     queryFn: () =>
-      apiClient.list<CephOSD>(`/api/v1/clusters/${clusterId}/ceph/osds`),
+      apiClient.list<CephOSD>(apiPath`/api/v1/clusters/${clusterId}/ceph/osds`),
     enabled: clusterId.length > 0,
     refetchInterval: 60_000,
   });
@@ -43,7 +46,9 @@ export function useCephPools(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "pools"],
     queryFn: () =>
-      apiClient.list<CephPool>(`/api/v1/clusters/${clusterId}/ceph/pools`),
+      apiClient.list<CephPool>(
+        apiPath`/api/v1/clusters/${clusterId}/ceph/pools`,
+      ),
     enabled: clusterId.length > 0,
     refetchInterval: 60_000,
   });
@@ -53,7 +58,9 @@ export function useCephMonitors(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "monitors"],
     queryFn: () =>
-      apiClient.list<CephMon>(`/api/v1/clusters/${clusterId}/ceph/monitors`),
+      apiClient.list<CephMon>(
+        apiPath`/api/v1/clusters/${clusterId}/ceph/monitors`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -62,7 +69,7 @@ export function useCephFS(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "fs"],
     queryFn: () =>
-      apiClient.list<CephFS>(`/api/v1/clusters/${clusterId}/ceph/fs`),
+      apiClient.list<CephFS>(apiPath`/api/v1/clusters/${clusterId}/ceph/fs`),
     enabled: clusterId.length > 0,
   });
 }
@@ -71,7 +78,9 @@ export function useCephCrushRules(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "rules"],
     queryFn: () =>
-      apiClient.list<CephCrushRule>(`/api/v1/clusters/${clusterId}/ceph/rules`),
+      apiClient.list<CephCrushRule>(
+        apiPath`/api/v1/clusters/${clusterId}/ceph/rules`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -83,7 +92,7 @@ export function useCephMetrics(clusterId: string, timeframe: string) {
     queryKey: ["clusters", clusterId, "ceph", "metrics", timeframe],
     queryFn: () =>
       apiClient.list<CephClusterMetric>(
-        `/api/v1/clusters/${clusterId}/ceph/metrics?timeframe=${timeframe}`,
+        apiPath`/api/v1/clusters/${clusterId}/ceph/metrics?timeframe=${timeframe}`,
       ),
     enabled: clusterId.length > 0,
     refetchInterval: 60_000,
@@ -95,7 +104,7 @@ export function useCephOSDMetrics(clusterId: string) {
     queryKey: ["clusters", clusterId, "ceph", "osds", "metrics"],
     queryFn: () =>
       apiClient.list<CephOSDMetric>(
-        `/api/v1/clusters/${clusterId}/ceph/osds/metrics`,
+        apiPath`/api/v1/clusters/${clusterId}/ceph/osds/metrics`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -106,7 +115,7 @@ export function useCephPoolMetrics(clusterId: string) {
     queryKey: ["clusters", clusterId, "ceph", "pools", "metrics"],
     queryFn: () =>
       apiClient.list<CephPoolMetric>(
-        `/api/v1/clusters/${clusterId}/ceph/pools/metrics`,
+        apiPath`/api/v1/clusters/${clusterId}/ceph/pools/metrics`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -125,7 +134,7 @@ export function useCreateCephPool() {
   return useMutation({
     mutationFn: ({ clusterId, body }: CreatePoolParams) =>
       apiClient.post<CephPoolActionResponse>(
-        `/api/v1/clusters/${clusterId}/ceph/pools`,
+        apiPath`/api/v1/clusters/${clusterId}/ceph/pools`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -178,7 +187,7 @@ export function useCephOSDPreflight(
     ],
     queryFn: () =>
       apiClient.get<CephOSDPreflight>(
-        `/api/v1/clusters/${clusterId}/ceph/osds/${String(osdId)}/preflight?action=${action}`,
+        apiPath`/api/v1/clusters/${clusterId}/ceph/osds/${osdId}/preflight?action=${action}`,
       ),
     enabled: clusterId.length > 0,
     staleTime: 0,
@@ -199,7 +208,7 @@ export function useCephOSDAction() {
   return useMutation({
     mutationFn: ({ clusterId, osdId, action }: OSDActionParams) =>
       apiClient.post<CephOSDActionResponse>(
-        `/api/v1/clusters/${clusterId}/ceph/osds/${String(osdId)}/${action}`,
+        apiPath`/api/v1/clusters/${clusterId}/ceph/osds/${osdId}/${action}`,
         {},
       ),
     onSuccess: (data, variables) => {
@@ -236,7 +245,7 @@ export function useDeleteCephPool() {
   return useMutation({
     mutationFn: ({ clusterId, poolName }: DeletePoolParams) =>
       apiClient.delete<CephPoolActionResponse>(
-        `/api/v1/clusters/${clusterId}/ceph/pools/${encodeURIComponent(poolName)}`,
+        apiPath`/api/v1/clusters/${clusterId}/ceph/pools/${poolName}`,
       ),
     onSuccess: (_data, variables) => {
       invalidatePoolsAfterSettle(queryClient, variables.clusterId);

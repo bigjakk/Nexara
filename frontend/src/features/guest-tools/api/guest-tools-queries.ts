@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   GuestToolsConfig,
   GuestToolsConfigRequest,
@@ -24,7 +25,7 @@ export function useGuestToolsConfig(clusterId: string) {
     queryKey: guestToolsKeys.config(clusterId),
     queryFn: () =>
       apiClient.get<GuestToolsConfig>(
-        `/api/v1/clusters/${clusterId}/guest-tools/config`,
+        apiPath`/api/v1/clusters/${clusterId}/guest-tools/config`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -35,7 +36,7 @@ export function useUpdateGuestToolsConfig(clusterId: string) {
   return useMutation({
     mutationFn: (config: GuestToolsConfigRequest) =>
       apiClient.put<GuestToolsConfig>(
-        `/api/v1/clusters/${clusterId}/guest-tools/config`,
+        apiPath`/api/v1/clusters/${clusterId}/guest-tools/config`,
         config,
       ),
     onSuccess: () => {
@@ -55,7 +56,7 @@ export function useGuestToolsFleet(clusterId: string, enabled = true) {
     queryKey: guestToolsKeys.fleet(clusterId),
     queryFn: () =>
       apiClient.list<GuestToolsGuest>(
-        `/api/v1/clusters/${clusterId}/guest-tools/guests`,
+        apiPath`/api/v1/clusters/${clusterId}/guest-tools/guests`,
       ),
     enabled: enabled && clusterId.length > 0,
     refetchInterval: (query) => {
@@ -101,7 +102,7 @@ export function useSetGuestToolsPolicy(clusterId: string) {
       policy: GuestToolsPolicyRequest;
     }) =>
       apiClient.put(
-        `/api/v1/clusters/${clusterId}/guest-tools/guests/${String(vmid)}/policy`,
+        apiPath`/api/v1/clusters/${clusterId}/guest-tools/guests/${vmid}/policy`,
         policy,
       ),
     onSuccess: () => {
@@ -115,7 +116,7 @@ export function useDetectGuestTools(clusterId: string) {
   return useMutation({
     mutationFn: (vmid: number) =>
       apiClient.post<GuestToolsDetectResponse>(
-        `/api/v1/clusters/${clusterId}/guest-tools/guests/${String(vmid)}/detect`,
+        apiPath`/api/v1/clusters/${clusterId}/guest-tools/guests/${vmid}/detect`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: guestToolsKeys.all });
@@ -134,7 +135,7 @@ export function useStageGuestToolsUpdate(clusterId: string) {
       body: GuestToolsUpdateRequest;
     }) =>
       apiClient.post<GuestToolsUpdateResponse>(
-        `/api/v1/clusters/${clusterId}/guest-tools/guests/${String(vmid)}/update`,
+        apiPath`/api/v1/clusters/${clusterId}/guest-tools/guests/${vmid}/update`,
         body,
       ),
     onSuccess: () => {
@@ -148,7 +149,7 @@ export function useCancelGuestToolsUpdate(clusterId: string) {
   return useMutation({
     mutationFn: (vmid: number) =>
       apiClient.delete(
-        `/api/v1/clusters/${clusterId}/guest-tools/guests/${String(vmid)}/update`,
+        apiPath`/api/v1/clusters/${clusterId}/guest-tools/guests/${vmid}/update`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: guestToolsKeys.all });

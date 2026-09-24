@@ -127,8 +127,13 @@ func parseDocEndpointRows(md string) []docEndpointRow {
 //     query in the same cell. Fiber routes on the path alone.
 //   - A trailing slash, because StrictRouting is unset (buildFiberConfig
 //     in server.go), so "/veeam-servers/" and "/veeam-servers" are one
-//     route to Fiber and have to be one here. The doc spells that pair
-//     with the slash today and the router without it.
+//     route to Fiber and have to be one here. That is the ROUTER's
+//     equivalence, and for writes the API no longer offers it:
+//     refuseTrailingSlashWrites answers 400, before routing, to any
+//     method but GET, HEAD and OPTIONS whose path ends in "/". So a row
+//     that spells a write with the slash names a request the API refuses
+//     even though its shape matches a route, and
+//     docRowsSpellingARefusedSlash reports it separately.
 //
 // Wildcards keep their own marker rather than collapsing into the
 // parameter one: "*" matches any number of trailing segments and ":x"
@@ -195,6 +200,23 @@ func docRowsNamingNoRoute(rows []docEndpointRow, live map[string]bool) []docEndp
 	return out
 }
 
+// docRowsSpellingARefusedSlash returns the rows that document a write with
+// a trailing slash. routeShape matches such a row to its route, because the
+// router serves both spellings; refuseTrailingSlashWrites refuses the
+// slashed one before the router sees it, using the same method set and the
+// same length test on the path, query left off, as isReadMethod and the
+// gate do.
+func docRowsSpellingARefusedSlash(rows []docEndpointRow) []docEndpointRow {
+	var out []docEndpointRow
+	for _, row := range rows {
+		path, _, _ := strings.Cut(row.Path, "?")
+		if len(path) > 1 && strings.HasSuffix(path, "/") && !isReadMethod(row.Method) {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // docPermissionsNotSeeded is the same separation for the prose check.
 func docPermissionsNotSeeded(tokens map[string]int, seeded map[string]string) []string {
 	var out []string
@@ -249,6 +271,11 @@ func TestGuard_APIReferenceRowsNameRealRoutes(t *testing.T) {
 			"the route was renamed or deleted and the row was not. Fix the row (or delete it); "+
 			"parameter NAMES are not compared, so this is a real difference in method, segment "+
 			"count, or a literal segment.",
+			apiReferencePath(), row.Line, row.Method, row.Path)
+	}
+	for _, row := range docRowsSpellingARefusedSlash(rows) {
+		t.Errorf("%s:%d documents %s %s with a trailing slash, which the API refuses with a 400 before "+
+			"routing (refuseTrailingSlashWrites) — spell the path without it",
 			apiReferencePath(), row.Line, row.Method, row.Path)
 	}
 }
@@ -519,6 +546,37 @@ func TestGuard_APIReferenceRowsNameRealRoutes_RejectsAPhantomRow(t *testing.T) {
 		if !found {
 			t.Errorf("the phantom row %q was not reported; findings = %+v", want, got)
 		}
+	}
+}
+
+// TestGuard_APIReferenceRowsNameRealRoutes_RejectsASlashedWrite is the
+// same splice for the trailing-slash check: the real reference plus a write
+// and a read, each spelled with a trailing slash, on a route that exists.
+//
+// Only the write may come back. The gate lets a GET through, so the slashed
+// read still names a request the API serves, and a check that reported it
+// as well would be telling the doc to stop spelling something the API
+// accepts. The shape comparison is asked too, and must report neither:
+// the slash is the only thing wrong with the write, so without the second
+// check nothing would catch it.
+func TestGuard_APIReferenceRowsNameRealRoutes_RejectsASlashedWrite(t *testing.T) {
+	body, err := os.ReadFile(apiReferencePath())
+	if err != nil {
+		t.Fatalf("reading %s: %v", apiReferencePath(), err)
+	}
+	const mutation = "\n| POST | `/veeam-servers/` | A write spelled with a trailing slash |\n" +
+		"| GET | `/veeam-servers/` | A read spelled with a trailing slash |\n"
+	rows := parseDocEndpointRows(string(body) + mutation)
+
+	if got := docRowsNamingNoRoute(rows, liveRouteShapes(t)); len(got) != 0 {
+		t.Fatalf("precondition: the shape comparison reported %+v; both spliced rows name a real route "+
+			"by shape, so the reference has drifted or the splice is wrong", got)
+	}
+	got := docRowsSpellingARefusedSlash(rows)
+	if len(got) != 1 || got[0].Method != "POST" || got[0].Path != "/veeam-servers/" {
+		t.Errorf("findings = %+v, want exactly the slashed POST — either the check no longer rejects a "+
+			"slashed write, it rejects a slashed read the API serves, or the reference itself spells a "+
+			"write with a slash and TestGuard_APIReferenceRowsNameRealRoutes is already failing", got)
 	}
 }
 

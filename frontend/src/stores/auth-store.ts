@@ -15,6 +15,7 @@ import {
   setAuthRefreshCallback,
   storeTokens,
 } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 interface AuthState {
   user: User | null;
@@ -90,7 +91,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     try {
       // Empty body — the HttpOnly refresh cookie carries the token.
       const res = await apiClient.postPublic<AuthResponse>(
-        "/api/v1/auth/refresh",
+        apiPath`/api/v1/auth/refresh`,
         {},
       );
       storeTokens(res);
@@ -118,7 +119,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     try {
       const res = await apiClient.postPublic<
         AuthResponse | TOTPRequiredResponse
-      >("/api/v1/auth/login", req);
+      >(apiPath`/api/v1/auth/login`, req);
 
       if (isTotpRequired(res)) {
         set({
@@ -155,7 +156,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
         code,
       };
       const res = await apiClient.postPublic<AuthResponse>(
-        "/api/v1/auth/totp/verify-login",
+        apiPath`/api/v1/auth/totp/verify-login`,
         body,
       );
       storeTokens(res);
@@ -184,7 +185,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
         recovery_code: recoveryCode,
       };
       const res = await apiClient.postPublic<AuthResponse>(
-        "/api/v1/auth/totp/verify-login",
+        apiPath`/api/v1/auth/totp/verify-login`,
         body,
       );
       storeTokens(res);
@@ -210,7 +211,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     set({ isLoading: true });
     try {
       const res = await apiClient.postPublic<AuthResponse>(
-        "/api/v1/auth/register",
+        apiPath`/api/v1/auth/register`,
         req,
       );
       storeTokens(res);
@@ -231,7 +232,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     // Empty body — the HttpOnly cookie carries the refresh token. Always hit
     // /auth/logout so the server can revoke the session and clear the cookie.
     try {
-      await apiClient.post("/api/v1/auth/logout", {});
+      await apiClient.post(apiPath`/api/v1/auth/logout`, {});
     } catch {
       // Proceed with local cleanup even if server logout fails
     }
@@ -249,7 +250,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   logoutAll: async () => {
     set({ isLoggingOut: true });
     try {
-      await apiClient.post("/api/v1/auth/logout-all");
+      await apiClient.post(apiPath`/api/v1/auth/logout-all`);
     } catch {
       // Proceed with local cleanup even if server call fails
     }

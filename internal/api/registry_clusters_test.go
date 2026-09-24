@@ -148,7 +148,7 @@ func TestClusterRoutesAreGatedByTheirDeclaration(t *testing.T) {
 				gated.RateLimiter = nil
 				app := newRegistryApp(t, stubAuth(tc.grants), gated)
 
-				req := jsonRequest(tt.method, target, clusterProbeBody(tt.method, tt.path))
+				req := jsonRequest(tt.method, target+clusterProbeQuery(tt.method), clusterProbeBody(tt.method, tt.path))
 				req.Header.Set("X-Test-User", "yes")
 				status, env := send(t, app, req)
 				if status != tc.want {
@@ -165,7 +165,7 @@ func TestClusterRoutesAreGatedByTheirDeclaration(t *testing.T) {
 			gated.Handler = cap.handler()
 			gated.RateLimiter = nil
 			app := newRegistryApp(t, stubAuth(tt.granted), gated)
-			if status, _ := send(t, app, jsonRequest(tt.method, target, clusterProbeBody(tt.method, tt.path))); status != fiber.StatusUnauthorized {
+			if status, _ := send(t, app, jsonRequest(tt.method, target+clusterProbeQuery(tt.method), clusterProbeBody(tt.method, tt.path))); status != fiber.StatusUnauthorized {
 				t.Errorf("anonymous: status = %d, want 401", status)
 			}
 			if cap.called {
@@ -173,6 +173,16 @@ func TestClusterRoutesAreGatedByTheirDeclaration(t *testing.T) {
 			}
 		})
 	}
+}
+
+// clusterProbeQuery is the query the DELETE's schema requires, so its granted
+// case reaches the handler rather than a 400: confirm, which the capture handler
+// in its place never compares with anything.
+func clusterProbeQuery(method string) string {
+	if method == fiber.MethodDelete {
+		return "?confirm=cluster01"
+	}
+	return ""
 }
 
 // clusterProbeBody is the minimum body each probed route's schema accepts, so
@@ -375,14 +385,16 @@ func TestClusterDeleteRevokeStaysAString(t *testing.T) {
 			"and never the default")
 	}
 
-	target := strings.ReplaceAll(clusterByID, ":id", testClusterID)
+	// confirm is required on this route (TestClusterDeleteRequiresTheClusterName);
+	// it rides along so the request reaches the handler.
+	target := strings.ReplaceAll(clusterByID, ":id", testClusterID) + "?confirm=cluster01"
 	for _, tt := range []struct {
 		query string
 		want  string
 	}{
 		{"", ""},
-		{"?revoke_pve_credentials=1", "1"},
-		{"?revoke_pve_credentials=on", "on"},
+		{"&revoke_pve_credentials=1", "1"},
+		{"&revoke_pve_credentials=on", "on"},
 	} {
 		cap := &capture{}
 		e := declaredEndpoint(t, fiber.MethodDelete, clusterByID)

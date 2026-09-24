@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import {
   resolveVolidToCTVolumeKey,
@@ -113,8 +114,8 @@ export function MigrateBatchDialog({
 
         const path =
           job.guestKind === "ct"
-            ? `/api/v1/clusters/${clusterId}/containers/${job.guestId}/volumes/move`
-            : `/api/v1/clusters/${clusterId}/vms/${job.guestId}/disks/move`;
+            ? apiPath`/api/v1/clusters/${clusterId}/containers/${job.guestId}/volumes/move`
+            : apiPath`/api/v1/clusters/${clusterId}/vms/${job.guestId}/disks/move`;
 
         const body =
           job.guestKind === "ct"

@@ -5,6 +5,7 @@ import { Trash2 } from "lucide-react";
 import { PoolDeleteDialog } from "./PoolDeleteDialog";
 import type { CephPool } from "../types/ceph";
 import { formatBytes } from "@/lib/format";
+import { unaddressableHint } from "@/lib/api-path";
 
 interface PoolTableProps {
   pools: CephPool[];
@@ -63,16 +64,26 @@ export function PoolTable({ pools, clusterId }: PoolTableProps) {
                   {formatBytes(pool.write_bytes_sec)}/s
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <Button
-                    aria-label={`Delete pool ${pool.pool_name}`}
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setDeletePool(pool.pool_name);
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+                  {/* Ceph and Proxmox both admit a pool named "." or "..";
+                      Nexara cannot address one (lib/api-path.ts), so the
+                      row shows why in place of the delete — as text, since a
+                      disabled button's title never shows. */}
+                  {unaddressableHint(pool.pool_name) !== null ? (
+                    <span className="text-xs text-muted-foreground">
+                      {unaddressableHint(pool.pool_name)}
+                    </span>
+                  ) : (
+                    <Button
+                      aria-label={`Delete pool ${pool.pool_name}`}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setDeletePool(pool.pool_name);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  )}
                 </td>
               </tr>
             ))}

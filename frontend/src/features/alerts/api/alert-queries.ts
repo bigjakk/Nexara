@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   AlertRule,
   AlertInstance,
@@ -17,12 +18,11 @@ import type {
 export function useAlertRules(clusterId?: string) {
   const params = new URLSearchParams();
   if (clusterId) params.set("cluster_id", clusterId);
-  const qs = params.toString();
 
   return useQuery({
     queryKey: ["alert-rules", clusterId ?? "all"],
     queryFn: () =>
-      apiClient.list<AlertRule>(`/api/v1/alert-rules${qs ? `?${qs}` : ""}`),
+      apiClient.list<AlertRule>(apiPath`/api/v1/alert-rules?${params}`),
   });
 }
 
@@ -30,7 +30,7 @@ export function useCreateAlertRule() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: AlertRuleRequest) =>
-      apiClient.post<AlertRule>("/api/v1/alert-rules", data),
+      apiClient.post<AlertRule>(apiPath`/api/v1/alert-rules`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["alert-rules"] });
     },
@@ -46,7 +46,7 @@ export function useUpdateAlertRule() {
     // empty strings are treated as absent, not as clears. Send only the
     // fields actually being changed.
     mutationFn: ({ id, ...data }: Partial<AlertRuleRequest> & { id: string }) =>
-      apiClient.put<AlertRule>(`/api/v1/alert-rules/${id}`, data),
+      apiClient.put<AlertRule>(apiPath`/api/v1/alert-rules/${id}`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["alert-rules"] });
     },
@@ -56,7 +56,8 @@ export function useUpdateAlertRule() {
 export function useDeleteAlertRule() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiClient.delete(`/api/v1/alert-rules/${id}`),
+    mutationFn: (id: string) =>
+      apiClient.delete(apiPath`/api/v1/alert-rules/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["alert-rules"] });
     },
@@ -74,12 +75,11 @@ export function useAlerts(filters?: {
   if (filters?.state) params.set("state", filters.state);
   if (filters?.severity) params.set("severity", filters.severity);
   if (filters?.clusterId) params.set("cluster_id", filters.clusterId);
-  const qs = params.toString();
 
   return useQuery({
     queryKey: ["alerts", filters?.state, filters?.severity, filters?.clusterId],
     queryFn: () =>
-      apiClient.list<AlertInstance>(`/api/v1/alerts${qs ? `?${qs}` : ""}`),
+      apiClient.list<AlertInstance>(apiPath`/api/v1/alerts?${params}`),
     refetchInterval: (query) => {
       const data = query.state.data;
       if (!data) return false;
@@ -94,7 +94,7 @@ export function useAlerts(filters?: {
 export function useAlertSummary() {
   return useQuery({
     queryKey: ["alert-summary"],
-    queryFn: () => apiClient.get<AlertSummary>("/api/v1/alerts/summary"),
+    queryFn: () => apiClient.get<AlertSummary>(apiPath`/api/v1/alerts/summary`),
     refetchInterval: 30000,
   });
 }
@@ -103,7 +103,7 @@ export function useAcknowledgeAlert() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.post(`/api/v1/alerts/${id}/acknowledge`),
+      apiClient.post(apiPath`/api/v1/alerts/${id}/acknowledge`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["alerts"] });
       void qc.invalidateQueries({ queryKey: ["alert-summary"] });
@@ -114,7 +114,8 @@ export function useAcknowledgeAlert() {
 export function useResolveAlert() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiClient.post(`/api/v1/alerts/${id}/resolve`),
+    mutationFn: (id: string) =>
+      apiClient.post(apiPath`/api/v1/alerts/${id}/resolve`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["alerts"] });
       void qc.invalidateQueries({ queryKey: ["alert-summary"] });
@@ -128,7 +129,9 @@ export function useNotificationChannels() {
   return useQuery({
     queryKey: ["notification-channels"],
     queryFn: () =>
-      apiClient.list<NotificationChannel>("/api/v1/notification-channels"),
+      apiClient.list<NotificationChannel>(
+        apiPath`/api/v1/notification-channels`,
+      ),
   });
 }
 
@@ -142,7 +145,7 @@ export function useCreateNotificationChannel() {
       enabled?: boolean;
     }) =>
       apiClient.post<NotificationChannel>(
-        "/api/v1/notification-channels",
+        apiPath`/api/v1/notification-channels`,
         data,
       ),
     onSuccess: () => {
@@ -165,7 +168,7 @@ export function useUpdateNotificationChannel() {
       enabled?: boolean;
     }) =>
       apiClient.put<NotificationChannel>(
-        `/api/v1/notification-channels/${id}`,
+        apiPath`/api/v1/notification-channels/${id}`,
         data,
       ),
     onSuccess: () => {
@@ -178,7 +181,7 @@ export function useDeleteNotificationChannel() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.delete(`/api/v1/notification-channels/${id}`),
+      apiClient.delete(apiPath`/api/v1/notification-channels/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["notification-channels"] });
     },
@@ -189,7 +192,7 @@ export function useTestNotificationChannel() {
   return useMutation({
     mutationFn: (id: string) =>
       apiClient.post<TestChannelResponse>(
-        `/api/v1/notification-channels/${id}/test`,
+        apiPath`/api/v1/notification-channels/${id}/test`,
       ),
   });
 }
@@ -201,7 +204,7 @@ export function useMaintenanceWindows(clusterId: string) {
     queryKey: ["maintenance-windows", clusterId],
     queryFn: () =>
       apiClient.list<MaintenanceWindow>(
-        `/api/v1/clusters/${clusterId}/maintenance-windows`,
+        apiPath`/api/v1/clusters/${clusterId}/maintenance-windows`,
       ),
     enabled: !!clusterId,
   });
@@ -221,7 +224,7 @@ export function useCreateMaintenanceWindow() {
       node_id?: string;
     }) =>
       apiClient.post<MaintenanceWindow>(
-        `/api/v1/clusters/${clusterId}/maintenance-windows`,
+        apiPath`/api/v1/clusters/${clusterId}/maintenance-windows`,
         data,
       ),
     onSuccess: (_data, vars) => {
@@ -243,7 +246,7 @@ export function useDeleteMaintenanceWindow() {
       windowId: string;
     }) =>
       apiClient.delete(
-        `/api/v1/clusters/${clusterId}/maintenance-windows/${windowId}`,
+        apiPath`/api/v1/clusters/${clusterId}/maintenance-windows/${windowId}`,
       ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
@@ -258,13 +261,12 @@ export function useDeleteMaintenanceWindow() {
 export function useNotificationDLQ(state?: string) {
   const params = new URLSearchParams();
   if (state) params.set("state", state);
-  const qs = params.toString();
 
   return useQuery({
     queryKey: ["notification-dlq", state ?? "all"],
     queryFn: () =>
       apiClient.list<NotificationDLQEntry>(
-        `/api/v1/notification-dlq${qs ? `?${qs}` : ""}`,
+        apiPath`/api/v1/notification-dlq?${params}`,
       ),
     refetchInterval: 30000,
   });
@@ -274,7 +276,9 @@ export function useNotificationDLQSummary() {
   return useQuery({
     queryKey: ["notification-dlq-summary"],
     queryFn: () =>
-      apiClient.get<NotificationDLQSummary>("/api/v1/notification-dlq/summary"),
+      apiClient.get<NotificationDLQSummary>(
+        apiPath`/api/v1/notification-dlq/summary`,
+      ),
     refetchInterval: 30000,
   });
 }
@@ -284,7 +288,7 @@ export function useRetryNotificationDLQ() {
   return useMutation({
     mutationFn: (id: string) =>
       apiClient.post<{ success: boolean; message: string }>(
-        `/api/v1/notification-dlq/${id}/retry`,
+        apiPath`/api/v1/notification-dlq/${id}/retry`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["notification-dlq"] });
@@ -298,7 +302,7 @@ export function useDismissNotificationDLQ() {
   return useMutation({
     mutationFn: (id: string) =>
       apiClient.post<{ success: boolean }>(
-        `/api/v1/notification-dlq/${id}/dismiss`,
+        apiPath`/api/v1/notification-dlq/${id}/dismiss`,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["notification-dlq"] });
@@ -311,7 +315,7 @@ export function useDeleteNotificationDLQ() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.delete(`/api/v1/notification-dlq/${id}`),
+      apiClient.delete(apiPath`/api/v1/notification-dlq/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["notification-dlq"] });
       void qc.invalidateQueries({ queryKey: ["notification-dlq-summary"] });

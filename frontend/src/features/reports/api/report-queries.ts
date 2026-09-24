@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient, getValidAccessToken } from "@/lib/api-client";
+import { apiClient, apiFetch } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { ReportSchedule, ReportRun, ReportParameters } from "@/types/api";
 
 // --- Report Schedules ---
@@ -7,7 +8,8 @@ import type { ReportSchedule, ReportRun, ReportParameters } from "@/types/api";
 export function useReportSchedules() {
   return useQuery({
     queryKey: ["report-schedules"],
-    queryFn: () => apiClient.list<ReportSchedule>("/api/v1/reports/schedules"),
+    queryFn: () =>
+      apiClient.list<ReportSchedule>(apiPath`/api/v1/reports/schedules`),
   });
 }
 
@@ -15,7 +17,7 @@ export function useReportSchedule(id: string) {
   return useQuery({
     queryKey: ["report-schedules", id],
     queryFn: () =>
-      apiClient.get<ReportSchedule>(`/api/v1/reports/schedules/${id}`),
+      apiClient.get<ReportSchedule>(apiPath`/api/v1/reports/schedules/${id}`),
     enabled: !!id,
   });
 }
@@ -38,7 +40,7 @@ export function useCreateReportSchedule() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: ReportScheduleRequest) =>
-      apiClient.post<ReportSchedule>("/api/v1/reports/schedules", data),
+      apiClient.post<ReportSchedule>(apiPath`/api/v1/reports/schedules`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["report-schedules"] });
     },
@@ -52,7 +54,10 @@ export function useUpdateReportSchedule() {
       id,
       ...data
     }: Partial<ReportScheduleRequest> & { id: string }) =>
-      apiClient.put<ReportSchedule>(`/api/v1/reports/schedules/${id}`, data),
+      apiClient.put<ReportSchedule>(
+        apiPath`/api/v1/reports/schedules/${id}`,
+        data,
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["report-schedules"] });
     },
@@ -63,7 +68,7 @@ export function useDeleteReportSchedule() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.delete(`/api/v1/reports/schedules/${id}`),
+      apiClient.delete(apiPath`/api/v1/reports/schedules/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["report-schedules"] });
     },
@@ -83,7 +88,7 @@ export function useGenerateReport() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: GenerateReportRequest) =>
-      apiClient.post<ReportRun>("/api/v1/reports/generate", data),
+      apiClient.post<ReportRun>(apiPath`/api/v1/reports/generate`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["report-runs"] });
     },
@@ -95,14 +100,15 @@ export function useGenerateReport() {
 export function useReportRuns() {
   return useQuery({
     queryKey: ["report-runs"],
-    queryFn: () => apiClient.list<ReportRun>("/api/v1/reports/runs"),
+    queryFn: () => apiClient.list<ReportRun>(apiPath`/api/v1/reports/runs`),
   });
 }
 
 export function useReportRun(id: string) {
   return useQuery({
     queryKey: ["report-runs", id],
-    queryFn: () => apiClient.get<ReportRun>(`/api/v1/reports/runs/${id}`),
+    queryFn: () =>
+      apiClient.get<ReportRun>(apiPath`/api/v1/reports/runs/${id}`),
     enabled: !!id,
     // A run still generating is polled until it settles; a finished one is
     // not re-read.
@@ -116,7 +122,8 @@ export function useReportRun(id: string) {
 export function useDeleteReportRun() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiClient.delete(`/api/v1/reports/runs/${id}`),
+    mutationFn: (id: string) =>
+      apiClient.delete(apiPath`/api/v1/reports/runs/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["report-runs"] });
     },
@@ -133,7 +140,7 @@ export interface EmailReportRunRequest {
 export function useEmailReportRun() {
   return useMutation({
     mutationFn: ({ id, ...body }: EmailReportRunRequest) =>
-      apiClient.post<unknown>(`/api/v1/reports/runs/${id}/email`, body),
+      apiClient.post<unknown>(apiPath`/api/v1/reports/runs/${id}/email`, body),
   });
 }
 
@@ -143,9 +150,7 @@ export function useEmailReportRun() {
  * beside the other report calls, rather than in a component.
  */
 async function fetchReportFile(id: string, kind: "html" | "csv") {
-  const token = (await getValidAccessToken()) ?? "";
-  const res = await fetch(`/api/v1/reports/runs/${id}/${kind}`, {
-    headers: { Authorization: `Bearer ${token}` },
+  const res = await apiFetch(apiPath`/api/v1/reports/runs/${id}/${kind}`, {
     credentials: "same-origin",
   });
   if (!res.ok) throw new Error(`Failed to fetch report ${kind.toUpperCase()}`);

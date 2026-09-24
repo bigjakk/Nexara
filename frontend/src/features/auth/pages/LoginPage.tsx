@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient, ApiClientError } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   SetupStatus,
   SSOStatus,
@@ -84,7 +85,7 @@ export function LoginPage() {
   useEffect(() => {
     let cancelled = false;
     apiClient
-      .getPublic<SetupStatus>("/api/v1/auth/setup-status")
+      .getPublic<SetupStatus>(apiPath`/api/v1/auth/setup-status`)
       .then((status) => {
         if (!cancelled) {
           setNeedsSetup(status.needs_setup);
@@ -107,7 +108,7 @@ export function LoginPage() {
   useEffect(() => {
     let cancelled = false;
     apiClient
-      .getPublic<SSOStatus>("/api/v1/auth/sso-status")
+      .getPublic<SSOStatus>(apiPath`/api/v1/auth/sso-status`)
       .then((status) => {
         if (!cancelled) setSSOStatus(status);
       })
@@ -132,7 +133,7 @@ export function LoginPage() {
     setError("");
     try {
       const res = await apiClient.getPublic<OIDCAuthorizeResponse>(
-        "/api/v1/auth/oidc/authorize",
+        apiPath`/api/v1/auth/oidc/authorize`,
       );
       window.location.href = res.redirect_url;
     } catch {

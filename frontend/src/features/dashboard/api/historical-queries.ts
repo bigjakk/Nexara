@@ -1,5 +1,6 @@
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { TimeRange, HistoricalMetricPoint } from "@/types/api";
 import type { MetricDataPoint } from "@/types/ws";
 
@@ -22,7 +23,7 @@ export function useHistoricalMetrics(clusterId: string, range: TimeRange) {
     queryKey: ["clusters", clusterId, "metrics", range],
     queryFn: async () => {
       const data = await apiClient.list<HistoricalMetricPoint>(
-        `/api/v1/clusters/${clusterId}/metrics?range=${range}`,
+        apiPath`/api/v1/clusters/${clusterId}/metrics?range=${range}`,
       );
       return toMetricDataPoints(data);
     },
@@ -40,7 +41,7 @@ export function useSeedMetrics(clusterId: string) {
     queryKey: ["clusters", clusterId, "metrics", "seed"],
     queryFn: async () => {
       const data = await apiClient.list<HistoricalMetricPoint>(
-        `/api/v1/clusters/${clusterId}/metrics?range=1h`,
+        apiPath`/api/v1/clusters/${clusterId}/metrics?range=1h`,
       );
       return toMetricDataPoints(data);
     },
@@ -62,7 +63,7 @@ export function useSeedMetricsForClusters(
       queryKey: ["clusters", id, "metrics", "seed"],
       queryFn: async () => {
         const data = await apiClient.list<HistoricalMetricPoint>(
-          `/api/v1/clusters/${id}/metrics?range=1h`,
+          apiPath`/api/v1/clusters/${id}/metrics?range=1h`,
         );
         return toMetricDataPoints(data);
       },
@@ -89,7 +90,7 @@ export function useNodeHistoricalMetrics(
     queryKey: ["clusters", clusterId, "nodes", nodeId, "metrics", range],
     queryFn: async () => {
       const data = await apiClient.list<HistoricalMetricPoint>(
-        `/api/v1/clusters/${clusterId}/nodes/${nodeId}/metrics?range=${range}`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeId}/metrics?range=${range}`,
       );
       return toMetricDataPoints(data);
     },
@@ -107,7 +108,7 @@ export function useVMHistoricalMetrics(
     queryKey: ["clusters", clusterId, "vms", vmId, "metrics", range],
     queryFn: async () => {
       const data = await apiClient.list<HistoricalMetricPoint>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/metrics?range=${range}`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/metrics?range=${range}`,
       );
       return toMetricDataPoints(data);
     },

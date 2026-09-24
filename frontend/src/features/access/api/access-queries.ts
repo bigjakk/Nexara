@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath, queryParams } from "@/lib/api-path";
 
 /**
  * Proxmox access control for a single cluster: PVE users, API tokens, groups,
@@ -8,8 +9,10 @@ import { apiClient } from "@/lib/api-client";
  * This is the CLUSTER's own access model, not Nexara's. Nexara's local users
  * and roles live under features/admin.
  *
- * Every path segment is encodeURIComponent'd because these identifiers legally
- * contain characters that must be encoded — a PVE user id is "name@realm".
+ * Every path is built with apiPath (lib/api-path.ts), which encodes each
+ * segment — these identifiers legally contain characters that must be encoded,
+ * a PVE user id is "name@realm" — and refuses a group or role named "." or
+ * "..": Proxmox admits both, and no browser can send either as a segment.
  */
 
 /** A PVE user as returned by the list endpoint (groups is comma-separated). */
@@ -127,7 +130,6 @@ export type AccessPermissions = Record<string, Record<string, boolean>>;
  */
 const errorsHandledLocally = { onError: () => undefined };
 
-const base = (clusterId: string) => `/api/v1/clusters/${clusterId}/access`;
 const key = (clusterId: string, ...rest: string[]) => [
   "clusters",
   clusterId,
@@ -148,7 +150,10 @@ function invalidateAccess(
 export function useAccessUsers(clusterId: string) {
   return useQuery({
     queryKey: key(clusterId, "users"),
-    queryFn: () => apiClient.list<AccessUser>(`${base(clusterId)}/users`),
+    queryFn: () =>
+      apiClient.list<AccessUser>(
+        apiPath`/api/v1/clusters/${clusterId}/access/users`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -158,7 +163,7 @@ export function useAccessUser(clusterId: string, userid: string) {
     queryKey: key(clusterId, "users", userid),
     queryFn: () =>
       apiClient.get<AccessUserDetail>(
-        `${base(clusterId)}/users/${encodeURIComponent(userid)}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/users/${userid}`,
       ),
     enabled: clusterId.length > 0 && userid.length > 0,
   });
@@ -180,7 +185,7 @@ export function useCreateAccessUser(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: CreateAccessUserInput) =>
-      apiClient.post(`${base(clusterId)}/users`, data),
+      apiClient.post(apiPath`/api/v1/clusters/${clusterId}/access/users`, data),
     ...errorsHandledLocally,
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
@@ -199,7 +204,7 @@ export function useUpdateAccessUser(clusterId: string) {
       "userid" | "password"
     >) =>
       apiClient.put(
-        `${base(clusterId)}/users/${encodeURIComponent(userid)}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/users/${userid}`,
         data,
       ),
     onSuccess: () => {
@@ -213,7 +218,7 @@ export function useDeleteAccessUser(clusterId: string) {
   return useMutation({
     mutationFn: ({ userid, force }: { userid: string; force?: boolean }) =>
       apiClient.delete(
-        `${base(clusterId)}/users/${encodeURIComponent(userid)}${force ? "?force=true" : ""}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/users/${userid}?${queryParams({ force: force ? "true" : undefined })}`,
       ),
     ...errorsHandledLocally,
     onSuccess: () => {
@@ -229,7 +234,7 @@ export function useAccessTokens(clusterId: string, userid: string) {
     queryKey: key(clusterId, "users", userid, "tokens"),
     queryFn: () =>
       apiClient.list<AccessToken>(
-        `${base(clusterId)}/users/${encodeURIComponent(userid)}/tokens`,
+        apiPath`/api/v1/clusters/${clusterId}/access/users/${userid}/tokens`,
       ),
     enabled: clusterId.length > 0 && userid.length > 0,
   });
@@ -250,7 +255,7 @@ export function useCreateAccessToken(clusterId: string) {
       privsep?: boolean;
     }) =>
       apiClient.post<AccessTokenCreated>(
-        `${base(clusterId)}/users/${encodeURIComponent(userid)}/tokens/${encodeURIComponent(tokenid)}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/users/${userid}/tokens/${tokenid}`,
         data,
       ),
     ...errorsHandledLocally,
@@ -278,7 +283,7 @@ export function useUpdateAccessToken(clusterId: string) {
       regenerate?: boolean;
     }) =>
       apiClient.put<AccessTokenCreated>(
-        `${base(clusterId)}/users/${encodeURIComponent(userid)}/tokens/${encodeURIComponent(tokenid)}${force ? "?force=true" : ""}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/users/${userid}/tokens/${tokenid}?${queryParams({ force: force ? "true" : undefined })}`,
         data,
       ),
     ...errorsHandledLocally,
@@ -301,7 +306,7 @@ export function useDeleteAccessToken(clusterId: string) {
       force?: boolean;
     }) =>
       apiClient.delete(
-        `${base(clusterId)}/users/${encodeURIComponent(userid)}/tokens/${encodeURIComponent(tokenid)}${force ? "?force=true" : ""}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/users/${userid}/tokens/${tokenid}?${queryParams({ force: force ? "true" : undefined })}`,
       ),
     ...errorsHandledLocally,
     onSuccess: () => {
@@ -315,7 +320,10 @@ export function useDeleteAccessToken(clusterId: string) {
 export function useAccessGroups(clusterId: string) {
   return useQuery({
     queryKey: key(clusterId, "groups"),
-    queryFn: () => apiClient.list<AccessGroup>(`${base(clusterId)}/groups`),
+    queryFn: () =>
+      apiClient.list<AccessGroup>(
+        apiPath`/api/v1/clusters/${clusterId}/access/groups`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -325,7 +333,7 @@ export function useAccessGroup(clusterId: string, groupid: string) {
     queryKey: key(clusterId, "groups", groupid),
     queryFn: () =>
       apiClient.get<AccessGroupDetail>(
-        `${base(clusterId)}/groups/${encodeURIComponent(groupid)}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/groups/${groupid}`,
       ),
     enabled: clusterId.length > 0 && groupid.length > 0,
   });
@@ -335,7 +343,10 @@ export function useCreateAccessGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: { groupid: string; comment?: string }) =>
-      apiClient.post(`${base(clusterId)}/groups`, data),
+      apiClient.post(
+        apiPath`/api/v1/clusters/${clusterId}/access/groups`,
+        data,
+      ),
     ...errorsHandledLocally,
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
@@ -348,7 +359,7 @@ export function useUpdateAccessGroup(clusterId: string) {
   return useMutation({
     mutationFn: ({ groupid, comment }: { groupid: string; comment: string }) =>
       apiClient.put(
-        `${base(clusterId)}/groups/${encodeURIComponent(groupid)}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/groups/${groupid}`,
         { comment },
       ),
     ...errorsHandledLocally,
@@ -363,7 +374,7 @@ export function useDeleteAccessGroup(clusterId: string) {
   return useMutation({
     mutationFn: (groupid: string) =>
       apiClient.delete(
-        `${base(clusterId)}/groups/${encodeURIComponent(groupid)}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/groups/${groupid}`,
       ),
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
@@ -376,7 +387,10 @@ export function useDeleteAccessGroup(clusterId: string) {
 export function useAccessRoles(clusterId: string) {
   return useQuery({
     queryKey: key(clusterId, "roles"),
-    queryFn: () => apiClient.list<AccessRole>(`${base(clusterId)}/roles`),
+    queryFn: () =>
+      apiClient.list<AccessRole>(
+        apiPath`/api/v1/clusters/${clusterId}/access/roles`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -385,7 +399,7 @@ export function useCreateAccessRole(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: { roleid: string; privs: string }) =>
-      apiClient.post(`${base(clusterId)}/roles`, data),
+      apiClient.post(apiPath`/api/v1/clusters/${clusterId}/access/roles`, data),
     ...errorsHandledLocally,
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
@@ -399,9 +413,12 @@ export function useUpdateAccessRole(clusterId: string) {
     // privs is always sent: the API rejects an omitted value rather than
     // treating it as "clear", because clearing strips every privilege.
     mutationFn: ({ roleid, privs }: { roleid: string; privs: string }) =>
-      apiClient.put(`${base(clusterId)}/roles/${encodeURIComponent(roleid)}`, {
-        privs,
-      }),
+      apiClient.put(
+        apiPath`/api/v1/clusters/${clusterId}/access/roles/${roleid}`,
+        {
+          privs,
+        },
+      ),
     ...errorsHandledLocally,
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
@@ -414,7 +431,7 @@ export function useDeleteAccessRole(clusterId: string) {
   return useMutation({
     mutationFn: (roleid: string) =>
       apiClient.delete(
-        `${base(clusterId)}/roles/${encodeURIComponent(roleid)}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/roles/${roleid}`,
       ),
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
@@ -427,7 +444,10 @@ export function useDeleteAccessRole(clusterId: string) {
 export function useAccessACL(clusterId: string) {
   return useQuery({
     queryKey: key(clusterId, "acl"),
-    queryFn: () => apiClient.list<AccessACLEntry>(`${base(clusterId)}/acl`),
+    queryFn: () =>
+      apiClient.list<AccessACLEntry>(
+        apiPath`/api/v1/clusters/${clusterId}/access/acl`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -453,7 +473,7 @@ export function useUpdateAccessACL(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: UpdateACLInput) =>
-      apiClient.put(`${base(clusterId)}/acl`, data),
+      apiClient.put(apiPath`/api/v1/clusters/${clusterId}/access/acl`, data),
     ...errorsHandledLocally,
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
@@ -466,7 +486,10 @@ export function useUpdateAccessACL(clusterId: string) {
 export function useAccessDomains(clusterId: string) {
   return useQuery({
     queryKey: key(clusterId, "domains"),
-    queryFn: () => apiClient.list<AccessDomain>(`${base(clusterId)}/domains`),
+    queryFn: () =>
+      apiClient.list<AccessDomain>(
+        apiPath`/api/v1/clusters/${clusterId}/access/domains`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -483,7 +506,9 @@ export function useAccessPermissions(clusterId: string) {
   return useQuery({
     queryKey: key(clusterId, "permissions"),
     queryFn: () =>
-      apiClient.get<AccessPermissions>(`${base(clusterId)}/permissions`),
+      apiClient.get<AccessPermissions>(
+        apiPath`/api/v1/clusters/${clusterId}/access/permissions`,
+      ),
     enabled: clusterId.length > 0,
     staleTime: 5 * 60_000,
   });

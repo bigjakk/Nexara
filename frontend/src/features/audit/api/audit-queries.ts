@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 export interface AuditLogEntry {
   id: string;
@@ -26,7 +27,8 @@ export interface AuditLogEntry {
 export function useRecentActivity() {
   return useQuery({
     queryKey: ["recent-activity"],
-    queryFn: () => apiClient.list<AuditLogEntry>("/api/v1/audit-log/recent"),
+    queryFn: () =>
+      apiClient.list<AuditLogEntry>(apiPath`/api/v1/audit-log/recent`),
     refetchInterval: 120_000,
   });
 }

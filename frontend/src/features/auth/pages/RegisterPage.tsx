@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient, ApiClientError } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { SetupStatus } from "@/types/api";
 
 function useRegisterSchema() {
@@ -72,7 +73,7 @@ export function RegisterPage() {
   useEffect(() => {
     let cancelled = false;
     apiClient
-      .getPublic<SetupStatus>("/api/v1/auth/setup-status")
+      .getPublic<SetupStatus>(apiPath`/api/v1/auth/setup-status`)
       .then((status) => {
         if (!cancelled) {
           if (!status.needs_setup) {

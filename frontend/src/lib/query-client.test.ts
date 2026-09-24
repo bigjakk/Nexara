@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { retryUnlessClientError, queryClient } from "./query-client";
 import { ApiClientError } from "@/lib/api-client";
+import { PathSegmentError } from "@/lib/api-path";
 
 function apiError(status: number) {
   return new ApiClientError(status, {
@@ -32,6 +33,11 @@ describe("retryUnlessClientError", () => {
     expect(retryUnlessClientError(0, apiError(status))).toBe(true);
     // Still capped at one retry, exactly as the previous `retry: 1` was.
     expect(retryUnlessClientError(1, apiError(status))).toBe(false);
+  });
+
+  it("does not retry a path apiPath refused — the name cannot change", () => {
+    const refused = new PathSegmentError("..", "refused");
+    expect(retryUnlessClientError(0, refused)).toBe(false);
   });
 
   it("retries a non-API error, which carries no status to judge", () => {

@@ -96,10 +96,13 @@ func (c *Client) CreateResourcePool(ctx context.Context, params CreatePoolParams
 // The price is a pool literally named "." or "..": Nexara cannot address it,
 // and cannot move a guest into it or out of it, since SetVMPool
 // (internal/api/handlers/vms.go) goes through UpdateResourcePool for both
-// halves of a move. Yet it can create such a pool, because CreateResourcePool
-// sends the id as a form field (see below), and create a guest INTO one,
-// because CreateVM and CreateCT send `pool` as a form field too — and a guest
-// created there can never be moved out through Nexara. Switching these three
+// halves of a move. It does not CREATE one: CreateResourcePool (above) would
+// send either name, since it carries the id as a form field, but POST /pools
+// refuses both at its declaration (pve-poolid-new, poolCreateIDParam in
+// internal/api/registry_pools.go). One made outside Nexara can still exist,
+// though, and Nexara can still create a guest INTO it, because CreateVM and
+// CreateCT send `pool` as a form field too — and a guest created there can
+// never be moved out through Nexara. Switching these three
 // methods to the forms PVE now prefers — PUT, DELETE and GET /pools with
 // poolid as a parameter; the {poolid} path forms are deprecated upstream —
 // takes the id out of this client's path, but fixes only that leg: Nexara's

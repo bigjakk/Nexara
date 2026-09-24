@@ -46,7 +46,10 @@ var haSIDParam = apischema.Property{
 // made outside Nexara cannot become unaddressable through our own stricter
 // create rule. What it does enforce is the shape — a leading letter, then
 // letters, digits, underscore and dash — which keeps "..", "%2e%2e" and a
-// slash out of a path both proxmox client methods build by concatenation.
+// slash out of the raw path segment. The handlers decode that segment
+// (decodeParamValue) and the decoded id is re-checked by the client, whose
+// methods run validateHAConfigID (internal/proxmox/client_ha.go) before they
+// escape an id into a Proxmox path.
 //
 // The rule is the catalogue's pve-configid-existing, shared with
 // snapshotNameParam (registry_vms.go), which is looser than pve-configid by

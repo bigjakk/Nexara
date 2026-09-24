@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { SortDirection } from "@/hooks/useTableSort";
 import type { TaskSortKey } from "../lib/task-columns";
 
@@ -84,8 +85,7 @@ export function useTasks({
       order,
       vmidsKey,
     ],
-    queryFn: () =>
-      apiClient.page<TaskRecord>(`/api/v1/tasks?${params.toString()}`),
+    queryFn: () => apiClient.page<TaskRecord>(apiPath`/api/v1/tasks?${params}`),
     enabled: enabled ?? true,
     // Keep the previous page's rows (and, crucially, its `total`) visible
     // while the next page loads — consumers derive page counts from `total`,

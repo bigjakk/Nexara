@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   OIDCConfig,
   OIDCConfigRequest,
@@ -9,7 +10,7 @@ import type {
 export function useOIDCConfigs() {
   return useQuery({
     queryKey: ["oidc", "configs"],
-    queryFn: () => apiClient.list<OIDCConfig>("/api/v1/oidc/configs"),
+    queryFn: () => apiClient.list<OIDCConfig>(apiPath`/api/v1/oidc/configs`),
   });
 }
 
@@ -35,7 +36,7 @@ export function useCreateOIDCConfig() {
   return useMutation({
     ...errorsHandledLocally,
     mutationFn: (data: OIDCConfigRequest) =>
-      apiClient.post<OIDCConfig>("/api/v1/oidc/configs", data),
+      apiClient.post<OIDCConfig>(apiPath`/api/v1/oidc/configs`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["oidc", "configs"] });
     },
@@ -47,7 +48,7 @@ export function useUpdateOIDCConfig() {
   return useMutation({
     ...errorsHandledLocally,
     mutationFn: ({ id, ...data }: OIDCConfigRequest & { id: string }) =>
-      apiClient.put<OIDCConfig>(`/api/v1/oidc/configs/${id}`, data),
+      apiClient.put<OIDCConfig>(apiPath`/api/v1/oidc/configs/${id}`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["oidc", "configs"] });
     },
@@ -57,7 +58,8 @@ export function useUpdateOIDCConfig() {
 export function useDeleteOIDCConfig() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiClient.delete(`/api/v1/oidc/configs/${id}`),
+    mutationFn: (id: string) =>
+      apiClient.delete(apiPath`/api/v1/oidc/configs/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["oidc", "configs"] });
     },
@@ -67,6 +69,8 @@ export function useDeleteOIDCConfig() {
 export function useTestOIDCConnection() {
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.post<OIDCTestResponse>(`/api/v1/oidc/configs/${id}/test`),
+      apiClient.post<OIDCTestResponse>(
+        apiPath`/api/v1/oidc/configs/${id}/test`,
+      ),
   });
 }

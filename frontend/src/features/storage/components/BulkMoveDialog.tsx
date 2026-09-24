@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { useStorageContent } from "../api/storage-queries";
 import type { StorageContentItem } from "../types/storage";
 import type { VMActionResponse } from "@/features/vms/types/vm";
@@ -48,7 +49,7 @@ async function resolveVolidToDiskKey(
 ): Promise<string | null> {
   try {
     const config = await apiClient.get<VMConfig>(
-      `/api/v1/clusters/${clusterId}/vms/${vmUuid}/config`,
+      apiPath`/api/v1/clusters/${clusterId}/vms/${vmUuid}/config`,
     );
     for (const [key, val] of Object.entries(config)) {
       if (
@@ -106,7 +107,7 @@ export function BulkMoveDialog({
     let vmList: VMListEntry[];
     try {
       vmList = await apiClient.list<VMListEntry>(
-        `/api/v1/clusters/${clusterId}/vms`,
+        apiPath`/api/v1/clusters/${clusterId}/vms`,
       );
     } catch {
       setRunning(false);
@@ -172,7 +173,7 @@ export function BulkMoveDialog({
         }
 
         const resp = await apiClient.post<VMActionResponse>(
-          `/api/v1/clusters/${clusterId}/vms/${vmUuid}/disks/move`,
+          apiPath`/api/v1/clusters/${clusterId}/vms/${vmUuid}/disks/move`,
           { disk: job.diskKey, storage: targetStorage, delete: deleteOriginal },
         );
 

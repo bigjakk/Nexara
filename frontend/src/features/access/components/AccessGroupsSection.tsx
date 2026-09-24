@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiClientError } from "@/lib/api-client";
+import { unaddressableHint } from "@/lib/api-path";
 
 import {
   type AccessCapabilities,
@@ -190,31 +191,44 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                       </TableCell>
                       {manageable && (
                         <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Edit ${group.groupid}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditTarget({
-                                groupid: group.groupid,
-                                comment: group.comment ?? "",
-                              });
-                            }}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Delete ${group.groupid}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteTarget(group.groupid);
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                          {/* Proxmox admits a group named "." or "..";
+                              Nexara cannot address one (lib/api-path.ts), so
+                              the row shows why in place of its actions — as
+                              text, since a disabled button's title never
+                              shows. */}
+                          {unaddressableHint(group.groupid) !== null ? (
+                            <span className="text-xs text-muted-foreground">
+                              {unaddressableHint(group.groupid)}
+                            </span>
+                          ) : (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label={`Edit ${group.groupid}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditTarget({
+                                    groupid: group.groupid,
+                                    comment: group.comment ?? "",
+                                  });
+                                }}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label={`Delete ${group.groupid}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteTarget(group.groupid);
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </>
+                          )}
                         </TableCell>
                       )}
                     </TableRow>
@@ -285,8 +299,20 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
   );
 }
 
-/** Group members, fetched lazily when the row is expanded. */
-function GroupMembers({
+/**
+ * Group members, fetched lazily when the row is expanded — or, for a group
+ * Nexara cannot address, why not: reading them needs the same path, which
+ * apiPath refuses to build.
+ */
+function GroupMembers(props: { clusterId: string; groupid: string }) {
+  const hint = unaddressableHint(props.groupid);
+  if (hint !== null) {
+    return <p className="py-1 text-sm text-muted-foreground">{hint}</p>;
+  }
+  return <AddressableGroupMembers {...props} />;
+}
+
+function AddressableGroupMembers({
   clusterId,
   groupid,
 }: {

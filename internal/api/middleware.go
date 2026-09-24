@@ -250,6 +250,50 @@ func (s *Server) setupMiddleware() {
 		},
 	}))
 
+	// Refuse a write whose path ends in "/" before it can reach a route. See
+	// refuseTrailingSlashWrites for what it refuses and why.
+	//
+	// Its position is what makes it cover every route, the same way the
+	// content-coding gate's does: setupMiddleware runs before setupRoutes,
+	// and main.go mounts the /ws upgraders and the embedded-SPA handler
+	// after New, so the registry routes, the legacy ones in router.go, the
+	// upgraders and the SPA handler all sit behind it.
+	// TestTrailingSlashGatePrecedesEveryRoute sweeps the route table for it.
+	//
+	// Among the app-level middleware, each neighbour was chosen:
+	//
+	//   - After the logger, requestid and the security headers, so a refusal
+	//     carries a request id and the security headers and is access-logged
+	//     like any other rejection — with the path as sent, trailing slash
+	//     included, since the logger's ${path} reads the same c.Path().
+	//   - After the content-coding gate. A content-coded write with a
+	//     trailing slash is refused by that gate first, and that refusal
+	//     also closes the connection, which this one does not do.
+	//   - After CORS, which for a request that is not a preflight sets its
+	//     response headers and calls Next. So a cross-origin caller's refused
+	//     write still carries Access-Control-Allow-Origin, and its browser
+	//     hands the caller this 400 rather than an opaque CORS failure. A
+	//     preflight never gets here: CORS answers it with a 204 first.
+	//   - After the body-size guard and every limiter. A refused write still
+	//     spends the caller's own limiter budget, the rule this API already
+	//     follows for permission checks: a flood of them is throttled rather
+	//     than answered with free refusals. It is also what keeps a trailing-
+	//     slash spelling of an auth-limited path on the auth cap —
+	//     TestAuthLimiterCannotBeSpelledAround requires that of POST
+	//     /api/v1/auth/login/, and fails if this gate moves ahead of the
+	//     limiters. None of them reads a body; nothing here does before a
+	//     route runs.
+	//   - Ahead of compression and of every route: a refusal returns before
+	//     either runs.
+	//
+	// It does not close the connection, and it does not read the body: a body
+	// it leaves unread stays on a kept-alive connection, where fasthttp would
+	// read what is left of it as the next request. That is the same
+	// pre-existing gap every early rejection here has — the 401, 404, 405,
+	// 413 and 429 answers alike — and it is tracked as one fix of its own
+	// rather than patched gate by gate.
+	s.app.Use(refuseTrailingSlashWrites)
+
 	// Response compression — see compressionSkipped for what is excluded and
 	// why, and the block comment above it for the BREACH assessment.
 	//
@@ -365,6 +409,94 @@ func refuseContentCodedRequests(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusUnsupportedMediaType, contentCodingRefusal)
 	}
 	return c.Next()
+}
+
+// trailingSlashRefusal is the message refuseTrailingSlashWrites answers
+// with.
+const trailingSlashRefusal = `only GET, HEAD and OPTIONS requests may end their path in "/"; ` +
+	`send this one without the trailing slash`
+
+// refuseTrailingSlashWrites answers 400 to a request whose path ends in "/"
+// unless it is a GET, a HEAD or an OPTIONS, before any route can see it.
+//
+// # Why
+//
+// A browser resolves a "." or ".." path segment before a request leaves it:
+// the WHATWG URL parser every browser shares drops a "." segment, drops a
+// ".." segment together with the segment before it, and counts "%2e" in
+// either case as a dot while doing so. When the dot segment is the LAST
+// one, what goes out ends in a slash: ".../pools/." is sent as ".../pools/"
+// and ".../pools/.." as "/api/v1/clusters/<id>/", which is how the SPA's
+// DELETE of a pool named ".." reached the server. Fiber ignores a trailing
+// slash when it routes (StrictRouting is off in buildFiberConfig), so that
+// request matched the CLUSTER delete route and removed the cluster. A final
+// dot segment always leaves such a slash behind, so refusing it here closes
+// that case for every route at once, whatever the id, the object or the
+// caller. No caller needs one: the SPA sends every write without it. That
+// includes the two write routes router.go registers on a group root, which
+// the route table lists as POST /api/v1/alert-rules/ and POST
+// /api/v1/firewall-templates/ but which Fiber matches without the slash.
+//
+// A dot segment in the MIDDLE of a path leaves no such mark. "." there
+// just disappears and ".." takes the segment before it with it, so what is
+// sent is an ordinary path — ".../pools/../members" goes out as
+// "/api/v1/clusters/<id>/members" — which may be a real route. Only the
+// SPA's refusal to put a "." or ".." into a path at all covers that case
+// (apiPath, frontend/src/lib/api-path.ts); this gate does not.
+//
+// # What it reads
+//
+// c.Path(), which is the request path exactly as the router sees it before
+// its own trailing-slash strip: configDependentPaths copies fasthttp's
+// PathOriginal — the raw path, not percent-decoded, not dot-resolved, the
+// query excluded — and with UnescapePath off (buildFiberConfig does not set
+// it) Path returns those bytes unchanged. The router then trims every
+// trailing "/" from the same bytes when the path is longer than one
+// character, and this gate uses the same length test, so "/" alone is the
+// root rather than a trailing slash and "//" at the end is refused like "/".
+// "/x%2F" does not end in "/" to either of them.
+//
+// # Which methods
+//
+// Every method but GET, HEAD and OPTIONS — the three Nexara answers as reads.
+// That list is Nexara's own contract, not HTTP's list of safe methods: RFC
+// 9110 §9.2.1 also calls TRACE safe, RFC 10008 does QUERY, and Fiber v3
+// routes both by default, but no Nexara route serves either, so exempting
+// them would only let a trailing-slash QUERY through to whatever catch-all
+// is added next. POST, PUT, PATCH and DELETE are the writes Nexara routes;
+// refusing every method outside the three also covers CONNECT, TRACE, QUERY
+// and a route added later under another method, without anyone having to
+// remember this gate. The three pass because a mis-resolved one changes
+// nothing: the worst a trailing-slash GET does is read the parent resource,
+// with the caller's own permissions — the SPA handler serves deep links to
+// GET under any path — and a HEAD is a GET without the body. An OPTIONS
+// changes nothing either: a CORS preflight is answered by CORS before it
+// gets here, and any other OPTIONS by the router. (A method Fiber does not
+// know is answered 501 by the router before any middleware runs.)
+//
+// # Why 400
+//
+// The request is malformed, not aimed at something missing. A 404 would
+// claim the resource does not exist, and a client that treats a 404 on
+// DELETE as "already gone" would then record a deletion that never
+// happened; a 405 would claim the method is not allowed there. Both are
+// false — the same request without the slash reaches its route.
+func refuseTrailingSlashWrites(c fiber.Ctx) error {
+	if p := c.Path(); len(p) > 1 && p[len(p)-1] == '/' && !isReadMethod(c.Method()) {
+		return fiber.NewError(fiber.StatusBadRequest, trailingSlashRefusal)
+	}
+	return c.Next()
+}
+
+// isReadMethod reports whether Nexara answers this method as a read, which
+// is what exempts it from refuseTrailingSlashWrites: GET, HEAD and OPTIONS.
+// See that function for why TRACE and QUERY are not on the list.
+func isReadMethod(method string) bool {
+	switch method {
+	case fiber.MethodGet, fiber.MethodHead, fiber.MethodOptions:
+		return true
+	}
+	return false
 }
 
 // hasContentCoding reports whether the request names any content coding
@@ -533,8 +665,8 @@ func compressionSkipped(c fiber.Ctx) bool {
 	// busiest of them (/auth/refresh) fires once per session per ~14 minutes.
 	//
 	// limiterPath rather than c.Path(), for exactly the reason spelled out on
-	// limiterPath: Fiber routes on a lowercased, slash-trimmed path, so
-	// "/API/v1/auth/login/" reaches the handler while a raw comparison misses
+	// limiterPath: Fiber routes on a lowercased, slash-trimmed path, so a GET
+	// of "/API/v1/auth/me/" reaches the handler while a raw comparison misses
 	// it. The bare "/api/v1/auth" is named separately because the prefix's
 	// trailing slash would not match it — it routes nowhere today, and the
 	// point is that it would not need revisiting if it ever did.
@@ -582,9 +714,11 @@ var authCookieScope = strings.TrimSuffix(authCookieScopePrefix, "/")
 //
 //   - A path-matching Next() cannot be written safely at app level. Fiber routes
 //     on a lowercased, slash-trimmed path (CaseSensitive and StrictRouting are
-//     both false), so "POST /API/v1/clusters//" reaches this handler while a
+//     both false), so "POST /API/v1/Clusters" reaches this handler while a
 //     comparison against "/api/v1/clusters" does not match it — the limiter
-//     would be skipped by a request that still spends a login attempt.
+//     would be skipped by a request that still spends a login attempt. (The
+//     slash-trimmed spellings of a POST no longer reach the handler at all:
+//     refuseTrailingSlashWrites answers them first. The case-folded ones do.)
 //   - App-level middleware runs before the group's authRequired, so anonymous
 //     traffic could drain the bucket and lock legitimate onboarding out.
 //     Behind a proxy with TRUSTED_PROXIES unset every client shares one bucket,
@@ -677,12 +811,20 @@ func (s *Server) fingerprintFetchLimiter() fiber.Handler {
 // are both false here. A limiter gating on the raw path therefore steps aside
 // for spellings that still reach the handler:
 //
-//	POST /api/v1/auth/login/   the auth limiter's exact match misses it, and the
-//	                           general limiter's "/api/v1/auth/" prefix still
-//	                           matches, so it is skipped too — login ends up with
-//	                           NO rate limit at all
-//	POST /API/v1/auth/login    auth limiter skipped; the general limiter applies
-//	                           its far larger budget instead
+//	GET /api/v1/auth/oidc/authorize/   the auth limiter's exact match misses
+//	                                   it, and the general limiter's
+//	                                   "/api/v1/auth/" prefix still matches, so
+//	                                   it is skipped too — the OIDC flow ends
+//	                                   up with NO rate limit at all
+//	POST /API/v1/auth/login            auth limiter skipped; the general
+//	                                   limiter applies its far larger budget
+//	                                   instead
+//
+// A write spelled with a trailing slash — POST /api/v1/auth/login/, the
+// spelling that once left login with no limit at all — no longer reaches its
+// handler: refuseTrailingSlashWrites refuses it. The limiters run ahead of
+// that gate and still count it, which TestAuthLimiterCannotBeSpelledAround
+// pins.
 //
 // Route-attached limiters (see clusterCreateLimiter) do not need this, because
 // matching is Fiber's job by then.

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 export type ConsoleScopeType =
   | "node_shell"
@@ -60,7 +61,7 @@ export async function mintConsoleToken(
     body.silent = true;
   }
   return apiClient.post<ConsoleTokenResponse>(
-    "/api/v1/auth/console-token",
+    apiPath`/api/v1/auth/console-token`,
     body,
   );
 }
@@ -137,7 +138,7 @@ export function createConsoleTokenMinter(): ConsoleTokenMinter {
  * history, and Referer headers.
  */
 export async function mintWSHubToken(): Promise<ConsoleTokenResponse> {
-  return apiClient.post<ConsoleTokenResponse>("/api/v1/auth/ws-token");
+  return apiClient.post<ConsoleTokenResponse>(apiPath`/api/v1/auth/ws-token`);
 }
 
 /**
@@ -200,7 +201,7 @@ export function useNodeISOs(
     queryKey: ["clusters", clusterId, "nodes", nodeName, "isos"],
     queryFn: () =>
       apiClient.list<ISOImage>(
-        `/api/v1/clusters/${clusterId}/nodes/${nodeName}/isos`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/isos`,
       ),
     enabled: enabled && clusterId.length > 0 && nodeName.length > 0,
     staleTime: 30_000,
@@ -219,7 +220,7 @@ export function useMountISO() {
   return useMutation({
     mutationFn: ({ clusterId, vmId, volid }: MountISOParams) =>
       apiClient.post<{ status: string; device: string }>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/media`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/media`,
         { volid },
       ),
     onSuccess: (_data, variables) => {

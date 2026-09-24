@@ -28,6 +28,7 @@ import {
   useResourcePools,
 } from "../api/vm-queries";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { NodeResponse, VMResponse } from "@/types/api";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import {
@@ -742,7 +743,7 @@ export function CreateVMDialog({
                   })
                   .then(() =>
                     apiClient.list<VMResponse>(
-                      `/api/v1/clusters/${clusterId}/vms`,
+                      apiPath`/api/v1/clusters/${clusterId}/vms`,
                     ),
                   )
                   .then((vms) => {

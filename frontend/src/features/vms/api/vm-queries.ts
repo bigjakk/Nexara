@@ -6,6 +6,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { VMResponse } from "@/types/api";
 import type {
   VMAction,
@@ -41,7 +42,7 @@ export function useClusterVMIDs(clusterId: string) {
     queryKey: ["clusters", clusterId, "vmids"],
     queryFn: async () => {
       const vms = await apiClient.list<VMResponse>(
-        `/api/v1/clusters/${clusterId}/vms`,
+        apiPath`/api/v1/clusters/${clusterId}/vms`,
       );
       return new Set(vms.map((vm) => vm.vmid));
     },
@@ -61,7 +62,9 @@ export function useResourcePools(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "pools"],
     queryFn: () =>
-      apiClient.list<ResourcePool>(`/api/v1/clusters/${clusterId}/pools`),
+      apiClient.list<ResourcePool>(
+        apiPath`/api/v1/clusters/${clusterId}/pools`,
+      ),
     enabled: clusterId.length > 0,
     staleTime: 60_000,
   });
@@ -69,12 +72,10 @@ export function useResourcePools(clusterId: string) {
 
 // --- Single VM/CT fetch ---
 
+// The path is built inside queryFn, which runs only once `enabled` holds:
+// apiPath refuses an empty id, and building it in the hook body would throw
+// during render while the id is still loading.
 export function useVM(clusterId: string, vmId: string, kind: ResourceKind) {
-  const endpoint =
-    kind === "ct"
-      ? `/api/v1/clusters/${clusterId}/containers/${vmId}`
-      : `/api/v1/clusters/${clusterId}/vms/${vmId}`;
-
   return useQuery({
     queryKey: [
       "clusters",
@@ -82,7 +83,12 @@ export function useVM(clusterId: string, vmId: string, kind: ResourceKind) {
       kind === "ct" ? "containers" : "vms",
       vmId,
     ],
-    queryFn: () => apiClient.get<VMResponse>(endpoint),
+    queryFn: () =>
+      apiClient.get<VMResponse>(
+        kind === "ct"
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${vmId}`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}`,
+      ),
     enabled: clusterId.length > 0 && vmId.length > 0,
     refetchInterval: 60_000, // WS events handle immediate updates
   });
@@ -102,8 +108,8 @@ export function useVMAction() {
     mutationFn: ({ clusterId, resourceId, kind, action }: ActionParams) => {
       const base =
         kind === "ct"
-          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/status`
-          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/status`;
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}/status`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}/status`;
       return apiClient.post<VMActionResponse>(base, { action });
     },
     // No onSuccess invalidation here — the backend publishes a vm_state_change
@@ -128,8 +134,8 @@ export function useCloneVM() {
     mutationFn: ({ clusterId, resourceId, kind, body }: CloneParams) => {
       const base =
         kind === "ct"
-          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/clone`
-          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/clone`;
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}/clone`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}/clone`;
       return apiClient.post<VMActionResponse>(base, body);
     },
     onSuccess: (_data, variables) => {
@@ -159,8 +165,8 @@ export function useCloneToTemplate() {
     }: CloneToTemplateParams) => {
       const base =
         kind === "ct"
-          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/clone-to-template`
-          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/clone-to-template`;
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}/clone-to-template`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}/clone-to-template`;
       return apiClient.post<VMActionResponse>(base, body);
     },
     onSuccess: (_data, variables) => {
@@ -184,8 +190,8 @@ export function useConvertToTemplate() {
     mutationFn: ({ clusterId, resourceId, kind }: ConvertToTemplateParams) => {
       const base =
         kind === "ct"
-          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/convert-to-template`
-          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/convert-to-template`;
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}/convert-to-template`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}/convert-to-template`;
       return apiClient.post<VMActionResponse>(base, {});
     },
     onSuccess: (_data, variables) => {
@@ -208,7 +214,7 @@ export function useMigrateContainer() {
   return useMutation({
     mutationFn: ({ clusterId, containerId, body }: MigrateParams) =>
       apiClient.post<VMActionResponse>(
-        `/api/v1/clusters/${clusterId}/containers/${containerId}/migrate`,
+        apiPath`/api/v1/clusters/${clusterId}/containers/${containerId}/migrate`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -229,7 +235,7 @@ export function useMigrateVM() {
   return useMutation({
     mutationFn: ({ clusterId, vmId, body }: MigrateVMParams) =>
       apiClient.post<VMActionResponse>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/migrate`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/migrate`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -253,8 +259,8 @@ export function useDestroyVM() {
     mutationFn: ({ clusterId, resourceId, kind }: DestroyParams) => {
       const base =
         kind === "ct"
-          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}`
-          : `/api/v1/clusters/${clusterId}/vms/${resourceId}`;
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}`;
       return apiClient.delete<VMActionResponse>(base);
     },
     onSuccess: (_data, variables) => {
@@ -270,7 +276,7 @@ export function useTaskStatus(clusterId: string, upid: string | null) {
     queryKey: ["clusters", clusterId, "tasks", upid],
     queryFn: () =>
       apiClient.get<TaskStatusResponse>(
-        `/api/v1/clusters/${clusterId}/tasks/${encodeURIComponent(upid ?? "")}`,
+        apiPath`/api/v1/clusters/${clusterId}/tasks/${upid ?? ""}`,
       ),
     enabled: upid !== null && upid.length > 0 && clusterId.length > 0,
     refetchInterval: (query) => {
@@ -297,11 +303,6 @@ export function useSnapshotCapability(
   kind: ResourceKind,
   enabled: boolean,
 ) {
-  const base =
-    kind === "ct"
-      ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshot-capability`
-      : `/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshot-capability`;
-
   return useQuery({
     queryKey: [
       "clusters",
@@ -310,7 +311,12 @@ export function useSnapshotCapability(
       resourceId,
       "snapshot-capability",
     ],
-    queryFn: () => apiClient.get<SnapshotCapability>(base),
+    queryFn: () =>
+      apiClient.get<SnapshotCapability>(
+        kind === "ct"
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshot-capability`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshot-capability`,
+      ),
     enabled: enabled && clusterId.length > 0 && resourceId.length > 0,
     staleTime: 60_000,
   });
@@ -321,11 +327,6 @@ export function useSnapshots(
   resourceId: string,
   kind: ResourceKind,
 ) {
-  const base =
-    kind === "ct"
-      ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots`
-      : `/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots`;
-
   return useQuery({
     queryKey: [
       "clusters",
@@ -334,7 +335,12 @@ export function useSnapshots(
       resourceId,
       "snapshots",
     ],
-    queryFn: () => apiClient.list<Snapshot>(base),
+    queryFn: () =>
+      apiClient.list<Snapshot>(
+        kind === "ct"
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots`,
+      ),
     enabled: clusterId.length > 0 && resourceId.length > 0,
   });
 }
@@ -358,8 +364,8 @@ export function useCreateSnapshot() {
     }: CreateSnapshotParams) => {
       const base =
         kind === "ct"
-          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots`
-          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots`;
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots`;
       return apiClient.post<VMActionResponse>(base, body);
     },
     onSuccess: (_data, variables) => {
@@ -396,8 +402,8 @@ export function useDeleteSnapshot() {
     }: DeleteSnapshotParams) => {
       const base =
         kind === "ct"
-          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots/${encodeURIComponent(snapName)}`
-          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots/${encodeURIComponent(snapName)}`;
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots/${snapName}`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots/${snapName}`;
       return apiClient.delete<VMActionResponse>(base);
     },
     onSuccess: (_data, variables) => {
@@ -434,8 +440,8 @@ export function useRollbackSnapshot() {
     }: RollbackSnapshotParams) => {
       const base =
         kind === "ct"
-          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots/${encodeURIComponent(snapName)}/rollback`
-          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots/${encodeURIComponent(snapName)}/rollback`;
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots/${snapName}/rollback`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots/${snapName}/rollback`;
       return apiClient.post<VMActionResponse>(base, {});
     },
     onSuccess: (_data, variables) => {
@@ -474,7 +480,7 @@ export function useResizeDisk() {
   return useMutation({
     mutationFn: ({ clusterId, vmId, disk, size }: ResizeDiskParams) =>
       apiClient.post<VMActionResponse>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/resize`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/disks/resize`,
         { disk, size },
       ),
     onSuccess: (_data, variables) => {
@@ -504,7 +510,7 @@ export function useCreateVM() {
   return useMutation({
     mutationFn: ({ clusterId, body }: CreateVMParams) =>
       apiClient.post<VMActionResponse>(
-        `/api/v1/clusters/${clusterId}/vms`,
+        apiPath`/api/v1/clusters/${clusterId}/vms`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -526,7 +532,7 @@ export function useCreateContainer() {
   return useMutation({
     mutationFn: ({ clusterId, body }: CreateContainerParams) =>
       apiClient.post<VMActionResponse>(
-        `/api/v1/clusters/${clusterId}/containers`,
+        apiPath`/api/v1/clusters/${clusterId}/containers`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -542,7 +548,7 @@ export function useVMConfig(clusterId: string, vmId: string) {
     queryKey: ["clusters", clusterId, "vms", vmId, "config"],
     queryFn: () =>
       apiClient.get<VMConfig>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/config`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/config`,
       ),
     enabled: clusterId.length > 0 && vmId.length > 0,
   });
@@ -555,7 +561,7 @@ export function useContainerConfig(clusterId: string, ctId: string) {
     queryKey: ["clusters", clusterId, "containers", ctId, "config"],
     queryFn: () =>
       apiClient.get<VMConfig>(
-        `/api/v1/clusters/${clusterId}/containers/${ctId}/config`,
+        apiPath`/api/v1/clusters/${clusterId}/containers/${ctId}/config`,
       ),
     enabled: clusterId.length > 0 && ctId.length > 0,
   });
@@ -576,7 +582,7 @@ export function useResizeContainerDisk() {
   return useMutation({
     mutationFn: ({ clusterId, ctId, disk, size }: ResizeContainerDiskParams) =>
       apiClient.post<VMActionResponse>(
-        `/api/v1/clusters/${clusterId}/containers/${ctId}/disks/resize`,
+        apiPath`/api/v1/clusters/${clusterId}/containers/${ctId}/disks/resize`,
         { disk, size },
       ),
     onSuccess: (_data, variables) => {
@@ -605,7 +611,7 @@ export function useSetVMConfig() {
   return useMutation({
     mutationFn: ({ clusterId, vmId, fields }: SetVMConfigParams) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/config`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/config`,
         { fields },
       ),
     onSuccess: (_data, variables) => {
@@ -641,8 +647,8 @@ export function useSetResourceConfig() {
     }: SetResourceConfigParams) => {
       const path =
         kind === "ct"
-          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/config`
-          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/config`;
+          ? apiPath`/api/v1/clusters/${clusterId}/containers/${resourceId}/config`
+          : apiPath`/api/v1/clusters/${clusterId}/vms/${resourceId}/config`;
       return apiClient.put<{ status: string }>(path, { fields });
     },
     onSuccess: (_data, variables) => {
@@ -683,7 +689,7 @@ export interface TaskHistoryEntry {
 export function useTaskHistory(): UseQueryResult<TaskHistoryEntry[]> {
   return useQuery({
     queryKey: ["task-history"],
-    queryFn: () => apiClient.list<TaskHistoryEntry>("/api/v1/tasks"),
+    queryFn: () => apiClient.list<TaskHistoryEntry>(apiPath`/api/v1/tasks`),
     refetchInterval: 60_000, // WS events handle immediate updates; polling is a safety fallback
   });
 }
@@ -707,7 +713,7 @@ export function useAddTaskHistory() {
       node,
       taskType,
     }: AddTaskHistoryParams) =>
-      apiClient.post<TaskHistoryEntry>("/api/v1/tasks", {
+      apiClient.post<TaskHistoryEntry>(apiPath`/api/v1/tasks`, {
         cluster_id: clusterId,
         upid,
         description,
@@ -740,15 +746,12 @@ export function useUpdateTaskHistory() {
       progress,
       finishedAt,
     }: UpdateTaskHistoryParams) =>
-      apiClient.put<{ status: string }>(
-        `/api/v1/tasks/${encodeURIComponent(upid)}`,
-        {
-          status,
-          exit_status: exitStatus ?? "",
-          progress: progress ?? null,
-          finished_at: finishedAt ?? null,
-        },
-      ),
+      apiClient.put<{ status: string }>(apiPath`/api/v1/tasks/${upid}`, {
+        status,
+        exit_status: exitStatus ?? "",
+        progress: progress ?? null,
+        finished_at: finishedAt ?? null,
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["task-history"] });
     },
@@ -759,7 +762,8 @@ export function useClearTaskHistory() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: () => apiClient.delete<{ status: string }>("/api/v1/tasks"),
+    mutationFn: () =>
+      apiClient.delete<{ status: string }>(apiPath`/api/v1/tasks`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["task-history"] });
     },
@@ -806,7 +810,7 @@ export function useGuestAgentInfo(
     queryKey: ["clusters", clusterId, "vms", vmId, "agent"],
     queryFn: () =>
       apiClient.get<GuestAgentResponse>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/agent`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/agent`,
       ),
     enabled: enabled && clusterId.length > 0 && vmId.length > 0,
     refetchInterval: 30_000,
@@ -841,7 +845,7 @@ export function useMoveDisk() {
       bwlimitKib,
     }: MoveDiskParams) =>
       apiClient.post<VMActionResponse>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/move`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/disks/move`,
         {
           disk,
           storage,
@@ -893,7 +897,7 @@ export function useMoveContainerVolume() {
       bwlimitKib,
     }: MoveContainerVolumeParams) =>
       apiClient.post<VMActionResponse>(
-        `/api/v1/clusters/${clusterId}/containers/${ctId}/volumes/move`,
+        apiPath`/api/v1/clusters/${clusterId}/containers/${ctId}/volumes/move`,
         {
           volume,
           storage,
@@ -945,7 +949,7 @@ export function useAttachDisk() {
       format,
     }: AttachDiskParams) =>
       apiClient.post<VMActionResponse>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/attach`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/disks/attach`,
         { bus, index, storage, size, format },
       ),
     onSuccess: (_data, variables) => {
@@ -974,7 +978,7 @@ export function useDetachDisk() {
   return useMutation({
     mutationFn: ({ clusterId, vmId, disk }: DetachDiskParams) =>
       apiClient.post<VMActionResponse>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/detach`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/disks/detach`,
         { disk },
       ),
     // What useMoveDisk refreshes, for the same reason: a detach can free a
@@ -1023,7 +1027,9 @@ export function useScheduledTasks(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "schedules"],
     queryFn: () =>
-      apiClient.list<ScheduledTask>(`/api/v1/clusters/${clusterId}/schedules`),
+      apiClient.list<ScheduledTask>(
+        apiPath`/api/v1/clusters/${clusterId}/schedules`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -1047,7 +1053,7 @@ export function useCreateSchedule() {
   return useMutation({
     mutationFn: ({ clusterId, body }: CreateScheduleParams) =>
       apiClient.post<ScheduledTask>(
-        `/api/v1/clusters/${clusterId}/schedules`,
+        apiPath`/api/v1/clusters/${clusterId}/schedules`,
         body,
       ),
     onSuccess: (_data, variables) => {
@@ -1069,7 +1075,7 @@ export function useDeleteSchedule() {
   return useMutation({
     mutationFn: ({ clusterId, scheduleId }: DeleteScheduleParams) =>
       apiClient.delete<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/schedules/${scheduleId}`,
+        apiPath`/api/v1/clusters/${clusterId}/schedules/${scheduleId}`,
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -1093,7 +1099,7 @@ export function useTaskLog(
     queryKey: ["task-log", clusterId, upid],
     queryFn: () =>
       apiClient.list<TaskLogLine>(
-        `/api/v1/clusters/${clusterId ?? ""}/tasks/${encodeURIComponent(upid ?? "")}/log`,
+        apiPath`/api/v1/clusters/${clusterId ?? ""}/tasks/${upid ?? ""}/log`,
       ),
     enabled: enabled && !!clusterId && !!upid,
     staleTime: 60_000,
@@ -1133,7 +1139,7 @@ export function useNodeUSBDevices(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "hardware", "usb"],
     queryFn: () =>
       apiClient.list<NodeUSBDevice>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/hardware/usb`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/hardware/usb`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
     staleTime: 30_000,
@@ -1145,7 +1151,7 @@ export function useNodePCIDevices(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "hardware", "pci"],
     queryFn: () =>
       apiClient.list<NodePCIDevice>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/hardware/pci`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/hardware/pci`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
     staleTime: 30_000,
@@ -1157,7 +1163,7 @@ export function useSetVMPool(clusterId: string, vmId: string) {
   return useMutation({
     mutationFn: (pool: string) =>
       apiClient.put<{ pool: string }>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/pool`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/pool`,
         { pool },
       ),
     onSuccess: () => {

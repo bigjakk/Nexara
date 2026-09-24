@@ -32,6 +32,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { apiFetch } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 interface NavItem {
   labelKey: string;
@@ -139,7 +141,9 @@ export function Sidebar({ drawer = false }: SidebarProps) {
   const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
-    fetch("/api/v1/version")
+    // A Public route (internal/api/registry_version.go): it needs no
+    // session, so none is resolved for it.
+    apiFetch(apiPath`/api/v1/version`, {}, { auth: false })
       .then((r) => r.json() as Promise<{ version: string }>)
       .then((data) => {
         setAppVersion(data.version);

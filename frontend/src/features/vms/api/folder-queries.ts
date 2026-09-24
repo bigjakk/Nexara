@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { VMFolder, VMFolderListResponse } from "@/types/api";
 
 const FOLDER_LIST_KEY = (clusterId: string) =>
@@ -10,7 +11,7 @@ export function useVMFolders(clusterId: string) {
     queryKey: FOLDER_LIST_KEY(clusterId),
     queryFn: () =>
       apiClient.get<VMFolderListResponse>(
-        `/api/v1/clusters/${clusterId}/vm-folders`,
+        apiPath`/api/v1/clusters/${clusterId}/vm-folders`,
       ),
     enabled: clusterId.length > 0,
     staleTime: 15_000,
@@ -27,10 +28,13 @@ export function useCreateVMFolder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ clusterId, name, parent_id }: CreateFolderParams) =>
-      apiClient.post<VMFolder>(`/api/v1/clusters/${clusterId}/vm-folders`, {
-        name,
-        parent_id,
-      }),
+      apiClient.post<VMFolder>(
+        apiPath`/api/v1/clusters/${clusterId}/vm-folders`,
+        {
+          name,
+          parent_id,
+        },
+      ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: FOLDER_LIST_KEY(vars.clusterId) });
     },
@@ -57,7 +61,7 @@ export function useUpdateVMFolder() {
       if (name !== undefined) body["name"] = name;
       if (parent_id !== undefined) body["parent_id"] = parent_id;
       return apiClient.patch<VMFolder>(
-        `/api/v1/clusters/${clusterId}/vm-folders/${folderId}`,
+        apiPath`/api/v1/clusters/${clusterId}/vm-folders/${folderId}`,
         body,
       );
     },
@@ -77,7 +81,7 @@ export function useDeleteVMFolder() {
   return useMutation({
     mutationFn: ({ clusterId, folderId }: DeleteFolderParams) =>
       apiClient.delete<null>(
-        `/api/v1/clusters/${clusterId}/vm-folders/${folderId}`,
+        apiPath`/api/v1/clusters/${clusterId}/vm-folders/${folderId}`,
       ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: FOLDER_LIST_KEY(vars.clusterId) });
@@ -95,9 +99,12 @@ export function useAssignVMToFolder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ clusterId, vmId, folder_id }: AssignVMParams) =>
-      apiClient.put<null>(`/api/v1/clusters/${clusterId}/vms/${vmId}/folder`, {
-        folder_id,
-      }),
+      apiClient.put<null>(
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/folder`,
+        {
+          folder_id,
+        },
+      ),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: FOLDER_LIST_KEY(vars.clusterId) });
     },

@@ -21,6 +21,7 @@ import { Plus } from "lucide-react";
 import { useCreateAlertRule } from "../api/alert-queries";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { ClusterResponse, EscalationStep } from "@/types/api";
 import { EscalationChainEditor } from "./EscalationChainEditor";
 import { TemplateEditor } from "./TemplateEditor";
@@ -169,7 +170,7 @@ export function AlertRuleForm() {
 
   const { data: clusters } = useQuery({
     queryKey: ["clusters"],
-    queryFn: () => apiClient.list<ClusterResponse>("/api/v1/clusters"),
+    queryFn: () => apiClient.list<ClusterResponse>(apiPath`/api/v1/clusters`),
   });
 
   const {

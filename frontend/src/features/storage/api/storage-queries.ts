@@ -4,7 +4,8 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { apiClient, getValidAccessToken } from "@/lib/api-client";
+import { apiClient, openApiRequest } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { signedInUserID, usePBSKeyStore } from "@/stores/pbs-key-store";
 import type { ClusterResponse, StorageResponse } from "@/types/api";
 import type {
@@ -27,7 +28,9 @@ export function useClusterStorage(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "storage"],
     queryFn: () =>
-      apiClient.list<StorageResponse>(`/api/v1/clusters/${clusterId}/storage`),
+      apiClient.list<StorageResponse>(
+        apiPath`/api/v1/clusters/${clusterId}/storage`,
+      ),
     enabled: clusterId.length > 0,
     staleTime: 30_000,
     refetchInterval: 60_000,
@@ -41,7 +44,7 @@ export function useStorageContent(clusterId: string, storageId: string) {
     queryKey: ["clusters", clusterId, "storage", storageId, "content"],
     queryFn: () =>
       apiClient.list<StorageContentItem>(
-        `/api/v1/clusters/${clusterId}/storage/${storageId}/content`,
+        apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}/content`,
       ),
     enabled: clusterId.length > 0 && storageId.length > 0,
   });
@@ -64,21 +67,15 @@ async function uploadFile({
   file,
   onProgress,
 }: UploadParams): Promise<StorageActionResponse> {
-  // Resolve a fresh access token via the cookie-backed refresh path before
-  // opening the XHR. XHR authorization must be set before send() and is too
-  // late to refresh once a 401 lands.
-  const token = await getValidAccessToken();
+  // openApiRequest checks the path, opens the request and sets its
+  // Authorization header from a fresh access token — an XHR's must be set
+  // before send(), and it is too late to refresh once a 401 lands.
+  const xhr = await openApiRequest(
+    "POST",
+    apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}/upload`,
+  );
   return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open(
-      "POST",
-      `/api/v1/clusters/${clusterId}/storage/${storageId}/upload`,
-    );
     xhr.withCredentials = true;
-
-    if (token) {
-      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    }
 
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable && onProgress) {
@@ -154,7 +151,7 @@ export function useDeleteContent() {
   return useMutation({
     mutationFn: ({ clusterId, storageId, volume }: DeleteContentParams) =>
       apiClient.delete<StorageActionResponse>(
-        `/api/v1/clusters/${clusterId}/storage/${storageId}/content/${encodeURIComponent(volume)}`,
+        apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}/content/${volume}`,
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -177,7 +174,7 @@ export function useStorageConfig(clusterId: string, storageId: string) {
     queryKey: ["clusters", clusterId, "storage", storageId, "config"],
     queryFn: () =>
       apiClient.get<StorageConfigResponse>(
-        `/api/v1/clusters/${clusterId}/storage/${storageId}/config`,
+        apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}/config`,
       ),
     enabled: clusterId.length > 0 && storageId.length > 0,
   });
@@ -260,7 +257,7 @@ export function useCreateStorage() {
     gcTime: STORAGE_WRITE_GC_TIME,
     mutationFn: ({ clusterId, data }: CreateStorageParams) =>
       apiClient.post<StorageWriteResponse>(
-        `/api/v1/clusters/${clusterId}/storage`,
+        apiPath`/api/v1/clusters/${clusterId}/storage`,
         data,
       ),
     onMutate: (variables) => writeFiling(queryClient, variables.clusterId),
@@ -293,7 +290,7 @@ export function useUpdateStorage() {
     gcTime: STORAGE_WRITE_GC_TIME,
     mutationFn: ({ clusterId, storageId, data }: UpdateStorageParams) =>
       apiClient.put<StorageWriteResponse>(
-        `/api/v1/clusters/${clusterId}/storage/${storageId}`,
+        apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}`,
         data,
       ),
     onMutate: (variables) => writeFiling(queryClient, variables.clusterId),
@@ -324,7 +321,7 @@ export function usePullOCIImage() {
   return useMutation({
     mutationFn: ({ clusterId, storageId, data }: PullOCIParams) =>
       apiClient.post<StorageActionResponse>(
-        `/api/v1/clusters/${clusterId}/storage/${storageId}/oci-pull`,
+        apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}/oci-pull`,
         data,
       ),
     onSuccess: (_data, variables) => {
@@ -354,7 +351,7 @@ export function useDownloadURL() {
   return useMutation({
     mutationFn: ({ clusterId, storageId, data }: DownloadURLParams) =>
       apiClient.post<StorageActionResponse>(
-        `/api/v1/clusters/${clusterId}/storage/${storageId}/download-url`,
+        apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}/download-url`,
         data,
       ),
     onSuccess: (_data, variables) => {
@@ -378,7 +375,7 @@ export function useAppliances(clusterId: string, enabled = true) {
     queryKey: ["clusters", clusterId, "appliances"],
     queryFn: () =>
       apiClient.list<ApplianceTemplate>(
-        `/api/v1/clusters/${clusterId}/appliances`,
+        apiPath`/api/v1/clusters/${clusterId}/appliances`,
       ),
     enabled: enabled && clusterId.length > 0,
     staleTime: 60 * 60 * 1000,
@@ -399,7 +396,7 @@ export function useDownloadAppliance() {
   return useMutation({
     mutationFn: ({ clusterId, storageId, data }: DownloadApplianceParams) =>
       apiClient.post<StorageActionResponse>(
-        `/api/v1/clusters/${clusterId}/storage/${storageId}/appliances`,
+        apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}/appliances`,
         data,
       ),
     onSuccess: (_data, variables) => {
@@ -429,7 +426,7 @@ export function useDeleteStorage() {
   return useMutation({
     mutationFn: ({ clusterId, storageId }: DeleteStorageParams) =>
       apiClient.delete<{ status: string; storage: string }>(
-        `/api/v1/clusters/${clusterId}/storage/${storageId}`,
+        apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}`,
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -456,7 +453,7 @@ export function useISCSITargets(clusterId: string, portal: string) {
     queryKey: ["clusters", clusterId, "scan", "iscsi", trimmed],
     queryFn: () =>
       apiClient.list<ISCSITarget>(
-        `/api/v1/clusters/${clusterId}/scan/iscsi?portal=${encodeURIComponent(trimmed)}`,
+        apiPath`/api/v1/clusters/${clusterId}/scan/iscsi?portal=${trimmed}`,
       ),
     enabled: clusterId.length > 0 && trimmed.length > 0,
     retry: false,

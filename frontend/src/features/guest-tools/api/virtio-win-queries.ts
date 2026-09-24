@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiClient, ApiClientError } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { MIRROR_CONFIRM_CODES } from "../types/virtio-win";
 import type {
   VirtioWinCheckResult,
@@ -33,7 +34,7 @@ export function useVirtioWinReleases() {
   return useQuery({
     queryKey: virtioWinKeys.releases(),
     queryFn: () =>
-      apiClient.list<VirtioWinRelease>("/api/v1/virtio-win/releases"),
+      apiClient.list<VirtioWinRelease>(apiPath`/api/v1/virtio-win/releases`),
     staleTime: 5 * 60_000,
   });
 }
@@ -43,7 +44,7 @@ export function useVirtioWinConfig(clusterId: string) {
     queryKey: virtioWinKeys.config(clusterId),
     queryFn: () =>
       apiClient.get<VirtioWinConfig>(
-        `/api/v1/clusters/${clusterId}/virtio-win/config`,
+        apiPath`/api/v1/clusters/${clusterId}/virtio-win/config`,
       ),
     enabled: clusterId.length > 0,
   });
@@ -54,7 +55,7 @@ export function useUpdateVirtioWinConfig(clusterId: string) {
   return useMutation({
     mutationFn: (config: VirtioWinConfigRequest) =>
       apiClient.put<VirtioWinConfig>(
-        `/api/v1/clusters/${clusterId}/virtio-win/config`,
+        apiPath`/api/v1/clusters/${clusterId}/virtio-win/config`,
         config,
       ),
     onSuccess: () => {
@@ -75,7 +76,7 @@ export function useVirtioWinDownloads(clusterId: string) {
     queryKey: virtioWinKeys.downloads(clusterId),
     queryFn: () =>
       apiClient.list<VirtioWinDownload>(
-        `/api/v1/clusters/${clusterId}/virtio-win/downloads`,
+        apiPath`/api/v1/clusters/${clusterId}/virtio-win/downloads`,
       ),
     enabled: clusterId.length > 0,
     refetchInterval: (query) => {
@@ -94,7 +95,7 @@ export function useDownloadVirtioWin(clusterId: string) {
   return useMutation({
     mutationFn: (body: VirtioWinDownloadRequest) =>
       apiClient.post<VirtioWinDownloadResult>(
-        `/api/v1/clusters/${clusterId}/virtio-win/download`,
+        apiPath`/api/v1/clusters/${clusterId}/virtio-win/download`,
         body,
       ),
     onSuccess: () => {
@@ -116,7 +117,8 @@ export function useDownloadVirtioWin(clusterId: string) {
 export function useVirtioWinMirror() {
   return useQuery({
     queryKey: virtioWinKeys.mirror(),
-    queryFn: () => apiClient.get<VirtioWinMirror>("/api/v1/virtio-win/mirror"),
+    queryFn: () =>
+      apiClient.get<VirtioWinMirror>(apiPath`/api/v1/virtio-win/mirror`),
     staleTime: 5 * 60_000,
   });
 }
@@ -125,7 +127,7 @@ export function useUpdateVirtioWinMirror() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: VirtioWinMirrorRequest) =>
-      apiClient.put<VirtioWinMirror>("/api/v1/virtio-win/mirror", body),
+      apiClient.put<VirtioWinMirror>(apiPath`/api/v1/virtio-win/mirror`, body),
     // The global mutation cache toasts any mutation that defines no onError of
     // its own. Both confirm-required answers are prompts rather than failures
     // — the card renders each inline with a "use it anyway" — so they would
@@ -166,7 +168,7 @@ export function useCheckVirtioWinNow(clusterId: string) {
   return useMutation({
     mutationFn: () =>
       apiClient.post<VirtioWinCheckResult>(
-        `/api/v1/clusters/${clusterId}/virtio-win/check`,
+        apiPath`/api/v1/clusters/${clusterId}/virtio-win/check`,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({

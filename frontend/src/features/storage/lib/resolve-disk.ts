@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 interface ConfigMap {
   [key: string]: unknown;
@@ -24,7 +25,7 @@ export async function resolveVolidToDiskKey(
 ): Promise<string | null> {
   try {
     const config = await apiClient.get<ConfigMap>(
-      `/api/v1/clusters/${clusterId}/vms/${vmUuid}/config`,
+      apiPath`/api/v1/clusters/${clusterId}/vms/${vmUuid}/config`,
     );
     for (const [key, val] of Object.entries(config)) {
       if (
@@ -54,7 +55,7 @@ export async function resolveVolidToCTVolumeKey(
 ): Promise<string | null> {
   try {
     const config = await apiClient.get<ConfigMap>(
-      `/api/v1/clusters/${clusterId}/containers/${ctUuid}/config`,
+      apiPath`/api/v1/clusters/${clusterId}/containers/${ctUuid}/config`,
     );
     for (const [key, val] of Object.entries(config)) {
       if (

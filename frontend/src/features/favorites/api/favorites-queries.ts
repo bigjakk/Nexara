@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import { useAuthStore } from "@/stores/auth-store";
 import type { Favorite, FavoriteResourceType } from "@/types/api";
 
@@ -38,7 +39,7 @@ export function sameFavorite(a: FavoriteTarget, b: FavoriteTarget): boolean {
 }
 
 function fetchFavorites() {
-  return apiClient.list<Favorite>("/api/v1/favorites");
+  return apiClient.list<Favorite>(apiPath`/api/v1/favorites`);
 }
 
 /** The caller's own starred clusters, nodes and guests, across every cluster. */
@@ -101,7 +102,10 @@ export function useToggleFavorite() {
   return useMutation({
     mutationFn: ({ target, favorited }: ToggleFavoriteInput) => {
       if (favorited) {
-        return apiClient.post<{ message: string }>("/api/v1/favorites", target);
+        return apiClient.post<{ message: string }>(
+          apiPath`/api/v1/favorites`,
+          target,
+        );
       }
       // Query parameters rather than a path, so a node name with a slash or a
       // dot never has to survive URL path segmentation.
@@ -111,7 +115,7 @@ export function useToggleFavorite() {
         ref: target.ref,
       });
       return apiClient.delete<{ message: string }>(
-        `/api/v1/favorites?${params.toString()}`,
+        apiPath`/api/v1/favorites?${params}`,
       );
     },
     // onSettled, not onSuccess: a failed star must also refetch, or the menu

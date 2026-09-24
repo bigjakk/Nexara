@@ -15,6 +15,7 @@ import {
   User,
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -94,7 +95,7 @@ export function AppShell() {
   // For dev builds, append "-Dev" to the browser tab title
   const { data: versionInfo } = useQuery({
     queryKey: ["version"],
-    queryFn: () => apiClient.get<{ version: string }>("/api/v1/version"),
+    queryFn: () => apiClient.get<{ version: string }>(apiPath`/api/v1/version`),
     staleTime: Infinity,
   });
   useEffect(() => {

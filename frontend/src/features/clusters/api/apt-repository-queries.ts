@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type { AptRepositoryResponse } from "@/types/api";
 
 export function useNodeAptRepositories(clusterId: string, nodeName: string) {
@@ -7,7 +8,7 @@ export function useNodeAptRepositories(clusterId: string, nodeName: string) {
     queryKey: ["clusters", clusterId, "nodes", nodeName, "apt-repositories"],
     queryFn: () =>
       apiClient.get<AptRepositoryResponse>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/apt/repositories`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/apt/repositories`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
   });
@@ -23,7 +24,7 @@ export function useToggleAptRepository(clusterId: string, nodeName: string) {
       digest: string;
     }) =>
       apiClient.put<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/apt/repositories`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/apt/repositories`,
         data,
       ),
     onSuccess: () => {
@@ -48,7 +49,7 @@ export function useAddStandardAptRepository(
   return useMutation({
     mutationFn: (data: { handle: string; digest: string }) =>
       apiClient.post<{ status: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/apt/repositories`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/apt/repositories`,
         data,
       ),
     onSuccess: () => {

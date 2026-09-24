@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath, type ApiPath } from "@/lib/api-path";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 
@@ -65,7 +66,7 @@ export function useEvents({
       endTime,
     ],
     queryFn: () =>
-      apiClient.page<AuditLogEntry>(`/api/v1/audit-log?${params.toString()}`),
+      apiClient.page<AuditLogEntry>(apiPath`/api/v1/audit-log?${params}`),
     refetchInterval: 120_000,
   });
 }
@@ -73,7 +74,7 @@ export function useEvents({
 export function useAuditActions() {
   return useQuery({
     queryKey: ["audit-actions"],
-    queryFn: () => apiClient.list<string>("/api/v1/audit-log/actions"),
+    queryFn: () => apiClient.list<string>(apiPath`/api/v1/audit-log/actions`),
     staleTime: 300_000,
   });
 }
@@ -81,7 +82,8 @@ export function useAuditActions() {
 export function useAuditUsers() {
   return useQuery({
     queryKey: ["audit-users"],
-    queryFn: () => apiClient.list<AuditUserRef>("/api/v1/audit-log/users"),
+    queryFn: () =>
+      apiClient.list<AuditUserRef>(apiPath`/api/v1/audit-log/users`),
     staleTime: 300_000,
   });
 }
@@ -118,7 +120,7 @@ export function useSyslogConfig() {
   return useQuery({
     queryKey: ["syslog-config"],
     queryFn: () =>
-      apiClient.get<SyslogConfig>("/api/v1/audit-log/syslog-config"),
+      apiClient.get<SyslogConfig>(apiPath`/api/v1/audit-log/syslog-config`),
     staleTime: 60_000,
     enabled: canManage("audit"),
   });
@@ -129,7 +131,7 @@ export function useSaveSyslogConfig() {
   return useMutation({
     mutationFn: (cfg: SyslogConfig) =>
       apiClient.put<SyslogConfig | SyslogSaveWarning>(
-        "/api/v1/audit-log/syslog-config",
+        apiPath`/api/v1/audit-log/syslog-config`,
         cfg,
       ),
     onSuccess: () => {
@@ -142,7 +144,7 @@ export function useTestSyslog() {
   return useMutation({
     mutationFn: (cfg: SyslogConfig) =>
       apiClient.post<{ success: boolean; error?: string }>(
-        "/api/v1/audit-log/syslog-test",
+        apiPath`/api/v1/audit-log/syslog-test`,
         cfg,
       ),
   });
@@ -158,7 +160,7 @@ export function buildExportUrl(
     startTime?: string | undefined;
     endTime?: string | undefined;
   },
-): string {
+): ApiPath {
   const params = new URLSearchParams();
   params.set("format", format);
   if (filters.clusterId) params.set("cluster_id", filters.clusterId);
@@ -167,5 +169,5 @@ export function buildExportUrl(
   if (filters.action) params.set("action", filters.action);
   if (filters.startTime) params.set("start_time", filters.startTime);
   if (filters.endTime) params.set("end_time", filters.endTime);
-  return `/api/v1/audit-log/export?${params.toString()}`;
+  return apiPath`/api/v1/audit-log/export?${params}`;
 }

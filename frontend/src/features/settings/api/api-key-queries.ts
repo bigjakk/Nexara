@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   APIKeyResponse,
   CreateAPIKeyRequest,
@@ -9,7 +10,7 @@ import type {
 export function useAPIKeys() {
   return useQuery({
     queryKey: ["api-keys"],
-    queryFn: () => apiClient.list<APIKeyResponse>("/api/v1/api-keys"),
+    queryFn: () => apiClient.list<APIKeyResponse>(apiPath`/api/v1/api-keys`),
   });
 }
 
@@ -17,7 +18,7 @@ export function useCreateAPIKey() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: CreateAPIKeyRequest) =>
-      apiClient.post<CreateAPIKeyResponse>("/api/v1/api-keys", data),
+      apiClient.post<CreateAPIKeyResponse>(apiPath`/api/v1/api-keys`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["api-keys"] });
     },
@@ -27,7 +28,8 @@ export function useCreateAPIKey() {
 export function useRevokeAPIKey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiClient.delete(`/api/v1/api-keys/${id}`),
+    mutationFn: (id: string) =>
+      apiClient.delete(apiPath`/api/v1/api-keys/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["api-keys"] });
     },
@@ -37,7 +39,7 @@ export function useRevokeAPIKey() {
 export function useRevokeAllAPIKeys() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => apiClient.delete("/api/v1/api-keys"),
+    mutationFn: () => apiClient.delete(apiPath`/api/v1/api-keys`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["api-keys"] });
     },

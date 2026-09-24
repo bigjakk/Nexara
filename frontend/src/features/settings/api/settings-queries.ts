@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient, getValidAccessToken } from "@/lib/api-client";
+import { apiClient, apiFetch } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 
 export interface SettingResponse {
   id: string;
@@ -30,9 +31,7 @@ export function useSettings(scope: string) {
   return useQuery({
     queryKey: settingsKeys.list(scope),
     queryFn: () =>
-      apiClient.list<SettingResponse>(
-        `/api/v1/settings?scope=${encodeURIComponent(scope)}`,
-      ),
+      apiClient.list<SettingResponse>(apiPath`/api/v1/settings?scope=${scope}`),
   });
 }
 
@@ -41,7 +40,7 @@ export function useSetting(key: string, scope = "user") {
     queryKey: settingsKeys.detail(key, scope),
     queryFn: () =>
       apiClient.get<SettingResponse>(
-        `/api/v1/settings/${encodeURIComponent(key)}?scope=${encodeURIComponent(scope)}`,
+        apiPath`/api/v1/settings/${key}?scope=${scope}`,
       ),
     retry: false,
   });
@@ -50,7 +49,8 @@ export function useSetting(key: string, scope = "user") {
 export function useBranding() {
   return useQuery({
     queryKey: settingsKeys.branding(),
-    queryFn: () => apiClient.get<BrandingSettings>("/api/v1/settings/branding"),
+    queryFn: () =>
+      apiClient.get<BrandingSettings>(apiPath`/api/v1/settings/branding`),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -59,10 +59,7 @@ export function useUpsertSetting() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ key, ...payload }: UpsertSettingPayload & { key: string }) =>
-      apiClient.put<SettingResponse>(
-        `/api/v1/settings/${encodeURIComponent(key)}`,
-        payload,
-      ),
+      apiClient.put<SettingResponse>(apiPath`/api/v1/settings/${key}`, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: settingsKeys.all });
     },
@@ -73,9 +70,7 @@ export function useDeleteSetting() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ key, scope = "user" }: { key: string; scope?: string }) =>
-      apiClient.delete(
-        `/api/v1/settings/${encodeURIComponent(key)}?scope=${encodeURIComponent(scope)}`,
-      ),
+      apiClient.delete(apiPath`/api/v1/settings/${key}?scope=${scope}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: settingsKeys.all });
     },
@@ -88,10 +83,8 @@ export function useUploadLogo() {
     mutationFn: async (file: File) => {
       const formData = new FormData();
       formData.append("logo", file);
-      const token = await getValidAccessToken();
-      const res = await fetch("/api/v1/settings/branding/logo", {
+      const res = await apiFetch(apiPath`/api/v1/settings/branding/logo`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
         credentials: "same-origin",
       });
@@ -110,10 +103,8 @@ export function useUploadFavicon() {
     mutationFn: async (file: File) => {
       const formData = new FormData();
       formData.append("favicon", file);
-      const token = await getValidAccessToken();
-      const res = await fetch("/api/v1/settings/branding/favicon", {
+      const res = await apiFetch(apiPath`/api/v1/settings/branding/favicon`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
         credentials: "same-origin",
       });

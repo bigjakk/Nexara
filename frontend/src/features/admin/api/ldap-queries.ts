@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { apiPath } from "@/lib/api-path";
 import type {
   LDAPConfig,
   LDAPConfigRequest,
@@ -10,14 +11,15 @@ import type {
 export function useLDAPConfigs() {
   return useQuery({
     queryKey: ["ldap", "configs"],
-    queryFn: () => apiClient.list<LDAPConfig>("/api/v1/ldap/configs"),
+    queryFn: () => apiClient.list<LDAPConfig>(apiPath`/api/v1/ldap/configs`),
   });
 }
 
 export function useLDAPConfig(id: string) {
   return useQuery({
     queryKey: ["ldap", "configs", id],
-    queryFn: () => apiClient.get<LDAPConfig>(`/api/v1/ldap/configs/${id}`),
+    queryFn: () =>
+      apiClient.get<LDAPConfig>(apiPath`/api/v1/ldap/configs/${id}`),
     enabled: !!id,
   });
 }
@@ -44,7 +46,7 @@ export function useCreateLDAPConfig() {
   return useMutation({
     ...errorsHandledLocally,
     mutationFn: (data: LDAPConfigRequest) =>
-      apiClient.post<LDAPConfig>("/api/v1/ldap/configs", data),
+      apiClient.post<LDAPConfig>(apiPath`/api/v1/ldap/configs`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["ldap", "configs"] });
     },
@@ -56,7 +58,7 @@ export function useUpdateLDAPConfig() {
   return useMutation({
     ...errorsHandledLocally,
     mutationFn: ({ id, ...data }: LDAPConfigRequest & { id: string }) =>
-      apiClient.put<LDAPConfig>(`/api/v1/ldap/configs/${id}`, data),
+      apiClient.put<LDAPConfig>(apiPath`/api/v1/ldap/configs/${id}`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["ldap", "configs"] });
     },
@@ -66,7 +68,8 @@ export function useUpdateLDAPConfig() {
 export function useDeleteLDAPConfig() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiClient.delete(`/api/v1/ldap/configs/${id}`),
+    mutationFn: (id: string) =>
+      apiClient.delete(apiPath`/api/v1/ldap/configs/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["ldap", "configs"] });
     },
@@ -82,9 +85,12 @@ export function useTestLDAPConnection() {
       id: string;
       test_username?: string;
     }) =>
-      apiClient.post<LDAPTestResponse>(`/api/v1/ldap/configs/${id}/test`, {
-        test_username,
-      }),
+      apiClient.post<LDAPTestResponse>(
+        apiPath`/api/v1/ldap/configs/${id}/test`,
+        {
+          test_username,
+        },
+      ),
   });
 }
 
@@ -92,7 +98,9 @@ export function useSyncLDAP() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.post<LDAPSyncResponse>(`/api/v1/ldap/configs/${id}/sync`),
+      apiClient.post<LDAPSyncResponse>(
+        apiPath`/api/v1/ldap/configs/${id}/sync`,
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["ldap", "configs"] });
       void qc.invalidateQueries({ queryKey: ["admin", "users"] });
