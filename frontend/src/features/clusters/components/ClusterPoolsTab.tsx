@@ -1,4 +1,4 @@
-import { Fragment, useState, useMemo } from "react";
+import { Fragment, useRef, useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -745,6 +745,13 @@ function AddressablePoolMembers({
   const poolQuery = useResourcePool(clusterId, poolId);
   const updatePool = useUpdatePool(clusterId);
   const [pendingRemove, setPendingRemove] = useState<PoolMember | null>(null);
+  // Where focus goes after a confirmed removal: the Remove button that opened
+  // the dialog is disabled by then (see below), so ConfirmDeleteDialog's
+  // return of focus to its opener would not take and focus would fall to
+  // <body>. A cancelled dialog leaves ConfirmDeleteDialog to return focus to
+  // that button. confirmedRef marks the one close that follows a confirm.
+  const listRef = useRef<HTMLDivElement>(null);
+  const confirmedRef = useRef(false);
 
   const memberVMIDs = useMemo(() => {
     const ids = new Set<number>();
@@ -763,6 +770,7 @@ function AddressablePoolMembers({
   }, [poolQuery.data?.members]);
 
   const handleRemove = (member: PoolMember) => {
+    confirmedRef.current = true;
     const deleteField =
       member.type === "storage"
         ? (member.storage ?? member.id)
@@ -780,7 +788,13 @@ function AddressablePoolMembers({
   const members = poolQuery.data?.members ?? [];
 
   return (
-    <div className="space-y-3 py-2">
+    <div
+      ref={listRef}
+      tabIndex={-1}
+      role="group"
+      aria-label={`Members of pool ${poolId}`}
+      className="space-y-3 py-2 outline-none"
+    >
       {/* Action buttons */}
       {canManage && (
         <div className="flex gap-2">
@@ -840,6 +854,18 @@ function AddressablePoolMembers({
                         aria-label={`Remove ${m.name ?? m.storage ?? m.id}`}
                         variant="ghost"
                         size="sm"
+                        // One removal at a time: while one is in flight no
+                        // Remove button opens the confirmation, so neither a
+                        // second click nor a second confirm can send another
+                        // PUT. A failure is toasted once, with the server's
+                        // message, by the mutation-error net in
+                        // lib/query-client.ts (useUpdatePool has no onError of
+                        // its own; adding a per-call one here would not
+                        // silence that net, so it would toast twice). The
+                        // member then stays listed. On success useUpdatePool
+                        // stays pending until the pool is re-read, so the
+                        // buttons come back only once the member is gone.
+                        disabled={updatePool.isPending}
                         onClick={() => {
                           setPendingRemove(m);
                         }}
@@ -871,6 +897,12 @@ function AddressablePoolMembers({
           setPendingRemove(null);
         }}
         onConfirm={handleRemove}
+        onCloseAutoFocus={(e) => {
+          if (!confirmedRef.current) return;
+          confirmedRef.current = false;
+          e.preventDefault();
+          listRef.current?.focus();
+        }}
         title={(m) => `Remove ${memberLabel(m)} from pool ${poolId}?`}
         description={(m) =>
           `Proxmox takes ${memberLabel(m)} out of the pool as soon as you confirm. The ${m.type === "storage" ? "storage" : "guest"} itself is not changed, but a permission granted on pool ${poolId} no longer applies to it: a user or token that reaches it only through this pool loses that access. To undo, add it to the pool again.`

@@ -76,9 +76,13 @@ export function useUpdatePool(clusterId: string) {
         apiPath`/api/v1/clusters/${clusterId}/pools/${poolid}`,
         data,
       ),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "pools"] });
-    },
+    // Returned, not voided: the mutation stays pending until the pools are
+    // read again, so the pool's member list never shows a member the PUT
+    // already removed beside a Remove button that is enabled again (a second
+    // removal of it would fail). invalidateQueries does not reject when the
+    // refetch fails, so a failed re-read never turns this PUT into an error.
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["clusters", clusterId, "pools"] }),
   });
 }
 

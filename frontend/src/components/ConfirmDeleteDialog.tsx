@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,6 +28,13 @@ interface ConfirmDeleteDialogProps<T> {
   /** Say what is lost and whether it can be undone — the dialog adds nothing. */
   description: (target: T) => ReactNode;
   confirmLabel?: string;
+  /**
+   * Runs as the dialog closes, before focus goes back to the element that
+   * opened it. A caller whose opener cannot take focus by then (its button is
+   * disabled while the delete is in flight) calls preventDefault() and
+   * focuses something that can; otherwise focus would fall to <body>.
+   */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 /**
@@ -53,6 +60,7 @@ export function ConfirmDeleteDialog<T>({
   title,
   description,
   confirmLabel = "Delete",
+  onCloseAutoFocus,
 }: ConfirmDeleteDialogProps<T>) {
   // Radix keeps the content mounted while the close animation plays, after
   // target has gone back to null; the last target keeps the text from
@@ -61,14 +69,42 @@ export function ConfirmDeleteDialog<T>({
   if (target !== null) shown.current = target;
   const current = shown.current;
 
+  // Radix returns focus on close only to an AlertDialog.Trigger, and this
+  // dialog is opened by state, with no Trigger (react-dialog DialogContentModal:
+  // onCloseAutoFocus prevents the default and focuses context.triggerRef, which
+  // is empty here), so focus fell to <body> on every close. It goes back to
+  // whatever had focus when the dialog opened — the row's delete button.
+  // Recorded once per opening, and not again while the dialog stays open,
+  // when focus is inside it. It must run before Radix's FocusScope moves focus
+  // into the dialog (a passive effect). Today that FocusScope mounts a commit
+  // later, since react-portal renders nothing until its own layout effect sets
+  // `mounted`, so a passive effect here would also be early enough; a layout
+  // effect does not depend on that.
+  const opener = useRef<HTMLElement | null>(null);
+  const open = target !== null;
+  useLayoutEffect(() => {
+    if (!open) return;
+    opener.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+  }, [open]);
+
   return (
     <AlertDialog
-      open={target !== null}
+      open={open}
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          if (event.defaultPrevented) return;
+          event.preventDefault();
+          opener.current?.focus();
+        }}
+      >
         {current !== null && (
           <>
             <AlertDialogHeader>
