@@ -556,9 +556,15 @@ export function useVMConfig(clusterId: string, vmId: string) {
 
 // --- Container Config ---
 
+// The key a container's config is cached under. The resources panel reads
+// that cache directly when it checks a Save, so both use this one builder.
+export function containerConfigKey(clusterId: string, ctId: string) {
+  return ["clusters", clusterId, "containers", ctId, "config"];
+}
+
 export function useContainerConfig(clusterId: string, ctId: string) {
   return useQuery({
-    queryKey: ["clusters", clusterId, "containers", ctId, "config"],
+    queryKey: containerConfigKey(clusterId, ctId),
     queryFn: () =>
       apiClient.get<VMConfig>(
         apiPath`/api/v1/clusters/${clusterId}/containers/${ctId}/config`,

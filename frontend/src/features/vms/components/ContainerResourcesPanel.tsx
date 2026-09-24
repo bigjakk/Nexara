@@ -1,4 +1,5 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useLayoutEffect, useState, useMemo, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Loader2,
   Save,
@@ -24,6 +25,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  containerConfigKey,
   useContainerConfig,
   useSetResourceConfig,
   useResizeContainerDisk,
@@ -60,6 +72,51 @@ function num(val: unknown): number {
   if (val == null) return 0;
   const n = Number(val);
   return Number.isNaN(n) ? 0 : n;
+}
+
+// The config once a write of `fields` has succeeded, close enough to stand in
+// until a fetch completed after the write brings Proxmox's own copy, which is
+// then shown whatever it holds: each key in the delete list gone, every other
+// field as sent. (That copy can differ from this one: Proxmox normalises some
+// values, even back to what it had, and gives a new NIC its MAC.)
+function applyConfigWrite(
+  config: VMConfig,
+  fields: Record<string, string>,
+): VMConfig {
+  const deleted = new Set((fields["delete"] ?? "").split(","));
+  const next: VMConfig = Object.fromEntries(
+    Object.entries(config).filter(([key]) => !deleted.has(key)),
+  );
+  for (const [key, value] of Object.entries(fields)) {
+    if (key !== "delete") next[key] = value;
+  }
+  return next;
+}
+
+// An unused volume a Save would destroy: its config key and the volume that
+// key holds.
+interface VolumeToDelete {
+  key: string;
+  volume: string;
+}
+
+// Whether two lists name the same volumes under the same keys. Both come
+// sorted by key, so equal lists match entry by entry.
+function sameVolumes(
+  a: readonly VolumeToDelete[],
+  b: readonly VolumeToDelete[],
+): boolean {
+  return (
+    a.length === b.length &&
+    a.every((entry, i) => {
+      const other = b[i];
+      return (
+        other !== undefined &&
+        entry.key === other.key &&
+        entry.volume === other.volume
+      );
+    })
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -721,6 +778,54 @@ const consoleModes = [
   { value: "shell", label: "Shell" },
 ] as const;
 
+// A successful Save's result, laid over the fetched copy it was built on; the
+// component says when it stands.
+interface AfterSave {
+  over: VMConfig;
+  config: VMConfig;
+  at: number;
+}
+
+// The config the panel stands on: an afterSave while it still stands, else
+// the fetched copy, which was fetched at `updatedAt`.
+function currentConfig(
+  fetched: VMConfig | undefined,
+  updatedAt: number,
+  afterSave: AfterSave | null,
+): VMConfig | undefined {
+  return afterSave !== null &&
+    afterSave.over === fetched &&
+    updatedAt <= afterSave.at
+    ? afterSave.config
+    : fetched;
+}
+
+// What a config write of `fields` would destroy: the unusedN keys in its
+// delete list, each with the volume it holds in `config`, sorted by key as the
+// Unused Volumes section is. Read from the request itself, not from
+// deleteVolumes or unusedVolumes, so it cannot differ from what is sent.
+function volumesIn(
+  fields: Record<string, string>,
+  config: VMConfig | undefined,
+): VolumeToDelete[] {
+  return (fields["delete"] ?? "")
+    .split(",")
+    .filter((key) => UNUSED_KEY_RE.test(key))
+    .sort((a, b) => a.localeCompare(b))
+    .map((key) => ({ key, volume: str(config?.[key]) }));
+}
+
+// Every other key a config write of `fields` sets or deletes: all but the
+// unusedN deletes, which volumesIn has.
+function keysBesidesVolumes(fields: Record<string, string>): string[] {
+  return [
+    ...Object.keys(fields).filter((key) => key !== "delete"),
+    ...(fields["delete"] ?? "")
+      .split(",")
+      .filter((key) => key !== "" && !UNUSED_KEY_RE.test(key)),
+  ];
+}
+
 export function ContainerResourcesPanel({
   clusterId,
   ctId,
@@ -728,11 +833,38 @@ export function ContainerResourcesPanel({
   nodeName,
 }: ContainerResourcesPanelProps) {
   const {
-    data: config,
+    data: fetchedConfig,
+    dataUpdatedAt,
     isLoading,
     error,
   } = useContainerConfig(clusterId, ctId);
+
+  // After a successful Save: the config as it now stands, laid over the
+  // fetched copy that Save was built on until a fetch completes after the
+  // write. Without it, until the refetch lands everything sent stays staged
+  // behind an enabled Save, and a deleted volume is still listed, and Save
+  // would offer to delete it again, when its key may by then name another
+  // volume (pve-guest-common's add_unused_volume reuses the lowest free
+  // unusedN). Nothing is written to the query cache, so a fetch that lands
+  // first is never overwritten.
+  //
+  // Either of two things drops it. A fetch bringing other data is a new
+  // object, so `over` no longer matches. A fetch bringing the same data keeps
+  // the object (TanStack's structural sharing), as it does when Proxmox
+  // normalises a sent value back to what it stored (pve-guest-common's
+  // get_unique_tags sorts and lowercases tags), so its dataUpdatedAt, later
+  // than `at`, is the only sign it landed. A fetch that completed before
+  // `at`, while the Save was out, may predate the write and leaves it in
+  // place. One completing in the same millisecond as `at` counts as before
+  // it: holding the overlay too long only shows the values as sent, where
+  // dropping it too soon could list a deleted volume again.
+  const [afterSave, setAfterSave] = useState<AfterSave | null>(null);
+  const config = currentConfig(fetchedConfig, dataUpdatedAt, afterSave);
   const setConfigMutation = useSetResourceConfig();
+  const queryClient = useQueryClient();
+  // useContainerConfig's key, so saveChanges can read the newest copy at the
+  // moment it checks.
+  const configKey = containerConfigKey(clusterId, ctId);
   const { data: bridges } = useNodeBridges(clusterId, nodeName);
   const { data: storageList } = useClusterStorage(clusterId);
   const storageOptions = useMemo(() => {
@@ -796,12 +928,83 @@ export function ContainerResourcesPanel({
   // Unused volumes to delete
   const [deleteVolumes, setDeleteVolumes] = useState<Set<string>>(new Set());
 
+  // A Save that would delete them, waiting on its confirmation: whether that
+  // is open, the volumes it lists, whether it is asking again because they
+  // changed, and whether it refused to save because the configuration
+  // changed under it. The list is a snapshot of what the Save would destroy,
+  // taken when it opened, and it is what Delete and Save confirms. It is
+  // kept while the dialog animates closed.
+  const [confirmation, setConfirmation] = useState<{
+    open: boolean;
+    volumes: readonly VolumeToDelete[];
+    changed: boolean;
+    blocked: boolean;
+  }>({ open: false, volumes: [], changed: false, blocked: false });
+
+  // Said beside Save when a Save sent nothing and there was no dialog left
+  // to say it in.
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+
+  // Where focus returns when that confirmation closes. It has no Trigger for
+  // Radix to return focus to, so without this it would land on the page.
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+
+  // The notice a Delete and Save that sent nothing leaves in the dialog, and
+  // the number of such stops. Each stop moves focus to the notice, not to a
+  // button, so a held Enter neither confirms a list that has only just
+  // appeared nor cancels, which reloads the panel. It goes by the count, not
+  // by whether the notice is shown: a second stop finds it shown already,
+  // with focus perhaps back on Delete and Save. The count is also its key,
+  // so each stop mounts it afresh and a screen reader announces it again,
+  // even in the same words.
+  const noticeRef = useRef<HTMLParagraphElement>(null);
+  const noticeShown = confirmation.changed || confirmation.blocked;
+  const [stops, setStops] = useState(0);
+  useLayoutEffect(() => {
+    if (stops > 0) noticeRef.current?.focus();
+  }, [stops]);
+
+  // Saves sent, and saves a render has seen settle. While they differ a Save
+  // is in flight and saveChanges sends nothing. isPending cannot stand in for
+  // this: a render sees it only after TanStack's notification tick, so a
+  // second call before then would still read it false and send again. Nor
+  // can a Save's own settling end it: the render TanStack then gives
+  // re-enables Save and Delete and Save while the afterSave it set waits for
+  // the next render, so the staging and edits just sent are still there to
+  // send again. So settling (on the mutation's own promise, see saveChanges)
+  // bumps savesSettled, and the effect copies it once a render has it. React
+  // also runs the effect when a hidden panel (<Activity>) shows again, which
+  // copies only what has settled, so a Save still out stays in flight.
+  const savesSent = useRef(0);
+  const savesSeenSettled = useRef(0);
+  const [savesSettled, setSavesSettled] = useState(0);
+  useEffect(() => {
+    savesSeenSettled.current = savesSettled;
+  }, [savesSettled]);
+
   // Track original values for change detection
   const [origFields, setOrigFields] = useState<Record<string, string>>({});
 
-  // Populate form from fetched config
+  // The config the fields and the staging were last populated from, and the
+  // one this render's fields were: the populate effect below moves the ref
+  // after the render that brings a new config, so for that render the two
+  // differ.
+  const populatedFrom = useRef<VMConfig | undefined>(undefined);
+  const populatedAtRender = populatedFrom.current;
+  // A config that arrived while the confirmation is open, waiting on it.
+  // Cancel then reloads the panel, so the dialog says so.
+  const configChangedUnder = confirmation.open && config !== populatedAtRender;
+
+  // Populate form from fetched config. One that arrives while the
+  // confirmation is open waits until it closes, so the staging it confirms
+  // stays put. Everything the Save sends is still built on the config it was
+  // populated from, though, so saveChanges checks each key the request
+  // writes or deletes against the newest config before it sends.
   useEffect(() => {
-    if (!config) return;
+    if (!config || confirmation.open || config === populatedFrom.current) {
+      return;
+    }
+    populatedFrom.current = config;
 
     setCores(str(config["cores"]) || "1");
     setCpulimit(str(config["cpulimit"]));
@@ -854,7 +1057,7 @@ export function ContainerResourcesPanel({
       }
     }
     setOrigFields(orig);
-  }, [config]);
+  }, [config, confirmation.open]);
 
   // Build current fields for diff
   const currentFields = useMemo(() => {
@@ -972,14 +1175,164 @@ export function ContainerResourcesPanel({
     return `net${String(existing.size)}`;
   }
 
-  function handleSave() {
-    if (!hasChanges) return;
-    setConfigMutation.mutate({
-      clusterId,
-      resourceId: ctId,
-      kind: "ct",
-      fields: changedFields,
-    });
+  // Deleting an unusedN key destroys its volume. In pve-container,
+  // update_pct_config (src/PVE/LXC/Config.pm) queues the delete. Then
+  // vmconfig_apply_pending, or vmconfig_hotplug_pending on a running
+  // container, passes the volume to PVE::LXC::delete_mountpoint_volume
+  // (src/PVE/LXC.pm) unless is_volume_in_use finds a mount point, a snapshot
+  // or a pending change still using it, and with_checked_volid skips that
+  // call, with a warning, when the volume's storage no longer exists.
+  // delete_mountpoint_volume frees a storage volume (not a bind or device
+  // mount) with PVE::Storage::vdisk_free when this container owns it, and
+  // only warns when another guest does.
+  //
+  // So this, the one place a Save is sent from, sends only what still stands
+  // on the config it was built from. An unusedN delete goes only when its
+  // caller passes the list the operator confirmed and that list still names
+  // exactly what the request would destroy: the same keys, holding the same
+  // volumes now. Otherwise it opens the confirmation on what it would destroy
+  // now, or asks again on the new list, in place so the rest of the Save
+  // stays staged. Every other key the request writes or deletes must still
+  // hold what the fields were built from; if one has changed elsewhere,
+  // nothing is sent and the dialog says so. A NIC removal frees no volume (on
+  // an SDN vnet whose zone has IPAM and DHCP it releases the IP reserved for
+  // its MAC, pve-network's del_ips_from_mac), so it is not asked about.
+  function saveChanges({
+    confirmed,
+  }: {
+    confirmed: readonly VolumeToDelete[] | null;
+  }) {
+    if (savesSent.current !== savesSeenSettled.current || !hasChanges) return;
+    // This render's fields are built on a config already replaced, whose
+    // repopulating effect has not run yet. (While the confirmation is open
+    // that effect waits on purpose, and the checks below cover it.)
+    if (!confirmation.open && config !== populatedAtRender) return;
+    // Each setter below is called only when it changes something: even a
+    // same-value set can render this component, and a render taking in
+    // isPending before TanStack's own tick would change what a second click
+    // meets.
+    if (saveNotice !== null) setSaveNotice(null);
+    // The newest config the query has. That can be a tick ahead of this
+    // render, as TanStack tells React on a timer, and a click landing in that
+    // tick must not pass what has just changed.
+    const newest = queryClient.getQueryState<VMConfig>(configKey);
+    const newestConfig = currentConfig(
+      newest?.data,
+      newest?.dataUpdatedAt ?? 0,
+      afterSave,
+    );
+    // What the request would destroy now: its unusedN keys with what they
+    // hold.
+    const live = volumesIn(changedFields, newestConfig);
+
+    // A staged key that is gone was removed elsewhere, and its delete is not
+    // sent: pve-guest-common's add_unused_volume refills the lowest free
+    // unusedN, so by the time it arrived the key could hold another volume.
+    // It comes off the staging, and nothing is sent this time. With none left
+    // to ask about, the dialog closes, and the populate effect then reloads
+    // the panel from the newer config, discarding the rest of this Save too,
+    // so the notice beside Save says that as well.
+    const gone = new Set(
+      live
+        .filter(({ key }) => newestConfig?.[key] === undefined)
+        .map(({ key }) => key),
+    );
+    if (gone.size > 0) {
+      setConfigMutation.reset();
+      setDeleteVolumes(
+        (staged) => new Set([...staged].filter((key) => !gone.has(key))),
+      );
+      const rest = live.filter(({ key }) => !gone.has(key));
+      if (rest.length > 0) {
+        setConfirmation({
+          open: true,
+          volumes: rest,
+          changed: true,
+          blocked: false,
+        });
+        setStops((count) => count + 1);
+      } else {
+        setConfirmation((current) => ({ ...current, open: false }));
+        setSaveNotice(
+          "The volumes marked for deletion are no longer on this container, so nothing was saved, and the panel reloaded, discarding any other unsaved changes.",
+        );
+      }
+      return;
+    }
+
+    // Every other key the request writes or deletes must still hold what the
+    // fields were built from. One changed elsewhere since would be overwritten,
+    // or a NIC re-created under a staged key removed. Nothing is sent; with
+    // the dialog open it says so, and Cancel reloads the panel. (Closed, the
+    // newer config is a tick away from reloading the panel itself.)
+    const moved = keysBesidesVolumes(changedFields).some(
+      (key) => str(populatedAtRender?.[key]) !== str(newestConfig?.[key]),
+    );
+    if (moved) {
+      if (confirmed !== null) {
+        setConfigMutation.reset();
+        setConfirmation((current) => ({ ...current, blocked: true }));
+        setStops((count) => count + 1);
+      }
+      return;
+    }
+
+    const asks =
+      confirmed === null ? live.length > 0 : !sameVolumes(confirmed, live);
+    if (asks) {
+      // A failure left over from an earlier Save belongs to that one, not to
+      // the confirmation about to open.
+      setConfigMutation.reset();
+      setConfirmation({
+        open: live.length > 0,
+        volumes: live,
+        changed: confirmed !== null,
+        blocked: false,
+      });
+      if (confirmed !== null) setStops((count) => count + 1);
+      return;
+    }
+    // Sending: "nothing was deleted" must not outlive the attempt it was
+    // about, least of all into a failure, as Proxmox frees an unusedN volume
+    // before it applies the rest of the write.
+    if (confirmation.changed) {
+      setConfirmation((current) => ({ ...current, changed: false }));
+    }
+    const fields = changedFields;
+    // What this Save was built from (an earlier Save's afterSave, while the
+    // fetch after that one is still out), and the fetched copy under it. The
+    // next afterSave is built on the first, so it keeps that Save's changes.
+    const shown = config;
+    const fetched = fetchedConfig;
+    savesSent.current += 1;
+    // The mutation's own promise, not mutate()'s per-call callbacks: TanStack
+    // runs those only while this panel's observer has listeners, and a parent
+    // that keeps the panel alive while hiding it (<Activity>) takes them
+    // away, which would leave the Save forever unsettled and Save dead.
+    void setConfigMutation
+      .mutateAsync({ clusterId, resourceId: ctId, kind: "ct", fields })
+      .then(
+        () => {
+          // Closed first, as the populate effect waits while it is open.
+          // That then re-reads every field from the config as it now stands
+          // and clears all that was staged, so nothing sent is sent or
+          // offered again.
+          setConfirmation((current) => ({ ...current, open: false }));
+          if (shown !== undefined && fetched !== undefined) {
+            setAfterSave({
+              over: fetched,
+              config: applyConfigWrite(shown, fields),
+              at: Date.now(),
+            });
+          }
+        },
+        // Already shown: the dialog and the Save bar read the mutation's
+        // error, and the app's mutation cache toasts it.
+        () => undefined,
+      )
+      .finally(() => {
+        setSavesSettled((settled) => settled + 1);
+      });
   }
 
   if (isLoading) {
@@ -1028,12 +1381,23 @@ export function ContainerResourcesPanel({
               {setConfigMutation.error.message}
             </span>
           )}
+          {saveNotice !== null && (
+            <span
+              role="status"
+              className="text-xs text-amber-700 dark:text-amber-400"
+            >
+              {saveNotice}
+            </span>
+          )}
         </div>
         <Button
+          ref={saveButtonRef}
           size="sm"
           className="gap-1.5"
           disabled={!hasChanges || setConfigMutation.isPending}
-          onClick={handleSave}
+          onClick={() => {
+            saveChanges({ confirmed: null });
+          }}
         >
           {setConfigMutation.isPending ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1043,6 +1407,108 @@ export function ContainerResourcesPanel({
           Save Changes
         </Button>
       </div>
+
+      {/* Held open while the Save is in flight: Cancel cannot un-send it, and
+          closing would hide whether it worked. Its buttons are disabled
+          meanwhile, so one confirmation sends one request; a closing dialog
+          stays clickable for as long as its exit animation runs. Success
+          closes it, and a failure stays on screen to retry or cancel, with
+          the volumes still staged. A refetch while it is open, such as the
+          vm_state_change and inventory_change events trigger for every
+          container in the cluster, changes neither: the populate effect
+          waits, and the list shown is the snapshot the operator confirms,
+          which saveChanges checks against the volumes the keys hold now. */}
+      <AlertDialog
+        open={confirmation.open}
+        onOpenChange={(open) => {
+          if (!open && !setConfigMutation.isPending) {
+            setConfirmation((current) => ({ ...current, open: false }));
+          }
+        }}
+      >
+        <AlertDialogContent
+          onCloseAutoFocus={(event) => {
+            // Back to Save, which opened it. After a successful Save that
+            // button is disabled, having nothing left to send, and a disabled
+            // button cannot take focus.
+            event.preventDefault();
+            saveButtonRef.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {confirmation.volumes.length} unused volume
+              {confirmation.volumes.length !== 1 ? "s" : ""}?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                {noticeShown && (
+                  <p
+                    key={stops}
+                    ref={noticeRef}
+                    tabIndex={-1}
+                    role="alert"
+                    className="rounded-sm font-medium text-destructive focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    {confirmation.blocked
+                      ? "Nothing was saved: this container's configuration changed while this was open, including what this Save changes. Cancel reloads it; then make your changes again."
+                      : "These volumes changed after the list was shown, so nothing was deleted. Check the list again."}
+                  </p>
+                )}
+                {configChangedUnder && !confirmation.blocked && (
+                  <p
+                    role="status"
+                    className="text-amber-700 dark:text-amber-400"
+                  >
+                    This container&apos;s configuration changed while this was
+                    open. Cancel reloads it, discarding the changes you have not
+                    saved.
+                  </p>
+                )}
+                <p>
+                  Saving will permanently delete each volume below from storage,
+                  along with all data on it. This action cannot be undone.
+                </p>
+                <ul className="space-y-1 rounded-md border border-destructive/30 bg-destructive/5 p-2">
+                  {confirmation.volumes.map(({ key, volume }) => (
+                    <li key={key}>
+                      <span className="font-mono text-xs">{key}</span>{" "}
+                      <span className="break-all font-mono font-semibold">
+                        {volume}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {setConfigMutation.isError && (
+            <p className="text-sm text-destructive">
+              {setConfigMutation.error.message}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={setConfigMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={setConfigMutation.isPending || confirmation.blocked}
+              onClick={(event) => {
+                // Stays open until the outcome is known.
+                event.preventDefault();
+                // A double-click is one decision. Its second click would
+                // otherwise confirm the list that the first asked again on,
+                // before anyone could read it.
+                if (event.detail > 1) return;
+                saveChanges({ confirmed: confirmation.volumes });
+              }}
+            >
+              {setConfigMutation.isPending ? "Saving..." : "Delete and Save"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="grid gap-3 lg:grid-cols-2">
         {/* CPU */}

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useQuery } from "@tanstack/react-query";
 import { renderWithProviders } from "@/test/test-utils";
 import { ContainerResourcesPanel } from "./ContainerResourcesPanel";
 
@@ -15,14 +16,18 @@ vi.mock("../api/vm-queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/vm-queries")>();
   return {
     ...actual,
-    useContainerConfig: () => ({
-      data: state.config,
-      isLoading: false,
-      error: null,
-    }),
+    // A real query, seeded so the data is there on the first render: the
+    // panel also reads it straight from the cache when it checks a Save.
+    useContainerConfig: (clusterId: string, ctId: string) =>
+      useQuery({
+        queryKey: actual.containerConfigKey(clusterId, ctId),
+        queryFn: () => state.config,
+        initialData: state.config,
+      }),
     useSetResourceConfig: () => ({
-      mutate: (vars: Record<string, unknown>) => {
+      mutateAsync: (vars: Record<string, unknown>) => {
         state.saved = vars;
+        return Promise.resolve({ status: "ok" });
       },
       isPending: false,
       isError: false,
@@ -74,20 +79,8 @@ describe("ContainerResourcesPanel unused volumes", () => {
     expect(screen.getByText("local-lvm:vm-200-disk-0")).toBeInTheDocument();
   });
 
-  it("saves the removal as a config delete", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
-    await user.click(screen.getByTitle("Remove volume"));
-    expect(screen.getByText("removing")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /save/i }));
-    expect(state.saved).toMatchObject({
-      clusterId: "c1",
-      resourceId: "ct-1",
-      kind: "ct",
-      fields: { delete: "unused0" },
-    });
-  });
+  // Saving a removal, and the confirmation that comes first, are tested in
+  // ContainerResourcesPanel.volume-delete.test.tsx against the request itself.
 
   it("undoes a pending removal", async () => {
     const user = userEvent.setup();
