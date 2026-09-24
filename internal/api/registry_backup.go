@@ -124,12 +124,13 @@ var pbsTaskUPIDParam = apischema.Property{
 // pveBackupJobIDParam is a PVE vzdump job id as a PATH parameter.
 //
 // Same anchor, different server: internal/proxmox/client_backup.go builds
-// /cluster/backup/<id> and /cluster/backup/<id>/run with url.PathEscape, and
-// the handlers only checked the segment was non-empty. PVE assigns these ids
-// itself (a "backup-" prefix and a uuid), so the class is far wider than
-// anything PVE produces — it is a traversal anchor, not a format. The rule
-// is the catalogue's pve-object-id, shared with the firewall, SDN and
-// metric-server ids that are anchored for the same reason.
+// /cluster/backup/<id> with url.PathEscape — to change or delete the job, and
+// to read it back for a run — and the handlers only checked the segment was
+// non-empty. PVE assigns these ids itself (a "backup-" prefix and a uuid), so
+// the class is far wider than anything PVE produces — it is a traversal
+// anchor, not a format. The rule is the catalogue's pve-object-id, shared with
+// the firewall, SDN and metric-server ids that are anchored for the same
+// reason.
 var pveBackupJobIDParam = apischema.Property{
 	Type:        apischema.String,
 	Pattern:     apischema.Rule("pve-object-id"),
@@ -621,9 +622,23 @@ func registerBackupEndpoints(reg *Registry, h *handlers.BackupHandler) {
 		Handler:     h.DeleteBackupJob,
 	})
 	reg.Register(Endpoint{
-		Method:      fiber.MethodPost,
-		Path:        clusterScope + "/backup-jobs/:job_id/run",
-		Description: "Run a scheduled vzdump backup job now, outside its schedule. Runs as a background task.",
+		Method: fiber.MethodPost,
+		Path:   clusterScope + "/backup-jobs/:job_id/run",
+		Description: "Run a scheduled vzdump backup job now, outside its schedule, as the Proxmox GUI's " +
+			"Run now does: the job's own settings are sent to vzdump on the node the job names, or, when " +
+			"it names none, on every node Proxmox reports online. Whether a node starts a background task " +
+			"is vzdump's decision: a node holding none of the job's guests usually answers that it has " +
+			"nothing to back up, but an all-guests job starts a task there too unless the job has stop " +
+			"set, and a VMID list naming a guest that no longer exists starts one on every node, which " +
+			"then fails for that guest. Each task started is recorded like any other. Answers 200 with " +
+			"tasks (a node and upid per task), skipped (nodes that found nothing to back up), errors (a " +
+			"node and message per node where no backup started: not online, or refused), unconfirmed (a " +
+			"node and message per node whose answer did not say whether a backup started — check the task " +
+			"list before running the job again) and stops_running_backups (the job's stop flag, with which " +
+			"vzdump stops any backup already running on every node that answered with a task or with " +
+			"nothing to back up, and possibly on a node refused afterwards). Answers 502 " +
+			"when no task was confirmed and a node failed or went unconfirmed, and 409 when the job's own " +
+			"node is not online, in which case nothing is sent.",
 		Group:       "Backup",
 		Permissions: clusterCheck("manage", "backup"),
 		Parameters:  clusterParams(apischema.Properties{"job_id": pveBackupJobIDParam}),

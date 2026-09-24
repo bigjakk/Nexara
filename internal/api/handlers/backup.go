@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -1243,7 +1244,67 @@ func (h *BackupHandler) DeleteBackupJob(c fiber.Ctx, p *apischema.Params) error 
 	return c.JSON(fiber.Map{"status": "deleted"})
 }
 
+// backupJobRunResponse is what a backup job run answers when it confirmed at
+// least one task, or when no node failed. Every list is present, empty or not:
+// a caller reading "skipped" off an all-guests run must get [] rather than
+// null.
+type backupJobRunResponse struct {
+	Tasks []backupJobRunTask `json:"tasks"`
+	// Skipped names the nodes where vzdump found none of the job's guests and
+	// started no backup (it answered "OK").
+	Skipped []string `json:"skipped"`
+	// Errors are the nodes where no backup started, for certain: not online,
+	// a name Nexara would not send, or a refusal from Proxmox.
+	Errors []backupJobRunError `json:"errors"`
+	// Unconfirmed are the nodes the request reached, or may have reached,
+	// whose answer did not say whether a backup started — one may be running.
+	Unconfirmed []backupJobRunError `json:"unconfirmed"`
+	// StopsRunningBackups is the job's stop flag: vzdump then stops any
+	// backup already running on each node that answered with a task or with
+	// nothing to back up, and possibly on one it refused afterwards — so a
+	// skipped node is not one where nothing happened.
+	StopsRunningBackups bool `json:"stops_running_backups"`
+}
+
+type backupJobRunTask struct {
+	Node string `json:"node"`
+	UPID string `json:"upid"`
+}
+
+type backupJobRunError struct {
+	Node    string `json:"node"`
+	Message string `json:"message"`
+}
+
 // RunBackupJob handles POST /api/v1/clusters/:cluster_id/backup-jobs/:job_id/run
+//
+// The run is one vzdump request per node (proxmox.RunBackupJob), so it can
+// half-succeed, and the answer is shaped around the question a caller has to
+// act on — is a backup running?
+//
+//   - 200 whenever a task was confirmed, with every other node's outcome
+//     listed beside it. A running task is not undone by a sibling node's
+//     failure, and an error status would tell a script that nothing is
+//     running while backups are.
+//   - 200 as well when every node answered that it holds none of the job's
+//     guests. That is Proxmox's answer, not an error, and the SPA says so.
+//   - 502 when no task was confirmed and some node failed or went
+//     unconfirmed. The message says which of the two: "started no backup"
+//     only when every failure is certain, and "check the task list before
+//     running it again" when a backup may be running unconfirmed.
+//   - 409 when the job is pinned to a node that is not online. Nothing is
+//     sent anywhere, as the Proxmox GUI refuses the whole run in that case.
+//
+// Two kinds of audit row. Each task that started goes through TrackTask with
+// its own node — the audit row, the task_history row the collector reconciles
+// and the task event — exactly as a single dispatched task does. And every run
+// that sent vzdump anything gets one summary row, backup_job_run_requested,
+// recording each node's outcome, 502 included: a node answering "OK" may still
+// have had a running backup stopped (stops_running_backups), an unconfirmed
+// node may be backing up, and a refused one is part of what was asked of
+// Proxmox. A run that sent nothing — the 409, or one where every node was
+// offline, had a name Nexara would not send, or could not be connected to —
+// writes neither, because there is no action against Proxmox to record.
 func (h *BackupHandler) RunBackupJob(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
@@ -1257,23 +1318,175 @@ func (h *BackupHandler) RunBackupJob(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	upid, err := client.RunBackupJob(c.Context(), jobID)
+	run, err := client.RunBackupJob(c.Context(), jobID)
 	if err != nil {
+		var offline *proxmox.NodeNotOnlineError
+		if errors.As(err, &offline) {
+			where := "which is not online (Proxmox reports it as " + offline.Status + ")"
+			if offline.Status == "" {
+				where = "which Proxmox does not list"
+			}
+			return fiber.NewError(fiber.StatusConflict,
+				"Backup job "+jobID+" runs only on node "+offline.Node+", "+where+". No backup was started.")
+		}
 		return mapProxmoxError(err)
 	}
 
-	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
-		ClusterID:    clusterID,
-		ResourceType: "backup",
-		ResourceID:   jobID,
-		Action:       "backup_job_run",
-		UPID:         upid,
-		TaskType:     "vzdump",
-		Description:  "Run backup job " + jobID,
-		Extra:        map[string]any{"job_id": jobID},
-	})
+	resp := backupJobRunResponse{
+		Tasks:               make([]backupJobRunTask, 0, len(run.Tasks)),
+		Skipped:             append(make([]string, 0, len(run.Skipped)), run.Skipped...),
+		Errors:              backupJobRunErrors(run.Failed),
+		Unconfirmed:         backupJobRunErrors(run.Unconfirmed),
+		StopsRunningBackups: run.StopsRunningBackups,
+	}
+	for _, task := range run.Tasks {
+		TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+			ClusterID:    clusterID,
+			Node:         task.Node,
+			ResourceType: "backup",
+			ResourceID:   jobID,
+			Action:       "backup_job_run",
+			UPID:         task.UPID,
+			TaskType:     "vzdump",
+			Description:  "Run backup job " + jobID + " on " + task.Node,
+			Extra:        map[string]any{"job_id": jobID},
+		})
+		resp.Tasks = append(resp.Tasks, backupJobRunTask{Node: task.Node, UPID: task.UPID})
+	}
+	if run.Sent > 0 {
+		AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "backup", jobID,
+			"backup_job_run_requested", backupJobRunAuditDetails(jobID, resp))
+	}
 
-	return c.JSON(fiber.Map{"upid": upid})
+	if len(resp.Tasks) == 0 && (len(resp.Errors) > 0 || len(resp.Unconfirmed) > 0) {
+		return fiber.NewError(fiber.StatusBadGateway, backupJobRunNoTaskMessage(jobID, resp))
+	}
+	return c.JSON(resp)
+}
+
+// backupJobRunErrors renders failed or unconfirmed nodes for the answer,
+// never as nil.
+func backupJobRunErrors(failures []proxmox.BackupJobRunFailure) []backupJobRunError {
+	out := make([]backupJobRunError, 0, len(failures))
+	for _, f := range failures {
+		out = append(out, backupJobRunError{Node: f.Node, Message: backupJobRunFailureMessage(f.Err)})
+	}
+	return out
+}
+
+// backupJobRunUnreadable is the sentence for a failure of a kind
+// backupJobRunFailureMessage does not recognise.
+const backupJobRunUnreadable = "the answer from Proxmox could not be read"
+
+// backupJobRunFailureMessage is the sentence one node gets in the answer and in
+// the summary audit row, which already name the node. A node that was never
+// asked says why not. A failure of a kind this recognises — a refused node
+// name, a failed connection, a 403 or 404, an answer Proxmox gave (APIError),
+// an answer that did not parse — reads as it would from any single Proxmox
+// call, through mapProxmoxError, which turns a failed connection into a fixed
+// sentence. Anything else gets a fixed sentence of its own, never its text:
+// what is left is the transport's own errors, and those name both ends of the
+// socket — a body cut off mid-read comes back as "read response body: read tcp
+// 127.0.0.1:56428->192.0.2.10:8006: read: connection reset by peer", which the
+// 502 and the Viewer-readable audit row must not carry.
+//
+// What Proxmox itself answered is kept as mapProxmoxError renders it for every
+// handler: PVE's own words — or, where a reverse proxy stands in front of
+// pveproxy, that proxy's error page, which can name the proxy's host. That is
+// upstream text, not this process's socket, and it is recorded as it came.
+func backupJobRunFailureMessage(err error) string {
+	var offline *proxmox.NodeNotOnlineError
+	if errors.As(err, &offline) {
+		if offline.Status == "" {
+			return "Proxmox does not list this node"
+		}
+		return "node is not online (Proxmox reports it as " + offline.Status + ")"
+	}
+	var apiErr *proxmox.APIError
+	recognised := errors.As(err, &apiErr) || errors.Is(err, proxmox.ErrInvalidInput) ||
+		errors.Is(err, proxmox.ErrConnectionFailed) || errors.Is(err, proxmox.ErrForbidden) ||
+		errors.Is(err, proxmox.ErrNotFound) || errors.Is(err, proxmox.ErrInvalidResponse)
+	if !recognised {
+		return backupJobRunUnreadable
+	}
+	var fe *fiber.Error
+	if errors.As(mapProxmoxError(err), &fe) && strings.TrimSpace(fe.Message) != "" {
+		return fe.Message
+	}
+	// A status with an empty body maps to an empty sentence — the 59x statuses
+	// pveproxy relays for a node it could not reach carry their reason in the
+	// status line, which the client does not keep — so say what is known.
+	if apiErr != nil {
+		return "Proxmox answered with status " + strconv.Itoa(apiErr.StatusCode) + " and no message"
+	}
+	return backupJobRunUnreadable
+}
+
+// backupJobRunAuditDetails is the summary row's details. view:audit is held by
+// every Viewer, so every string Proxmox supplied goes through auditSafe — node
+// names included, since an offline node's was never checked, and messages,
+// since a PVE rejection can end in a newline — and the messages are the
+// answer's, which keep this process's socket addresses out
+// (backupJobRunFailureMessage).
+func backupJobRunAuditDetails(jobID string, resp backupJobRunResponse) json.RawMessage {
+	auditErrors := func(in []backupJobRunError) []map[string]string {
+		out := make([]map[string]string, 0, len(in))
+		for _, e := range in {
+			out = append(out, map[string]string{"node": auditSafe(e.Node), "message": auditSafe(e.Message)})
+		}
+		return out
+	}
+	tasks := make([]map[string]string, 0, len(resp.Tasks))
+	for _, t := range resp.Tasks {
+		tasks = append(tasks, map[string]string{"node": auditSafe(t.Node), "upid": auditSafe(t.UPID)})
+	}
+	skipped := make([]string, 0, len(resp.Skipped))
+	for _, n := range resp.Skipped {
+		skipped = append(skipped, auditSafe(n))
+	}
+	details, _ := json.Marshal(map[string]any{
+		"job_id":                jobID,
+		"tasks":                 tasks,
+		"skipped":               skipped,
+		"errors":                auditErrors(resp.Errors),
+		"unconfirmed":           auditErrors(resp.Unconfirmed),
+		"stops_running_backups": resp.StopsRunningBackups,
+	})
+	return details
+}
+
+// backupJobRunNoTaskMessage is the 502's message: no task was confirmed. It
+// says "started no backup" only when that is certain — every node that failed
+// failed for a reason that means nothing started — and otherwise asks for the
+// task list to be checked first, because a backup may be running unconfirmed
+// and a second run would start another on top of it.
+func backupJobRunNoTaskMessage(jobID string, resp backupJobRunResponse) string {
+	nodeMessages := func(in []backupJobRunError) string {
+		parts := make([]string, 0, len(in))
+		for _, e := range in {
+			parts = append(parts, e.Node+": "+e.Message)
+		}
+		return strings.Join(parts, "; ")
+	}
+	var b strings.Builder
+	if len(resp.Unconfirmed) > 0 {
+		b.WriteString("Backup job " + jobID + " did not confirm that any backup started — check the task " +
+			"list before running it again. Unconfirmed on " + nodeMessages(resp.Unconfirmed) + ".")
+	} else {
+		b.WriteString("Backup job " + jobID + " started no backup.")
+	}
+	if len(resp.Errors) > 0 {
+		b.WriteString(" Could not start on " + nodeMessages(resp.Errors) + ".")
+	}
+	if resp.StopsRunningBackups && len(resp.Skipped) > 0 {
+		b.WriteString(" The job has stop set, so vzdump stopped any backup already running on " +
+			strings.Join(resp.Skipped, ", ") + ", where none of its guests is.")
+	}
+	if resp.StopsRunningBackups && len(resp.Errors) > 0 {
+		b.WriteString(" With stop set, vzdump may also have stopped a backup already running on a node " +
+			"it refused afterwards.")
+	}
+	return b.String()
 }
 
 // --- Restore endpoint ---

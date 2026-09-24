@@ -1975,6 +1975,60 @@ type BackupJobParams struct {
 	Delete []string `json:"delete,omitempty"`
 }
 
+// BackupJobRun is what RunBackupJob did, node by node. Every node it
+// considered is in exactly one of the four lists, each in node-name order.
+type BackupJobRun struct {
+	// Tasks are the vzdump workers Proxmox started, one per node that
+	// answered with a UPID. Each is a running task the caller must record
+	// (handlers.TrackTask).
+	Tasks []BackupJobRunTask
+	// Skipped names the nodes vzdump answered "OK" on: none of the job's
+	// guests is there, so it started no backup. With StopsRunningBackups set
+	// it did do something first — see there.
+	Skipped []string
+	// Failed are the nodes where no backup started, for certain. Three were
+	// sent nothing: not online (a *NodeNotOnlineError), a node name this
+	// client would not put in a path (ErrInvalidInput), and a request that
+	// was never written to a connection (ErrRequestNotSent). The rest were
+	// sent a request Proxmox refused (see vzdumpRefused).
+	Failed []BackupJobRunFailure
+	// Unconfirmed are the nodes a request was written to whose answer did not
+	// say whether vzdump started a worker: a connection that failed after the
+	// request went, a proxy status, a 500, an unreadable reply, a reply that
+	// is neither a task nor "OK", or a task id that cannot be tracked. A
+	// backup may be running on any of them, so the task list is the place to
+	// look before running the job again.
+	Unconfirmed []BackupJobRunFailure
+	// Sent counts the nodes a vzdump request was written to: every node in
+	// Tasks, Skipped and Unconfirmed, and those Proxmox refused. A connection
+	// that failed after the request was written counts, because Proxmox may
+	// have acted on it; a request that was never written does not.
+	Sent int
+	// StopsRunningBackups is the job's stop flag. With it set, vzdump stops
+	// the backup already running on a node before it answers there with a
+	// task or with "OK" (PVE/API2/VZDump.pm, vzdump: stop_running_backups,
+	// then `return 'OK' if !scalar(@{$local_vmids})`), so a Skipped node is
+	// one where a running backup may have been stopped, not one where nothing
+	// happened. A node Proxmox refused may have had its backup stopped too —
+	// the storage permission check comes after the stop — though one refused
+	// by the parameter schema or an earlier permission check, the stop's own
+	// Sys.Modify check among them, did not.
+	StopsRunningBackups bool
+}
+
+// BackupJobRunTask is one vzdump worker a backup job run started.
+type BackupJobRunTask struct {
+	Node string
+	UPID string
+}
+
+// BackupJobRunFailure is one node a backup job run did not start a backup on,
+// or did not confirm one on, and why.
+type BackupJobRunFailure struct {
+	Node string
+	Err  error
+}
+
 // --- Phase 9: Datacenter Feature Parity Types ---
 
 // ClusterOptions represents the datacenter.cfg options from GET /cluster/options.

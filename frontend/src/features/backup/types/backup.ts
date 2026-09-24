@@ -189,6 +189,44 @@ export interface BackupJob {
   comment?: string;
 }
 
+/** One vzdump task a backup job run started. */
+export interface BackupJobRunTask {
+  node: string;
+  upid: string;
+}
+
+/** One node of a backup job run that did not start a backup, and why. */
+export interface BackupJobRunError {
+  node: string;
+  message: string;
+}
+
+/**
+ * What POST …/backup-jobs/:job_id/run answers when a task started or no node
+ * failed. The run is one vzdump request per node, so it can half-succeed:
+ * `errors` and `unconfirmed` may sit beside started `tasks`. When no task was
+ * confirmed and a node failed, the server answers an error status instead.
+ */
+export interface BackupJobRunResult {
+  tasks: BackupJobRunTask[];
+  /** Nodes where vzdump found none of the job's guests and started nothing. */
+  skipped: string[];
+  /** Nodes where no backup started, for certain: offline, or refused. */
+  errors: BackupJobRunError[];
+  /**
+   * Nodes whose answer did not say whether a backup started — one may be
+   * running, so the task list is the place to look before running again.
+   */
+  unconfirmed: BackupJobRunError[];
+  /**
+   * The job's stop flag: vzdump then stops any backup already running on every
+   * node that answered with a task or with nothing to back up, and possibly on
+   * a node refused afterwards — so a skipped node is not one where nothing
+   * happened.
+   */
+  stops_running_backups: boolean;
+}
+
 export interface TriggerBackupRequest {
   vmid: string;
   storage?: string;

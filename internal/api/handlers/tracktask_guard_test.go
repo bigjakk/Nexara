@@ -61,8 +61,17 @@ var upidMethods = map[string]bool{
 	"DownloadURLToStorage": true,
 	"DownloadAppliance":    true,
 	"TriggerBackup":        true,
-	"RunBackupJob":         true,
 	"CreateACMEAccount":    true,
+
+	// RunBackupJob is the one entry that does not return (string, error): it
+	// starts a vzdump task on each of several nodes and returns a
+	// *BackupJobRun holding every UPID. It stays listed because this set is
+	// what the per-function rule keys on, so the handler that calls it must
+	// still TrackTask — once per task, which the rule cannot count and
+	// TestRunBackupJobTracksEveryTaskOnItsOwnNode (internal/api) asserts.
+	// TestGuard_UPIDMethodListInSync cannot see a method of this shape, so a
+	// second multi-UPID method has to be added here by hand.
+	"RunBackupJob": true,
 }
 
 // nonUPIDStringMethods are proxmox *Client methods that return `(string, error)`

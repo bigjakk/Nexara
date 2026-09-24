@@ -31,6 +31,14 @@ var (
 	// path, say. It never reaches the network, so handlers should surface it as
 	// a client error rather than as a Proxmox failure.
 	ErrInvalidInput = errors.New("invalid input")
+
+	// ErrRequestNotSent marks a request that never left this process — the
+	// request was never written — so the server cannot have acted on it. It
+	// rides alongside the error that stopped it (ErrConnectionFailed, usually).
+	// Only a call that has to tell "never sent" from "sent, answer lost" sets
+	// it: startVzdump, for a backup job run. Everywhere else a failed
+	// connection is ErrConnectionFailed alone.
+	ErrRequestNotSent = errors.New("request not sent")
 )
 
 // APIError represents a non-sentinel HTTP error from the Proxmox API.
@@ -182,6 +190,24 @@ type TokenExistsError struct {
 
 func (e *TokenExistsError) Error() string {
 	return fmt.Sprintf("proxmox: API token %s!%s already exists", e.UserID, e.TokenName)
+}
+
+// NodeNotOnlineError reports a node that GET /nodes did not list as online, so
+// nothing was sent to it. RunBackupJob returns it on its own when the job is
+// pinned to that node, and records it per node otherwise (see
+// backupJobRunTargets).
+type NodeNotOnlineError struct {
+	Node string
+	// Status is the node's status as GET /nodes reported it — "offline" or
+	// "unknown" — or empty when Proxmox did not list the node at all.
+	Status string
+}
+
+func (e *NodeNotOnlineError) Error() string {
+	if e.Status == "" {
+		return fmt.Sprintf("Proxmox lists no node named %s", e.Node)
+	}
+	return fmt.Sprintf("node %s is not online (Proxmox reports it as %s)", e.Node, e.Status)
 }
 
 // IsAlreadyExistsError reports whether err is Proxmox's "this object is

@@ -1,6 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
 import { apiPath, queryParams } from "@/lib/api-path";
+import {
+  describeBackupJobRun,
+  normalizeBackupJobRun,
+  type BackupJobRunWire,
+} from "../lib/backup-job-run";
 import type {
   PBSServer,
   PBSDatastore,
@@ -19,6 +25,7 @@ import type {
   PBSPruneResult,
   BackupJob,
   BackupJobParams,
+  BackupJobRunResult,
   TriggerBackupRequest,
   PBSDatastoreRRDEntry,
   PBSDatastoreConfig,
@@ -494,15 +501,41 @@ export function useDeleteBackupJob() {
   });
 }
 
+/**
+ * Runs a backup job now. The server sends the job to vzdump on each node it
+ * runs on, so a 200 can carry failures and unconfirmed nodes beside the tasks
+ * that started; each outcome gets its own toast (describeBackupJobRun), and the
+ * tasks themselves reach the task list through the server's task events. A run
+ * that confirmed no task because a node failed answers an error status, which
+ * the global mutation-error toast (lib/query-client.ts) shows — the message
+ * names every node and why — so no onError is defined here.
+ */
 export function useRunBackupJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
-      apiClient.post<{ upid: string }>(
-        apiPath`/api/v1/clusters/${clusterId}/backup-jobs/${jobId}/run`,
+    mutationFn: async ({
+      clusterId,
+      jobId,
+    }: {
+      clusterId: string;
+      jobId: string;
+    }): Promise<BackupJobRunResult> =>
+      normalizeBackupJobRun(
+        await apiClient.post<BackupJobRunWire | null>(
+          apiPath`/api/v1/clusters/${clusterId}/backup-jobs/${jobId}/run`,
+        ),
       ),
-    onSuccess: (_data, variables) => {
+    onSuccess: (result, variables) => {
+      for (const notice of describeBackupJobRun(variables.jobId, result)) {
+        if (notice.description != null) {
+          toast[notice.level](notice.message, {
+            description: notice.description,
+          });
+        } else {
+          toast[notice.level](notice.message);
+        }
+      }
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "backup-jobs"],
       });

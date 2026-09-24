@@ -10,6 +10,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Pencil,
   Trash2,
   Play,
@@ -19,6 +29,7 @@ import {
 } from "lucide-react";
 import type { BackupJob } from "../types/backup";
 import { useDeleteBackupJob, useRunBackupJob } from "../api/backup-queries";
+import { describeBackupJobRunConfirm } from "../lib/backup-job-run";
 import { describeSchedule } from "../lib/schedule";
 import { BackupJobDialog } from "./BackupJobDialog";
 
@@ -45,8 +56,24 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editJob, setEditJob] = useState<BackupJob | null>(null);
   const [runningJobId, setRunningJobId] = useState<string | null>(null);
+  // Run now confirms first, as the Proxmox GUI does: a run may prune older
+  // backups as a scheduled one does, and a stop-mode job shuts guests down.
+  const [confirmRun, setConfirmRun] = useState<BackupJob | null>(null);
   const deleteMutation = useDeleteBackupJob();
   const runMutation = useRunBackupJob();
+
+  const runJob = (job: BackupJob) => {
+    setConfirmRun(null);
+    setRunningJobId(job.id);
+    runMutation.mutate(
+      { clusterId, jobId: job.id },
+      {
+        onSettled: () => {
+          setRunningJobId(null);
+        },
+      },
+    );
+  };
 
   if (jobs.length === 0) {
     return (
@@ -151,15 +178,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                           size="sm"
                           title="Run Now"
                           onClick={() => {
-                            setRunningJobId(job.id);
-                            runMutation.mutate(
-                              { clusterId, jobId: job.id },
-                              {
-                                onSettled: () => {
-                                  setRunningJobId(null);
-                                },
-                              },
-                            );
+                            setConfirmRun(job);
                           }}
                           disabled={runningJobId === job.id}
                         >
@@ -250,6 +269,33 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
           }}
         />
       )}
+      <AlertDialog
+        open={confirmRun !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmRun(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Run backup job {confirmRun?.id} now?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmRun && describeBackupJobRunConfirm(confirmRun)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirmRun) runJob(confirmRun);
+              }}
+            >
+              Run now
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

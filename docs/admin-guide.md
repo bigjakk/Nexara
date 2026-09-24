@@ -637,7 +637,7 @@ Beyond datastore management, the Backup dashboard carries four more tabs:
    - **Mode** — snapshot, suspend, or stop
    - **Compression** — zstd (recommended), lzo, gzip, or none
    - **Comment** and **Enabled**
-4. Save. Use the **Run Now** (▶) button on the job's row to fire it outside its schedule; the **Next Run** column shows when it would fire on its own.
+4. Save. Use the **Run Now** (▶) button on the job's row to fire it outside its schedule; the **Next Run** column shows when it would fire on its own. Run Now asks first, as Proxmox's own **Run now** does, then starts the job with its own settings on the node it names — or, when it names none, on every online node — and each backup task it starts appears in the task list. A node that is offline or refuses is reported beside the tasks that did start, and a node whose answer does not confirm a start is reported separately: a backup may be running there, so check the task list before running the job again. A job pinned to a node that is offline is refused outright. Each run writes an audit row per backup task it starts and, whenever it asked Proxmox anything, one more recording each node's outcome.
 
 > A job carries exactly **one** selection. Switching an existing job from, say, a VMID list to a pool clears the old selection rather than layering the two — that is deliberate, and it matches what vzdump accepts.
 

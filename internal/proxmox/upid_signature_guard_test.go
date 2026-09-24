@@ -147,6 +147,17 @@ var upidEndpoints = map[string]upidEndpoint{
 		verbs:     everyMutatingVerb,
 		why:       "directory create/destroy run as tasks",
 	},
+
+	// PVE::API2::VZDump's vzdump forks a 'vzdump' worker — or answers "OK"
+	// when the node holds none of the guests it was asked for, which is why
+	// the reply has to be read rather than dropped: it is the only thing that
+	// says which of the two happened. TriggerBackup and startVzdump (behind
+	// RunBackupJob) both post here.
+	"/nodes/{node}/vzdump": {
+		fragments: []string{"/vzdump"},
+		verbs:     everyMutatingVerb,
+		why:       "vzdump forks a backup worker, or answers \"OK\" when it has nothing to back up",
+	},
 }
 
 func TestGuard_WorkerEndpointsSurfaceTheUPID(t *testing.T) {
