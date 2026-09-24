@@ -322,6 +322,11 @@ func (e Endpoint) bodyValues(c fiber.Ctx) (map[string]any, error) {
 		}
 	}
 
+	// When the body deadline cuts this read (closeConnectionsLeftMidBody),
+	// Request.bodyBytes puts the read error's text where the body was — the
+	// server's own address and port among it. That text is not JSON, so it is
+	// answered below as a malformed body; nothing here may keep a raw body or
+	// send one back.
 	var body []byte
 	if required {
 		body = c.Body()

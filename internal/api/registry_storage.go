@@ -18,6 +18,15 @@ import (
 // (permissions.go) requires of a cluster-scoped Check.
 const storageScope = clusterScope + "/storage"
 
+// storageUploadPath is the storage upload route. The 10 MiB body-size guard,
+// the refusal of chunked bodies and the body read deadline exempt a streamed
+// multipart body sent to this route alone — one UploadFile streams, and
+// nothing reads before it has checked the caller's grants — and
+// isStreamedUpload (body_framing.go) decides that by matching a request
+// against this same constant, so a change to the route's path moves its
+// exemptions with it.
+const storageUploadPath = storageScope + "/:storage_id/upload"
+
 // storageRowParams is the pair every per-storage route carries: the
 // cluster and the storage pool's NEXARA row id.
 //
@@ -150,7 +159,7 @@ func registerStorageEndpoints(reg *Registry, h *handlers.StorageHandler) {
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
-		Path:   storageScope + "/:storage_id/upload",
+		Path:   storageUploadPath,
 		// Deferred renders as the bare word "deferred", so the permission an
 		// operator building a role needs is spelled out here.
 		Description: "Upload an ISO, CT template or OVA to a storage pool as multipart/form-data, with the " +
@@ -168,7 +177,12 @@ func registerStorageEndpoints(reg *Registry, h *handlers.StorageHandler) {
 		// memory. bodyValues gates on the Content-Type header BEFORE asking
 		// for the body, and multipart/form-data is not JSON, so nothing here
 		// touches it. The three form fields are read out of the multipart
-		// stream by the handler, which is the only place they exist.
+		// stream by the handler, which is the only place they exist. A JSON
+		// body sent here IS read — up to 64 KiB, before UploadFile checks any
+		// grant — and so is a +json type such as multipart/form-data+json,
+		// which bodyValues reads as JSON whatever comes before the suffix.
+		// That is why the body bounds exempt a multipart body of no JSON
+		// type sent to this route, and nothing else (isStreamedUpload).
 		Parameters: storageRowParams(nil),
 		Handler:    h.UploadFile,
 	})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -174,6 +175,22 @@ func New(a *nexapp.App) *Server {
 	s.wireAuthCompositions()
 
 	s.app = fiber.New(buildFiberConfig(cfg))
+	// Outside the middleware chain on purpose: it has to see the answers
+	// Fiber gives without running the chain. See closeConnectionsLeftMidBody.
+	closeConnectionsLeftMidBody(s.app, bodyReadTimeout)
+	// fasthttp builds the error it answers an unreadable request with out of
+	// the request itself, and Fiber would send that text back as the error
+	// envelope's message — the whole buffered head, Cookie and Authorization
+	// included, for some heads. What keeps every byte of the request out of
+	// that answer is redactServerErrorBodies, which replaces its body.
+	redactServerErrorBodies(s.app)
+	// SecureErrorLogMessage is a second layer under it: it keeps the snippet of
+	// the buffered request fasthttp would otherwise append to most of those
+	// errors (headerErrorMsg) out of the error's text, which Fiber's handler
+	// still reads to classify the error — so the request is not in the error
+	// for anything that ever does print it. It does not keep out the bytes a
+	// few errors quote themselves; see redactServerErrorBodies.
+	s.app.Server().SecureErrorLogMessage = true
 	s.setupMiddleware()
 	s.setupRoutes()
 
@@ -185,6 +202,82 @@ func New(a *nexapp.App) *Server {
 
 	return s
 }
+
+// keepAliveIdleTimeout is how long a kept-alive connection may wait between
+// requests before the server closes it.
+//
+// It has to outlast the reverse proxy's own idle timeout on its connections to
+// Nexara: a proxy that reuses a connection just as Nexara closes it has sent a
+// request nobody answers, and it may not resend one that is not idempotent.
+// The proxies the README configures keep an idle upstream connection for:
+//
+//   - nginx: 60 s — keepalive_timeout, defaulted in
+//     ngx_http_upstream_keepalive_init_main_conf
+//     (src/http/modules/ngx_http_upstream_keepalive_module.c). That function
+//     turns keepalive on, with 32 cached connections, for every explicit
+//     upstream{} block that does not configure it, so such a block reuses
+//     connections by default; a proxy_pass straight to an address is an
+//     implicit upstream, which it skips, and never reuses one;
+//   - Traefik: 90 s — idleConnTimeout, ForwardingTimeouts.SetDefaults
+//     (pkg/config/dynamic/http_config.go);
+//   - Caddy: 2 min — the transport's keepalive idle timeout,
+//     HTTPTransport.NewTransport (modules/caddyhttp/reverseproxy/httptransport.go).
+//
+// Three minutes outlasts the longest. A proxy configured to keep them longer
+// than this should be lowered below it.
+//
+// What it bounds, read off fasthttp v1.73.0's Server.serveConn, is the wait for
+// the first byte of a connection's second and later requests, and nothing
+// else: serveConn arms it just before that wait, replaces it with ReadTimeout
+// (headReadTimeout) the moment a byte arrives, and when it expires closes the
+// connection without a response (ErrNothingRead on a request after the
+// first). So it cuts neither a streamed upload nor a WebSocket — /ws,
+// /ws/console, /ws/vnc, however long the console session.
+const keepAliveIdleTimeout = 3 * time.Minute
+
+// headReadTimeout is how long a request's head, and fasthttp's read-ahead of
+// its body (the first 8 KiB), may take to arrive — timed from the request's
+// first byte, or from the connection opening for its first request. It is
+// buildFiberConfig's ReadTimeout.
+//
+// Without it nothing bounds those waits, and they come before authentication
+// and before any rate limiter: a client could hold a connection, and the
+// goroutine serving it, for as long as it liked by never finishing a head.
+// When it expires, Server.serveConn answers 408 (App.serverErrorHandler, with
+// errorHandler's request_timeout) and closes the connection. A minute is far
+// more than any client needs to send a head — capped at ReadBufferSize,
+// 16 KiB — and 8 KiB.
+//
+// It bounds nothing after that. serveConn arms it when a request's first byte
+// arrives and would leave it armed while the handler reads the rest of the
+// body — cutting an ISO upload streamed through the handler a minute after
+// its first byte. closeConnectionsLeftMidBody replaces it immediately before
+// the handler runs, with bodyReadTimeout or, for a streamed multipart upload
+// (isStreamedUpload), with no deadline at all. A hijacked connection — a
+// WebSocket — has every deadline cleared twice more on top of that: by
+// serveConn before it starts the hijack handler (c.SetDeadline(zeroTime)), and
+// by the fasthttp/websocket upgrader in its own (FastHTTPUpgrader.Upgrade,
+// server_fasthttp.go).
+const headReadTimeout = 60 * time.Second
+
+// bodyReadTimeout is how long a handler may spend reading a request's body,
+// timed from when the handler starts: after the head and fasthttp's read-ahead
+// of the first 8 KiB, which headReadTimeout bounds. closeConnectionsLeftMidBody
+// arms it as the connection's read deadline on every request but a streamed
+// multipart upload (isStreamedUpload), which streams for as long as it takes.
+//
+// Without it nothing bounds those reads, and on some routes they come before
+// authentication and before any rate limiter: logout and the OIDC token
+// exchange read their bodies unauthenticated (c.Bind().Body and bodyValues,
+// both through c.Body()), so a client could declare a body, send its first
+// 8 KiB and stop, and hold a handler goroutine for as long as it liked. When
+// the deadline cuts a read, c.Body() hands the handler the read error's text
+// in place of the body (Request.bodyBytes), the handler answers as it does a
+// malformed body, and the connection is closed after the answer (see
+// closeConnectionsLeftMidBody). Five minutes is the operator's choice. Every
+// body it bounds is at most 10 MiB (the body-size guard), so it asks of a
+// client no more than about 35 KB/s for the largest.
+const bodyReadTimeout = 5 * time.Minute
 
 // buildFiberConfig assembles the Fiber-side config struct. TrustProxy=true with
 // an empty TrustProxyConfig.Proxies means Fiber IGNORES the proxy header for everyone
@@ -202,12 +295,23 @@ func New(a *nexapp.App) *Server {
 // Private,UnixSocket} auto-trust toggles all default false, so ONLY the explicit
 // Proxies list is trusted — preserving the exact v2 semantics (XFF is honored solely
 // for remotes on the TRUSTED_PROXIES allowlist).
+//
+// It sets two read timeouts: IdleTimeout (keepAliveIdleTimeout) bounds the wait
+// between a connection's requests, and ReadTimeout (headReadTimeout) the head
+// of each request and fasthttp's read-ahead of its body. fasthttp would leave
+// ReadTimeout armed through a handler's reads of the rest of a body, so
+// closeConnectionsLeftMidBody replaces it before the handler runs: with
+// bodyReadTimeout, and with no deadline for a streamed multipart upload
+// (isStreamedUpload), whose ISO streams through the handler for as long as it
+// takes.
 func buildFiberConfig(cfg *config.Config) fiber.Config {
 	return fiber.Config{
 		ErrorHandler:      errorHandler,
 		BodyLimit:         32 * 1024 * 1024, // 32MB — bodies above this are streamed, not buffered
 		StreamRequestBody: true,             // Enable streaming for large uploads (ISO/vztmpl)
 		ReadBufferSize:    16 * 1024,        // fasthttp default is 4KB for the whole request line + headers; Bearer JWT + long filter query strings (?vmids= from big folders) overflow it into opaque 431s
+		IdleTimeout:       keepAliveIdleTimeout,
+		ReadTimeout:       headReadTimeout,
 
 		DisablePreParseMultipartForm: true, // Don't buffer multipart bodies; upload handler parses the stream itself
 		ProxyHeader:                  cfg.ProxyHeader,

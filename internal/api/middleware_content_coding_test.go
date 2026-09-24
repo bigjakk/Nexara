@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -532,88 +531,30 @@ func serveOnLoopback(t *testing.T, s *Server) string {
 	return ln.Addr().String()
 }
 
-// TestContentCodingRefusalClosesTheConnection holds the refusal to closing
-// the connection it answers on, over a real TCP connection.
+// TestContentCodingRefusalClosesTheConnection holds the 415 to closing the
+// connection it answers on, over a real TCP connection.
 //
 // The gate leaves the body unread, and fasthttp does not drain what a
 // handler leaves: it copies the first 8 KiB of a body with a Content-Length
 // into the request (readBodyWithStreaming) and, on a kept-alive connection,
-// parses what follows as the next request. So a request placed at that
-// offset inside a refused body would be served as if the client had sent it.
-// The fixture puts one there — GET /api/v1/version, padded so the body runs
-// to about 16 KiB.
+// parses what follows as the next request. The fixture hides a request at
+// that offset in the refused body (paddedRequest).
 //
-// The precondition sends the same body, without a coding, to a probe route
-// that answers without reading it: the hidden request then IS answered,
-// which is what shows the fixture reaches fasthttp's parser. It leans on an
-// early answer leaving the connection open, as every one but this refusal
-// does today; if that changes for all of them, the precondition is the part
-// to revisit, not the assertion.
+// The gate does not close the connection itself; closeConnectionsLeftMidBody
+// does, after every answer that leaves a body unread. So the precondition
+// sends the same request to the same server with closeConnectionsLeftMidBody
+// taken out, where the hidden request has to be served after the 415. That
+// shows the fixture reaches fasthttp's parser — and it fails if the gate ever
+// closes the connection itself again, a second copy of the decision that
+// would leave neither copy testable.
 func TestContentCodingRefusalClosesTheConnection(t *testing.T) {
-	s := newAssembledServer(t)
-	s.app.Post("/api/v1/unread-body-probe", func(c fiber.Ctx) error {
-		return c.SendStatus(fiber.StatusNoContent)
-	})
-	addr := serveOnLoopback(t, s)
-
-	hidden := "GET /api/v1/version HTTP/1.1\r\nHost: example.com\r\nX-Pad: " + strings.Repeat("p", 8<<10) + "\r\n\r\n"
-	body := strings.Repeat("x", 8<<10) + hidden
-
-	// exchange sends one request with body and reads two responses off the
-	// connection: the request's own, then whatever follows it.
-	exchange := func(target string, lines ...string) (*http.Response, *http.Response, error) {
-		conn, err := net.Dial("tcp", addr)
-		if err != nil {
-			t.Fatalf("dial: %v", err)
-		}
-		t.Cleanup(func() { _ = conn.Close() })
-		head := "POST " + target + " HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n"
-		for _, line := range lines {
-			head += line + "\r\n"
-		}
-		head += fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
-		if _, err := conn.Write([]byte(head + body)); err != nil {
-			t.Fatalf("write: %v", err)
-		}
-		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			t.Fatalf("set read deadline: %v", err)
-		}
-		r := bufio.NewReader(conn)
-		first, err := http.ReadResponse(r, nil)
-		if err != nil {
-			t.Fatalf("reading the response to POST %s: %v", target, err)
-		}
-		_, _ = io.Copy(io.Discard, first.Body)
-		_ = first.Body.Close()
-		second, err := http.ReadResponse(r, nil)
-		if second != nil {
-			_, _ = io.Copy(io.Discard, second.Body)
-			_ = second.Body.Close()
-		}
-		return first, second, err
-	}
-
-	probe, answered, err := exchange("/api/v1/unread-body-probe")
-	if probe.StatusCode != fiber.StatusNoContent || err != nil || answered.StatusCode != fiber.StatusOK {
-		t.Fatalf("precondition: the probe answered %d, then %v / %v — the request hidden in its unread body "+
-			"should have been answered 200, or this fixture cannot show a refusal preventing it",
-			probe.StatusCode, answered, err)
-	}
-
-	refused, second, err := exchange("/api/v1/auth/login", "Content-Encoding: gzip")
-	if refused.StatusCode != fiber.StatusUnsupportedMediaType {
-		t.Fatalf("status = %d, want the gate's 415", refused.StatusCode)
-	}
-	if !refused.Close {
-		t.Error("the 415 does not carry Connection: close")
-	}
-	var netErr net.Error
-	switch {
-	case err == nil:
-		t.Errorf("the request hidden in the refused body was answered, with %d", second.StatusCode)
-	case errors.As(err, &netErr) && netErr.Timeout():
-		t.Error("the connection stayed open after the 415 — nothing hidden came back yet, but nothing stops it")
-	}
+	unreadBodyCase{
+		raw: paddedRequest(fiber.MethodPost, "/api/v1/auth/login", 0,
+			"Content-Type: application/json", "Content-Encoding: gzip"),
+		status:  fiber.StatusUnsupportedMediaType,
+		slug:    "unsupported_media_type",
+		message: contentCodingRefusal,
+	}.run(t)
 }
 
 // accessLogChildEnv marks the child run of

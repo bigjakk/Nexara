@@ -167,6 +167,26 @@ func uploadContentAllowed(content string, canStorage, canImport bool) bool {
 	}
 }
 
+// ParseMultipartContentType reports whether a Content-Type names a multipart
+// body — the kind UploadFile streams — and, when it does, the parameters it
+// carries, the boundary among them: mime.ParseMediaType reads it without an
+// error, and the media type, which it returns in lower case, begins
+// "multipart/".
+//
+// UploadFile asks it of every upload, and the api package asks it too, to
+// decide which bodies the server's bounds on a request body — the body read
+// deadline, the 10 MiB body-size guard and the refusal of chunked bodies —
+// leave to this handler (isStreamedUpload). One function for both, so the
+// server never exempts a body this handler would not stream, nor bounds one
+// it would.
+func ParseMultipartContentType(contentType string) (params map[string]string, ok bool) {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
+		return nil, false
+	}
+	return params, true
+}
+
 // UploadFile handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/upload.
 //
 // This handler uses streaming multipart parsing to avoid buffering the entire
@@ -210,9 +230,8 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	// Parse the multipart boundary from the Content-Type header.
-	ct := c.Get("Content-Type")
-	mediaType, params, err := mime.ParseMediaType(ct)
-	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
+	params, ok := ParseMultipartContentType(c.Get("Content-Type"))
+	if !ok {
 		return fiber.NewError(fiber.StatusBadRequest, "Expected multipart form data")
 	}
 	boundary := params["boundary"]

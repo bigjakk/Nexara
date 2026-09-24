@@ -303,7 +303,7 @@ nexara.example.com {
 ```
 </details>
 
-> **Tips:** Set proxy max body size to at least 15 GB for ISO uploads, and disable request buffering so the proxy streams them instead of spooling 15 GB to its own disk first. Ensure WebSocket `Upgrade` headers are forwarded. Use long read timeouts for persistent WebSocket connections.
+> **Tips:** Set proxy max body size to at least 15 GB for ISO uploads, and disable request buffering so the proxy streams them instead of spooling 15 GB to its own disk first. Ensure WebSocket `Upgrade` headers are forwarded. Use long read timeouts for persistent WebSocket connections. Nexara closes a kept-alive connection after 3 minutes without a request, so if you raise the proxy's idle timeout for its connections to Nexara, keep it under that — the nginx, Traefik and Caddy defaults (60 s, 90 s, 2 min) all are.
 
 > **Set `TRUSTED_PROXIES`** to your reverse proxy's IP/CIDR (e.g. `127.0.0.1` or `10.0.0.0/8`). Without it, every request appears to come from the proxy and the per-IP auth/refresh/general rate limiters protect the *cluster*, not the *attacker*. If the proxy uses a non-standard header, also set `PROXY_HEADER`.
 

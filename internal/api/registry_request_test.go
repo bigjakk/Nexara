@@ -915,10 +915,14 @@ func TestBodyIsBoundedOnAnEndpointThatDeclaresNoBodyParameter(t *testing.T) {
 // reading, so it is one of the two shapes the Content-Length bound cannot
 // measure. The other is a content-coded body, which the server refuses before
 // any route runs (refuseContentCodedRequests, middleware.go); the test below
-// shows this path would not decode one even without that. It is
-// tested here rather than through app.Test because Fiber's test harness
-// serialises ContentLength verbatim, emitting a literal "Content-Length: -1"
-// header that fasthttp rejects while parsing, before any of this code runs.
+// shows this path would not decode one even without that. The server refuses
+// a chunked body before any route runs too (refuseChunkedRequestBodies,
+// body_framing.go) — on every route but the storage upload, which declares no
+// body parameter, so there this check is what refuses a chunked JSON body
+// unread. It is tested here rather than through app.Test because Fiber's test
+// harness serialises ContentLength verbatim, emitting a literal
+// "Content-Length: -1" header that fasthttp rejects while parsing, before any
+// of this code runs.
 func TestUnsizeableBodyIsRefusedUnreadOnAnEndpointDeclaringNoBodyParameter(t *testing.T) {
 	app := fiber.New()
 	e := Endpoint{

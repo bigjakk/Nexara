@@ -32,7 +32,9 @@ func TestStatusTextSlugs(t *testing.T) {
 		403: "forbidden",
 		404: "not_found",
 		405: "method_not_allowed",
+		408: "request_timeout",
 		409: "conflict",
+		411: "length_required",
 		412: "precondition_failed",
 		413: "request_entity_too_large",
 		415: "unsupported_media_type",
@@ -44,7 +46,6 @@ func TestStatusTextSlugs(t *testing.T) {
 		502: "bad_gateway",
 		503: "service_unavailable",
 		// Nothing the API sends today; each falls back.
-		408: "internal_server_error",
 		500: "internal_server_error",
 		504: "internal_server_error",
 		599: "internal_server_error",
@@ -73,6 +74,7 @@ var statusNamesTheAPISends = map[string]int{
 	"StatusForbidden":            fiber.StatusForbidden,
 	"StatusNotFound":             fiber.StatusNotFound,
 	"StatusConflict":             fiber.StatusConflict,
+	"StatusLengthRequired":       fiber.StatusLengthRequired,
 	"StatusPreconditionFailed":   fiber.StatusPreconditionFailed,
 	"StatusUnsupportedMediaType": fiber.StatusUnsupportedMediaType,
 	"StatusUnprocessableEntity":  fiber.StatusUnprocessableEntity,
@@ -90,13 +92,17 @@ var statusNamesTheAPISends = map[string]int{
 // app.go, which turns a request fasthttp could not read into a *fiber.Error.
 // TestFiberSentErrorStatusesCarryTheirSlug sends each one it can for real.
 //
-// Two of serverErrorHandler's are left out because this server cannot send
-// them: 408 needs a read deadline and buildFiberConfig sets no ReadTimeout or
-// IdleTimeout, and the 413 it makes of fasthttp.ErrBodyTooLarge never comes,
-// since StreamRequestBody streams an oversized body instead of refusing it.
+// One of serverErrorHandler's is left out because this server cannot send it:
+// the 413 it makes of fasthttp.ErrBodyTooLarge never comes, since
+// StreamRequestBody streams an oversized body instead of refusing it. Its 408
+// is in: buildFiberConfig's ReadTimeout (headReadTimeout) expires on a head, or
+// on fasthttp's read-ahead of a body, that does not arrive in time. The wait
+// between requests is bounded by IdleTimeout instead, and Server.serveConn
+// closes a connection that times out there without a response.
 var statusesFiberSendsThroughErrorHandler = map[int]string{
 	fiber.StatusBadRequest:                  "serverErrorHandler: a request fasthttp cannot parse",
 	fiber.StatusNotFound:                    "the router: no route matches the path",
+	fiber.StatusRequestTimeout:              "serverErrorHandler: a head or read-ahead the read deadline cut short",
 	fiber.StatusMethodNotAllowed:            "the router: a route matches the path but not the method",
 	fiber.StatusRequestHeaderFieldsTooLarge: "serverErrorHandler: a head larger than ReadBufferSize",
 	fiber.StatusNotImplemented:              "serverErrorHandler: a method with a byte outside the token set",
@@ -321,8 +327,13 @@ func TestGuard_EveryErrorStatusTheAPISendsHasASlug(t *testing.T) {
 // serverErrorHandler — plus the WebSocket gate's 426, which reaches it as
 // Fiber's own sentinel. Each is what puts its status in
 // statusesFiberSendsThroughErrorHandler, or keeps it out of internal_server_error.
+//
+// The server's ReadTimeout is shortened, so that a head the client stops
+// sending is cut in a second rather than a minute; every other request here
+// goes out whole at once.
 func TestFiberSentErrorStatusesCarryTheirSlug(t *testing.T) {
 	s := newAssembledServer(t)
+	s.app.Server().ReadTimeout = time.Second
 	addr := serveOnLoopback(t, s)
 
 	for _, tt := range []struct {
@@ -338,6 +349,7 @@ func TestFiberSentErrorStatusesCarryTheirSlug(t *testing.T) {
 			strings.Repeat("p", 20<<10) + "\r\n\r\n", fiber.StatusRequestHeaderFieldsTooLarge},
 		{"a method with a byte outside the token set", "G@T /api/v1/version HTTP/1.1\r\nHost: example.com\r\n\r\n",
 			fiber.StatusNotImplemented},
+		{"a head the client stops sending", "GET /api/v1/version HTTP/1.1\r\nHost: exa", fiber.StatusRequestTimeout},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			conn, err := net.Dial("tcp", addr)

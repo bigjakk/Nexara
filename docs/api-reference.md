@@ -116,11 +116,12 @@ All errors return a consistent envelope:
 ```
 
 `error` is a stable slug derived from the status code (`bad_request`,
-`unauthorized`, `forbidden`, `not_found`, `method_not_allowed`, `conflict`,
-`precondition_failed`, `request_entity_too_large`, `unsupported_media_type`,
-`unprocessable_entity`, `upgrade_required`, `too_many_requests`,
-`request_header_fields_too_large`, `internal_server_error`, `not_implemented`,
-`bad_gateway`, `service_unavailable`), unless an endpoint sends a more
+`unauthorized`, `forbidden`, `not_found`, `method_not_allowed`,
+`request_timeout`, `conflict`, `length_required`, `precondition_failed`,
+`request_entity_too_large`, `unsupported_media_type`, `unprocessable_entity`,
+`upgrade_required`, `too_many_requests`, `request_header_fields_too_large`,
+`internal_server_error`, `not_implemented`, `bad_gateway`,
+`service_unavailable`), unless an endpoint sends a more
 specific one of its own — cluster onboarding's `tfa_required` and
 `token_exists`, the `*_confirm_required` confirmation gates, and the two
 below, among others; `message` is the human-readable detail. Some of those
@@ -140,6 +141,13 @@ structured context: `token_exists` does, and so do most of the
   HA or capacity pre-flight check finds a problem. The failing checks come
   back in a top-level `conflicts` array rather than in `details`.
 
+A request the server cannot read at all — a malformed request line or header,
+a `Host` it cannot parse, a head that takes too long to arrive — is answered
+with the status's standard reason phrase as the `message` (`"Bad Request"`,
+`"Request Timeout"`, and so on) rather than a description of what was wrong:
+that description would repeat bytes of the request, its cookies and
+`Authorization` header among them. The connection is closed after the answer.
+
 Common HTTP status codes:
 
 | Code | Meaning |
@@ -148,8 +156,10 @@ Common HTTP status codes:
 | 401 | Unauthorized — missing or invalid token |
 | 403 | Forbidden — insufficient permissions |
 | 404 | Not found |
+| 408 | Request timeout — the request's head, or the first 8 KiB of its body, took longer than 60 seconds to arrive; see Request Bodies and Connections |
 | 409 | Conflict — resource already exists |
-| 413 | Request body too large — a `Content-Length` over 10 MiB, on every route but the storage upload |
+| 411 | Length required — the request body was sent chunked, other than as a multipart upload to the storage upload endpoint; see Request Bodies and Connections |
+| 413 | Request body too large — a `Content-Length` over 10 MiB, other than on a multipart upload to the storage upload endpoint; see Request Bodies and Connections |
 | 415 | Unsupported media type — the request named a `Content-Encoding` other than `identity`; see Compressed Request Bodies |
 | 429 | Rate limited |
 | 500 | Internal server error |
@@ -164,10 +174,9 @@ other — is refused on every endpoint with `415` and the `unsupported_media_typ
 envelope before any handler reads the body, so the body is never decompressed.
 The response carries `Accept-Encoding: identity`, which is how RFC 9110
 §12.5.3 has a server say which codings it would have accepted: none but "no
-encoding". The server then closes the connection, because a refused body is
-never read and so nothing can safely follow it there; a client still sending
-a large body at that point may see the connection reset rather than the 415.
-Resend the request, on a new connection, without the header.
+encoding". When the request carried a body, the server then closes the
+connection (see Request Bodies and Connections). Resend the request without
+the header.
 
 The refusal goes by the header alone, so it applies whatever the method and
 whether or not a body follows. A compressed body can be thousands of times
@@ -207,6 +216,55 @@ request is refused all the same, because a cluster delete must carry
 `confirm` set to the cluster's name (below), and no request rewritten from
 another route carries it. Sent to Nexara unresolved, the same path reaches
 the pool route, whose `pool_id` rule refuses `.` and `..`.
+
+## Request Bodies and Connections
+
+Send a request body with a `Content-Length`. A body sent chunked
+(`Transfer-Encoding: chunked`) is refused with `411` and the
+`length_required` envelope, before any of it is read: every size limit on a
+request body is a limit on the length it declares, and a chunked body declares
+none. A `Content-Length` over 10 MiB is refused with `413`.
+
+The storage upload, `POST /api/v1/clusters/:cluster_id/storage/:storage_id/upload`,
+streams a multipart body (`Content-Type: multipart/…`) to Proxmox, and that
+body — a multipart upload — is exempt from both refusals and from the
+five-minute limit on reading a body described below. The exemption holds only
+for a multipart type that is not also a `+json` type — `multipart/form-data+json`,
+say, which the endpoint reads as JSON — and only for the path spelled as it is
+there, in lower case, with no trailing slash. Any other body sent to the
+upload — JSON, a `+json` type, or anything else — and any body sent to another
+spelling of its path is refused when it is sent chunked or declares more than
+10 MiB, and is read under the five-minute limit, like a body sent anywhere
+else.
+
+A request whose head leaves its body's length open to another reading is
+refused with `400` and the `bad_request` envelope: a header line that starts
+with a space or tab — obsolete line folding, which continues the line above
+it — and `Transfer-Encoding: identity`, in any letter case, which the server
+would otherwise ignore. The connection is closed after the refusal.
+
+Whenever the server answers a request without reading all of its body — one of
+the refusals above, the trailing-slash `400` among them, a `401`, `404` or
+`429`, and so on — it closes the connection after the answer and says so with
+`Connection: close`, because nothing can safely follow the unread bytes on
+that connection. A client still sending a large body at that point may see the
+connection reset rather than the answer; retry on a new connection. A request
+whose body was read in full, or that sent none, leaves the connection open for
+the next one. The storage upload, and the branding logo and favicon uploads,
+are the exceptions: their handlers read the body themselves, as a multipart
+stream, and their connections are closed after the answer.
+
+A request's head, together with the first 8 KiB of its body, has 60 seconds
+to arrive — timed from its first byte, or from the connection opening for the
+first request on it. One that takes longer is answered `408` with the
+`request_timeout` envelope, and the connection is closed. The rest of the body
+then has five minutes to arrive, timed from when the server starts handling
+the request — every body but a multipart upload, which streams for as long as
+it takes. A body still arriving after that is cut off: the endpoint answers as
+it answers a malformed body, and the connection is closed. Any answer that
+comes more than five minutes after the server started handling the request
+closes the connection too. A kept-alive connection that carries no new request
+for three minutes is closed without an answer.
 
 ## Rate Limits
 

@@ -113,6 +113,13 @@ func (s *Server) setupMiddleware() {
 		Format: "${time} | ${status} | ${latency} | ${ip} | ${requestid} | ${method} ${path}\n",
 	}))
 
+	// Refuse (400) a request whose head frames its body ambiguously — an
+	// obs-fold line, or Transfer-Encoding: identity — before anything reads
+	// it; see refuseAmbiguousFraming. It reads only the head, and sits with
+	// the two gates below for the reasons they do: ahead of every route, and
+	// behind requestid and the security headers, so its refusal carries both.
+	s.app.Use(refuseAmbiguousFraming)
+
 	// Refuse a content-coded request before any handler reads its body, so
 	// that nothing ever decodes it. See refuseContentCodedRequests for what it
 	// refuses, and why on the header alone.
@@ -122,20 +129,24 @@ func (s *Server) setupMiddleware() {
 	// undecoded; its read buffer (ReadBufferSize, 16 KiB) may already hold
 	// more, and the rest is still on the socket. fasthttp does not drain what
 	// a handler leaves unread — on a kept-alive connection it parses the
-	// remainder as the next request — which is why the refusal also closes
-	// the connection. TestContentCodingRefusalClosesTheConnection pins that.
+	// remainder as the next request — so the connection is closed after the
+	// refusal, by closeConnectionsLeftMidBody (body_framing.go), which does
+	// that after every answer that leaves a body unread.
+	// TestContentCodingRefusalClosesTheConnection pins it for this one.
 	//
 	// Its position is what makes it cover every route, and it is the only
 	// copy of the check. New runs setupMiddleware before setupRoutes, main.go
 	// mounts the /ws upgraders and the embedded-SPA handler after New, and
 	// Fiber runs app-level handlers in the order they were registered — so the
 	// registry routes, the legacy ones in router.go, the WebSocket upgrades and
-	// the SPA handler all sit behind it. CORS, the body-size guard, the
-	// limiters and compression happen to come after it too; none of them reads
-	// a body, so its place among them carries no weight.
+	// the SPA handler all sit behind it. The chunked-body refusal, CORS, the
+	// body-size guard, the limiters and compression happen to come after it
+	// too; none of them reads a body, so its place among them carries no
+	// weight.
 	//
 	// What runs ahead of it — recover, the security headers, the Proxmox-cache
-	// local, requestid and the logger — reads headers, never a body. It sits
+	// local, requestid, the logger and the ambiguous-framing refusal — reads
+	// headers, never a body. It sits
 	// after them rather than first so that a refusal carries the security
 	// headers and a request id and is logged like every other rejection;
 	// TestContentCodingRefusalIsAccessLogged pins the last. The logger is the
@@ -148,6 +159,14 @@ func (s *Server) setupMiddleware() {
 	// fails if any of it starts to.
 	s.app.Use(refuseContentCodedRequests)
 
+	// Refuse a chunked request body with 411 before anything reads it, but for
+	// a streamed multipart upload (isStreamedUpload); see
+	// refuseChunkedRequestBodies. It reads only the head, as the content-coding
+	// gate does, and sits beside it for the same reasons: ahead of every route,
+	// and behind requestid and the security headers, so its refusal carries
+	// both.
+	s.app.Use(refuseChunkedRequestBodies)
+
 	// CORS. Fiber v3 takes []string for the allow-lists (v2 took comma-strings).
 	s.app.Use(cors.New(cors.Config{
 		AllowOrigins: corsAllowOrigins(s.config.CORSAllowOrigins),
@@ -155,20 +174,44 @@ func (s *Server) setupMiddleware() {
 		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 	}))
 
-	// Body size limit for non-upload API traffic (10 MB).
-	// Upload endpoints bypass this check — their bodies are streamed via
-	// StreamRequestBody and parsed incrementally by the handler.
+	// Body-size guard: a declared Content-Length over 10 MiB is refused (413)
+	// before any of the body is read — anywhere but as a streamed multipart
+	// upload (isStreamedUpload).
+	//
+	// What bounds a request body, by kind:
+	//
+	//   - A body with a Content-Length: this guard. A registry endpoint that
+	//     declares no body parameter also refuses a JSON body over 64 KiB
+	//     unread (bodyValues).
+	//   - A chunked body: refused (411) before any of it is read
+	//     (refuseChunkedRequestBodies).
+	//   - A content-coded body: refused (415) on every route
+	//     (refuseContentCodedRequests), so nothing decodes a body past these
+	//     bounds.
+	//   - How long a body takes: bodyReadTimeout from when the handler starts
+	//     (closeConnectionsLeftMidBody).
+	//   - A streamed multipart upload: none of these, by design. ISO,
+	//     CT-template and OVA files many GiB in size stream through the storage
+	//     upload to Proxmox. The route is authenticated, and nothing reads the
+	//     body before its handler has checked the caller's grants.
+	//     isStreamedUpload is the exemption here, in the chunked refusal and in
+	//     the body deadline; it matches the route only as it is declared, and a
+	//     multipart body of no type the declaration's bodyValues reads as JSON
+	//     — a +json type such as multipart/form-data+json is one, and bodyValues
+	//     reads it before any grant is checked. Every other body sent there is
+	//     bounded like a body sent anywhere else.
+	//
+	// BodyLimit bounds none of these reads: under StreamRequestBody fasthttp
+	// streams a larger body instead of refusing it. Each refusal leaves the
+	// body unread, and closeConnectionsLeftMidBody closes the connection after
+	// it. The length compared is the one fasthttp parsed from the head
+	// (RequestHeader.ContentLength), the same reading the chunked refusal and
+	// the body's own reader take — -1 for a chunked body, which is never over
+	// the limit here and is the chunked refusal's to answer.
 	const apiBodyLimit = 10 * 1024 * 1024
 	s.app.Use(func(c fiber.Ctx) error {
-		if strings.Contains(c.Path(), "/storage/") && strings.HasSuffix(c.Path(), "/upload") {
-			return c.Next()
-		}
-		cl := c.Get("Content-Length")
-		if cl != "" {
-			size, err := strconv.ParseInt(cl, 10, 64)
-			if err == nil && size > apiBodyLimit {
-				return fiber.ErrRequestEntityTooLarge
-			}
+		if c.Request().Header.ContentLength() > apiBodyLimit && !isStreamedUploadRequest(c) {
+			return fiber.ErrRequestEntityTooLarge
 		}
 		return c.Next()
 	})
@@ -266,9 +309,10 @@ func (s *Server) setupMiddleware() {
 	//     carries a request id and the security headers and is access-logged
 	//     like any other rejection — with the path as sent, trailing slash
 	//     included, since the logger's ${path} reads the same c.Path().
-	//   - After the content-coding gate. A content-coded write with a
-	//     trailing slash is refused by that gate first, and that refusal
-	//     also closes the connection, which this one does not do.
+	//   - After the content-coding gate and the two framing refusals beside
+	//     it (refuseAmbiguousFraming, refuseChunkedRequestBodies). A write
+	//     any of them refuses — a content-coded or chunked one with a
+	//     trailing slash, say — gets that refusal first.
 	//   - After CORS, which for a request that is not a preflight sets its
 	//     response headers and calls Next. So a cross-origin caller's refused
 	//     write still carries Access-Control-Allow-Origin, and its browser
@@ -286,12 +330,13 @@ func (s *Server) setupMiddleware() {
 	//   - Ahead of compression and of every route: a refusal returns before
 	//     either runs.
 	//
-	// It does not close the connection, and it does not read the body: a body
-	// it leaves unread stays on a kept-alive connection, where fasthttp would
-	// read what is left of it as the next request. That is the same
-	// pre-existing gap every early rejection here has — the 401, 404, 405,
-	// 413 and 429 answers alike — and it is tracked as one fix of its own
-	// rather than patched gate by gate.
+	// It does not read the body, and it does not close the connection itself:
+	// closeConnectionsLeftMidBody (body_framing.go), which sees every answer
+	// the server gives, closes the connection after any answer that leaves a
+	// body unread — this refusal's, as it does the 401, 404, 405, 413 and 429
+	// answers — so what is left of the body is never read as the next
+	// request. TestUnreadBodyClosesTheConnection holds it to that for this
+	// refusal too.
 	s.app.Use(refuseTrailingSlashWrites)
 
 	// Response compression — see compressionSkipped for what is excluded and
@@ -357,19 +402,17 @@ const contentCodingRefusal = "request body must be sent uncompressed: no Content
 // Fiber's c.Body() transparently decodes gzip, deflate, br and zstd (and the
 // x-gzip and brotli spellings), each step up to the 32 MiB BodyLimit. The
 // bounds Nexara puts on a body both read its Content-Length — the 10 MiB
-// body-size guard, on every path but the storage upload's, and bodyValues'
-// 64 KiB, on an endpoint that declares no body parameter — so they measure
-// the body as it crosses the wire, the compressed bytes, and never what it
-// decodes to. Measured with fasthttp's own encoders, 32 MiB of
-// repeated bytes is 52 bytes of brotli or about 3.5 KB of zstd, and gzip gets
-// there from about 64 KiB at its default level.
+// body-size guard, on everything but a streamed multipart upload, and
+// bodyValues' 64 KiB, on an endpoint that declares no body parameter — so they
+// measure the body as it crosses the wire, the compressed bytes, and never
+// what it decodes to. Measured with fasthttp's own encoders,
+// 32 MiB of repeated bytes is 52 bytes of brotli or about 3.5 KB of zstd, and
+// gzip gets there from about 64 KiB at its default level.
 //
-// Those bounds have a gap of their own that this does not close: a chunked
-// body carries no Content-Length for either to read. The 10 MiB guard passes
-// it, bodyValues refuses one only where no body parameter is declared, and
-// BodyLimit caps no read of it — under StreamRequestBody fasthttp streams a
-// body rather than refusing it, and c.Body() then copies every byte the
-// client sends.
+// Those bounds have a gap of their own, which refuseChunkedRequestBodies
+// closes rather than this: a chunked body carries no Content-Length for
+// either to read, so it is refused with 411 on every route but the storage
+// upload, whose handler reads the stream itself.
 //
 // Several routes read a body before any session exists —
 // POST /api/v1/auth/login, and the legacy register and logout routes, among
@@ -402,10 +445,12 @@ func refuseContentCodedRequests(c fiber.Ctx) error {
 		c.Set(fiber.HeaderAcceptEncoding, "identity")
 		// The body is left unread on purpose, and fasthttp does not drain what
 		// a handler leaves: on a kept-alive connection it parses whatever is
-		// left of this body as the next request, so a request hidden in it
-		// would be served as if the client — or the reverse proxy in front —
-		// had sent it. Closing the connection after the 415 ends that.
-		c.Response().SetConnectionClose()
+		// left of this body as the next request. closeConnectionsLeftMidBody
+		// closes the connection after this answer, as it does after every
+		// answer that leaves a body unread. There is deliberately no close of
+		// its own here: two copies of that decision would each hide the other
+		// from every test, and TestContentCodingRefusalClosesTheConnection's
+		// precondition fails if one comes back.
 		return fiber.NewError(fiber.StatusUnsupportedMediaType, contentCodingRefusal)
 	}
 	return c.Next()
