@@ -592,8 +592,11 @@ export function useDeleteNodeFirewallRule(clusterId: string, nodeName: string) {
       apiClient.delete<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/firewall/rules/${pos}`,
       ),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
+    // Returned, so the mutation stays pending — and the table's Delete
+    // buttons disabled — until the list is refetched: a rule is deleted by
+    // position, and a position read from the stale list names another rule.
+    onSuccess: () =>
+      queryClient.invalidateQueries({
         queryKey: [
           "clusters",
           clusterId,
@@ -602,8 +605,7 @@ export function useDeleteNodeFirewallRule(clusterId: string, nodeName: string) {
           "firewall",
           "rules",
         ],
-      });
-    },
+      }),
   });
 }
 

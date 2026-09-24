@@ -33,13 +33,14 @@ import {
   useSDNDNSPlugins,
   useDeleteSDNDNS,
 } from "../api/network-queries";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { CreateSDNZoneDialog } from "./CreateSDNZoneDialog";
 import { CreateSDNVNetDialog } from "./CreateSDNVNetDialog";
 import { CreateSDNSubnetDialog } from "./CreateSDNSubnetDialog";
 import { CreateSDNControllerDialog } from "./CreateSDNControllerDialog";
 import { CreateSDNIPAMDialog } from "./CreateSDNIPAMDialog";
 import { CreateSDNDNSDialog } from "./CreateSDNDNSDialog";
-import type { SDNVNet } from "../types/network";
+import type { SDNSubnet, SDNVNet } from "../types/network";
 
 interface SDNTableProps {
   clusterId: string;
@@ -121,6 +122,8 @@ function VNetSubnetsRow({
   );
   const deleteSubnet = useDeleteSDNSubnet(clusterId, vnet.vnet);
   const deleteVNet = useDeleteSDNVNet(clusterId);
+  const [pendingSubnetDelete, setPendingSubnetDelete] =
+    useState<SDNSubnet | null>(null);
 
   return (
     <>
@@ -211,7 +214,7 @@ function VNetSubnetsRow({
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => {
-                                  deleteSubnet.mutate(s.subnet);
+                                  setPendingSubnetDelete(s);
                                 }}
                                 disabled={deleteSubnet.isPending}
                               >
@@ -226,6 +229,46 @@ function VNetSubnetsRow({
                 </div>
               )}
             </div>
+            {/* What Proxmox does, transcribed: the subnet DELETE (pve-network
+                src/PVE/API2/Network/SDN/Subnets.pm) calls
+                Subnets::del_subnet, which — only when the zone has an IPAM —
+                removes it from that IPAM at once; the built-in PVE IPAM
+                (Ipams/PVEPlugin.pm del_subnet) dies "cannot delete subnet
+                ..., not empty" while any address other than the gateway is
+                allocated. It then drops the subnet from sdn/subnets.cfg.
+                Nodes build their SDN network from the running config, which
+                only the SDN apply (PUT /cluster/sdn, "Apply sdn controller
+                changes && reload") replaces — the Apply Changes button. The
+                SDN API's rollback (POST /cluster/sdn/rollback, which Nexara
+                does not call) rewrites subnets.cfg from the running config
+                but does not touch the IPAM, so the dialog promises no undo. */}
+            <ConfirmDeleteDialog
+              target={pendingSubnetDelete}
+              onClose={() => {
+                setPendingSubnetDelete(null);
+              }}
+              onConfirm={(subnet) => {
+                deleteSubnet.mutate(subnet.subnet);
+              }}
+              title={(subnet) => `Delete subnet ${subnet.subnet}?`}
+              description={(subnet) => (
+                <>
+                  <span className="block">
+                    Proxmox removes subnet {subnet.subnet} from VNet {vnet.vnet}{" "}
+                    in the SDN configuration now. If the zone uses an IPAM, the
+                    subnet is removed from it immediately too; the built-in PVE
+                    IPAM refuses while addresses other than the gateway are
+                    still allocated in the subnet.
+                  </span>
+                  <span className="mt-2 block">
+                    The nodes keep using the subnet until SDN changes are
+                    applied (Apply Changes). Nexara cannot undo the delete: to
+                    get the subnet back, create it again.
+                  </span>
+                </>
+              )}
+              confirmLabel="Delete Subnet"
+            />
           </TableCell>
         </TableRow>
       )}

@@ -26,6 +26,7 @@ import {
 } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
 import { formatRelativeTime } from "@/lib/format";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import type { DLQState, NotificationDLQEntry } from "@/types/api";
 
 const STATE_VARIANTS: Record<DLQState, BadgeVariant> = {
@@ -52,6 +53,8 @@ export function NotificationDLQTable() {
   const [retryFeedback, setRetryFeedback] = useState<
     Record<string, { success: boolean; message: string } | undefined>
   >({});
+  const [pendingDelete, setPendingDelete] =
+    useState<NotificationDLQEntry | null>(null);
 
   const { data: summary } = useNotificationDLQSummary();
   const { data: entries, isLoading } = useNotificationDLQ(stateFilter);
@@ -183,7 +186,7 @@ export function NotificationDLQTable() {
                     dismiss.mutate(entry.id);
                   }}
                   onDelete={() => {
-                    del.mutate(entry.id);
+                    setPendingDelete(entry);
                   }}
                   retryPending={retry.isPending}
                   feedback={retryFeedback[entry.id]}
@@ -193,6 +196,21 @@ export function NotificationDLQTable() {
           </Table>
         )}
       </div>
+      <ConfirmDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(entry) => {
+          del.mutate(entry.id);
+        }}
+        title={(entry) =>
+          `Delete the failed notification to ${entry.channel_name} from ${formatRelativeTime(entry.created_at)}?`
+        }
+        description={() =>
+          "The entry, its stored payload and its last error are deleted, so this notification can no longer be retried or inspected. This cannot be undone."
+        }
+      />
     </div>
   );
 }

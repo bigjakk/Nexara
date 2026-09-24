@@ -21,7 +21,13 @@ import {
   useDeleteSSHKnownHost,
 } from "../api/rolling-update-queries";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
-import type { SSHHostKeyPending, SSHHostKeyMismatch } from "@/types/api";
+import type {
+  SSHCredential,
+  SSHHostKeyPending,
+  SSHHostKeyMismatch,
+  SSHKnownHost,
+} from "@/types/api";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { BulkPinDialog } from "./BulkPinDialog";
 
 interface SSHCredentialsFormProps {
@@ -62,6 +68,9 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
   const [testNode, setTestNode] = useState("");
   const [testState, setTestState] = useState<TestUiState>({ kind: "idle" });
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [pendingCredsDelete, setPendingCredsDelete] =
+    useState<SSHCredential | null>(null);
+  const [pendingUnpin, setPendingUnpin] = useState<SSHKnownHost | null>(null);
 
   // Compute pinned-vs-unpinned status by matching each cluster node's
   // address against the pinned-hosts list. Nodes without a stored address
@@ -245,7 +254,9 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
               aria-label="Delete SSH credentials"
               variant="ghost"
               size="sm"
-              onClick={handleDelete}
+              onClick={() => {
+                setPendingCredsDelete(creds);
+              }}
               disabled={deleteCreds.isPending}
             >
               <Trash2 className="h-4 w-4 text-destructive" />
@@ -486,7 +497,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
                     size="sm"
                     disabled={deleteKnownHost.isPending}
                     onClick={() => {
-                      deleteKnownHost.mutate({ clusterId, id: kh.id });
+                      setPendingUnpin(kh);
                     }}
                     title="Unpin host key"
                   >
@@ -497,6 +508,55 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
             </div>
           </div>
         )}
+
+        <ConfirmDeleteDialog
+          target={pendingCredsDelete}
+          onClose={() => {
+            setPendingCredsDelete(null);
+          }}
+          onConfirm={handleDelete}
+          title={(c) =>
+            `Delete SSH credentials for ${c.username} on port ${String(c.port)}?`
+          }
+          // Every SSH path reads the one stored row and fails without it:
+          // rolling.RunNodeCommand (maintenance mode, node sensors) returns
+          // ErrSSHNotConfigured, and CreateJob refuses auto_upgrade. The SSH
+          // step runs only for an auto_upgrade job (beginUpgrade), and there
+          // the orchestrator's failNode ("SSH credentials not found") calls
+          // failJob, failing the whole job, not just the node. The
+          // DELETE removes only cluster_ssh_credentials — the handler's
+          // re-home check notes the pins outlive it.
+          description={() =>
+            "The stored password or private key is deleted from Nexara and cannot be recovered; you would have to enter it again. Until you do, Nexara cannot run commands on this cluster's nodes over SSH: rolling updates cannot run automated apt upgrades (a running rolling update with automated upgrades fails when its next node reaches the upgrade step), and node maintenance mode and node sensor readings stop working. Pinned host keys are kept."
+          }
+        />
+
+        <ConfirmDeleteDialog
+          target={pendingUnpin}
+          onClose={() => {
+            setPendingUnpin(null);
+          }}
+          onConfirm={(kh) => {
+            deleteKnownHost.mutate({ clusterId, id: kh.id });
+          }}
+          title={(kh) =>
+            `Unpin the host key for ${kh.host}:${String(kh.port)}?`
+          }
+          // Unpinning does NOT fall back to trusting whatever key is presented:
+          // internal/ssh/client.go Execute refuses to connect when
+          // KnownHostKey is nil, rolling.RunNodeCommand returns
+          // ErrHostKeyNotPinned before dialling, and the orchestrator fails
+          // the node ("SSH host key not pinned"), which fails the job. The pin
+          // is looked up by (host, the credential's port) — nodessh.go and
+          // orchestrator.go GetSSHKnownHost — so it is host:port that is
+          // refused. A key is only pinned again
+          // through Test Connection + Trust & Pin (PinSSHHostKey re-scans and
+          // must match the fingerprint the operator confirmed).
+          description={(kh) =>
+            `Nexara forgets the pinned key ${kh.fingerprint}. It will not trust whatever key this host presents next: SSH connections to ${kh.host}:${String(kh.port)} are refused until you pin a key again with Test Connection, so automated upgrades, maintenance mode and sensor readings on that host stop working until then.`
+          }
+          confirmLabel="Unpin"
+        />
       </div>
     );
   }

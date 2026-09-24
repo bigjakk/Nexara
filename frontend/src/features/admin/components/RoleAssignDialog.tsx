@@ -21,6 +21,9 @@ import {
   useAssignRole,
   useRevokeRole,
 } from "../api/rbac-queries";
+import { useAuth } from "@/hooks/useAuth";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import type { RBACUserRole } from "@/types/api";
 
 interface RoleAssignDialogProps {
   userId: string;
@@ -37,6 +40,8 @@ export function RoleAssignDialog({
   const { data: allRoles } = useRoles();
   const assignRole = useAssignRole();
   const revokeRole = useRevokeRole();
+  const { user } = useAuth();
+  const [pendingRevoke, setPendingRevoke] = useState<RBACUserRole | null>(null);
 
   const [selectedRoleId, setSelectedRoleId] = useState("");
 
@@ -95,10 +100,7 @@ export function RoleAssignDialog({
                       size="icon"
                       className="h-7 w-7 text-destructive hover:text-destructive"
                       onClick={() => {
-                        revokeRole.mutate({
-                          userId,
-                          assignmentId: ur.id,
-                        });
+                        setPendingRevoke(ur);
                       }}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -135,6 +137,41 @@ export function RoleAssignDialog({
             </div>
           </div>
         </div>
+        <ConfirmDeleteDialog
+          target={pendingRevoke}
+          onClose={() => {
+            setPendingRevoke(null);
+          }}
+          onConfirm={(ur) => {
+            revokeRole.mutate({
+              userId: ur.user_id,
+              assignmentId: ur.id,
+            });
+          }}
+          title={(ur) => `Revoke ${ur.role_name} at ${ur.scope_type} scope?`}
+          // RevokeUserRole deletes the one user_roles row and calls
+          // RBACEngine.InvalidateUser, which drops the cached permission set,
+          // so the next request is checked against what is left. The server
+          // has no last-administrator guard.
+          description={(ur) => (
+            <>
+              The permissions this assignment grants are withdrawn from the
+              user&apos;s next request, unless another assignment also grants
+              them.
+              {user !== null && ur.user_id === user.id && (
+                <>
+                  {" "}
+                  <strong>
+                    This is your own account. If this role is what lets you
+                    manage roles, you will not be able to assign it back —
+                    another administrator will have to.
+                  </strong>
+                </>
+              )}
+            </>
+          )}
+          confirmLabel="Revoke"
+        />
       </DialogContent>
     </Dialog>
   );

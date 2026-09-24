@@ -28,6 +28,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import type { BackupJob } from "../types/backup";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { useDeleteBackupJob, useRunBackupJob } from "../api/backup-queries";
 import { describeBackupJobRunConfirm } from "../lib/backup-job-run";
 import { describeSchedule } from "../lib/schedule";
@@ -59,6 +60,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
   // Run now confirms first, as the Proxmox GUI does: a run may prune older
   // backups as a scheduled one does, and a stop-mode job shuts guests down.
   const [confirmRun, setConfirmRun] = useState<BackupJob | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<BackupJob | null>(null);
   const deleteMutation = useDeleteBackupJob();
   const runMutation = useRunBackupJob();
 
@@ -203,10 +205,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                           size="sm"
                           title="Delete"
                           onClick={() => {
-                            deleteMutation.mutate({
-                              clusterId,
-                              jobId: job.id,
-                            });
+                            setConfirmDelete(job);
                           }}
                           disabled={deleteMutation.isPending}
                         >
@@ -296,6 +295,25 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/*
+        pve-manager PVE/API2/Backup.pm "delete_job" removes the job from
+        vzdump.cron or jobs.cfg and, for the latter, unlinks its schedule
+        state (PVE/Jobs.pm remove_job). It touches no backup archive and
+        signals no running vzdump.
+      */}
+      <ConfirmDeleteDialog
+        target={confirmDelete}
+        onClose={() => {
+          setConfirmDelete(null);
+        }}
+        onConfirm={(job) => {
+          deleteMutation.mutate({ clusterId, jobId: job.id });
+        }}
+        title={(job) => `Delete backup job ${job.id}?`}
+        description={(job) =>
+          `Proxmox deletes the job as soon as you confirm, and it no longer runs on its schedule. The backups it already made stay on ${job.storage ?? "their storage"}, and a backup it is running now is not stopped. To undo, create the job again.`
+        }
+      />
     </>
   );
 }

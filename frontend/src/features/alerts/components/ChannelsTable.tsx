@@ -17,7 +17,8 @@ import {
 } from "../api/alert-queries";
 import { ChannelForm } from "./ChannelForm";
 import { useAuth } from "@/hooks/useAuth";
-import type { ChannelType } from "@/types/api";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import type { ChannelType, NotificationChannel } from "@/types/api";
 
 const CHANNEL_TYPE_LABELS: Record<ChannelType, string> = {
   email: "Email",
@@ -38,6 +39,8 @@ export function ChannelsTable() {
   const [testResults, setTestResults] = useState<
     Record<string, { success: boolean; message: string } | undefined>
   >({});
+  const [pendingDelete, setPendingDelete] =
+    useState<NotificationChannel | null>(null);
 
   const handleTest = (id: string) => {
     setTestResults((prev) => ({ ...prev, [id]: undefined }));
@@ -138,7 +141,7 @@ export function ChannelsTable() {
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        deleteMutation.mutate(ch.id);
+                        setPendingDelete(ch);
                       }}
                       disabled={deleteMutation.isPending}
                     >
@@ -151,6 +154,28 @@ export function ChannelsTable() {
           ))}
         </TableBody>
       </Table>
+      <ConfirmDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(ch) => {
+          deleteMutation.mutate(ch.id);
+        }}
+        title={(ch) => `Delete notification channel ${ch.name}?`}
+        // What references a channel (migrations): alert rules only through
+        // their escalation_chain JSONB, which has no foreign key, so the step
+        // stays and notifications.Engine.dispatchToChannel logs "channel not
+        // found or disabled" and returns without a DLQ row.
+        // cve_notification_config_channels is ON DELETE CASCADE (000057);
+        // report_schedules.email_channel_id (000024) and
+        // rolling_update_jobs.notify_channel_id (000031) are SET NULL; so is
+        // notification_dlq.channel_id (000053), and ReplayDLQ then refuses
+        // with "channel deleted; cannot replay".
+        description={() =>
+          "Its stored settings are deleted and cannot be recovered. Alert rules whose escalation chain uses this channel keep that step, but nothing is sent through it any more. It is removed from CVE notification settings, report schedules and rolling-update jobs that notify through it are left with no channel, and its failed notifications can no longer be retried."
+        }
+      />
     </div>
   );
 }

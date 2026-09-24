@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Table,
   TableBody,
@@ -9,6 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
   useFirewallTemplates,
   useDeleteFirewallTemplate,
@@ -26,6 +28,9 @@ export function FirewallTemplatesTable({
 }: FirewallTemplatesTableProps) {
   const { data: templates, isLoading } = useFirewallTemplates();
   const deleteTemplate = useDeleteFirewallTemplate();
+  const [pendingDelete, setPendingDelete] = useState<FirewallTemplate | null>(
+    null,
+  );
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading...</p>;
@@ -80,7 +85,7 @@ export function FirewallTemplatesTable({
                         variant="ghost"
                         size="icon"
                         onClick={() => {
-                          deleteTemplate.mutate(tmpl.id);
+                          setPendingDelete(tmpl);
                         }}
                         disabled={deleteTemplate.isPending}
                       >
@@ -94,6 +99,27 @@ export function FirewallTemplatesTable({
           </Table>
         </div>
       )}
+
+      {/* A template is a Nexara row, not Proxmox state: the handler
+          (NetworkHandler.DeleteTemplate) deletes it from firewall_templates
+          and nothing else. Apply copied its rules into the cluster firewall
+          as ordinary rules (CreateClusterFirewallRule, one per rule) and kept
+          no link back to the template, so those rules stay. Templates are not
+          per-cluster: /api/v1/firewall-templates is one list. */}
+      <ConfirmDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(tmpl) => {
+          deleteTemplate.mutate(tmpl.id);
+        }}
+        title={(tmpl) => `Delete firewall template ${tmpl.name}?`}
+        description={(tmpl) =>
+          `Nexara deletes the template ${tmpl.name} and its ${String(tmpl.rules.length)} rule${tmpl.rules.length !== 1 ? "s" : ""} for every cluster. Rules already applied from it are ordinary Proxmox firewall rules and stay in place. It cannot be undone: to get the template back, create it again.`
+        }
+        confirmLabel="Delete Template"
+      />
     </div>
   );
 }

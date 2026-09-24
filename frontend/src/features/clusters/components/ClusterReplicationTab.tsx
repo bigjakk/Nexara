@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
   useReplicationJobs,
   useCreateReplicationJob,
@@ -56,6 +57,9 @@ export function ClusterReplicationTab({
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editJob, setEditJob] = useState<ReplicationJob | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ReplicationJob | null>(
+    null,
+  );
 
   const formatTime = (ts?: number) => {
     if (!ts) return "—";
@@ -174,7 +178,7 @@ export function ClusterReplicationTab({
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          deleteJob.mutate(job.id);
+                          setPendingDelete(job);
                         }}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
@@ -187,6 +191,32 @@ export function ClusterReplicationTab({
           </Table>
         )}
       </CardContent>
+
+      {/*
+        What the delete does, from pve-manager PVE/API2/ReplicationConfig.pm
+        "delete": Nexara sends neither keep nor force
+        (proxmox.Client.DeleteReplicationJob), so a local job gets
+        remove_job=full. PVE/ReplicationState.pm job_status gives a job
+        marked for removal next_sync 1, the earliest, even when disabled, so
+        the replication runner's next pass takes it up: pve-guest-common
+        PVE/Replication.pm replicate() removes the job's replicated volumes
+        on the target over SSH (remote_prepare_local_job with an empty volume
+        list) and its replication snapshots on the source, and only then drops
+        the job from the config.
+      */}
+      <ConfirmDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(job) => {
+          deleteJob.mutate(job.id);
+        }}
+        title={(job) => `Delete replication job ${job.id}?`}
+        description={(job) =>
+          `Proxmox marks the job for removal as soon as you confirm, and removes it in the background shortly after: it deletes the copy of guest ${String(job.guest)}'s disks that this job replicated to ${job.target}, and the job's replication snapshots on the source. The guest and its own disks are not touched. The replicated copy on ${job.target} cannot be recovered.`
+        }
+      />
 
       {editJob != null && (
         <EditJobDialog

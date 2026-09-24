@@ -58,6 +58,7 @@ import {
 import { cn } from "@/lib/utils";
 import { unaddressableHint } from "@/lib/api-path";
 import { useAuth } from "@/hooks/useAuth";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
   useResourcePools,
   useResourcePool,
@@ -743,6 +744,7 @@ function AddressablePoolMembers({
 }) {
   const poolQuery = useResourcePool(clusterId, poolId);
   const updatePool = useUpdatePool(clusterId);
+  const [pendingRemove, setPendingRemove] = useState<PoolMember | null>(null);
 
   const memberVMIDs = useMemo(() => {
     const ids = new Set<number>();
@@ -839,7 +841,7 @@ function AddressablePoolMembers({
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          handleRemove(m);
+                          setPendingRemove(m);
                         }}
                       >
                         <X className="h-3 w-3 text-destructive" />
@@ -856,6 +858,32 @@ function AddressablePoolMembers({
           No members in this pool.
         </p>
       )}
+      {/*
+        pve-manager PVE/API2/Pool.pm "update_pool" with delete=1 only drops
+        the vmid or storage id from the pool in user.cfg. What that takes
+        away is in pve-access-control PVE/RPCEnvironment.pm: roles granted on
+        /pool/<pool> are applied to /vms/<vmid> and /storage/<id> of the
+        pool's members only, so a member that leaves loses them.
+      */}
+      <ConfirmDeleteDialog
+        target={pendingRemove}
+        onClose={() => {
+          setPendingRemove(null);
+        }}
+        onConfirm={handleRemove}
+        title={(m) => `Remove ${memberLabel(m)} from pool ${poolId}?`}
+        description={(m) =>
+          `Proxmox takes ${memberLabel(m)} out of the pool as soon as you confirm. The ${m.type === "storage" ? "storage" : "guest"} itself is not changed, but a permission granted on pool ${poolId} no longer applies to it: a user or token that reaches it only through this pool loses that access. To undo, add it to the pool again.`
+        }
+        confirmLabel="Remove"
+      />
     </div>
   );
+}
+
+/** How the confirmation names a member: its name, else its id. */
+function memberLabel(m: PoolMember): string {
+  if (m.type === "storage") return `storage ${m.storage ?? m.id}`;
+  const vmid = m.vmid != null ? String(m.vmid) : m.id;
+  return m.name ? `${m.name} (${vmid})` : vmid;
 }

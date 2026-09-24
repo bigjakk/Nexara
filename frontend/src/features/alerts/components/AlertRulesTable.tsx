@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Trash2, ToggleLeft, ToggleRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,8 @@ import {
   useDeleteAlertRule,
 } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import type { AlertRule } from "@/types/api";
 
 export function AlertRulesTable() {
   const { data: rules, isLoading } = useAlertRules();
@@ -22,6 +25,7 @@ export function AlertRulesTable() {
   const deleteMutation = useDeleteAlertRule();
   const { hasPermission } = useAuth();
   const canManage = hasPermission("manage", "alert");
+  const [pendingDelete, setPendingDelete] = useState<AlertRule | null>(null);
 
   const toggleEnabled = (id: string, currentEnabled: boolean) => {
     updateMutation.mutate({ id, enabled: !currentEnabled });
@@ -126,7 +130,7 @@ export function AlertRulesTable() {
                     size="sm"
                     aria-label="Delete rule"
                     onClick={() => {
-                      deleteMutation.mutate(rule.id);
+                      setPendingDelete(rule);
                     }}
                     disabled={deleteMutation.isPending}
                   >
@@ -138,6 +142,21 @@ export function AlertRulesTable() {
           ))}
         </TableBody>
       </Table>
+      <ConfirmDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(rule) => {
+          deleteMutation.mutate(rule.id);
+        }}
+        title={(rule) => `Delete alert rule ${rule.name}?`}
+        // alert_history.rule_id is ON DELETE CASCADE (migration 000022), so
+        // the rule's alert history goes with it.
+        description={() =>
+          "The rule is no longer evaluated, and every alert it has raised — firing, acknowledged and resolved — is deleted with it. This cannot be undone."
+        }
+      />
     </div>
   );
 }

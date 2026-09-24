@@ -41,6 +41,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
   useHAResources,
   useHAGroups,
@@ -200,6 +201,13 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   // --- Rule dialog state ---
   const [ruleCreateOpen, setRuleCreateOpen] = useState(false);
   const [ruleEditing, setRuleEditing] = useState<HARuleEntry | null>(null);
+
+  // --- Delete confirmations: a row's delete button only sets these ---
+  const [pendingResource, setPendingResource] = useState<HAResource | null>(
+    null,
+  );
+  const [pendingRule, setPendingRule] = useState<HARuleEntry | null>(null);
+  const [pendingGroup, setPendingGroup] = useState<HAGroup | null>(null);
 
   const existingHASIDs = useMemo(() => {
     const sids = new Set<string>();
@@ -603,7 +611,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                               size="sm"
                               disabled={deleteResource.isPending}
                               onClick={() => {
-                                handleDeleteResource(res.sid);
+                                setPendingResource(res);
                               }}
                             >
                               <Trash2 className="h-4 w-4 text-destructive" />
@@ -766,7 +774,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                               size="sm"
                               disabled={deleteRule.isPending}
                               onClick={() => {
-                                handleDeleteRule(r.rule);
+                                setPendingRule(r);
                               }}
                             >
                               <Trash2 className="h-4 w-4 text-destructive" />
@@ -967,7 +975,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                                 size="sm"
                                 disabled={deleteGroup.isPending}
                                 onClick={() => {
-                                  handleDeleteGroup(g.group);
+                                  setPendingGroup(g);
                                 }}
                               >
                                 <Trash2 className="h-4 w-4 text-destructive" />
@@ -1032,6 +1040,71 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
           </DialogContent>
         </Dialog>
       </TabsContent>
+
+      {/*
+        Resource delete (pve-ha-manager API2/HA/Resources.pm "delete", then
+        HA/Config.pm delete_service_from_config) only drops the sid from
+        resources.cfg. The CRM then forgets the service ("removing stale
+        service", HA/Manager.pm) and the LRM acts only on services the CRM
+        tracks (HA/LRM.pm manage_resources), so nothing stops or moves the
+        guest. Nexara sends no `purge`; where the API has it (added
+        2025-11, commit c952c63 "api: add purge parameter for resource
+        deletion") it defaults to 1 and also takes the sid out of every rule,
+        deleting a rule left empty. Older releases leave the rules alone.
+      */}
+      <ConfirmDeleteDialog
+        target={pendingResource}
+        onClose={() => {
+          setPendingResource(null);
+        }}
+        onConfirm={(res) => {
+          handleDeleteResource(res.sid);
+        }}
+        title={(res) => {
+          const name = vmNameBySID.get(res.sid);
+          return `Delete HA resource ${res.sid}${name ? ` (${name})` : ""}?`;
+        }}
+        description={(res) =>
+          `Proxmox stops managing ${res.sid} with HA as soon as you confirm: it is no longer restarted after a failure or recovered to another node when its node fails. The guest itself is left as it is — if it is running, it keeps running where it is. Recent Proxmox VE 9 releases also take it out of every HA rule that lists it and delete a rule it was the only resource of. To undo, add it to HA again.`
+        }
+      />
+      {/*
+        Rule delete (API2/HA/Rules.pm "delete_rule") only drops the rule
+        from rules.cfg; the resources it names stay in resources.cfg.
+      */}
+      <ConfirmDeleteDialog
+        target={pendingRule}
+        onClose={() => {
+          setPendingRule(null);
+        }}
+        onConfirm={(r) => {
+          handleDeleteRule(r.rule);
+        }}
+        title={(r) => `Delete HA rule ${r.rule}?`}
+        description={(r) =>
+          r.disable === 1
+            ? `Proxmox deletes this ${r.type} rule as soon as you confirm. It is disabled, so HA is not applying it to ${r.resources} now. Those resources stay HA-managed. To undo, create the rule again.`
+            : `Proxmox deletes this ${r.type} rule as soon as you confirm, and HA stops applying it to ${r.resources}. Those resources stay HA-managed. To undo, create the rule again.`
+        }
+      />
+      {/*
+        Group delete (API2/HA/Groups.pm "delete") dies with "ha group is used
+        by service" while any resource names the group, and with "ha groups
+        have been migrated to rules" once PVE 9 migrated them.
+      */}
+      <ConfirmDeleteDialog
+        target={pendingGroup}
+        onClose={() => {
+          setPendingGroup(null);
+        }}
+        onConfirm={(g) => {
+          handleDeleteGroup(g.group);
+        }}
+        title={(g) => `Delete HA group ${g.group}?`}
+        description={() =>
+          "Proxmox deletes the group as soon as you confirm. It refuses while any HA resource is still assigned to the group, and on a cluster whose HA groups were migrated to rules. To undo, create the group again."
+        }
+      />
     </Tabs>
   );
 }

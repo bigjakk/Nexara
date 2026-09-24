@@ -84,6 +84,7 @@ import {
   useCreateNodeFirewallRule,
   useDeleteNodeFirewallRule,
   useNodeFirewallLog,
+  type NodeFirewallRuleResponse,
 } from "../api/cluster-queries";
 import {
   useNodeNetworkInterfaces as useNodeNetworkInterfacesLive,
@@ -94,6 +95,8 @@ import {
 import type { NetworkInterface } from "@/features/networks/types/network";
 import { CreateInterfaceDialog } from "@/features/networks/components/CreateInterfaceDialog";
 import { InterfaceFormDialog } from "@/features/networks/components/InterfaceFormDialog";
+import { ConfirmInterfaceDeleteDialog } from "@/features/networks/components/ConfirmInterfaceDeleteDialog";
+import { ConfirmFirewallRuleDeleteDialog } from "@/features/networks/components/ConfirmFirewallRuleDeleteDialog";
 import {
   interfaceAddresses,
   interfaceGateways,
@@ -486,7 +489,7 @@ export function NodeDetailPage() {
 /* Tab content components                                             */
 /* ------------------------------------------------------------------ */
 
-function NetworkTab({
+export function NetworkTab({
   clusterId,
   nodeName,
 }: {
@@ -499,6 +502,9 @@ function NetworkTab({
   const apply = useApplyNetworkConfig(clusterId, nodeName);
   const revert = useRevertNetworkConfig(clusterId, nodeName);
   const [editIface, setEditIface] = useState<NetworkInterface | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<NetworkInterface | null>(
+    null,
+  );
 
   return (
     <div className="space-y-3">
@@ -628,7 +634,7 @@ function NetworkTab({
                         size="icon"
                         className="h-7 w-7"
                         onClick={() => {
-                          deleteIface.mutate(iface.iface);
+                          setPendingDelete(iface);
                         }}
                         disabled={deleteIface.isPending}
                       >
@@ -654,6 +660,17 @@ function NetworkTab({
           }}
         />
       )}
+
+      <ConfirmInterfaceDeleteDialog
+        target={pendingDelete}
+        nodeName={nodeName}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(iface) => {
+          deleteIface.mutate(iface.iface);
+        }}
+      />
     </div>
   );
 }
@@ -1923,7 +1940,7 @@ function DirectorySection({
   );
 }
 
-function FirewallTab({
+export function FirewallTab({
   clusterId,
   nodeName,
 }: {
@@ -1934,6 +1951,8 @@ function FirewallTab({
   const rulesQuery = useNodeFirewallRules(clusterId, nodeName);
   const rules = rulesQuery.data;
   const deleteRule = useDeleteNodeFirewallRule(clusterId, nodeName);
+  const [pendingDelete, setPendingDelete] =
+    useState<NodeFirewallRuleResponse | null>(null);
   const createRule = useCreateNodeFirewallRule(clusterId, nodeName);
   const logQuery = useNodeFirewallLog(clusterId, nodeName);
   const logEntries = logQuery.data;
@@ -2050,7 +2069,7 @@ function FirewallTab({
                       size="icon"
                       className="h-7 w-7"
                       onClick={() => {
-                        deleteRule.mutate(rule.pos);
+                        setPendingDelete(rule);
                       }}
                       disabled={deleteRule.isPending}
                     >
@@ -2085,6 +2104,18 @@ function FirewallTab({
           )}
         </div>
       )}
+
+      <ConfirmFirewallRuleDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(rule) => {
+          deleteRule.mutate(rule.pos);
+        }}
+        owner={`node ${nodeName}`}
+        current={rules}
+      />
     </div>
   );
 }

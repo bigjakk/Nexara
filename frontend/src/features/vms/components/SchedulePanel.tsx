@@ -14,7 +14,9 @@ import {
   useScheduledTasks,
   useCreateSchedule,
   useDeleteSchedule,
+  type ScheduledTask,
 } from "../api/vm-queries";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { snapshotNameError, SNAPSHOT_NAME_RULES } from "../lib/snapshot-name";
 import type { ResourceKind } from "../types/vm";
 
@@ -42,6 +44,9 @@ export function SchedulePanel({
   const [action, setAction] = useState("snapshot");
   const [cronExpr, setCronExpr] = useState("0 2 * * *");
   const [snapName, setSnapName] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<ScheduledTask | null>(
+    null,
+  );
 
   // Scoped to the snapshot action because handleCreate only sends snap_name
   // for "snapshot". A bad name left behind by switching the action away would
@@ -169,7 +174,7 @@ export function SchedulePanel({
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        handleDelete(s.id);
+                        setPendingDelete(s);
                       }}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
@@ -181,6 +186,23 @@ export function SchedulePanel({
           </table>
         </div>
       )}
+
+      <ConfirmDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(s) => {
+          handleDelete(s.id);
+        }}
+        title={(s) => `Delete the ${s.action} schedule ${s.schedule}?`}
+        // The DELETE removes only the scheduled_tasks row
+        // (handlers.ScheduleHandler.Delete); nothing prunes what earlier runs
+        // made, and a run the scheduler already dispatched is not cancelled.
+        description={(s) =>
+          `No further ${s.action} runs are started for this ${kind === "ct" ? "container" : "VM"}. A run already under way is not stopped${s.action === "snapshot" ? ", and snapshots earlier runs took are kept" : ""}. This cannot be undone; add the schedule again to resume it.`
+        }
+      />
 
       {/* Create Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

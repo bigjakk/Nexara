@@ -406,3 +406,55 @@ describe("BackupJobTable — Run now", () => {
     expect(vi.mocked(toast.warning)).not.toHaveBeenCalled();
   });
 });
+
+describe("BackupJobTable — Delete", () => {
+  const OTHER_ID = "backup-5e6f7a8b";
+  const DELETE_PATH = `DELETE /api/v1/clusters/${CLUSTER}/backup-jobs/${OTHER_ID}`;
+
+  /** Opens the delete confirmation of the SECOND job, so a delete aimed at
+   *  the first row would show. */
+  async function openDelete(user: ReturnType<typeof userEvent.setup>) {
+    renderTable([job(), job({ id: OTHER_ID, storage: "store02" })]);
+    const row = screen.getByText(OTHER_ID).closest("tr");
+    if (!(row instanceof HTMLElement)) throw new Error("no row for the job");
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    return screen.findByRole("alertdialog");
+  }
+
+  it("asks first, naming the job, and sends nothing yet", async () => {
+    const user = userEvent.setup();
+    const dialog = await openDelete(user);
+
+    expect(
+      within(dialog).getByRole("heading", {
+        name: `Delete backup job ${OTHER_ID}?`,
+      }),
+    ).toBeInTheDocument();
+    expect(dialog).toHaveTextContent(
+      "The backups it already made stay on store02",
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it("sends nothing when cancelled", async () => {
+    const user = userEvent.setup();
+    const dialog = await openDelete(user);
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    });
+    expect(sent).toEqual([]);
+  });
+
+  it("deletes exactly the job it was opened for, once", async () => {
+    const user = userEvent.setup();
+    const dialog = await openDelete(user);
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => {
+      expect(sent).toEqual([DELETE_PATH]);
+    });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+});

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Table,
   TableBody,
@@ -14,6 +15,8 @@ import {
   useDeleteClusterFirewallRule,
 } from "../api/network-queries";
 import { CreateFirewallRuleDialog } from "./CreateFirewallRuleDialog";
+import { ConfirmFirewallRuleDeleteDialog } from "./ConfirmFirewallRuleDeleteDialog";
+import type { FirewallRule } from "../types/network";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 
 interface FirewallRulesTableProps {
@@ -24,6 +27,7 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
   const rulesQuery = useClusterFirewallRules(clusterId);
   const rules = rulesQuery.data;
   const deleteRule = useDeleteClusterFirewallRule(clusterId);
+  const [pendingDelete, setPendingDelete] = useState<FirewallRule | null>(null);
 
   return (
     <div className="space-y-4">
@@ -96,7 +100,7 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
                       variant="ghost"
                       size="icon"
                       onClick={() => {
-                        deleteRule.mutate(rule.pos);
+                        setPendingDelete(rule);
                       }}
                       disabled={deleteRule.isPending}
                     >
@@ -109,6 +113,18 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
           </Table>
         </div>
       )}
+
+      <ConfirmFirewallRuleDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(rule) => {
+          deleteRule.mutate(rule.pos);
+        }}
+        owner="the cluster"
+        current={rules}
+      />
     </div>
   );
 }

@@ -22,7 +22,9 @@ import { Label } from "@/components/ui/label";
 import { Plus, Trash2 } from "lucide-react";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { useAuth } from "@/hooks/useAuth";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
+  type MetricServerConfig,
   useMetricServers,
   useCreateMetricServer,
   useDeleteMetricServer,
@@ -41,6 +43,9 @@ export function ClusterMetricServersTab({
   const deleteServer = useDeleteMetricServer(clusterId);
 
   const [open, setOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<MetricServerConfig | null>(
+    null,
+  );
   const [id, setId] = useState("");
   const [type, setType] = useState("influxdb");
   const [server, setServer] = useState("");
@@ -173,7 +178,7 @@ export function ClusterMetricServersTab({
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          deleteServer.mutate(s.id);
+                          setPendingDelete(s);
                         }}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
@@ -186,6 +191,29 @@ export function ClusterMetricServersTab({
           </Table>
         )}
       </CardContent>
+      {/*
+        pve-manager PVE/API2/Cluster/MetricServer.pm "delete" drops the entry
+        from status.cfg after the plugin's on_delete_hook, which for InfluxDB
+        (PVE/Status/InfluxDB.pm) unlinks the token file stored for it. Nothing
+        is sent to the metric server itself.
+      */}
+      <ConfirmDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(s) => {
+          deleteServer.mutate(s.id);
+        }}
+        title={(s) => `Delete metric server ${s.id}?`}
+        description={(s) =>
+          `${
+            s.disable
+              ? `Proxmox deletes this metric server as soon as you confirm. It is disabled, so no metrics are being sent to ${s.server}:${String(s.port)} now.`
+              : `Proxmox deletes this metric server as soon as you confirm and stops sending the cluster's metrics to ${s.server}:${String(s.port)}.`
+          } Its settings are gone, including any InfluxDB token Proxmox stored for it. Metrics already sent stay on ${s.server}. To undo, add the server again.`
+        }
+      />
     </Card>
   );
 }

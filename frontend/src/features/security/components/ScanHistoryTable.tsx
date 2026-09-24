@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CVEScan, CVEScanNode } from "@/types/api";
 import { useCVEScanDetail, useDeleteScan } from "../api/cve-queries";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { SeverityBadge } from "./SeverityBadge";
 
 interface ScanHistoryTableProps {
@@ -105,6 +106,7 @@ export function ScanHistoryTable({
   onSelectScan,
 }: ScanHistoryTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<CVEScan | null>(null);
   const deleteScan = useDeleteScan();
 
   if (scans.length === 0) {
@@ -193,7 +195,7 @@ export function ScanHistoryTable({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        deleteScan.mutate({ clusterId, scanId: scan.id });
+                        setPendingDelete(scan);
                       }}
                       className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       title="Delete scan"
@@ -210,6 +212,26 @@ export function ScanHistoryTable({
           );
         })}
       </table>
+      <ConfirmDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(scan) => {
+          deleteScan.mutate({ clusterId, scanId: scan.id });
+        }}
+        title={(scan) =>
+          `Delete the scan from ${new Date(scan.started_at).toLocaleString()}?`
+        }
+        // cve_scan_nodes and cve_scan_vulns are ON DELETE CASCADE from
+        // cve_scans (migration 000020). The posture reads the newest
+        // remaining completed scan (queries/cve.sql GetClusterSecuritySummary);
+        // with none, handlers.CVEHandler.GetSecurityPosture answers
+        // status "no_scans", PostureScore 100.
+        description={() =>
+          "Its per-node results and every vulnerability finding it recorded are deleted. If it is the newest completed scan, the security posture falls back to the newest completed scan left, or, if none is left, reads as though no scan had ever run (a score of 100 with no findings). This cannot be undone."
+        }
+      />
     </div>
   );
 }

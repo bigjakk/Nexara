@@ -19,6 +19,7 @@ import {
 import type { NetworkInterface } from "../types/network";
 import { CreateInterfaceDialog } from "./CreateInterfaceDialog";
 import { InterfaceFormDialog } from "./InterfaceFormDialog";
+import { ConfirmInterfaceDeleteDialog } from "./ConfirmInterfaceDeleteDialog";
 import {
   interfaceAddresses,
   interfaceGateways,
@@ -136,6 +137,9 @@ function InterfaceRow({
 }) {
   const deleteIface = useDeleteNetworkInterface(clusterId, nodeName);
   const [editing, setEditing] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<NetworkInterface | null>(
+    null,
+  );
 
   return (
     <TableRow>
@@ -184,7 +188,7 @@ function InterfaceRow({
             variant="ghost"
             size="icon"
             onClick={() => {
-              deleteIface.mutate(iface.iface);
+              setPendingDelete(iface);
             }}
             disabled={deleteIface.isPending}
           >
@@ -202,6 +206,16 @@ function InterfaceRow({
             }}
           />
         )}
+        <ConfirmInterfaceDeleteDialog
+          target={pendingDelete}
+          nodeName={nodeName}
+          onClose={() => {
+            setPendingDelete(null);
+          }}
+          onConfirm={(target) => {
+            deleteIface.mutate(target.iface);
+          }}
+        />
       </TableCell>
     </TableRow>
   );

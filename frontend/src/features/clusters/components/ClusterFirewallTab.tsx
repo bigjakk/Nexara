@@ -22,6 +22,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { Plus, Trash2 } from "lucide-react";
 import { FirewallRulesTable } from "@/features/networks/components/FirewallRulesTable";
 import { FirewallOptionsCard } from "@/features/networks/components/FirewallOptionsCard";
@@ -40,6 +41,10 @@ import {
   useCreateFirewallSecurityGroup,
   useDeleteFirewallSecurityGroup,
   useFirewallLog,
+  type FirewallAlias,
+  type FirewallIPSet,
+  type FirewallIPSetEntry,
+  type FirewallSecurityGroup,
 } from "@/features/networks/api/firewall-extra-queries";
 import { useClusterNodes } from "../api/cluster-queries";
 
@@ -88,6 +93,9 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
   const aliasesQuery = useFirewallAliases(clusterId);
   const createAlias = useCreateFirewallAlias(clusterId);
   const deleteAlias = useDeleteFirewallAlias(clusterId);
+  const [pendingDelete, setPendingDelete] = useState<FirewallAlias | null>(
+    null,
+  );
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [cidr, setCidr] = useState("");
@@ -194,7 +202,7 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        deleteAlias.mutate(a.name);
+                        setPendingDelete(a);
                       }}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
@@ -207,6 +215,24 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
         ) : (
           <p className="text-sm text-muted-foreground">No aliases defined.</p>
         )}
+        {/* Proxmox's remove_alias (pve-firewall
+            src/PVE/API2/Firewall/Aliases.pm) deletes the alias from the
+            cluster firewall config without checking whether a rule or IP set
+            still names it. */}
+        <ConfirmDeleteDialog
+          target={pendingDelete}
+          onClose={() => {
+            setPendingDelete(null);
+          }}
+          onConfirm={(a) => {
+            deleteAlias.mutate(a.name);
+          }}
+          title={(a) => `Delete alias ${a.name}?`}
+          description={(a) =>
+            `Proxmox removes the alias ${a.name} (${a.cidr}) from the cluster firewall at once, without checking whether a rule or IP set still refers to it. It cannot be undone: to get it back, create it again.`
+          }
+          confirmLabel="Delete Alias"
+        />
       </CardContent>
     </Card>
   );
@@ -216,6 +242,9 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
   const setsQuery = useFirewallIPSets(clusterId);
   const createSet = useCreateFirewallIPSet(clusterId);
   const deleteSet = useDeleteFirewallIPSet(clusterId);
+  const [pendingDelete, setPendingDelete] = useState<FirewallIPSet | null>(
+    null,
+  );
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [comment, setComment] = useState("");
@@ -318,7 +347,7 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
                         size="sm"
                         onClick={(e) => {
                           e.stopPropagation();
-                          deleteSet.mutate(s.name);
+                          setPendingDelete(s);
                         }}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
@@ -333,6 +362,26 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
           )}
         </CardContent>
       </Card>
+      {/* Proxmox's delete_ipset (pve-firewall src/PVE/API2/Firewall/IPSet.pm)
+          dies "IPSet '<name>' is not empty" unless force is set, and
+          proxmox.Client DeleteFirewallIPSet never sends it. It checks nothing
+          else — not whether a rule still refers to the set. Rendered outside
+          the table: a portal's clicks still bubble through the React tree,
+          and the row's onClick would toggle the selected set. */}
+      <ConfirmDeleteDialog
+        target={pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+        }}
+        onConfirm={(s) => {
+          deleteSet.mutate(s.name);
+        }}
+        title={(s) => `Delete IP set ${s.name}?`}
+        description={(s) =>
+          `Proxmox deletes the IP set ${s.name} only if it has no entries left — remove its entries first. It does not check whether a rule still refers to the set. It cannot be undone: to get it back, create it again.`
+        }
+        confirmLabel="Delete IP Set"
+      />
       {selectedSet && (
         <IPSetEntriesCard clusterId={clusterId} setName={selectedSet} />
       )}
@@ -350,6 +399,9 @@ function IPSetEntriesCard({
   const entriesQuery = useFirewallIPSetEntries(clusterId, setName);
   const addEntry = useAddFirewallIPSetEntry(clusterId, setName);
   const deleteEntry = useDeleteFirewallIPSetEntry(clusterId, setName);
+  const [pendingDelete, setPendingDelete] = useState<FirewallIPSetEntry | null>(
+    null,
+  );
   const [cidr, setCidr] = useState("");
 
   const handleAdd = () => {
@@ -418,7 +470,7 @@ function IPSetEntriesCard({
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        deleteEntry.mutate(e.cidr);
+                        setPendingDelete(e);
                       }}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
@@ -431,6 +483,32 @@ function IPSetEntriesCard({
         ) : (
           <p className="text-sm text-muted-foreground">No entries.</p>
         )}
+        {/* Proxmox's remove_ip (pve-firewall src/PVE/API2/Firewall/IPSet.pm)
+            rewrites the set without that cidr; pve-firewall reads the change
+            on its 10 s update loop ($updatetime in
+            src/PVE/Service/pve_firewall.pm). A nomatch entry is written as
+            "!cidr" and loaded into the kernel ipset as "add ... cidr nomatch"
+            (src/PVE/Firewall.pm, the $entry->{nomatch} branches of the ipset
+            writer and ruleset generator): an exclusion. Removing one LIFTS
+            that exclusion, so the dialog branches on it. */}
+        <ConfirmDeleteDialog
+          target={pendingDelete}
+          onClose={() => {
+            setPendingDelete(null);
+          }}
+          onConfirm={(e) => {
+            deleteEntry.mutate(e.cidr);
+          }}
+          title={(e) =>
+            `Remove ${e.nomatch ? "!" : ""}${e.cidr} from IP set ${setName}?`
+          }
+          description={(e) =>
+            e.nomatch
+              ? `This is a nomatch entry: it excludes ${e.cidr} from the IP set ${setName}. Proxmox removes it at once, which lifts the exclusion — addresses in ${e.cidr} that another entry of the set covers start matching the set, and rules that use the set start applying to them on the firewall service's next update, every 10 seconds. It cannot be undone: to get it back, add the entry again with nomatch.`
+              : `Proxmox removes ${e.cidr} from the IP set ${setName} at once; unless another entry of the set covers them, its addresses stop matching the set, and rules that use the set stop applying to them on the firewall service's next update, every 10 seconds. It cannot be undone: to get it back, add the entry again.`
+          }
+          confirmLabel="Remove Entry"
+        />
       </CardContent>
     </Card>
   );
@@ -440,6 +518,8 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
   const groupsQuery = useFirewallSecurityGroups(clusterId);
   const createGroup = useCreateFirewallSecurityGroup(clusterId);
   const deleteGroup = useDeleteFirewallSecurityGroup(clusterId);
+  const [pendingDelete, setPendingDelete] =
+    useState<FirewallSecurityGroup | null>(null);
   const [open, setOpen] = useState(false);
   const [group, setGroup] = useState("");
   const [comment, setComment] = useState("");
@@ -527,7 +607,7 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        deleteGroup.mutate(g.group);
+                        setPendingDelete(g);
                       }}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
@@ -542,6 +622,26 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
             No security groups defined.
           </p>
         )}
+        {/* Proxmox's delete_security_group (pve-firewall
+            src/PVE/API2/Firewall/Rules.pm) dies "Security group '<group>' is
+            not empty" while the group has rules, and checks nothing else —
+            not the cluster, node, guest or VNet rules that can refer to a
+            group (src/PVE/Firewall.pm refuses a group rule only inside a
+            group: $allow_groups). */}
+        <ConfirmDeleteDialog
+          target={pendingDelete}
+          onClose={() => {
+            setPendingDelete(null);
+          }}
+          onConfirm={(g) => {
+            deleteGroup.mutate(g.group);
+          }}
+          title={(g) => `Delete security group ${g.group}?`}
+          description={(g) =>
+            `Proxmox deletes the security group ${g.group} only if it has no rules left — delete its rules first. It does not check whether any rule still refers to the group. It cannot be undone: to get it back, create it again.`
+          }
+          confirmLabel="Delete Group"
+        />
       </CardContent>
     </Card>
   );

@@ -155,16 +155,23 @@ func registerReplicationEndpoints(reg *Registry, h *handlers.ReplicationHandler)
 			"comment":  replicationCommentParam(),
 			"disable":  replicationDisableParam(),
 			"remove_job": optString(32, "<local|full>",
-				"Ask Proxmox to remove the job's replicated data as it deletes the job. Nexara's own UI "+
-					"does not send this, but the endpoint has always forwarded it."),
+				"Mark the job for removal (pve-guest-common ReplicationConfig remove_job): the job "+
+					"removes its local replication snapshots, with full also the replicated volumes on "+
+					"the target, and then removes itself. Nexara's own UI does not send this, but the "+
+					"endpoint has always forwarded it."),
 		}),
 		Handler: h.UpdateJob,
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodDelete,
 		Path:   replicationScope + "/:job_id",
-		Description: "Delete a replication job. The data already replicated onto the target is left in " +
-			"place unless a prior update asked for it to be removed.",
+		// Nexara sends neither keep nor force (proxmox.DeleteReplicationJob), so pve-manager
+		// PVE/API2/ReplicationConfig.pm delete marks a local job remove_job=full, and
+		// pve-guest-common PVE/Replication.pm removes the target volumes and the source
+		// replication snapshots on the runner's next pass, even for a disabled job.
+		Description: "Delete a replication job. Proxmox also deletes the data already replicated onto " +
+			"the target node, and the job's replication snapshots on the source, on the replication " +
+			"runner's next pass, even if the job is disabled. The guest and its own disks are untouched.",
 		Group:       "Replication",
 		Permissions: clusterCheck("manage", "replication"),
 		Parameters:  clusterParams(apischema.Properties{"job_id": replicationJobIDParam}),
