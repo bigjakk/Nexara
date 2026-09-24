@@ -71,6 +71,10 @@ export interface FirewallRule {
   macro?: string;
   log?: string;
   iface?: string;
+  /** Digest of the WHOLE list this rule was read from — the same on every
+   *  rule of one listing. Sent back with an update or delete of the rule so
+   *  Proxmox refuses it if the list changed since (firewall-rule-digest.ts). */
+  digest: string;
 }
 
 export interface FirewallRuleRequest {

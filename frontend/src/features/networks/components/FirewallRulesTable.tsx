@@ -120,7 +120,7 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
           setPendingDelete(null);
         }}
         onConfirm={(rule) => {
-          deleteRule.mutate(rule.pos);
+          deleteRule.mutate({ pos: rule.pos, digest: rule.digest });
         }}
         owner="the cluster"
         current={rules}

@@ -1487,6 +1487,19 @@ type FirewallRule struct {
 	Macro   string `json:"macro,omitempty"`
 	Log     string `json:"log,omitempty"`
 	Iface   string `json:"iface,omitempty"`
+	// Digest is the SHA-1 of the WHOLE rule list this rule was read from, not
+	// of this rule: pve-firewall's get_rules (src/PVE/API2/Firewall/Rules.pm)
+	// runs the list through copy_list_with_digest (src/PVE/Firewall.pm), which
+	// hashes every entry and then stamps that one digest onto every item. So
+	// every rule of one listing carries the same value.
+	//
+	// Rules are addressed by position, so this is what makes an update or a
+	// delete safe against a list that changed since it was read: sent back as
+	// `digest`, Proxmox refuses the write when the list's digest no longer
+	// matches (see the note above GetClusterFirewallRules in client_firewall.go).
+	// Not omitempty: the SPA types it as always present, and refuses to send a
+	// rule write without one rather than send an unconditional one.
+	Digest string `json:"digest"`
 }
 
 // FirewallRuleParams holds parameters for creating/updating a firewall rule.

@@ -541,11 +541,11 @@ func (c *Client) CreateNodeFirewallRule(ctx context.Context, node string, rule F
 	}
 	return nil
 }
-func (c *Client) DeleteNodeFirewallRule(ctx context.Context, node string, pos int) error {
+func (c *Client) DeleteNodeFirewallRule(ctx context.Context, node string, pos int, digest string) error {
 	if err := validateNodeName(node); err != nil {
 		return err
 	}
-	path := "/nodes/" + url.PathEscape(node) + "/firewall/rules/" + strconv.Itoa(pos)
+	path := firewallRuleDeletePath("/nodes/"+url.PathEscape(node)+"/firewall/rules/"+strconv.Itoa(pos), digest)
 	if err := c.doDelete(ctx, path, nil); err != nil {
 		return fmt.Errorf("delete firewall rule %d on %s: %w", pos, node, err)
 	}

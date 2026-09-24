@@ -42,6 +42,10 @@ func (h *ACMEHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*pr
 // Note the digest covers the WHOLE node config file, not just the ACME keys, so
 // an operator editing the node's Notes in the PVE UI can trigger this too. The
 // message says "changed" rather than naming ACME for that reason.
+//
+// The die string is pve-common's, not the node config's, so the firewall rule
+// mapper (mapFirewallRuleError, firewall.go) matches the same phrase for a rule
+// list digest that no longer matches.
 var staleDigestPhrases = []string{"detected modified configuration"}
 
 // mapNodeConfigError adds the digest-mismatch case to the shared mapping.

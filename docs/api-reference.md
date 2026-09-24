@@ -675,6 +675,8 @@ other's common case.
 `items` is a flat array of raw journal lines (strings), unlike `syslog`'s
 `{n, t}` objects.
 
+A node's firewall rule routes are listed with the other rule sets under [Firewall](#firewall); a rule `PUT` or `DELETE` there takes the rule list's `digest` — see the note below that table.
+
 ### Node Disks
 
 | Method | Path | Description |
@@ -1043,6 +1045,8 @@ update its credentials.
 | PUT | `/clusters/:id/firewall/groups/:group/rules/:pos` | Update group rule |
 | DELETE | `/clusters/:id/firewall/groups/:group/rules/:pos` | Delete group rule |
 | GET | `/clusters/:id/firewall/log` | Get firewall log |
+
+Rules are addressed by position, so every rule listing returns a `digest` on each rule — one value for the whole list. Send it back as `digest` — in a rule `PUT`'s body, or in a rule `DELETE`'s query string — and the write is refused with `409 conflict` if the list has changed since it was read, instead of changing whichever rule now sits at that position. Omitted or empty, the write is unconditional.
 
 ### Firewall Templates
 

@@ -1,6 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiFetch } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import {
+  onRuleWriteError,
+  requireRuleDigest,
+} from "@/features/networks/api/firewall-rule-digest";
 import type {
   ClusterResponse,
   NodeResponse,
@@ -544,6 +548,8 @@ export interface NodeFirewallRuleResponse {
   macro?: string;
   log?: string;
   iface?: string;
+  /** Digest of the whole rule list; see FirewallRule.digest. */
+  digest: string;
 }
 
 export interface FirewallLogEntryResponse {
@@ -565,7 +571,7 @@ export function useNodeFirewallRules(clusterId: string, nodeName: string) {
 export function useCreateNodeFirewallRule(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (rule: Omit<NodeFirewallRuleResponse, "pos">) =>
+    mutationFn: (rule: Omit<NodeFirewallRuleResponse, "pos" | "digest">) =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/firewall/rules`,
         rule,
@@ -587,25 +593,28 @@ export function useCreateNodeFirewallRule(clusterId: string, nodeName: string) {
 
 export function useDeleteNodeFirewallRule(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
+  const reload = () =>
+    queryClient.invalidateQueries({
+      queryKey: ["clusters", clusterId, "nodes", nodeName, "firewall", "rules"],
+    });
   return useMutation({
-    mutationFn: (pos: number) =>
+    // digest is the rule list's, as the row was read — so Proxmox refuses the
+    // delete (409) rather than remove another rule if the list has changed.
+    mutationFn: ({ pos, digest }: { pos: number; digest: string }) =>
       apiClient.delete<{ status: string }>(
-        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/firewall/rules/${pos}`,
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/firewall/rules/${pos}?digest=${requireRuleDigest(digest)}`,
       ),
     // Returned, so the mutation stays pending — and the table's Delete
     // buttons disabled — until the list is refetched: a rule is deleted by
     // position, and a position read from the stale list names another rule.
-    onSuccess: () =>
-      queryClient.invalidateQueries({
-        queryKey: [
-          "clusters",
-          clusterId,
-          "nodes",
-          nodeName,
-          "firewall",
-          "rules",
-        ],
-      }),
+    onSuccess: reload,
+    onError: (error) =>
+      onRuleWriteError(
+        error,
+        "Nothing was deleted",
+        `node ${nodeName}`,
+        reload,
+      ),
   });
 }
 

@@ -2111,7 +2111,7 @@ export function FirewallTab({
           setPendingDelete(null);
         }}
         onConfirm={(rule) => {
-          deleteRule.mutate(rule.pos);
+          deleteRule.mutate({ pos: rule.pos, digest: rule.digest });
         }}
         owner={`node ${nodeName}`}
         current={rules}

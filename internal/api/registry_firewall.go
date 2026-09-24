@@ -63,6 +63,35 @@ var firewallRulePosParam = apischema.Property{
 	Description: "Rule position, counted from 0 at the top of the ruleset.",
 }
 
+// firewallRuleDigestParam is the rule list's digest, as every rule listing
+// returns it on each item (proxmox.FirewallRule.Digest). Declared on the
+// update and delete of all four rule sets — node, cluster, guest and security
+// group — and forwarded to Proxmox, which refuses the write when the list has
+// changed since it was read; that refusal is a plain PVE die, answered here as
+// 409 (handlers.mapFirewallRuleError).
+// Rules are addressed by position, so without it a write aimed at a changed
+// list lands on whatever rule now sits at that position.
+//
+// Transcribed from PVE rather than invented: pve-firewall's update_rule and
+// delete_rule (src/PVE/API2/Firewall/Rules.pm) declare it as pve-common's
+// 'pve-config-digest' standard option (src/PVE/JSONSchema.pm) — an optional
+// string with maxLength 64 and no pattern or format, the length allowing a
+// sha256 while the firewall's own copy_list_with_digest sends a 40-character
+// sha1. Nothing stricter is declared here: a pattern would be Nexara's own and
+// would refuse a digest PVE accepts.
+//
+// Optional, because the routes have always worked without one and an external
+// script sending none keeps the unconditional write it always had —
+// PVE::Tools::assert_if_modified compares only when both digests are
+// non-empty, so an absent or empty digest is no check at all. Nexara's own UI
+// always sends it. It is not on the creates: PVE's create_rule accepts one
+// and never compares it, because a create prepends and names no position.
+var firewallRuleDigestParam = optString(64, "<digest>",
+	"Digest of the rule list this write is based on, exactly as the rule listing returns it on "+
+		"each rule. Sent, the write is refused with 409 when the list has changed since, "+
+		"instead of changing whichever rule now sits at that position. Omitted or empty, the write "+
+		"is unconditional.")
+
 // firewallRuleBody is the Proxmox rule shape that FOUR route pairs take —
 // the node, cluster, guest and security-group rule sets. Declared once so
 // they cannot drift apart.
@@ -276,8 +305,11 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 			"when the body omits it.",
 		Group:       "Firewall",
 		Permissions: clusterCheck("manage", "network"),
-		Parameters:  clusterParams(withParams(firewallRuleBody(true), apischema.Properties{"pos": firewallRulePosParam})),
-		Handler:     h.UpdateClusterFirewallRule,
+		Parameters: clusterParams(withParams(firewallRuleBody(true), apischema.Properties{
+			"pos":    firewallRulePosParam,
+			"digest": firewallRuleDigestParam,
+		})),
+		Handler: h.UpdateClusterFirewallRule,
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodDelete,
@@ -285,8 +317,11 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 		Description: "Delete one cluster-wide firewall rule by position. Every rule below it moves up.",
 		Group:       "Firewall",
 		Permissions: clusterCheck("delete", "network"),
-		Parameters:  clusterParams(apischema.Properties{"pos": firewallRulePosParam}),
-		Handler:     h.DeleteClusterFirewallRule,
+		Parameters: clusterParams(apischema.Properties{
+			"pos":    firewallRulePosParam,
+			"digest": firewallRuleDigestParam,
+		}),
+		Handler: h.DeleteClusterFirewallRule,
 	})
 
 	// ── Cluster firewall options ──────────────────────────────────────
@@ -339,8 +374,9 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 		Group:       "Firewall",
 		Permissions: clusterCheck("manage", "network"),
 		Parameters: clusterParams(withParams(firewallRuleBody(true), apischema.Properties{
-			"vm_id": firewallVMIDParam,
-			"pos":   firewallRulePosParam,
+			"vm_id":  firewallVMIDParam,
+			"pos":    firewallRulePosParam,
+			"digest": firewallRuleDigestParam,
 		})),
 		Handler: h.UpdateVMFirewallRule,
 	})
@@ -351,8 +387,9 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 		Group:       "Firewall",
 		Permissions: clusterCheck("delete", "network"),
 		Parameters: clusterParams(apischema.Properties{
-			"vm_id": firewallVMIDParam,
-			"pos":   firewallRulePosParam,
+			"vm_id":  firewallVMIDParam,
+			"pos":    firewallRulePosParam,
+			"digest": firewallRuleDigestParam,
 		}),
 		Handler: h.DeleteVMFirewallRule,
 	})
@@ -582,8 +619,9 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 		Group:       "Firewall",
 		Permissions: clusterCheck("manage", "network"),
 		Parameters: clusterParams(withParams(firewallRuleBody(true), apischema.Properties{
-			"group": pveObjectNameParam("Security group the rule lives in."),
-			"pos":   firewallRulePosParam,
+			"group":  pveObjectNameParam("Security group the rule lives in."),
+			"pos":    firewallRulePosParam,
+			"digest": firewallRuleDigestParam,
 		})),
 		Handler: h.UpdateSecurityGroupRule,
 	})
@@ -594,8 +632,9 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 		Group:       "Firewall",
 		Permissions: clusterCheck("manage", "network"),
 		Parameters: clusterParams(apischema.Properties{
-			"group": pveObjectNameParam("Security group the rule lives in."),
-			"pos":   firewallRulePosParam,
+			"group":  pveObjectNameParam("Security group the rule lives in."),
+			"pos":    firewallRulePosParam,
+			"digest": firewallRuleDigestParam,
 		}),
 		Handler: h.DeleteSecurityGroupRule,
 	})

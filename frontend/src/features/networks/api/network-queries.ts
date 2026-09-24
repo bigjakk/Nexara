@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath, keepColons } from "@/lib/api-path";
+import { onRuleWriteError, requireRuleDigest } from "./firewall-rule-digest";
 import type {
   NodeInterfaces,
   NetworkInterface,
@@ -168,36 +169,52 @@ export function useCreateClusterFirewallRule(clusterId: string) {
   });
 }
 
+/** A positional rule write: the rule's position, and the digest of the list
+ *  that position was read from (see firewall-rule-digest.ts). */
+interface RuleAt {
+  pos: number;
+  digest: string;
+}
+
 export function useUpdateClusterFirewallRule(clusterId: string) {
   const queryClient = useQueryClient();
+  const reload = () =>
+    queryClient.invalidateQueries({
+      queryKey: ["firewall", "rules", clusterId],
+    });
   return useMutation({
-    mutationFn: ({ pos, rule }: { pos: number; rule: FirewallRuleRequest }) =>
+    mutationFn: ({
+      pos,
+      digest,
+      rule,
+    }: RuleAt & { rule: FirewallRuleRequest }) =>
       apiClient.put<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/firewall/rules/${pos}`,
-        rule,
+        { ...rule, digest: requireRuleDigest(digest) },
       ),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["firewall", "rules", clusterId],
-      });
-    },
+    onSuccess: reload,
+    onError: (error) =>
+      onRuleWriteError(error, "Nothing was changed", "the cluster", reload),
   });
 }
 
 export function useDeleteClusterFirewallRule(clusterId: string) {
   const queryClient = useQueryClient();
+  const reload = () =>
+    queryClient.invalidateQueries({
+      queryKey: ["firewall", "rules", clusterId],
+    });
   return useMutation({
-    mutationFn: (pos: number) =>
+    mutationFn: ({ pos, digest }: RuleAt) =>
       apiClient.delete<{ status: string }>(
-        apiPath`/api/v1/clusters/${clusterId}/firewall/rules/${pos}`,
+        apiPath`/api/v1/clusters/${clusterId}/firewall/rules/${pos}?digest=${requireRuleDigest(digest)}`,
       ),
     // Returned, so the mutation stays pending — and the table's Delete
     // buttons disabled — until the list is refetched: a rule is deleted by
     // position, and a position read from the stale list names another rule.
-    onSuccess: () =>
-      queryClient.invalidateQueries({
-        queryKey: ["firewall", "rules", clusterId],
-      }),
+    onSuccess: reload,
+    onError: (error) =>
+      onRuleWriteError(error, "Nothing was deleted", "the cluster", reload),
   });
 }
 
@@ -232,16 +249,18 @@ export function useCreateVMFirewallRule(clusterId: string, vmId: string) {
 
 export function useDeleteVMFirewallRule(clusterId: string, vmId: string) {
   const queryClient = useQueryClient();
+  const reload = () =>
+    queryClient.invalidateQueries({
+      queryKey: ["firewall", "vm-rules", clusterId, vmId],
+    });
   return useMutation({
-    mutationFn: (pos: number) =>
+    mutationFn: ({ pos, digest }: RuleAt) =>
       apiClient.delete<{ status: string }>(
-        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/firewall/rules/${pos}`,
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/firewall/rules/${pos}?digest=${requireRuleDigest(digest)}`,
       ),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["firewall", "vm-rules", clusterId, vmId],
-      });
-    },
+    onSuccess: reload,
+    onError: (error) =>
+      onRuleWriteError(error, "Nothing was deleted", `guest ${vmId}`, reload),
   });
 }
 

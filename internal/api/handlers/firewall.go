@@ -25,18 +25,49 @@ import (
 // is a different object on a neighbouring endpoint and must keep its 502.
 var firewallRuleMissingPhrases = []string{"no rule at position"}
 
-// mapFirewallRuleError adds position-specific handling on top of
-// mapProxmoxError, in the same shape as mapTemplateError.
+// firewallRuleStaleMessage is the 409 a rule update or delete answers when the
+// digest it carried no longer matches the rule list. Nothing was changed: PVE
+// compares the digest before it touches the list.
+const firewallRuleStaleMessage = "The firewall rule list changed since it was loaded, so nothing was " +
+	"changed — reload the list and try again."
+
+// mapFirewallRuleError adds the two ways a positional rule write can find its
+// view of the list stale, on top of mapProxmoxError. Both are plain 500 die()
+// strings with no rejection map (pve-firewall src/PVE/API2/Firewall/Rules.pm,
+// update_rule and delete_rule), which mapProxmoxError alone can only call a
+// gateway failure. Neither is one: two operators with the same list open will
+// do this to each other routinely.
 //
-// PVE's rule endpoints die with a plain "no rule at position N" — a bare 500
-// with no rejection map — so mapProxmoxError can only call it a gateway
-// failure. It is not one: two operators with the same list open will do this to
-// each other routinely, and the answer is "your view is stale", which is what
-// 404 says. Nexara sends no digest, so PVE's assert_if_modified 409 never
-// fires and 404 is the right code here.
+//   - A digest mismatch — PVE::Tools::assert_if_modified's "detected modified
+//     configuration" (staleDigestPhrases, acme.go) — is 409: the caller sent
+//     the digest of the list it read, and the list has changed since. It fires
+//     only when the request carried a digest, which the SPA always sends.
+//   - "no rule at position N" is 404: the position is past the end of the
+//     list. Without a digest this is the ONLY staleness PVE can report, and
+//     with one it is still reachable when the list was unchanged and the
+//     caller simply named a position that was never there.
+//
+// The digest is checked first, as Rules.pm does: assert_if_modified runs
+// before the position check, so a stale request never reaches the 404.
 func mapFirewallRuleError(err error) error {
+	stale := mapProxmoxDieError(fiber.StatusConflict, firewallRuleStaleMessage, staleDigestPhrases, err)
+	var fe *fiber.Error
+	if errors.As(stale, &fe) && fe.Code == fiber.StatusConflict {
+		return stale
+	}
 	return mapMissingObjectError("No firewall rule at that position — the list may be out of date",
 		firewallRuleMissingPhrases, err)
+}
+
+// firewallRuleDigest reads the optional list digest a rule update or delete
+// forwards to Proxmox (see firewallRuleDigestParam in
+// internal/api/registry_firewall.go). Absent and empty are the same request —
+// PVE's assert_if_modified skips the check unless both digests are non-empty —
+// and the client omits the key for either, so the "supplied" half of OptString
+// has nothing to decide here.
+func firewallRuleDigest(p *apischema.Params) string {
+	digest, _ := p.OptString("digest")
+	return digest
 }
 
 // firewallRuleFromParams reads the twelve-field rule body in the shape the
@@ -168,7 +199,7 @@ func (h *NetworkHandler) UpdateClusterFirewallRule(c fiber.Ctx, p *apischema.Par
 		return err
 	}
 
-	if err := pxClient.UpdateClusterFirewallRule(c.Context(), pos, req); err != nil {
+	if err := pxClient.UpdateClusterFirewallRule(c.Context(), pos, req, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
 
@@ -191,7 +222,7 @@ func (h *NetworkHandler) DeleteClusterFirewallRule(c fiber.Ctx, p *apischema.Par
 		return err
 	}
 
-	if err := pxClient.DeleteClusterFirewallRule(c.Context(), pos); err != nil {
+	if err := pxClient.DeleteClusterFirewallRule(c.Context(), pos, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
 
@@ -307,7 +338,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 		return err
 	}
 
-	if err := pxClient.UpdateVMFirewallRule(c.Context(), nodeName, vmid, pos, req); err != nil {
+	if err := pxClient.UpdateVMFirewallRule(c.Context(), nodeName, vmid, pos, req, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
 
@@ -336,7 +367,7 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c fiber.Ctx, p *apischema.Params) 
 		return err
 	}
 
-	if err := pxClient.DeleteVMFirewallRule(c.Context(), nodeName, vmid, pos); err != nil {
+	if err := pxClient.DeleteVMFirewallRule(c.Context(), nodeName, vmid, pos, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
 
@@ -737,7 +768,7 @@ func (h *NetworkHandler) UpdateSecurityGroupRule(c fiber.Ctx, p *apischema.Param
 	if err != nil {
 		return err
 	}
-	if err := pxClient.UpdateSecurityGroupRule(c.Context(), group, pos, req); err != nil {
+	if err := pxClient.UpdateSecurityGroupRule(c.Context(), group, pos, req, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "pos": strconv.Itoa(pos)})
@@ -757,7 +788,7 @@ func (h *NetworkHandler) DeleteSecurityGroupRule(c fiber.Ctx, p *apischema.Param
 	if err != nil {
 		return err
 	}
-	if err := pxClient.DeleteSecurityGroupRule(c.Context(), group, pos); err != nil {
+	if err := pxClient.DeleteSecurityGroupRule(c.Context(), group, pos, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "pos": strconv.Itoa(pos)})

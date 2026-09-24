@@ -716,8 +716,11 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 		Description: "Delete one of a node's firewall rules by position. Requires manage:network, not manage:node — see the resource note above.",
 		Group:       "Nodes",
 		Permissions: clusterCheck("manage", "network"),
-		Parameters:  nodeParams(apischema.Properties{"pos": firewallRulePosParam}),
-		Handler:     h.DeleteNodeFirewallRule,
+		Parameters: nodeParams(apischema.Properties{
+			"pos":    firewallRulePosParam,
+			"digest": firewallRuleDigestParam,
+		}),
+		Handler: h.DeleteNodeFirewallRule,
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,
@@ -765,7 +768,8 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 // bodies of the node firewall rule routes. They differ in exactly two ways,
 // and both differences are what the handlers already enforced rather than
 // anything introduced here: the create route requires type and action, and
-// the update route additionally carries :pos.
+// the update route additionally carries :pos — and the list digest, which
+// only a positional write has any use for (firewallRuleDigestParam).
 //
 // The rule body itself is firewallRuleBody in registry_firewall.go — the
 // same twelve fields the cluster, guest and security-group rule routes take,
@@ -777,5 +781,6 @@ func createNodeFirewallRuleParams() apischema.Properties {
 func updateNodeFirewallRuleParams() apischema.Properties {
 	p := firewallRuleBody(true)
 	p["pos"] = firewallRulePosParam
+	p["digest"] = firewallRuleDigestParam
 	return p
 }

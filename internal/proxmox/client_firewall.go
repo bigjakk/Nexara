@@ -7,6 +7,49 @@ import (
 	"strconv"
 )
 
+// Firewall rules are addressed BY POSITION, so a write aimed at position N of
+// a list that has changed since it was read lands on whatever rule is at N
+// now. Proxmox's answer is the list digest (FirewallRule.Digest), and every
+// rule update and delete below takes it.
+//
+// Transcribed from pve-firewall src/PVE/API2/Firewall/Rules.pm (RulesBase,
+// shared by the cluster, node, guest and security-group rule sets):
+//
+//   - update_rule (PUT .../rules/{pos}, moveto included) and delete_rule
+//     (DELETE .../rules/{pos}) both run, under the config lock and BEFORE
+//     the position check, `PVE::Tools::assert_if_modified($digest,
+//     $param->{digest})` against copy_list_with_digest of the current list.
+//   - assert_if_modified (pve-common src/PVE/Tools.pm) does nothing unless
+//     BOTH digests are non-empty, and otherwise dies "detected modified
+//     configuration - file changed by other user? Try again." — a plain die,
+//     so pveproxy answers it as a 500 carrying that sentence.
+//   - create_rule accepts a digest (add_rule_properties adds it to every rule
+//     method) but never compares it: a create prepends, so there is no
+//     position to go stale. The create methods therefore take none.
+//
+// So an EMPTY digest is not an error and not a check — it is exactly the
+// unconditional write these methods made before they took one. That is the
+// contract: send it when the caller has one, omit the key otherwise.
+
+// firewallRuleDigestForm adds digest to an update's form, when there is one.
+func firewallRuleDigestForm(form url.Values, digest string) url.Values {
+	if digest != "" {
+		form.Set("digest", digest)
+	}
+	return form
+}
+
+// firewallRuleDeletePath appends digest to a rule DELETE's path as a query
+// parameter, when there is one — a DELETE carries its parameters in the
+// query, the way the other DELETE-with-parameters methods in this package
+// send theirs.
+func firewallRuleDeletePath(path, digest string) string {
+	if digest == "" {
+		return path
+	}
+	return path + "?" + url.Values{"digest": {digest}}.Encode()
+}
+
 func (c *Client) GetClusterFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 	var rules []FirewallRule
 	if err := c.do(ctx, "/cluster/firewall/rules", &rules); err != nil {
@@ -21,16 +64,16 @@ func (c *Client) CreateClusterFirewallRule(ctx context.Context, rule FirewallRul
 	}
 	return nil
 }
-func (c *Client) UpdateClusterFirewallRule(ctx context.Context, pos int, rule FirewallRuleParams) error {
-	form := firewallRuleToForm(rule)
+func (c *Client) UpdateClusterFirewallRule(ctx context.Context, pos int, rule FirewallRuleParams, digest string) error {
+	form := firewallRuleDigestForm(firewallRuleToForm(rule), digest)
 	path := "/cluster/firewall/rules/" + strconv.Itoa(pos)
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("update cluster firewall rule %d: %w", pos, err)
 	}
 	return nil
 }
-func (c *Client) DeleteClusterFirewallRule(ctx context.Context, pos int) error {
-	path := "/cluster/firewall/rules/" + strconv.Itoa(pos)
+func (c *Client) DeleteClusterFirewallRule(ctx context.Context, pos int, digest string) error {
+	path := firewallRuleDeletePath("/cluster/firewall/rules/"+strconv.Itoa(pos), digest)
 	if err := c.doDelete(ctx, path, nil); err != nil {
 		return fmt.Errorf("delete cluster firewall rule %d: %w", pos, err)
 	}
@@ -47,11 +90,11 @@ func (c *Client) GetNodeFirewallRules(ctx context.Context, node string) ([]Firew
 	}
 	return rules, nil
 }
-func (c *Client) UpdateNodeFirewallRule(ctx context.Context, node string, pos int, rule FirewallRuleParams) error {
+func (c *Client) UpdateNodeFirewallRule(ctx context.Context, node string, pos int, rule FirewallRuleParams, digest string) error {
 	if err := validateNodeName(node); err != nil {
 		return err
 	}
-	form := firewallRuleToForm(rule)
+	form := firewallRuleDigestForm(firewallRuleToForm(rule), digest)
 	path := "/nodes/" + url.PathEscape(node) + "/firewall/rules/" + strconv.Itoa(pos)
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("update firewall rule %d on %s: %w", pos, node, err)
@@ -86,28 +129,28 @@ func (c *Client) CreateVMFirewallRule(ctx context.Context, node string, vmid int
 	}
 	return nil
 }
-func (c *Client) UpdateVMFirewallRule(ctx context.Context, node string, vmid int, pos int, rule FirewallRuleParams) error {
+func (c *Client) UpdateVMFirewallRule(ctx context.Context, node string, vmid int, pos int, rule FirewallRuleParams, digest string) error {
 	if err := validateNodeName(node); err != nil {
 		return err
 	}
 	if err := validateVMID(vmid); err != nil {
 		return err
 	}
-	form := firewallRuleToForm(rule)
+	form := firewallRuleDigestForm(firewallRuleToForm(rule), digest)
 	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/firewall/rules/" + strconv.Itoa(pos)
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("update firewall rule %d for VM %d on %s: %w", pos, vmid, node, err)
 	}
 	return nil
 }
-func (c *Client) DeleteVMFirewallRule(ctx context.Context, node string, vmid int, pos int) error {
+func (c *Client) DeleteVMFirewallRule(ctx context.Context, node string, vmid int, pos int, digest string) error {
 	if err := validateNodeName(node); err != nil {
 		return err
 	}
 	if err := validateVMID(vmid); err != nil {
 		return err
 	}
-	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/firewall/rules/" + strconv.Itoa(pos)
+	path := firewallRuleDeletePath("/nodes/"+url.PathEscape(node)+"/qemu/"+strconv.Itoa(vmid)+"/firewall/rules/"+strconv.Itoa(pos), digest)
 	if err := c.doDelete(ctx, path, nil); err != nil {
 		return fmt.Errorf("delete firewall rule %d for VM %d on %s: %w", pos, vmid, node, err)
 	}
@@ -330,16 +373,16 @@ func (c *Client) CreateSecurityGroupRule(ctx context.Context, group string, para
 	}
 	return nil
 }
-func (c *Client) UpdateSecurityGroupRule(ctx context.Context, group string, pos int, params FirewallRuleParams) error {
-	form := firewallRuleToForm(params)
+func (c *Client) UpdateSecurityGroupRule(ctx context.Context, group string, pos int, params FirewallRuleParams, digest string) error {
+	form := firewallRuleDigestForm(firewallRuleToForm(params), digest)
 	path := "/cluster/firewall/groups/" + url.PathEscape(group) + "/" + strconv.Itoa(pos)
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("update rule %d in security group %s: %w", pos, group, err)
 	}
 	return nil
 }
-func (c *Client) DeleteSecurityGroupRule(ctx context.Context, group string, pos int) error {
-	path := "/cluster/firewall/groups/" + url.PathEscape(group) + "/" + strconv.Itoa(pos)
+func (c *Client) DeleteSecurityGroupRule(ctx context.Context, group string, pos int, digest string) error {
+	path := firewallRuleDeletePath("/cluster/firewall/groups/"+url.PathEscape(group)+"/"+strconv.Itoa(pos), digest)
 	if err := c.doDelete(ctx, path, nil); err != nil {
 		return fmt.Errorf("delete rule %d from security group %s: %w", pos, group, err)
 	}

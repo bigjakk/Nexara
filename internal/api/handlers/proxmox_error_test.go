@@ -327,6 +327,24 @@ func TestMapFirewallRuleError(t *testing.T) {
 			wantCode: fiber.StatusNotFound,
 		},
 		{
+			// PVE::Tools::assert_if_modified, reached through update_rule or
+			// delete_rule when the digest the caller sent no longer matches the
+			// list — in the envelope and the client's wrap, as it arrives.
+			name: "a stale digest is a conflict, not a gateway failure",
+			err: fmt.Errorf("delete cluster firewall rule %d: %w", 5,
+				&proxmox.APIError{StatusCode: 500, Message: `{"data":null,"message":"detected modified configuration - file changed by other user? Try again.\n"}`}),
+			wantCode: fiber.StatusConflict,
+			wantMsg:  firewallRuleStaleMessage,
+		},
+		{
+			// A die carrying both sentences cannot come from Rules.pm — it
+			// checks the digest first and dies there — but it pins the order:
+			// a stale list is reported as stale, never as a missing position.
+			name:     "the digest check wins over the position check",
+			err:      &proxmox.APIError{StatusCode: 500, Message: "detected modified configuration; no rule at position 5"},
+			wantCode: fiber.StatusConflict,
+		},
+		{
 			// A different plain-500 die must stay a gateway error. Note this
 			// fixture does not itself contain "no rule", so it is not the guard
 			// against that particular loosening — the cross-set test_RejectEachOthersNegatives

@@ -62,7 +62,7 @@ func (h *NodeHandler) UpdateNodeFirewallRule(c fiber.Ctx, p *apischema.Params) e
 	if err != nil {
 		return err
 	}
-	if err := pxClient.UpdateNodeFirewallRule(c.Context(), nodeName, pos, rule); err != nil {
+	if err := pxClient.UpdateNodeFirewallRule(c.Context(), nodeName, pos, rule, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
 	details := firewallRuleAudit(rule)
@@ -81,7 +81,7 @@ func (h *NodeHandler) DeleteNodeFirewallRule(c fiber.Ctx, p *apischema.Params) e
 	if err != nil {
 		return err
 	}
-	if err := pxClient.DeleteNodeFirewallRule(c.Context(), nodeName, pos); err != nil {
+	if err := pxClient.DeleteNodeFirewallRule(c.Context(), nodeName, pos, firewallRuleDigest(p)); err != nil {
 		return mapFirewallRuleError(err)
 	}
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "delete_firewall_rule", nil)
