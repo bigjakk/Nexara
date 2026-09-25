@@ -798,6 +798,16 @@ row: QEMU rows require `view:vm` on the row's cluster, LXC rows
 | GET | `/clusters/:id/appliances` | List available appliance templates |
 | GET | `/clusters/:id/scan/iscsi` | Discover iSCSI targets on a portal — `?portal=<host[:port]>`; each item is `{ "target", "portal" }`. **Requires `manage:storage`** (node-side network probe) |
 
+Creating or updating a `pbs` storage with `params.encryption-key` set to
+`autogen` makes Proxmox generate a new client encryption key, and only that
+response carries it, as `generated_encryption_key`, sent with
+`Cache-Control: no-store`. A key the caller supplies is not echoed back, and
+reading the storage config returns the key's fingerprint, not the key. Nexara
+keeps no copy and Proxmox keeps one only on the cluster, so save it elsewhere:
+without it, backups encrypted with it cannot be restored if the cluster is lost,
+unless they were made while the storage had a master key whose private half you
+hold.
+
 ### VM Import
 
 Import VMs from ESXi/vCenter sources, OVA/OVF appliances, or disk images. Reads require `view:vm_import`, mutations `manage:vm_import`, except where noted.
@@ -1219,6 +1229,25 @@ selection untouched.
 
 The `schedule` field is a Proxmox **systemd calendar event** (`02:00`,
 `mon,fri 22:30`, `*/6:00`, `*-*-01 04:00`), not a cron expression.
+
+**Running a job now.** Proxmox has no endpoint that runs a scheduled job, so
+`POST /clusters/:id/backup-jobs/:job_id/run` does what the Proxmox GUI's *Run
+now* does: it sends the job's own settings to vzdump on the node the job names
+or, when it names none, on every node Proxmox reports online. It answers `200`
+with every list present, empty or not:
+
+| Field | Meaning |
+|-------|---------|
+| `tasks` | `{ "node", "upid" }` for each backup task started |
+| `skipped` | Nodes that found none of the job's guests and started no backup |
+| `errors` | `{ "node", "message" }` for each node where no backup started: not online, never reached, or refused |
+| `unconfirmed` | `{ "node", "message" }` for each node whose answer did not say whether a backup started — check the task list before running the job again |
+| `stops_running_backups` | The job's `stop` flag: vzdump then stops any backup already running on every node in `tasks` or `skipped`, and possibly on one in `errors` or `unconfirmed` |
+
+It answers `502` when no task was confirmed and a node failed or went
+unconfirmed, and `409`, sending nothing, when the job's own node is not online.
+The privileges the cluster's API token needs are listed under
+[Backup Jobs](admin-guide.md#backup-jobs) in the Administration Guide.
 
 ### Veeam Backup & Replication
 

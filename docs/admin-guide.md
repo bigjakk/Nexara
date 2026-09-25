@@ -71,9 +71,19 @@ From the cluster list, click the delete button. This removes the cluster from Ne
 
 ### API Token Requirements
 
-The Proxmox API token needs sufficient privileges to read cluster state and perform actions. For full functionality, use a token with `PVEAdmin` role or equivalent. For read-only monitoring, `PVEAuditor` is sufficient.
+A token Nexara minted itself already holds everything it needs — onboarding grants its user the `Administrator` role on `/` — so this section only applies to tokens you create by hand. The cluster row records which route its token came from, so you can tell later which clusters Nexara onboarded itself.
 
-A token Nexara minted itself is provisioned with the privileges it needs, so this only applies to tokens you create by hand. The cluster row records which route it came from, so you can tell later which clusters Nexara onboarded itself.
+For full functionality, the token needs `Administrator` on `/`: grant the role to the token's user and create the token with privilege separation off (`--privsep 0`, or **Privilege Separation** unchecked), as in [Creating a Proxmox API Token](installation.md#creating-a-proxmox-api-token). A privilege-separated token holds only what both it and its user are granted, so it would need the grant twice. For read-only monitoring, `PVEAuditor` is sufficient.
+
+`PVEAdmin` covers most of what Nexara does, but it lacks seven privileges that `Administrator` has — `Sys.Modify`, `Sys.PowerMgmt`, `Sys.Incoming`, `Sys.AccessNetwork`, `Realm.Allocate`, `Permissions.Modify` and `Mapping.Modify` — and whatever needs one of them either fails or, where Nexara treats the step as optional, is skipped: node power actions need `Sys.PowerMgmt`, a rolling update cannot pause Proxmox VE 9.2's native CRS auto-rebalance without `Sys.Modify` on `/` and drains with it still on, and some backup jobs cannot be run on demand (see [Backup Jobs](#backup-jobs)).
+
+**Grant the role on `/` itself**, not only on `/nodes`, `/vms` or `/storage`. Proxmox answers some cluster-wide reads only to a holder of `Sys.Audit` on `/` — HA status, the HA resource, group and rule listings, and the backup job definitions among them — and Nexara will not act without HA state:
+
+- **DRS** skips the evaluation rather than plan migrations it cannot check against HA maintenance, node pins and anti-affinity rules, and tries again at its next interval.
+- **Node evacuation** is refused whenever Nexara has to choose the target nodes. Naming an explicit target still works, because Nexara does not score that choice.
+- **A rolling update that drains guests** fails before it migrates any of them, because it cannot tell which HA rules would fight the drain or where HA lets each guest go. An in-place update drains nothing and is unaffected.
+
+A grant that stops at `/nodes` therefore blocks every DRS evaluation, every evacuation that leaves the targets to Nexara, and every rolling update that drains guests.
 
 Once a cluster is connected, the cluster's **Access Control** tab manages Proxmox's own users, tokens, groups, roles and ACLs from Nexara — see [Proxmox Access Control](#proxmox-access-control).
 
@@ -640,6 +650,8 @@ Beyond datastore management, the Backup dashboard carries four more tabs:
 4. Save. Use the **Run Now** (▶) button on the job's row to fire it outside its schedule; the **Next Run** column shows when it would fire on its own. Run Now asks first, as Proxmox's own **Run now** does, then starts the job with its own settings on the node it names — or, when it names none, on every online node — and each backup task it starts appears in the task list. A node that is offline or refuses is reported beside the tasks that did start, and a node whose answer does not confirm a start is reported separately: a backup may be running there, so check the task list before running the job again. A job pinned to a node that is offline is refused outright. Each run writes an audit row per backup task it starts and, whenever it asked Proxmox anything, one more recording each node's outcome.
 
 > A job carries exactly **one** selection. Switching an existing job from, say, a VMID list to a pool clears the old selection rather than layering the two — that is deliberate, and it matches what vzdump accepts.
+
+Run Now uses the cluster's API token, so the token needs `Sys.Audit` on `/` to read the job, and then what Proxmox's backup call checks: `VM.Backup` on the guests and `Datastore.AllocateSpace` on the target storage. On an **All guests** or **All except selected** job, Proxmox silently leaves out any guest the token lacks `VM.Backup` on, so Run Now can back up fewer guests than the job's own schedule, which runs as `root@pam`; on any other job, the backup task fails instead. A job carrying settings Nexara's form does not offer — typically one created in Proxmox — can need more: fleecing needs `Datastore.AllocateSpace` on the fleecing storage; retention (`prune-backups`, or `maxfiles` on Proxmox VE 8) needs `Datastore.Allocate` on the target storage; a bandwidth limit (`bwlimit`), I/O priority (`ionice`) or `performance` settings need `Sys.Modify` on `/`; and `stop` (end any backup already running on the node first) needs `Sys.Modify` on that node. `PVEAdmin` has no `Sys.Modify`. Proxmox reserves `tmpdir`, `dumpdir` and `script` for `root@pam` itself, and no API token counts as `root@pam`, not even one of its own, so Proxmox refuses Run Now for a job that sets any of them; its schedule still runs it.
 
 The jobs table shows the schedule in plain English with the raw calendar event underneath, and the expanded row spells out the guest selection. Creating or editing a job writes an audit row naming the schedule, storage, node, selection and mode.
 
