@@ -15,7 +15,11 @@ permissions:
 
 jobs:
   go-ci:
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest, here and on every job in ci.yml, so the
+    # OS a release builds on changes only in a commit CI has already run on.
+    # ubuntu-latest moves to 26.04 between 2026-10-19 and 2026-11-19
+    # (actions/runner-images#14748); this is that image, already GA.
+    runs-on: ubuntu-26.04
 
     # Mirrors the identical block in ci.yml, and is required here rather than
     # inherited from it: ci.yml triggers on `push: branches`, which does not
@@ -66,7 +70,7 @@ jobs:
         run: CGO_ENABLED=0 go build -o /dev/null ./cmd/nexara
 
   frontend-ci:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: frontend
@@ -95,7 +99,7 @@ jobs:
         run: npm run build
 
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [go-ci, frontend-ci]
     steps:
       - uses: actions/checkout@v5
@@ -121,9 +125,17 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
+        # --provenance=false: the Docker 29 on ubuntu-26.04 uses the containerd
+        # image store, where a build attaches a provenance attestation by
+        # default, so the push would be an index plus two untagged manifests —
+        # three GHCR versions per release — and the cleanup below, which keeps
+        # three versions, would keep only one release. Without the flag Docker
+        # 29 builds an OCI index; with it, a single manifest again, as Docker 28
+        # built.
         run: |
           docker build \
             --pull \
+            --provenance=false \
             -f docker/nexara/Dockerfile \
             --build-arg "VERSION=${{ steps.version.outputs.version }}" \
             --build-arg "COMMIT=${{ steps.version.outputs.commit }}" \
@@ -148,15 +160,40 @@ jobs:
           GH_TOKEN: ${{ secrets.PKG_VISIBILITY_TOKEN }}
 
       - name: Cleanup old package versions
-        # No Node 24 release of this action exists yet (latest is v5 / Node 20); GitHub
-        # force-runs it on Node 24. Bump when upstream ships a Node 24 version.
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: nexara
-          package-type: container
-          min-versions-to-keep: 3
-          delete-only-untagged-versions: false
+        # Keeps the three newest image versions and deletes the rest, as
+        # actions/delete-package-versions@v5 did with min-versions-to-keep: 3.
+        # That action is frozen on Node 20 (last release v5.0.0, January 2024,
+        # and its README says upstream takes no contributions), so this makes
+        # the same two REST calls it made — list the versions, then delete all
+        # but the newest three by created_at — with the gh and jq the runner
+        # ships. It counts versions, so it is right only while each release
+        # pushes exactly one manifest (see --provenance=false above).
+        # The listing is read whole before anything is deleted: the API does
+        # not document its order, so a listing that failed part-way could
+        # leave one of the three newest versions on the delete list. A failed
+        # listing or jq run ends the step (-e) having deleted nothing; a failed
+        # delete is reported and the rest are still attempted, as the action
+        # did, because GitHub refuses to delete a public version downloaded
+        # more than 5,000 times, and that version, always the oldest, would
+        # otherwise block every delete after it. continue-on-error keeps any
+        # cleanup failure from failing a release whose image is already pushed.
         continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          versions=$(gh api --paginate "/users/${OWNER}/packages/container/nexara/versions?per_page=100")
+          ids=$(jq -rs 'add | sort_by(.created_at, .id) | .[:-3] | .[].id' <<< "$versions")
+          failed=0
+          for id in $ids; do
+            if gh api --method DELETE "/users/${OWNER}/packages/container/nexara/versions/${id}"; then
+              echo "Deleted package version ${id}"
+            else
+              failed=1
+            fi
+          done
+          exit "$failed"
 
       - name: Generate release notes
         id: notes

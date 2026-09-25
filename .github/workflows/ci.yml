@@ -18,7 +18,11 @@ on:
 
 jobs:
   go-ci:
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest, here and on every job in release.yml,
+    # so the OS a build runs on changes only in a commit CI has already run on.
+    # ubuntu-latest moves to 26.04 between 2026-10-19 and 2026-11-19
+    # (actions/runner-images#14748); this is that image, already GA.
+    runs-on: ubuntu-26.04
 
     # The internal/db migration round-trip tests skip themselves unless
     # NEXARA_TEST_DB_URL is set, so without this service they skipped on every
@@ -85,7 +89,7 @@ jobs:
         run: CGO_ENABLED=0 go build -o /dev/null ./cmd/nexara
 
   frontend-ci:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: frontend
@@ -114,15 +118,18 @@ jobs:
         run: npm run build
 
   docker-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [go-ci, frontend-ci]
     steps:
       - uses: actions/checkout@v5
 
       - name: Build unified image
+        # --provenance=false mirrors release.yml, which needs it to push one
+        # manifest per release; here it proves the flag on this runner's Docker.
         run: |
           docker build \
             --pull \
+            --provenance=false \
             -f docker/nexara/Dockerfile \
             -t nexara:ci \
             .
