@@ -24,8 +24,8 @@ import (
 // the router applies only authRequired. A route whose handler forgets the call
 // ships as authenticated-but-unauthorized-accessible, and nothing fails. That
 // is not hypothetical — console-token minting shipped gated on `view`, which
-// every default Viewer holds, so a read-only account could open a root shell
-// on a hypervisor (fixed in 17a7cc0).
+// every default Viewer holds, so a read-only account could open a hypervisor's
+// shell, at its login prompt, and every guest console (fixed in 17a7cc0).
 //
 // The guard resolves each registered route to the function that serves it,
 // then walks the handlers package's call graph to decide whether that function

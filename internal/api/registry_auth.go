@@ -25,8 +25,10 @@ const authScope = pathPrefix + "auth"
 //
 // The action is the dedicated "console" family rather than "view", and that is
 // not a detail: the built-in Viewer role holds every view:* permission, and
-// gating this on view:node once handed read-only accounts a root shell on the
-// hypervisor (fixed in 17a7cc0, pinned by console_token_authz_test.go).
+// gating this on view:* once handed read-only accounts the hypervisor's shell,
+// at its login prompt, and every guest console — a root shell with no login in
+// a container set to cmode=shell (fixed in 17a7cc0, pinned by
+// console_token_authz_test.go).
 const consoleTokenReason = "the resource is chosen by the request BODY — node_shell gates on console:node, " +
 	"vm_serial and vm_vnc on console:vm, ct_attach and ct_vnc on console:container — and the cluster " +
 	"comes from the body as well, since the path names none; middleware runs before either is readable"

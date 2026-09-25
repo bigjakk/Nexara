@@ -214,7 +214,7 @@ Permissions follow the pattern `action:resource`. Examples:
 | `manage:migration` | Create, execute, and cancel Nexara migration jobs (the planner) |
 | `console:vm` | Open VM serial and VNC consoles |
 | `console:container` | Open container attach and VNC consoles |
-| `console:node` | Open node shell consoles (root shell on the Proxmox host) |
+| `console:node` | Open node shell consoles (a login prompt on the Proxmox host) |
 | `view:audit` | View audit log |
 | `manage:alert` | Create and manage alert rules |
 | `manage:user` | Create, update, delete users |
@@ -230,10 +230,13 @@ The complete catalog is whatever **Admin > Roles** lists — it is seeded from t
 > **Console access is not implied by `view:*`.** Opening a shell or console
 > requires the dedicated `console:*` permissions, which the built-in Admin
 > and Operator roles hold. The built-in Viewer role deliberately does not —
-> a read-only account cannot open a root shell on a node or a guest console.
+> a read-only account cannot open a node shell or a guest console.
 > To build a "viewer plus consoles" role, grant `console:vm` /
 > `console:container` (and `console:node` only if node shells are intended)
-> alongside the view permissions.
+> alongside the view permissions. A node shell opens at the host's login
+> prompt: Proxmox logs a shell straight in as root only for `root@pam` itself,
+> and Nexara connects with an API token, whose identity is
+> `user@realm!token` — never `root@pam`, even for a token `root@pam` owns.
 
 ### Assigning Roles
 

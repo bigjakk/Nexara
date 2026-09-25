@@ -782,8 +782,11 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 	//
 	// The action is the dedicated "console" family (migration 000078), NOT
 	// "view": the built-in Viewer role holds every view:* permission, and
-	// gating on view:node handed read-only accounts a root shell on the
-	// hypervisor. console_token_authz_test.go pins this invariant.
+	// gating on view:* handed read-only accounts the hypervisor's shell (at
+	// its login prompt: Proxmox skips the login only for root@pam, never for
+	// an API token) and every guest console, which for a container with
+	// cmode=shell is a root shell inside it, with no login.
+	// console_token_authz_test.go pins this invariant.
 	if err := requireClusterPerm(c, "console", resource, clusterUUID); err != nil {
 		return err
 	}

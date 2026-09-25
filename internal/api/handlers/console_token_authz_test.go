@@ -129,11 +129,11 @@ var consoleTokenTypes = []struct {
 }
 
 // TestConsoleToken_ViewOnlyDenied is the regression test for the Viewer
-// root-shell vulnerability: an account holding only view:* permissions (the
-// built-in Viewer role's grant set) must not be able to mint any console
+// console-access vulnerability: an account holding only view:* permissions
+// (the built-in Viewer role's grant set) must not be able to mint any console
 // token. Before migration 000078 the gate was requireClusterPerm("view", …),
-// which handed every Viewer a node_shell token — a root shell on the
-// hypervisor.
+// which handed every Viewer a node_shell token — the hypervisor's shell, at
+// its login prompt — and every guest console.
 func TestConsoleToken_ViewOnlyDenied(t *testing.T) {
 	for _, tt := range consoleTokenTypes {
 		t.Run(tt.consoleType, func(t *testing.T) {
