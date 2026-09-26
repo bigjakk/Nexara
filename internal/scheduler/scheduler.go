@@ -138,6 +138,16 @@ func (s *Scheduler) Run(ctx context.Context) {
 		}
 	}()
 
+	// Settle finished runs first, exactly as RunScheduledTaskReconcile's own
+	// faster tick does. What that buys is the rows that are NOT due: the tick
+	// that starts runs settles them too, even if the other tick were ever
+	// unwired. A due row gains little — the claim below overwrites whatever
+	// was settled with 'running' in the same pass, and only the log line and
+	// the schedule_change event for its finished run remain. Called through
+	// the tick's body, which has its own recover, so neither a failure nor a
+	// panic in the settle keeps due runs from starting.
+	s.RunScheduledTaskReconcile(ctx)
+
 	tasks, err := claimDueTasks(ctx, s.queries)
 	if err != nil {
 		s.logger.Error("failed to claim due tasks", "error", err)
@@ -171,6 +181,74 @@ func (s *Scheduler) Run(ctx context.Context) {
 			s.executeTask(ctx, client, t)
 		}
 	}
+}
+
+// RunScheduledTaskReconcile settles scheduled-task runs whose Proxmox task has
+// ended: 'dispatched' becomes 'success' or 'failed', from the task_history row
+// of the run's UPID (queries/scheduled_tasks.sql,
+// ReconcileDispatchedScheduledTasks, has the rules).
+//
+// Run settles as well, before it claims; this tick exists for responsiveness.
+// Run ticks once a minute and skips a tick while a slow pass is still
+// dispatching, and a task ends whenever it ends. The only source is
+// task_history, which the collector finalizes on its own sync tick, so this
+// reads the database and never Proxmox — one set-based UPDATE per tick, which
+// touches nothing while no run is waiting.
+func (s *Scheduler) RunScheduledTaskReconcile(ctx context.Context) {
+	s.tick(ctx, "scheduled task reconcile panicked", "scheduled tasks: reconcile failed", s.settleDispatchedRuns)
+}
+
+// dispatchedRunSettler is the one-method slice of db.Querier that
+// settleDispatchedRuns needs, carved out so its params can be asserted with a
+// fake (the same shape as dueTaskClaimer).
+type dispatchedRunSettler interface {
+	ReconcileDispatchedScheduledTasks(
+		ctx context.Context, arg db.ReconcileDispatchedScheduledTasksParams,
+	) ([]db.ReconcileDispatchedScheduledTasksRow, error)
+}
+
+// settleDispatchedRunsOn hands the query the same status constants
+// finishTaskRun writes, so the value a dispatched run is recorded with and the
+// value the reconcile looks for cannot drift apart: the SQL names neither.
+func settleDispatchedRunsOn(
+	ctx context.Context, settler dispatchedRunSettler,
+) ([]db.ReconcileDispatchedScheduledTasksRow, error) {
+	return settler.ReconcileDispatchedScheduledTasks(ctx, db.ReconcileDispatchedScheduledTasksParams{
+		DispatchedStatus: runStatusDispatched,
+		SucceededStatus:  runStatusSucceeded,
+		FailedStatus:     runStatusFailed,
+	})
+}
+
+func (s *Scheduler) settleDispatchedRuns(ctx context.Context) error {
+	return s.settleDispatchedRunsWith(ctx, s.queries)
+}
+
+// settleDispatchedRunsWith settles through settler, then logs and announces
+// each run it settled.
+//
+// The announcement is a schedule_change event on the run's cluster, one per
+// settled row. It is the only signal an open Schedules tab gets that the row
+// changed: the run's own task_update is published when the collector
+// finalizes the task, which is BEFORE this settles the row, so the re-read
+// that event triggers still finds the run "dispatched". Nothing settled,
+// nothing published. eventPub is nil-safe.
+func (s *Scheduler) settleDispatchedRunsWith(ctx context.Context, settler dispatchedRunSettler) error {
+	rows, err := settleDispatchedRunsOn(ctx, settler)
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if r.LastStatus.String == runStatusFailed {
+			s.logger.Warn("scheduled task run failed in Proxmox",
+				"task_id", r.ID, "cluster_id", r.ClusterID, "error", r.LastError.String)
+		} else {
+			s.logger.Info("scheduled task run succeeded", "task_id", r.ID, "cluster_id", r.ClusterID)
+		}
+		s.eventPub.ClusterEvent(ctx, r.ClusterID.String(), events.KindScheduleChange,
+			"schedule", r.ID.String(), r.LastStatus.String)
+	}
+	return nil
 }
 
 // RunDRS evaluates DRS for all enabled clusters, respecting each cluster's
@@ -595,35 +673,121 @@ type snapshotParams struct {
 	VMState     bool   `json:"vmstate"`
 }
 
+// The last_status values the scheduler writes for a scheduled task's run.
+//
+// A row goes NULL (never run) → 'running' → 'dispatched' or 'failed' → and,
+// from 'dispatched', 'success' or 'failed'. 'running' is the claim, written as
+// a literal by ClaimDueTasks while the run is being started. finishTaskRun
+// records how the run left the scheduler: 'dispatched' with the UPID of the
+// task it started, or 'failed' with the reason nothing could be followed.
+// RunScheduledTaskReconcile settles a dispatched run once its task has ended.
+//
+// 'dispatched' is why this vocabulary exists. The call that starts a snapshot
+// or reboot returns as soon as Proxmox has forked the worker, and Proxmox
+// refuses much of what it refuses INSIDE the worker — "snapshot name '…'
+// already used", "snapshot feature is not available". The scheduler used to
+// write 'success' when that call returned, which recorded that the run had
+// been SENT: the schedule read Success while every run's task failed, and the
+// failure showed only in the task history.
+//
+// It is deliberately not 'running'. That is the claim's in-flight marker —
+// ClaimDueTasks will not claim a row reading 'running' until the claim goes
+// stale — so writing it for the life of a Proxmox task would give one field
+// two meanings: a run that came due while the previous task was still going
+// would be skipped as in flight, and then, once the stale window had passed,
+// taken over as if its claimant had crashed.
+//
+// A schedule that fires again before its previous run's task has finished and
+// been settled starts a new run over it: the claim clears the old UPID, so the
+// status follows the newer run, and the older run's outcome stays in
+// task_history (Events → Tasks) only.
+//
+// The SPA reads all four (frontend/src/features/vms/lib/schedule-status.ts),
+// and the schedules listing's API description restates them;
+// TestRunStatusVocabularyMatchesTheSPA and
+// TestScheduleStatusVocabularyIsDescribed hold those copies to RunStatusValues.
+const (
+	// runStatusClaimed is the claim's marker. ClaimDueTasks writes it as a
+	// literal; it is named here so the vocabulary is one list in Go, and
+	// TestRunStatusVocabularyMatchesTheSPA pins it to that literal.
+	runStatusClaimed    = "running"
+	runStatusDispatched = "dispatched"
+	runStatusSucceeded  = "success"
+	runStatusFailed     = "failed"
+)
+
+// RunStatusValues returns every last_status value a scheduled task's run can
+// leave, sorted. Exported for the guard in package api that compares it with
+// what the schedules listing tells callers; package api imports this package,
+// not the other way round.
+func RunStatusValues() []string {
+	return slices.Sorted(slices.Values([]string{
+		runStatusClaimed, runStatusDispatched, runStatusSucceeded, runStatusFailed,
+	}))
+}
+
+// noTaskIDError is what a run records when Proxmox accepted its call and gave
+// back no UPID. Snapshot and reboot always start a task, so this is not
+// expected — but with no UPID there is nothing to follow, and recording the
+// run as anything but failed would claim an outcome nobody saw.
+const noTaskIDError = "Proxmox returned no task ID for this run, so how it ended cannot be followed"
+
+// runOutcome is how one run left the scheduler: what finishTaskRun records.
+type runOutcome struct {
+	// status is runStatusDispatched or runStatusFailed. It is never
+	// runStatusSucceeded: only the end of the task itself can say that, and
+	// the reconcile is what reads it.
+	status string
+	// err is why the run failed before there was a task to follow. Empty for
+	// a dispatched run.
+	err string
+	// upid is the task the run started, which the reconcile follows. Empty for
+	// a failed run.
+	upid string
+}
+
+// dispatchOutcome is the record of a run whose dispatch returned upid and err.
+func dispatchOutcome(upid string, err error) runOutcome {
+	switch {
+	case err != nil:
+		return runOutcome{status: runStatusFailed, err: err.Error()}
+	case upid == "":
+		return runOutcome{status: runStatusFailed, err: noTaskIDError}
+	default:
+		return runOutcome{status: runStatusDispatched, upid: upid}
+	}
+}
+
 func (s *Scheduler) executeTask(ctx context.Context, client *proxmox.Client, task db.ScheduledTask) {
 	now := time.Now()
+	var upid string
 	var execErr error
 
 	switch task.Action {
 	case "snapshot":
-		execErr = s.executeSnapshot(ctx, client, task, now)
+		upid, execErr = s.executeSnapshot(ctx, client, task, now)
 	case "reboot":
-		execErr = s.executeReboot(ctx, client, task)
+		upid, execErr = s.executeReboot(ctx, client, task)
 	default:
 		execErr = fmt.Errorf("unsupported action: %s", task.Action)
 	}
 
-	status := "success"
-	errMsg := ""
-	if execErr != nil {
-		status = "failed"
-		errMsg = execErr.Error()
+	run := dispatchOutcome(upid, execErr)
+	if run.status == runStatusFailed {
 		s.logger.Error("scheduled task failed",
-			"task_id", task.ID, "action", task.Action, "error", execErr)
+			"task_id", task.ID, "action", task.Action, "error", run.err)
 	} else {
-		s.logger.Info("scheduled task completed",
-			"task_id", task.ID, "action", task.Action)
+		s.logger.Info("scheduled task dispatched",
+			"task_id", task.ID, "action", task.Action, "upid", run.upid)
 	}
 
-	s.finishTaskRun(ctx, task, now, status, errMsg)
+	s.finishTaskRun(ctx, task, now, run)
 }
 
-// finishTaskRun records how a run ended and arms the next one.
+// finishTaskRun records how a run left the scheduler and arms the next one.
+// For a dispatched run that is not how the run ENDED — the task is still
+// running in Proxmox — so it records the UPID, and RunScheduledTaskReconcile
+// settles the row once the task has finished.
 //
 // now is when the run STARTED, not when it finished, so a long run does not
 // push its own next occurrence out by its duration.
@@ -631,16 +795,15 @@ func (s *Scheduler) executeTask(ctx context.Context, client *proxmox.Client, tas
 // When the cron can no longer yield a future run there is no safe value to
 // write: a NULL next_run_at reads as "due now" in this table's due predicate,
 // which would claim and RE-RUN this task — the reboot or snapshot it carries —
-// on every tick. Park it instead, with the reason on the row. status/errMsg
-// ride along: the run that just finished has its own outcome, independent of
-// the schedule being unusable. A snapshot that succeeded must not be recorded
-// as failed just because the task is being parked, and a run that DID fail
-// must not have its reason replaced by the schedule message — last_error is
-// the only field the operator sees.
-func (s *Scheduler) finishTaskRun(ctx context.Context, task db.ScheduledTask, now time.Time, status, errMsg string) {
+// on every tick. Park it instead, with the reason on the row. The run's own
+// outcome rides along, independent of the schedule being unusable: a run that
+// DID fail must not have its reason replaced by the schedule message, since
+// last_error is the only field the operator sees, and a dispatched run is
+// parked as dispatched, so that its task still settles it.
+func (s *Scheduler) finishTaskRun(ctx context.Context, task db.ScheduledTask, now time.Time, run runOutcome) {
 	nextRun, cronErr := cronspec.NextRunTime(task.Schedule, now)
 	if cronErr != nil {
-		s.parkUnschedulableTask(ctx, task, cronErr, status, errMsg)
+		s.parkUnschedulableTask(ctx, task, cronErr, run)
 		return
 	}
 
@@ -648,8 +811,9 @@ func (s *Scheduler) finishTaskRun(ctx context.Context, task db.ScheduledTask, no
 		ID:         task.ID,
 		LastRunAt:  pgtype.Timestamptz{Time: now, Valid: true},
 		NextRunAt:  pgtype.Timestamptz{Time: nextRun, Valid: true},
-		LastStatus: pgtype.Text{String: status, Valid: true},
-		LastError:  pgtype.Text{String: errMsg, Valid: errMsg != ""},
+		LastStatus: pgtype.Text{String: run.status, Valid: true},
+		LastError:  pgtype.Text{String: run.err, Valid: run.err != ""},
+		LastUpid:   pgtype.Text{String: run.upid, Valid: run.upid != ""},
 	}); err != nil {
 		s.logger.Error("failed to update task last run", "task_id", task.ID, "error", err)
 	}
@@ -739,13 +903,18 @@ func scheduledSnapshotName(stored string, now time.Time) string {
 	return proxmox.TimestampedSnapshotName(prefix, now)
 }
 
-// executeSnapshot takes one run's snapshot. now is when the run started — the
-// instant finishTaskRun records as last_run_at — and it names the snapshot, so
-// the name and the run's record agree.
-func (s *Scheduler) executeSnapshot(ctx context.Context, client *proxmox.Client, task db.ScheduledTask, now time.Time) error {
+// executeSnapshot takes one run's snapshot and returns the UPID of the task
+// that takes it. now is when the run started — the instant finishTaskRun
+// records as last_run_at — and it names the snapshot, so the name and the run's
+// record agree.
+//
+// A nil error says Proxmox STARTED the task, not that the snapshot exists:
+// Proxmox refuses a name the guest already holds, or storage that cannot
+// snapshot, inside the task, after this call has returned.
+func (s *Scheduler) executeSnapshot(ctx context.Context, client *proxmox.Client, task db.ScheduledTask, now time.Time) (string, error) {
 	var params snapshotParams
 	if err := json.Unmarshal(task.Params, &params); err != nil {
-		return fmt.Errorf("unmarshal snapshot params: %w", err)
+		return "", fmt.Errorf("unmarshal snapshot params: %w", err)
 	}
 
 	snapName := scheduledSnapshotName(params.SnapName, now)
@@ -764,17 +933,19 @@ func (s *Scheduler) executeSnapshot(ctx context.Context, client *proxmox.Client,
 	case guestFamilyCT:
 		upid, err = client.CreateCTSnapshot(ctx, task.Node, mustAtoi(task.ResourceID), sp)
 	default:
-		return fmt.Errorf("unsupported resource type for snapshot: %s", task.ResourceType)
+		return "", fmt.Errorf("unsupported resource type for snapshot: %s", task.ResourceType)
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	s.trackTask(ctx, scheduledTask(task, upid, "scheduled_snapshot",
 		fmt.Sprintf("Scheduled snapshot %s — %s %s", snapName, task.ResourceType, task.ResourceID)))
-	return nil
+	return upid, nil
 }
 
-func (s *Scheduler) executeReboot(ctx context.Context, client *proxmox.Client, task db.ScheduledTask) error {
+// executeReboot reboots the guest and returns the UPID of the reboot task; as
+// with executeSnapshot, a nil error says only that the task was started.
+func (s *Scheduler) executeReboot(ctx context.Context, client *proxmox.Client, task db.ScheduledTask) (string, error) {
 	vmid := mustAtoi(task.ResourceID)
 	var upid string
 	var err error
@@ -784,14 +955,14 @@ func (s *Scheduler) executeReboot(ctx context.Context, client *proxmox.Client, t
 	case guestFamilyCT:
 		upid, err = client.RebootCT(ctx, task.Node, vmid)
 	default:
-		return fmt.Errorf("unsupported resource type for reboot: %s", task.ResourceType)
+		return "", fmt.Errorf("unsupported resource type for reboot: %s", task.ResourceType)
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	s.trackTask(ctx, scheduledTask(task, upid, "scheduled_reboot",
 		fmt.Sprintf("Scheduled reboot — %s %s", task.ResourceType, task.ResourceID)))
-	return nil
+	return upid, nil
 }
 
 // trackTaskParams is one UPID-producing action the scheduler dispatched on its
@@ -845,7 +1016,9 @@ func scheduledTask(task db.ScheduledTask, upid, taskType, description string) tr
 // purpose: an audit row containing the UPID would make the external-task
 // ingest dedup skip it, and the task would then never appear anywhere. With
 // nothing recorded, the next collector tick ingests it as external — a
-// degraded but visible fallback.
+// degraded but visible fallback. For a scheduled_tasks run that fallback also
+// settles the schedule: RunScheduledTaskReconcile follows the run's UPID into
+// task_history, and finds the row whichever of the two wrote it.
 func (s *Scheduler) trackTask(ctx context.Context, p trackTaskParams) {
 	if p.UPID == "" {
 		return
@@ -905,7 +1078,7 @@ func (s *Scheduler) createClient(ctx context.Context, clusterID uuid.UUID) (*pro
 // could not be built, so nothing was dispatched. The run still finished, and
 // finishTaskRun still has to arm the next one.
 func (s *Scheduler) markFailed(ctx context.Context, task db.ScheduledTask, errMsg string) {
-	s.finishTaskRun(ctx, task, time.Now(), "failed", errMsg)
+	s.finishTaskRun(ctx, task, time.Now(), runOutcome{status: runStatusFailed, err: errMsg})
 }
 
 // parkUnschedulableTask disables a task whose cron cannot yield a future run,
@@ -916,30 +1089,36 @@ func (s *Scheduler) markFailed(ctx context.Context, task db.ScheduledTask, errMs
 // the zero time robfig returns for an unsatisfiable expression is inert — both
 // mean due now. The API rejects such an expression on write, so reaching this
 // is a row from before that check existed, or one edited by hand.
-// runStatus and runErr describe the run that just finished; they are recorded
-// as-is rather than being replaced by the schedule problem, because the two are
-// independent. A snapshot can be taken perfectly by a task whose expression can
-// never come round again — writing 'failed' there sends the operator looking
-// for a problem in the wrong half — and a run that genuinely failed must keep
-// its own reason, since last_error is the only field that surfaces either.
+//
+// run describes the run that just finished, and is recorded as-is rather than
+// being replaced by the schedule problem, because the two are independent. A
+// run that genuinely failed keeps its own reason in front of the schedule
+// message, since last_error is the only field that surfaces either. A run that
+// reached Proxmox is parked as dispatched, with its UPID: how it ends is not
+// known yet, and recording 'success' now would claim the outcome this status
+// exists not to guess, while 'failed' would send the operator looking for a
+// problem in the wrong half. RunScheduledTaskReconcile settles it like any
+// other dispatched run, and keeps the schedule message — a task that fails
+// then puts its exit status in front of it, in the same "<run>; disabled: …"
+// shape this writes for a run that failed before dispatch.
 func (s *Scheduler) parkUnschedulableTask(
 	ctx context.Context,
 	task db.ScheduledTask,
 	cronErr error,
-	runStatus string,
-	runErr string,
+	run runOutcome,
 ) {
 	s.logger.Error("scheduled task disabled: its schedule can never fire",
 		"task_id", task.ID, "action", task.Action, "schedule", task.Schedule,
-		"error", cronErr, "run_status", runStatus, "run_error", runErr)
+		"error", cronErr, "run_status", run.status, "run_error", run.err, "upid", run.upid)
 	msg := "disabled: " + cronErr.Error()
-	if runErr != "" {
-		msg = runErr + "; " + msg
+	if run.err != "" {
+		msg = run.err + "; " + msg
 	}
 	if err := s.queries.DisableScheduledTaskForBadSchedule(ctx, db.DisableScheduledTaskForBadScheduleParams{
 		ID:         task.ID,
-		LastStatus: pgtype.Text{String: runStatus, Valid: runStatus != ""},
+		LastStatus: pgtype.Text{String: run.status, Valid: run.status != ""},
 		LastError:  pgtype.Text{String: msg, Valid: true},
+		LastUpid:   pgtype.Text{String: run.upid, Valid: run.upid != ""},
 	}); err != nil {
 		s.logger.Error("failed to disable task with an unusable schedule",
 			"task_id", task.ID, "error", err)

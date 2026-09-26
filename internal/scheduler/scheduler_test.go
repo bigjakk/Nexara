@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -94,27 +95,46 @@ func TestClaimDueTasks_GuardCoversStaleWindow(t *testing.T) {
 	}
 }
 
-// TestSchedulerRun_RecoversFromClaimPanic exercises the deferred recover
-// at the top of Run(). We swap s.queries via a Scheduler built with the
-// concrete *db.Queries set to nil; then calling Run() naturally panics
-// (nil-pointer deref on the ClaimDueTasks call) and the recover should
-// catch it. This is the cheapest way to exercise the production
-// panic-recovery path without a full DB.
+// TestSchedulerRun_RecoversFromClaimPanic exercises the deferred recover at the
+// top of Run(): the claim panics, and Run must return rather than take the
+// scheduler goroutine down with it.
+//
+// The claim is asserted to have been REACHED, so a panic somewhere earlier —
+// Run settles dispatched runs first — cannot pass for this one. The second
+// case makes the settle panic as well: its own recover has to absorb that, or
+// the claim is never reached at all.
 func TestSchedulerRun_RecoversFromClaimPanic(t *testing.T) {
 	t.Parallel()
 
-	// Logger that drops output so the test stays quiet.
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	s := &Scheduler{
-		queries: nil, // nil *db.Queries → method call panics with nil deref
-		logger:  logger,
+	tests := []struct {
+		name      string
+		panicking map[string]string
+	}{
+		{"the claim panics", map[string]string{"ClaimDueTasks": "claim exploded"}},
+		{"the settle and the claim panic", map[string]string{
+			"ReconcileDispatchedScheduledTasks": "settle exploded",
+			"ClaimDueTasks":                     "claim exploded",
+		}},
 	}
 
-	// If the panic recover is missing or broken, this call propagates
-	// the panic and the test fails with a stack trace; if it works, Run
-	// returns normally and the test passes.
-	s.Run(context.Background())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			recorder := &queryOrderRecorder{panicking: tt.panicking}
+			s := &Scheduler{
+				queries: db.New(recorder),
+				logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+			}
+			// A missing or broken recover propagates the panic from here and
+			// fails the test with a stack trace.
+			s.Run(context.Background())
+			if !slices.Contains(recorder.names, "ClaimDueTasks") {
+				t.Errorf("Run sent %v and never reached the claim, so the recover under test was not exercised",
+					recorder.names)
+			}
+		})
+	}
 }
 
 // --- Scheduled snapshot names ---
@@ -125,19 +145,41 @@ func TestSchedulerRun_RecoversFromClaimPanic(t *testing.T) {
 // one to s.trackTask, which writes a task_history row and an audit entry — so a
 // realistic UPID would drag a database into a test about whether the request is
 // sent at all. trackTask returns immediately on an empty UPID, which keeps the
-// success path reachable with a zero-valued Scheduler.
+// success path reachable with a zero-valued Scheduler. (executeTask records
+// such a run as failed — nothing came back to follow — but these tests call
+// executeSnapshot, which only reports what Proxmox answered.)
 func newPVEStub(t *testing.T) (*httptest.Server, *[]string) {
+	t.Helper()
+	return newPVEStubAnswering(t, http.StatusOK, `{"data":""}`)
+}
+
+// newPVEStubAnswering is newPVEStub with the answer chosen: the UPID of a task
+// Proxmox started, or an error status for a call it refused. Tests that give
+// it a UPID run the Scheduler over a taskRunRecorder, which takes the
+// task_history and audit rows trackTask writes for it.
+func newPVEStubAnswering(t *testing.T, status int, body string) (*httptest.Server, *[]string) {
 	t.Helper()
 	var seen []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		seen = append(seen, r.Method+" "+r.RequestURI+" snapname="+r.PostForm.Get("snapname"))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":""}`))
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
 	return srv, &seen
 }
+
+// UPIDs the stub hands back for a task it "started". Placeholder node and
+// token names; the fields only need to have Proxmox's shape.
+const (
+	snapshotUPID = "UPID:pve-01:0000A1B2:0001C3D4:66F4E3C0:qmsnapshot:100:nexara@pve!api:"
+	rebootUPID   = "UPID:pve-01:0000A1B3:0001C3D5:66F4E3C1:qmreboot:100:nexara@pve!api:"
+)
+
+// upidBody is the answer to a call that started the task upid.
+func upidBody(upid string) string { return `{"data":"` + upid + `"}` }
 
 func newStubPVEClient(t *testing.T, serverURL string) *proxmox.Client {
 	t.Helper()
@@ -215,7 +257,7 @@ func TestExecuteSnapshot_ASecondRunWithATypedNameTakesANewName(t *testing.T) {
 			}
 
 			for i, at := range runs {
-				if err := s.executeSnapshot(context.Background(), client, task, at); err != nil {
+				if _, err := s.executeSnapshot(context.Background(), client, task, at); err != nil {
 					t.Fatalf("run %d: executeSnapshot(%s) = %v, want nil", i+1, tt.params, err)
 				}
 			}
@@ -241,50 +283,72 @@ func TestExecuteSnapshot_ASecondRunWithATypedNameTakesANewName(t *testing.T) {
 	}
 }
 
-// taskRunRecorder is a db.DBTX that records the UPDATE finishTaskRun writes
-// for a run and answers anything else with an error. It stands in for the
-// database in the one test that has to go through executeTask.
+// taskRunRecorder is a db.DBTX that stands in for the database while the
+// scheduler runs a task. It records every UPDATE of a scheduled_tasks row —
+// which sqlc query sent it and the value bound to each column — takes the two
+// inserts trackTask makes for a task a run started, and answers anything else
+// with an error.
 //
 // err keeps the reason for a refusal: finishTaskRun only logs a failed write,
 // to a logger the test discards, so without it every refusal would read as a
 // bare "recorded 0 times".
 type taskRunRecorder struct {
-	lastRunAt pgtype.Timestamptz
-	updates   int
-	err       error
+	writes []runWrite
+	// historyInserts counts InsertTaskHistory calls — trackTask recording the
+	// task a run started, which is what the reconcile later reads.
+	historyInserts int
+	err            error
 }
 
-// lastRunAtParam finds last_run_at's placeholder in the statement rather than
-// hard-coding its position, so a reordered query cannot quietly hand this
-// recorder a different column.
-var lastRunAtParam = regexp.MustCompile(`last_run_at = \$(\d+)`)
+// runWrite is one UPDATE of a scheduled_tasks row: the sqlc query that sent it,
+// and the value bound to each column the statement names as `column = $N`.
+type runWrite struct {
+	query string
+	cols  map[string]any
+}
+
+var (
+	// queryNameRe reads the name sqlc writes at the head of every statement.
+	queryNameRe = regexp.MustCompile(`^-- name: (\w+)`)
+	// columnParamRe finds each `column = $N`, in the SET list and the WHERE,
+	// so the recorder reads each value by its column rather than by position:
+	// a reordered query cannot quietly hand a test a different column's value.
+	columnParamRe = regexp.MustCompile(`(\w+)\s*=\s*\$(\d+)`)
+)
 
 func (r *taskRunRecorder) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	ts, err := lastRunAtArg(sql, args)
-	if err != nil {
-		r.err = err
-		return pgconn.CommandTag{}, err
+	switch {
+	case strings.Contains(sql, "INSERT INTO audit_log"):
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	case strings.Contains(sql, "UPDATE scheduled_tasks"):
+		w, err := parseRunWrite(sql, args)
+		if err != nil {
+			r.err = err
+			return pgconn.CommandTag{}, err
+		}
+		r.writes = append(r.writes, w)
+		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}
-	r.lastRunAt = ts
-	r.updates++
-	return pgconn.NewCommandTag("UPDATE 1"), nil
+	r.err = fmt.Errorf("unexpected statement: %s", sql)
+	return pgconn.CommandTag{}, r.err
 }
 
-// lastRunAtArg picks the last_run_at value out of a scheduled_tasks UPDATE.
-func lastRunAtArg(sql string, args []any) (pgtype.Timestamptz, error) {
-	m := lastRunAtParam.FindStringSubmatch(sql)
-	if !strings.Contains(sql, "UPDATE scheduled_tasks") || m == nil {
-		return pgtype.Timestamptz{}, fmt.Errorf("unexpected statement: %s", sql)
+// parseRunWrite pairs each `column = $N` in a scheduled_tasks UPDATE with the
+// argument bound to it.
+func parseRunWrite(sql string, args []any) (runWrite, error) {
+	name := queryNameRe.FindStringSubmatch(sql)
+	if name == nil {
+		return runWrite{}, fmt.Errorf("statement carries no sqlc query name: %s", sql)
 	}
-	n, _ := strconv.Atoi(m[1])
-	if n < 1 || n > len(args) {
-		return pgtype.Timestamptz{}, fmt.Errorf("last_run_at is $%d but %d args were passed", n, len(args))
+	w := runWrite{query: name[1], cols: map[string]any{}}
+	for _, m := range columnParamRe.FindAllStringSubmatch(sql, -1) {
+		n, _ := strconv.Atoi(m[2])
+		if n < 1 || n > len(args) {
+			return runWrite{}, fmt.Errorf("%s binds %s to $%d but %d args were passed", w.query, m[1], n, len(args))
+		}
+		w.cols[m[1]] = args[n-1]
 	}
-	ts, ok := args[n-1].(pgtype.Timestamptz)
-	if !ok {
-		return pgtype.Timestamptz{}, fmt.Errorf("last_run_at arg is %T", args[n-1])
-	}
-	return ts, nil
+	return w, nil
 }
 
 func (r *taskRunRecorder) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
@@ -293,7 +357,52 @@ func (r *taskRunRecorder) Query(_ context.Context, sql string, _ ...any) (pgx.Ro
 }
 
 func (r *taskRunRecorder) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if strings.Contains(sql, "INSERT INTO task_history") {
+		r.historyInserts++
+		return insertedRow{}
+	}
 	panic("unexpected query row: " + sql)
+}
+
+// insertedRow answers InsertTaskHistory's RETURNING. trackTask discards the
+// row, so nothing needs scanning into it.
+type insertedRow struct{}
+
+func (insertedRow) Scan(...any) error { return nil }
+
+// onlyWrite is the one scheduled_tasks write a run made. A run records itself
+// exactly once, whatever happened to it.
+func (r *taskRunRecorder) onlyWrite(t *testing.T) runWrite {
+	t.Helper()
+	if r.err != nil || len(r.writes) != 1 {
+		t.Fatalf("the run was recorded %d times, want once (recorder error: %v)", len(r.writes), r.err)
+	}
+	return r.writes[0]
+}
+
+// text reads a nullable text column the write bound: its value, and whether it
+// is non-NULL. A write that does not bind the column at all fails the test —
+// "not written" and "written NULL" are different outcomes on a row that still
+// holds the previous run's value.
+func (w runWrite) text(t *testing.T, col string) (value string, valid bool) {
+	t.Helper()
+	v, ok := w.cols[col]
+	if !ok {
+		t.Fatalf("%s does not write %s", w.query, col)
+	}
+	tv, ok := v.(pgtype.Text)
+	if !ok {
+		t.Fatalf("%s binds %s as %T, want pgtype.Text", w.query, col, v)
+	}
+	return tv.String, tv.Valid
+}
+
+// newRecordingScheduler is a Scheduler whose database is recorder.
+func newRecordingScheduler(recorder *taskRunRecorder) *Scheduler {
+	return &Scheduler{
+		queries: db.New(recorder),
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
 }
 
 // TestExecuteTask_NamesTheSnapshotForTheRunItRecords pins the wiring the tests
@@ -308,12 +417,9 @@ func (r *taskRunRecorder) QueryRow(_ context.Context, sql string, _ ...any) pgx.
 func TestExecuteTask_NamesTheSnapshotForTheRunItRecords(t *testing.T) {
 	t.Parallel()
 
-	srv, seen := newPVEStub(t)
+	srv, seen := newPVEStubAnswering(t, http.StatusOK, upidBody(snapshotUPID))
 	recorder := &taskRunRecorder{}
-	s := &Scheduler{
-		queries: db.New(recorder),
-		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}
+	s := newRecordingScheduler(recorder)
 	task := db.ScheduledTask{
 		ID:           uuid.New(),
 		ResourceType: "vm",
@@ -328,13 +434,14 @@ func TestExecuteTask_NamesTheSnapshotForTheRunItRecords(t *testing.T) {
 	s.executeTask(context.Background(), newStubPVEClient(t, srv.URL), task)
 	after := time.Now()
 
-	if recorder.updates != 1 || recorder.err != nil {
-		t.Fatalf("the run was recorded %d times, want once (recorder error: %v)", recorder.updates, recorder.err)
+	lastRunAt, ok := recorder.onlyWrite(t).cols["last_run_at"].(pgtype.Timestamptz)
+	if !ok {
+		t.Fatalf("the run's write binds no last_run_at timestamp: %v", recorder.writes[0].cols)
 	}
-	recorded := recorder.lastRunAt.Time
-	if !recorder.lastRunAt.Valid || recorded.Before(before) || recorded.After(after) {
+	recorded := lastRunAt.Time
+	if !lastRunAt.Valid || recorded.Before(before) || recorded.After(after) {
 		t.Fatalf("last_run_at = %v (valid %v), want the time of this run, between %v and %v",
-			recorded, recorder.lastRunAt.Valid, before, after)
+			recorded, lastRunAt.Valid, before, after)
 	}
 	// time.Now() carries time.Local and a UTC conversion carries time.UTC, a
 	// different pointer, so this holds the zone even on a host whose local
@@ -463,7 +570,7 @@ func TestExecuteSnapshot_RefusesAStoredNameProxmoxWouldReject(t *testing.T) {
 				Params:       []byte(tt.params),
 			}
 
-			err := s.executeSnapshot(context.Background(), newStubPVEClient(t, srv.URL), task, runAt)
+			_, err := s.executeSnapshot(context.Background(), newStubPVEClient(t, srv.URL), task, runAt)
 			// The sentinel, not merely "an error": the stub answers 200 to
 			// everything, so a refusal arriving for some unrelated reason —
 			// a params unmarshal, an unhandled resource type — would satisfy
@@ -533,7 +640,7 @@ func TestExecuteSnapshot_DispatchesNamesProxmoxAccepts(t *testing.T) {
 				Params:       []byte(tt.params),
 			}
 
-			if err := s.executeSnapshot(context.Background(), newStubPVEClient(t, srv.URL), task, runAt); err != nil {
+			if _, err := s.executeSnapshot(context.Background(), newStubPVEClient(t, srv.URL), task, runAt); err != nil {
 				t.Fatalf("executeSnapshot(%s) = %v, want nil; Proxmox accepts this name", tt.params, err)
 			}
 			if len(*seen) != 1 {

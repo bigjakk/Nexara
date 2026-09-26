@@ -1,0 +1,23 @@
+-- 000104_scheduled_task_last_upid.up.sql
+--
+-- A scheduled task's last_status recorded whether the scheduler DISPATCHED its
+-- run, not how the run ended. The scheduler wrote 'success' as soon as the
+-- snapshot or reboot call came back with a UPID, but Proxmox refuses much of
+-- what it refuses inside the forked worker — "snapshot name '…' already used",
+-- "snapshot feature is not available" — so the task failed after dispatch and
+-- the schedule kept reading Success while every run failed.
+--
+-- last_upid is the UPID the last run dispatched. The scheduler now records a
+-- dispatched run as last_status 'dispatched' with its UPID here, and its
+-- reconcile tick (RunScheduledTaskReconcile, queries/scheduled_tasks.sql
+-- ReconcileDispatchedScheduledTasks) settles the row to 'success' or 'failed'
+-- once the task_history row for that UPID is terminal. Keyed on the UPID, so a
+-- run that finishes late can only ever settle its own row: once a newer run has
+-- written its own UPID, the older one no longer matches.
+--
+-- Additive and nullable: existing rows keep NULL and the status they already
+-- carry, and each records a UPID from its next run on. last_status has no CHECK
+-- constraint (000009 created it as plain TEXT), so the new 'dispatched' value
+-- needs no constraint change. No index: the reconcile joins task_history on its
+-- unique upid index, and scheduled_tasks holds one row per schedule.
+ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS last_upid TEXT;

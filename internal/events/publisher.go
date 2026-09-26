@@ -38,6 +38,11 @@ const (
 	KindSnapshotChange    = "snapshot_change"
 	KindAccessChange      = "access_change"
 	KindVeeamChange       = "veeam_change"
+	// KindScheduleChange announces that the scheduler settled a scheduled
+	// task's run from its Proxmox task (resource_id is the schedule, action
+	// its new last_status). Nothing else publishes it: the claim, the
+	// dispatch, a run that fails before dispatch and parking do not.
+	KindScheduleChange = "schedule_change"
 )
 
 // Redis pub/sub channels for non-cluster events. Cluster events use

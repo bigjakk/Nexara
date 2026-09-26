@@ -1155,13 +1155,53 @@ Scheduled tasks run on cron expressions and are attached to a single guest.
      one snapshot and every later run failed in Proxmox. The failure showed in the task
      history (**Events → Tasks**) as a failed "Scheduled snapshot" task reading
      `snapshot name '…' already used`, and in a `pve_task_failed` alert if you had one. The
-     schedule's own status did not show it, because that status records whether a run was
-     sent to Proxmox, not how the Proxmox task ended. Those schedules now run again with no
-     action from you: the old name becomes the prefix, cut to its first 24 characters if it
-     is longer, and every run from then on adds a snapshot.
+     schedule's own status did not show it: it recorded whether a run was sent to Proxmox,
+     not how the Proxmox task ended. It now follows the task (see **Status** below). Those
+     schedules now run again with no action from you: the old name becomes the prefix, cut
+     to its first 24 characters if it is longer, and every run from then on adds a snapshot.
 5. Click **Create**
 
-The table lists each schedule with its last status, next run, and last run, and a delete button.
+The table lists each schedule with its status, next run, and last run, and a delete button.
+
+**Status** follows each run to the end of the Proxmox task it starts:
+
+- **Pending** — the schedule has not run yet.
+- **Running** — a run is being started, or the Proxmox task it started has not finished yet.
+- **Success** — the last run's Proxmox task finished successfully. A task that finished with
+  warnings counts as a success, as it does in the task history.
+- **Failed** — the last run's Proxmox task failed, and the text beneath shows Proxmox's exit
+  status, for example `snapshot name '…' already used` or a storage that cannot take
+  snapshots; or the run never reached Proxmox, and the text says why.
+
+Proxmox refuses much of what it refuses inside the task, after accepting the request, which is
+why a run only reads Success once its task has ended. The collector notices the end on its next
+sync of the cluster (every `METRICS_COLLECT_INTERVAL` — 10 seconds in the Docker deployment),
+and the scheduler updates the schedule within 15 seconds after that. Some runs go differently:
+
+- **The schedule fires again first.** If a run comes due before the previous run's task has
+  finished and been recorded, the new run starts anyway and the status follows it; the older
+  run's outcome is then only in the task history (**Events → Tasks**).
+- **Proxmox stops reporting on the task** — the node rebooted, or its task log was rotated.
+  Nexara gives up on the task after 24 hours. If the schedule has not run again by then — it
+  fires less often than daily — it shows **Failed** with "Proxmox never reported how this task
+  ended; Nexara stopped following it after 24 hours"; the task may well have succeeded, so check
+  the guest. Otherwise its next run has already replaced the status, and the lost task shows
+  only in the task history.
+- **The cluster cannot be reached.** Nothing is followed until it can be; the status then
+  settles as above.
+- **The task never reaches the task history** — the scheduler could not record it, and the
+  collector did not pick it up either. The schedule shows Running until its next run replaces
+  it.
+
+An open **Schedules** tab re-reads the list whenever a task on the cluster starts or ends, and
+whenever the scheduler settles a run, so it shows a run once Proxmox has started its task and
+how it ended as soon as that is recorded. A run that fails before it reaches Proxmox starts no
+task; the tab shows it the next time it re-reads the list. As a fallback, while one of this
+guest's enabled schedules shows Running, the tab also re-reads the list every 10 seconds, for up
+to 30 minutes after it first showed that run.
+
+A schedule the scheduler had to disable because its cron expression can never fire again shows
+a **Disabled** badge, with the reason after the run's own error.
 
 The scheduler evaluates schedules every 60 seconds. Every execution of a scheduled snapshot or reboot is recorded in the task history and the audit log, so scheduled activity is traceable exactly like manual actions.
 

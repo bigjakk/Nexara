@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -21,6 +22,7 @@ import type {
   CreateCTRequest,
   VMConfig,
 } from "../types/vm";
+import { anyRunInFlight, type InFlightSightings } from "../lib/schedule-status";
 
 // --- Shared invalidation helper ---
 // Every mutation that changes VM/CT inventory (create, clone, destroy, migrate,
@@ -1023,13 +1025,36 @@ export interface ScheduledTask {
   enabled: boolean;
   last_run_at: string | null;
   next_run_at: string | null;
+  /** null until the first run; see ScheduleLastStatus (lib/schedule-status)
+   *  for the values. A plain string on the wire: one this build does not
+   *  know shows as failed. */
   last_status: string | null;
+  /** Why the last run failed — Proxmox's exit status when the task it started
+   *  failed, Nexara's own note when it could not follow the task to its end,
+   *  or why the run never reached Proxmox — and why the schedule was
+   *  disabled, if it was. */
   last_error: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export function useScheduledTasks(clusterId: string) {
+/** How often the schedule list is re-read while some row's run is in flight. */
+export const SCHEDULE_IN_FLIGHT_POLL_MS = 10_000;
+
+/**
+ * The cluster's scheduled tasks. `shown` picks the rows the caller displays —
+ * the Schedules tab shows one guest's — and only those decide whether the list
+ * polls: another guest's run must not keep this tab re-reading.
+ */
+export function useScheduledTasks(
+  clusterId: string,
+  shown: (schedule: ScheduledTask) => boolean,
+) {
+  // When this view first saw each run in flight (InFlightSightings): the
+  // polling bound below is timed on the browser's own clock from that moment.
+  // One map per mounted view, created once; the refetchInterval below updates
+  // it in place, and it never drives a render.
+  const [seen] = useState<InFlightSightings>(() => new Map());
   return useQuery({
     queryKey: ["clusters", clusterId, "schedules"],
     queryFn: () =>
@@ -1037,6 +1062,17 @@ export function useScheduledTasks(clusterId: string) {
         apiPath`/api/v1/clusters/${clusterId}/schedules`,
       ),
     enabled: clusterId.length > 0,
+    // A task starting or ending invalidates this list (task_created /
+    // task_update), and so does a run settling (schedule_change, which the
+    // scheduler publishes for each run it settles; see useEventInvalidation).
+    // Polling is the fallback for when that last event is missed: while a
+    // shown row is in flight (isRunInFlight: an enabled schedule's run) the
+    // list re-reads itself, for up to 30 minutes from when this view first
+    // saw that run, and stops once none is.
+    refetchInterval: (query) =>
+      anyRunInFlight((query.state.data ?? []).filter(shown), Date.now(), seen)
+        ? SCHEDULE_IN_FLIGHT_POLL_MS
+        : false,
   });
 }
 

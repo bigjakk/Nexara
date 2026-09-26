@@ -16,6 +16,15 @@ import (
 // before we give up and mark it failed.
 const staleTaskGrace = 24 * time.Hour
 
+// vanishedExitStatus is the exit_status a task is finalized with once
+// staleTaskGrace has passed with no status from Proxmox. It means "lost
+// track", not "failed", and other readers match it literally: the failed-task
+// alerts and the digest skip it (queries/tasks.sql), reports render it as lost
+// (internal/reports), and the scheduled-task reconcile words it for the
+// schedule (queries/scheduled_tasks.sql) — that last copy, and the hours it
+// states, are pinned here by TestScheduleReconcileWordsTheCollectorsGiveUp.
+const vanishedExitStatus = "vanished"
+
 // reconcileRunningTasks updates task_history rows still marked "running" by
 // polling each task's live status from Proxmox. The working set is small (the
 // running tasks on the cluster — Nexara-dispatched plus the external PVE-native
@@ -48,7 +57,7 @@ func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient
 			// "running" well past any plausible lifetime, mark it failed so it
 			// doesn't hang forever; otherwise leave it and retry next tick.
 			if time.Since(row.StartedAt) > staleTaskGrace {
-				s.finalizeTask(ctx, cluster, row.Upid, "failed", "vanished")
+				s.finalizeTask(ctx, cluster, row.Upid, "failed", vanishedExitStatus)
 			}
 			continue
 		}

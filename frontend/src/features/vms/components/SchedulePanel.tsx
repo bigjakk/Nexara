@@ -1,5 +1,12 @@
-import { useState } from "react";
-import { Trash2, Plus, Clock, AlertCircle, CheckCircle2 } from "lucide-react";
+import { useCallback, useState } from "react";
+import {
+  Trash2,
+  Plus,
+  Clock,
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +30,7 @@ import {
   SNAPSHOT_NAME_PREFIX_MAX_LENGTH,
   SNAPSHOT_PREFIX_RULES,
 } from "../lib/snapshot-name";
+import { scheduleRunState } from "../lib/schedule-status";
 import type { ResourceKind } from "../types/vm";
 
 const selectClass =
@@ -41,7 +49,16 @@ export function SchedulePanel({
   vmid,
   node,
 }: SchedulePanelProps) {
-  const { data: schedules, isLoading } = useScheduledTasks(clusterId);
+  // The rows this panel shows: this guest's, out of the cluster's list. The
+  // same test decides what the list polls for (useScheduledTasks), so another
+  // guest's run never keeps this tab re-reading.
+  const shown = useCallback(
+    (s: ScheduledTask) =>
+      s.resource_id === String(vmid) &&
+      s.resource_type === (kind === "ct" ? "ct" : "vm"),
+    [vmid, kind],
+  );
+  const { data: schedules, isLoading } = useScheduledTasks(clusterId, shown);
   const createSchedule = useCreateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
@@ -59,12 +76,7 @@ export function SchedulePanel({
   const snapNameError =
     action === "snapshot" ? snapshotPrefixError(snapName, kind) : null;
 
-  // Filter schedules to this resource.
-  const mySchedules = schedules?.filter(
-    (s) =>
-      s.resource_id === String(vmid) &&
-      s.resource_type === (kind === "ct" ? "ct" : "vm"),
-  );
+  const mySchedules = schedules?.filter(shown);
 
   function handleCreate() {
     const params: Record<string, unknown> = {};
@@ -302,27 +314,41 @@ export function SchedulePanel({
   );
 }
 
+// Success and Failed describe how the last run's Proxmox task ENDED. The
+// scheduler records a run it has handed to Proxmox as "dispatched" and settles
+// it once the task finishes; until then — and while the scheduler is still
+// starting the run, "running" — the row shows Running. It used to show Failed
+// for "running", and Success as soon as Proxmox accepted the call, however the
+// task then went.
 function StatusIcon({ status }: { status: string | null }) {
-  if (!status) {
-    return (
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Clock className="h-3 w-3" />
-        Pending
-      </span>
-    );
+  switch (scheduleRunState(status)) {
+    case "pending":
+      return (
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Clock className="h-3 w-3" />
+          Pending
+        </span>
+      );
+    case "running":
+      return (
+        <span className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Running
+        </span>
+      );
+    case "success":
+      return (
+        <span className="flex items-center gap-1 text-xs text-emerald-600">
+          <CheckCircle2 className="h-3 w-3" />
+          Success
+        </span>
+      );
+    case "failed":
+      return (
+        <span className="flex items-center gap-1 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3" />
+          Failed
+        </span>
+      );
   }
-  if (status === "success") {
-    return (
-      <span className="flex items-center gap-1 text-xs text-emerald-600">
-        <CheckCircle2 className="h-3 w-3" />
-        Success
-      </span>
-    );
-  }
-  return (
-    <span className="flex items-center gap-1 text-xs text-destructive">
-      <AlertCircle className="h-3 w-3" />
-      Failed
-    </span>
-  );
 }

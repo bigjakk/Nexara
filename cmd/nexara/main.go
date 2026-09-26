@@ -709,6 +709,10 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			note string
 		}{
 			{name: "scheduled_tasks", every: 60 * time.Second, run: sched.Run},
+			// The run's other half: a dispatched snapshot or reboot is settled
+			// from its task_history row once the collector has seen the task
+			// end. Database only, so it can tick faster than the dispatch.
+			{name: "scheduled_tasks_reconcile", every: 15 * time.Second, run: sched.RunScheduledTaskReconcile},
 			{name: "drs", every: 60 * time.Second, run: sched.RunDRS},
 			{name: "cve_scanning", every: 6 * time.Hour, run: sched.RunCVEScanning},
 			{name: "kev_refresh", every: 1 * time.Hour, run: sched.RunKEVRefresh},

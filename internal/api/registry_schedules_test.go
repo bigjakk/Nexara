@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -99,6 +100,37 @@ func TestScheduleActionVocabulary(t *testing.T) {
 	if !slices.Equal(declaredEnum, want) {
 		t.Errorf("the declared action enum is %v but handlers.validScheduleActions carries %v — an action "+
 			"in one and not the other is a schedule nothing will ever execute", declaredEnum, want)
+	}
+}
+
+// quotedWordRe finds each double-quoted word in a description.
+var quotedWordRe = regexp.MustCompile(`"([a-z_]+)"`)
+
+// TestScheduleStatusVocabularyIsDescribed pins the last_status values the
+// schedules listing's description restates against the scheduler's own list.
+//
+// The response carries last_status as a bare string, so the description is
+// the only place a caller learns the values — and it is a copy. Rename one in
+// the scheduler and the docs keep naming the old value while the new one goes
+// unmentioned. Checked both ways: every value the scheduler writes is quoted in
+// the description, and every word quoted there is one it writes, so a stale
+// value cannot linger beside its replacement.
+func TestScheduleStatusVocabularyIsDescribed(t *testing.T) {
+	desc := declaredEndpoint(t, fiber.MethodGet, scheduleScope).Description
+	var quoted []string
+	for _, m := range quotedWordRe.FindAllStringSubmatch(desc, -1) {
+		quoted = append(quoted, m[1])
+	}
+	slices.Sort(quoted)
+	quoted = slices.Compact(quoted)
+
+	want := scheduler.RunStatusValues()
+	if len(want) == 0 {
+		t.Fatal("scheduler.RunStatusValues is empty, so this would compare nothing")
+	}
+	if !slices.Equal(quoted, want) {
+		t.Errorf("the schedules listing quotes last_status values %v, but the scheduler writes %v — "+
+			"a caller reading the docs would expect the wrong values", quoted, want)
 	}
 }
 

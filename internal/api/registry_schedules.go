@@ -95,7 +95,9 @@ func registerScheduleEndpoints(reg *Registry, h *handlers.ScheduleHandler) {
 		Method: fiber.MethodPost,
 		Path:   scheduleScope,
 		Description: "Create a scheduled task on a guest — a recurring snapshot or reboot. The stored next " +
-			"run is computed from the cron expression at creation, so a spec that can never fire is refused here.",
+			"run is computed from the cron expression at creation, so a spec that can never fire is refused here. " +
+			"The task is returned with no last run: last_status is null until it first fires (the listing " +
+			"describes the values it takes).",
 		Group:       "Tasks",
 		Permissions: clusterCheck("manage", "schedule"),
 		Parameters: clusterParams(apischema.Properties{
@@ -142,10 +144,20 @@ func registerScheduleEndpoints(reg *Registry, h *handlers.ScheduleHandler) {
 		}),
 		Handler: h.Create,
 	})
+	// The status vocabulary is the scheduler's (internal/scheduler, the
+	// runStatus* constants and ClaimDueTasks' "running"), restated for callers
+	// because the response carries it as a bare string.
 	reg.Register(Endpoint{
-		Method:      fiber.MethodGet,
-		Path:        scheduleScope,
-		Description: "List the cluster's scheduled tasks with their last and next run.",
+		Method: fiber.MethodGet,
+		Path:   scheduleScope,
+		Description: "List the cluster's scheduled tasks with their last and next run. last_status follows the " +
+			"last run to the end of the Proxmox task it started: null before the first run, \"running\" while " +
+			"the scheduler starts a run, \"dispatched\" while the run's Proxmox task is in progress, then " +
+			"\"success\" or \"failed\" by how that task ended — a task that ends with warnings is a success. A " +
+			"run that fails before reaching Proxmox reads \"failed\" at once. last_error says why the last run " +
+			"failed — Proxmox's exit status when its task failed; Nexara's own note when it could not follow " +
+			"the task to its end, in which case the run reads \"failed\" although its outcome is unknown; or " +
+			"why the run never reached Proxmox — and why the task was disabled if the scheduler disabled it.",
 		Group:       "Tasks",
 		Permissions: clusterCheck("view", "schedule"),
 		Parameters:  clusterParams(nil),

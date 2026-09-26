@@ -79,6 +79,20 @@ export function useEventInvalidation(clusterIds: string[]): void {
         case "task_created":
         case "task_update":
           scheduleInvalidation(["recent-activity"], ["tasks"]);
+          // That cluster's schedule list (useScheduledTasks). An open
+          // Schedules tab then sees a scheduled run once Proxmox has started
+          // its task — the scheduler publishes task_created after recording
+          // that task; a claim, or a run that fails before it reaches
+          // Proxmox, publishes nothing — and re-reads when a task ends.
+          // task_update comes from the collector marking the task finished,
+          // which is BEFORE the scheduler's reconcile settles the schedule
+          // row, so this read can still find the run "dispatched": the
+          // settle itself arrives as schedule_change, below. Scoped to the
+          // event's cluster; an event without one (a hand-made task update)
+          // names no schedule list.
+          if (cid) {
+            scheduleInvalidation(["clusters", cid, "schedules"]);
+          }
           break;
 
         case "audit_entry":
@@ -137,6 +151,16 @@ export function useEventInvalidation(clusterIds: string[]): void {
             ["audit-log"],
             ["recent-activity"],
           );
+          break;
+
+        case "schedule_change":
+          // The scheduler settled a run from its Proxmox task. The run's own
+          // task_update came earlier, before the row changed, so this is
+          // what shows the tab Success or Failed instead of Running. Nothing
+          // else changes with it.
+          if (cid) {
+            scheduleInvalidation(["clusters", cid, "schedules"]);
+          }
           break;
 
         case "snapshot_change":

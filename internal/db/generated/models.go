@@ -924,6 +924,7 @@ type ScheduledTask struct {
 	LastError    pgtype.Text        `json:"last_error"`
 	CreatedAt    time.Time          `json:"created_at"`
 	UpdatedAt    time.Time          `json:"updated_at"`
+	LastUpid     pgtype.Text        `json:"last_upid"`
 }
 
 type Session struct {
