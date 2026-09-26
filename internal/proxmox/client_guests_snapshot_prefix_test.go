@@ -10,28 +10,56 @@ import (
 // --- Timestamped snapshot names ---
 //
 // The rule a scheduled snapshot's name follows: a prefix, then the run's date
-// and time. internal/scheduler composes the name with TimestampedSnapshotName
-// and internal/api/handlers checks a stored prefix with
-// ValidateSnapshotNamePrefix, so these tests are what both of them rest on.
+// and time in UTC. internal/scheduler composes the name with
+// TimestampedSnapshotName and internal/api/handlers checks a stored prefix
+// with ValidateSnapshotNamePrefix, so these tests are what both of them rest
+// on.
+//
+// Every zone below other than UTC is a synthetic fixed zone, named "synthetic":
+// the tests need a clock that is not UTC but is not a place either, and no zone
+// in use today is 30 or 90 minutes off UTC.
+
+// TestMain runs the WHOLE package with the local clock in one of those
+// synthetic zones, 90 minutes east of UTC. The scheduler hands
+// TimestampedSnapshotName the server's local time, and on a host whose local
+// zone is UTC — CI's, and this image's by default — a name formatted on that
+// clock reads exactly like a UTC one, so no test here could tell
+// at.Local().Format from at.UTC().Format. It is set before m.Run, so before any
+// test, or any goroutine a test starts, reads it.
+func TestMain(m *testing.M) {
+	time.Local = time.FixedZone("synthetic", 90*60)
+	m.Run()
+}
 
 // prefixTestInstants are the instants the verdict must not depend on: the zero
 // time ValidateSnapshotNamePrefix composes with, an ordinary run, and the last
-// second a four-digit year can print.
+// second a four-digit year can print — once in UTC, and once as a run's start
+// arrives from a server whose clock is east of UTC, where that second's own
+// wall clock already reads the year 10000. Printed in that zone, the name
+// would gain a digit and outgrow the budget; printed in UTC, it cannot.
 var prefixTestInstants = []time.Time{
 	{},
 	time.Date(2026, time.September, 26, 2, 0, 0, 0, time.UTC),
 	time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC),
+	time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC).In(time.FixedZone("synthetic", 90*60)),
 }
 
 func TestTimestampedSnapshotName(t *testing.T) {
-	// An afternoon instant, so a 12-hour layout ("03" for "15") cannot pass:
-	// it would name a 02:00 and a 14:00 run of a twice-daily schedule alike,
-	// and the second would fail "already used". In a zone of its own, so the
-	// name is shown to follow at's location rather than be converted: the
-	// scheduler passes the server's local time. No zone in use today has a
-	// 90-minute offset.
+	// A name formatted on the local clock reads exactly like a UTC one while
+	// that clock is UTC, so the tests in this file need TestMain's zone.
+	if _, offset := time.Now().Zone(); offset == 0 {
+		t.Fatalf("the package's local clock (%v) sits at UTC's offset, so nothing read on it can be told "+
+			"from UTC; TestMain must put it off UTC", time.Local)
+	}
+
+	// An afternoon instant, in UTC as well, so a 12-hour layout ("03" for
+	// "15") cannot pass: it would name a 02:00 and a 14:00 run of a
+	// twice-daily schedule alike, and the second would fail "already used".
+	// Handed over in a zone of its own, as the scheduler hands over the
+	// server's local time, so the name is shown to be converted to UTC rather
+	// than follow at's location: 14:30:05 at +01:30 is 13:00:05 UTC.
 	at := time.Date(2026, time.September, 26, 14, 30, 5, 0, time.FixedZone("synthetic", 90*60))
-	if got, want := TimestampedSnapshotName("nightly", at), "nightly-20260926-143005"; got != want {
+	if got, want := TimestampedSnapshotName("nightly", at), "nightly-20260926-130005"; got != want {
 		t.Errorf("TimestampedSnapshotName(nightly, %s) = %q, want %q", at, got, want)
 	}
 	// It composes and nothing else. The cut for an over-long stored prefix is
@@ -40,6 +68,44 @@ func TestTimestampedSnapshotName(t *testing.T) {
 	long := strings.Repeat("a", SnapshotNamePrefixMaxLen+1)
 	if got := TimestampedSnapshotName(long, at); !strings.HasPrefix(got, long+"-") {
 		t.Errorf("TimestampedSnapshotName shortened a %d-character prefix to %q", len(long), got)
+	}
+}
+
+// TestTimestampedSnapshotNameSurvivesAFallBack is why a name is in UTC. Where
+// the server's zone has daylight saving, the autumn fall-back moves its offset
+// back an hour, so one hour of wall clock is shown twice, and the scheduler's
+// cron, which runs on that clock, fires the repeated time again. Named from the
+// wall clock, the second run could ask for the name the first had taken an
+// hour before, and its task fail "already used". It did whenever the two runs
+// started in the same second, which the scheduler's steady one-minute tick
+// makes likely, and that is the case here: the two instants share their second.
+//
+// Two synthetic fixed zones an hour apart stand in for one zone's summer and
+// winter offsets, so no real zone is named.
+func TestTimestampedSnapshotNameSurvivesAFallBack(t *testing.T) {
+	summer := time.FixedZone("synthetic", 90*60)
+	winter := time.FixedZone("synthetic", 30*60)
+	first := time.Date(2026, time.September, 26, 2, 30, 0, 0, summer)
+	repeat := time.Date(2026, time.September, 26, 2, 30, 0, 0, winter)
+
+	// The fixture has to BE a repeat, or the assertion below cannot fail: the
+	// same wall clock, an hour later.
+	if first.Format(snapshotNameTimestampLayout) != repeat.Format(snapshotNameTimestampLayout) ||
+		repeat.Sub(first) != time.Hour {
+		t.Fatalf("%s and %s are not the two passes through one repeated hour", first, repeat)
+	}
+
+	firstName, repeatName := TimestampedSnapshotName("nightly", first), TimestampedSnapshotName("nightly", repeat)
+	if firstName == repeatName {
+		t.Fatalf("both passes through the repeated hour are named %q, so the second run's task fails "+
+			"with \"snapshot name '%s' already used\"", firstName, firstName)
+	}
+	// Each is its own instant in UTC: 02:30 at +01:30 and 02:30 at +00:30.
+	if want := "nightly-20260926-010000"; firstName != want {
+		t.Errorf("the first pass is named %q, want %q", firstName, want)
+	}
+	if want := "nightly-20260926-020000"; repeatName != want {
+		t.Errorf("the repeat is named %q, want %q", repeatName, want)
 	}
 }
 

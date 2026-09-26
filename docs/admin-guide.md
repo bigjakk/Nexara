@@ -1143,13 +1143,15 @@ Scheduled tasks run on cron expressions and are attached to a single guest.
    - **Cron Expression** — minute hour day month weekday (e.g. `0 2 * * *` = daily at 2 AM)
    - **Snapshot Name Prefix (optional)** (snapshot actions only) — each run takes a new
      snapshot named `<prefix>-YYYYMMDD-HHMMSS` from the date and time of the run, for example
-     `nightly-20260926-020000`; leave it empty and the prefix is `auto`. The date and time come
-     from the Nexara server's clock, in the server's time zone: UTC unless the container is
-     given one (a `TZ` variable added to the `nexara` service's `environment:` in
-     `docker-compose.yml`, or a mounted `/etc/localtime`). A prefix starts with a letter, uses
-     only letters, digits, `-` and `_`, and is at most 24 characters, which leaves room for the
-     date and time within Proxmox's 40-character limit on a snapshot name. Earlier snapshots
-     are kept; nothing deletes them.
+     `nightly-20260926-020000`; leave it empty and the prefix is `auto`. The date and time are
+     in UTC. The cron expression itself still runs on the Nexara server's clock, in the server's
+     time zone: UTC unless the container is given one (a `TZ` variable added to the `nexara`
+     service's `environment:` in `docker-compose.yml`, or a mounted `/etc/localtime`), so on a
+     server given another zone a `0 2 * * *` schedule still runs at 2 AM there, and its names
+     show that moment in UTC. A prefix starts with a letter, uses only letters, digits, `-` and
+     `_`, and is at most 24 characters, which leaves room for the date and time within
+     Proxmox's 40-character limit on a snapshot name. Earlier snapshots are kept; nothing
+     deletes them.
 
      Before names became prefixes, a name you typed was used as-is, so such a schedule took
      one snapshot and every later run failed in Proxmox. The failure showed in the task
@@ -1159,6 +1161,16 @@ Scheduled tasks run on cron expressions and are attached to a single guest.
      not how the Proxmox task ended. It now follows the task (see **Status** below). Those
      schedules now run again with no action from you: the old name becomes the prefix, cut
      to its first 24 characters if it is longer, and every run from then on adds a snapshot.
+
+     Before names were in UTC, their date and time came from the server's clock, in the
+     server's time zone. On an install that sets a time zone, the time in new names — and
+     sometimes the date — therefore moves by the zone's offset from UTC, while every schedule
+     keeps firing at the same local times. East of UTC, if a guest's `auto-…` snapshots (from
+     schedules with no prefix) are taken again exactly that offset later — every hour, say,
+     where the offset is whole hours — runs in the first hours after the upgrade can rarely
+     fail `snapshot name '…' already used`: that needs a run's new UTC name to match, to the
+     second, a name an earlier run took on local time. Later runs succeed with nothing for you
+     to do.
 5. Click **Create**
 
 The table lists each schedule with its status, next run, and last run, and a delete button.

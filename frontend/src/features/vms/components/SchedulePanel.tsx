@@ -270,7 +270,7 @@ export function SchedulePanel({
                   maxLength={SNAPSHOT_NAME_PREFIX_MAX_LENGTH}
                 />
                 {/* A prefix, not a name: the scheduler adds each run's date and
-                    time to it, and uses "auto" when it is empty
+                    time in UTC to it, and uses "auto" when it is empty
                     (internal/scheduler, scheduledSnapshotName). It used to send
                     this verbatim, and a guest holds each snapshot name once, so
                     every run after the first failed. The line below spells out
@@ -285,7 +285,7 @@ export function SchedulePanel({
                   }
                 >
                   {snapNameError ??
-                    `Each run takes a new snapshot named ${scheduledSnapshotNamePattern(snapName)}, from the date and time of the run; earlier ones are kept.${snapName.length === 0 ? "" : ` ${SNAPSHOT_PREFIX_RULES}`}`}
+                    `Each run takes a new snapshot named ${scheduledSnapshotNamePattern(snapName)}, from the run's date and time in UTC; earlier ones are kept.${snapName.length === 0 ? "" : ` ${SNAPSHOT_PREFIX_RULES}`}`}
                 </p>
               </div>
             )}

@@ -743,13 +743,22 @@ func ValidateSnapshotName(kind SnapshotGuestKind, name string) error {
 // every run after it.
 //
 // So a scheduled run's snapshot is always named by a prefix plus the run's
-// date and time: "nightly-20260926-020000", or "auto-20260926-020000" when the
-// schedule stores no prefix. The two pieces below are that rule. They live
-// beside SnapshotMaxNameLen because the prefix budget is arithmetic on it, and
-// in this package because two others must compose the name identically:
-// internal/scheduler mints it on every fire, and internal/api/handlers checks a
-// prefix when a schedule is created or updated. Composed twice, the check at
-// the form and the name at the fire could disagree.
+// date and time in UTC: "nightly-20260926-020000", or "auto-20260926-020000"
+// when the schedule stores no prefix. In UTC because a UTC wall clock never
+// shows the same time twice, and a local one can: where the server's zone has
+// daylight saving, the autumn fall-back shows one hour of wall clock twice, and
+// the cron, which runs on that local clock, fires the repeated time again.
+// Named from the local clock, that second run could ask for the name the first
+// had taken an hour before, and fail "already used" — it did whenever the two
+// started in the same second, which the scheduler's steady one-minute tick
+// makes likely.
+//
+// The two pieces below are that rule. They live beside SnapshotMaxNameLen
+// because the prefix budget is arithmetic on it, and in this package because
+// two others must compose the name identically: internal/scheduler mints it on
+// every fire, and internal/api/handlers checks a prefix when a schedule is
+// created or updated. Composed twice, the check at the form and the name at
+// the fire could disagree.
 
 // snapshotNameTimestampLayout is the time.Format layout of the suffix. Digits
 // and a dash only, so it cannot make a legal prefix illegal; fixed width, so
@@ -762,13 +771,21 @@ const snapshotNameTimestampLayout = "20060102-150405"
 const SnapshotNamePrefixMaxLen = SnapshotMaxNameLen - len("-"+snapshotNameTimestampLayout)
 
 // TimestampedSnapshotName is the name a scheduled run gives its snapshot:
-// prefix, "-", then at as YYYYMMDD-HHMMSS in at's own location.
+// prefix, "-", then at as YYYYMMDD-HHMMSS in UTC, whatever at's location.
+//
+// The conversion is made here, not left to the caller, so that no caller can
+// skip it: the scheduler hands over the run's start on the server's local
+// clock, which is also the time it records for the run, and only the name is
+// in UTC. Until names moved to UTC they showed at in its own location, so on
+// an install that sets a time zone the time in new names, and sometimes the
+// date, moves by the zone's offset; internal/scheduler's scheduledSnapshotName
+// records what that means for the first runs after the upgrade.
 //
 // It does not validate and does not shorten. The name goes to
 // Create{VM,CT}Snapshot, which validates it; ValidateSnapshotNamePrefix is the
 // check for a prefix before it is stored.
 func TimestampedSnapshotName(prefix string, at time.Time) string {
-	return prefix + "-" + at.Format(snapshotNameTimestampLayout)
+	return prefix + "-" + at.UTC().Format(snapshotNameTimestampLayout)
 }
 
 // ValidateSnapshotNamePrefix rejects a prefix whose timestamped name Proxmox

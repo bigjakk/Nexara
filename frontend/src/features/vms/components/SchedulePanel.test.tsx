@@ -115,6 +115,21 @@ describe("SchedulePanel snapshot name", () => {
     expect(screen.queryByText(/as-is/i)).toBeNull();
   });
 
+  it("says the date and time a run adds are in UTC", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SchedulePanel {...defaultProps} />);
+    await openDialog(user);
+
+    // The scheduler names each run in UTC (proxmox.TimestampedSnapshotName),
+    // whatever the server's zone or the browser's, and this line is the only
+    // place the dialog says so: the cron hint above names no zone.
+    expect(
+      screen.getByText(
+        /auto-YYYYMMDD-HHMMSS, from the run's date and time in UTC;/,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("flags a prefix Proxmox would refuse and blocks submit", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SchedulePanel {...defaultProps} />);

@@ -866,8 +866,8 @@ func ResourceTypeKeys() []string { return slices.Sorted(maps.Keys(scheduledResou
 const autoSnapshotPrefix = "auto"
 
 // scheduledSnapshotName is the name one run of a snapshot task gives its
-// snapshot: the stored snap_name as a PREFIX, then the run's date and time
-// (proxmox.TimestampedSnapshotName) — "nightly-20260926-020000".
+// snapshot: the stored snap_name as a PREFIX, then the run's date and time in
+// UTC (proxmox.TimestampedSnapshotName) — "nightly-20260926-020000".
 //
 // Never the stored value alone. A guest holds each snapshot name once, so a
 // name sent on every run worked exactly once: the first run took the snapshot
@@ -886,12 +886,28 @@ const autoSnapshotPrefix = "auto"
 // pve-configid is ASCII; a stored name that is not ASCII fails the client's
 // check however it is cut.
 //
-// now is in the server's local zone — UTC unless the container is given one —
-// which is also the zone a cron expression without a CRON_TZ= or TZ= prefix
-// fires in.
-// In a zone with daylight saving, the hour a fall-back repeats can repeat a
-// name, and the repeat's run then fails as "already used"; that predates the
-// prefix, since "auto" names have always been formatted this way.
+// The name is in UTC whatever zone now is in, and now itself is left alone. It
+// is the server's local time — UTC unless the container is given a zone —
+// because it is also what finishTaskRun records as last_run_at and computes
+// the next run from, and a cron expression without a CRON_TZ= or TZ= prefix
+// fires on that local clock. So on an install that sets TZ, a "0 2 * * *"
+// schedule still fires at 02:00 local, and its names show that instant in UTC.
+// Where the local zone has daylight saving, a cron time inside the hour a
+// fall-back repeats fires twice. Named from the local clock, the second run
+// could ask for the first one's name and fail "already used" — it did whenever
+// the two started in the same second, which the steady one-minute tick makes
+// likely. In UTC it gets a name of its own, so it succeeds, and takes a second
+// snapshot that hour.
+//
+// Names were on the local clock until they moved to UTC, so on an install that
+// sets TZ the time in new names, and sometimes the date, moves by the zone's
+// offset while every schedule keeps its local times. East of UTC that can,
+// rarely, fail runs in the first hours after the upgrade with "already used":
+// only when a run's new UTC name matches, to the second, the local name of an
+// earlier snapshot of the same guest taken exactly the offset before it. Only an "auto" schedule has
+// such names — a typed snap_name was sent verbatim until it became a prefix —
+// and a restart starts the one-minute tick afresh, so the same second is
+// chance. Later runs succeed with nothing for the operator to do.
 func scheduledSnapshotName(stored string, now time.Time) string {
 	prefix := stored
 	if prefix == "" {
@@ -906,7 +922,7 @@ func scheduledSnapshotName(stored string, now time.Time) string {
 // executeSnapshot takes one run's snapshot and returns the UPID of the task
 // that takes it. now is when the run started — the instant finishTaskRun
 // records as last_run_at — and it names the snapshot, so the name and the run's
-// record agree.
+// record are the same instant, the name showing it in UTC.
 //
 // A nil error says Proxmox STARTED the task, not that the snapshot exists:
 // Proxmox refuses a name the guest already holds, or storage that cannot

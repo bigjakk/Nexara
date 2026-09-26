@@ -75,10 +75,14 @@ export function snapshotNameError(
  * --- Scheduled snapshots ---
  *
  * A snapshot schedule stores a PREFIX, not a name. Every run names its
- * snapshot `<prefix>-YYYYMMDD-HHMMSS` from the date and time it runs, "auto"
+ * snapshot `<prefix>-YYYYMMDD-HHMMSS` from its date and time in UTC, "auto"
  * standing in when the prefix is empty — because a guest holds each snapshot
  * name once, and a name sent verbatim on every run failed on every run after
- * the first. The authority is proxmox.TimestampedSnapshotName and
+ * the first. In UTC rather than on the server's clock or the browser's: a
+ * local clock with daylight saving shows one hour twice each autumn, the cron
+ * runs on the server's clock and fires the repeated time again, and a name
+ * read off that clock could repeat. The authority is
+ * proxmox.TimestampedSnapshotName and
  * proxmox.ValidateSnapshotNamePrefix in internal/proxmox/client_guests.go,
  * with the prefix default in internal/scheduler (scheduledSnapshotName); the
  * constants below mirror them and must not drift.
@@ -86,8 +90,8 @@ export function snapshotNameError(
 
 /**
  * What a run adds to the prefix, as a pattern: a dash, then the run's date and
- * time. The scheduler writes digits (Go layout "20060102-150405"); this is the
- * shape, for display and for the length budget.
+ * time in UTC. The scheduler writes digits (Go layout "20060102-150405"); this
+ * is the shape, for display and for the length budget.
  */
 export const SCHEDULED_SNAPSHOT_SUFFIX = "-YYYYMMDD-HHMMSS";
 

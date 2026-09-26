@@ -53,9 +53,10 @@ var scheduleParamsParam = apischema.Property{
 	Optional: true,
 	Typetext: "<object>",
 	Description: "Action-specific options. Omitted, an empty object is stored. A snapshot task reads `snap_name`, " +
-		"the PREFIX of every snapshot it takes: each run is named `<snap_name>-YYYYMMDD-HHMMSS` from the date and " +
-		"time it runs, or `auto-YYYYMMDD-HHMMSS` when snap_name is absent or empty. A prefix starts with a letter, " +
-		"contains only letters, digits, '-' and '_', and is at most " + strconv.Itoa(proxmox.SnapshotNamePrefixMaxLen) +
+		"the PREFIX of every snapshot it takes: each run is named `<snap_name>-YYYYMMDD-HHMMSS` from the run's " +
+		"date and time in UTC, or `auto-YYYYMMDD-HHMMSS` when snap_name is absent or empty. A prefix starts " +
+		"with a letter, contains only letters, digits, '-' and '_', and is at most " +
+		strconv.Itoa(proxmox.SnapshotNamePrefixMaxLen) +
 		" characters, which leaves room for the date and time within Proxmox's " +
 		strconv.Itoa(proxmox.SnapshotMaxNameLen) + "-character limit on a snapshot name.",
 }

@@ -194,15 +194,30 @@ func newStubPVEClient(t *testing.T, serverURL string) *proxmox.Client {
 	return c
 }
 
+// TestMain runs the WHOLE package with the local clock in a synthetic zone, 90
+// minutes east of UTC, because a snapshot run keeps two clocks apart: its
+// recorded time and its cron are on the server's local clock, and its
+// snapshot's name is in UTC. On a host whose local zone is UTC — CI's, and this
+// image's by default — the two read alike, and no test here could tell one from
+// the other. It is set before m.Run, so before any test, or any goroutine a
+// test starts, reads it. No zone in use today has a 90-minute offset.
+func TestMain(m *testing.M) {
+	time.Local = time.FixedZone("synthetic", 90*60)
+	m.Run()
+}
+
 // runAt is the instant a test run starts. A fixed one, because executeSnapshot
 // names the snapshot from it: time.Now() would make the expected names
 // unknowable and let two back-to-back runs share a second.
 //
-// In a zone of its own, not UTC, so every expected name below also holds the
-// name to runAt's own wall clock. CI runs in UTC, where a conversion to UTC
-// changes nothing; here it turns 02:00 into 00:30. No zone in use today has a
-// 90-minute offset.
-var runAt = time.Date(2026, time.September, 26, 2, 0, 0, 0, time.FixedZone("synthetic", 90*60))
+// It is 02:00 UTC, and every expected name below reads 020000 because a name
+// is in UTC. It is handed over as the scheduler hands over a run's start, off
+// UTC: in a synthetic zone 90 minutes east, where its wall clock reads 03:30.
+// So a name formatted in runAt's own zone reads 033000 and fails, and so does
+// one formatted on the local clock, which TestMain puts at the same offset —
+// on a UTC host without TestMain, that one would read 020000 and pass. No zone
+// in use today has a 90-minute offset.
+var runAt = time.Date(2026, time.September, 26, 2, 0, 0, 0, time.UTC).In(time.FixedZone("synthetic", 90*60))
 
 // TestExecuteSnapshot_ASecondRunWithATypedNameTakesANewName is the regression
 // test for the bug a typed name had.
@@ -252,8 +267,12 @@ func TestExecuteSnapshot_ASecondRunWithATypedNameTakesANewName(t *testing.T) {
 				ResourceID:   "100",
 				Node:         "pve-01",
 				Action:       "snapshot",
-				Schedule:     "0 2,14 * * *",
-				Params:       []byte(tt.params),
+				// Documentation only: executeSnapshot never reads Schedule.
+				// It is the cron that fires at runAt and twelve hours on, on
+				// this package's local clock (TestMain) — 03:30 and 15:30
+				// there, 02:00 and 14:00 UTC.
+				Schedule: "30 3,15 * * *",
+				Params:   []byte(tt.params),
 			}
 
 			for i, at := range runs {
@@ -275,7 +294,7 @@ func TestExecuteSnapshot_ASecondRunWithATypedNameTakesANewName(t *testing.T) {
 				}
 				taken[name] = i
 				if name != tt.want[i] {
-					t.Errorf("run %d took %q, want %q — the stored name followed by the run's date and time",
+					t.Errorf("run %d took %q, want %q — the stored name followed by the run's date and time in UTC",
 						i+1, name, tt.want[i])
 				}
 			}
@@ -411,9 +430,17 @@ func newRecordingScheduler(recorder *taskRunRecorder) *Scheduler {
 // fixed — the zero time, a constant — and every run sends the same name again,
 // which is the bug this change exists to fix. The run's start time is also
 // what finishTaskRun records as last_run_at, so the name must be exactly the
-// prefix composed with that recorded instant, that instant must be now, and it
-// must be on the server's local clock, which is what the admin guide tells
-// operators the name shows.
+// prefix composed with that recorded instant, and that instant must be now.
+//
+// It also holds two clocks apart, which TestMain's synthetic local zone is what
+// lets it see. last_run_at and the cron stay on the server's local clock: the
+// recorded instant must carry it, and next_run_at must be the cron's next fire
+// read on it — "0 2 * * *" is 02:00 local, never the same instant as 02:00 UTC
+// at a 90-minute offset. Only the name is in UTC. The expected name is composed
+// by proxmox.TimestampedSnapshotName, the function that converts, so this test
+// cannot see that function lose its conversion — the tests on runAt, and
+// package proxmox's own, hold that — but it does see a scheduler that names
+// the run any other way, the local clock included.
 func TestExecuteTask_NamesTheSnapshotForTheRunItRecords(t *testing.T) {
 	t.Parallel()
 
@@ -434,9 +461,10 @@ func TestExecuteTask_NamesTheSnapshotForTheRunItRecords(t *testing.T) {
 	s.executeTask(context.Background(), newStubPVEClient(t, srv.URL), task)
 	after := time.Now()
 
-	lastRunAt, ok := recorder.onlyWrite(t).cols["last_run_at"].(pgtype.Timestamptz)
+	write := recorder.onlyWrite(t)
+	lastRunAt, ok := write.cols["last_run_at"].(pgtype.Timestamptz)
 	if !ok {
-		t.Fatalf("the run's write binds no last_run_at timestamp: %v", recorder.writes[0].cols)
+		t.Fatalf("the run's write binds no last_run_at timestamp: %v", write.cols)
 	}
 	recorded := lastRunAt.Time
 	if !lastRunAt.Valid || recorded.Before(before) || recorded.After(after) {
@@ -449,11 +477,35 @@ func TestExecuteTask_NamesTheSnapshotForTheRunItRecords(t *testing.T) {
 	if recorded.Location() != time.Local {
 		t.Errorf("the run's clock is in %v, want the server's local zone", recorded.Location())
 	}
+	// Every check below that tells the local clock from UTC passes either way
+	// while the two read alike, so it must not be UTC here.
+	if _, offset := time.Now().Zone(); offset == 0 {
+		t.Fatalf("the package's local clock (%v) sits at UTC's offset, so nothing read on it can be told "+
+			"from UTC; TestMain must put it off UTC", time.Local)
+	}
+
+	// The cron fires on the local clock. The expectation is worked out here,
+	// not by cronspec, so that a cron read on the wrong clock anywhere between
+	// finishTaskRun and robfig cannot pass by agreeing with itself.
+	nextRunAt, ok := write.cols["next_run_at"].(pgtype.Timestamptz)
+	if !ok || !nextRunAt.Valid {
+		t.Fatalf("the run's write binds no next_run_at timestamp: %v", write.cols)
+	}
+	local := recorded.In(time.Local)
+	wantNext := time.Date(local.Year(), local.Month(), local.Day(), 2, 0, 0, 0, time.Local)
+	if !wantNext.After(recorded) {
+		wantNext = wantNext.AddDate(0, 0, 1)
+	}
+	if !nextRunAt.Time.Equal(wantNext) {
+		t.Errorf("next_run_at = %v, want %v — %q's next 02:00 on the server's local clock",
+			nextRunAt.Time, wantNext, task.Schedule)
+	}
+
 	if len(*seen) != 1 {
 		t.Fatalf("the run issued %d requests %v, want exactly 1", len(*seen), *seen)
 	}
 	if got, want := snapnameOf(t, (*seen)[0]), proxmox.TimestampedSnapshotName("nightly", recorded); got != want {
-		t.Errorf("the run asked for %q, want %q — the prefix with the start time the run recorded", got, want)
+		t.Errorf("the run asked for %q, want %q — the prefix with the start time the run recorded, in UTC", got, want)
 	}
 }
 
