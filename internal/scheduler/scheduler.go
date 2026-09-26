@@ -588,6 +588,8 @@ func (s *Scheduler) RunCVEScanning(ctx context.Context) {
 
 // snapshotParams holds decoded params for snapshot actions.
 type snapshotParams struct {
+	// SnapName is the PREFIX of every run's snapshot name, not the name
+	// itself; see scheduledSnapshotName.
 	SnapName    string `json:"snap_name"`
 	Description string `json:"description"`
 	VMState     bool   `json:"vmstate"`
@@ -599,7 +601,7 @@ func (s *Scheduler) executeTask(ctx context.Context, client *proxmox.Client, tas
 
 	switch task.Action {
 	case "snapshot":
-		execErr = s.executeSnapshot(ctx, client, task)
+		execErr = s.executeSnapshot(ctx, client, task, now)
 	case "reboot":
 		execErr = s.executeReboot(ctx, client, task)
 	default:
@@ -695,16 +697,58 @@ var scheduledResourceTypes = map[string]scheduledGuestFamily{
 // round, so the comparison reads the list from here.
 func ResourceTypeKeys() []string { return slices.Sorted(maps.Keys(scheduledResourceTypes)) }
 
-func (s *Scheduler) executeSnapshot(ctx context.Context, client *proxmox.Client, task db.ScheduledTask) error {
+// autoSnapshotPrefix is the prefix a run's snapshot takes when the task stores
+// no snap_name.
+const autoSnapshotPrefix = "auto"
+
+// scheduledSnapshotName is the name one run of a snapshot task gives its
+// snapshot: the stored snap_name as a PREFIX, then the run's date and time
+// (proxmox.TimestampedSnapshotName) — "nightly-20260926-020000".
+//
+// Never the stored value alone. A guest holds each snapshot name once, so a
+// name sent on every run worked exactly once: the first run took the snapshot
+// and every later run's task failed with "snapshot name already used". An
+// empty snap_name always got a timestamp; a typed one now gets the same one,
+// which leaves "auto" as nothing more than the default prefix.
+//
+// A stored prefix longer than proxmox.SnapshotNamePrefixMaxLen is cut to it.
+// Only a row written before the API began refusing such a prefix can hold one:
+// snap_name was sent verbatim then, so up to 40 characters were accepted, and
+// before v1.14.0 any length at all. Such a row had failed on every run after
+// its first, like every row with a typed name; cutting lets it run again with
+// nothing for the operator to do, where refusing would leave it failing until
+// someone deleted and re-created it (the SPA has no edit form). The cut is at
+// a byte, which is a character for every name Proxmox accepts, since
+// pve-configid is ASCII; a stored name that is not ASCII fails the client's
+// check however it is cut.
+//
+// now is in the server's local zone — UTC unless the container is given one —
+// which is also the zone a cron expression without a CRON_TZ= or TZ= prefix
+// fires in.
+// In a zone with daylight saving, the hour a fall-back repeats can repeat a
+// name, and the repeat's run then fails as "already used"; that predates the
+// prefix, since "auto" names have always been formatted this way.
+func scheduledSnapshotName(stored string, now time.Time) string {
+	prefix := stored
+	if prefix == "" {
+		prefix = autoSnapshotPrefix
+	}
+	if len(prefix) > proxmox.SnapshotNamePrefixMaxLen {
+		prefix = prefix[:proxmox.SnapshotNamePrefixMaxLen]
+	}
+	return proxmox.TimestampedSnapshotName(prefix, now)
+}
+
+// executeSnapshot takes one run's snapshot. now is when the run started — the
+// instant finishTaskRun records as last_run_at — and it names the snapshot, so
+// the name and the run's record agree.
+func (s *Scheduler) executeSnapshot(ctx context.Context, client *proxmox.Client, task db.ScheduledTask, now time.Time) error {
 	var params snapshotParams
 	if err := json.Unmarshal(task.Params, &params); err != nil {
 		return fmt.Errorf("unmarshal snapshot params: %w", err)
 	}
 
-	snapName := params.SnapName
-	if snapName == "" {
-		snapName = fmt.Sprintf("auto-%s", time.Now().Format("20060102-150405"))
-	}
+	snapName := scheduledSnapshotName(params.SnapName, now)
 
 	sp := proxmox.SnapshotParams{
 		SnapName:    snapName,

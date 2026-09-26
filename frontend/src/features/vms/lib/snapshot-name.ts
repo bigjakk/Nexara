@@ -1,5 +1,8 @@
 import type { ResourceKind } from "../types/vm";
 
+/** Proxmox's cap on a snapshot name — proxmox.SnapshotMaxNameLen. */
+const SNAPSHOT_NAME_MAX_LENGTH = 40;
+
 /**
  * Proxmox snapshot names follow the pve-configid format: a leading letter,
  * then letters, digits, '-' or '_', capped at 40 characters. Validating here
@@ -21,8 +24,7 @@ import type { ResourceKind } from "../types/vm";
  * internal/api/handlers/vms.go until the rule moved to the client choke point,
  * so that the scheduler and the guest-tools engine share it too.)
  */
-export const SNAPSHOT_NAME_RULES =
-  "Must start with a letter and use only letters, numbers, '-' and '_' — no spaces (2–40 characters).";
+export const SNAPSHOT_NAME_RULES = `Must start with a letter and use only letters, numbers, '-' and '_' — no spaces (2–${String(SNAPSHOT_NAME_MAX_LENGTH)} characters).`;
 
 /**
  * Reserved names per guest kind, split by how upstream compares them. A
@@ -49,7 +51,8 @@ export function snapshotNameError(
   if (/[^A-Za-z0-9_-]/.test(name))
     return "Only letters, numbers, '-' and '_' are allowed.";
   if (name.length < 2) return "Snapshot names need at least 2 characters.";
-  if (name.length > 40) return "Snapshot names are limited to 40 characters.";
+  if (name.length > SNAPSHOT_NAME_MAX_LENGTH)
+    return `Snapshot names are limited to ${String(SNAPSHOT_NAME_MAX_LENGTH)} characters.`;
   // Reserved names are checked last, after the shape rules, on purpose: the
   // char-class rule above has already rejected every non-ASCII input, so a
   // plain toLowerCase() here is an exact match for Go's strings.EqualFold.
@@ -66,4 +69,67 @@ export function snapshotNameError(
     // server's own "snap_name %q is reserved by Proxmox".
     return `"${name}" is reserved by Proxmox.`;
   return null;
+}
+
+/*
+ * --- Scheduled snapshots ---
+ *
+ * A snapshot schedule stores a PREFIX, not a name. Every run names its
+ * snapshot `<prefix>-YYYYMMDD-HHMMSS` from the date and time it runs, "auto"
+ * standing in when the prefix is empty — because a guest holds each snapshot
+ * name once, and a name sent verbatim on every run failed on every run after
+ * the first. The authority is proxmox.TimestampedSnapshotName and
+ * proxmox.ValidateSnapshotNamePrefix in internal/proxmox/client_guests.go,
+ * with the prefix default in internal/scheduler (scheduledSnapshotName); the
+ * constants below mirror them and must not drift.
+ */
+
+/**
+ * What a run adds to the prefix, as a pattern: a dash, then the run's date and
+ * time. The scheduler writes digits (Go layout "20060102-150405"); this is the
+ * shape, for display and for the length budget.
+ */
+export const SCHEDULED_SNAPSHOT_SUFFIX = "-YYYYMMDD-HHMMSS";
+
+/**
+ * The longest prefix a schedule can store: what the suffix leaves of the 40,
+ * which is 24 — proxmox.SnapshotNamePrefixMaxLen, which the API enforces on
+ * create and update.
+ */
+export const SNAPSHOT_NAME_PREFIX_MAX_LENGTH =
+  SNAPSHOT_NAME_MAX_LENGTH - SCHEDULED_SNAPSHOT_SUFFIX.length;
+
+/** The prefix a run uses when the schedule stores none. */
+export const AUTO_SNAPSHOT_PREFIX = "auto";
+
+export const SNAPSHOT_PREFIX_RULES = `Must start with a letter and use only letters, numbers, '-' and '_' — no spaces (up to ${String(SNAPSHOT_NAME_PREFIX_MAX_LENGTH)} characters).`;
+
+/** The name a schedule's runs take, as a pattern: "nightly-YYYYMMDD-HHMMSS". */
+export function scheduledSnapshotNamePattern(prefix: string): string {
+  return `${prefix || AUTO_SNAPSHOT_PREFIX}${SCHEDULED_SNAPSHOT_SUFFIX}`;
+}
+
+/**
+ * Validates a snapshot schedule's prefix. What Proxmox judges is the name a
+ * run sends — the prefix, then the run's date and time — so that is what is
+ * checked, by the whole-name rule above; the API does the same. Checking the
+ * prefix as a name would get two answers wrong: a reserved word is a legal
+ * prefix ("current-20260926-020000" is not reserved), and so is one letter.
+ */
+export function snapshotPrefixError(
+  prefix: string,
+  kind: ResourceKind,
+): string | null {
+  if (prefix.length === 0) return null;
+  // First, and in the prefix's own terms: past the budget the whole-name rule
+  // would answer "limited to 40 characters", which is not the limit the field
+  // is typed against.
+  if (prefix.length > SNAPSHOT_NAME_PREFIX_MAX_LENGTH)
+    return `A prefix is limited to ${String(SNAPSHOT_NAME_PREFIX_MAX_LENGTH)} characters, which leaves room for the date and time each run adds.`;
+  // Any date gives the same verdict — the suffix is fixed-width digits — so
+  // zeros stand in for the run's own.
+  return snapshotNameError(
+    prefix + SCHEDULED_SNAPSHOT_SUFFIX.replace(/[A-Z]/g, "0"),
+    kind,
+  );
 }

@@ -1041,16 +1041,22 @@ const (
 
 // snapshotNameError is what the two create handlers call: it validates the
 // name and returns the HTTP error to hand back, or nil.
+func snapshotNameError(kind snapshotGuestKind, name string) error {
+	return snapshotRuleError(kind, proxmox.ValidateSnapshotName(kind, name))
+}
+
+// snapshotRuleError turns a snapshot-name rule's verdict into the HTTP error
+// to hand back, or nil. Shared by snapshotNameError and the scheduled-snapshot
+// prefix check (schedules.go), whose verdicts carry the same two failures.
 //
-// It exists to keep the two failures apart. Every rule in
+// It exists to keep those two failures apart. Every rule in
 // proxmox.ValidateSnapshotName is a caller mistake and earns a 400 naming
 // the problem — except one. An unregistered guest kind is Nexara's own bug,
 // and reporting it as "your snapshot name was bad" would blame the caller
 // for something no request of theirs could fix, while echoing an internal
 // enum value at them. It fails closed either way; this only decides who
 // the failure is attributed to.
-func snapshotNameError(kind snapshotGuestKind, name string) error {
-	err := proxmox.ValidateSnapshotName(kind, name)
+func snapshotRuleError(kind snapshotGuestKind, err error) error {
 	switch {
 	case err == nil:
 		return nil

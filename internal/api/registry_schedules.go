@@ -1,10 +1,13 @@
 package api
 
 import (
+	"strconv"
+
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/api/handlers"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // The shared declaration vocabulary this file uses — clusterScope,
@@ -39,11 +42,22 @@ var scheduleSpecParam = apischema.Property{
 // action the row names, and apischema has no nested-object schema. An absent
 // value becomes `{}` in the handler, which is what the column has always
 // stored for a task that needs no options.
+//
+// No facet can reach inside it, so the one key with a rule — a snapshot task's
+// snap_name — is stated in the Description and enforced by the handler
+// (validateSnapshotScheduleParams, through proxmox.ValidateSnapshotNamePrefix).
+// The limit is printed from proxmox.SnapshotNamePrefixMaxLen so the published
+// number is the enforced one.
 var scheduleParamsParam = apischema.Property{
-	Type:        apischema.Object,
-	Optional:    true,
-	Typetext:    "<object>",
-	Description: "Action-specific options. Omitted, an empty object is stored.",
+	Type:     apischema.Object,
+	Optional: true,
+	Typetext: "<object>",
+	Description: "Action-specific options. Omitted, an empty object is stored. A snapshot task reads `snap_name`, " +
+		"the PREFIX of every snapshot it takes: each run is named `<snap_name>-YYYYMMDD-HHMMSS` from the date and " +
+		"time it runs, or `auto-YYYYMMDD-HHMMSS` when snap_name is absent or empty. A prefix starts with a letter, " +
+		"contains only letters, digits, '-' and '_', and is at most " + strconv.Itoa(proxmox.SnapshotNamePrefixMaxLen) +
+		" characters, which leaves room for the date and time within Proxmox's " +
+		strconv.Itoa(proxmox.SnapshotMaxNameLen) + "-character limit on a snapshot name.",
 }
 
 // registerScheduleEndpoints declares ScheduleHandler's four routes.

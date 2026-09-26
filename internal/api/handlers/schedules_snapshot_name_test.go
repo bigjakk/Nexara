@@ -55,13 +55,25 @@ func newScheduleCreateApp(t *testing.T, dbtx db.DBTX) *fiber.App {
 	return app
 }
 
+// snapshotScheduleBody is a create body for a snapshot task carrying snapName.
+func snapshotScheduleBody(resourceType, snapName string) string {
+	return `{"resource_type":"` + resourceType + `","resource_id":"101","node":"pve-01","action":"snapshot",` +
+		`"schedule":"0 3 * * *","params":{"snap_name":"` + snapName + `"}}`
+}
+
 // TestScheduleCreateRefusesASnapshotNameProxmoxWouldReject is the test that
 // turns the live bug into a 400.
 //
-// Every payload below was storable before this change. The row was created,
-// the SPA showed the schedule as armed, and then every fire failed against PVE
-// with a raw sentence in last_error — a recurring snapshot the operator
-// believed was protecting a guest, silently never running.
+// A refused payload here was once storable. The row was created, the SPA
+// showed the schedule as armed, and then every fire failed against PVE with a
+// raw sentence in last_error — a recurring snapshot the operator believed was
+// protecting a guest, silently never running.
+//
+// snap_name is a PREFIX now: each run adds -YYYYMMDD-HHMMSS, because a name
+// sent verbatim on every run failed on every run after the first (a guest
+// holds each snapshot name once). So the budget is 24 characters, not 40, and
+// what Proxmox reserves is judged on the whole name a run sends — which is why
+// the reserved words sit in the accepting half.
 func TestScheduleCreateRefusesASnapshotNameProxmoxWouldReject(t *testing.T) {
 	clusterID := uuid.New()
 
@@ -73,33 +85,25 @@ func TestScheduleCreateRefusesASnapshotNameProxmoxWouldReject(t *testing.T) {
 		wantPhrase string
 	}{
 		{
-			name: "a VM snapshot named current",
-			body: `{"resource_type":"vm","resource_id":"101","node":"pve-01","action":"snapshot",` +
-				`"schedule":"0 3 * * *","params":{"snap_name":"current"}}`,
-			wantStatus: http.StatusBadRequest, wantPhrase: "reserved",
+			name:       "a prefix one over the 24-character budget",
+			body:       snapshotScheduleBody("vm", strings.Repeat("a", 25)),
+			wantStatus: http.StatusBadRequest, wantPhrase: "at most 24 characters",
 		},
 		{
-			name: "a VM snapshot named Pending — PVE folds the case on this one",
-			body: `{"resource_type":"vm","resource_id":"101","node":"pve-01","action":"snapshot",` +
-				`"schedule":"0 3 * * *","params":{"snap_name":"Pending"}}`,
-			wantStatus: http.StatusBadRequest, wantPhrase: "reserved",
+			// Accepted while the name was sent verbatim; with a date added
+			// it composes a 56-character name no run could send.
+			name:       "the old whole-name maximum of 40",
+			body:       snapshotScheduleBody("ct", strings.Repeat("a", SnapshotMaxNameLen)),
+			wantStatus: http.StatusBadRequest, wantPhrase: "prefix",
 		},
 		{
-			name: "a container snapshot named vzdump",
-			body: `{"resource_type":"ct","resource_id":"201","node":"pve-01","action":"snapshot",` +
-				`"schedule":"0 3 * * *","params":{"snap_name":"vzdump"}}`,
-			wantStatus: http.StatusBadRequest, wantPhrase: "reserved",
-		},
-		{
-			name: "a name one over Proxmox's cap",
-			body: `{"resource_type":"vm","resource_id":"101","node":"pve-01","action":"snapshot",` +
-				`"schedule":"0 3 * * *","params":{"snap_name":"` + strings.Repeat("a", SnapshotMaxNameLen+1) + `"}}`,
+			name:       "a name with a space",
+			body:       snapshotScheduleBody("vm", "my snap.1"),
 			wantStatus: http.StatusBadRequest, wantPhrase: "snap_name",
 		},
 		{
-			name: "a name with a space",
-			body: `{"resource_type":"vm","resource_id":"101","node":"pve-01","action":"snapshot",` +
-				`"schedule":"0 3 * * *","params":{"snap_name":"my snap.1"}}`,
+			name:       "a name starting with a digit",
+			body:       snapshotScheduleBody("ct", "1nightly"),
 			wantStatus: http.StatusBadRequest, wantPhrase: "snap_name",
 		},
 		{
@@ -114,27 +118,47 @@ func TestScheduleCreateRefusesASnapshotNameProxmoxWouldReject(t *testing.T) {
 		// database", not "succeeded". Without them the test above would be
 		// satisfied by a handler that refuses every snapshot schedule.
 		{
-			name: "an ordinary name is stored",
-			body: `{"resource_type":"vm","resource_id":"101","node":"pve-01","action":"snapshot",` +
-				`"schedule":"0 3 * * *","params":{"snap_name":"nightly"}}`,
+			name:       "an ordinary prefix is stored",
+			body:       snapshotScheduleBody("vm", "nightly"),
 			wantStatus: http.StatusInternalServerError, wantInsert: true,
 		},
 		{
-			name: "the OTHER kind's reserved name is legal here",
-			body: `{"resource_type":"ct","resource_id":"201","node":"pve-01","action":"snapshot",` +
-				`"schedule":"0 3 * * *","params":{"snap_name":"pending"}}`,
+			name:       "exactly the 24-character budget",
+			body:       snapshotScheduleBody("vm", strings.Repeat("a", 24)),
 			wantStatus: http.StatusInternalServerError, wantInsert: true,
 		},
 		{
-			name: "no snap_name at all leaves the scheduler to mint one",
+			name:       "a one-letter prefix, since Proxmox's two-character minimum is on the whole name",
+			body:       snapshotScheduleBody("ct", "a"),
+			wantStatus: http.StatusInternalServerError, wantInsert: true,
+		},
+		{
+			name:       "current on a VM — Proxmox reserves the whole name, and a run's name carries a date",
+			body:       snapshotScheduleBody("vm", "current"),
+			wantStatus: http.StatusInternalServerError, wantInsert: true,
+		},
+		{
+			name:       "Pending on a VM — the case PVE folds, still only as a whole name",
+			body:       snapshotScheduleBody("vm", "Pending"),
+			wantStatus: http.StatusInternalServerError, wantInsert: true,
+		},
+		{
+			name:       "vzdump on a container — reserved only as a whole name",
+			body:       snapshotScheduleBody("ct", "vzdump"),
+			wantStatus: http.StatusInternalServerError, wantInsert: true,
+		},
+		{
+			name: "no snap_name at all leaves the scheduler to use auto",
 			body: `{"resource_type":"vm","resource_id":"101","node":"pve-01","action":"snapshot",` +
 				`"schedule":"0 3 * * *","params":{}}`,
 			wantStatus: http.StatusInternalServerError, wantInsert: true,
 		},
 		{
+			// A value every snapshot case above refuses, so this row fails
+			// the moment the action stops gating the check.
 			name: "a reboot task carries no snapshot name to check",
 			body: `{"resource_type":"vm","resource_id":"101","node":"pve-01","action":"reboot",` +
-				`"schedule":"0 3 * * *","params":{"snap_name":"current"}}`,
+				`"schedule":"0 3 * * *","params":{"snap_name":"my snap.1"}}`,
 			wantStatus: http.StatusInternalServerError, wantInsert: true,
 		},
 	}
@@ -173,12 +197,13 @@ func TestScheduleCreateRefusesASnapshotNameProxmoxWouldReject(t *testing.T) {
 // write.
 //
 // The PUT body carries neither the action nor the resource type — a task's
-// resource is fixed at creation — so the guest kind has to come off the stored
-// row. That makes this the case a create-only check would miss entirely:
-// create a schedule with a good name, then edit it to "current".
+// resource is fixed at creation — so both have to come off the stored row.
+// That makes this the case a create-only check would miss entirely: create a
+// schedule with a good prefix, then edit it to one no run could send.
 func TestScheduleUpdateRefusesASnapshotNameProxmoxWouldReject(t *testing.T) {
 	clusterID := uuid.New()
 	taskID := uuid.New()
+	overBudget := strings.Repeat("a", 25)
 
 	tests := []struct {
 		name         string
@@ -189,27 +214,29 @@ func TestScheduleUpdateRefusesASnapshotNameProxmoxWouldReject(t *testing.T) {
 		wantWrite    bool
 	}{
 		{
-			name:   "a stored VM snapshot task edited to a reserved name",
+			name:   "a stored VM snapshot task edited to a prefix over the budget",
+			action: "snapshot", resourceType: "vm",
+			body:       `{"schedule":"0 3 * * *","params":{"snap_name":"` + overBudget + `"},"enabled":true}`,
+			wantStatus: http.StatusBadRequest, wantWrite: false,
+		},
+		{
+			name:   "a stored CT snapshot task edited to a name with a space",
+			action: "snapshot", resourceType: "ct",
+			body:       `{"schedule":"0 3 * * *","params":{"snap_name":"my snap"},"enabled":true}`,
+			wantStatus: http.StatusBadRequest, wantWrite: false,
+		},
+		{
+			name:   "a stored snapshot task edited to a reserved word, which is a legal prefix",
 			action: "snapshot", resourceType: "vm",
 			body:       `{"schedule":"0 3 * * *","params":{"snap_name":"current"},"enabled":true}`,
-			wantStatus: http.StatusBadRequest, wantWrite: false,
-		},
-		{
-			name:   "a stored CT snapshot task edited to its own reserved name",
-			action: "snapshot", resourceType: "ct",
-			body:       `{"schedule":"0 3 * * *","params":{"snap_name":"vzdump"},"enabled":true}`,
-			wantStatus: http.StatusBadRequest, wantWrite: false,
-		},
-		{
-			name:   "the kind comes off the ROW, so a CT task keeps accepting pending",
-			action: "snapshot", resourceType: "ct",
-			body:       `{"schedule":"0 3 * * *","params":{"snap_name":"pending"},"enabled":true}`,
 			wantStatus: http.StatusOK, wantWrite: true,
 		},
 		{
+			// The same over-budget value the first case refuses: the action
+			// comes off the ROW, and a reboot has no snapshot name to check.
 			name:   "a stored reboot task has no snapshot name to check",
 			action: "reboot", resourceType: "vm",
-			body:       `{"schedule":"0 3 * * *","params":{"snap_name":"current"},"enabled":true}`,
+			body:       `{"schedule":"0 3 * * *","params":{"snap_name":"` + overBudget + `"},"enabled":true}`,
 			wantStatus: http.StatusOK, wantWrite: true,
 		},
 	}

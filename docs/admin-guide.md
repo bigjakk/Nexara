@@ -1141,10 +1141,24 @@ Scheduled tasks run on cron expressions and are attached to a single guest.
 4. Configure:
    - **Action** — **Snapshot** or **Reboot**
    - **Cron Expression** — minute hour day month weekday (e.g. `0 2 * * *` = daily at 2 AM)
-   - **Snapshot Name (optional)** (snapshot actions only) — leave it empty and each run is
-     named `auto-<timestamp>`, which is what you almost always want. A name you type is used
-     **verbatim on every run**, with no date substituted, so the second run collides with the
-     first run's snapshot and fails.
+   - **Snapshot Name Prefix (optional)** (snapshot actions only) — each run takes a new
+     snapshot named `<prefix>-YYYYMMDD-HHMMSS` from the date and time of the run, for example
+     `nightly-20260926-020000`; leave it empty and the prefix is `auto`. The date and time come
+     from the Nexara server's clock, in the server's time zone: UTC unless the container is
+     given one (a `TZ` variable added to the `nexara` service's `environment:` in
+     `docker-compose.yml`, or a mounted `/etc/localtime`). A prefix starts with a letter, uses
+     only letters, digits, `-` and `_`, and is at most 24 characters, which leaves room for the
+     date and time within Proxmox's 40-character limit on a snapshot name. Earlier snapshots
+     are kept; nothing deletes them.
+
+     Before names became prefixes, a name you typed was used as-is, so such a schedule took
+     one snapshot and every later run failed in Proxmox. The failure showed in the task
+     history (**Events → Tasks**) as a failed "Scheduled snapshot" task reading
+     `snapshot name '…' already used`, and in a `pve_task_failed` alert if you had one. The
+     schedule's own status did not show it, because that status records whether a run was
+     sent to Proxmox, not how the Proxmox task ended. Those schedules now run again with no
+     action from you: the old name becomes the prefix, cut to its first 24 characters if it
+     is longer, and every run from then on adds a snapshot.
 5. Click **Create**
 
 The table lists each schedule with its last status, next run, and last run, and a delete button.

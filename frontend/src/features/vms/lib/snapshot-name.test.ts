@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { snapshotNameError } from "./snapshot-name";
+import {
+  AUTO_SNAPSHOT_PREFIX,
+  scheduledSnapshotNamePattern,
+  snapshotNameError,
+  snapshotPrefixError,
+  SNAPSHOT_NAME_PREFIX_MAX_LENGTH,
+} from "./snapshot-name";
 import type { ResourceKind } from "../types/vm";
 
 const KINDS: ResourceKind[] = ["vm", "ct"];
@@ -89,6 +95,97 @@ describe("snapshotNameError", () => {
     it("accepts Current on both kinds — only pending folds case", () => {
       expect(snapshotNameError("Current", "vm")).toBeNull();
       expect(snapshotNameError("Current", "ct")).toBeNull();
+    });
+  });
+});
+
+// A snapshot schedule stores a PREFIX: each run's snapshot is
+// <prefix>-YYYYMMDD-HHMMSS. Mirrors the API's check — the handler's
+// validateSnapshotScheduleParams, where an empty snap_name means "auto", over
+// proxmox.ValidateSnapshotNamePrefix (internal/proxmox/client_guests.go).
+describe("scheduled snapshot prefix", () => {
+  // A real run's suffix, for checking the name a run would actually send.
+  const aRun = "-20260926-020000";
+
+  it("leaves 24 characters for the prefix", () => {
+    expect(SNAPSHOT_NAME_PREFIX_MAX_LENGTH).toBe(24);
+    // The budget fills the 40 exactly: a longer one would let a prefix
+    // through whose every run the whole-name rule refuses.
+    expect(snapshotNameError("a".repeat(24) + aRun, "vm")).toBeNull();
+    expect(snapshotNameError("a".repeat(25) + aRun, "vm")).not.toBeNull();
+  });
+
+  it("describes the name each run takes, auto standing in for an empty prefix", () => {
+    expect(AUTO_SNAPSHOT_PREFIX).toBe("auto");
+    expect(scheduledSnapshotNamePattern("")).toBe("auto-YYYYMMDD-HHMMSS");
+    expect(scheduledSnapshotNamePattern("nightly")).toBe(
+      "nightly-YYYYMMDD-HHMMSS",
+    );
+  });
+
+  describe.each(KINDS)("on a %s", (kind) => {
+    it("returns null for an empty prefix — the scheduler uses auto", () => {
+      expect(snapshotPrefixError("", kind)).toBeNull();
+    });
+
+    it("accepts prefixes whose run names Proxmox takes", () => {
+      const valid = [
+        "nightly",
+        "a", // one letter: the two-character minimum is on the whole name
+        "a".repeat(24),
+        // Reserved only as whole names; a run's name carries a date.
+        "current",
+        "pending",
+        "PENDING",
+        "vzdump",
+      ];
+      for (const prefix of valid) {
+        expect(snapshotPrefixError(prefix, kind)).toBeNull();
+      }
+    });
+
+    it("flags a prefix over the budget in the prefix's own terms", () => {
+      expect(snapshotPrefixError("a".repeat(25), kind)).toMatch(
+        /prefix is limited to 24 characters/i,
+      );
+      // The old whole-name maximum no longer fits once a date is added.
+      expect(snapshotPrefixError("a".repeat(40), kind)).toMatch(/24/);
+    });
+
+    it("flags a prefix no run name could carry", () => {
+      expect(snapshotPrefixError("my snap", kind)).toMatch(/spaces/i);
+      expect(snapshotPrefixError("1abc", kind)).toMatch(/start with a letter/i);
+      expect(snapshotPrefixError("-abc", kind)).toMatch(/start with a letter/i);
+      expect(snapshotPrefixError("ab.c", kind)).toMatch(/only letters/i);
+    });
+
+    // What the check is FOR: its verdict is the whole-name rule's verdict on
+    // the name a run sends. Disagreeing either way is a form that refuses a
+    // schedule Proxmox would run, or accepts one that fails on every fire.
+    it("agrees with the whole-name rule on the name a run sends", () => {
+      const prefixes = [
+        "a",
+        "nightly",
+        "current",
+        "Pending",
+        "vzdump",
+        "x_y-z",
+        "a".repeat(24),
+        "a".repeat(25),
+        " ",
+        "my snap",
+        "a.b",
+        "1a",
+        "-a",
+        "_a",
+        "é",
+      ];
+      for (const prefix of prefixes) {
+        expect(
+          snapshotPrefixError(prefix, kind) === null,
+          `prefix ${JSON.stringify(prefix)}`,
+        ).toBe(snapshotNameError(prefix + aRun, kind) === null);
+      }
     });
   });
 });

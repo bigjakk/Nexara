@@ -17,7 +17,12 @@ import {
   type ScheduledTask,
 } from "../api/vm-queries";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
-import { snapshotNameError, SNAPSHOT_NAME_RULES } from "../lib/snapshot-name";
+import {
+  scheduledSnapshotNamePattern,
+  snapshotPrefixError,
+  SNAPSHOT_NAME_PREFIX_MAX_LENGTH,
+  SNAPSHOT_PREFIX_RULES,
+} from "../lib/snapshot-name";
 import type { ResourceKind } from "../types/vm";
 
 const selectClass =
@@ -52,7 +57,7 @@ export function SchedulePanel({
   // for "snapshot". A bad name left behind by switching the action away would
   // otherwise disable Create from a field that is no longer on screen.
   const snapNameError =
-    action === "snapshot" ? snapshotNameError(snapName, kind) : null;
+    action === "snapshot" ? snapshotPrefixError(snapName, kind) : null;
 
   // Filter schedules to this resource.
   const mySchedules = schedules?.filter(
@@ -241,7 +246,7 @@ export function SchedulePanel({
             {action === "snapshot" && (
               <div>
                 <Label htmlFor="schedule-snap-name">
-                  Snapshot Name (optional)
+                  Snapshot Name Prefix (optional)
                 </Label>
                 <Input
                   id="schedule-snap-name"
@@ -250,14 +255,16 @@ export function SchedulePanel({
                     setSnapName(e.target.value);
                   }}
                   placeholder="Optional"
-                  maxLength={40}
+                  maxLength={SNAPSHOT_NAME_PREFIX_MAX_LENGTH}
                 />
-                {/* Not a template: the scheduler stores this string and passes
-                    it to Proxmox verbatim, minting "auto-<timestamp>" only
-                    when it is empty (internal/scheduler, executeSnapshot). The
-                    old "auto-YYYYMMDD-HHMMSS" placeholder implied a
-                    substitution that does not exist — and, being a legal name,
-                    would have been taken literally had anyone typed it. */}
+                {/* A prefix, not a name: the scheduler adds each run's date and
+                    time to it, and uses "auto" when it is empty
+                    (internal/scheduler, scheduledSnapshotName). It used to send
+                    this verbatim, and a guest holds each snapshot name once, so
+                    every run after the first failed. The line below spells out
+                    the name a run takes. The placeholder stays free of any
+                    YYYYMMDD pattern: typed in, it would be kept literally as
+                    part of the prefix, not filled in. */}
                 <p
                   className={
                     snapNameError
@@ -266,9 +273,7 @@ export function SchedulePanel({
                   }
                 >
                   {snapNameError ??
-                    (snapName.length === 0
-                      ? "Leave empty to auto-generate a timestamped name for each run."
-                      : `Used as-is on every run — no date is substituted, so a recurring job collides with its own previous snapshot. Leave empty to auto-name each run. ${SNAPSHOT_NAME_RULES}`)}
+                    `Each run takes a new snapshot named ${scheduledSnapshotNamePattern(snapName)}, from the date and time of the run; earlier ones are kept.${snapName.length === 0 ? "" : ` ${SNAPSHOT_PREFIX_RULES}`}`}
                 </p>
               </div>
             )}

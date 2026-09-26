@@ -712,7 +712,7 @@ func ReservedSnapshotName(kind SnapshotGuestKind, name string) (reserved, known 
 // a 400 naming the value, where an unwrapped error falls through to a 500
 // reading "Proxmox operation failed". The fourth — an unregistered guest
 // kind — is Nexara's own bug and carries ErrUnknownSnapshotGuestKind
-// instead; see handlers.snapshotNameError for the attribution that hangs
+// instead; see handlers.snapshotRuleError for the attribution that hangs
 // off that split.
 func ValidateSnapshotName(kind SnapshotGuestKind, name string) error {
 	reserved, known := ReservedSnapshotName(kind, name)
@@ -731,6 +731,76 @@ func ValidateSnapshotName(kind SnapshotGuestKind, name string) error {
 		return fmt.Errorf("%w: snap_name must start with a letter and contain only letters, digits, '-' and '_' (no spaces), 2-%d characters", ErrInvalidInput, SnapshotMaxNameLen)
 	}
 	return nil
+}
+
+// --- Timestamped snapshot names ---
+//
+// A snapshot task that fires on a schedule cannot reuse a name, because a guest
+// holds each snapshot name once: pve-guest-common's __snapshot_prepare dies
+// with "snapshot name '…' already used". It dies inside the worker, so the
+// create call still returns a UPID and it is the TASK that fails. A schedule
+// that sent the same name on every run therefore took one snapshot and failed
+// every run after it.
+//
+// So a scheduled run's snapshot is always named by a prefix plus the run's
+// date and time: "nightly-20260926-020000", or "auto-20260926-020000" when the
+// schedule stores no prefix. The two pieces below are that rule. They live
+// beside SnapshotMaxNameLen because the prefix budget is arithmetic on it, and
+// in this package because two others must compose the name identically:
+// internal/scheduler mints it on every fire, and internal/api/handlers checks a
+// prefix when a schedule is created or updated. Composed twice, the check at
+// the form and the name at the fire could disagree.
+
+// snapshotNameTimestampLayout is the time.Format layout of the suffix. Digits
+// and a dash only, so it cannot make a legal prefix illegal; fixed width, so
+// the budget below holds at every instant.
+const snapshotNameTimestampLayout = "20060102-150405"
+
+// SnapshotNamePrefixMaxLen is the longest prefix whose timestamped name still
+// fits SnapshotMaxNameLen: 40, less the "-" and the 15-character timestamp,
+// which is 24.
+const SnapshotNamePrefixMaxLen = SnapshotMaxNameLen - len("-"+snapshotNameTimestampLayout)
+
+// TimestampedSnapshotName is the name a scheduled run gives its snapshot:
+// prefix, "-", then at as YYYYMMDD-HHMMSS in at's own location.
+//
+// It does not validate and does not shorten. The name goes to
+// Create{VM,CT}Snapshot, which validates it; ValidateSnapshotNamePrefix is the
+// check for a prefix before it is stored.
+func TimestampedSnapshotName(prefix string, at time.Time) string {
+	return prefix + "-" + at.Format(snapshotNameTimestampLayout)
+}
+
+// ValidateSnapshotNamePrefix rejects a prefix whose timestamped name Proxmox
+// would refuse.
+//
+// What it checks is the FINAL name, composed by TimestampedSnapshotName and
+// judged by ValidateSnapshotName, so every rule applies to what Proxmox will
+// actually receive. Two answers follow that checking the prefix as a name
+// would get wrong. A reserved word is a legal prefix: "current" is refused as a
+// name, but "current-20260926-020000" is not reserved. A one-letter prefix is
+// legal too, although a one-letter name is not. Refusing either would be a rule
+// Proxmox does not have.
+//
+// The same check enforces SnapshotNamePrefixMaxLen, since a longer prefix
+// composes a name over SnapshotMaxNameLen. That is why there is no separate
+// length branch here.
+func ValidateSnapshotNamePrefix(kind SnapshotGuestKind, prefix string) error {
+	// Any instant gives the same verdict: the suffix is fixed-width digits.
+	// The zero time keeps the check deterministic.
+	err := ValidateSnapshotName(kind, TimestampedSnapshotName(prefix, time.Time{}))
+	if errors.Is(err, ErrInvalidInput) {
+		// Restated in the prefix's terms, because ValidateSnapshotName's
+		// "2-40 characters" describes a whole name and would send the caller
+		// after the wrong limit. Nothing is lost: the composed name is at
+		// least 16 characters and ends in a digit, so it is never empty and
+		// never a reserved word — the shape rule, length included, is the
+		// only one it can fail.
+		return fmt.Errorf("%w: snap_name is a prefix, and each run adds -YYYYMMDD-HHMMSS to it, so it must "+
+			"start with a letter, contain only letters, digits, '-' and '_' (no spaces), and be at most %d characters",
+			ErrInvalidInput, SnapshotNamePrefixMaxLen)
+	}
+	return err
 }
 
 // --- Addressing an existing snapshot ---

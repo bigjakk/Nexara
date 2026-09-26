@@ -43,23 +43,29 @@ function createButton() {
   return screen.getByRole("button", { name: "Create" });
 }
 
+// The field holds a PREFIX: every run names its snapshot
+// <prefix>-YYYYMMDD-HHMMSS ("auto" when empty), because a guest holds each
+// snapshot name once and a name reused verbatim failed on every run after the
+// first. What Proxmox judges is that whole name, so a reserved word is a legal
+// prefix and the budget is 24 characters, not 40.
 describe("SchedulePanel snapshot name", () => {
   beforeEach(() => {
     createCalls.current = [];
   });
 
-  it("treats an empty name as the auto-generate path", async () => {
+  it("treats an empty name as the auto prefix", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SchedulePanel {...defaultProps} />);
     await openDialog(user);
 
     expect(
-      screen.getByText(/auto-generate a timestamped name/i),
+      screen.getByText(/new snapshot named auto-YYYYMMDD-HHMMSS/),
     ).toBeInTheDocument();
     expect(createButton()).toBeEnabled();
 
     // Empty must not merely be allowed through — it must reach the server as
-    // an absent snap_name, which is what makes the scheduler mint one.
+    // an absent snap_name, which is what makes the scheduler use the auto
+    // prefix.
     // toStrictEqual, not toMatchObject and not toEqual: toMatchObject reads a
     // nested {} as "any object" and would pass against a params carrying a
     // snap_name, and toEqual still tolerates {snap_name: undefined} — benign
@@ -96,50 +102,75 @@ describe("SchedulePanel snapshot name", () => {
     expect(createButton()).toBeEnabled();
   });
 
-  it("flags the reserved name current and blocks submit", async () => {
+  it("shows the name each run takes from the typed prefix", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SchedulePanel {...defaultProps} />);
     const input = await openDialog(user);
 
-    await user.type(input, "current");
-    expect(screen.getByText(/reserved/i)).toBeInTheDocument();
+    await user.type(input, "nightly");
+    expect(
+      screen.getByText(/new snapshot named nightly-YYYYMMDD-HHMMSS/),
+    ).toBeInTheDocument();
+    // The old copy said the name was used as-is on every run. It is not.
+    expect(screen.queryByText(/as-is/i)).toBeNull();
+  });
+
+  it("flags a prefix Proxmox would refuse and blocks submit", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SchedulePanel {...defaultProps} />);
+    const input = await openDialog(user);
+
+    await user.type(input, "my snap");
+    expect(screen.getByText(/cannot contain spaces/i)).toBeInTheDocument();
     expect(createButton()).toBeDisabled();
   });
 
-  // The reserved set is asymmetric by guest kind, so these two prove the
-  // `kind` prop actually reaches the validator — a hardcoded kind at the call
-  // site keeps every other case green.
-  it("accepts vzdump on a VM — it is reserved for containers only", async () => {
+  // Proxmox reserves these as WHOLE names, and the name a run sends carries a
+  // date, so none of them is refused as a prefix — on either kind, whatever
+  // the kind reserves as a name.
+  it.each([
+    ["vm", "current"],
+    ["ct", "current"],
+    ["vm", "pending"],
+    ["vm", "PENDING"],
+    ["ct", "vzdump"],
+  ] as const)(
+    "accepts the reserved word %s/%s as a prefix",
+    async (kind, word) => {
+      const user = userEvent.setup();
+      renderWithProviders(<SchedulePanel {...defaultProps} kind={kind} />);
+      const input = await openDialog(user);
+
+      await user.type(input, word);
+      expect(screen.queryByText(/reserved/i)).toBeNull();
+      expect(createButton()).toBeEnabled();
+      await user.click(createButton());
+      expect(createCalls.current[0]?.body.params).toStrictEqual({
+        snap_name: word,
+      });
+    },
+  );
+
+  it("accepts a one-letter prefix — the two-character minimum is on the whole name", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SchedulePanel {...defaultProps} />);
     const input = await openDialog(user);
 
-    await user.type(input, "vzdump");
-    expect(screen.queryByText(/reserved/i)).toBeNull();
+    await user.type(input, "a");
     expect(createButton()).toBeEnabled();
   });
 
-  it("accepts pending on a container — it is reserved for VMs only", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<SchedulePanel {...defaultProps} kind="ct" />);
-    const input = await openDialog(user);
-
-    await user.type(input, "pending");
-    expect(screen.queryByText(/reserved/i)).toBeNull();
-    expect(createButton()).toBeEnabled();
-  });
-
-  it("accepts Current — only lowercase current is reserved", async () => {
+  it("accepts a prefix of exactly 24 characters", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SchedulePanel {...defaultProps} />);
     const input = await openDialog(user);
 
-    await user.type(input, "Current");
-    expect(screen.queryByText(/reserved/i)).toBeNull();
+    await user.type(input, "a".repeat(24));
+    expect(input).toHaveValue("a".repeat(24));
     expect(createButton()).toBeEnabled();
   });
 
-  it("rejects a name over 40 characters", async () => {
+  it("rejects a prefix over 24 characters", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SchedulePanel {...defaultProps} />);
     const input = await openDialog(user);
@@ -147,17 +178,17 @@ describe("SchedulePanel snapshot name", () => {
     // Set the value directly: maxLength stops this at the keyboard, so typing
     // could never reach the validator's own length rule. The rule is still
     // what must answer — maxLength is a convenience, not the authority.
-    fireEvent.change(input, { target: { value: "a".repeat(41) } });
-    expect(screen.getByText(/limited to 40 characters/i)).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "a".repeat(25) } });
+    expect(screen.getByText(/limited to 24 characters/i)).toBeInTheDocument();
     expect(createButton()).toBeDisabled();
   });
 
-  it("caps the field at 40 characters", async () => {
+  it("caps the field at 24 characters", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SchedulePanel {...defaultProps} />);
     const input = await openDialog(user);
 
-    expect(input).toHaveAttribute("maxLength", "40");
+    expect(input).toHaveAttribute("maxLength", "24");
   });
 
   it("stops blocking submit when the action no longer takes a name", async () => {
@@ -165,7 +196,7 @@ describe("SchedulePanel snapshot name", () => {
     renderWithProviders(<SchedulePanel {...defaultProps} />);
     const input = await openDialog(user);
 
-    await user.type(input, "current");
+    await user.type(input, "my snap");
     expect(createButton()).toBeDisabled();
 
     // The field goes away with the action, so the block it caused has to go
@@ -180,8 +211,10 @@ describe("SchedulePanel snapshot name", () => {
     renderWithProviders(<SchedulePanel {...defaultProps} />);
     await openDialog(user);
 
-    // The scheduler uses the stored value verbatim (internal/scheduler,
-    // executeSnapshot); nothing anywhere expands a YYYYMMDD placeholder.
+    // The scheduler adds the date itself (internal/scheduler,
+    // scheduledSnapshotName); nothing expands a YYYYMMDD the user TYPES — it
+    // would stay in the prefix literally. So the pattern may appear in the
+    // description of what a run does, never in the placeholder.
     expect(screen.queryByText(/template/i)).toBeNull();
     expect(screen.queryByPlaceholderText(/YYYYMMDD/)).toBeNull();
   });

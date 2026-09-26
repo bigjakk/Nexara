@@ -16,6 +16,7 @@ import (
 	"github.com/bigjakk/nexara/internal/cronspec"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // All four routes are declared in internal/api/registry_schedules.go, which
@@ -138,7 +139,8 @@ func scheduleParamsJSON(p *apischema.Params) (json.RawMessage, error) {
 // than a shared type: the column is carried through undescribed (the
 // declaration's "params" is a bare apischema.Object) and the scheduler is what
 // owns its full shape. The one key checked here is the one that can make the
-// task unrunnable.
+// task unrunnable. SnapName is a PREFIX: the scheduler adds each run's date and
+// time to it (internal/scheduler's scheduledSnapshotName).
 //
 // Two copies of one contract is a drift that fails OPEN, so the two are pinned
 // against each other by TestGuard_SnapshotScheduleParamsMatchesTheScheduler.
@@ -167,8 +169,10 @@ func ScheduleResourceTypeKeys() []string {
 	return slices.Sorted(maps.Keys(snapshotScheduleGuestKinds))
 }
 
-// snapshotScheduleGuestKind maps a stored resource_type onto the guest kind
-// whose reserved names apply.
+// snapshotScheduleGuestKind maps a stored resource_type onto the guest kind a
+// snapshot name is checked under. With snap_name a prefix, the name checked
+// carries a date and can never be reserved, so what the kind still decides is
+// whether the check can run at all.
 //
 // The second result is false for anything else. That is not a name this check
 // can decide — and it does not need to: a snapshot task whose resource_type is
@@ -181,20 +185,34 @@ func snapshotScheduleGuestKind(resourceType string) (snapshotGuestKind, bool) {
 	return kind, ok
 }
 
-// validateSnapshotScheduleParams refuses AT CREATION a snap_name Proxmox would
-// refuse at every fire.
+// validateSnapshotScheduleParams refuses AT CREATION a snap_name whose
+// snapshots Proxmox would refuse at every fire.
+//
+// snap_name is a prefix — each run adds -YYYYMMDD-HHMMSS — so what is checked
+// is the name a run will send, through proxmox.ValidateSnapshotNamePrefix: the
+// scheduler composes it with the same function. That is also where the
+// 24-character budget comes from, and why a reserved word is an acceptable
+// prefix: the reserved-name rule applies to the whole name, which then carries
+// a date.
 //
 // The client is what actually stops a bad name reaching Proxmox — see the
 // "Snapshot names" block in internal/proxmox/client_guests.go, which is the
 // choke point every caller goes through. This is not a second gate on the same
 // hazard; it is about WHEN the operator finds out. Without it the row is
 // accepted, the schedule looks armed in the UI, and the failure lands on every
-// fire as a raw PVE sentence in last_error — a recurring snapshot that silently
-// never runs. With it the caller gets a 400 naming the problem while they are
-// still looking at the form.
+// fire in last_error — a recurring snapshot that silently never runs. With it
+// the caller gets a 400 naming the problem while they are still looking at the
+// form.
 //
 // It reads the same json.RawMessage that is about to be STORED rather than the
 // parsed body, so what is validated and what is persisted cannot diverge.
+//
+// A PUT that sends back a stored snap_name longer than the 24-character budget
+// is refused like any other, although the scheduler still runs such a row by
+// cutting the prefix (internal/scheduler, scheduledSnapshotName). The cut is
+// there so rows written before the budget run again untouched; it is not a
+// second rule for new writes. A caller re-saving one is told the rule, rather
+// than having a value stored that no run will use as written.
 func validateSnapshotScheduleParams(action, resourceType string, params json.RawMessage) error {
 	if action != "snapshot" {
 		return nil
@@ -213,11 +231,11 @@ func validateSnapshotScheduleParams(action, resourceType string, params json.Raw
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid params: snap_name must be a string")
 	}
 	if sp.SnapName == "" {
-		// Absent is the common case and is not a mistake: executeSnapshot
-		// mints "auto-<timestamp>" instead, which is always a legal name.
+		// Absent is the common case and is not a mistake: the scheduler uses
+		// the prefix "auto" instead, which always makes a legal name.
 		return nil
 	}
-	return snapshotNameError(kind, sp.SnapName)
+	return snapshotRuleError(kind, proxmox.ValidateSnapshotNamePrefix(kind, sp.SnapName))
 }
 
 // Create handles POST /api/v1/clusters/:cluster_id/schedules.
