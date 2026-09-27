@@ -53,6 +53,7 @@ import {
   MonitorCog,
   Plus,
   Upload,
+  Usb,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -271,6 +272,13 @@ const CLUSTER_PAGES: PageEntry[] = [
     description: "Resource pools",
     icon: <Layers className="h-4 w-4" />,
     clusterPath: "/clusters/{id}?tab=pools",
+  },
+  {
+    keywords: ["mapping", "resource mapping", "usb", "passthrough", "device"],
+    label: "Resource Mappings",
+    description: "USB device mappings",
+    icon: <Usb className="h-4 w-4" />,
+    clusterPath: "/clusters/{id}?tab=mappings",
   },
   {
     keywords: ["replication", "zfs", "sync", "replicate"],

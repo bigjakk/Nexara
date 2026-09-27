@@ -268,8 +268,9 @@ for three minutes is closed without an answer.
 
 ## Rate Limits
 
-All limiters key on the client IP (`c.IP()` — see `TRUSTED_PROXIES` before
-deploying behind a reverse proxy) and return `429`. Note these responses come
+Every limiter returns `429`, and all but one key on the client IP (`c.IP()` —
+see `TRUSTED_PROXIES` before deploying behind a reverse proxy); the USB
+mapping usage limiter keys on the signed-in user. Note these responses come
 from the limiter middleware, not the API error handler: the body is the plain
 text `Too Many Requests` (`Content-Type: text/plain`), not the JSON error
 envelope documented above.
@@ -281,6 +282,7 @@ envelope documented above.
 | WS token | 60/min | `/auth/ws-token` |
 | Snapshot resync | 30/min | `/clusters/:id/guest-snapshots/resync` |
 | Cluster create | 10/min | `POST /clusters` — in bootstrap mode each call spends a Proxmox login attempt |
+| USB mapping usage | 10/min per user | `GET /clusters/:id/usb-mappings/:mapping_id/usage` — each call reads the configuration of every VM in the cluster. The handler also runs at most two checks at once per cluster and one per user, where a newer check replaces the older one, which answers `409`. It answers `429`, with the JSON error envelope, when the cluster has no room, when the older check has not stopped within two seconds, or when another of the user's own checks took the slot first |
 | General | `RATE_LIMIT_MAX` per `RATE_LIMIT_EXPIRATION` (default 600/min) | Everything whose path does not start with `/api/v1/auth/` or `/ws` — `/healthz` included |
 
 The general limiter's exemption is by path prefix, not by coverage: the auth
@@ -581,7 +583,11 @@ leaves provenance intact.
 | GET | `/clusters/:id/config` | Get cluster config (Corosync) |
 | GET | `/clusters/:id/config/join` | Get cluster join info |
 | GET | `/clusters/:id/config/nodes` | List Corosync nodes |
+| GET | `/clusters/:id/usb-mappings` | List the cluster's USB resource mappings, each entry checked on its own node (`view:cluster`) |
 | POST | `/clusters/:id/usb-mappings` | Create a USB resource mapping for passthrough (`manage:cluster`; the token needs `Mapping.Modify`) |
+| PUT | `/clusters/:id/usb-mappings/:mapping_id` | Replace a USB mapping's entries and description; needs the listing's `digest`, 409 when any USB mapping changed since (`manage:cluster`) |
+| DELETE | `/clusters/:id/usb-mappings/:mapping_id` | Delete a USB mapping; succeeds when it is already gone; with `?digest=` from the listing, 409 when any USB mapping changed since (`manage:cluster`) |
+| GET | `/clusters/:id/usb-mappings/:mapping_id/usage` | Which VMs use a USB mapping, and which could not be checked (`view:vm`; limited per user and per cluster, see [Rate Limits](#rate-limits)) |
 
 ### Nodes
 

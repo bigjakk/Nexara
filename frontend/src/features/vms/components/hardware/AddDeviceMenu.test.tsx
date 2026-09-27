@@ -4,7 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
-import type { NodeUSBDevice, USBMapping } from "../../api/vm-queries";
+import type { NodeUSBDevice } from "../../api/vm-queries";
+import type { USBMapping } from "@/features/mappings/api/mapping-queries";
 import type { VMConfig } from "../../types/vm";
 import { AddDeviceMenu } from "./AddDeviceMenu";
 

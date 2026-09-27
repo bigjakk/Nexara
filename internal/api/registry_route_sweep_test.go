@@ -833,6 +833,12 @@ var sweepValueOverrides = map[string]any{
 	// caller-chosen one — a fixed suffix, not something a Format/Pattern can
 	// state since the host in front of it varies per deployment.
 	"redirect_uri": "https://example.com/api/v1/auth/oidc/callback",
+	// Not a handler rule like the rest: registry_mappings.go's USB device id
+	// pattern, ^[0-9A-Fa-f]{4}:[0-9A-Fa-f]{4}$, which nothing in
+	// stringCandidatePool satisfies, so POST .../usb-mappings was skipped on
+	// both variants. A made-up vendor:product id, like the route's own
+	// examples.
+	"device_id": "1234:5678",
 }
 
 // sweepEndpointOverride is the route-scoped counterpart to

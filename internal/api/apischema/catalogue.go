@@ -287,8 +287,9 @@ func formatRules() []RuleDoc {
 			UpstreamRule: `^[a-z][a-z0-9_-]+\z (case-insensitive) — a letter then ONE OR MORE, so minimum 2 and no maximum`,
 			Divergence: "STRICTER in the ceiling only, and the ceiling is now the ADDRESSING rule's rather " +
 				"than an invented one. PVE imposes no maximum. This one is 128 because that is " +
-				"pve-configid-existing's MaxLength at both its declaration sites (snapshotNameParam in " +
-				"registry_vms.go, haConfigIDParam in registry_ha.go), and the create rule has to stay a " +
+				"pve-configid-existing's MaxLength at all three of its declaration sites (snapshotNameParam in " +
+				"registry_vms.go, haConfigIDParam in registry_ha.go, usbMappingIDParam in " +
+				"registry_mappings.go), and the create rule has to stay a " +
 				"SUBSET of the rule that addresses what it created — a create rule that admits a name the " +
 				"delete route's MaxLength then refuses produces an object this API cannot remove, which is " +
 				"the same failure ceph-pool-name records. It was 40, which refused ids PVE accepts for no " +

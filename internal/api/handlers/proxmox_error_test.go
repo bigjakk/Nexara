@@ -623,6 +623,8 @@ func TestMissingObjectPhraseSets_RejectEachOthersNegatives(t *testing.T) {
 		"staleDigestPhrases": staleDigestPhrases,
 		// Also 409, for a taken USB mapping id.
 		"usbMappingTakenPhrases": usbMappingTakenPhrases,
+		// 404, for a USB mapping update whose mapping is gone.
+		"usbMappingMissingPhrases": usbMappingMissingPhrases,
 	}
 	// ownedBy names the set a fixture is a legitimate positive for, so the
 	// matrix can carry one set's die as every other set's negative without the
@@ -649,6 +651,9 @@ func TestMissingObjectPhraseSets_RejectEachOthersNegatives(t *testing.T) {
 		// SectionConfig lookup's *other* branch: a defined but unknown type is
 		// a real config problem, not a missing id.
 		{"unknown section type 'influxdb'", ""},
+		// The USB mapping update's other die, on the same PUT: the lock on
+		// usb.cfg timing out is a cluster failure, not a missing mapping.
+		{"update hardware mapping failed: can't lock file '/var/lock/pve-manager/pve-mapping-usb.lck' - got timeout", ""},
 	}
 
 	for name, phrases := range sets {
@@ -792,6 +797,8 @@ func TestMissingObjectPhrasesAreLowercase(t *testing.T) {
 		"staleDigestPhrases": staleDigestPhrases,
 		// Also 409, for a taken USB mapping id.
 		"usbMappingTakenPhrases": usbMappingTakenPhrases,
+		// 404, for a USB mapping update whose mapping is gone.
+		"usbMappingMissingPhrases": usbMappingMissingPhrases,
 	}
 	for name, phrases := range sets {
 		if len(phrases) == 0 {

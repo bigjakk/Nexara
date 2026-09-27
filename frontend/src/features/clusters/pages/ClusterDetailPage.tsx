@@ -35,6 +35,7 @@ import { ClusterGuestToolsTab } from "@/features/guest-tools/components/ClusterG
 import { ClusterOptionsTab } from "../components/ClusterOptionsTab";
 import { ClusterHATab } from "../components/ClusterHATab";
 import { ClusterPoolsTab } from "../components/ClusterPoolsTab";
+import { ClusterResourceMappingsTab } from "../components/ClusterResourceMappingsTab";
 import { ClusterAccessTab } from "../components/ClusterAccessTab";
 import { ClusterReplicationTab } from "../components/ClusterReplicationTab";
 import { ClusterACMETab } from "../components/ClusterACMETab";
@@ -157,6 +158,7 @@ export function ClusterDetailPage() {
               <TabsTrigger value="options">Options</TabsTrigger>
               <TabsTrigger value="ha">HA</TabsTrigger>
               <TabsTrigger value="pools">Pools</TabsTrigger>
+              <TabsTrigger value="mappings">Resource Mappings</TabsTrigger>
               <TabsTrigger value="access">Access Control</TabsTrigger>
               <TabsTrigger value="replication">Replication</TabsTrigger>
               <TabsTrigger value="ceph">Ceph</TabsTrigger>
@@ -321,6 +323,10 @@ export function ClusterDetailPage() {
 
             <TabsContent value="pools">
               <ClusterPoolsTab clusterId={clusterId ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="mappings">
+              <ClusterResourceMappingsTab clusterId={clusterId ?? ""} />
             </TabsContent>
 
             <TabsContent value="access">

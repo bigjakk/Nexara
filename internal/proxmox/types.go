@@ -1241,12 +1241,20 @@ type NodeUSBDevice struct {
 // USBMapping is one entry of GET /cluster/mapping/usb.
 //
 // Map holds the per-node entries verbatim, as Proxmox stores them:
-// "node=<n>,id=<vendor:product>[,path=<bus-port>][,description=<text>]".
+// node=<n>, id=<vendor:product>, and optionally path=<bus-port> and
+// description=<text>, comma-separated in any order.
+//
+// Digest is the digest of the WHOLE usb.cfg, not of this mapping: the listing
+// sets every entry's to the file's ($entry->{digest} = $cfg->{digest}, index in
+// pve-manager PVE/API2/Cluster/Mapping/USB.pm). It is what an update sends
+// back as its compare-and-swap, so a change to ANY USB mapping since the read
+// makes it conflict.
 type USBMapping struct {
 	ID          string         `json:"id"`
 	Description string         `json:"description"`
 	Map         []string       `json:"map"`
 	Errors      []MappingCheck `json:"errors"`
+	Digest      string         `json:"digest"`
 }
 
 // MappingCheck is one problem Proxmox reports for a mapping when its listing

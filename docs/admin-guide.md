@@ -576,11 +576,27 @@ For a host device or port, Nexara reuses the mapping that already passes exactly
 Two things work differently from passing a device straight through in Proxmox:
 
 - **A mapped device must be present when the VM starts.** Proxmox checks the mapping at start and refuses to start the VM if the device is missing or, for a port mapping, if a different device is on the port. A direct passthrough starts without the device.
-- **Nexara maps the device on one node.** It creates the entry for the VM's current node. For the VM to start on another node, add that node's device to the mapping in Proxmox.
+- **Nexara maps the device on one node.** It creates the entry for the VM's current node. For the VM to start on another node, give the mapping an entry for that node (see [Managing mappings](#managing-mappings)).
 
 A USB device passed through directly in Proxmox (`host=…`) is listed in the Hardware tab under its device name, and the row says that only `root@pam` can remove it: Proxmox refuses the change to anyone else. Remove it in Proxmox, then add the device again here if you want Nexara to manage it.
 
-You extend and delete mappings in Proxmox; Nexara does not change a mapping once it has created it.
+### Managing mappings
+
+A cluster's **Resource Mappings** tab lists its USB mappings with each node entry: the node, the device's vendor:product ID, and the port, or *Any port* for a mapping that follows the device. Every entry shows what Proxmox reports when it checks the mapping **on that node**: *OK*, the problem (the device is missing, or a different device is on the port), or *Not checked* with the reason — the node is offline or not a node of this cluster, it did not answer in time, the mappings changed while they were being checked, or Nexara could not read the cluster's node list (it then checks no node rather than guess which names are real). A node that was not checked is never shown as OK. Proxmox lists only the mappings the cluster's API token may see.
+
+With `manage:cluster` (and `Mapping.Modify` on the cluster's token, as for creating one), the tab offers:
+
+- **New mapping** — a name, a description, and a first entry: a node and a device on it, by ID or by port.
+- **Add node** — an entry for a node that has none, so a VM using the mapping can start there. When the node has the same device as the mapping's other entries, it is picked for you.
+- **Replace device** — point an entry at different hardware on the same node, after a device was swapped or moved to another port.
+- **Remove** — drop one node's entry. VMs using the mapping will not start on that node until it has an entry again. Removing a mapping's last entry deletes the mapping.
+- **Edit description**, and **Delete**.
+
+A mapping has at most one entry per node. Proxmox itself would store two, but it then refuses to start any VM using the mapping on that node, so the tab flags such a mapping, and until the extra entry is removed Nexara saves no other change to it. Nexara also writes device IDs in lowercase, which is how Proxmox compares them when a VM starts: a mapping made elsewhere with an uppercase ID is repaired the next time Nexara saves it — any change will do, or **Replace device** with the same device.
+
+**Delete checks which VMs use the mapping first.** Proxmox deletes a mapping without looking, and a VM that still uses it will not start until a mapping of that name exists again. So the delete confirmation lists the VMs whose configuration names the mapping, read live from each VM, and any VM it could not read — on a node that is offline, or that did not answer in time — which may use it too. The check needs `view:vm`, and it has limits worth knowing: it reads each VM's current configuration (pending changes included) but not its snapshots, so rolling a VM back to a snapshot taken while it used the mapping brings back its reference to the mapping; and it sees only the VMs the cluster's API token can see. The delete is on offer once the check has answered, and still is when it could not be done, with a warning. Each check reads every VM in the cluster, so it is limited to 10 a minute per user, one running at once per user and two per cluster; a check over a limit fails and says so. A user's newer check replaces their older one, so two windows — or a script — signed in as the same Nexara user can cancel each other's checks.
+
+**A save can conflict.** Every change — deletes included — is checked against the mappings as the tab showed them. If anything changed in the meantime — in Proxmox or in another Nexara window — nothing is saved or deleted: the tab reloads the mappings and you check and try again. For a delete, Nexara makes that check itself just before asking Proxmox, whose delete has no such check: a delete confirmed as removing a mapping's only entry is refused if an entry was added since the tab loaded, though not one added in the instant between that check and the delete. Proxmox keeps all USB mappings in one file and checks the whole file, so a change to a *different* USB mapping also makes a save conflict.
 
 **Who can attach a mapping.** Nexara reaches Proxmox with one API token, which can use every mapping in the cluster, so Nexara's own permission is the only gate: anyone who can manage a VM (`manage:vm`) can attach any existing mapping to any VM in that cluster: a USB device, a PCI device (through the API), or a VirtioFS directory. Proxmox checks `Mapping.Use` on each mapping for a user signed in to it; Nexara has no per-mapping permission, just as `manage:storage` covers every storage. Bear it in mind before giving a custom role `manage:vm`.
 

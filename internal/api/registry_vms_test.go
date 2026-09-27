@@ -398,7 +398,7 @@ var routesOutsideTheClusterCheckShape = func() map[string]string {
 // later migration adding its own routes cannot make this number drift
 // without saying so: a single total would be a number anyone could raise
 // to make the test pass again.
-const vmRouteCount = 35
+const vmRouteCount = 39
 
 // registryDomainRouteCounts names every migrated domain and how many
 // routes it declares, keyed by the function that declares them.
@@ -534,7 +534,7 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	reg := NewRegistry()
 	s := newRouteStubServer(t)
 
-	registerVMEndpoints(reg, s.vmHandler)
+	registerVMEndpoints(reg, s.vmHandler, s.usbMappingUsageLimiter())
 	declared["registerVMEndpoints"] = reg.Len()
 
 	before := reg.Len()

@@ -1188,68 +1188,6 @@ export function useNodeUSBDevices(clusterId: string, nodeName: string) {
   });
 }
 
-/**
- * A Proxmox USB resource mapping, as GET …/nodes/:node/usb-mappings lists it.
- *
- * `map` holds the per-node entries verbatim ("node=…,id=…[,path=…]"; see
- * parseUSBMappingEntry). `errors` is Proxmox's check of the mapping against
- * the node the listing was read for: a warning when the mapping has no entry
- * for it, an error when its entry names hardware the node does not have.
- */
-export interface USBMapping {
-  id: string;
-  description: string;
-  map: string[];
-  errors: MappingCheck[];
-}
-
-export interface MappingCheck {
-  severity: string;
-  message: string;
-}
-
-export function useNodeUSBMappings(clusterId: string, nodeName: string) {
-  return useQuery({
-    queryKey: ["clusters", clusterId, "usb-mappings", nodeName],
-    queryFn: () =>
-      apiClient.list<USBMapping>(
-        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/usb-mappings`,
-      ),
-    enabled: clusterId.length > 0 && nodeName.length > 0,
-    staleTime: 30_000,
-  });
-}
-
-export interface CreateUSBMappingRequest {
-  mapping_id: string;
-  node: string;
-  device_id: string;
-  path?: string;
-  description?: string;
-}
-
-export function useCreateUSBMapping(clusterId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: CreateUSBMappingRequest) =>
-      apiClient.post(apiPath`/api/v1/clusters/${clusterId}/usb-mappings`, data),
-    // Returned, not voided: the Add USB Device dialog stages mapping=<id>
-    // only once this resolves, so the listing already holds the new mapping
-    // when the dialog closes and the next add reuses it instead of trying to
-    // create it again. A failed re-read does not reject, so it never turns a
-    // created mapping into an error. On settle rather than on success: a 409
-    // means the listing is stale — someone created that mapping meanwhile —
-    // and re-reading it is what lets the dialog offer it for reuse.
-    onSettled: () =>
-      qc.invalidateQueries({
-        queryKey: ["clusters", clusterId, "usb-mappings"],
-      }),
-    // The dialog renders the failure inline, next to the name it concerns;
-    // having an onError is what keeps the app-wide toast from repeating it.
-    onError: () => undefined,
-  });
-}
-
 export function useNodePCIDevices(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "hardware", "pci"],

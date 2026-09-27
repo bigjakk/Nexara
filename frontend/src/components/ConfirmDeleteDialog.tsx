@@ -29,6 +29,11 @@ interface ConfirmDeleteDialogProps<T> {
   description: (target: T) => ReactNode;
   confirmLabel?: string;
   /**
+   * Holds the confirm button shut, for a description that is still being
+   * read — what the delete would affect, say. Cancel stays available.
+   */
+  confirmDisabled?: boolean;
+  /**
    * Runs as the dialog closes, before focus goes back to the element that
    * opened it. A caller whose opener cannot take focus by then (its button is
    * disabled while the delete is in flight) calls preventDefault() and
@@ -60,6 +65,7 @@ export function ConfirmDeleteDialog<T>({
   title,
   description,
   confirmLabel = "Delete",
+  confirmDisabled = false,
   onCloseAutoFocus,
 }: ConfirmDeleteDialogProps<T>) {
   // Radix keeps the content mounted while the close animation plays, after
@@ -117,6 +123,7 @@ export function ConfirmDeleteDialog<T>({
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                disabled={confirmDisabled}
                 onClick={() => {
                   // Only an open dialog confirms: the closing content is
                   // still clickable for the length of its animation. The

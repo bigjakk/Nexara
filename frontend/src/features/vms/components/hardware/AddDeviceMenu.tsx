@@ -48,19 +48,25 @@ import {
   buildEFIDisk,
   buildTPMState,
   buildNet,
-  findReusableUSBMapping,
-  MAPPING_ID_PATTERN,
-  cleanDeviceText,
-  suggestMappingName,
-  usbMappingEntryFor,
 } from "../../lib/vm-config-parsers";
+import type { NodeUSBDevice, NodePCIDevice } from "../../api/vm-queries";
 import {
   useCreateUSBMapping,
   useNodeUSBMappings,
-  type NodeUSBDevice,
-  type NodePCIDevice,
   type USBMapping,
-} from "../../api/vm-queries";
+} from "@/features/mappings/api/mapping-queries";
+import {
+  cleanDeviceText,
+  findReusableUSBMapping,
+  MAPPING_ID_PATTERN,
+  passthroughCandidates,
+  pickedUSBDevice,
+  suggestMappingName,
+  USB_DEVICE_ID_HINT,
+  USB_DEVICE_ID_PATTERN,
+} from "@/features/mappings/lib/usb-mapping";
+import { USBDevicePicker } from "@/features/mappings/components/USBDevicePicker";
+import { MappingCheckList } from "@/features/mappings/components/MappingCheckList";
 import type { VMConfig } from "../../types/vm";
 import { usePermissions } from "@/hooks/usePermissions";
 import { describeError } from "@/lib/api-error";
@@ -515,33 +521,6 @@ const usbModes: ReadonlyArray<{ value: USBMode; label: string; hint: string }> =
     },
   ];
 
-const USB_DEVICE_ID_PATTERN = /^[0-9A-Fa-f]{4}:[0-9A-Fa-f]{4}$/;
-
-const usbDeviceId = (d: NodeUSBDevice) => `${d.vendid}:${d.prodid}`;
-const usbPortPath = (d: NodeUSBDevice) => `${String(d.busnum)}-${d.usbpath}`;
-
-/**
- * The devices a passthrough picker offers, filtered as Proxmox's USBSelector
- * (pve-manager www/manager6/form/USBSelector.js) filters them: no root hub
- * (it has no usbpath), nothing without a product id, and no hub (class 9).
- */
-function passthroughCandidates(
-  devices: NodeUSBDevice[] | undefined,
-): NodeUSBDevice[] {
-  return (devices ?? []).filter(
-    (d) => d.usbpath !== "" && d.prodid !== "" && d.class !== 9,
-  );
-}
-
-/** The device's own name, cleaned — it is the device's to say — or its id. */
-function deviceLabel(d: NodeUSBDevice | undefined, id: string): string {
-  return (
-    cleanDeviceText(d?.product ?? "") ||
-    cleanDeviceText(d?.manufacturer ?? "") ||
-    `USB ${id}`
-  );
-}
-
 function mappingOptionLabel(m: USBMapping): string {
   const description = cleanDeviceText(m.description);
   let label = description ? `${m.id} — ${description}` : m.id;
@@ -598,25 +577,10 @@ function AddUSBDialog({
   const isHostMode = mode === "device" || mode === "port";
 
   // What a host pick passes through: a device id and, for a port, its path.
-  // A typed id is lowercased to match the node's sysfs, which is what
-  // Proxmox compares a mapping's id against when the VM starts.
-  let picked: { deviceId: string; path: string; label: string } | null = null;
-  if (mode === "device" && USB_DEVICE_ID_PATTERN.test(deviceId)) {
-    const id = deviceId.toLowerCase();
-    const d = candidates.find((c) => usbDeviceId(c) === id);
-    picked = { deviceId: id, path: "", label: deviceLabel(d, id) };
-  } else if (mode === "port") {
-    // Proxmox's own mapping editor refuses an empty port the same way: the
-    // mapping needs the id of the device on it (window/USBMapEdit.js).
-    const d = candidates.find((c) => usbPortPath(c) === port);
-    if (d) {
-      picked = {
-        deviceId: usbDeviceId(d),
-        path: port,
-        label: deviceLabel(d, usbDeviceId(d)),
-      };
-    }
-  }
+  const picked =
+    mode === "device" || mode === "port"
+      ? pickedUSBDevice(mode, deviceId, port, candidates)
+      : null;
 
   // Reuse and the taken-name check both read the listing, so a host pick
   // waits for it: deciding on a listing still loading, or one that failed,
@@ -645,7 +609,7 @@ function AddUSBDialog({
     !hasDeviceList &&
     deviceId !== "" &&
     !USB_DEVICE_ID_PATTERN.test(deviceId)
-      ? "Enter vendor:product as four hex digits each, without 0x (e.g. 1234:5678)."
+      ? USB_DEVICE_ID_HINT
       : "";
 
   const selectedMapping = mappings.find((m) => m.id === mappingId);
@@ -794,40 +758,18 @@ function AddUSBDialog({
               <Label htmlFor="add-usb-device" className="text-xs">
                 Device
               </Label>
-              {hasDeviceList ? (
-                <select
-                  id="add-usb-device"
-                  className={selectClass}
-                  value={deviceId}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setDeviceId(e.target.value);
-                    clearCreateError();
-                  }}
-                >
-                  <option value="">Select a device...</option>
-                  {candidates.map((d) => (
-                    <option
-                      key={`${usbDeviceId(d)}-${String(d.busnum)}-${String(d.devnum)}`}
-                      value={usbDeviceId(d)}
-                    >
-                      {deviceLabel(d, usbDeviceId(d))} ({usbDeviceId(d)})
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <Input
-                  id="add-usb-device"
-                  value={deviceId}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setDeviceId(e.target.value.trim());
-                    clearCreateError();
-                  }}
-                  placeholder="vendor:product (e.g. 1234:5678)"
-                  aria-invalid={typedIdError !== ""}
-                />
-              )}
+              <USBDevicePicker
+                id="add-usb-device"
+                mode="device"
+                devices={devices}
+                value={deviceId}
+                disabled={busy}
+                onChange={(value) => {
+                  setDeviceId(value);
+                  clearCreateError();
+                }}
+                invalid={typedIdError !== ""}
+              />
               {typedIdError && (
                 <p className="text-xs text-destructive">{typedIdError}</p>
               )}
@@ -839,31 +781,17 @@ function AddUSBDialog({
               <Label htmlFor="add-usb-port" className="text-xs">
                 Port
               </Label>
-              {hasDeviceList ? (
-                <select
-                  id="add-usb-port"
-                  className={selectClass}
-                  value={port}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setPort(e.target.value);
-                    clearCreateError();
-                  }}
-                >
-                  <option value="">Select a port...</option>
-                  {candidates.map((d) => (
-                    <option key={usbPortPath(d)} value={usbPortPath(d)}>
-                      {deviceLabel(d, usbDeviceId(d))} ({usbPortPath(d)})
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {devices === undefined
-                    ? "The node's USB devices are not available: still loading, or they could not be read."
-                    : "The node lists no USB device on a port that can be passed through."}
-                </p>
-              )}
+              <USBDevicePicker
+                id="add-usb-port"
+                mode="port"
+                devices={devices}
+                value={port}
+                disabled={busy}
+                onChange={(value) => {
+                  setPort(value);
+                  clearCreateError();
+                }}
+              />
             </div>
           )}
 
@@ -981,45 +909,6 @@ function AddUSBDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/**
- * What Proxmox reported for a mapping against the VM's node, or, when it
- * reported nothing, what the mapping passes through there.
- */
-function MappingCheckList({
-  mapping,
-  node,
-}: {
-  mapping: USBMapping;
-  node: string;
-}) {
-  if (mapping.errors.length === 0) {
-    const entry = usbMappingEntryFor(mapping.map, node);
-    if (!entry) return null;
-    return (
-      <p className="text-xs text-muted-foreground">
-        On {node}: {entry.id}
-        {entry.path ? ` on port ${entry.path}` : ""}
-      </p>
-    );
-  }
-  return (
-    <ul className="space-y-0.5">
-      {mapping.errors.map((e) => (
-        <li
-          key={`${e.severity}:${e.message}`}
-          className={
-            e.severity === "error"
-              ? "text-xs text-destructive"
-              : "text-xs text-amber-700 dark:text-amber-400"
-          }
-        >
-          {e.message}
-        </li>
-      ))}
-    </ul>
   );
 }
 

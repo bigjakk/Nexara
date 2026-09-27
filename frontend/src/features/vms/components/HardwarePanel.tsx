@@ -83,7 +83,6 @@ import {
   buildBootOrder,
   parseUSB,
   isRawUSBPassthrough,
-  cleanDeviceText,
   parsePCI,
   parseRNG,
   parseVirtioFS,
@@ -97,6 +96,7 @@ import {
   buildSMBIOS,
   SMBIOS_TEXT_FIELDS,
 } from "../lib/vm-config-parsers";
+import { cleanDeviceText } from "@/features/mappings/lib/usb-mapping";
 import type {
   CPUFlagState,
   ParsedNet,
