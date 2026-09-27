@@ -19,8 +19,9 @@ import (
 //
 // The PVE die strings behind each entry are cited on the phrase-set var next to
 // each mapper: haRuleMissingPhrases in ha.go, metricServerMissingPhrases in
-// metric_servers.go, firewallRuleMissingPhrases in networks.go, and
-// staleDigestPhrases in acme.go.
+// metric_servers.go, firewallRuleMissingPhrases in networks.go,
+// staleDigestPhrases in acme.go, and usbMappingTakenPhrases in
+// resource_mappings.go.
 //
 // BE CLEAR ABOUT WHAT THIS DOES NOT CATCH. It checks that the mapper is called
 // somewhere in the same function, not that it is called on the right error; it
@@ -60,6 +61,9 @@ var dieStringMappers = map[string]string{
 	"DeleteVMFirewallRule":      "mapFirewallRuleError",
 	"UpdateSecurityGroupRule":   "mapFirewallRuleError",
 	"DeleteSecurityGroupRule":   "mapFirewallRuleError",
+
+	// 409, like SetNodeACMEConfig: a taken mapping id dies as a plain 500.
+	"CreateUSBMapping": "mapUSBMappingCreateError",
 }
 
 func TestGuard_DieStringEndpointsMapPastThe502(t *testing.T) {

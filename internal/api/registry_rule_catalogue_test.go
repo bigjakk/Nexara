@@ -616,7 +616,7 @@ func declaredRuleSites(t *testing.T) []ruleSite {
 // or parameter rename, which a list of sites does not. It is not expected to
 // move at all in ordinary work.
 var baseRuleSiteCounts = map[string]int{
-	"pve-configid": 5,
+	"pve-configid": 6,
 }
 
 // TestGuard_ExistingRuleSitesAcceptWhatTheCreateRuleMints closes the half of

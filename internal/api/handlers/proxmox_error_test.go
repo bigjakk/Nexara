@@ -621,6 +621,8 @@ func TestMissingObjectPhraseSets_RejectEachOthersNegatives(t *testing.T) {
 		// Answers 409 rather than 404, but it reaches the same scan through
 		// mapProxmoxDieError and so has the same two ways to be wrong.
 		"staleDigestPhrases": staleDigestPhrases,
+		// Also 409, for a taken USB mapping id.
+		"usbMappingTakenPhrases": usbMappingTakenPhrases,
 	}
 	// ownedBy names the set a fixture is a legitimate positive for, so the
 	// matrix can carry one set's die as every other set's negative without the
@@ -788,6 +790,8 @@ func TestMissingObjectPhrasesAreLowercase(t *testing.T) {
 		// Answers 409 rather than 404, but it reaches the same scan through
 		// mapProxmoxDieError and so has the same two ways to be wrong.
 		"staleDigestPhrases": staleDigestPhrases,
+		// Also 409, for a taken USB mapping id.
+		"usbMappingTakenPhrases": usbMappingTakenPhrases,
 	}
 	for name, phrases := range sets {
 		if len(phrases) == 0 {

@@ -581,6 +581,7 @@ leaves provenance intact.
 | GET | `/clusters/:id/config` | Get cluster config (Corosync) |
 | GET | `/clusters/:id/config/join` | Get cluster join info |
 | GET | `/clusters/:id/config/nodes` | List Corosync nodes |
+| POST | `/clusters/:id/usb-mappings` | Create a USB resource mapping for passthrough (`manage:cluster`; the token needs `Mapping.Modify`) |
 
 ### Nodes
 
@@ -595,6 +596,7 @@ leaves provenance intact.
 | GET | `/clusters/:id/nodes/:node/bridges` | List network bridges |
 | GET | `/clusters/:id/nodes/:node/hardware/usb` | List USB devices |
 | GET | `/clusters/:id/nodes/:node/hardware/pci` | List PCI devices |
+| GET | `/clusters/:id/nodes/:node/usb-mappings` | List the cluster's USB resource mappings, each checked against this node |
 | GET | `/clusters/:id/nodes/:node/machine-types` | List available machine types |
 | GET | `/clusters/:id/nodes/:node/cpu-models` | List available CPU models |
 | GET | `/clusters/:id/nodes/:node/cpu-flags` | List available VM CPU flags, with the nodes supporting each |

@@ -623,29 +623,193 @@ export function parseDisk(raw: string): ParsedDisk {
 // USB passthrough
 // ---------------------------------------------------------------------------
 
+/*
+ * qemu-server's $usb_fmt (src/PVE/QemuServer/USB.pm), transcribed: `host` is
+ * the default_key, so a segment with no "=" is the host — a vendor:product id,
+ * a <bus>-<port> path, or "spice" in any case; `mapping` names a cluster
+ * resource mapping instead of a host; `usb3` is a boolean. A usbN carries a
+ * host or a mapping, never both.
+ *
+ * Only a mapping or spice can be written through an API token: qemu-server's
+ * check_usb_perm (src/PVE/API2/Qemu.pm) lets nobody but root@pam set, change
+ * or remove a usbN whose host is a real device. isRawUSBPassthrough names
+ * those, so the panel can say so instead of offering a Remove that must fail.
+ */
 export interface ParsedUSB {
   host: string;
+  mapping: string;
   usb3: boolean;
   spice: boolean;
 }
 
 export function parseUSB(raw: string): ParsedUSB {
-  if (!raw) return { host: "", usb3: false, spice: false };
-  if (raw === "spice") return { host: "", usb3: false, spice: true };
-  const kv = parseKVString(raw);
-  return {
-    host: kv.get("host") ?? "",
-    usb3: kv.get("usb3") === "1",
+  const parsed: ParsedUSB = {
+    host: "",
+    mapping: "",
+    usb3: false,
     spice: false,
   };
+  for (const s of splitSegments(raw)) {
+    if (s.key === null || s.key === "host") parsed.host = s.value;
+    else if (s.key === "mapping") parsed.mapping = s.value;
+    else if (s.key === "usb3") parsed.usb3 = pveBoolean(s.value);
+  }
+  if (/^spice$/i.test(parsed.host)) {
+    parsed.host = "";
+    parsed.spice = true;
+  }
+  return parsed;
 }
 
+/**
+ * Writes spice, a mapping or a host — in that order of precedence, since a
+ * usbN holds one — with usb3=1 after it when set. usb3 is kept for spice too:
+ * qemu-server puts a spice redirection on the xHCI bus when it is set.
+ */
 export function buildUSB(parsed: ParsedUSB): string {
-  if (parsed.spice) return "spice";
   const parts: string[] = [];
-  if (parsed.host) parts.push(`host=${parsed.host}`);
+  if (parsed.spice) parts.push("spice");
+  else if (parsed.mapping) parts.push(`mapping=${parsed.mapping}`);
+  else if (parsed.host) parts.push(`host=${parsed.host}`);
   if (parsed.usb3) parts.push("usb3=1");
   return parts.join(",");
+}
+
+/** A real host device, which only root@pam may set, change or remove. */
+export function isRawUSBPassthrough(parsed: ParsedUSB): boolean {
+  return !parsed.spice && parsed.mapping === "" && parsed.host !== "";
+}
+
+/**
+ * One node entry of a USB mapping's `map`, in pve-guest-common's $map_fmt
+ * (src/PVE/Mapping/USB.pm): `id` is the vendor:product id, and `path`, when
+ * present, is the port the mapping passes through instead.
+ */
+export interface USBMappingEntry {
+  node: string;
+  id: string;
+  path: string;
+}
+
+export function parseUSBMappingEntry(raw: string): USBMappingEntry {
+  const entry: USBMappingEntry = { node: "", id: "", path: "" };
+  for (const s of splitSegments(raw)) {
+    if (s.key === "node") entry.node = s.value;
+    else if (s.key === "id") entry.id = s.value;
+    else if (s.key === "path") entry.path = s.value;
+  }
+  return entry;
+}
+
+/**
+ * The entry a mapping has for `node`. A VM can use only one: qemu-server
+ * refuses the start with "More than one USB mapping per host not supported"
+ * (parse_usb_device, src/PVE/QemuServer/USB.pm), though the create API would
+ * store more.
+ */
+export function usbMappingEntryFor(
+  map: readonly string[],
+  node: string,
+): USBMappingEntry | undefined {
+  return map.map(parseUSBMappingEntry).find((e) => e.node === node);
+}
+
+/**
+ * The mapping whose entry for `node` passes exactly this device: the same id
+ * and the same port, or no port for a pick by id. Adding a device again then
+ * reuses its mapping rather than minting a second one for the same hardware.
+ *
+ * The stored id must match the lowercase one EXACTLY. Proxmox's start-time
+ * check compares it with `ne` against the node's lowercase sysfs hex
+ * (assert_valid, pve-guest-common src/PVE/Mapping/USB.pm), so a mapping made
+ * elsewhere as "ABCD:EF01" refuses to start every VM that uses it. And the
+ * mapping must have exactly ONE entry for the node: qemu-server refuses the
+ * start of any VM using one with more ("More than one USB mapping per host
+ * not supported", parse_usb_device), whatever the listing's check says.
+ *
+ * A mapping Proxmox reports an error for is still reused. With the id exact,
+ * the error can only say the device is not there now — and a new mapping for
+ * the same device would say the same, so skipping it would only mint
+ * duplicates. The dialog shows the check next to the reuse instead.
+ */
+export function findReusableUSBMapping<M extends { map: readonly string[] }>(
+  mappings: readonly M[],
+  node: string,
+  deviceId: string,
+  path: string,
+): M | undefined {
+  const id = deviceId.toLowerCase();
+  return mappings.find((m) => {
+    const entries = m.map
+      .map(parseUSBMappingEntry)
+      .filter((e) => e.node === node);
+    const [e] = entries;
+    return (
+      entries.length === 1 && e !== undefined && e.id === id && e.path === path
+    );
+  });
+}
+
+/**
+ * Text a device reported about itself, made safe to show and to store. A USB
+ * device supplies its own product and manufacturer strings, so they can carry
+ * anything: control characters (a carriage return makes Proxmox refuse a
+ * mapping description outright, "property contains a line feed") and bidi
+ * controls that reorder what is printed around them. Each becomes a space, and
+ * runs of space collapse to one. Descriptions read back from Proxmox get the
+ * same treatment before they are shown, since anyone who can edit a mapping
+ * there can set one.
+ */
+export function cleanDeviceText(text: string): string {
+  const cleaned = Array.from(text, (ch) => {
+    const cp = ch.codePointAt(0) ?? 0;
+    const control = cp < 0x20 || (cp >= 0x7f && cp <= 0x9f);
+    const bidi =
+      (cp >= 0x202a && cp <= 0x202e) ||
+      (cp >= 0x2066 && cp <= 0x2069) ||
+      cp === 0x200e ||
+      cp === 0x200f ||
+      cp === 0x061c;
+    return control || bidi ? " " : ch;
+  }).join("");
+  return cleaned.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * pve-configid as Nexara's route declares it (apischema catalogue): a letter,
+ * then letters, digits, "_" or "-", 2 to 128 characters in all.
+ */
+export const MAPPING_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{1,127}$/;
+
+/**
+ * A mapping name made from a device's label, e.g. "Example Serial Adapter" →
+ * "example-serial-adapter": lowercase, runs of anything else collapsed to
+ * one "-", starting with a letter, at most 32 characters — cut at the last
+ * word that fits rather than mid-word, unless that would keep under half —
+ * before a -2, -3, … suffix that steps past the names already `taken`
+ * (compared case-insensitively).
+ */
+export function suggestMappingName(
+  label: string,
+  taken: ReadonlySet<string>,
+): string {
+  let base = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (base !== "" && !/^[a-z]/.test(base)) base = `usb-${base}`;
+  if (base.length > 32) {
+    // The 33rd character decides: a "-" there means the first 32 end on a
+    // word; otherwise back up to the last "-" within them.
+    const boundary = base.slice(0, 33).lastIndexOf("-");
+    base = boundary >= 16 ? base.slice(0, boundary) : base.slice(0, 32);
+  }
+  base = base.replace(/-+$/, "");
+  if (base.length < 2) base = "usb-device";
+  const lowerTaken = new Set([...taken].map((t) => t.toLowerCase()));
+  let name = base;
+  for (let n = 2; lowerTaken.has(name); n++) name = `${base}-${String(n)}`;
+  return name;
 }
 
 // ---------------------------------------------------------------------------

@@ -1238,6 +1238,30 @@ type NodeUSBDevice struct {
 	Level        int        `json:"level"`
 }
 
+// USBMapping is one entry of GET /cluster/mapping/usb.
+//
+// Map holds the per-node entries verbatim, as Proxmox stores them:
+// "node=<n>,id=<vendor:product>[,path=<bus-port>][,description=<text>]".
+type USBMapping struct {
+	ID          string         `json:"id"`
+	Description string         `json:"description"`
+	Map         []string       `json:"map"`
+	Errors      []MappingCheck `json:"errors"`
+}
+
+// MappingCheck is one problem Proxmox reports for a mapping when its listing
+// is asked to check the mappings against a node (check-node).
+//
+// The field is "errors" because that is what the listing's code sets
+// (pve-manager PVE/API2/Cluster/Mapping/USB.pm, index); the endpoint's
+// declared return schema calls it "error", which nothing ever sends.
+type MappingCheck struct {
+	// Severity is "warning" (no entry for the node) or "error" (the entry
+	// names hardware the node does not have).
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+}
+
 // NodePCIDevice represents a PCI device from GET /nodes/{node}/hardware/pci.
 type NodePCIDevice struct {
 	ID              string `json:"id"`

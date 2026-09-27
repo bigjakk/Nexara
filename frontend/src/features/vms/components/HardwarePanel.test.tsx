@@ -935,3 +935,180 @@ describe("HardwarePanel dirty check", () => {
     ]);
   });
 });
+
+describe("HardwarePanel USB devices", () => {
+  const USB_URL = `/api/v1/clusters/${CLUSTER}/nodes/pve-01/hardware/usb`;
+  const MAPPINGS_URL = `/api/v1/clusters/${CLUSTER}/nodes/pve-01/usb-mappings`;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    // A raw port passthrough, set in Proxmox by root; a mapped device; and a
+    // SPICE port.
+    serverConfig = {
+      digest: "aabbccddeeff00112233445566778899aabbccdd",
+      cores: 2,
+      memory: 2048,
+      scsi0: "store01:vm-101-disk-0,size=32G",
+      usb0: "host=1-2",
+      usb1: "mapping=usbdev01,usb3=1",
+      usb2: "spice",
+    };
+    mockedGet.mockImplementation((path: string) =>
+      path === CONFIG_URL
+        ? Promise.resolve({ ...serverConfig })
+        : Promise.reject(new Error(`unexpected GET ${path}`)),
+    );
+    mockedList.mockImplementation((path: string) => {
+      if (path === STORAGE_URL) return Promise.resolve([imageStorage]);
+      if (path === USB_URL)
+        return Promise.resolve([
+          {
+            busnum: 1,
+            devnum: 3,
+            port: "2",
+            prodid: "5678",
+            vendid: "1234",
+            // The device names itself; the row shows it cleaned.
+            product: "Example Serial\u202e Adapter",
+            manufacturer: "Example Corp",
+            speed: "12",
+            class: 0,
+            usbpath: "2",
+            level: 1,
+          },
+        ]);
+      if (path === MAPPINGS_URL)
+        return Promise.resolve([
+          {
+            id: "usbdev01",
+            description: "Example Radio",
+            map: ["id=abcd:ef01,node=pve-01"],
+            errors: [],
+          },
+        ]);
+      return Promise.resolve([]);
+    });
+    mockedPut.mockResolvedValue({ status: "ok" });
+  });
+
+  async function openUSBSection(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByText("USB Devices (3)"));
+  }
+
+  it("will not offer to remove a raw passthrough, and says why", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<HardwarePanel {...props} />);
+    await openUSBSection(user);
+
+    // The raw row has no button to find it by, so by its key's own row.
+    const label = screen.getByText("usb0", { exact: true });
+    const row = label.parentElement;
+    if (!row) throw new Error("no row for usb0");
+    // Named from the node's own USB list.
+    expect(
+      await within(row).findByText("Example Serial Adapter (1-2)"),
+    ).toBeInTheDocument();
+    // The reason in place of the action, as text — a disabled button's title
+    // never shows — and nothing to press.
+    expect(
+      within(row).getByText(/only root@pam can remove it/),
+    ).toBeInTheDocument();
+    expect(within(row).queryAllByRole("button")).toEqual([]);
+
+    // A mapping and a SPICE port can go: Proxmox checks Mapping.Use and
+    // VM.Config.HWType for those, not root.
+    expect(
+      within(diskRow("usb1")).getByRole("button", { name: /remove/i }),
+    ).toBeEnabled();
+    expect(within(diskRow("usb1")).getByText("Mapped")).toBeInTheDocument();
+    expect(within(diskRow("usb1")).getByText("usbdev01")).toBeInTheDocument();
+    expect(
+      within(diskRow("usb2")).getByRole("button", { name: /remove/i }),
+    ).toBeEnabled();
+  });
+
+  it("removes a mapped device on Save", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<HardwarePanel {...props} />);
+    await openUSBSection(user);
+
+    await user.click(
+      within(diskRow("usb1")).getByRole("button", { name: /remove/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(mockedPut.mock.calls).toEqual([
+      [CONFIG_URL, { fields: { delete: "usb1" } }],
+    ]);
+  });
+
+  // Each add is staged until Save, so the next dialog has to count the staged
+  // ones as taken — otherwise the second lands on the first's slot and
+  // silently replaces it.
+  it("puts two devices added before a Save into two slots", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<HardwarePanel {...props} />);
+    await screen.findByText("USB Devices (3)");
+
+    async function addUSB(pick: (dialog: HTMLElement) => Promise<void>) {
+      await user.click(screen.getByRole("button", { name: /add device/i }));
+      await user.click(
+        await screen.findByRole("menuitem", { name: /usb device/i }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      await pick(dialog);
+      await user.click(within(dialog).getByRole("button", { name: "Add" }));
+    }
+    await addUSB(async (dialog) => {
+      await user.click(
+        within(dialog).getByRole("radio", { name: /mapped device/i }),
+      );
+      await user.selectOptions(
+        await within(dialog).findByLabelText("Mapping"),
+        "usbdev01",
+      );
+    });
+    await addUSB(async (dialog) => {
+      await user.click(
+        within(dialog).getByRole("radio", { name: /spice port/i }),
+      );
+    });
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(mockedPut.mock.calls).toEqual([
+      [
+        CONFIG_URL,
+        {
+          fields: { usb3: "mapping=usbdev01,usb3=1", usb4: "spice,usb3=1" },
+        },
+      ],
+    ]);
+  });
+
+  // CD/DVD drives are staged apart from other devices, so the slot count has
+  // to see them too, or the second drive replaces the first.
+  it("puts two CD/DVD drives added before a Save into two slots", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<HardwarePanel {...props} />);
+    await screen.findByText("USB Devices (3)");
+
+    for (let i = 0; i < 2; i++) {
+      await user.click(screen.getByRole("button", { name: /add device/i }));
+      await user.click(
+        await screen.findByRole("menuitem", { name: /cd\/dvd drive/i }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: "Add" }));
+    }
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(mockedPut.mock.calls).toEqual([
+      [
+        CONFIG_URL,
+        {
+          fields: { ide0: "none,media=cdrom", ide1: "none,media=cdrom" },
+        },
+      ],
+    ]);
+  });
+});

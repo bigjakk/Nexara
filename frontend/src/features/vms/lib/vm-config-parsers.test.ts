@@ -19,6 +19,15 @@ import {
   buildWatchdog,
   parseSMBIOS,
   buildSMBIOS,
+  parseUSB,
+  buildUSB,
+  isRawUSBPassthrough,
+  parseUSBMappingEntry,
+  usbMappingEntryFor,
+  findReusableUSBMapping,
+  suggestMappingName,
+  cleanDeviceText,
+  MAPPING_ID_PATTERN,
 } from "./vm-config-parsers";
 
 describe("parseKVString / buildKVString", () => {
@@ -770,5 +779,240 @@ describe("parseSMBIOS / buildSMBIOS", () => {
     const p = parseSMBIOS("");
     p.uuid = "00000000-0000-4000-8000-000000000001";
     expect(buildSMBIOS(p)).not.toContain("base64");
+  });
+});
+
+describe("parseUSB / buildUSB", () => {
+  it("reads each form qemu-server's $usb_fmt allows", () => {
+    expect(parseUSB("host=1-2,usb3=1")).toEqual({
+      host: "1-2",
+      mapping: "",
+      usb3: true,
+      spice: false,
+    });
+    // host is the default_key: `qm set --usb0 1234:5678` stores it bare.
+    expect(parseUSB("1234:5678")).toEqual({
+      host: "1234:5678",
+      mapping: "",
+      usb3: false,
+      spice: false,
+    });
+    expect(parseUSB("mapping=usbdev01,usb3=1")).toEqual({
+      host: "",
+      mapping: "usbdev01",
+      usb3: true,
+      spice: false,
+    });
+    // spice in any case, bare or as host=, keeping its usb3.
+    for (const raw of ["spice", "SPICE,usb3=1", "host=Spice"]) {
+      expect(parseUSB(raw).spice).toBe(true);
+      expect(parseUSB(raw).host).toBe("");
+    }
+    expect(parseUSB("spice,usb3=1").usb3).toBe(true);
+    // usb3 is a pve boolean: on/yes/true count too.
+    expect(parseUSB("host=1-2,usb3=on").usb3).toBe(true);
+    expect(parseUSB("host=1-2,usb3=0").usb3).toBe(false);
+    expect(parseUSB("")).toEqual({
+      host: "",
+      mapping: "",
+      usb3: false,
+      spice: false,
+    });
+  });
+
+  it("writes spice, then a mapping, then a host, with usb3 after", () => {
+    expect(
+      buildUSB({ host: "", mapping: "usbdev01", usb3: true, spice: false }),
+    ).toBe("mapping=usbdev01,usb3=1");
+    expect(buildUSB({ host: "", mapping: "", usb3: true, spice: true })).toBe(
+      "spice,usb3=1",
+    );
+    expect(buildUSB({ host: "", mapping: "", usb3: false, spice: true })).toBe(
+      "spice",
+    );
+    expect(
+      buildUSB({ host: "1-2", mapping: "", usb3: false, spice: false }),
+    ).toBe("host=1-2");
+    for (const raw of ["mapping=usbdev01,usb3=1", "spice,usb3=1", "host=1-2"]) {
+      expect(buildUSB(parseUSB(raw))).toBe(raw);
+    }
+  });
+
+  it("names the raw passthroughs only root@pam may change", () => {
+    expect(isRawUSBPassthrough(parseUSB("host=1-2"))).toBe(true);
+    expect(isRawUSBPassthrough(parseUSB("1234:5678,usb3=1"))).toBe(true);
+    expect(isRawUSBPassthrough(parseUSB("mapping=usbdev01"))).toBe(false);
+    expect(isRawUSBPassthrough(parseUSB("spice"))).toBe(false);
+    expect(isRawUSBPassthrough(parseUSB(""))).toBe(false);
+  });
+});
+
+describe("USB mapping entries", () => {
+  const mappings = [
+    {
+      id: "byid",
+      map: ["id=abcd:ef01,node=pve-01", "id=abcd:ef01,node=pve-02"],
+    },
+    { id: "byport", map: ["id=abcd:ef01,node=pve-01,path=1-2"] },
+    { id: "elsewhere", map: ["id=1234:5678,node=pve-02"] },
+    // Stored uppercase: Proxmox's start-time check compares it with `ne`
+    // against lowercase sysfs hex, so every VM using it fails to start.
+    { id: "uppercase", map: ["id=5678:ABCD,node=pve-01"] },
+    // Two entries for one node: qemu-server refuses the start outright.
+    {
+      id: "twice",
+      map: ["id=9999:0001,node=pve-01", "id=9999:0001,node=pve-01,path=1-4"],
+    },
+  ];
+
+  it("reads an entry whatever order its keys are in", () => {
+    expect(parseUSBMappingEntry("path=1-2.3,node=pve-01,id=1234:5678")).toEqual(
+      { node: "pve-01", id: "1234:5678", path: "1-2.3" },
+    );
+    expect(usbMappingEntryFor(mappings[0]?.map ?? [], "pve-02")).toEqual({
+      node: "pve-02",
+      id: "abcd:ef01",
+      path: "",
+    });
+    expect(
+      usbMappingEntryFor(mappings[2]?.map ?? [], "pve-01"),
+    ).toBeUndefined();
+  });
+
+  it("reuses only a mapping that passes exactly the same thing on the node", () => {
+    expect(
+      findReusableUSBMapping(mappings, "pve-01", "abcd:ef01", "")?.id,
+    ).toBe("byid");
+    // The PICKED id may come in any case (a typed one); it is lowercased.
+    expect(
+      findReusableUSBMapping(mappings, "pve-01", "ABCD:EF01", "")?.id,
+    ).toBe("byid");
+    expect(
+      findReusableUSBMapping(mappings, "pve-01", "abcd:ef01", "1-2")?.id,
+    ).toBe("byport");
+    // A by-id mapping is not a port mapping, nor the reverse.
+    expect(
+      findReusableUSBMapping(mappings, "pve-01", "abcd:ef01", "1-3"),
+    ).toBeUndefined();
+    // An entry for another node does not count.
+    expect(
+      findReusableUSBMapping(mappings, "pve-01", "1234:5678", ""),
+    ).toBeUndefined();
+  });
+
+  it("never reuses a mapping Proxmox could not start a VM with", () => {
+    // The STORED id must already be lowercase.
+    expect(
+      findReusableUSBMapping(mappings, "pve-01", "5678:abcd", ""),
+    ).toBeUndefined();
+    // Nor one with two entries for the node, even if one matches exactly.
+    expect(
+      findReusableUSBMapping(mappings, "pve-01", "9999:0001", ""),
+    ).toBeUndefined();
+    expect(
+      findReusableUSBMapping(mappings, "pve-02", "abcd:ef01", "")?.id,
+    ).toBe("byid");
+  });
+
+  // With the id exact, an error can only mean the device is not there right
+  // now, and a new mapping would report the same: reuse it, so adding an
+  // unplugged device twice does not mint usb-…-2.
+  it("still reuses a mapping Proxmox reports the device missing for", () => {
+    const missing = [
+      {
+        id: "unplugged",
+        map: ["id=abcd:0001,node=pve-01"],
+        errors: [
+          {
+            severity: "error",
+            message: "Invalid configuration: usb device 'abcd:0001' not found",
+          },
+        ],
+      },
+    ];
+    expect(findReusableUSBMapping(missing, "pve-01", "abcd:0001", "")?.id).toBe(
+      "unplugged",
+    );
+  });
+});
+
+describe("cleanDeviceText", () => {
+  it("keeps an ordinary device name as it is", () => {
+    expect(cleanDeviceText("Example Serial Adapter")).toBe(
+      "Example Serial Adapter",
+    );
+  });
+
+  it("drops what a device could put in its own name", () => {
+    // A carriage return would make Proxmox refuse the create outright.
+    expect(cleanDeviceText("Example\rAdapter\n")).toBe("Example Adapter");
+    expect(cleanDeviceText("Tab\tand\u0085NEL")).toBe("Tab and NEL");
+    // Direction overrides and isolates would disguise the text.
+    expect(cleanDeviceText("abc\u202Edcb\u2066x\u2069")).toBe("abc dcb x");
+    expect(cleanDeviceText("  \u200E  ")).toBe("");
+    // The Arabic letter mark is a bidi control too.
+    expect(cleanDeviceText("ab\u061Ccd")).toBe("ab cd");
+  });
+});
+
+describe("suggestMappingName", () => {
+  it("makes a pve-configid out of a device's name", () => {
+    expect(suggestMappingName("Example Serial Adapter", new Set())).toBe(
+      "example-serial-adapter",
+    );
+    expect(suggestMappingName("  USB 3.0 -- Hub!! ", new Set())).toBe(
+      "usb-3-0-hub",
+    );
+    // A digit cannot start a pve-configid.
+    expect(suggestMappingName("2.4GHz Receiver", new Set())).toBe(
+      "usb-2-4ghz-receiver",
+    );
+    expect(suggestMappingName("", new Set())).toBe("usb-device");
+    expect(suggestMappingName("!!!", new Set())).toBe("usb-device");
+    expect(suggestMappingName("x", new Set())).toBe("usb-device");
+  });
+
+  it("caps the length without ending on a dash", () => {
+    const name = suggestMappingName(
+      "Example Very Long Dual Serial Bridge Controller",
+      new Set(),
+    );
+    expect(name.length).toBeLessThanOrEqual(32);
+    expect(name).not.toMatch(/-$/);
+    expect(name).toMatch(MAPPING_ID_PATTERN);
+    // Cut at the last word that fits, not mid-word.
+    expect(
+      suggestMappingName(
+        "Example Dual Serial Bridge Controller Adapter",
+        new Set(),
+      ),
+    ).toBe("example-dual-serial-bridge");
+    // A boundary that would keep under half the name is not worth it.
+    expect(
+      suggestMappingName("Ab Cdefghijklmnopqrstuvwxyzabcdefghij", new Set()),
+    ).toBe("ab-cdefghijklmnopqrstuvwxyzabcde");
+    // One long word has no boundary to back up to; it is cut at 32.
+    expect(
+      suggestMappingName(
+        "Examplesingleverylongwordwithoutanyspaces",
+        new Set(),
+      ),
+    ).toBe("examplesingleverylongwordwithout");
+    // The "usb-" a leading digit needs is inside the 32, not on top of it.
+    const prefixed = suggestMappingName(
+      "2.4GHz Wireless Receiver For Example Keyboards",
+      new Set(),
+    );
+    expect(prefixed).toBe("usb-2-4ghz-wireless-receiver-for");
+    expect(prefixed.length).toBeLessThanOrEqual(32);
+  });
+
+  it("steps past names already taken, ignoring case", () => {
+    expect(
+      suggestMappingName(
+        "Example Radio",
+        new Set(["example-radio", "Example-Radio-2"]),
+      ),
+    ).toBe("example-radio-3");
   });
 });

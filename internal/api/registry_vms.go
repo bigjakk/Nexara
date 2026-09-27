@@ -644,10 +644,17 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 		Parameters:  vmParams(nil),
 		Handler:     h.GetVMConfig,
 	})
+	// The mapping sentence in the Description is a decision, not an oversight
+	// (operator, 2026-09-27): Proxmox gates a mapped device on Mapping.Use per
+	// mapping, but Nexara's one token holds it for every mapping, and Nexara's
+	// RBAC is cluster-wide throughout (manage:storage is every storage). So it
+	// is stated rather than gated.
 	reg.Register(Endpoint{
-		Method:      fiber.MethodPut,
-		Path:        clusterScope + "/vms/:vm_id/config",
-		Description: "Write Proxmox configuration keys on a VM.",
+		Method: fiber.MethodPut,
+		Path:   clusterScope + "/vms/:vm_id/config",
+		Description: "Write Proxmox configuration keys on a VM. The write goes out with the cluster's API token, " +
+			"so manage:vm here can attach any resource mapping that token can use — a USB or PCI device " +
+			"(usbN or hostpciN mapping=<id>) or a VirtioFS directory; Nexara has no per-mapping permission.",
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("manage", "vm"),
 		Parameters: vmParams(apischema.Properties{
@@ -940,6 +947,7 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler) {
 			Handler:     r.handler,
 		})
 	}
+	registerResourceMappingEndpoints(reg, h)
 
 	// ── Resource pools ────────────────────────────────────────────────
 	reg.Register(Endpoint{

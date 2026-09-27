@@ -284,9 +284,10 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 // newly declared node route trips the first of them — so a loop sharing
 // that body would never run in the one situation it exists for.
 //
-// The seven VM-dialog hardware listings share the node prefix and are
-// declared in registry_vms.go, so they are named explicitly rather than
-// skipped by a looser prefix rule that would also swallow a real omission.
+// The eight VM-dialog hardware listings share the node prefix and are
+// declared in registry_vms.go and registry_mappings.go, so they are named
+// explicitly rather than skipped by a looser prefix rule that would also
+// swallow a real omission.
 //
 // FOUR other domains also mount routes under this prefix, and they are
 // deferred to rather than re-listed: the six ACME certificate and
@@ -306,6 +307,7 @@ func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 		"GET " + clusterScope + "/nodes/:node_name/cpu-models":    true,
 		"GET " + clusterScope + "/nodes/:node_name/cpu-flags":     true,
 		"GET " + clusterScope + "/nodes/:node_name/isos":          true,
+		"GET " + clusterScope + "/nodes/:node_name/usb-mappings":  true,
 	}
 	s := newRouteStubServer(t)
 	seen := 0

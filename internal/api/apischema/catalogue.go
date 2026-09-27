@@ -292,7 +292,7 @@ func formatRules() []RuleDoc {
 				"SUBSET of the rule that addresses what it created — a create rule that admits a name the " +
 				"delete route's MaxLength then refuses produces an object this API cannot remove, which is " +
 				"the same failure ceph-pool-name records. It was 40, which refused ids PVE accepts for no " +
-				"reason anyone could name: the 5 sites that carry this format are all BODY parameters, so " +
+				"reason anyone could name: the 6 sites that carry this format are all BODY parameters, so " +
 				"the path-segment argument that bounds storage-id and node-name never applied here.",
 			Accepts: []string{"snap1", "ab", "a-b_c", strings.Repeat("s", 41), strings.Repeat("s", 128)},
 			Rejects: []string{"", "a", "1snap", "snap.1", strings.Repeat("s", 129)},

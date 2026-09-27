@@ -14,6 +14,7 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 - [DRS Configuration](#drs-configuration)
 - [High Availability](#high-availability)
 - [Storage Management](#storage-management)
+- [Device Passthrough](#device-passthrough)
 - [VM Imports](#vm-imports)
 - [Backup Management](#backup-management)
 - [Veeam Backup & Replication](#veeam-backup--replication)
@@ -75,7 +76,7 @@ A token Nexara minted itself already holds everything it needs — onboarding gr
 
 For full functionality, the token needs `Administrator` on `/`: grant the role to the token's user and create the token with privilege separation off (`--privsep 0`, or **Privilege Separation** unchecked), as in [Creating a Proxmox API Token](installation.md#creating-a-proxmox-api-token). A privilege-separated token holds only what both it and its user are granted, so it would need the grant twice. For read-only monitoring, `PVEAuditor` is sufficient.
 
-`PVEAdmin` covers most of what Nexara does, but it lacks seven privileges that `Administrator` has — `Sys.Modify`, `Sys.PowerMgmt`, `Sys.Incoming`, `Sys.AccessNetwork`, `Realm.Allocate`, `Permissions.Modify` and `Mapping.Modify` — and whatever needs one of them either fails or, where Nexara treats the step as optional, is skipped: node power actions need `Sys.PowerMgmt`, a rolling update cannot pause Proxmox VE 9.2's native CRS auto-rebalance without `Sys.Modify` on `/` and drains with it still on, and some backup jobs cannot be run on demand (see [Backup Jobs](#backup-jobs)).
+`PVEAdmin` covers most of what Nexara does, but it lacks seven privileges that `Administrator` has — `Sys.Modify`, `Sys.PowerMgmt`, `Sys.Incoming`, `Sys.AccessNetwork`, `Realm.Allocate`, `Permissions.Modify` and `Mapping.Modify` — and whatever needs one of them either fails or, where Nexara treats the step as optional, is skipped: node power actions need `Sys.PowerMgmt`, creating a USB mapping for [device passthrough](#device-passthrough) needs `Mapping.Modify`, a rolling update cannot pause Proxmox VE 9.2's native CRS auto-rebalance without `Sys.Modify` on `/` and drains with it still on, and some backup jobs cannot be run on demand (see [Backup Jobs](#backup-jobs)).
 
 **Grant the role on `/` itself**, not only on `/nodes`, `/vms` or `/storage`. Proxmox answers some cluster-wide reads only to a holder of `Sys.Audit` on `/` — HA status, the HA resource, group and rule listings, and the backup job definitions among them — and Nexara will not act without HA state:
 
@@ -554,6 +555,34 @@ equivalent to selecting all guests in the VMs/CTs tab and migrating,
 but with a dedicated dialog tuned for "I'm decommissioning this
 pool" workflows. Container volumes are not yet covered by Evacuate;
 use the per-guest migrate or bulk-migrate flow for those.
+
+---
+
+## Device Passthrough
+
+Proxmox lets only the `root@pam` user pass a USB device straight through to a VM, by vendor/device ID or by port (`usbN: host=…`), and it checks for that user by name. An API token is `user@realm!tokenname`, never `root@pam`, even when root owns it. Nexara connects to every cluster with an API token, so it passes a USB device through the one way Proxmox allows a token: a cluster **resource mapping** (Datacenter → Resource Mappings in Proxmox), which the VM names as `usbN: mapping=<name>`.
+
+### USB Devices
+
+In a VM's **Hardware** tab, **Add Device → USB Device** offers:
+
+- **Mapped device** — a mapping that already exists. Each one shows what Proxmox reports for the VM's node: a warning when the mapping has no entry for that node, an error when its entry names hardware the node does not have. Such a mapping can still be picked, but Proxmox will not start the VM on that node with it.
+- **Host device** — this device, on whichever port it is plugged into.
+- **Host USB port** — this device, on this port. Use it to tell two identical devices apart.
+- **SPICE port** — a device redirected from the SPICE client.
+
+For a host device or port, Nexara reuses the mapping that already passes exactly that device on the VM's node. Otherwise it creates one, named after the device (you can change the name first), with a single entry for the VM's node, and then adds the device to the VM's pending changes. The mapping is created as soon as you confirm, and stays if you then discard the pending change; the next time you add that device, Nexara reuses it. Creating a mapping needs the Nexara permission `manage:cluster`, and the cluster's API token needs `Mapping.Modify`, which Proxmox's `Administrator` role has and `PVEAdmin` does not. Attaching an existing mapping needs `Mapping.Use`, which both roles have. Proxmox keeps mapping creation away from `PVEAdmin`, but Nexara's built-in Operator role holds `manage:cluster` and can create mappings.
+
+Two things work differently from passing a device straight through in Proxmox:
+
+- **A mapped device must be present when the VM starts.** Proxmox checks the mapping at start and refuses to start the VM if the device is missing or, for a port mapping, if a different device is on the port. A direct passthrough starts without the device.
+- **Nexara maps the device on one node.** It creates the entry for the VM's current node. For the VM to start on another node, add that node's device to the mapping in Proxmox.
+
+A USB device passed through directly in Proxmox (`host=…`) is listed in the Hardware tab under its device name, and the row says that only `root@pam` can remove it: Proxmox refuses the change to anyone else. Remove it in Proxmox, then add the device again here if you want Nexara to manage it.
+
+You extend and delete mappings in Proxmox; Nexara does not change a mapping once it has created it.
+
+**Who can attach a mapping.** Nexara reaches Proxmox with one API token, which can use every mapping in the cluster, so Nexara's own permission is the only gate: anyone who can manage a VM (`manage:vm`) can attach any existing mapping to any VM in that cluster: a USB device, a PCI device (through the API), or a VirtioFS directory. Proxmox checks `Mapping.Use` on each mapping for a user signed in to it; Nexara has no per-mapping permission, just as `manage:storage` covers every storage. Bear it in mind before giving a custom role `manage:vm`.
 
 ---
 

@@ -48,9 +48,22 @@ import {
   buildEFIDisk,
   buildTPMState,
   buildNet,
+  findReusableUSBMapping,
+  MAPPING_ID_PATTERN,
+  cleanDeviceText,
+  suggestMappingName,
+  usbMappingEntryFor,
 } from "../../lib/vm-config-parsers";
-import type { NodeUSBDevice, NodePCIDevice } from "../../api/vm-queries";
+import {
+  useCreateUSBMapping,
+  useNodeUSBMappings,
+  type NodeUSBDevice,
+  type NodePCIDevice,
+  type USBMapping,
+} from "../../api/vm-queries";
 import type { VMConfig } from "../../types/vm";
+import { usePermissions } from "@/hooks/usePermissions";
+import { describeError } from "@/lib/api-error";
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
@@ -62,6 +75,10 @@ interface ISOFile {
 
 interface AddDeviceMenuProps {
   config: VMConfig;
+  /** For the USB dialog's mapping listing and create. */
+  clusterId: string;
+  /** The VM's node: mappings are checked, and created, for it. */
+  nodeName: string;
   diskStorages: Array<{ storage: string; type: string; id: string }>;
   usbDevices: NodeUSBDevice[] | undefined;
   pciDevices: NodePCIDevice[] | undefined;
@@ -94,6 +111,8 @@ function findNextIndex(config: VMConfig, prefix: string, max: number): number {
 
 export function AddDeviceMenu({
   config,
+  clusterId,
+  nodeName,
   diskStorages,
   usbDevices,
   pciDevices,
@@ -213,6 +232,8 @@ export function AddDeviceMenu({
       {dialog === "usb" && (
         <AddUSBDialog
           config={config}
+          clusterId={clusterId}
+          nodeName={nodeName}
           devices={usbDevices}
           onAdd={onAddDevice}
           onClose={() => {
@@ -460,100 +481,464 @@ function AddNICDialog({
 // USB Dialog
 // ---------------------------------------------------------------------------
 
+type USBMode = "mapped" | "device" | "port" | "spice";
+
+// Proxmox's own dialog offers the same four (pve-manager
+// www/manager6/qemu/USBEdit.js). Its two raw ones write host=<id> and
+// host=<bus>-<port>, which qemu-server refuses to anyone but root@pam, so here
+// they go through a mapping instead — see AddUSBDialog.
+const usbModes: ReadonlyArray<{ value: USBMode; label: string; hint: string }> =
+  [
+    {
+      value: "mapped",
+      label: "Mapped device",
+      hint: "A cluster resource mapping",
+    },
+    {
+      value: "device",
+      label: "Host device",
+      hint: "This device, on any port",
+    },
+    {
+      // Not "whatever is on the port": a port mapping carries the device's
+      // id too, and Proxmox refuses to start the VM when another device is
+      // there (assert_valid, pve-guest-common src/PVE/Mapping/USB.pm). What
+      // the port adds is telling two identical devices apart.
+      value: "port",
+      label: "Host USB port",
+      hint: "This device, on this port",
+    },
+    {
+      value: "spice",
+      label: "SPICE port",
+      hint: "A device redirected from the SPICE client",
+    },
+  ];
+
+const USB_DEVICE_ID_PATTERN = /^[0-9A-Fa-f]{4}:[0-9A-Fa-f]{4}$/;
+
+const usbDeviceId = (d: NodeUSBDevice) => `${d.vendid}:${d.prodid}`;
+const usbPortPath = (d: NodeUSBDevice) => `${String(d.busnum)}-${d.usbpath}`;
+
+/**
+ * The devices a passthrough picker offers, filtered as Proxmox's USBSelector
+ * (pve-manager www/manager6/form/USBSelector.js) filters them: no root hub
+ * (it has no usbpath), nothing without a product id, and no hub (class 9).
+ */
+function passthroughCandidates(
+  devices: NodeUSBDevice[] | undefined,
+): NodeUSBDevice[] {
+  return (devices ?? []).filter(
+    (d) => d.usbpath !== "" && d.prodid !== "" && d.class !== 9,
+  );
+}
+
+/** The device's own name, cleaned — it is the device's to say — or its id. */
+function deviceLabel(d: NodeUSBDevice | undefined, id: string): string {
+  return (
+    cleanDeviceText(d?.product ?? "") ||
+    cleanDeviceText(d?.manufacturer ?? "") ||
+    `USB ${id}`
+  );
+}
+
+function mappingOptionLabel(m: USBMapping): string {
+  const description = cleanDeviceText(m.description);
+  let label = description ? `${m.id} — ${description}` : m.id;
+  if (m.errors.some((e) => e.severity === "error")) label += " (error)";
+  else if (m.errors.length > 0) label += " (warning)";
+  return label;
+}
+
+/**
+ * Adds a usbN. A real device can only go through a cluster resource mapping:
+ * qemu-server's check_usb_perm lets nobody but root@pam write host=<device>,
+ * and Nexara connects with an API token, which never is root@pam. So picking
+ * a host device or port reuses the mapping that already passes exactly that,
+ * or creates one (which needs manage:cluster) and stages mapping=<name>.
+ *
+ * While a create is in flight the dialog is locked — no close, no Cancel, no
+ * edits — because the create cannot be recalled: closing then would leave it
+ * to finish and stage a device the operator had already walked away from,
+ * into a slot another add may have taken meanwhile.
+ */
 function AddUSBDialog({
   config,
+  clusterId,
+  nodeName,
   devices,
   onAdd,
   onClose,
 }: {
   config: VMConfig;
+  clusterId: string;
+  nodeName: string;
   devices: NodeUSBDevice[] | undefined;
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
-  const [mode, setMode] = useState<"host" | "spice">("host");
-  const [selectedDevice, setSelectedDevice] = useState("");
+  const { canManage } = usePermissions();
+  const canCreateMapping = canManage("cluster");
+  const mappingsQuery = useNodeUSBMappings(clusterId, nodeName);
+  const createMapping = useCreateUSBMapping(clusterId);
+  const busy = createMapping.isPending;
+
+  const [mode, setMode] = useState<USBMode>("device");
+  const [mappingId, setMappingId] = useState("");
+  const [deviceId, setDeviceId] = useState("");
+  const [port, setPort] = useState("");
+  // null until the operator types, so the suggestion follows the pick.
+  const [nameInput, setNameInput] = useState<string | null>(null);
   const [usb3, setUsb3] = useState(true);
 
   const idx = findNextIndex(config, "usb", 13);
-  const canAdd = idx >= 0 && (mode === "spice" || selectedDevice.length > 0);
+  const mappings = mappingsQuery.data ?? [];
+  const candidates = passthroughCandidates(devices);
+  const hasDeviceList = candidates.length > 0;
+  const isHostMode = mode === "device" || mode === "port";
 
-  function handleAdd() {
+  // What a host pick passes through: a device id and, for a port, its path.
+  // A typed id is lowercased to match the node's sysfs, which is what
+  // Proxmox compares a mapping's id against when the VM starts.
+  let picked: { deviceId: string; path: string; label: string } | null = null;
+  if (mode === "device" && USB_DEVICE_ID_PATTERN.test(deviceId)) {
+    const id = deviceId.toLowerCase();
+    const d = candidates.find((c) => usbDeviceId(c) === id);
+    picked = { deviceId: id, path: "", label: deviceLabel(d, id) };
+  } else if (mode === "port") {
+    // Proxmox's own mapping editor refuses an empty port the same way: the
+    // mapping needs the id of the device on it (window/USBMapEdit.js).
+    const d = candidates.find((c) => usbPortPath(c) === port);
+    if (d) {
+      picked = {
+        deviceId: usbDeviceId(d),
+        path: port,
+        label: deviceLabel(d, usbDeviceId(d)),
+      };
+    }
+  }
+
+  // Reuse and the taken-name check both read the listing, so a host pick
+  // waits for it: deciding on a listing still loading, or one that failed,
+  // would mint a duplicate of a mapping that exists, or a 409.
+  const listingReady = mappingsQuery.isSuccess;
+  const reusable =
+    picked && listingReady
+      ? findReusableUSBMapping(mappings, nodeName, picked.deviceId, picked.path)
+      : undefined;
+  const needsCreate = picked !== null && listingReady && reusable === undefined;
+  const suggestedName = picked
+    ? suggestMappingName(picked.label, new Set(mappings.map((m) => m.id)))
+    : "";
+  const newName = nameInput ?? suggestedName;
+  let nameError = "";
+  if (needsCreate) {
+    if (!MAPPING_ID_PATTERN.test(newName)) {
+      nameError =
+        "Start with a letter; use letters, digits, '_' and '-' (2 to 128 characters).";
+    } else if (mappings.some((m) => m.id === newName)) {
+      nameError = `A mapping named "${newName}" already exists for other hardware.`;
+    }
+  }
+  const typedIdError =
+    mode === "device" &&
+    !hasDeviceList &&
+    deviceId !== "" &&
+    !USB_DEVICE_ID_PATTERN.test(deviceId)
+      ? "Enter vendor:product as four hex digits each, without 0x (e.g. 1234:5678)."
+      : "";
+
+  const selectedMapping = mappings.find((m) => m.id === mappingId);
+  const slotsFull = idx < 0;
+  const createDenied = needsCreate && !canCreateMapping;
+
+  const canAdd =
+    !slotsFull &&
+    !busy &&
+    (mode === "spice" ||
+      (mode === "mapped" && selectedMapping !== undefined) ||
+      (isHostMode &&
+        picked !== null &&
+        listingReady &&
+        (reusable !== undefined || (!createDenied && nameError === ""))));
+
+  // A new pick or name makes the last refusal stale. Never while a create is
+  // in flight: resetting then would detach the dialog from it.
+  function clearCreateError() {
+    if (!createMapping.isPending) createMapping.reset();
+  }
+
+  async function handleAdd() {
     if (!canAdd) return;
-    const val = buildUSB({
-      host: mode === "host" ? selectedDevice : "",
-      usb3,
-      spice: mode === "spice",
-    });
-    onAdd(`usb${String(idx)}`, val);
+    let value: string;
+    if (mode === "spice") {
+      value = buildUSB({ host: "", mapping: "", usb3, spice: true });
+    } else if (mode === "mapped") {
+      value = buildUSB({ host: "", mapping: mappingId, usb3, spice: false });
+    } else {
+      if (!picked) return;
+      let id = reusable?.id;
+      if (id === undefined) {
+        try {
+          await createMapping.mutateAsync({
+            mapping_id: newName,
+            node: nodeName,
+            device_id: picked.deviceId,
+            ...(picked.path ? { path: picked.path } : {}),
+            // Already cleaned: the label is deviceLabel's.
+            description: picked.label,
+          });
+        } catch {
+          return; // rendered below from createMapping.error
+        }
+        id = newName;
+      }
+      value = buildUSB({ host: "", mapping: id, usb3, spice: false });
+    }
+    onAdd(`usb${String(idx)}`, value);
     onClose();
   }
 
+  const listingFailure = mappingsQuery.isError
+    ? `Could not list the cluster's USB mappings${
+        describeError(mappingsQuery.error)
+          ? `: ${describeError(mappingsQuery.error)}`
+          : "."
+      }`
+    : "";
+
   return (
-    <Dialog open onOpenChange={onClose}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+    >
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add USB Device (usb{String(idx)})</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
-          <div className="flex gap-2">
-            <Button
-              variant={mode === "host" ? "default" : "outline"}
-              size="sm"
-              onClick={() => {
-                setMode("host");
-              }}
-            >
-              Host Device
-            </Button>
-            <Button
-              variant={mode === "spice" ? "default" : "outline"}
-              size="sm"
-              onClick={() => {
-                setMode("spice");
-              }}
-            >
-              SPICE Redirect
-            </Button>
-          </div>
+          <fieldset className="grid gap-1.5" disabled={busy}>
+            <legend className="sr-only">Pass through</legend>
+            {usbModes.map((m) => (
+              <label
+                key={m.value}
+                className="flex items-baseline gap-2 text-sm"
+              >
+                <input
+                  type="radio"
+                  name="add-usb-mode"
+                  value={m.value}
+                  checked={mode === m.value}
+                  onChange={() => {
+                    setMode(m.value);
+                    clearCreateError();
+                  }}
+                  className="h-4 w-4 translate-y-0.5 accent-primary"
+                />
+                <span>
+                  {m.label}
+                  <span className="ml-1.5 text-xs text-muted-foreground">
+                    {m.hint}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
 
-          {mode === "host" && (
+          {mode === "mapped" && (
             <div className="space-y-1">
-              <Label className="text-xs">Device</Label>
-              {devices && devices.length > 0 ? (
+              <Label htmlFor="add-usb-mapping" className="text-xs">
+                Mapping
+              </Label>
+              {listingFailure ? (
+                <p className="text-xs text-destructive">{listingFailure}</p>
+              ) : mappingsQuery.isPending ? (
+                <p className="text-xs text-muted-foreground">
+                  Loading mappings…
+                </p>
+              ) : mappings.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  This cluster has no USB mappings yet.{" "}
+                  {canCreateMapping
+                    ? "Pick a host device or port instead, and Nexara creates one."
+                    : "Creating one needs the Manage Cluster permission; ask an administrator."}
+                </p>
+              ) : (
                 <select
+                  id="add-usb-mapping"
                   className={selectClass}
-                  value={selectedDevice}
+                  value={mappingId}
+                  disabled={busy}
                   onChange={(e) => {
-                    setSelectedDevice(e.target.value);
+                    setMappingId(e.target.value);
+                  }}
+                >
+                  <option value="">Select a mapping...</option>
+                  {mappings.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {mappingOptionLabel(m)}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {selectedMapping && (
+                <MappingCheckList mapping={selectedMapping} node={nodeName} />
+              )}
+            </div>
+          )}
+
+          {mode === "device" && (
+            <div className="space-y-1">
+              <Label htmlFor="add-usb-device" className="text-xs">
+                Device
+              </Label>
+              {hasDeviceList ? (
+                <select
+                  id="add-usb-device"
+                  className={selectClass}
+                  value={deviceId}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setDeviceId(e.target.value);
+                    clearCreateError();
                   }}
                 >
                   <option value="">Select a device...</option>
-                  {devices
-                    .filter((d) => d.class !== 9) // exclude hubs
-                    .map((d) => {
-                      const id = `${d.vendid}:${d.prodid}`;
-                      const label = d.product || d.manufacturer || id;
-                      return (
-                        <option
-                          key={`${id}-${String(d.busnum)}-${String(d.devnum)}`}
-                          value={id}
-                        >
-                          {label} ({id})
-                        </option>
-                      );
-                    })}
+                  {candidates.map((d) => (
+                    <option
+                      key={`${usbDeviceId(d)}-${String(d.busnum)}-${String(d.devnum)}`}
+                      value={usbDeviceId(d)}
+                    >
+                      {deviceLabel(d, usbDeviceId(d))} ({usbDeviceId(d)})
+                    </option>
+                  ))}
                 </select>
               ) : (
                 <Input
-                  value={selectedDevice}
+                  id="add-usb-device"
+                  value={deviceId}
+                  disabled={busy}
                   onChange={(e) => {
-                    setSelectedDevice(e.target.value);
+                    setDeviceId(e.target.value.trim());
+                    clearCreateError();
                   }}
-                  placeholder="vendor:product (e.g. 058f:6387)"
+                  placeholder="vendor:product (e.g. 1234:5678)"
+                  aria-invalid={typedIdError !== ""}
                 />
               )}
+              {typedIdError && (
+                <p className="text-xs text-destructive">{typedIdError}</p>
+              )}
             </div>
+          )}
+
+          {mode === "port" && (
+            <div className="space-y-1">
+              <Label htmlFor="add-usb-port" className="text-xs">
+                Port
+              </Label>
+              {hasDeviceList ? (
+                <select
+                  id="add-usb-port"
+                  className={selectClass}
+                  value={port}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setPort(e.target.value);
+                    clearCreateError();
+                  }}
+                >
+                  <option value="">Select a port...</option>
+                  {candidates.map((d) => (
+                    <option key={usbPortPath(d)} value={usbPortPath(d)}>
+                      {deviceLabel(d, usbDeviceId(d))} ({usbPortPath(d)})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {devices === undefined
+                    ? "The node's USB devices are not available: still loading, or they could not be read."
+                    : "The node lists no USB device on a port that can be passed through."}
+                </p>
+              )}
+            </div>
+          )}
+
+          {isHostMode && picked && listingFailure && (
+            <p className="text-xs text-destructive">{listingFailure}</p>
+          )}
+          {isHostMode && picked && mappingsQuery.isPending && (
+            <p className="text-xs text-muted-foreground">
+              Checking the cluster's USB mappings…
+            </p>
+          )}
+          {isHostMode && picked && reusable && (
+            <div className="space-y-0.5">
+              <p className="text-xs text-muted-foreground">
+                Uses the existing mapping “{reusable.id}”
+                {cleanDeviceText(reusable.description)
+                  ? ` (${cleanDeviceText(reusable.description)})`
+                  : ""}
+                .
+              </p>
+              {/* A device that is not plugged in now is reused all the same —
+                  a new mapping would report the same — so say so here. */}
+              {reusable.errors.length > 0 && (
+                <MappingCheckList mapping={reusable} node={nodeName} />
+              )}
+            </div>
+          )}
+          {needsCreate && (
+            <div className="space-y-1">
+              <Label htmlFor="add-usb-mapping-name" className="text-xs">
+                Mapping name
+              </Label>
+              <Input
+                id="add-usb-mapping-name"
+                value={newName}
+                disabled={busy}
+                onChange={(e) => {
+                  setNameInput(e.target.value);
+                  clearCreateError();
+                }}
+                aria-invalid={nameError !== ""}
+              />
+              {nameError && (
+                <p className="text-xs text-destructive">{nameError}</p>
+              )}
+            </div>
+          )}
+          {isHostMode && (
+            <p className="text-xs text-muted-foreground">
+              Proxmox passes a USB device straight through only for root@pam,
+              and Nexara connects with an API token, so the device goes through
+              a cluster resource mapping
+              {needsCreate
+                ? ", which Nexara creates now, even if you then discard this change"
+                : ""}
+              . Proxmox will not start the VM while the device is missing
+              {mode === "port" ? " or another device is on the port" : ""}.
+            </p>
+          )}
+          {createDenied && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              Creating a mapping needs the Manage Cluster permission. Pick an
+              existing mapping instead, or ask an administrator.
+            </p>
+          )}
+          {slotsFull && (
+            <p className="text-xs text-destructive">
+              All 14 USB slots are in use.
+            </p>
+          )}
+          {createMapping.isError && (
+            <p className="text-xs text-destructive">
+              {describeError(createMapping.error) ||
+                "Could not create the mapping."}
+            </p>
           )}
 
           {mode === "spice" && (
@@ -567,6 +952,7 @@ function AddUSBDialog({
             <Checkbox
               id="add-usb-usb3"
               checked={usb3}
+              disabled={busy}
               onCheckedChange={(v) => {
                 setUsb3(v === true);
               }}
@@ -577,15 +963,63 @@ function AddUSBDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={handleAdd} disabled={!canAdd}>
-            Add
+          <Button
+            onClick={() => {
+              void handleAdd();
+            }}
+            disabled={!canAdd}
+          >
+            {busy
+              ? "Creating mapping…"
+              : needsCreate
+                ? "Create mapping & add"
+                : "Add"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * What Proxmox reported for a mapping against the VM's node, or, when it
+ * reported nothing, what the mapping passes through there.
+ */
+function MappingCheckList({
+  mapping,
+  node,
+}: {
+  mapping: USBMapping;
+  node: string;
+}) {
+  if (mapping.errors.length === 0) {
+    const entry = usbMappingEntryFor(mapping.map, node);
+    if (!entry) return null;
+    return (
+      <p className="text-xs text-muted-foreground">
+        On {node}: {entry.id}
+        {entry.path ? ` on port ${entry.path}` : ""}
+      </p>
+    );
+  }
+  return (
+    <ul className="space-y-0.5">
+      {mapping.errors.map((e) => (
+        <li
+          key={`${e.severity}:${e.message}`}
+          className={
+            e.severity === "error"
+              ? "text-xs text-destructive"
+              : "text-xs text-amber-700 dark:text-amber-400"
+          }
+        >
+          {e.message}
+        </li>
+      ))}
+    </ul>
   );
 }
 

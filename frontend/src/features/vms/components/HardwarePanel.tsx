@@ -37,6 +37,7 @@ import {
   useDetachDisk,
   useNodeUSBDevices,
   useNodePCIDevices,
+  type NodeUSBDevice,
 } from "../api/vm-queries";
 import {
   useClusterStorage,
@@ -81,6 +82,8 @@ import {
   parseBootOrder,
   buildBootOrder,
   parseUSB,
+  isRawUSBPassthrough,
+  cleanDeviceText,
   parsePCI,
   parseRNG,
   parseVirtioFS,
@@ -145,6 +148,29 @@ interface HardwarePanelProps {
   vmId: string;
   vmStatus: string;
   nodeName: string;
+}
+
+/**
+ * A raw usbN host as the node knows it: "Product (1234:5678)" for a
+ * vendor:product id, "Product (1-2)" for a port, or the host alone when the
+ * node lists nothing there. qemu-server takes the id with or without 0x
+ * ($USB_ID_RE, src/PVE/QemuServer/USB.pm); the node lists it without.
+ */
+function usbHostLabel(
+  host: string,
+  devices: NodeUSBDevice[] | undefined,
+): string {
+  const id = host.toLowerCase().replace(/0x/g, "");
+  const match = devices?.find(
+    (d) =>
+      `${d.vendid}:${d.prodid}` === id ||
+      `${String(d.busnum)}-${d.usbpath}` === host,
+  );
+  // The device names itself, so its text is cleaned before it is shown.
+  const name =
+    cleanDeviceText(match?.product ?? "") ||
+    cleanDeviceText(match?.manufacturer ?? "");
+  return name ? `${name} (${host})` : host;
 }
 
 function str(val: unknown): string {
@@ -1507,7 +1533,12 @@ export function HardwarePanel({
 
       {/* Add Device button — always visible at top */}
       <AddDeviceMenu
-        config={config}
+        // Staged adds count as taken — devices, and CD/DVD drives, which are
+        // staged separately — so two added before a Save land in two slots
+        // rather than the second replacing the first.
+        config={{ ...config, ...pendingDeviceAdds, ...cdromEdits }}
+        clusterId={clusterId}
+        nodeName={nodeName}
         diskStorages={diskStorages.map((s) => ({
           storage: s.storage,
           type: s.type,
@@ -3256,6 +3287,13 @@ export function HardwarePanel({
                   </div>
                 );
               }
+              // qemu-server's check_usb_perm refuses to change or delete a
+              // raw host passthrough for anyone but root@pam, and a Nexara
+              // token never is — so a Remove would fail, and take the rest of
+              // the Save down with it. The row says why in its place, as text:
+              // a disabled button's title never shows (Button takes no pointer
+              // events when disabled).
+              const rootOnly = isRawUSBPassthrough(parsed);
               return (
                 <div
                   key={key}
@@ -3266,9 +3304,18 @@ export function HardwarePanel({
                     <Badge variant="secondary" className="text-[10px]">
                       SPICE
                     </Badge>
+                  ) : parsed.mapping ? (
+                    <>
+                      <Badge variant="secondary" className="text-[10px]">
+                        Mapped
+                      </Badge>
+                      <span className="truncate text-[10px] text-muted-foreground">
+                        {parsed.mapping}
+                      </span>
+                    </>
                   ) : (
-                    <span className="text-[10px] text-muted-foreground">
-                      {parsed.host}
+                    <span className="truncate text-[10px] text-muted-foreground">
+                      {usbHostLabel(parsed.host, usbDevices)}
                     </span>
                   )}
                   {parsed.usb3 && (
@@ -3276,16 +3323,26 @@ export function HardwarePanel({
                       USB3
                     </Badge>
                   )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      handleRemoveDevice(key);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" /> Remove
-                  </Button>
+                  {rootOnly ? (
+                    // Wraps rather than shrink-0: on a phone the row is too
+                    // narrow for it, and a fixed width would squeeze the
+                    // device's name out of the row first.
+                    <span className="ml-auto min-w-0 text-right text-[10px] text-muted-foreground">
+                      Passed through directly; only root@pam can remove it, in
+                      Proxmox
+                    </span>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
+                      onClick={() => {
+                        handleRemoveDevice(key);
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3" /> Remove
+                    </Button>
+                  )}
                 </div>
               );
             })}
