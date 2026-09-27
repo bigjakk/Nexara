@@ -31,6 +31,7 @@ import {
   QueryFailureNote,
   QueryStateNotice,
 } from "@/components/QueryStateNotice";
+import { useOpenerFocus } from "@/hooks/useOpenerFocus";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ApiClientError } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
@@ -161,11 +162,14 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
   const removeEntry = useUpdateUSBMapping(clusterId);
   const deleteMapping = useDeleteUSBMapping(clusterId);
   const settled = useUSBMappingsSettled(clusterId);
-  // Where focus goes after a confirmed Remove or Delete: the row's button that
-  // opened the confirmation is held (disabled) by then, and focus returned to
-  // it would fall to the page. The card's content, not the table: deleting the
-  // last mapping takes the table away.
+  // Where focus goes after a confirmed Remove or Delete — the row's button
+  // that opened the confirmation is held (disabled) by then, and focus
+  // returned to it would fall to the page — and after an edit or a new
+  // mapping whose opener cannot take it back: held after a save, or gone
+  // after a conflict's re-read. The card's content, not the table: deleting
+  // the last mapping takes the table away.
   const regionRef = useRef<HTMLDivElement>(null);
+  const focusFallback = () => regionRef.current;
   const confirmed = useRef(false);
 
   const [creating, setCreating] = useState(false);
@@ -408,6 +412,7 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
           onClose={() => {
             setCreating(false);
           }}
+          fallbackFocus={focusFallback}
         />
       )}
       {edit !== null && (
@@ -421,6 +426,7 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
           onClose={() => {
             setEdit(null);
           }}
+          fallbackFocus={focusFallback}
         />
       )}
 
@@ -913,13 +919,17 @@ function NewMappingDialog({
   mappings,
   clusterNodes,
   onClose,
+  fallbackFocus,
 }: {
   clusterId: string;
   mappings: readonly ClusterUSBMapping[];
   clusterNodes: string[];
   onClose: () => void;
+  /** Where focus goes on close if New mapping cannot take it back. */
+  fallbackFocus: () => HTMLElement | null;
 }) {
   const create = useCreateUSBMapping(clusterId);
+  const restoreFocus = useOpenerFocus(true, fallbackFocus);
   const busy = create.isPending;
   const [node, setNode] = useState("");
   const [mode, setMode] = useState<USBPickMode>("device");
@@ -986,7 +996,7 @@ function NewMappingDialog({
         if (!open && !busy) onClose();
       }}
     >
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" onCloseAutoFocus={restoreFocus}>
         <DialogHeader>
           <DialogTitle>New USB mapping</DialogTitle>
         </DialogHeader>
@@ -1122,6 +1132,7 @@ function EditMappingDialog({
   clusterNodes,
   onSaved,
   onClose,
+  fallbackFocus,
 }: {
   clusterId: string;
   target: EditTarget;
@@ -1130,9 +1141,13 @@ function EditMappingDialog({
    * listing has been read again. */
   onSaved: (id: string, write: Promise<unknown>) => void;
   onClose: () => void;
+  /** Where focus goes on close when the button that opened the dialog
+   * cannot take it back: held after a save, gone after a conflict. */
+  fallbackFocus: () => HTMLElement | null;
 }) {
   const listQuery = useClusterUSBMappings(clusterId);
   const update = useUpdateUSBMapping(clusterId);
+  const restoreFocus = useOpenerFocus(true, fallbackFocus);
   const [pinned, setPinned] = useState(target.mapping);
   const [reread, setReread] = useState<Reread>("none");
   // Only the save locks the dialog: closing it then would leave the write to
@@ -1313,7 +1328,7 @@ function EditMappingDialog({
         if (!open && !busy) onClose();
       }}
     >
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" onCloseAutoFocus={restoreFocus}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>

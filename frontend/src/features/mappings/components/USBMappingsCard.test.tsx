@@ -1621,6 +1621,174 @@ describe("USBMappingsCard edge cases", () => {
     });
   });
 
+  it("puts focus on the table after a saved edit, not on the page", async () => {
+    const user = userEvent.setup();
+    renderCard();
+    await user.click(
+      within(await mappingRow("usbdev01")).getByRole("button", {
+        name: /Edit description/,
+      }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Description"), "!");
+    // The re-read is held back, so the button that opened the dialog is still
+    // held when the dialog closes.
+    const reread = deferred<ClusterUSBMapping[]>();
+    listGate = reread.promise;
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("region", { name: "USB mappings" }),
+      );
+    });
+    listGate = null;
+    reread.resolve(baseMappings("d2"));
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole("region", { name: "USB mappings" }))
+          .getAllByRole("button", { name: /Edit description/ })
+          .every((b) => !(b as HTMLButtonElement).disabled),
+      ).toBe(true);
+    });
+  });
+
+  // The conflict's re-read rebuilt the row the dialog was opened from, so its
+  // Replace device button is gone — as the dialog itself then says.
+  it("puts focus on the table when a conflict took away the opener's row", async () => {
+    const user = userEvent.setup();
+    renderCard();
+    await user.click(
+      within(await entryRow("usbdev04", "pve-01")).getByRole("button", {
+        name: /Replace device/,
+      }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(
+      await within(dialog).findByLabelText("Device"),
+      "6666:0006",
+    );
+    const changed = baseMappings("d2");
+    const target = changed.find((m) => m.id === "usbdev04");
+    if (!target) throw new Error("fixture");
+    target.map = ["node=pve-01,id=7777:0007", "node=pve-02,id=5555:0004"];
+    mockedPut.mockRejectedValueOnce(conflict());
+    listing = changed;
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(
+      await within(dialog).findByText(/This entry changed since it was loaded/),
+    ).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("region", { name: "USB mappings" }),
+      );
+    });
+  });
+
+  it("returns focus to the opener after a cancelled edit, even following a saved one", async () => {
+    const user = userEvent.setup();
+    renderCard();
+    await user.click(
+      within(await mappingRow("usbdev01")).getByRole("button", {
+        name: /Edit description/,
+      }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Description"), "!");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(
+        within(
+          screen.getByRole("region", { name: "USB mappings" }),
+        ).queryAllByText("Reloading after a change…"),
+      ).toHaveLength(0);
+    });
+
+    const opener = within(await mappingRow("usbdev04")).getByRole("button", {
+      name: /Edit description/,
+    });
+    await user.click(opener);
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
+  });
+
+  it("returns focus to New mapping after a mapping is created", async () => {
+    const user = userEvent.setup();
+    renderCard();
+    const opener = await screen.findByRole("button", { name: /New mapping/ });
+    await user.click(opener);
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText("Node"), "pve-02");
+    await user.selectOptions(
+      await within(dialog).findByLabelText("Device"),
+      "abcd:ef01",
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: "Create mapping" }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
+  });
+
+  // A click that does not focus the button it lands on — Safari's, say —
+  // leaves no opener to go back to.
+  it("puts focus on the table when New mapping was clicked without taking focus", async () => {
+    const user = userEvent.setup();
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /New mapping/ }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("region", { name: "USB mappings" }),
+      );
+    });
+  });
+
+  it("returns focus to New mapping when its dialog is cancelled", async () => {
+    const user = userEvent.setup();
+    renderCard();
+    const opener = await screen.findByRole("button", { name: /New mapping/ });
+    await user.click(opener);
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
+  });
+
   it("keeps focus on the card when the last mapping is deleted", async () => {
     const user = userEvent.setup();
     listing = [
