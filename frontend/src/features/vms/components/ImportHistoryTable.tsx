@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -41,6 +41,9 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<VMImportJob | null>(null);
   const [deleteVm, setDeleteVm] = useState(false);
+  // Where focus goes when Cancel import closes: the table, whose X button
+  // goes once the job is no longer running.
+  const table = useRef<HTMLDivElement>(null);
 
   if (isLoading) {
     return (
@@ -66,7 +69,13 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
 
   return (
     <>
-      <div className="rounded-md border border-border">
+      <div
+        ref={table}
+        role="region"
+        aria-label="Import history"
+        tabIndex={-1}
+        className="rounded-md border border-border outline-none"
+      >
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -113,7 +122,7 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
           }
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md" fallbackFocus={() => table.current}>
           <DialogHeader>
             <DialogTitle>Cancel import?</DialogTitle>
             <DialogDescription>

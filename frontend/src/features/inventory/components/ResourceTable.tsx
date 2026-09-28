@@ -42,6 +42,7 @@ import { MetricMiniBar } from "./MetricMiniBar";
 import { SearchBar } from "./SearchBar";
 import { ColumnToggle } from "./ColumnToggle";
 import { BulkActionToolbar } from "./BulkActionToolbar";
+import { menuOpener } from "@/components/ui/return-focus";
 import {
   lifecycleActions,
   managementActions,
@@ -113,14 +114,19 @@ interface MenuState {
   target: VMContextTarget;
   x: number;
   y: number;
+  /** What opened the menu, to give focus back to — see handleCloseMenu. */
+  opener: HTMLElement | null;
 }
 
 function RowContextMenu({
   menu,
   onClose,
+  onDismiss,
 }: {
   menu: MenuState;
   onClose: () => void;
+  /** A click outside: closes without moving focus — see handleDismissMenu. */
+  onDismiss: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const {
@@ -154,7 +160,7 @@ function RowContextMenu({
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
+        onDismiss();
       }
     }
     function handleEscape(e: KeyboardEvent) {
@@ -166,7 +172,7 @@ function RowContextMenu({
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [onClose]);
+  }, [onClose, onDismiss]);
 
   // Clamp position so menu doesn't overflow viewport
   const menuWidth = 176;
@@ -321,7 +327,12 @@ const columnHelper = createColumnHelper<InventoryRow>();
 
 function buildColumns(
   isMobile: boolean,
-  openMenu: (target: VMContextTarget, x: number, y: number) => void,
+  openMenu: (
+    target: VMContextTarget,
+    x: number,
+    y: number,
+    opener: HTMLElement | null,
+  ) => void,
 ): ColumnDef<InventoryRow>[] {
   const selectColumn = columnHelper.display({
     id: "select",
@@ -367,7 +378,7 @@ function buildColumns(
           onClick={(e) => {
             e.stopPropagation();
             const rect = e.currentTarget.getBoundingClientRect();
-            openMenu(target, rect.left, rect.bottom + 4);
+            openMenu(target, rect.left, rect.bottom + 4, e.currentTarget);
           }}
         >
           <MoreVertical className="h-4 w-4" />
@@ -657,8 +668,13 @@ export function ResourceTable({ data }: ResourceTableProps) {
   const [contextMenu, setContextMenu] = useState<MenuState | null>(null);
 
   const openRowMenu = useCallback(
-    (target: VMContextTarget, x: number, y: number) => {
-      setContextMenu({ target, x, y });
+    (
+      target: VMContextTarget,
+      x: number,
+      y: number,
+      opener: HTMLElement | null,
+    ) => {
+      setContextMenu({ target, x, y, opener });
     },
     [],
   );
@@ -701,7 +717,21 @@ export function ResourceTable({ data }: ResourceTableProps) {
     setQuery(parsed);
   }, []);
 
+  // Like Radix's menus, which this one is not: an item chosen, or Escape,
+  // gives focus back to what opened the menu — at once, so that a dialog the
+  // item opens (in the same click, as the menu goes) takes that as the
+  // element to return focus to when it closes, not the menu's own button,
+  // which is gone by then. Without scrolling to it, as Radix's FocusScope
+  // does not.
   const handleCloseMenu = useCallback(() => {
+    contextMenu?.opener?.focus({ preventScroll: true });
+    setContextMenu(null);
+  }, [contextMenu]);
+
+  // Not after a click outside, as Radix's do not either: that leaves focus
+  // where the click put it — or where what it landed on put it, as a
+  // console's terminal does, cancelling the click's own focusing.
+  const handleDismissMenu = useCallback(() => {
     setContextMenu(null);
   }, []);
 
@@ -771,6 +801,7 @@ export function ResourceTable({ data }: ResourceTableProps) {
                               target,
                               x: e.clientX,
                               y: e.clientY,
+                              opener: menuOpener(e),
                             });
                           }
                         : undefined
@@ -840,7 +871,11 @@ export function ResourceTable({ data }: ResourceTableProps) {
       </div>
 
       {contextMenu && (
-        <RowContextMenu menu={contextMenu} onClose={handleCloseMenu} />
+        <RowContextMenu
+          menu={contextMenu}
+          onClose={handleCloseMenu}
+          onDismiss={handleDismissMenu}
+        />
       )}
     </div>
   );

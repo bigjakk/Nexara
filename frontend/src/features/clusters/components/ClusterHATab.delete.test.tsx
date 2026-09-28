@@ -228,3 +228,34 @@ describe("ClusterHATab — deletes confirm first", () => {
     expect(writes).toEqual([]);
   });
 });
+
+describe("ClusterHATab — focus after a delete", () => {
+  // Every row's delete button is held while a delete is in flight — the one
+  // that opened the confirmation, too — so focus cannot go back to it.
+  it("puts focus on the Resources tab panel while the delete holds the button that asked", async () => {
+    let release: (response: Response) => void = () => undefined;
+    const held = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const answer = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "DELETE" ? held : answer(input, init),
+      ),
+    );
+    const { user, dialog } = await openDialog(SITES[0] as Site);
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    expect(
+      screen.getByRole("button", { name: "Delete resource vm:102" }),
+    ).toBeDisabled();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("tabpanel", { name: "Resources" }),
+      );
+    });
+    release(json(200, { status: "ok" }));
+  });
+});

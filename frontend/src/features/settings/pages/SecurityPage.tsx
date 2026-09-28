@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
   Copy,
@@ -54,6 +54,9 @@ export function SecurityPage() {
   const [error, setError] = useState("");
 
   const [disableDialogOpen, setDisableDialogOpen] = useState(false);
+  // Where focus goes when Disable 2FA closes: the card, whose Disable 2FA
+  // button goes once 2FA is off.
+  const twoFactorCard = useRef<HTMLDivElement>(null);
   const [disableCode, setDisableCode] = useState("");
 
   const [regenDialogOpen, setRegenDialogOpen] = useState(false);
@@ -169,7 +172,13 @@ export function SecurityPage() {
         </div>
       )}
 
-      <Card>
+      <Card
+        ref={twoFactorCard}
+        role="region"
+        aria-label="Two-factor authentication"
+        tabIndex={-1}
+        className="outline-none"
+      >
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5" />
@@ -362,7 +371,7 @@ export function SecurityPage() {
 
       {/* Disable 2FA Dialog */}
       <Dialog open={disableDialogOpen} onOpenChange={setDisableDialogOpen}>
-        <DialogContent>
+        <DialogContent fallbackFocus={() => twoFactorCard.current}>
           <DialogHeader>
             <DialogTitle>Disable Two-Factor Authentication</DialogTitle>
             <DialogDescription>

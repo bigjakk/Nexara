@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { screen, within, waitFor } from "@testing-library/react";
+import { useRef } from "react";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { fireEvent, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { ResourceTable } from "./ResourceTable";
 import type { InventoryRow } from "../types/inventory";
+import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
 
 // Mock localStorage
 const localStorageMock = (() => {
@@ -163,5 +165,116 @@ describe("ResourceTable", () => {
     if (firstDataRow) {
       expect(within(firstDataRow).getByText("alpha")).toBeInTheDocument();
     }
+  });
+});
+
+// A dialog one of the row menu's items opens takes what had focus as the
+// element to return to — and the menu's own buttons go with the menu.
+describe("ResourceTable — the row menu gives focus back", () => {
+  const desktop = window.matchMedia.bind(window);
+  beforeEach(() => {
+    localStorageMock.clear();
+    // Below the mobile line, where each row has an Actions button.
+    window.matchMedia = (query: string) =>
+      Object.assign(desktop(query), { matches: true });
+  });
+  afterEach(() => {
+    window.matchMedia = desktop;
+    useVMContextMenuStore.getState().closeDialog();
+  });
+
+  it("to the row's Actions button when one of its items is chosen", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ResourceTable data={[makeRow({ key: "c1:vm:0" })]} />);
+    const actions = screen.getByRole("button", { name: "Actions for test-vm" });
+    await user.click(actions);
+
+    await user.click(screen.getByRole("button", { name: "Clone" }));
+
+    expect(useVMContextMenuStore.getState().openDialog).toBe("clone");
+    expect(document.activeElement).toBe(actions);
+  });
+
+  it("to what a right click on the row landed on", async () => {
+    window.matchMedia = desktop;
+    const user = userEvent.setup();
+    renderWithProviders(<ResourceTable data={[makeRow({ key: "c1:vm:0" })]} />);
+    const name = screen.getByRole("link", { name: "test-vm" });
+    fireEvent.contextMenu(name);
+
+    await user.click(screen.getByRole("button", { name: "Clone" }));
+
+    expect(useVMContextMenuStore.getState().openDialog).toBe("clone");
+    expect(document.activeElement).toBe(name);
+  });
+
+  it("to the row's first control when a right click landed on none", async () => {
+    window.matchMedia = desktop;
+    const user = userEvent.setup();
+    renderWithProviders(<ResourceTable data={[makeRow({ key: "c1:vm:0" })]} />);
+    const cluster = screen.getByText("Cluster1");
+    const row = cluster.closest("tr");
+    if (row === null) throw new Error("no row");
+    fireEvent.contextMenu(cluster);
+
+    await user.click(screen.getByRole("button", { name: "Clone" }));
+
+    expect(document.activeElement).toBe(
+      within(row).getByRole("checkbox", { name: "Select row" }),
+    );
+  });
+
+  it("on Escape", async () => {
+    window.matchMedia = desktop;
+    const user = userEvent.setup();
+    renderWithProviders(<ResourceTable data={[makeRow({ key: "c1:vm:0" })]} />);
+    const name = screen.getByRole("link", { name: "test-vm" });
+    fireEvent.contextMenu(name);
+
+    await user.keyboard("{Escape}");
+
+    expect(
+      screen.queryByRole("button", { name: "Clone" }),
+    ).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(name);
+  });
+
+  // A terminal as xterm is one: a mousedown on it focuses its own input and
+  // cancels the browser's focusing of what was clicked.
+  function Terminal() {
+    const input = useRef<HTMLTextAreaElement>(null);
+    return (
+      <div
+        data-testid="terminal"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          input.current?.focus();
+        }}
+      >
+        <textarea ref={input} aria-label="Terminal input" />
+      </div>
+    );
+  }
+
+  it("not after a click outside, which leaves focus where it put it", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <ResourceTable data={[makeRow({ key: "c1:vm:0" })]} />
+        <Terminal />
+      </>,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Actions for test-vm" }),
+    );
+
+    await user.click(screen.getByTestId("terminal"));
+
+    expect(
+      screen.queryByRole("button", { name: "Clone" }),
+    ).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: "Terminal input" }),
+    );
   });
 });

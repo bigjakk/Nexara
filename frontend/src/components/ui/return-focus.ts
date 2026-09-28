@@ -126,29 +126,37 @@ export function resolveOpener(start: Element | null): HTMLElement | null {
 }
 
 /**
+ * The element a menu opened by `event` was opened on, to give focus back to:
+ * the focusable element the event landed on, or else the first in the
+ * element the menu belongs to (`event.currentTarget`) — a table row, say.
+ * Not document.activeElement: a right click does not focus what it lands on
+ * in every browser. Within that element: the page's main content is
+ * focusable too, and around every row.
+ */
+export function menuOpener(event: {
+  target: EventTarget;
+  currentTarget: Element;
+}): HTMLElement | null {
+  const owner = event.currentTarget;
+  const hit =
+    event.target instanceof Element
+      ? event.target.closest<HTMLElement>(FOCUSABLE)
+      : null;
+  if (hit !== null && owner.contains(hit)) return hit;
+  if (owner instanceof HTMLElement && owner.matches(FOCUSABLE)) return owner;
+  return owner.querySelector<HTMLElement>(FOCUSABLE);
+}
+
+/**
  * Called by the ContextMenu trigger on contextmenu (a right click, Shift+F10,
- * the Menu key) and on a touch or pen press: the element to go back to after
- * a dialog opened from that menu — the focusable element the event landed on,
- * or else the trigger's first. Not document.activeElement: a right click does
- * not focus what it lands on in every browser. Within the trigger: the page's
- * main content is focusable too, and around every row.
+ * the Menu key) and on a touch or pen press: what a dialog opened from that
+ * menu goes back to — see menuOpener.
  */
 export function rememberContextMenuOpener(event: {
   target: EventTarget;
   currentTarget: Element;
 }): void {
-  const trigger = event.currentTarget;
-  const hit =
-    event.target instanceof Element
-      ? event.target.closest<HTMLElement>(FOCUSABLE)
-      : null;
-  if (hit !== null && trigger.contains(hit)) {
-    contextMenuOpener = hit;
-  } else if (trigger instanceof HTMLElement && trigger.matches(FOCUSABLE)) {
-    contextMenuOpener = trigger;
-  } else {
-    contextMenuOpener = trigger.querySelector<HTMLElement>(FOCUSABLE);
-  }
+  contextMenuOpener = menuOpener(event);
 }
 
 /**
@@ -243,7 +251,7 @@ export function useReturnFocus<T extends HTMLElement>(
 
 // Sets a forwarded ref, and hands back the cleanup a React 19 callback ref
 // may return, so that composing it does not drop it.
-function setRef<T>(ref: ForwardedRef<T>, node: T | null) {
+export function setRef<T>(ref: ForwardedRef<T>, node: T | null) {
   if (typeof ref === "function") {
     const cleanup = (ref as (node: T | null) => (() => void) | undefined)(node);
     return typeof cleanup === "function" ? cleanup : undefined;

@@ -160,3 +160,46 @@ describe("ClusterFirewallTab — every delete asks first", () => {
     });
   });
 });
+
+// Radix alone left focus on <body> after every one of these: the row's Delete
+// button opened the confirmation by state, then went with its row.
+describe("ClusterFirewallTab — focus after a delete", () => {
+  it("puts focus on the Aliases tab panel once the deleted alias's row has gone", async () => {
+    const reads: Record<string, unknown> = { ...LISTS };
+    const net01 = { name: "net01", cidr: "192.0.2.0/25", comment: "" };
+    const net02 = { name: "net02", cidr: "192.0.2.128/25", comment: "" };
+    // Read back without net02 once it has been deleted.
+    Object.defineProperty(reads, `${FW}/aliases`, {
+      enumerable: true,
+      get: () =>
+        listOf(
+          api.writes().includes(`DELETE ${FW}/aliases/net02`)
+            ? [net01]
+            : [net01, net02],
+        ),
+    });
+    api = stubApi(reads);
+    const user = userEvent.setup();
+    renderWithProviders(<ClusterFirewallTab clusterId={CLUSTER} />);
+    await user.click(await screen.findByRole("tab", { name: "Aliases" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Delete alias net02" }),
+    );
+    const dialog = await screen.findByRole("alertdialog");
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete Alias" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Delete alias net02" }),
+      ).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("tabpanel", { name: "Aliases" }),
+      );
+    });
+  });
+});

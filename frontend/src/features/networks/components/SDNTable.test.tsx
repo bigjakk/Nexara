@@ -108,3 +108,46 @@ describe("SDNTable — deleting a subnet", () => {
     });
   });
 });
+
+// The row's Delete button and its dialog live in the row, and go with it:
+// the dialog unmounts with the row it deleted.
+describe("SDNTable — focus after a delete", () => {
+  it("puts focus on the VNets tab panel once the deleted VNet's row has gone", async () => {
+    const reads: Record<string, unknown> = {
+      [`${SDN}/zones`]: listOf(ZONES),
+      [`${SDN}/vnets/vnet01/subnets`]: listOf(VNET01_SUBNETS),
+      [`${SDN}/vnets/vnet02/subnets`]: listOf(VNET02_SUBNETS),
+    };
+    // Read back without vnet02 once it has been deleted.
+    Object.defineProperty(reads, `${SDN}/vnets`, {
+      enumerable: true,
+      get: () =>
+        listOf(
+          api.writes().includes(`DELETE ${SDN}/vnets/vnet02`)
+            ? VNETS.filter((v) => v.vnet !== "vnet02")
+            : VNETS,
+        ),
+    });
+    api = stubApi(reads);
+    const user = userEvent.setup();
+    renderWithProviders(<SDNTable clusterId={CLUSTER} />);
+    await user.click(await screen.findByRole("tab", { name: "VNets" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Delete VNet vnet02" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Delete VNet vnet02" }),
+      ).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("tabpanel", { name: "VNets" }),
+      );
+    });
+  });
+});

@@ -91,6 +91,9 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
   const [infoOpen, setInfoOpen] = useState(false);
   const [isoPickerOpen, setIsoPickerOpen] = useState(false);
   const pasteRef = useRef<HTMLTextAreaElement>(null);
+  // Set by Send: the paste dialog then closes back to the console, to go on
+  // typing into the guest, not to the Paste button that opened it.
+  const pasteSent = useRef(false);
 
   const hasResource = tab.resourceId !== undefined && tab.kind !== undefined;
   const vmKind = tab.kind ?? "vm";
@@ -186,8 +189,8 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
         );
       }
     }
+    pasteSent.current = true;
     setPasteOpen(false);
-    rfb?.focus();
   }
 
   function handleScreenshot() {
@@ -450,7 +453,18 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
 
       {/* Paste dialog */}
       <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent
+          className="max-w-sm"
+          onCloseAutoFocus={(event) => {
+            // As the dialog closes, not in Send: while it is open its focus
+            // trap takes focus straight back from the console.
+            const sent = pasteSent.current;
+            pasteSent.current = false;
+            if (!sent || rfb === null) return;
+            event.preventDefault();
+            rfb.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Paste into Console</DialogTitle>
           </DialogHeader>

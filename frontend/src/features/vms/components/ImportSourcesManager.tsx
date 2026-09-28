@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +31,9 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
   const deleteMutation = useDeleteImportSource();
   const [showEsxiForm, setShowEsxiForm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  // Where focus goes when Remove closes: the list, whose row goes with the
+  // source.
+  const section = useRef<HTMLDivElement>(null);
 
   const groups = useMemo<SourceGroup[]>(() => {
     const byStorage = new Map<string, SourceGroup>();
@@ -67,7 +70,13 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
   }
 
   return (
-    <div className="space-y-3">
+    <div
+      ref={section}
+      role="region"
+      aria-label="Import sources"
+      tabIndex={-1}
+      className="space-y-3 outline-none"
+    >
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">Import sources</h2>
         {canManageImport && !showEsxiForm && (
@@ -154,7 +163,10 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
           if (!o) setDeleteTarget(null);
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          fallbackFocus={() => section.current}
+        >
           <DialogHeader>
             <DialogTitle>Remove import source?</DialogTitle>
             <DialogDescription>

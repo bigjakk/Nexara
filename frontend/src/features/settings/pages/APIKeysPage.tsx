@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Key,
@@ -102,6 +102,12 @@ export function APIKeysPage() {
   const { data: keys, isLoading } = useAPIKeys();
   const createMutation = useCreateAPIKey();
   const revokeMutation = useRevokeAPIKey();
+
+  // Where focus goes when a dialog's opener has gone by the time it closes:
+  // a revoked key's Revoke button, or "Create your first API key", which
+  // the first key takes away with the empty list.
+  const keysCard = useRef<HTMLDivElement>(null);
+  const focusKeys = () => keysCard.current;
 
   // Create dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -221,7 +227,13 @@ export function APIKeysPage() {
         </div>
       </div>
 
-      <Card>
+      <Card
+        ref={keysCard}
+        role="region"
+        aria-label="Your API keys"
+        tabIndex={-1}
+        className="outline-none"
+      >
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Key className="h-5 w-5" />
@@ -324,7 +336,7 @@ export function APIKeysPage() {
           setCreateDialogOpen(open);
         }}
       >
-        <DialogContent>
+        <DialogContent fallbackFocus={focusKeys}>
           <DialogHeader>
             <DialogTitle>Create API Key</DialogTitle>
             <DialogDescription>
@@ -409,7 +421,7 @@ export function APIKeysPage() {
           setRevealDialogOpen(open);
         }}
       >
-        <DialogContent>
+        <DialogContent fallbackFocus={focusKeys}>
           <DialogHeader>
             <DialogTitle>API Key Created</DialogTitle>
             <DialogDescription>
@@ -472,7 +484,7 @@ export function APIKeysPage() {
           setRevokeDialogOpen(open);
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent fallbackFocus={focusKeys}>
           <AlertDialogHeader>
             <AlertDialogTitle>Revoke API Key</AlertDialogTitle>
             <AlertDialogDescription>

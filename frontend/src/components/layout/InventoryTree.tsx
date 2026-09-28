@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -18,6 +18,10 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
+import {
+  FallbackFocusContext,
+  useFallbackFocus,
+} from "@/components/ui/return-focus";
 import {
   severityDotClass,
   worstIssueSeverity,
@@ -460,44 +464,58 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
 export function InventoryTree() {
   const { t } = useTranslation("common");
   const { data: clusters, isLoading } = useClusters();
+  // Where a dialog opened from the tree sends focus when its opener has gone
+  // — Delete cluster takes the whole branch, dialog and all: back into the
+  // tree, not to the page's main content.
+  const tree = useRef<HTMLDivElement>(null);
+  const treeRoot = useCallback(() => tree.current, []);
+  const fallbacks = useFallbackFocus(treeRoot);
 
   return (
-    <div className="space-y-1 py-1">
-      <div className="flex items-center justify-between px-2 pb-1">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-          {t("datacenter")}
-        </span>
-        <AddClusterDialog
-          trigger={
-            <Button
-              aria-label="Add cluster"
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-            >
-              <Plus className="h-3 w-3" />
-            </Button>
-          }
-        />
-      </div>
-
-      {isLoading && (
-        <div className="space-y-1 px-2">
-          {Array.from({ length: 2 }, (_, i) => (
-            <div key={i} className="h-6 animate-pulse rounded bg-muted" />
-          ))}
+    <FallbackFocusContext value={fallbacks}>
+      <div
+        ref={tree}
+        role="group"
+        aria-label={t("datacenter")}
+        tabIndex={-1}
+        className="space-y-1 py-1 outline-none"
+      >
+        <div className="flex items-center justify-between px-2 pb-1">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+            {t("datacenter")}
+          </span>
+          <AddClusterDialog
+            trigger={
+              <Button
+                aria-label="Add cluster"
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5"
+              >
+                <Plus className="h-3 w-3" />
+              </Button>
+            }
+          />
         </div>
-      )}
 
-      {clusters?.length === 0 && (
-        <p className="px-2 text-xs text-muted-foreground">
-          {t("noClustersAdded")}
-        </p>
-      )}
+        {isLoading && (
+          <div className="space-y-1 px-2">
+            {Array.from({ length: 2 }, (_, i) => (
+              <div key={i} className="h-6 animate-pulse rounded bg-muted" />
+            ))}
+          </div>
+        )}
 
-      {clusters?.map((cluster) => (
-        <ClusterBranch key={cluster.id} cluster={cluster} />
-      ))}
-    </div>
+        {clusters?.length === 0 && (
+          <p className="px-2 text-xs text-muted-foreground">
+            {t("noClustersAdded")}
+          </p>
+        )}
+
+        {clusters?.map((cluster) => (
+          <ClusterBranch key={cluster.id} cluster={cluster} />
+        ))}
+      </div>
+    </FallbackFocusContext>
   );
 }

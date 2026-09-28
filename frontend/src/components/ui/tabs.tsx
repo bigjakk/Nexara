@@ -2,8 +2,59 @@ import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 
 import { cn } from "@/lib/utils";
+import {
+  FallbackFocusContext,
+  setRef,
+  useFallbackFocus,
+} from "@/components/ui/return-focus";
 
-const Tabs = TabsPrimitive.Root;
+/**
+ * Radix's Root, which also gives a dialog inside it somewhere to send focus
+ * when the element that opened it has gone by the time it closes — the row
+ * it deleted: the panel on show, the section that row was in (see
+ * return-focus.ts). Radix makes a panel focusable. Tabs inside tabs offer
+ * their own panel first.
+ */
+const Tabs = React.forwardRef<
+  React.ComponentRef<typeof TabsPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Root>
+>((props, ref) => {
+  const root = React.useRef<HTMLDivElement | null>(null);
+  const setRoot = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      root.current = node;
+      const cleanup = setRef(ref, node);
+      if (cleanup === undefined) return undefined;
+      // With a cleanup to run, React does not call this ref again with null.
+      return () => {
+        root.current = null;
+        cleanup();
+      };
+    },
+    [ref],
+  );
+  const panel = React.useCallback(() => activePanel(root.current), []);
+  const fallbacks = useFallbackFocus(panel);
+  return (
+    <FallbackFocusContext value={fallbacks}>
+      <TabsPrimitive.Root ref={setRoot} {...props} />
+    </FallbackFocusContext>
+  );
+});
+Tabs.displayName = TabsPrimitive.Root.displayName;
+
+// These tabs' own panel on show, not that of tabs inside it: Radix renders
+// every panel but fills only the active one, and that one comes before
+// anything inside it. (forceMount fills an inactive panel too, left to CSS to
+// hide: tabs in it could come first, but what CSS hides cannot take focus,
+// so the next fallback would be used, not a wrong one.)
+function activePanel(root: HTMLElement | null): HTMLElement | null {
+  return (
+    root?.querySelector<HTMLElement>(
+      '[role="tabpanel"][data-state="active"]',
+    ) ?? null
+  );
+}
 
 const TabsList = React.forwardRef<
   React.ComponentRef<typeof TabsPrimitive.List>,
