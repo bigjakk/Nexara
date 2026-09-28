@@ -30,7 +30,6 @@ import {
   QueryFailureNote,
   QueryStateNotice,
 } from "@/components/QueryStateNotice";
-import { useOpenerFocus } from "@/hooks/useOpenerFocus";
 import { usePermissions } from "@/hooks/usePermissions";
 import { describeError } from "@/lib/api-error";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
@@ -762,7 +761,6 @@ function NewMappingDialog({
   fallbackFocus: () => HTMLElement | null;
 }) {
   const create = useCreateUSBMapping(clusterId);
-  const restoreFocus = useOpenerFocus(true, fallbackFocus);
   const busy = create.isPending;
   const [node, setNode] = useState("");
   const [mode, setMode] = useState<USBPickMode>("device");
@@ -829,7 +827,7 @@ function NewMappingDialog({
         if (!open && !busy) onClose();
       }}
     >
-      <DialogContent className="max-w-md" onCloseAutoFocus={restoreFocus}>
+      <DialogContent className="max-w-md" fallbackFocus={fallbackFocus}>
         <DialogHeader>
           <DialogTitle>New USB mapping</DialogTitle>
         </DialogHeader>
@@ -977,7 +975,6 @@ function EditMappingDialog({
 }) {
   const listQuery = useClusterUSBMappings(clusterId);
   const update = useUpdateUSBMapping(clusterId);
-  const restoreFocus = useOpenerFocus(true, fallbackFocus);
   const { pinned, reread, onSaveError } = usePinnedMapping(
     target.mapping,
     listQuery,
@@ -1137,7 +1134,7 @@ function EditMappingDialog({
         if (!open && !busy) onClose();
       }}
     >
-      <DialogContent className="max-w-md" onCloseAutoFocus={restoreFocus}>
+      <DialogContent className="max-w-md" fallbackFocus={fallbackFocus}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>

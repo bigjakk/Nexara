@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { StrictMode, useState, type ReactElement } from "react";
-import { render, screen } from "@testing-library/react";
+import { StrictMode, useRef, useState, type ReactElement } from "react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConfirmDeleteDialog } from "./ConfirmDeleteDialog";
 
@@ -159,6 +159,61 @@ describe("ConfirmDeleteDialog", () => {
       expect(document.activeElement).toBe(opener);
     },
   );
+
+  function Rows() {
+    const [items, setItems] = useState<Item[]>([
+      { name: "alpha" },
+      { name: "beta" },
+    ]);
+    const [pending, setPending] = useState<Item | null>(null);
+    const list = useRef<HTMLUListElement>(null);
+    return (
+      <>
+        <ul ref={list} aria-label="Items" tabIndex={-1}>
+          {items.map((it) => (
+            <li key={it.name}>
+              <button
+                onClick={() => {
+                  setPending(it);
+                }}
+              >
+                Delete {it.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <ConfirmDeleteDialog
+          target={pending}
+          onClose={() => {
+            setPending(null);
+          }}
+          onConfirm={(it) => {
+            setItems((all) => all.filter((other) => other !== it));
+          }}
+          title={(it) => `Delete item ${it.name}?`}
+          description={(it) => `Item ${it.name} is removed for good.`}
+          confirmLabel="Delete Item"
+          fallbackFocus={() => list.current}
+        />
+      </>
+    );
+  }
+
+  it("puts focus on fallbackFocus once the confirmed row's button is gone", async () => {
+    render(<Rows />);
+    await userEvent.click(screen.getByRole("button", { name: "Delete beta" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete Item" }));
+
+    expect(
+      screen.queryByRole("button", { name: "Delete beta" }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("list", { name: "Items" }),
+      );
+    });
+  });
 
   it.each(CASES)(
     "$how returns focus to the second opener when reopened from another row ($mode)",

@@ -31,7 +31,6 @@ import {
   QueryFailureNote,
   QueryStateNotice,
 } from "@/components/QueryStateNotice";
-import { useOpenerFocus } from "@/hooks/useOpenerFocus";
 import { usePermissions } from "@/hooks/usePermissions";
 import { describeError } from "@/lib/api-error";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
@@ -761,7 +760,6 @@ function EditMappingDialog({
 }) {
   const listQuery = useClusterPCIMappings(clusterId);
   const update = useUpdatePCIMapping(clusterId);
-  const restoreFocus = useOpenerFocus(true, fallbackFocus);
   const { pinned, reread, onSaveError } = usePinnedMapping(
     target.mapping,
     listQuery,
@@ -930,7 +928,7 @@ function EditMappingDialog({
         if (!open && !busy) onClose();
       }}
     >
-      <DialogContent className="max-w-lg" onCloseAutoFocus={restoreFocus}>
+      <DialogContent className="max-w-lg" fallbackFocus={fallbackFocus}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>

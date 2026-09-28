@@ -3,10 +3,31 @@ import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
 import { Check, ChevronRight, Circle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { rememberContextMenuOpener } from "@/components/ui/return-focus";
 
 const ContextMenu = ContextMenuPrimitive.Root;
 
-const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
+// Remembers what the menu was opened on: a dialog opened from one of its
+// items goes back there when it closes, since the item goes with the menu.
+// Radix opens it on contextmenu, and on a long touch or pen press.
+const ContextMenuTrigger = React.forwardRef<
+  React.ComponentRef<typeof ContextMenuPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Trigger>
+>(({ onContextMenu, onPointerDown, ...props }, ref) => (
+  <ContextMenuPrimitive.Trigger
+    ref={ref}
+    onContextMenu={(event) => {
+      rememberContextMenuOpener(event);
+      onContextMenu?.(event);
+    }}
+    onPointerDown={(event) => {
+      if (event.pointerType !== "mouse") rememberContextMenuOpener(event);
+      onPointerDown?.(event);
+    }}
+    {...props}
+  />
+));
+ContextMenuTrigger.displayName = ContextMenuPrimitive.Trigger.displayName;
 
 const ContextMenuGroup = ContextMenuPrimitive.Group;
 

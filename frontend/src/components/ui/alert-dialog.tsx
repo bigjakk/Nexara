@@ -3,8 +3,28 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
+import {
+  FallbackFocusContext,
+  ReturnFocusContext,
+  useRecordOpener,
+  useReturnFocus,
+  type FallbackFocus,
+} from "@/components/ui/return-focus";
 
-const AlertDialog = AlertDialogPrimitive.Root;
+/**
+ * Radix's Root, recording the element that opens it, so that closing puts
+ * focus back there (see return-focus.ts). An AlertDialog is always modal.
+ */
+function AlertDialog(
+  props: React.ComponentProps<typeof AlertDialogPrimitive.Root>,
+) {
+  const returnFocus = useRecordOpener(props.open, true);
+  return (
+    <ReturnFocusContext value={returnFocus}>
+      <AlertDialogPrimitive.Root {...props} />
+    </ReturnFocusContext>
+  );
+}
 
 const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
 
@@ -27,20 +47,36 @@ AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
 
 const AlertDialogContent = React.forwardRef<
   React.ComponentRef<typeof AlertDialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <AlertDialogPortal>
-    <AlertDialogOverlay />
-    <AlertDialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid max-h-[85vh] w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
-        className,
-      )}
-      {...props}
-    />
-  </AlertDialogPortal>
-));
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content> & {
+    /**
+     * Where focus goes on close when the element that opened the dialog
+     * cannot take it back — it is disabled or gone by then, or nothing had
+     * focus — or is taken away soon after. A container needs tabIndex={-1}.
+     * After it, the regions around the dialog (FallbackFocusContext).
+     */
+    fallbackFocus?: FallbackFocus | undefined;
+  }
+>(({ className, children, onCloseAutoFocus, fallbackFocus, ...props }, ref) => {
+  const returnFocus = useReturnFocus(ref, onCloseAutoFocus, fallbackFocus);
+  return (
+    <AlertDialogPortal>
+      <AlertDialogOverlay />
+      <AlertDialogPrimitive.Content
+        ref={returnFocus.ref}
+        className={cn(
+          "fixed left-[50%] top-[50%] z-50 grid max-h-[85vh] w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+          className,
+        )}
+        onCloseAutoFocus={returnFocus.onCloseAutoFocus}
+        {...props}
+      >
+        <FallbackFocusContext value={returnFocus.childFallbacks}>
+          {children}
+        </FallbackFocusContext>
+      </AlertDialogPrimitive.Content>
+    </AlertDialogPortal>
+  );
+});
 AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName;
 
 const AlertDialogHeader = ({

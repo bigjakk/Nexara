@@ -42,6 +42,7 @@ import {
   getEntriesToShow,
   type ChangelogEntry,
 } from "@/lib/changelog";
+import { MAIN_CONTENT_ID } from "@/lib/constants";
 import { useChangelog } from "@/features/changelog/api/changelog-queries";
 import { Sidebar } from "./Sidebar";
 import { TaskLogPanel } from "./TaskLogPanel";
@@ -289,7 +290,11 @@ export function AppShell() {
           </div>
         </header>
         <Separator />
-        <main className="flex-1 overflow-auto p-4 md:p-6">
+        <main
+          id={MAIN_CONTENT_ID}
+          tabIndex={-1}
+          className="flex-1 overflow-auto p-4 outline-none md:p-6"
+        >
           {/* Keyed by pathname so a crashed route doesn't hold every other
               route hostage — navigation remounts a fresh boundary. */}
           <ErrorBoundary key={location.pathname}>

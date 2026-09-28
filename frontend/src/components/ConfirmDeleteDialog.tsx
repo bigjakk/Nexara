@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,6 +9,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import type { FallbackFocus } from "@/components/ui/return-focus";
 
 interface ConfirmDeleteDialogProps<T> {
   /**
@@ -34,12 +35,17 @@ interface ConfirmDeleteDialogProps<T> {
    */
   confirmDisabled?: boolean;
   /**
-   * Runs as the dialog closes, before focus goes back to the element that
-   * opened it. A caller whose opener cannot take focus by then (its button is
-   * disabled while the delete is in flight) calls preventDefault() and
-   * focuses something that can; otherwise focus would fall to <body>.
+   * Where focus goes when the row's button that opened the dialog cannot take
+   * it back: held while the delete is in flight, or gone with its row once
+   * the list is read again. A container needs tabIndex={-1}. After it, the
+   * regions around the dialog (see components/ui/return-focus.ts).
    */
-  onCloseAutoFocus?: (event: Event) => void;
+  fallbackFocus?: FallbackFocus | undefined;
+  /**
+   * Runs as the dialog closes, before focus goes back to the element that
+   * opened it; one that calls preventDefault() puts focus somewhere itself.
+   */
+  onCloseAutoFocus?: ((event: Event) => void) | undefined;
 }
 
 /**
@@ -66,6 +72,7 @@ export function ConfirmDeleteDialog<T>({
   description,
   confirmLabel = "Delete",
   confirmDisabled = false,
+  fallbackFocus,
   onCloseAutoFocus,
 }: ConfirmDeleteDialogProps<T>) {
   // Radix keeps the content mounted while the close animation plays, after
@@ -75,40 +82,20 @@ export function ConfirmDeleteDialog<T>({
   if (target !== null) shown.current = target;
   const current = shown.current;
 
-  // Radix returns focus on close only to an AlertDialog.Trigger, and this
-  // dialog is opened by state, with no Trigger (react-dialog DialogContentModal:
-  // onCloseAutoFocus prevents the default and focuses context.triggerRef, which
-  // is empty here), so focus fell to <body> on every close. It goes back to
-  // whatever had focus when the dialog opened — the row's delete button.
-  // Recorded once per opening, and not again while the dialog stays open,
-  // when focus is inside it. It must run before Radix's FocusScope moves focus
-  // into the dialog (a passive effect). Today that FocusScope mounts a commit
-  // later, since react-portal renders nothing until its own layout effect sets
-  // `mounted`, so a passive effect here would also be early enough; a layout
-  // effect does not depend on that.
-  const opener = useRef<HTMLElement | null>(null);
-  const open = target !== null;
-  useLayoutEffect(() => {
-    if (!open) return;
-    opener.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-  }, [open]);
-
+  // Opened by state, with no Trigger: the AlertDialog puts focus back on the
+  // element that opened it, the row's delete button, on every close — or on
+  // fallbackFocus once that button is held or gone.
   return (
     <AlertDialog
-      open={open}
+      open={target !== null}
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
     >
       <AlertDialogContent
+        fallbackFocus={fallbackFocus}
         onCloseAutoFocus={(event) => {
           onCloseAutoFocus?.(event);
-          if (event.defaultPrevented) return;
-          event.preventDefault();
-          opener.current?.focus();
         }}
       >
         {current !== null && (

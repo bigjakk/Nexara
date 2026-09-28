@@ -335,6 +335,31 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     expect(mockedDelete).not.toHaveBeenCalled();
   });
 
+  // Save opened the confirmation, but once the Save lands it has nothing left
+  // to send, so it is disabled and cannot take focus back.
+  it("puts focus on the save bar after a confirmed Save, not on the page", async () => {
+    mockedPut.mockImplementation(serverDropsDeletedKeys);
+    const user = userEvent.setup();
+    const { save } = await openPanel();
+    await stage(user, "unused0");
+
+    await user.click(save);
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete and Save" }),
+    );
+
+    await waitFor(() => {
+      expect(dialog).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("group", { name: "Changes" }),
+      );
+    });
+    expect(save).toBeDisabled();
+  });
+
   it("holds the dialog, and its buttons, while the Save is in flight", async () => {
     const pending = deferred<unknown>();
     mockedPut.mockReturnValue(pending.promise);

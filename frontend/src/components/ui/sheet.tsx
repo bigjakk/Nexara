@@ -4,8 +4,29 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import {
+  FallbackFocusContext,
+  ReturnFocusContext,
+  useRecordOpener,
+  useReturnFocus,
+  type FallbackFocus,
+} from "@/components/ui/return-focus";
 
-const Sheet = SheetPrimitive.Root;
+/**
+ * Radix's Root, recording the element that opens it, so that closing puts
+ * focus back there (see return-focus.ts).
+ */
+function Sheet({
+  modal = true,
+  ...props
+}: React.ComponentProps<typeof SheetPrimitive.Root>) {
+  const returnFocus = useRecordOpener(props.open, modal);
+  return (
+    <ReturnFocusContext value={returnFocus}>
+      <SheetPrimitive.Root modal={modal} {...props} />
+    </ReturnFocusContext>
+  );
+}
 
 const SheetTrigger = SheetPrimitive.Trigger;
 
@@ -50,27 +71,53 @@ const sheetVariants = cva(
 type SheetContentProps = React.ComponentPropsWithoutRef<
   typeof SheetPrimitive.Content
 > &
-  VariantProps<typeof sheetVariants>;
+  VariantProps<typeof sheetVariants> & {
+    /**
+     * Where focus goes on close when the element that opened the sheet
+     * cannot take it back — it is disabled or gone by then, or nothing had
+     * focus — or is taken away soon after. A container needs tabIndex={-1}.
+     * After it, the regions around the sheet (FallbackFocusContext).
+     */
+    fallbackFocus?: FallbackFocus | undefined;
+  };
 
 const SheetContent = React.forwardRef<
   React.ComponentRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay />
-    <SheetPrimitive.Content
-      ref={ref}
-      className={cn(sheetVariants({ side }), className)}
-      {...props}
-    >
-      {children}
-      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </SheetPrimitive.Close>
-    </SheetPrimitive.Content>
-  </SheetPortal>
-));
+>(
+  (
+    {
+      side = "right",
+      className,
+      children,
+      onCloseAutoFocus,
+      fallbackFocus,
+      ...props
+    },
+    ref,
+  ) => {
+    const returnFocus = useReturnFocus(ref, onCloseAutoFocus, fallbackFocus);
+    return (
+      <SheetPortal>
+        <SheetOverlay />
+        <SheetPrimitive.Content
+          ref={returnFocus.ref}
+          className={cn(sheetVariants({ side }), className)}
+          onCloseAutoFocus={returnFocus.onCloseAutoFocus}
+          {...props}
+        >
+          <FallbackFocusContext value={returnFocus.childFallbacks}>
+            {children}
+          </FallbackFocusContext>
+          <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </SheetPrimitive.Close>
+        </SheetPrimitive.Content>
+      </SheetPortal>
+    );
+  },
+);
 SheetContent.displayName = SheetPrimitive.Content.displayName;
 
 const SheetHeader = ({

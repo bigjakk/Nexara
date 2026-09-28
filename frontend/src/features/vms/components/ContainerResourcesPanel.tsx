@@ -945,9 +945,10 @@ export function ContainerResourcesPanel({
   // to say it in.
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
-  // Where focus returns when that confirmation closes. It has no Trigger for
-  // Radix to return focus to, so without this it would land on the page.
-  const saveButtonRef = useRef<HTMLButtonElement>(null);
+  // Where focus goes when that confirmation closes and Save, which opened it,
+  // cannot take it back: after a successful Save it is disabled, having
+  // nothing left to send. The bar says "Saved", or why not.
+  const saveBarRef = useRef<HTMLDivElement>(null);
 
   // The notice a Delete and Save that sent nothing leaves in the dialog, and
   // the number of such stops. Each stop moves focus to the notice, not to a
@@ -1365,7 +1366,13 @@ export function ContainerResourcesPanel({
       )}
 
       {/* Save bar */}
-      <div className="flex items-center justify-between">
+      <div
+        ref={saveBarRef}
+        role="group"
+        aria-label="Changes"
+        tabIndex={-1}
+        className="flex items-center justify-between outline-none"
+      >
         <div className="flex items-center gap-2">
           {hasChanges && (
             <Badge variant="secondary" className="text-xs">
@@ -1391,7 +1398,6 @@ export function ContainerResourcesPanel({
           )}
         </div>
         <Button
-          ref={saveButtonRef}
           size="sm"
           className="gap-1.5"
           disabled={!hasChanges || setConfigMutation.isPending}
@@ -1426,15 +1432,7 @@ export function ContainerResourcesPanel({
           }
         }}
       >
-        <AlertDialogContent
-          onCloseAutoFocus={(event) => {
-            // Back to Save, which opened it. After a successful Save that
-            // button is disabled, having nothing left to send, and a disabled
-            // button cannot take focus.
-            event.preventDefault();
-            saveButtonRef.current?.focus();
-          }}
-        >
+        <AlertDialogContent fallbackFocus={() => saveBarRef.current}>
           <AlertDialogHeader>
             <AlertDialogTitle>
               Delete {confirmation.volumes.length} unused volume
