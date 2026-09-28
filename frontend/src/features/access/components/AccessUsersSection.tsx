@@ -49,6 +49,7 @@ import {
   type AccessCapabilities,
   type AccessTokenCreated,
   type AccessUser,
+  type UpdateAccessUserInput,
   useAccessTokens,
   useAccessUser,
   useAccessUsers,
@@ -123,8 +124,10 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
   const [sectionError, setSectionError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<AccessUser | null>(null);
   const [editTarget, setEditTarget] = useState<string | null>(null);
-  // Set when the server refuses because the target is Nexara's own credential.
-  const [selfConflict, setSelfConflict] = useState<{
+  // Set when the server refuses a DELETE because the target is Nexara's own
+  // credential, and its override force-deletes. An edit's refusal must never
+  // land here: EditUserDialog keeps its own override, which forces the edit.
+  const [deleteConflict, setDeleteConflict] = useState<{
     message: string;
     userid: string;
   } | null>(null);
@@ -166,7 +169,7 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
       { userid: target, force },
       {
         onSuccess: () => {
-          setSelfConflict(null);
+          setDeleteConflict(null);
           setDeleteTarget(null);
         },
         onError: (err) => {
@@ -175,10 +178,10 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
           // Hand it to the type-to-confirm override rather than reporting a
           // plain failure — it is a refusal, not an error.
           if (err instanceof ApiClientError && err.status === 409) {
-            setSelfConflict({ message: err.message, userid: target });
+            setDeleteConflict({ message: err.message, userid: target });
             return;
           }
-          setSelfConflict(null);
+          setDeleteConflict(null);
           setSectionError(errorMessage(err, "Failed to delete user"));
         },
       },
@@ -422,24 +425,20 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
             onClose={() => {
               setEditTarget(null);
             }}
-            onSelfConflict={(message, uid) => {
-              setEditTarget(null);
-              setSelfConflict({ message, userid: uid });
-            }}
           />
         )}
 
-        {selfConflict && (
+        {deleteConflict && (
           <SelfCredentialConfirm
-            message={selfConflict.message}
-            confirmValue={selfConflict.userid}
+            message={deleteConflict.message}
+            confirmValue={deleteConflict.userid}
             actionLabel="Delete User"
             pending={deleteUser.isPending}
             onCancel={() => {
-              setSelfConflict(null);
+              setDeleteConflict(null);
             }}
             onConfirm={() => {
-              handleDelete(selfConflict.userid, true);
+              handleDelete(deleteConflict.userid, true);
             }}
           />
         )}
@@ -805,20 +804,20 @@ function UserTokens({
  *
  * Disabling an account is the interesting case: PVE checks the owning user when
  * it verifies an API token, so disabling the user Nexara authenticates as
- * breaks the cluster connection just as a delete would. The server answers that
- * with the same 409 the delete path uses, which is handed back up to the
- * type-to-confirm override.
+ * breaks the cluster connection just as a delete would. The server refuses that
+ * with a 409, and the type-to-confirm override is this dialog's own: it re-sends
+ * the refused edit with force, and Cancel goes back to the form. It is not
+ * handed up to the section, whose override is the DELETE's — an earlier version
+ * did that, so confirming an edit force-deleted the user and all its tokens.
  */
 function EditUserDialog({
   clusterId,
   userid,
   onClose,
-  onSelfConflict,
 }: {
   clusterId: string;
   userid: string;
   onClose: () => void;
-  onSelfConflict: (message: string, userid: string) => void;
 }) {
   const userQuery = useAccessUser(clusterId, userid);
   const updateUser = useUpdateAccessUser(clusterId);
@@ -828,31 +827,46 @@ function EditUserDialog({
   const [email, setEmail] = useState<string | null>(null);
   const [enable, setEnable] = useState<boolean | null>(null);
   const [error, setError] = useState("");
+  // The edit as it was refused, so the override confirms exactly that one.
+  const [conflict, setConflict] = useState<{
+    message: string;
+    edit: UpdateAccessUserInput;
+  } | null>(null);
 
   const currentComment = comment ?? userQuery.data?.comment ?? "";
   const currentEmail = email ?? userQuery.data?.email ?? "";
   const currentEnable = enable ?? userQuery.data?.enable ?? true;
 
-  const handleSave = (e: React.SyntheticEvent) => {
-    e.preventDefault();
+  const save = (edit: UpdateAccessUserInput, force: boolean) => {
     setError("");
     updateUser.mutate(
+      { ...edit, force },
+      {
+        onSuccess: onClose,
+        onError: (err) => {
+          // A forced save is past the self-credential refusal, so whatever it
+          // fails with is an error for the form, never a second override.
+          if (!force && err instanceof ApiClientError && err.status === 409) {
+            setConflict({ message: err.message, edit });
+            return;
+          }
+          setConflict(null);
+          setError(errorMessage(err, "Failed to update user"));
+        },
+      },
+    );
+  };
+
+  const handleSave = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    save(
       {
         userid,
         comment: currentComment,
         email: currentEmail,
         enable: currentEnable,
       },
-      {
-        onSuccess: onClose,
-        onError: (err) => {
-          if (err instanceof ApiClientError && err.status === 409) {
-            onSelfConflict(err.message, userid);
-            return;
-          }
-          setError(errorMessage(err, "Failed to update user"));
-        },
-      },
+      false,
     );
   };
 
@@ -918,6 +932,22 @@ function EditUserDialog({
               </Button>
             </div>
           </form>
+        )}
+        {/* Stacked over this dialog, which stays open beneath it, so
+            dismissing it returns to the form with the edit intact. */}
+        {conflict && (
+          <SelfCredentialConfirm
+            message={conflict.message}
+            confirmValue={conflict.edit.userid}
+            actionLabel="Save Anyway"
+            pending={updateUser.isPending}
+            onCancel={() => {
+              setConflict(null);
+            }}
+            onConfirm={() => {
+              save(conflict.edit, true);
+            }}
+          />
         )}
       </DialogContent>
     </Dialog>

@@ -193,18 +193,29 @@ export function useCreateAccessUser(clusterId: string) {
   });
 }
 
+/**
+ * An edit to the account userid names: each other field is optional, and an
+ * omitted one is left as it is.
+ */
+export type UpdateAccessUserInput = { userid: string } & Omit<
+  CreateAccessUserInput,
+  "userid" | "password"
+>;
+
 export function useUpdateAccessUser(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    // force is the override for an edit that would cut Nexara off from the
+    // cluster — disabling, expiring or regrouping the account it
+    // authenticates as. It goes in the query, where the route declares it,
+    // and never in the body.
     mutationFn: ({
       userid,
+      force,
       ...data
-    }: { userid: string } & Omit<
-      CreateAccessUserInput,
-      "userid" | "password"
-    >) =>
+    }: UpdateAccessUserInput & { force?: boolean }) =>
       apiClient.put(
-        apiPath`/api/v1/clusters/${clusterId}/access/users/${userid}`,
+        apiPath`/api/v1/clusters/${clusterId}/access/users/${userid}?${queryParams({ force: force ? "true" : undefined })}`,
         data,
       ),
     onSuccess: () => {
