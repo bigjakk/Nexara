@@ -185,7 +185,7 @@ export function useUpdateUSBMapping(clusterId: string) {
         body,
       ),
     onSettled: () => {
-      refreshAfterWrite(qc, clusterId);
+      refreshAfterWrite(qc, usbMappingsKey(clusterId));
     },
     // Every caller renders the failure itself, next to what it concerns.
     onError: () => undefined,
@@ -210,15 +210,16 @@ export function useDeleteUSBMapping(clusterId: string) {
         apiPath`/api/v1/clusters/${clusterId}/usb-mappings/${id}?digest=${digest}`,
       ),
     onSettled: () => {
-      refreshAfterWrite(qc, clusterId);
+      refreshAfterWrite(qc, usbMappingsKey(clusterId));
     },
     onError: () => undefined,
   });
 }
 
 /**
- * Re-reads every USB mapping listing after an update or a delete, succeeded
- * or not: after a 409 the listing is what is stale.
+ * Re-reads every listing of a kind's mappings — `key`, the kind's prefix —
+ * after an update or a delete, succeeded or not: after a 409 the listing is
+ * what is stale.
  *
  * Never awaited. The cluster listing runs Proxmox's check on every node, and a
  * promise returned from onSettled would hold the mutation — and the dialog's
@@ -228,9 +229,9 @@ export function useDeleteUSBMapping(clusterId: string) {
  */
 function refreshAfterWrite(
   qc: ReturnType<typeof useQueryClient>,
-  clusterId: string,
+  key: readonly unknown[],
 ): void {
-  void qc.invalidateQueries({ queryKey: usbMappingsKey(clusterId) });
+  void qc.invalidateQueries({ queryKey: key });
 }
 
 /**
@@ -299,6 +300,129 @@ export function useUSBMappingUsage(
     queryFn: () =>
       apiClient.get<MappingUsage>(
         apiPath`/api/v1/clusters/${clusterId}/usb-mappings/${mappingId ?? ""}/usage`,
+      ),
+    enabled: clusterId.length > 0 && mappingId !== null,
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
+/**
+ * A PCI mapping as the cluster's Resource Mappings tab lists it
+ * (GET …/pci-mappings): ClusterUSBMapping's fields, with a node's several
+ * entries all checked together on that node, the mapping's two flags, and
+ * `unreadable_entries` — for each stored entry the server cannot read the way
+ * Proxmox does, why. Nexara cannot save the mapping while one is there, so it
+ * can only be removed.
+ *
+ * `digest` is the whole pci.cfg's, read with `map`.
+ */
+export interface ClusterPCIMapping {
+  id: string;
+  description: string;
+  map: string[];
+  digest: string;
+  node_checks: Record<string, MappingCheck[]>;
+  unchecked: Record<string, string>;
+  mdev: boolean;
+  live_migration_capable: boolean;
+  unreadable_entries: Record<string, string>;
+}
+
+export function useClusterPCIMappings(clusterId: string) {
+  return useQuery({
+    queryKey: pciMappingsKey(clusterId),
+    queryFn: () =>
+      apiClient.list<ClusterPCIMapping>(
+        apiPath`/api/v1/clusters/${clusterId}/pci-mappings`,
+      ),
+    enabled: clusterId.length > 0,
+    // Each read runs Proxmox's check on every node an entry names.
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * PUT …/pci-mappings/:id. `map` is every entry the mapping keeps, each exactly
+ * as the listing returned it — the server refuses any other string. With
+ * `add_node` and `add_path` the server adds that node's device, the entry
+ * built from the node's own report of it; with `replace` too, the new entry
+ * takes that entry's place. `description` omitted leaves it, "" removes it;
+ * `digest` is the one the entries were read with.
+ */
+export interface UpdatePCIMappingRequest {
+  id: string;
+  map: string[];
+  add_node?: string;
+  add_path?: string;
+  replace?: string;
+  description?: string;
+  digest: string;
+}
+
+export function useUpdatePCIMapping(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: UpdatePCIMappingRequest) =>
+      apiClient.put(
+        apiPath`/api/v1/clusters/${clusterId}/pci-mappings/${id}`,
+        body,
+      ),
+    onSettled: () => {
+      refreshAfterWrite(qc, pciMappingsKey(clusterId));
+    },
+    // Every caller renders the failure itself, next to what it concerns.
+    onError: () => undefined,
+  });
+}
+
+/** DELETE …/pci-mappings/:id, with the listing's digest, as for USB. */
+export interface DeletePCIMappingRequest {
+  id: string;
+  digest: string;
+}
+
+export function useDeletePCIMapping(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, digest }: DeletePCIMappingRequest) =>
+      apiClient.delete(
+        apiPath`/api/v1/clusters/${clusterId}/pci-mappings/${id}?digest=${digest}`,
+      ),
+    onSettled: () => {
+      refreshAfterWrite(qc, pciMappingsKey(clusterId));
+    },
+    onError: () => undefined,
+  });
+}
+
+/** useUSBMappingsSettled for the PCI mapping listings. It never rejects. */
+export function usePCIMappingsSettled(clusterId: string) {
+  const qc = useQueryClient();
+  return useCallback(
+    () =>
+      qc.refetchQueries(
+        { queryKey: pciMappingsKey(clusterId), type: "active" },
+        { cancelRefetch: false },
+      ),
+    [qc, clusterId],
+  );
+}
+
+/**
+ * The usage of PCI mapping `mappingId`, as useUSBMappingUsage reads a USB
+ * mapping's — and for its reasons, always stale and dropped once its dialog
+ * closes.
+ */
+export function usePCIMappingUsage(
+  clusterId: string,
+  mappingId: string | null,
+) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "pci-mapping-usage", mappingId],
+    queryFn: () =>
+      apiClient.get<MappingUsage>(
+        apiPath`/api/v1/clusters/${clusterId}/pci-mappings/${mappingId ?? ""}/usage`,
       ),
     enabled: clusterId.length > 0 && mappingId !== null,
     staleTime: 0,

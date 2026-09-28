@@ -1,11 +1,28 @@
 import { ApiClientError } from "@/lib/api-client";
 
 /*
- * What the cluster's mapping cards share about writing a mapping: every save,
- * removal and delete is a compare-and-swap on the digest of the kind's whole
- * config file (usb.cfg, pci.cfg), refused with 409 when the file changed since
- * the listing the operator was looking at.
+ * What the cluster's mapping cards share about reading and writing a mapping:
+ * every save, removal and delete is a compare-and-swap on the digest of the
+ * kind's whole config file (usb.cfg, pci.cfg), refused with 409 when the file
+ * changed since the listing the operator was looking at; and the listing's
+ * maps are read by their own keys (ownValue).
  */
+
+/**
+ * `record[key]` when the record itself holds the key, else undefined. A
+ * listing's maps are parsed JSON, so a plain index would give a key named
+ * "constructor", say, what every object inherits in place of "not listed".
+ * Through Object.prototype.hasOwnProperty rather than Object.hasOwn, which is
+ * newer than the browsers the build targets (vite.config.ts).
+ */
+export function ownValue<T>(
+  record: Readonly<Record<string, T>>,
+  key: string,
+): T | undefined {
+  return Object.prototype.hasOwnProperty.call(record, key)
+    ? record[key]
+    : undefined;
+}
 
 /** A remove, delete or save refused because the file changed since its read. */
 export function isConflict(err: unknown): boolean {

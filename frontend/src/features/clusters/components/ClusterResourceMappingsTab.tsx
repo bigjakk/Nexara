@@ -1,3 +1,4 @@
+import { PCIMappingsCard } from "@/features/mappings/components/PCIMappingsCard";
 import { USBMappingsCard } from "@/features/mappings/components/USBMappingsCard";
 
 interface ClusterResourceMappingsTabProps {
@@ -16,6 +17,7 @@ export function ClusterResourceMappingsTab({
   return (
     <div className="space-y-4">
       <USBMappingsCard clusterId={clusterId} />
+      <PCIMappingsCard clusterId={clusterId} />
     </div>
   );
 }

@@ -82,7 +82,7 @@ import (
 // Adding a route that takes pveObjectNameParam("…") or emptyOrNodeName does not
 // move this list at all, and neither does deleting one, because the shared
 // declaration is what carries the rule. It moves only when a route declares its
-// OWN inline rule reference, which 13 of the 48 entries below do — the ones whose
+// OWN inline rule reference, which 13 of the 50 entries below do — the ones whose
 // container is a register…Endpoints function rather than a named parameter — and
 // then the failure names which of the five things happened.
 var ruleReferenceSites = []string{
@@ -107,6 +107,8 @@ var ruleReferenceSites = []string{
 	"registry_guest_snapshots.go guestSnapshotFilterClusterParam = uuid-or-empty",
 	"registry_ha.go haConfigIDParam = pve-configid-existing",
 	"registry_ldap.go ldapConfigParams [default_role_id] = uuid-or-empty",
+	"registry_mappings.go pciAddressParam = pci-address",
+	"registry_mappings.go pciMappingIDParam = pve-configid-existing",
 	"registry_mappings.go usbMappingIDParam = pve-configid-existing",
 	"registry_metric_servers.go metricServerIDParam = pve-object-id",
 	"registry_migrations.go createMigrationParams [target_node] = node-name-or-empty",

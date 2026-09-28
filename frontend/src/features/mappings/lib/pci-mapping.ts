@@ -283,3 +283,81 @@ export function pciUnreadPaths(
     ),
   ];
 }
+
+/**
+ * An entry's own description, which parsePCIMappingEntry does not read. An
+ * update replaces every entry, so a rewritten entry has to keep it — the
+ * server keeps it on a replaced one.
+ */
+export function pciMappingEntryDescription(raw: string): string {
+  let description = "";
+  for (const s of entrySegments(raw)) {
+    if (s.key === "description") description = s.value;
+  }
+  return description;
+}
+
+/** Two IOMMU groups as entries spell them: "3", "+3" and "03" are one group. */
+function sameGroup(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a === "" || b === "") return false;
+  const x = Number(a);
+  return Number.isInteger(x) && x === Number(b);
+}
+
+/**
+ * Whether two stored entries say the same thing, whatever order their keys
+ * are in, the case of their ids and the spelling of their group — the server
+ * rewrites all three on every save, so an entry's string need not survive
+ * another operator's edit of the same mapping.
+ */
+export function samePCIMappingEntry(a: string, b: string): boolean {
+  const x = parsePCIMappingEntry(a);
+  const y = parsePCIMappingEntry(b);
+  return (
+    x.node === y.node &&
+    x.path === y.path &&
+    x.id.toLowerCase() === y.id.toLowerCase() &&
+    x.subsystemId.toLowerCase() === y.subsystemId.toLowerCase() &&
+    sameGroup(x.iommugroup, y.iommugroup) &&
+    pciMappingEntryDescription(a) === pciMappingEntryDescription(b)
+  );
+}
+
+/**
+ * Whether the entry `entry` holds exactly what `expected` — the entry the
+ * server builds for a device (pciEntryForDevice) — describes: the same path,
+ * ids and group. Replacing an entry with such a device changes nothing.
+ *
+ * Compared exactly, not as samePCIMappingEntry compares: `expected` is
+ * lowercase with a plain group number, and Proxmox compares an entry's ids and
+ * group with the node's lowercase sysfs hex and plain number as strings
+ * (assert_valid), so an entry stored with an uppercase id or a group spelled
+ * "07" or "+7" is broken — and picking the same device repairs it.
+ */
+export function pciEntryMatches(
+  entry: string,
+  expected: PCIMappingEntry,
+): boolean {
+  const e = parsePCIMappingEntry(entry);
+  return (
+    e.path === expected.path &&
+    e.id === expected.id &&
+    e.subsystemId === expected.subsystemId &&
+    e.iommugroup === expected.iommugroup
+  );
+}
+
+/**
+ * Whether two paths — each one address or a ";"-joined list — name any of the
+ * same device: the same address, or a whole device (a slot) and one of its
+ * functions. The server refuses a device a node's entries already name this
+ * way (the same rule, pciPathsOverlap in the handlers).
+ */
+export function pciPathsOverlap(a: string, b: string): boolean {
+  const xs = a.split(";");
+  const ys = b.split(";");
+  return xs.some((x) =>
+    ys.some((y) => x === y || pciSlot(x) === y || x === pciSlot(y)),
+  );
+}

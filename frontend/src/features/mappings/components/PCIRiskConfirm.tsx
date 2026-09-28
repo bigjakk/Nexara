@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 
@@ -7,7 +8,9 @@ import { Label } from "@/components/ui/label";
  * node, whether or not the node is using it. Asked, not stopped: passing a
  * spare disk controller or NIC through is what the dialogs are for. Renders
  * nothing when there is no risk to state. The checkbox's id is
- * `${idPrefix}-host-risk`.
+ * `${idPrefix}-host-risk`. `lead`, the sentence above the warnings, is by
+ * default the one for a single VM's device; a caller about a mapping, which
+ * any VM on the node may use, says so in its own.
  */
 export function PCIRiskConfirm({
   idPrefix,
@@ -16,6 +19,7 @@ export function PCIRiskConfirm({
   accepted,
   onAcceptedChange,
   disabled,
+  lead,
 }: {
   idPrefix: string;
   node: string;
@@ -23,13 +27,18 @@ export function PCIRiskConfirm({
   accepted: boolean;
   onAcceptedChange: (accepted: boolean) => void;
   disabled: boolean;
+  lead?: ReactNode | undefined;
 }) {
   if (risks.length === 0) return null;
   return (
     <div className="space-y-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
       <p>
-        When the VM starts, the device is taken away from {node} — check that
-        the node does not need it:
+        {lead ?? (
+          <>
+            When the VM starts, the device is taken away from {node} — check
+            that the node does not need it:
+          </>
+        )}
       </p>
       <ul className="list-disc space-y-0.5 pl-4">
         {risks.map((r, i) => (

@@ -625,6 +625,8 @@ func TestMissingObjectPhraseSets_RejectEachOthersNegatives(t *testing.T) {
 		"mappingTakenPhrases": mappingTakenPhrases,
 		// 404, for a USB mapping update whose mapping is gone.
 		"usbMappingMissingPhrases": usbMappingMissingPhrases,
+		// 404, for a PCI mapping update whose mapping is gone.
+		"pciMappingMissingPhrases": pciMappingMissingPhrases,
 	}
 	// ownedBy names the set a fixture is a legitimate positive for, so the
 	// matrix can carry one set's die as every other set's negative without the
@@ -654,6 +656,8 @@ func TestMissingObjectPhraseSets_RejectEachOthersNegatives(t *testing.T) {
 		// The USB mapping update's other die, on the same PUT: the lock on
 		// usb.cfg timing out is a cluster failure, not a missing mapping.
 		{"update hardware mapping failed: can't lock file '/var/lock/pve-manager/pve-mapping-usb.lck' - got timeout", ""},
+		// The PCI update's, likewise for pci.cfg.
+		{"update hardware mapping failed: can't lock file '/var/lock/pve-manager/pve-mapping-pci.lck' - got timeout", ""},
 	}
 
 	for name, phrases := range sets {
@@ -799,6 +803,8 @@ func TestMissingObjectPhrasesAreLowercase(t *testing.T) {
 		"mappingTakenPhrases": mappingTakenPhrases,
 		// 404, for a USB mapping update whose mapping is gone.
 		"usbMappingMissingPhrases": usbMappingMissingPhrases,
+		// 404, for a PCI mapping update whose mapping is gone.
+		"pciMappingMissingPhrases": pciMappingMissingPhrases,
 	}
 	for name, phrases := range sets {
 		if len(phrases) == 0 {

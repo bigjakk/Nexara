@@ -782,16 +782,19 @@ func (s *Server) clusterCreateLimiter() fiber.Handler {
 	})
 }
 
-// usbMappingUsageLimiter caps GET .../usb-mappings/:mapping_id/usage at
-// 10/min per user.
+// mappingUsageLimiter caps GET .../usb-mappings/:mapping_id/usage and
+// GET .../pci-mappings/:mapping_id/usage at 10/min per user, the two together:
+// buildRegistry makes ONE instance and both routes take it, so a user's checks
+// of either kind spend the same budget — a second instance would give each
+// user ten of each.
 //
 // Each call reads the configuration of every VM in the cluster — one Proxmox
-// request per VM — and the route is open to view:vm, which every built-in
+// request per VM — and the routes are open to view:vm, which every built-in
 // Viewer holds, so under the general limiter's budget a read-only account
 // could multiply its requests into Proxmox by the size of the cluster. The
-// SPA asks once per delete confirmation. The handler also caps the scans in
-// flight, per user and per cluster (mappingUsageScans in
-// handlers/resource_mappings.go).
+// SPA asks once per delete confirmation. The handlers also cap the scans in
+// flight, per user and per cluster, in one pool for both kinds
+// (mappingUsageScans in handlers/resource_mappings.go).
 //
 // Keyed on the user, unlike the per-IP limiters, because it can be: route
 // limiters run after authRequired, which has set user_id. Per IP, everyone
@@ -799,24 +802,24 @@ func (s *Server) clusterCreateLimiter() fiber.Handler {
 // share ten checks a minute, and any one of them could spend them all. The IP
 // is the fallback for a request without a user, which does not reach here.
 //
-// Attached to the route rather than app-level, for the reasons spelled out on
+// Attached to the routes rather than app-level, for the reasons spelled out on
 // clusterCreateLimiter: a path-matching Next() cannot be written safely, and
 // app-level middleware runs before authRequired.
-func (s *Server) usbMappingUsageLimiter() fiber.Handler {
+func (s *Server) mappingUsageLimiter() fiber.Handler {
 	return limiter.New(limiter.Config{
 		Max:          10,
 		Expiration:   1 * time.Minute,
-		KeyGenerator: usbMappingUsageLimiterKey,
+		KeyGenerator: mappingUsageLimiterKey,
 	})
 }
 
-// usbMappingUsageLimiterKey is usbMappingUsageLimiter's bucket: the user when
-// there is one, else the IP.
-func usbMappingUsageLimiterKey(c fiber.Ctx) string {
+// mappingUsageLimiterKey is mappingUsageLimiter's bucket: the user when there
+// is one, else the IP.
+func mappingUsageLimiterKey(c fiber.Ctx) string {
 	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
-		return "user:" + uid.String() + ":usb-mapping-usage"
+		return "user:" + uid.String() + ":mapping-usage"
 	}
-	return c.IP() + ":usb-mapping-usage"
+	return c.IP() + ":mapping-usage"
 }
 
 // veeamConnectLimiter caps the Veeam endpoints that spend a real logon at

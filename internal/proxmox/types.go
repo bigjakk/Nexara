@@ -1272,15 +1272,16 @@ type USBMapping struct {
 // MDev is the mapping's "Use with Mediated Devices" flag. Proxmox compares it
 // with the device's own capability when it checks an entry, and refuses a
 // mismatch either way ('mdev' does not match, assert_valid in pve-guest-common
-// src/PVE/Mapping/PCI.pm). Digest is the whole pci.cfg's, as USBMapping's is
-// usb.cfg's.
+// src/PVE/Mapping/PCI.pm). LiveMigrationCapable is its "Live Migration
+// Capable" flag. Digest is the whole pci.cfg's, as USBMapping's is usb.cfg's.
 type PCIMapping struct {
-	ID          string         `json:"id"`
-	Description string         `json:"description"`
-	Map         []string       `json:"map"`
-	Checks      []MappingCheck `json:"checks"`
-	MDev        FlexBool       `json:"mdev"`
-	Digest      string         `json:"digest"`
+	ID                   string         `json:"id"`
+	Description          string         `json:"description"`
+	Map                  []string       `json:"map"`
+	Checks               []MappingCheck `json:"checks"`
+	MDev                 FlexBool       `json:"mdev"`
+	LiveMigrationCapable FlexBool       `json:"live-migration-capable"`
+	Digest               string         `json:"digest"`
 }
 
 // MappingCheck is one problem Proxmox reports for a mapping when its listing

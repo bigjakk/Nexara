@@ -20,6 +20,9 @@ const (
 	usbMappingUsagePath   = clusterScope + "/usb-mappings/:mapping_id/usage"
 	pciMappingListPath    = clusterScope + "/nodes/:node_name/pci-mappings"
 	pciMappingCreatePath  = clusterScope + "/pci-mappings"
+	pciMappingClusterPath = clusterScope + "/pci-mappings"
+	pciMappingPath        = clusterScope + "/pci-mappings/:mapping_id"
+	pciMappingUsagePath   = clusterScope + "/pci-mappings/:mapping_id/usage"
 )
 
 // TestUSBMappingRoutesDeclareTheirPermissions pins the gates. The node
@@ -169,12 +172,17 @@ func TestEveryUSBMappingEndpointIsDocumented(t *testing.T) {
 
 // TestPCIMappingRoutesDeclareTheirPermissions pins the PCI gates, which are
 // the USB ones for the same reasons: the node listing sits with the node
-// hardware listings the Add PCI Device dialog also reads, and the create is
-// cluster configuration.
+// hardware listings the Add PCI Device dialog also reads; the create, update
+// and delete are cluster configuration; the cluster-wide listing is cluster
+// configuration to read; and the usage answers with guests.
 func TestPCIMappingRoutesDeclareTheirPermissions(t *testing.T) {
 	for _, tt := range []struct{ method, path, want string }{
 		{fiber.MethodGet, pciMappingListPath, "view:node"},
 		{fiber.MethodPost, pciMappingCreatePath, "manage:cluster"},
+		{fiber.MethodGet, pciMappingClusterPath, "view:cluster"},
+		{fiber.MethodPut, pciMappingPath, "manage:cluster"},
+		{fiber.MethodDelete, pciMappingPath, "manage:cluster"},
+		{fiber.MethodGet, pciMappingUsagePath, "view:vm"},
 	} {
 		e := declaredEndpoint(t, tt.method, tt.path)
 		if e.Permissions.Check == nil {
@@ -194,6 +202,10 @@ func TestEveryPCIMappingEndpointIsDocumented(t *testing.T) {
 	for _, tt := range []struct{ method, path, group string }{
 		{fiber.MethodGet, pciMappingListPath, "Nodes"},
 		{fiber.MethodPost, pciMappingCreatePath, "Clusters"},
+		{fiber.MethodGet, pciMappingClusterPath, "Clusters"},
+		{fiber.MethodPut, pciMappingPath, "Clusters"},
+		{fiber.MethodDelete, pciMappingPath, "Clusters"},
+		{fiber.MethodGet, pciMappingUsagePath, "Clusters"},
 	} {
 		e := declaredEndpoint(t, tt.method, tt.path)
 		key := tt.method + " " + tt.path
@@ -466,16 +478,19 @@ func TestDeleteUSBMappingDigestParam(t *testing.T) {
 }
 
 // Each usage call reads every VM's configuration, and the route is open to
-// every Viewer: it carries its own per-IP limiter, attached to the route
-// (usbMappingUsageLimiter in middleware.go) — and only that route does.
+// every Viewer: it carries its own per-user limiter, attached to the route
+// (mappingUsageLimiter in middleware.go) — and only the two usage routes do.
 func TestUSBMappingUsageIsRateLimited(t *testing.T) {
 	for _, tt := range []struct{ method, path string }{
 		{fiber.MethodGet, usbMappingClusterPath},
 		{fiber.MethodPut, usbMappingPath},
 		{fiber.MethodDelete, usbMappingPath},
+		{fiber.MethodGet, pciMappingClusterPath},
+		{fiber.MethodPut, pciMappingPath},
+		{fiber.MethodDelete, pciMappingPath},
 	} {
 		if e := declaredEndpoint(t, tt.method, tt.path); e.RateLimiter != nil {
-			t.Errorf("%s %s carries a route limiter; only the usage route should", tt.method, tt.path)
+			t.Errorf("%s %s carries a route limiter; only the usage routes should", tt.method, tt.path)
 		}
 	}
 	e := declaredEndpoint(t, fiber.MethodGet, usbMappingUsagePath)
@@ -520,5 +535,222 @@ func TestUSBMappingUsageIsRateLimited(t *testing.T) {
 	// Per user, not per IP: bob, behind the same address, still has his ten.
 	if status := get("bob"); status != fiber.StatusOK {
 		t.Errorf("bob's first request = %d, want 200", status)
+	}
+}
+
+// TestUpdatePCIMappingRefusesMalformedBodies drives the PCI update's
+// declaration with real requests. The body names entries only as the listing
+// returned them, and a device only by its node and address: an id, a group or
+// a flag of the caller's is refused, not used.
+func TestUpdatePCIMappingRefusesMalformedBodies(t *testing.T) {
+	target := strings.Replace(strings.Replace(pciMappingPath, ":cluster_id", testClusterID, 1), ":mapping_id", "gpu01", 1)
+	const entry = `"id=1234:5678,node=pve-01,path=0000:01:00.0"`
+
+	for _, tt := range []struct{ name, body string }{
+		{"entries kept, nothing added", `{"map":[` + entry + `],"digest":"0123456789abcdef"}`},
+		{"a device added", `{"map":[` + entry + `],"add_node":"pve-02","add_path":"0000:02:00.0","digest":"0123456789abcdef"}`},
+		{"the whole device added", `{"map":[` + entry + `],"add_node":"pve-02","add_path":"0000:02:00","digest":"0123456789abcdef"}`},
+		{"an entry replaced", `{"map":[` + entry + `],"add_node":"pve-01","add_path":"0000:02:00.0","replace":` + entry +
+			`,"digest":"0123456789abcdef"}`},
+		{"the description removed", `{"map":[` + entry + `],"description":"","digest":"0123456789abcdef"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app, _ := mountForParams(t, fiber.MethodPut, pciMappingPath)
+			if status, env := send(t, app, jsonRequest(http.MethodPut, target, tt.body)); status != fiber.StatusNoContent {
+				t.Errorf("status = %d (%q), want 204", status, env.Message)
+			}
+		})
+	}
+
+	t.Run("a valid body reaches the handler intact", func(t *testing.T) {
+		app, cap := mountForParams(t, fiber.MethodPut, pciMappingPath)
+		body := `{"map":[` + entry + `],"add_node":"pve-01","add_path":"0000:02:00.0","replace":` + entry +
+			`,"description":"Example GPU","digest":"0123456789abcdef"}`
+		if status, env := send(t, app, jsonRequest(http.MethodPut, target, body)); status != fiber.StatusNoContent {
+			t.Fatalf("status = %d (%q), want 204", status, env.Message)
+		}
+		for key, want := range map[string]string{
+			"mapping_id": "gpu01", "add_node": "pve-01", "add_path": "0000:02:00.0",
+			"replace": "id=1234:5678,node=pve-01,path=0000:01:00.0", "description": "Example GPU", "digest": "0123456789abcdef",
+		} {
+			if got := cap.params.String(key); got != want {
+				t.Errorf("%s = %q, want %q", key, got, want)
+			}
+		}
+		if got := cap.params.Strings("map"); !slices.Equal(got, []string{"id=1234:5678,node=pve-01,path=0000:01:00.0"}) {
+			t.Errorf("map = %q", got)
+		}
+	})
+
+	for _, tt := range []struct{ name, body string }{
+		{"no map", `{"digest":"0123456789abcdef"}`},
+		// The last entry goes by deleting the mapping.
+		{"an empty map", `{"map":[],"digest":"0123456789abcdef"}`},
+		{"no digest", `{"map":[` + entry + `]}`},
+		{"an empty digest", `{"map":[` + entry + `],"digest":""}`},
+		// Requires, both ways: a device is its node and its address.
+		{"a node without an address", `{"map":[` + entry + `],"add_node":"pve-01","digest":"0123456789abcdef"}`},
+		{"an address without a node", `{"map":[` + entry + `],"add_path":"0000:02:00.0","digest":"0123456789abcdef"}`},
+		{"a replace without a device", `{"map":[` + entry + `],"replace":` + entry + `,"digest":"0123456789abcdef"}`},
+		{"a replace with a node only", `{"map":[` + entry + `],"add_node":"pve-01","replace":` + entry + `,"digest":"0123456789abcdef"}`},
+		{"an empty replace", `{"map":[` + entry + `],"add_node":"pve-01","add_path":"0000:02:00.0","replace":"","digest":"0123456789abcdef"}`},
+		{"an address in uppercase", `{"map":[` + entry + `],"add_node":"pve-01","add_path":"0000:0A:00.0","digest":"0123456789abcdef"}`},
+		{"an address smuggling a key", `{"map":[` + entry + `],"add_node":"pve-01","add_path":"0000:02:00.0,node=pve-02","digest":"0123456789abcdef"}`},
+		{"a list of addresses", `{"map":[` + entry + `],"add_node":"pve-01","add_path":"0000:02:00.0;0000:03:00.0","digest":"0123456789abcdef"}`},
+		{"a node smuggling a key", `{"map":[` + entry + `],"add_node":"pve-01,path=0000:02:00.0","add_path":"0000:02:00.0","digest":"0123456789abcdef"}`},
+		// The entry is the node's own report of the device: nothing of it
+		// comes from the caller.
+		{"a device id", `{"map":[` + entry + `],"add_node":"pve-01","add_path":"0000:02:00.0","id":"1234:5678","digest":"0123456789abcdef"}`},
+		{"an IOMMU group", `{"map":[` + entry + `],"add_node":"pve-01","add_path":"0000:02:00.0","iommugroup":1,"digest":"0123456789abcdef"}`},
+		{"a subsystem id", `{"map":[` + entry + `],"add_node":"pve-01","add_path":"0000:02:00.0","subsystem_id":"abcd:ef01","digest":"0123456789abcdef"}`},
+		{"an mdev flag", `{"map":[` + entry + `],"mdev":true,"digest":"0123456789abcdef"}`},
+		{"a node and path of Proxmox's spelling", `{"map":[` + entry + `],"node":"pve-01","path":"0000:02:00.0","digest":"0123456789abcdef"}`},
+		{"a map entry that is not a string", `{"map":[{"node":"pve-01"}],"digest":"0123456789abcdef"}`},
+		{"a digest over 64 characters", `{"map":[` + entry + `],"digest":"` + strings.Repeat("a", 65) + `"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app, cap := mountForParams(t, fiber.MethodPut, pciMappingPath)
+			status, env := send(t, app, jsonRequest(http.MethodPut, target, tt.body))
+			if status != fiber.StatusBadRequest {
+				t.Errorf("status = %d (%q), want 400", status, env.Message)
+			}
+			if cap.called {
+				t.Error("the handler ran for a malformed body")
+			}
+		})
+	}
+}
+
+// TestPCIMappingIDParam holds the path parameter every per-mapping PCI route
+// takes, as TestUSBMappingIDParam holds USB's.
+func TestPCIMappingIDParam(t *testing.T) {
+	routes := []struct{ method, path, body string }{
+		{fiber.MethodPut, pciMappingPath, `{"map":["id=1234:5678,node=pve-01,path=0000:01:00.0"],"digest":"0123456789abcdef"}`},
+		{fiber.MethodDelete, pciMappingPath, ""},
+		{fiber.MethodGet, pciMappingUsagePath, ""},
+	}
+	build := func(path, id string) string {
+		return strings.Replace(strings.Replace(path, ":cluster_id", testClusterID, 1), ":mapping_id", id, 1)
+	}
+	for _, r := range routes {
+		for _, id := range []string{"g", "gpu01", "gpu_dev-01", strings.Repeat("g", 128)} {
+			t.Run(r.method+" accepts "+id[:min(len(id), 16)], func(t *testing.T) {
+				app, cap := mountForParams(t, r.method, r.path)
+				status, env := send(t, app, jsonRequest(r.method, build(r.path, id), r.body))
+				if status != fiber.StatusNoContent || !cap.called {
+					t.Fatalf("status = %d (%q), want 204", status, env.Message)
+				}
+				if got := cap.params.String("mapping_id"); got != id {
+					t.Errorf("mapping_id = %q, want %q", got, id)
+				}
+			})
+		}
+		for _, id := range []string{"1gpu", "-gpu", "gpu.dev", "%2e%2e", "gpu%2Fdev", strings.Repeat("g", 129)} {
+			t.Run(r.method+" refuses "+id[:min(len(id), 16)], func(t *testing.T) {
+				app, cap := mountForParams(t, r.method, r.path)
+				if status, env := send(t, app, jsonRequest(r.method, build(r.path, id), r.body)); status != fiber.StatusBadRequest {
+					t.Errorf("status = %d (%q), want 400", status, env.Message)
+				}
+				if cap.called {
+					t.Error("the handler ran")
+				}
+			})
+		}
+	}
+}
+
+// The PCI delete's digest, as the USB delete's: optional, compared when sent.
+func TestDeletePCIMappingDigestParam(t *testing.T) {
+	base := strings.Replace(strings.Replace(pciMappingPath, ":cluster_id", testClusterID, 1), ":mapping_id", "gpu01", 1)
+	for _, tt := range []struct {
+		name, query string
+		want        int
+	}{
+		{"no digest", "", fiber.StatusNoContent},
+		{"a digest", "?digest=0123456789abcdef", fiber.StatusNoContent},
+		{"a digest over 64 characters", "?digest=" + strings.Repeat("a", 65), fiber.StatusBadRequest},
+		{"an empty digest", "?digest=", fiber.StatusBadRequest},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app, _ := mountForParams(t, fiber.MethodDelete, pciMappingPath)
+			if status, env := send(t, app, jsonRequest(http.MethodDelete, base+tt.query, "")); status != tt.want {
+				t.Errorf("status = %d (%q), want %d", status, env.Message, tt.want)
+			}
+		})
+	}
+}
+
+// The two usage routes share ONE limiter: a user's checks of either kind draw
+// on the same ten a minute. Proved by what it does — six USB and four PCI
+// requests spend it, the eleventh is refused on either route — since two
+// handlers compared by code pointer look equal even with separate state.
+func TestMappingUsageRoutesShareOneLimiter(t *testing.T) {
+	s := newRouteStubServer(t)
+	var usb, pci fiber.Handler
+	for _, e := range s.registry.Endpoints() {
+		switch {
+		case e.Method == fiber.MethodGet && e.Path == usbMappingUsagePath:
+			usb = e.RateLimiter
+		case e.Method == fiber.MethodGet && e.Path == pciMappingUsagePath:
+			pci = e.RateLimiter
+		}
+	}
+	if usb == nil || pci == nil {
+		t.Fatalf("usage limiters: usb %v, pci %v; want both", usb != nil, pci != nil)
+	}
+	alice := uuid.New()
+	app := fiber.New()
+	asAlice := func(c fiber.Ctx) error {
+		c.Locals("user_id", alice)
+		return c.Next()
+	}
+	ok := func(c fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) }
+	app.Get("/usb", asAlice, usb, ok)
+	app.Get("/pci", asAlice, pci, ok)
+	get := func(path string) int {
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, path, nil))
+		if err != nil {
+			t.Fatalf("app.Test: %v", err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	for i := range 10 {
+		path := "/usb"
+		if i >= 6 {
+			path = "/pci"
+		}
+		if status := get(path); status != fiber.StatusOK {
+			t.Fatalf("request %d on %s = %d, want 200", i+1, path, status)
+		}
+	}
+	for _, path := range []string{"/usb", "/pci"} {
+		if status := get(path); status != fiber.StatusTooManyRequests {
+			t.Errorf("the eleventh request on %s = %d, want 429", path, status)
+		}
+	}
+}
+
+// The pci-address rule's catalogue entry says each site holds it to 64
+// characters (proxmox.pciMappingPathMax): a site that did not would take an
+// address the client then refuses.
+func TestPCIAddressSitesAreHeldTo64Characters(t *testing.T) {
+	var sites []ruleSite
+	for _, s := range declaredRuleSites(t) {
+		if s.rule == "pci-address" {
+			sites = append(sites, s)
+		}
+	}
+	if len(sites) < 2 {
+		t.Fatalf("pci-address sites = %v, want at least the PCI create's path and the update's add_path", sites)
+	}
+	for _, s := range sites {
+		if s.prop.MaxLength == nil || *s.prop.MaxLength != 64 {
+			got := "none"
+			if s.prop.MaxLength != nil {
+				got = fmt.Sprint(*s.prop.MaxLength)
+			}
+			t.Errorf("%s: MaxLength = %s, want 64, the ceiling the catalogue states for every site", s, got)
+		}
 	}
 }

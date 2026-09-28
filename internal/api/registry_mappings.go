@@ -25,6 +25,36 @@ var usbMappingIDParam = apischema.Property{
 	Description: "The mapping's id, as a VM's usbN names it in mapping=<mapping_id>.",
 }
 
+// pciMappingIDParam is a PCI mapping id as a PATH parameter, on the routes
+// that act on a mapping that already exists: usbMappingIDParam's shape, for
+// its reasons — pve-configid-existing, looser than the pve-configid the PCI
+// create mints, and the same 128 ceiling, held there by
+// TestGuard_ExistingRuleSitesAcceptWhatTheCreateRuleMints.
+var pciMappingIDParam = apischema.Property{
+	Type:        apischema.String,
+	Pattern:     apischema.Rule("pve-configid-existing"),
+	MaxLength:   apischema.Ptr(128),
+	Typetext:    "<mapping id>",
+	Description: "The mapping's id, as a VM's hostpciN names it in mapping=<mapping_id>.",
+}
+
+// pciAddressParam is a PCI device's address in a request body: the create's
+// path and the update's add_path, each the one device Nexara builds an entry
+// from. One $PCI_RE of pve-guest-common src/PVE/Mapping/PCI.pm, not the
+// ";"-joined list its schema admits (the pci-address rule's Divergence says
+// why), and the 64 is Nexara's (proxmox.pciMappingPathMax);
+// proxmox.PCIMapEntryForDevice applies both again, being the choke point.
+// A named Property so the rule has one declaration site: the two routes copy
+// it and change only what differs.
+var pciAddressParam = apischema.Property{
+	Type:      apischema.String,
+	Pattern:   apischema.Rule("pci-address"),
+	MaxLength: apischema.Ptr(64),
+	Typetext:  "<domain>:<bus>:<slot>[.<function>]",
+	Description: "The device's address as GET …/hardware/pci reports it, e.g. 0000:01:00.0, or without the " +
+		"function, e.g. 0000:01:00, to map the whole device; lowercase hex, at most 64 characters.",
+}
+
 // Proxmox cluster resource mappings, for passing host devices through.
 //
 // They exist because nothing else works for a token. qemu-server's
@@ -43,8 +73,10 @@ var usbMappingIDParam = apischema.Property{
 // They are declared from registerVMEndpoints, which VMHandler also serves, so
 // they count toward vmRouteCount.
 //
-// usageLimiter caps the usage route per user (usbMappingUsageLimiter in
-// middleware.go): each call reads every VM's configuration.
+// usageLimiter caps the usage routes per user (mappingUsageLimiter in
+// middleware.go): each call reads every VM's configuration. The USB and PCI
+// usage routes take the one instance, so a user's checks of either kind draw
+// on the same budget.
 func registerResourceMappingEndpoints(reg *Registry, h *handlers.VMHandler, usageLimiter fiber.Handler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,
@@ -228,9 +260,9 @@ func registerResourceMappingEndpoints(reg *Registry, h *handlers.VMHandler, usag
 			"configuration could not be read — its node is not online, the read failed, or the scan ran out " +
 			"of its 30 seconds — is listed under unchecked with the reason, and may use the mapping too. " +
 			"Only the VMs the cluster's API token can see are read. Containers are not read: they cannot " +
-			"use a USB mapping. Each call reads every VM, so it is limited to 10 a minute per user and two " +
-			"running at once per cluster — another gets 429 — and one running at once per user: a user's " +
-			"newer check replaces the older one, which answers 409.",
+			"use a USB mapping. Each call reads every VM, so it is limited — together with the PCI usage " +
+			"check — to 10 a minute per user and two running at once per cluster — another gets 429 — and " +
+			"one running at once per user: a user's newer check replaces the older one, which answers 409.",
 		Group:       "Clusters",
 		Permissions: clusterCheck("view", "vm"),
 		Parameters:  clusterParams(apischema.Properties{"mapping_id": usbMappingIDParam}),
@@ -283,21 +315,155 @@ func registerResourceMappingEndpoints(reg *Registry, h *handlers.VMHandler, usag
 				Description: "Name for the new mapping, which a VM's hostpciN names as mapping=<mapping_id>: 2-128 characters, starting with a letter.",
 			},
 			"node": requiredNode("Node the device is on."),
-			// One $PCI_RE of pve-guest-common src/PVE/Mapping/PCI.pm, not the
-			// ";"-joined list its schema admits: proxmox.PCIMapEntryForDevice
-			// says why, and applies the same pattern, being the choke point.
-			// The 64 is Nexara's, as on the USB port (proxmox.pciMappingPathMax).
-			"path": {
-				Type:      apischema.String,
-				Pattern:   `^[a-f0-9]{4,}:[a-f0-9]{2}:[a-f0-9]{2}(\.[a-f0-9])?$`,
-				MaxLength: apischema.Ptr(64),
-				Typetext:  "<domain>:<bus>:<slot>[.<function>]",
-				Description: "The device's address as GET …/hardware/pci reports it, e.g. 0000:01:00.0, or without the " +
-					"function, e.g. 0000:01:00, to map the whole device; lowercase hex, at most 64 characters.",
-			},
+			"path": pciAddressParam,
 			"description": optString(4096, "<string>",
 				"Description Proxmox shows for the mapping. A single line: Proxmox refuses a line break."),
 		}),
 		Handler: h.CreatePCIMapping,
+	})
+
+	// ── PCI mappings on the Resource Mappings tab ────────────────────────
+	reg.Register(Endpoint{
+		Method: fiber.MethodGet,
+		Path:   clusterScope + "/pci-mappings",
+		Description: "List the cluster's PCI resource mappings, each checked on every node one of its entries " +
+			"names: node_checks holds what Proxmox reported running the check on that node — an empty list " +
+			"is a clean check, a warning or an error says why the mapping would not work there, and one failing " +
+			"entry stops every VM using the mapping from starting on that node, its other entries there " +
+			"included — and unchecked says why a node was not checked (offline, not answering, not a node of " +
+			"this cluster, the mappings changed during the check, the checks' 20 seconds ran out, or the " +
+			"cluster's node list could not be read — then no node is checked). Every node an entry names is in " +
+			"exactly one of the two. A node may have several entries: a VM starting there takes the first device " +
+			"not in use. mdev and live_migration_capable are the mapping's two flags. unreadable_entries holds, " +
+			"for each entry Nexara cannot read the way Proxmox does, why: an update cannot keep such an entry, " +
+			"so while one is there the mapping can only lose it or be deleted. digest is the whole pci.cfg's, " +
+			"from the same read as the entries: an update sends it back, so it conflicts when any PCI mapping " +
+			"changed since. Proxmox lists only the mappings the cluster's token holds a Mapping privilege on.",
+		Group:       "Clusters",
+		Permissions: clusterCheck("view", "cluster"),
+		Parameters:  clusterParams(nil),
+		Handler:     h.ListClusterPCIMappings,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPut,
+		Path:   clusterScope + "/pci-mappings/:mapping_id",
+		// Gated like the create, on manage:cluster, for the reason given
+		// on the USB create.
+		Description: "Change a PCI mapping's node entries — keep some, add one node's device, or replace one " +
+			"entry with it — and optionally its description. map lists every entry the mapping keeps, each " +
+			"exactly as the listing returns it, at least one; any other string is refused, and so is an entry " +
+			"listed in unreadable_entries. A kept entry is written back saying what it said, re-spelled as " +
+			"Nexara writes every entry — its description first, the other keys sorted, ids in lowercase, the " +
+			"group a plain number — which also repairs an id or group Proxmox would refuse for its spelling. " +
+			"add_node with add_path adds that node's device, the entry built from the node's own report of it " +
+			"— device and subsystem ids and IOMMU group, which Proxmox compares with the device when a VM " +
+			"starts — and refused when the node's entries already name it, as a whole or as one of its " +
+			"functions. With replace, an entry of map on add_node, the new entry takes that one's place and " +
+			"keeps its entry description; the same device again brings the entry's ids and group up to date. " +
+			"The mapping's mdev flag must match every entry's device: while other entries remain, a device " +
+			"that does not is refused; as the only entry, the device sets the flag. add_node is checked first, " +
+			"404 when it is not a node of the cluster. digest is the listing's: then the update is refused " +
+			"with 409 when any PCI mapping changed since, before any device is read, and with 404 when no " +
+			"mapping has that id — whatever the digest, when the cluster has no PCI mapping at all. Needs the " +
+			"token to hold Mapping.Modify; Nexara gates it on manage:cluster.",
+		Group:       "Clusters",
+		Permissions: clusterCheck("manage", "cluster"),
+		Parameters: clusterParams(apischema.Properties{
+			"mapping_id": pciMappingIDParam,
+			// Each entry is checked against the listing in the handler, and
+			// re-read by proxmox.CanonicalPCIMap, the choke point, before
+			// anything is written.
+			"map": {
+				Type:      apischema.Array,
+				MinLength: apischema.Ptr(1),
+				Typetext:  "<entry>[]",
+				Items: &apischema.Property{
+					Type:        apischema.String,
+					Typetext:    "<entry>",
+					Description: "An entry the mapping keeps, exactly as the listing returns it.",
+				},
+				Description: "Every entry the mapping is to keep, each exactly as the listing returns it, in their order, at least one.",
+			},
+			"add_node": func() apischema.Property {
+				p := apischema.StdOption("node-name")
+				p.Optional = true
+				p.Requires = []string{"add_path"}
+				p.Description = "Node whose device to add, or on which replace's entry is."
+				return p
+			}(),
+			"add_path": func() apischema.Property {
+				p := pciAddressParam
+				p.Optional = true
+				p.Requires = []string{"add_node"}
+				p.Description = "The device's address on add_node as GET …/hardware/pci reports it, e.g. " +
+					"0000:01:00.0, or without the function, e.g. 0000:01:00, for the whole device; lowercase " +
+					"hex, at most 64 characters."
+				return p
+			}(),
+			"replace": {
+				Type:        apischema.String,
+				Optional:    true,
+				MinLength:   apischema.Ptr(1),
+				Requires:    []string{"add_node", "add_path"},
+				Typetext:    "<entry>",
+				Description: "An entry of map, on add_node, that the new entry replaces in place.",
+			},
+			"description": optString(4096, "<string>",
+				"The mapping's new description. An empty string removes it; omitted, it is left as it is. A "+
+					"single line: Proxmox refuses a line break."),
+			// As on the USB update: required, and not empty.
+			"digest": {
+				Type:        apischema.String,
+				MinLength:   apischema.Ptr(1),
+				MaxLength:   apischema.Ptr(64),
+				Typetext:    "<digest>",
+				Description: "digest of the listing this update is based on, exactly as the listing returns it.",
+			},
+		}),
+		Handler: h.UpdatePCIMapping,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodDelete,
+		Path:   clusterScope + "/pci-mappings/:mapping_id",
+		Description: "Delete a PCI mapping. Like Proxmox's own delete it succeeds whether or not the mapping " +
+			"exists, and it does not check the VMs that use it: such a VM will not start until a mapping of " +
+			"that name exists again, so read …/usage first. With digest — the listing's — it is refused with " +
+			"409 when any PCI mapping changed since; Proxmox's delete takes no digest, so Nexara compares it " +
+			"against its own read just before the delete. The audit entry keeps the mapping's entries and " +
+			"flags. Needs the token to hold Mapping.Modify; Nexara gates it on manage:cluster.",
+		Group:       "Clusters",
+		Permissions: clusterCheck("manage", "cluster"),
+		Parameters: clusterParams(apischema.Properties{
+			"mapping_id": pciMappingIDParam,
+			// As on the USB delete.
+			"digest": {
+				Type:      apischema.String,
+				Optional:  true,
+				MinLength: apischema.Ptr(1),
+				MaxLength: apischema.Ptr(64),
+				Typetext:  "<digest>",
+				Description: "digest of the listing the delete is based on. Sent, the delete is refused with 409 when " +
+					"any PCI mapping changed since, instead of deleting a mapping that changed meanwhile.",
+			},
+		}),
+		Handler: h.DeletePCIMapping,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodGet,
+		Path:   clusterScope + "/pci-mappings/:mapping_id/usage",
+		// view:vm for the reason on the USB usage route.
+		Description: "Which VMs pass this PCI mapping through — a hostpciN of mapping=<mapping_id> — read from " +
+			"each VM's current configuration (pending changes included; snapshots are not read). A VM whose " +
+			"configuration could not be read — its node is not online, the read failed, or the scan ran out " +
+			"of its 30 seconds — is listed under unchecked with the reason, and may use the mapping too. " +
+			"Only the VMs the cluster's API token can see are read. Containers are not read: they cannot use " +
+			"a PCI mapping. The USB usage check's limits apply to the two together: 10 a minute per user, two " +
+			"running at once per cluster — another gets 429 — and one at once per user, a newer check " +
+			"replacing the older, which answers 409.",
+		Group:       "Clusters",
+		Permissions: clusterCheck("view", "vm"),
+		Parameters:  clusterParams(apischema.Properties{"mapping_id": pciMappingIDParam}),
+		RateLimiter: usageLimiter,
+		Handler:     h.GetPCIMappingUsage,
 	})
 }

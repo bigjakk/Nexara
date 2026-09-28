@@ -470,10 +470,28 @@ var usbConfigKeyRe = regexp.MustCompile(`^usb\d+$`)
 // is compared exactly: qemu-server looks the mapping up by hash key, so case
 // matters to it too.
 func (c VMConfig) USBMappingKeys(id string) []string {
+	return c.mappingKeys(usbConfigKeyRe, "usb", id)
+}
+
+// pciConfigKeyRe is a guest's PCI device key: hostpci0 … hostpci15 today,
+// matched without a ceiling as usbConfigKeyRe is.
+var pciConfigKeyRe = regexp.MustCompile(`^hostpci\d+$`)
+
+// PCIMappingKeys returns the guest's hostpciN keys that pass PCI mapping id
+// through, in key order: a hostpciN value is a property string whose
+// "mapping" key names one (qemu-server src/PVE/QemuServer/PCI.pm), compared
+// exactly, as USBMappingKeys compares.
+func (c VMConfig) PCIMappingKeys(id string) []string {
+	return c.mappingKeys(pciConfigKeyRe, "hostpci", id)
+}
+
+// mappingKeys is the guest's keys that keyRe matches and whose value names
+// mapping id, ordered by the number after prefix.
+func (c VMConfig) mappingKeys(keyRe *regexp.Regexp, prefix, id string) []string {
 	var keys []string
 	for key, raw := range c {
 		value, ok := raw.(string)
-		if !ok || !usbConfigKeyRe.MatchString(key) {
+		if !ok || !keyRe.MatchString(key) {
 			continue
 		}
 		for _, part := range strings.Split(value, ",") {
@@ -484,8 +502,8 @@ func (c VMConfig) USBMappingKeys(id string) []string {
 		}
 	}
 	sort.Slice(keys, func(i, j int) bool {
-		ni, _ := strconv.Atoi(strings.TrimPrefix(keys[i], "usb"))
-		nj, _ := strconv.Atoi(strings.TrimPrefix(keys[j], "usb"))
+		ni, _ := strconv.Atoi(strings.TrimPrefix(keys[i], prefix))
+		nj, _ := strconv.Atoi(strings.TrimPrefix(keys[j], prefix))
 		return ni < nj
 	})
 	return keys

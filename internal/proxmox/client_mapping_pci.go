@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -286,6 +287,245 @@ func (c *Client) CreatePCIMapping(ctx context.Context, params CreatePCIMappingPa
 	}
 	if err := c.doPost(ctx, "/cluster/mapping/pci", form, nil); err != nil {
 		return fmt.Errorf("create PCI mapping %s: %w", params.ID, err)
+	}
+	return nil
+}
+
+// --- Stored entries, and changing a mapping -----------------------------------
+
+// pciMapEntryKeys are the keys $map_fmt declares (pve-guest-common
+// src/PVE/Mapping/PCI.pm). Like USB's it declares no default_key and no alias,
+// so a part with no key and any other key are both refused.
+var pciMapEntryKeys = map[string]bool{
+	"node": true, "path": true, "id": true, "subsystem-id": true, "iommugroup": true, "description": true,
+}
+
+// pciMappingPathListRe is $map_fmt's path pattern as Proxmox checks a stored
+// entry: one pciMappingPathRe address, or several joined by ";".
+var pciMappingPathListRe = regexp.MustCompile(
+	`^[a-f0-9]{4,}:[a-f0-9]{2}:[a-f0-9]{2}(\.[a-f0-9])?(;[a-f0-9]{4,}:[a-f0-9]{2}:[a-f0-9]{2}(\.[a-f0-9])?)*$`)
+
+// ParsePCIMapEntry reads one node entry of a PCI mapping the way Proxmox
+// reads a stored one, refusing what Proxmox would refuse, and returns it with
+// its ids lowercased.
+//
+// The parse is ParseUSBMapEntry's transcription of parse_property_string
+// (pve-common src/PVE/JSONSchema.pm) — split on ",", each part at its first
+// "=", neither side empty, nothing trimmed, a part that is only white space
+// skipped — over PCI's $map_fmt: node, path and id required; node the pve-node
+// format; id and subsystem-id vendor:device; path one address or a
+// ";"-joined list of them (pciMappingPathListRe); iommugroup an integer, a
+// sign allowed; description at most 4096 characters.
+//
+// It is the parse for entries Proxmox already holds, so it takes what Proxmox
+// takes there: a list of paths and a group of any sign, which
+// PCIMapEntryForDevice never builds and PCIMapEntry.validate refuses for a new
+// entry. Stricter than Proxmox in three places, each Nexara's:
+//   - A line feed or carriage return anywhere, for ParseUSBMapEntry's reason.
+//   - The group's digits are ASCII. Perl's \d takes the digits of every
+//     script, and the group is written back as the number it is; one that
+//     is not ASCII, or does not fit an int, is refused rather than rewritten.
+//   - The ids come back lowercase, as USB's do: assert_valid compares them
+//     with `ne` against the node's sysfs hex, so an uppercase one refuses to
+//     start every VM that uses the mapping, and writing it back repairs it.
+func ParsePCIMapEntry(raw string) (PCIMapEntry, error) {
+	e, problem := parsePCIMapEntry(raw)
+	if problem != "" {
+		return PCIMapEntry{}, fmt.Errorf("%w: PCI mapping entry %q %s", ErrInvalidInput, raw, problem)
+	}
+	return e, nil
+}
+
+// PCIMapEntryProblem says why ParsePCIMapEntry refuses raw, as a sentence
+// that does not repeat raw — for a listing that shows the entry beside it —
+// or returns "" when it reads. A part of raw it names is cut to 40
+// characters.
+func PCIMapEntryProblem(raw string) string {
+	if _, problem := parsePCIMapEntry(raw); problem != "" {
+		return "The entry " + problem + "."
+	}
+	return ""
+}
+
+// parsePCIMapEntry is ParsePCIMapEntry, with what is wrong said as a phrase
+// that follows the entry — "", when nothing is.
+func parsePCIMapEntry(raw string) (entry PCIMapEntry, problem string) {
+	if strings.ContainsAny(raw, "\r\n") {
+		return PCIMapEntry{}, "must be a single line"
+	}
+	values := make(map[string]string, len(pciMapEntryKeys))
+	for _, part := range strings.Split(raw, ",") {
+		if strings.TrimFunc(part, unicode.IsSpace) == "" {
+			continue
+		}
+		key, value, hasEq := strings.Cut(part, "=")
+		switch {
+		case !hasEq:
+			return PCIMapEntry{}, fmt.Sprintf("has a value without a key (%.40q)", part)
+		case key == "" || value == "":
+			return PCIMapEntry{}, fmt.Sprintf("has a key or a value missing (%.40q)", part)
+		case !pciMapEntryKeys[key]:
+			return PCIMapEntry{}, fmt.Sprintf("has an unknown key %.40q; the keys are node, path, id, subsystem-id, "+
+				"iommugroup and description", key)
+		}
+		if _, dup := values[key]; dup {
+			return PCIMapEntry{}, fmt.Sprintf("names %q twice", key)
+		}
+		values[key] = value
+	}
+
+	e := PCIMapEntry{
+		Node:        values["node"],
+		Path:        values["path"],
+		ID:          values["id"],
+		SubsystemID: values["subsystem-id"],
+		Description: values["description"],
+	}
+	if !mappingNodeRe.MatchString(e.Node) {
+		return PCIMapEntry{}, "needs node=<a Proxmox node name>"
+	}
+	if !pciMappingPathListRe.MatchString(e.Path) {
+		return PCIMapEntry{}, "needs path=<domain>:<bus>:<slot>[.<function>] in lowercase hex, or several such " +
+			"addresses joined by semicolons"
+	}
+	if !pciMappingIDRe.MatchString(e.ID) {
+		return PCIMapEntry{}, "needs id=<vendor:device>, four hex digits each"
+	}
+	// Tested by key rather than by value, as ParseUSBMapEntry tests the port.
+	if _, has := values["subsystem-id"]; has && !pciMappingIDRe.MatchString(e.SubsystemID) {
+		return PCIMapEntry{}, "has a subsystem-id that is not vendor:device, four hex digits each"
+	}
+	if group, has := values["iommugroup"]; has {
+		// Proxmox checks it as a JSONSchema integer — is_integer in pve-common
+		// src/PVE/JSONSchema.pm, m/^[+-]?\d+$/ — and strconv.Atoi takes
+		// exactly that with \d held to ASCII, in the range of an int.
+		n, err := strconv.Atoi(group)
+		if err != nil {
+			return PCIMapEntry{}, "has an iommugroup that is not a whole number"
+		}
+		e.IOMMUGroup = &n
+	}
+	if utf8.RuneCountInString(e.Description) > mappingDescriptionMax {
+		return PCIMapEntry{}, fmt.Sprintf("has a description longer than %d characters", mappingDescriptionMax)
+	}
+	e.ID = strings.ToLower(e.ID)
+	e.SubsystemID = strings.ToLower(e.SubsystemID)
+	return e, ""
+}
+
+// CanonicalPCIMap validates a PCI mapping's whole list of node entries and
+// returns them as they will be written: each read as Proxmox reads a stored
+// entry (ParsePCIMapEntry) and re-serialised by PCIMapEntry.String, in the
+// order given — a node's entries are tried in that order when a VM starts
+// (choose_hostpci_devices), so the order is kept as it was.
+//
+// An empty list is refused, as CanonicalUSBMap refuses one: Proxmox's own UI
+// deletes a mapping rather than emptying it, and so must a caller here
+// (DeletePCIMapping). Unlike USB's, several entries for one node are fine:
+// each is a device a VM there may be given.
+func CanonicalPCIMap(entries []string) ([]string, error) {
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("%w: a PCI mapping needs at least one node entry; delete the mapping instead", ErrInvalidInput)
+	}
+	out := make([]string, 0, len(entries))
+	for _, raw := range entries {
+		e, err := ParsePCIMapEntry(raw)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e.String())
+	}
+	return out, nil
+}
+
+// UpdatePCIMappingParams replaces a PCI mapping's node entries.
+type UpdatePCIMappingParams struct {
+	// Map is the mapping's WHOLE list of node entries, not a change to it,
+	// as UpdateUSBMappingParams.Map is. See CanonicalPCIMap for what each
+	// entry must be.
+	Map []string
+	// Description, when non-nil, replaces the mapping's description, and an
+	// empty one removes it. Nil leaves it as it is.
+	Description *string
+	// MDev, when non-nil, sets the mapping's "Use with Mediated Devices" flag
+	// (true) or removes it (false). Nil leaves it as it is. Proxmox compares
+	// the flag with every entry's device when a VM starts (PCIMapping.MDev).
+	MDev *bool
+	// Digest is the pci.cfg digest of the listing this update is based on
+	// (PCIMapping.Digest), required for UpdateUSBMappingParams.Digest's
+	// reason.
+	Digest string
+}
+
+// UpdatePCIMapping replaces a PCI mapping's node entries and, optionally, its
+// description and its mdev flag: PUT /cluster/mapping/pci/{id}.
+//
+// Every entry is re-read and re-serialised here (CanonicalPCIMap) rather than
+// forwarded, for UpdateUSBMapping's reason. An option to remove goes into ONE
+// delete, which Proxmox reads as a list, and no option is both set and
+// removed: the description and the flag are each one or the other.
+func (c *Client) UpdatePCIMapping(ctx context.Context, id string, params UpdatePCIMappingParams) error {
+	if err := validateMappingID(id); err != nil {
+		return err
+	}
+	entries, err := CanonicalPCIMap(params.Map)
+	if err != nil {
+		return err
+	}
+	// "0" as well, for UpdateUSBMapping's reason: Perl reads it as false,
+	// and assert_if_modified would skip the check.
+	if params.Digest == "" || params.Digest == "0" {
+		return fmt.Errorf("%w: a PCI mapping update needs the digest of the listing it is based on", ErrInvalidInput)
+	}
+	if len(params.Digest) > mappingDigestMax {
+		return fmt.Errorf("%w: digest is longer than %d characters", ErrInvalidInput, mappingDigestMax)
+	}
+
+	form := url.Values{}
+	for _, e := range entries {
+		form.Add("map", e)
+	}
+	var remove []string
+	if params.Description != nil {
+		if *params.Description == "" {
+			remove = append(remove, "description")
+		} else {
+			if err := validateMappingDescription(*params.Description); err != nil {
+				return err
+			}
+			form.Set("description", *params.Description)
+		}
+	}
+	if params.MDev != nil {
+		if *params.MDev {
+			form.Set("mdev", "1")
+		} else {
+			remove = append(remove, "mdev")
+		}
+	}
+	if len(remove) > 0 {
+		form.Set("delete", strings.Join(remove, ","))
+	}
+	form.Set("digest", params.Digest)
+
+	if err := c.doPut(ctx, "/cluster/mapping/pci/"+url.PathEscape(id), form, nil); err != nil {
+		return fmt.Errorf("update PCI mapping %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeletePCIMapping removes a PCI mapping: DELETE /cluster/mapping/pci/{id}.
+//
+// Like DeleteUSBMapping's, Proxmox's delete takes no digest, checks no guest
+// that uses the mapping, and succeeds whether or not the id exists.
+func (c *Client) DeletePCIMapping(ctx context.Context, id string) error {
+	// The id becomes a path segment; validateMappingID keeps "/", "." and
+	// "%" out of it.
+	if err := validateMappingID(id); err != nil {
+		return err
+	}
+	if err := c.doDelete(ctx, "/cluster/mapping/pci/"+url.PathEscape(id), nil); err != nil {
+		return fmt.Errorf("delete PCI mapping %s: %w", id, err)
 	}
 	return nil
 }

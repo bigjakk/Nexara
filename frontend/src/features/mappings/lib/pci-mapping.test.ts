@@ -11,6 +11,10 @@ import {
   pciHostRisks,
   pciSlot,
   pciUnreadPaths,
+  pciEntryMatches,
+  pciMappingEntryDescription,
+  pciPathsOverlap,
+  samePCIMappingEntry,
   type PCIMappingEntry,
 } from "./pci-mapping";
 
@@ -328,5 +332,120 @@ describe("pciUnreadPaths", () => {
   it("names nothing the list holds, whole devices included", () => {
     expect(pciUnreadPaths(["0000:01:00", "0000:02:00.0"], devices)).toEqual([]);
     expect(pciUnreadPaths([], devices)).toEqual([]);
+  });
+});
+
+describe("samePCIMappingEntry", () => {
+  const entry =
+    "description=left slot,id=abcd:5678,iommugroup=7,node=pve-01,path=0000:01:00.0,subsystem-id=abcd:ef01";
+
+  it("matches an entry the server rewrote: key order, id case, group spelling", () => {
+    expect(
+      samePCIMappingEntry(
+        entry,
+        "node=pve-01,path=0000:01:00.0,id=ABCD:5678,subsystem-id=ABCD:EF01,iommugroup=+07,description=left slot",
+      ),
+    ).toBe(true);
+  });
+
+  it("tells apart any change of what the entry says", () => {
+    for (const other of [
+      entry.replace("node=pve-01", "node=pve-02"),
+      entry.replace("path=0000:01:00.0", "path=0000:01:00.1"),
+      entry.replace("id=abcd:5678", "id=abcd:5679"),
+      entry.replace("subsystem-id=abcd:ef01", "subsystem-id=abcd:ef02"),
+      entry.replace("iommugroup=7", "iommugroup=8"),
+      entry.replace(",iommugroup=7", ""),
+      entry.replace("description=left slot,", ""),
+    ]) {
+      expect(samePCIMappingEntry(entry, other)).toBe(false);
+    }
+  });
+});
+
+describe("pciEntryMatches", () => {
+  const expected: PCIMappingEntry = {
+    node: "pve-01",
+    path: "0000:01:00.0",
+    id: "1234:5678",
+    subsystemId: "abcd:ef01",
+    iommugroup: "7",
+  };
+
+  it("is true when the entry holds exactly what the device reports", () => {
+    expect(
+      pciEntryMatches(
+        "id=1234:5678,iommugroup=7,node=pve-01,path=0000:01:00.0,subsystem-id=abcd:ef01",
+        expected,
+      ),
+    ).toBe(true);
+  });
+
+  it("is false for the same device spelled as Proxmox refuses it: an uppercase id, a group written another way", () => {
+    const hex: PCIMappingEntry = { ...expected, id: "abcd:5678" };
+    const exact =
+      "id=abcd:5678,iommugroup=7,node=pve-01,path=0000:01:00.0,subsystem-id=abcd:ef01";
+    expect(pciEntryMatches(exact, hex)).toBe(true);
+    for (const entry of [
+      exact.replace("id=abcd:5678", "id=ABCD:5678"),
+      exact.replace("subsystem-id=abcd:ef01", "subsystem-id=ABCD:EF01"),
+      exact.replace("iommugroup=7", "iommugroup=07"),
+      exact.replace("iommugroup=7", "iommugroup=+7"),
+    ]) {
+      expect(pciEntryMatches(entry, hex)).toBe(false);
+    }
+  });
+
+  it("is false for a stale group, a missing subsystem id or another path", () => {
+    expect(
+      pciEntryMatches(
+        "id=1234:5678,iommugroup=9,node=pve-01,path=0000:01:00.0,subsystem-id=abcd:ef01",
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      pciEntryMatches(
+        "id=1234:5678,iommugroup=7,node=pve-01,path=0000:01:00.0",
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      pciEntryMatches(
+        "id=1234:5678,iommugroup=7,node=pve-01,path=0000:01:00,subsystem-id=abcd:ef01",
+        expected,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("pciPathsOverlap", () => {
+  it("is the same address, or a whole device and one of its functions", () => {
+    expect(pciPathsOverlap("0000:01:00.0", "0000:01:00.0")).toBe(true);
+    expect(pciPathsOverlap("0000:01:00", "0000:01:00.1")).toBe(true);
+    expect(pciPathsOverlap("0000:01:00.1", "0000:01:00")).toBe(true);
+    expect(pciPathsOverlap("0000:02:00.0;0000:01:00.0", "0000:01:00")).toBe(
+      true,
+    );
+  });
+
+  it("is not two functions of one device, or two devices", () => {
+    expect(pciPathsOverlap("0000:01:00.0", "0000:01:00.1")).toBe(false);
+    expect(pciPathsOverlap("0000:01:00.0", "0000:02:00.0")).toBe(false);
+    expect(pciPathsOverlap("0000:02:00.0;0000:03:00.0", "0000:01:00")).toBe(
+      false,
+    );
+  });
+});
+
+describe("pciMappingEntryDescription", () => {
+  it("reads the entry's own description, = and all", () => {
+    expect(
+      pciMappingEntryDescription(
+        "description=slot=2,id=1234:5678,node=pve-01,path=0000:01:00.0",
+      ),
+    ).toBe("slot=2");
+    expect(
+      pciMappingEntryDescription("id=1234:5678,node=pve-01,path=0000:01:00.0"),
+    ).toBe("");
   });
 });

@@ -983,9 +983,9 @@ const usbMappingUsageConcurrency = mappingUsageConcurrency
 
 // mappingUsageScansPerCluster bounds the scans in flight against one cluster,
 // of both kinds together, and usageScanSlots holds each user to one at a time.
-// Each scan is a Proxmox request per VM, and the usage route's limiter
-// (usbMappingUsageLimiter in internal/api/middleware.go, per user) bounds how
-// often one starts, not how many overlap. Per cluster, so no caller can hold
+// Each scan is a Proxmox request per VM, and the usage routes' limiter
+// (mappingUsageLimiter in internal/api/middleware.go, per user, one for both
+// kinds) bounds how often one starts, not how many overlap. Per cluster, so no caller can hold
 // the slots another cluster's check needs; per user, so no one account can
 // hold both of a cluster's. A caller over the cluster's cap gets 429 at once
 // rather than a wait: the SPA retries a 429 once, and the delete dialog shows
@@ -1316,4 +1316,566 @@ func mappingUsageAnswer(scanCtx context.Context, usage mappingUsage, err error) 
 // usbMappingUsageAnswer is mappingUsageAnswer by the name the USB tests use.
 func usbMappingUsageAnswer(scanCtx context.Context, usage usbMappingUsage, err error) (usbMappingUsage, error) {
 	return mappingUsageAnswer(scanCtx, usage, err)
+}
+
+// --- PCI mappings on the Resource Mappings tab ----------------------------------
+//
+// The USB flows above, over a PCI mapping — whose check is under "checks", and
+// whose nodes may each have several entries, a VM starting there taking the
+// first device not in use — and an update of its own: an entry is only ever
+// built from the node's own report of the device (proxmox.PCIMapEntryForDevice
+// says why), so the update keeps the entries the caller names from the listing
+// — each saying what it said, re-spelled only as proxmox.CanonicalPCIMap
+// writes every entry — and adds or replaces at most one built that way.
+
+// pciMappingView reads a PCI mapping, whose check is under "checks".
+var pciMappingView = mappingView[proxmox.PCIMapping]{
+	kind:        "PCI",
+	id:          func(m proxmox.PCIMapping) string { return m.ID },
+	digest:      func(m proxmox.PCIMapping) string { return m.Digest },
+	description: func(m proxmox.PCIMapping) string { return m.Description },
+	entries:     func(m proxmox.PCIMapping) []string { return m.Map },
+	checks:      func(m proxmox.PCIMapping) []proxmox.MappingCheck { return m.Checks },
+}
+
+// pciMappingLister reads the cluster's PCI mappings, optionally checked on a
+// node. The PCI interfaces here hold only PCI calls: the generic flows take
+// their calls as method expressions of these (deleteMapping says why).
+type pciMappingLister interface {
+	ListPCIMappings(ctx context.Context, checkNode string) ([]proxmox.PCIMapping, error)
+}
+
+// pciMappingReader is what the PCI listing reads through.
+type pciMappingReader interface {
+	pciMappingLister
+	nodeLister
+}
+
+// pciMappingDeleter is what the PCI delete flow reads and writes.
+type pciMappingDeleter interface {
+	pciMappingLister
+	DeletePCIMapping(ctx context.Context, id string) error
+}
+
+// pciMappingEditor is what the PCI update flow reads and writes.
+type pciMappingEditor interface {
+	pciMappingLister
+	ListNodePCIDevicesAllClasses(ctx context.Context, node string) ([]proxmox.NodePCIDevice, error)
+	UpdatePCIMapping(ctx context.Context, id string, params proxmox.UpdatePCIMappingParams) error
+}
+
+// clusterPCIMapping is one PCI mapping as its cluster-wide listing answers
+// it: clusterMapping, the mapping's two flags, and the entries Nexara cannot
+// read.
+type clusterPCIMapping struct {
+	clusterMapping
+	// MDev is the mapping's "Use with Mediated Devices" flag, which Proxmox
+	// compares with every entry's device.
+	MDev bool `json:"mdev"`
+	// LiveMigrationCapable is its "Live Migration Capable" flag: shown here,
+	// set in Proxmox.
+	LiveMigrationCapable bool `json:"live_migration_capable"`
+	// UnreadableEntries says, for each entry proxmox.ParsePCIMapEntry
+	// refuses, why — keyed by the entry as stored. An update keeps entries
+	// only as the parse reads them, so such an entry can only be removed:
+	// every other save of the mapping is refused while it is there.
+	UnreadableEntries map[string]string `json:"unreadable_entries"`
+}
+
+// pciUnreadableEntries is clusterPCIMapping.UnreadableEntries for entries.
+// The reason does not repeat the entry, which is its key and in map already.
+func pciUnreadableEntries(entries []string) map[string]string {
+	out := map[string]string{}
+	for _, raw := range entries {
+		if problem := proxmox.PCIMapEntryProblem(raw); problem != "" {
+			out[raw] = problem
+		}
+	}
+	return out
+}
+
+// listClusterPCIMappings is the PCI cluster-wide listing: the plain listing,
+// each mapping checked on every node its entries name (checkMappingNodes),
+// merged, and each merged mapping given its flags and its unreadable entries
+// from the plain mapping it came from — mergeMappingChecks answers them in
+// plain's order.
+func listClusterPCIMappings(ctx context.Context, px pciMappingReader) ([]clusterPCIMapping, error) {
+	plain, err := px.ListPCIMappings(ctx, "")
+	if err != nil {
+		return nil, mapProxmoxError(err)
+	}
+	checks := checkMappingNodes(ctx, px, pciMappingReader.ListPCIMappings, pciMappingView,
+		mappingEntryNodes(pciMappingView, plain))
+	merged := mergeMappingChecks(pciMappingView, plain, checks)
+	out := make([]clusterPCIMapping, 0, len(merged))
+	for i, cm := range merged {
+		out = append(out, clusterPCIMapping{
+			clusterMapping:       cm,
+			MDev:                 bool(plain[i].MDev),
+			LiveMigrationCapable: bool(plain[i].LiveMigrationCapable),
+			UnreadableEntries:    pciUnreadableEntries(cm.Map),
+		})
+	}
+	return out, nil
+}
+
+// ListClusterPCIMappings handles GET /api/v1/clusters/:cluster_id/pci-mappings.
+func (h *VMHandler) ListClusterPCIMappings(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	mappings, err := listClusterPCIMappings(c.Context(), pxClient)
+	if err != nil {
+		return err
+	}
+	return RespondItems(c, mappings)
+}
+
+// pciMappingDeviceTimeout bounds the read of add_node's devices an update
+// makes to build the entry it adds. A variable only so the tests can shorten
+// it.
+var pciMappingDeviceTimeout = 10 * time.Second
+
+// pciMappingStaleMessage is the 409 an update answers when the digest it
+// carried no longer matches pci.cfg. Nothing was changed.
+const pciMappingStaleMessage = "The cluster's PCI mappings changed since they were loaded, so nothing was " +
+	"changed — reload and try again. A change to any PCI mapping counts, not only to this one."
+
+// pciMappingMissing is the 404 an update answers for an id with no mapping.
+const pciMappingMissing = "No PCI mapping with that ID — it may have been deleted"
+
+// pciMappingMissingPhrases is how Proxmox's update refuses an id with no
+// mapping: pve-manager PVE/API2/Cluster/Mapping/PCI.pm dies
+// "pci ID '$id' does not exist" as USB.pm's dies for a usb ID
+// (usbMappingMissingPhrases), after the digest is compared.
+var pciMappingMissingPhrases = []string{"does not exist"}
+
+// mapPCIMappingUpdateError is mapUSBMappingUpdateError for a PCI mapping:
+// a stale digest is 409 — compared first, as the update does — and a mapping
+// that is gone 404.
+func mapPCIMappingUpdateError(err error) error {
+	stale := mapProxmoxDieError(fiber.StatusConflict, pciMappingStaleMessage, staleDigestPhrases, err)
+	var fe *fiber.Error
+	if errors.As(stale, &fe) && fe.Code == fiber.StatusConflict {
+		return stale
+	}
+	return mapMissingObjectError(pciMappingMissing, pciMappingMissingPhrases, err)
+}
+
+// pciPathSlot is a PCI path's slot — "0000:01:00.1" → "0000:01:00" — and a
+// slot is its own.
+func pciPathSlot(path string) string {
+	if n := len(path); n >= 2 && path[n-2] == '.' {
+		return path[:n-2]
+	}
+	return path
+}
+
+// pciPathsOverlap says whether two paths — each one address or a ";"-joined
+// list — name any of the same device: the same address, or a whole device
+// (a slot) and one of its functions. The SPA's pciPathsOverlap is the same
+// rule.
+func pciPathsOverlap(a, b string) bool {
+	for _, x := range strings.Split(a, ";") {
+		for _, y := range strings.Split(b, ";") {
+			if x == y || pciPathSlot(x) == y || x == pciPathSlot(y) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pciKeptEntries checks that keep is a sub-multiset of current — every entry
+// kept is one the mapping has, exactly as the listing returned it, and no
+// entry more often than the mapping has it — and returns the entries of
+// current that keep leaves out.
+func pciKeptEntries(current, keep []string) (removed []string, ok bool) {
+	left := make(map[string]int, len(current))
+	for _, raw := range current {
+		left[raw]++
+	}
+	for _, raw := range keep {
+		if left[raw] == 0 {
+			return nil, false
+		}
+		left[raw]--
+	}
+	for _, raw := range current {
+		if left[raw] > 0 {
+			removed = append(removed, raw)
+			left[raw]--
+		}
+	}
+	return removed, true
+}
+
+// pciMappingUpdate is a completed update, for its audit row.
+type pciMappingUpdate struct {
+	id     string
+	params proxmox.UpdatePCIMappingParams
+	// added is the entry the update built from add_node's device, or nil.
+	added *proxmox.PCIMapEntry
+	// replaced is the entry added took the place of, or "".
+	replaced string
+	// removed are the entries the mapping had that map left out.
+	removed []string
+}
+
+// pciMdevMismatch is the 400 for a device whose mediated-device capability
+// is not what the mapping's flag says, while the mapping keeps other entries:
+// which side is which, why it matters beyond this device, and what to do.
+func pciMdevMismatch(id, node, path string, deviceMDev bool) error {
+	side := fmt.Sprintf("%s on %s cannot provide mediated devices, but mapping %s is set to use them", path, node, id)
+	if deviceMDev {
+		side = fmt.Sprintf("%s on %s can provide mediated devices, but mapping %s is not set to use them", path, node, id)
+	}
+	return fiber.NewError(fiber.StatusBadRequest, side+". Proxmox refuses to start a VM with an entry whose "+
+		"device does not match the mapping's mdev flag, and a mismatched entry stops the node's other entries "+
+		"too. Change the flag in Proxmox, or replace the mapping's only entry, which the flag then follows.")
+}
+
+// updatePCIMappingRequest makes the update the request asks for — everything
+// between reading the request and auditing it:
+//
+//  1. add_node, when given, is one of the cluster's nodes: its devices are a
+//     /nodes/{node} read, which pveproxy forwards wherever the name resolves.
+//  2. The plain listing, read first: a digest other than the caller's is 409
+//     and nothing more is read or written; a mapping that is gone is 404.
+//  3. map is a sub-multiset of the mapping's entries, exactly as listed: no
+//     caller can write an entry of its own spelling. And each of them reads,
+//     since each is written back as read; one that does not is refused.
+//  4. replace, when given, is an entry of map, on add_node.
+//  5. The new entry is built from add_node's own report of the device at
+//     add_path, and refused when it is, or overlaps, an entry the node keeps.
+//  6. The mdev flag: while other entries remain, the device must match it —
+//     an entry that does not stops the node's others too; as the only entry
+//     left, the device decides it (mdev=1, or delete=mdev).
+//  7. The entry goes in replace's place, keeping replace's own description,
+//     or at the end.
+//  8. The PUT carries the caller's digest, which Proxmox checks again under
+//     its lock.
+func updatePCIMappingRequest(ctx context.Context, px pciMappingEditor, isMember func(context.Context, string) (bool, error),
+	p *apischema.Params) (pciMappingUpdate, error) {
+	id := p.String("mapping_id")
+	keep := p.Strings("map")
+	digest := p.String("digest")
+	addNode, adding := p.OptString("add_node")
+	addPath, _ := p.OptString("add_path")
+	replace, replacing := p.OptString("replace")
+
+	if adding {
+		member, err := isMember(ctx, addNode)
+		if err != nil {
+			return pciMappingUpdate{}, err
+		}
+		if !member {
+			return pciMappingUpdate{}, errMappingNodeNotMember
+		}
+	}
+
+	current, fileDigest, err := findMapping(ctx, px, pciMappingEditor.ListPCIMappings, pciMappingView, id)
+	switch {
+	case err != nil:
+		return pciMappingUpdate{}, mapProxmoxError(err)
+	case fileDigest != "" && fileDigest != digest:
+		return pciMappingUpdate{}, fiber.NewError(fiber.StatusConflict, pciMappingStaleMessage)
+	case current == nil:
+		// With no mapping at all there is no digest to compare, and the
+		// mapping is certainly gone.
+		return pciMappingUpdate{}, fiber.NewError(fiber.StatusNotFound, pciMappingMissing)
+	}
+
+	removed, ok := pciKeptEntries(current.Map, keep)
+	if !ok {
+		return pciMappingUpdate{}, fiber.NewError(fiber.StatusBadRequest, "map must list only entries the mapping "+
+			"has, each exactly as the listing returns it and no more often than the mapping has it.")
+	}
+	// Every kept entry is written back as the parse reads it
+	// (proxmox.CanonicalPCIMap), which refuses one it cannot read. Refused
+	// here, before any device is read, so that the checks below read every
+	// entry the mapping keeps.
+	kept := make([]proxmox.PCIMapEntry, len(keep))
+	for i, raw := range keep {
+		e, err := proxmox.ParsePCIMapEntry(raw)
+		switch {
+		case err == nil:
+			kept[i] = e
+		case replacing && raw == replace:
+			return pciMappingUpdate{}, fiber.NewError(fiber.StatusBadRequest,
+				"Nexara cannot read the entry to replace, so it can only be removed.")
+		default:
+			return pciMappingUpdate{}, fiber.NewError(fiber.StatusBadRequest,
+				strings.TrimPrefix(err.Error(), proxmox.ErrInvalidInput.Error()+": ")+
+					". Nexara cannot save the mapping with it: leave it out of map to remove it.")
+		}
+	}
+	upd := pciMappingUpdate{id: id, removed: removed}
+	final := slices.Clone(keep)
+	var mdev *bool
+
+	if adding {
+		at := -1
+		var replaced proxmox.PCIMapEntry
+		if replacing {
+			at = slices.Index(keep, replace)
+			if at < 0 {
+				return pciMappingUpdate{}, fiber.NewError(fiber.StatusBadRequest, "replace must be one of the entries in map.")
+			}
+			replaced = kept[at]
+			if replaced.Node != addNode {
+				return pciMappingUpdate{}, fiber.NewError(fiber.StatusBadRequest,
+					"The entry to replace is on node "+replaced.Node+", not on add_node: a replacement stays on its node.")
+			}
+		}
+
+		devCtx, cancel := context.WithTimeout(ctx, pciMappingDeviceTimeout)
+		devices, err := px.ListNodePCIDevicesAllClasses(devCtx, addNode)
+		cancel()
+		if err != nil {
+			return pciMappingUpdate{}, mapProxmoxError(err)
+		}
+		entry, deviceMDev, err := proxmox.PCIMapEntryForDevice(addNode, addPath, devices)
+		if err != nil {
+			return pciMappingUpdate{}, mapProxmoxError(err)
+		}
+		for i, e := range kept {
+			if i != at && e.Node == addNode && pciPathsOverlap(e.Path, addPath) {
+				return pciMappingUpdate{}, fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("%s already has %s in "+
+					"mapping %s; a device can be in a mapping once per node, as a whole or as one of its functions.",
+					addNode, e.Path, id))
+			}
+		}
+
+		others := len(keep)
+		if replacing {
+			others--
+		}
+		switch flag := bool(current.MDev); {
+		case deviceMDev == flag:
+		case others > 0:
+			return pciMappingUpdate{}, pciMdevMismatch(id, addNode, addPath, deviceMDev)
+		default:
+			mdev = &deviceMDev
+		}
+
+		if replacing {
+			entry.Description = replaced.Description
+			final[at] = entry.String()
+			upd.replaced = replace
+		} else {
+			final = append(final, entry.String())
+		}
+		upd.added = &entry
+	}
+
+	params := proxmox.UpdatePCIMappingParams{Map: final, MDev: mdev, Digest: digest}
+	if description, set := p.OptString("description"); set {
+		params.Description = &description
+	}
+	if err := px.UpdatePCIMapping(ctx, id, params); err != nil {
+		return pciMappingUpdate{}, mapPCIMappingUpdateError(err)
+	}
+	upd.params = params
+	return upd, nil
+}
+
+// UpdatePCIMapping handles PUT /api/v1/clusters/:cluster_id/pci-mappings/:mapping_id.
+func (h *VMHandler) UpdatePCIMapping(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	upd, err := updatePCIMappingRequest(c.Context(), pxClient, h.nodeInCluster(clusterID), p)
+	if err != nil {
+		return err
+	}
+	// The entries as Proxmox now stores them. The client has just written
+	// exactly this, so the error cannot happen here.
+	written, _ := proxmox.CanonicalPCIMap(upd.params.Map)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pci_mapping", upd.id, "updated",
+		pciMappingUpdateDetails(upd, written))
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// pciMappingAuditMap is usbMappingAuditMap for a PCI mapping's entries: each
+// recorded as it was when it fits usbMappingAuditTextMax, and otherwise with
+// only its description cut, re-written by the PCI parse — or cut whole when it
+// does not parse — at most usbMappingAuditEntries of them, and map_count.
+func pciMappingAuditMap(detail map[string]any, entries []string) {
+	detail["map"] = pciMappingAuditEntries(entries)
+	detail["map_count"] = len(entries)
+}
+
+// pciMappingAuditEntries is the capped list pciMappingAuditMap records.
+func pciMappingAuditEntries(entries []string) []string {
+	recorded := make([]string, 0, min(len(entries), usbMappingAuditEntries))
+	for _, raw := range entries[:min(len(entries), usbMappingAuditEntries)] {
+		if utf8.RuneCountInString(raw) <= usbMappingAuditTextMax {
+			recorded = append(recorded, raw)
+			continue
+		}
+		e, err := proxmox.ParsePCIMapEntry(raw)
+		if err != nil {
+			recorded = append(recorded, auditTruncate(raw, usbMappingAuditTextMax))
+			continue
+		}
+		e.Description = auditTruncate(e.Description, usbMappingAuditTextMax)
+		// And the whole of it bounded too: a stored path may be a long list,
+		// and nothing holds a node name to a length.
+		recorded = append(recorded, auditTruncate(e.String(), 2*usbMappingAuditTextMax))
+	}
+	return recorded
+}
+
+// pciMappingUpdateDetails is the audit detail of a completed update: every
+// entry as written, what was added — with the ids the node reported for the
+// device — what it replaced, what was removed, a change to the mdev flag, and
+// the description when the update touched it.
+func pciMappingUpdateDetails(upd pciMappingUpdate, written []string) json.RawMessage {
+	detail := map[string]any{}
+	pciMappingAuditMap(detail, written)
+	if e := upd.added; e != nil {
+		added := map[string]any{"node": e.Node, "path": e.Path, "device_id": e.ID}
+		if e.SubsystemID != "" {
+			added["subsystem_id"] = e.SubsystemID
+		}
+		if e.IOMMUGroup != nil {
+			added["iommugroup"] = *e.IOMMUGroup
+		}
+		detail["added"] = added
+	}
+	if upd.replaced != "" {
+		detail["replaced"] = pciMappingAuditEntries([]string{upd.replaced})[0]
+	}
+	if len(upd.removed) > 0 {
+		detail["removed"] = pciMappingAuditEntries(upd.removed)
+		detail["removed_count"] = len(upd.removed)
+	}
+	if upd.params.MDev != nil {
+		detail["mdev"] = *upd.params.MDev
+	}
+	if d := upd.params.Description; d != nil {
+		if *d == "" {
+			detail["description_removed"] = true
+		} else {
+			detail["description"] = auditTruncate(*d, usbMappingAuditTextMax)
+		}
+	}
+	details, _ := json.Marshal(detail)
+	return details
+}
+
+// pciMappingDeleteDetails is the audit detail of a completed delete of a PCI
+// mapping: the mapping as it was — entries, flags and description — which is
+// enough to create it again. As for USB, a snapshot that could not be taken
+// is marked, and its error kept out of the row.
+func pciMappingDeleteDetails(snapshot *proxmox.PCIMapping, priorStateUnknown bool) json.RawMessage {
+	detail := map[string]any{}
+	if priorStateUnknown {
+		detail["prior_state_unknown"] = true
+	}
+	if snapshot != nil {
+		pciMappingAuditMap(detail, snapshot.Map)
+		if snapshot.Description != "" {
+			detail["description"] = auditTruncate(snapshot.Description, usbMappingAuditTextMax)
+		}
+		if snapshot.MDev {
+			detail["mdev"] = true
+		}
+		if snapshot.LiveMigrationCapable {
+			detail["live_migration_capable"] = true
+		}
+	}
+	details, _ := json.Marshal(detail)
+	return details
+}
+
+// deletePCIMapping is deleteMapping for a PCI mapping.
+func deletePCIMapping(ctx context.Context, px pciMappingDeleter, id, digest string) (mappingDeleteOutcome[proxmox.PCIMapping], error) {
+	return deleteMapping(ctx, px, pciMappingDeleter.ListPCIMappings, pciMappingDeleter.DeletePCIMapping,
+		pciMappingView, id, digest)
+}
+
+// deletePCIMappingRequest makes the delete the request asks for, as
+// deleteUSBMappingRequest does for USB.
+func deletePCIMappingRequest(ctx context.Context, px pciMappingDeleter,
+	p *apischema.Params) (id string, outcome mappingDeleteOutcome[proxmox.PCIMapping], err error) {
+	id = p.String("mapping_id")
+	digest, _ := p.OptString("digest")
+	outcome, err = deletePCIMapping(ctx, px, id, digest)
+	return id, outcome, err
+}
+
+// DeletePCIMapping handles DELETE /api/v1/clusters/:cluster_id/pci-mappings/:mapping_id.
+//
+// Idempotent, like the Proxmox endpoint underneath, as DeleteUSBMapping is.
+func (h *VMHandler) DeletePCIMapping(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	id, outcome, err := deletePCIMappingRequest(c.Context(), pxClient, p)
+	if err != nil {
+		return err
+	}
+	if outcome.priorStateUnknown {
+		slog.Warn("PCI mapping delete: could not read the mappings to snapshot this one; auditing without its entries",
+			"cluster_id", clusterID, "mapping_id", id, "error", outcome.snapErr)
+	}
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pci_mapping", id, outcome.action,
+		pciMappingDeleteDetails(outcome.snapshot, outcome.priorStateUnknown))
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// scanPCIMappingUsage is scanMappingUsage for a PCI mapping: the VMs whose
+// hostpciN names it.
+func scanPCIMappingUsage(ctx context.Context, px guestConfigReader, id string) (mappingUsage, error) {
+	return scanMappingUsage(ctx, px, pciMappingView.kind, id, proxmox.VMConfig.PCIMappingKeys)
+}
+
+// checkPCIMappingUsage is checkMappingUsage for a PCI mapping, in the same
+// slots as the USB checks (mappingUsageScans): the caps are a user's and a
+// cluster's whichever kind they check.
+func checkPCIMappingUsage(ctx context.Context, slots *usageScanSlots, cluster, user uuid.UUID, id string,
+	reader func() (guestConfigReader, error)) (mappingUsage, error) {
+	return checkMappingUsage(ctx, slots, cluster, user, reader,
+		func(scanCtx context.Context, px guestConfigReader) (mappingUsage, error) {
+			return scanPCIMappingUsage(scanCtx, px, id)
+		})
+}
+
+// GetPCIMappingUsage handles GET /api/v1/clusters/:cluster_id/pci-mappings/:mapping_id/usage.
+func (h *VMHandler) GetPCIMappingUsage(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+	// As for USB: the route is authenticated, so there is always a user.
+	userID, _ := c.Locals("user_id").(uuid.UUID)
+	usage, err := checkPCIMappingUsage(c.Context(), mappingUsageScans, clusterID, userID,
+		p.String("mapping_id"), func() (guestConfigReader, error) {
+			pxClient, err := h.createProxmoxClient(c, clusterID)
+			if err != nil {
+				return nil, err
+			}
+			return pxClient, nil
+		})
+	if err != nil {
+		return err
+	}
+	return c.JSON(usage)
 }

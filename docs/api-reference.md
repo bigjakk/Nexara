@@ -269,8 +269,8 @@ for three minutes is closed without an answer.
 ## Rate Limits
 
 Every limiter returns `429`, and all but one key on the client IP (`c.IP()` —
-see `TRUSTED_PROXIES` before deploying behind a reverse proxy); the USB
-mapping usage limiter keys on the signed-in user. Note these responses come
+see `TRUSTED_PROXIES` before deploying behind a reverse proxy); the mapping
+usage limiter keys on the signed-in user. Note these responses come
 from the limiter middleware, not the API error handler: the body is the plain
 text `Too Many Requests` (`Content-Type: text/plain`), not the JSON error
 envelope documented above.
@@ -282,7 +282,7 @@ envelope documented above.
 | WS token | 60/min | `/auth/ws-token` |
 | Snapshot resync | 30/min | `/clusters/:id/guest-snapshots/resync` |
 | Cluster create | 10/min | `POST /clusters` — in bootstrap mode each call spends a Proxmox login attempt |
-| USB mapping usage | 10/min per user | `GET /clusters/:id/usb-mappings/:mapping_id/usage` — each call reads the configuration of every VM in the cluster. The handler also runs at most two checks at once per cluster and one per user, where a newer check replaces the older one, which answers `409`. It answers `429`, with the JSON error envelope, when the cluster has no room, when the older check has not stopped within two seconds, or when another of the user's own checks took the slot first |
+| Mapping usage | 10/min per user, USB and PCI checks together | `GET /clusters/:id/usb-mappings/:mapping_id/usage` and `GET /clusters/:id/pci-mappings/:mapping_id/usage` — each call reads the configuration of every VM in the cluster. The handlers also run at most two checks at once per cluster and one per user, of either kind, where a newer check replaces the older one, which answers `409`. It answers `429`, with the JSON error envelope, when the cluster has no room, when the older check has not stopped within two seconds, or when another of the user's own checks took the slot first |
 | General | `RATE_LIMIT_MAX` per `RATE_LIMIT_EXPIRATION` (default 600/min) | Everything whose path does not start with `/api/v1/auth/` or `/ws` — `/healthz` included |
 
 The general limiter's exemption is by path prefix, not by coverage: the auth
@@ -589,6 +589,10 @@ leaves provenance intact.
 | DELETE | `/clusters/:id/usb-mappings/:mapping_id` | Delete a USB mapping; succeeds when it is already gone; with `?digest=` from the listing, 409 when any USB mapping changed since (`manage:cluster`) |
 | GET | `/clusters/:id/usb-mappings/:mapping_id/usage` | Which VMs use a USB mapping, and which could not be checked (`view:vm`; limited per user and per cluster, see [Rate Limits](#rate-limits)) |
 | POST | `/clusters/:id/pci-mappings` | Create a PCI resource mapping for passthrough from a node's device address; the entry's ids, IOMMU group and mdev flag are copied from the node's own report of the device (`manage:cluster`; the token needs `Mapping.Modify`) |
+| GET | `/clusters/:id/pci-mappings` | List the cluster's PCI resource mappings, each node's entries checked on that node, with the mapping's mdev and live-migration flags and any entry Nexara cannot read (`view:cluster`) |
+| PUT | `/clusters/:id/pci-mappings/:mapping_id` | Keep a PCI mapping's entries as listed, add a node's device or replace an entry with one — the entry built from the node's own report of the device — and change its description; needs the listing's `digest`, 409 when any PCI mapping changed since (`manage:cluster`) |
+| DELETE | `/clusters/:id/pci-mappings/:mapping_id` | Delete a PCI mapping; succeeds when it is already gone; with `?digest=` from the listing, 409 when any PCI mapping changed since (`manage:cluster`) |
+| GET | `/clusters/:id/pci-mappings/:mapping_id/usage` | Which VMs use a PCI mapping, and which could not be checked (`view:vm`; limited per user and per cluster together with the USB check, see [Rate Limits](#rate-limits)) |
 
 ### Nodes
 

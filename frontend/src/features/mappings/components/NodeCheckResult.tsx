@@ -1,20 +1,7 @@
 import { CheckCircle2 } from "lucide-react";
 import type { MappingCheck } from "../api/mapping-queries";
+import { ownValue } from "../lib/mapping-edits";
 import { cleanDeviceText } from "../lib/usb-mapping";
-
-/**
- * `record[key]` when the record itself holds the key, else undefined. Through
- * Object.prototype.hasOwnProperty rather than Object.hasOwn, which is newer
- * than the browsers the build targets (vite.config.ts).
- */
-function ownValue<T>(
-  record: Readonly<Record<string, T>>,
-  key: string,
-): T | undefined {
-  return Object.prototype.hasOwnProperty.call(record, key)
-    ? record[key]
-    : undefined;
-}
 
 /**
  * What a cluster-wide listing says about a mapping on `node`: why the node was
@@ -24,8 +11,7 @@ function ownValue<T>(
  * own to state instead.
  *
  * `unchecked` and `checks` are the listing's two maps, read here by the node's
- * OWN key: they are parsed JSON, so a plain index would give a node named
- * "constructor", say, what every object inherits in place of "not listed".
+ * OWN key (ownValue).
  */
 export function NodeCheckResult({
   node,

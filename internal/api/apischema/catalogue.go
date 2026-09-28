@@ -846,6 +846,27 @@ func patternRules() []RuleDoc {
 			},
 			Rejects: []string{"", ".", "..", "%2e%2e", "infra/prod", "infra prod", "a+b", "pool@name"},
 		},
+		{
+			Name: "pci-address",
+			Kind: KindPattern,
+			Permits: "one PCI device address as Proxmox writes it: domain, bus and slot in lowercase hex, and " +
+				"the function when one function is meant — without it, the whole device, every function " +
+				"passed through as one. Each site holds it to 64 characters.",
+			Rule:         `^[a-f0-9]{4,}:[a-f0-9]{2}:[a-f0-9]{2}(\.[a-f0-9])?$`,
+			RuleIsRegex:  true,
+			Origin:       OriginProxmox,
+			Upstream:     "pve-guest-common src/PVE/Mapping/PCI.pm $PCI_RE (the path of $map_fmt)",
+			UpstreamRule: `$PCI_RE = [a-f0-9]{4,}:[a-f0-9]{2}:[a-f0-9]{2}(?:\.[a-f0-9])?, and $map_fmt's path is one or more of them joined by ";"`,
+			Divergence: "STRICTER: one address, where the entry's path admits a \";\"-joined list. The two " +
+				"routes that take it — a PCI mapping's create and its update's add_path — name the one device " +
+				"Nexara builds an entry from, and proxmox.PCIMapEntryForDevice says why that is one: Proxmox " +
+				"passes such a list as one multi-function device rather than as alternatives, and its own " +
+				"editor never writes one. The 64-character ceiling is Nexara's as well " +
+				"(proxmox.pciMappingPathMax); an entry Proxmox already holds is read by " +
+				"proxmox.ParsePCIMapEntry, which takes the list.",
+			Accepts: []string{"0000:01:00.0", "0000:01:00", "10000:0a:1f.7"},
+			Rejects: []string{"", "01:00.0", "0000:0A:00.0", "0000:01:00.0;0000:02:00.0", "0000:01:00.0,node=x", "0000:01:00.10"},
+		},
 	}
 }
 

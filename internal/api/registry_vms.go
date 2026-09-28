@@ -22,7 +22,7 @@ import (
 func (s *Server) buildRegistry() *Registry {
 	reg := NewRegistry()
 	if s.vmHandler != nil {
-		registerVMEndpoints(reg, s.vmHandler, s.usbMappingUsageLimiter())
+		registerVMEndpoints(reg, s.vmHandler, s.mappingUsageLimiter())
 	}
 	if s.containerHandler != nil {
 		registerContainerEndpoints(reg, s.containerHandler)
@@ -483,7 +483,7 @@ const bothGuestKindsReason = "the resource depends on the guest's type, which is
 // lookup, so they are Deferred and keep their checks in the handler — see
 // bothGuestKindsReason. None is Advisory: none of these filters a listing
 // through accessibleClusters instead of gating it.
-func registerVMEndpoints(reg *Registry, h *handlers.VMHandler, usbMappingUsageLimiter fiber.Handler) {
+func registerVMEndpoints(reg *Registry, h *handlers.VMHandler, mappingUsageLimiter fiber.Handler) {
 	// ── Virtual machines ──────────────────────────────────────────────
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,
@@ -947,7 +947,7 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler, usbMappingUsageLi
 			Handler:     r.handler,
 		})
 	}
-	registerResourceMappingEndpoints(reg, h, usbMappingUsageLimiter)
+	registerResourceMappingEndpoints(reg, h, mappingUsageLimiter)
 
 	// ── Resource pools ────────────────────────────────────────────────
 	reg.Register(Endpoint{

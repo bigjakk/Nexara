@@ -856,8 +856,8 @@ type sweepEndpointOverride struct {
 	// variant, for a parameter the schema marks Optional but the handler's
 	// cross-field business logic makes conditionally required whenever the
 	// endpoint is called at all (not merely whenever the caller happens to
-	// send a sibling — that shape IS what Requires expresses, and the real
-	// registry declares none of it as of this writing).
+	// send a sibling — that shape IS what Requires expresses, which the PCI
+	// mapping update declares among add_node, add_path and replace).
 	forceRequired []string
 	// excludeFromOptional removes these names from the with-optional
 	// variant: for a parameter that is mutually exclusive with another one
@@ -876,6 +876,11 @@ var sweepRouteOverrides = map[string]sweepEndpointOverride{
 	// address in Proxmox's form.
 	"POST " + pathPrefix + "clusters/:cluster_id/pci-mappings": {
 		values: map[string]any{"path": "0000:01:00.0"},
+	},
+	// The same address pattern on the PCI update, as add_path: the device
+	// to add, or the one replacing an entry.
+	"PUT " + pathPrefix + "clusters/:cluster_id/pci-mappings/:mapping_id": {
+		values: map[string]any{"add_path": "0000:01:00.0"},
 	},
 	// ssh-credentials: auth_type's Enum[0] is "password" (checked against
 	// registry_rolling_update.go), and the handler requires a password
@@ -1268,9 +1273,12 @@ func synthesizeValueFor(name string, prop apischema.Property, override sweepEndp
 // are, in practice, required too, even though they are declared Optional.
 // Compile() only allows Requires to target an Optional parameter in the
 // first place (compileProperty), which is what makes this closure necessary
-// rather than redundant. The real registry declares no Requires at all as of
-// this writing; this exists so a future one is exercised correctly on day one
-// rather than silently producing a false "registry rejected it" finding.
+// rather than redundant. As of this writing only the PCI mapping update
+// declares Requires, and only among optional parameters (add_node, add_path
+// and replace, which the with-optional variant sends together), so no required
+// parameter drags a companion in yet; this exists so one that does is exercised
+// correctly on day one rather than silently producing a false "registry
+// rejected it" finding.
 func closeRequiredParams(props apischema.Properties) map[string]bool {
 	included := make(map[string]bool, len(props))
 	for name, prop := range props {
