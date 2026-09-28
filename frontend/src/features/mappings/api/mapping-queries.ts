@@ -253,8 +253,11 @@ export function useUSBMappingsSettled(clusterId: string) {
   );
 }
 
-/** A guest in the usage answer: a user carries `keys`, an unchecked one `reason`. */
-export interface USBMappingGuest {
+/**
+ * A guest in a usage answer: a user carries `keys` — the usbN or hostpciN
+ * that name the mapping — an unchecked one `reason`.
+ */
+export interface MappingGuest {
   vmid: number;
   name: string;
   node: string;
@@ -266,12 +269,15 @@ export interface USBMappingGuest {
  * Which VMs pass a mapping through, read from their live configs. A guest in
  * `unchecked` may use it too: its config could not be read.
  */
-export interface USBMappingUsage {
+export interface MappingUsage {
   mapping_id: string;
   checked: number;
-  users: USBMappingGuest[];
-  unchecked: USBMappingGuest[];
+  users: MappingGuest[];
+  unchecked: MappingGuest[];
 }
+
+/** A USB mapping's usage: MappingUsage, by its earlier name. */
+export type USBMappingUsage = MappingUsage;
 
 /**
  * The usage of `mappingId`, or nothing while it is null. Its own key, outside
@@ -291,7 +297,7 @@ export function useUSBMappingUsage(
   return useQuery({
     queryKey: ["clusters", clusterId, "usb-mapping-usage", mappingId],
     queryFn: () =>
-      apiClient.get<USBMappingUsage>(
+      apiClient.get<MappingUsage>(
         apiPath`/api/v1/clusters/${clusterId}/usb-mappings/${mappingId ?? ""}/usage`,
       ),
     enabled: clusterId.length > 0 && mappingId !== null,

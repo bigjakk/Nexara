@@ -237,6 +237,27 @@ export function pciHostRisks(
 }
 
 /**
+ * Everything to ask about before a VM on `node` is given the devices at
+ * `paths`: what pciHostRisks finds, and each path whose device the node's list
+ * does not hold (pciUnreadPaths), since what the dialog cannot look at it
+ * cannot call safe. Empty when there is nothing to ask.
+ */
+export function pciPassRisks(
+  paths: readonly string[],
+  devices: readonly NodePCIDevice[],
+  node: string,
+): string[] {
+  const passed = paths.flatMap((p) => pciDevicesAt(devices, p));
+  return [
+    ...pciHostRisks(passed, devices),
+    ...pciUnreadPaths(paths, devices).map(
+      (p) =>
+        `Nexara cannot tell what ${p} is, or what shares its IOMMU group: check in Proxmox that ${node} does not need it.`,
+    ),
+  ];
+}
+
+/**
  * The paths among `paths` — each of a ";"-joined list on its own — whose
  * device the node's list does not hold: a typed address, one in a class the
  * list leaves out, one the node no longer has. The dialog asks about these

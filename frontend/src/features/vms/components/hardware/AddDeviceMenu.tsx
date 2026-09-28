@@ -72,14 +72,12 @@ import {
   findCheckedPCIMappingAt,
   findReusablePCIMapping,
   parsePCIMappingEntry,
-  PCI_PATH_PATTERN,
-  pciDeviceLabel,
-  pciDevicesAt,
-  pciEntryForDevice,
-  pciHostRisks,
-  pciSlot,
-  pciUnreadPaths,
+  pciPassRisks,
 } from "@/features/mappings/lib/pci-mapping";
+import { usePCIPick } from "@/features/mappings/hooks/usePCIPick";
+import { usePCIRiskAck } from "@/features/mappings/hooks/usePCIRiskAck";
+import { PCIDevicePicker } from "@/features/mappings/components/PCIDevicePicker";
+import { PCIRiskConfirm } from "@/features/mappings/components/PCIRiskConfirm";
 import { USBDevicePicker } from "@/features/mappings/components/USBDevicePicker";
 import {
   MappingCheckList,
@@ -1008,8 +1006,8 @@ function AddPCIDialog({
 
   const [mode, setMode] = useState<PCIMode>("device");
   const [mappingId, setMappingId] = useState("");
-  const [addressInput, setAddress] = useState("");
-  const [allFunctions, setAllFunctions] = useState(false);
+  // The host device picked, typed when the node's device list is not there.
+  const pick = usePCIPick(devices, nodeName);
   // null until the operator types, so the suggestion follows the pick.
   const [nameInput, setNameInput] = useState<string | null>(null);
   const [pcie, setPcie] = useState(isQ35);
@@ -1018,37 +1016,13 @@ function AddPCIDialog({
 
   const idx = findNextIndex(config, "hostpci", 15);
   const mappings = mappingsQuery.data ?? [];
-  const deviceList = devices ?? [];
-  const hasDeviceList = deviceList.length > 0;
-  // Once the node's list is there, only a device on it counts: an address
-  // typed while the list was loading is not what the picker then shows.
-  const address =
-    hasDeviceList && !deviceList.some((d) => d.id === addressInput)
-      ? ""
-      : addressInput;
+  const deviceList = pick.deviceList;
 
   // The address a host pick passes through: the device, or its slot for all
-  // of its functions. Typed when the node's device list is not there.
-  const typedAddressError =
-    !hasDeviceList && address !== "" && !PCI_PATH_PATTERN.test(address)
-      ? "An address like 0000:01:00.0: domain, bus, slot and function, in lowercase hex."
-      : "";
-  const pickedPath =
-    mode === "device" && address !== "" && typedAddressError === ""
-      ? allFunctions
-        ? pciSlot(address)
-        : address
-      : "";
-  // The whole device is named after function 0, as Proxmox checks it by.
-  const namedDevice =
-    deviceList.find(
-      (d) => d.id === (allFunctions ? `${pciSlot(address)}.0` : address),
-    ) ?? deviceList.find((d) => d.id === address);
-  const label = namedDevice ? pciDeviceLabel(namedDevice) : "";
-  const expected =
-    pickedPath !== ""
-      ? pciEntryForDevice(deviceList, nodeName, pickedPath)
-      : undefined;
+  // of its functions.
+  const pickedPath = mode === "device" ? pick.path : "";
+  const label = pick.label;
+  const expected = pickedPath !== "" ? pick.expected : undefined;
 
   // Reuse and the taken-name check both read the listing, so a host pick
   // waits for it, for AddUSBDialog's reason.
@@ -1099,24 +1073,9 @@ function AddPCIDialog({
           .map(parsePCIMappingEntry)
           .filter((e) => e.node === nodeName)
           .map((e) => e.path);
-  const passedDevices = passedPaths.flatMap((p) =>
-    pciDevicesAt(deviceList, p),
-  );
-  const hostRisks = [
-    ...pciHostRisks(passedDevices, deviceList),
-    ...pciUnreadPaths(passedPaths, deviceList).map(
-      (p) =>
-        `Nexara cannot tell what ${p} is, or what shares its IOMMU group: check in Proxmox that ${nodeName} does not need it.`,
-    ),
-  ];
-  // Keyed by what was said too: a warning that arrives after the tick — the
-  // device list loading late — is asked about afresh.
-  const riskKey =
-    hostRisks.length > 0
-      ? `${mode}|${pickedPath}|${mappingId}|${hostRisks.join("\n")}`
-      : "";
-  const [acknowledgedRisk, setAcknowledgedRisk] = useState("");
-  const risksAccepted = riskKey === "" || acknowledgedRisk === riskKey;
+  const hostRisks = pciPassRisks(passedPaths, deviceList, nodeName);
+  const risk = usePCIRiskAck(`${mode}|${pickedPath}|${mappingId}`, hostRisks);
+  const risksAccepted = risk.accepted;
 
   const canAdd =
     !slotsFull &&
@@ -1177,15 +1136,6 @@ function AddPCIDialog({
           : "."
       }`
     : "";
-
-  // Grouped by IOMMU group, as Proxmox lists them: a device shares its group
-  // with whatever else is in it.
-  const grouped = new Map<number, NodePCIDevice[]>();
-  for (const d of deviceList) {
-    const list = grouped.get(d.iommugroup) ?? [];
-    list.push(d);
-    grouped.set(d.iommugroup, list);
-  }
 
   return (
     <Dialog
@@ -1273,76 +1223,12 @@ function AddPCIDialog({
           )}
 
           {mode === "device" && (
-            <div className="space-y-1">
-              <Label htmlFor="add-pci-device" className="text-xs">
-                Device
-              </Label>
-              {hasDeviceList ? (
-                <select
-                  id="add-pci-device"
-                  className={selectClass}
-                  value={address}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setAddress(e.target.value);
-                    clearCreateError();
-                  }}
-                >
-                  <option value="">Select a device...</option>
-                  {Array.from(grouped.entries())
-                    .sort(([a], [b]) => a - b)
-                    .map(([group, devs]) => (
-                      <optgroup
-                        key={group}
-                        label={
-                          group < 0 ? "No IOMMU group" : `IOMMU Group ${String(group)}`
-                        }
-                      >
-                        {devs.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.id} — {pciDeviceLabel(d)}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                </select>
-              ) : (
-                <Input
-                  id="add-pci-device"
-                  value={address}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setAddress(e.target.value);
-                    clearCreateError();
-                  }}
-                  placeholder="PCI address, e.g. 0000:01:00.0"
-                  aria-invalid={typedAddressError !== ""}
-                />
-              )}
-              {typedAddressError && (
-                <p className="text-xs text-destructive">{typedAddressError}</p>
-              )}
-              <div className="flex items-center gap-1.5 pt-1">
-                <Checkbox
-                  id="add-pci-all-functions"
-                  checked={allFunctions}
-                  disabled={busy}
-                  onCheckedChange={(v) => {
-                    setAllFunctions(v === true);
-                    clearCreateError();
-                  }}
-                />
-                <Label
-                  htmlFor="add-pci-all-functions"
-                  className="cursor-pointer text-xs"
-                >
-                  All functions
-                  <span className="ml-1.5 text-muted-foreground">
-                    Pass the whole device through, every function as one
-                  </span>
-                </Label>
-              </div>
-            </div>
+            <PCIDevicePicker
+              idPrefix="add-pci"
+              pick={pick}
+              disabled={busy}
+              onPicked={clearCreateError}
+            />
           )}
 
           {mode === "device" && pickedPath !== "" && listingFailure && (
@@ -1407,35 +1293,14 @@ function AddPCIDialog({
               existing mapping instead, or ask an administrator.
             </p>
           )}
-          {hostRisks.length > 0 && (
-            <div className="space-y-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
-              <p>
-                When the VM starts, the device is taken away from {nodeName}{" "}
-                — check that the node does not need it:
-              </p>
-              <ul className="list-disc space-y-0.5 pl-4">
-                {hostRisks.map((r) => (
-                  <li key={r}>{r}</li>
-                ))}
-              </ul>
-              <div className="flex items-center gap-1.5">
-                <Checkbox
-                  id="add-pci-host-risk"
-                  checked={risksAccepted}
-                  disabled={busy}
-                  onCheckedChange={(v) => {
-                    setAcknowledgedRisk(v === true ? riskKey : "");
-                  }}
-                />
-                <Label
-                  htmlFor="add-pci-host-risk"
-                  className="cursor-pointer text-xs"
-                >
-                  The node does not need it; pass it through
-                </Label>
-              </div>
-            </div>
-          )}
+          <PCIRiskConfirm
+            idPrefix="add-pci"
+            node={nodeName}
+            risks={hostRisks}
+            accepted={risksAccepted}
+            onAcceptedChange={risk.setAccepted}
+            disabled={busy}
+          />
           {slotsFull && (
             <p className="text-xs text-destructive">
               All 16 PCI slots are in use.

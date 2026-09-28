@@ -1,6 +1,5 @@
 import { Fragment, useRef, useState } from "react";
-import type { UseQueryResult } from "@tanstack/react-query";
-import { CheckCircle2, Pencil, Plus, Replace, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Replace, Trash2, X } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -33,7 +32,6 @@ import {
 } from "@/components/QueryStateNotice";
 import { useOpenerFocus } from "@/hooks/useOpenerFocus";
 import { usePermissions } from "@/hooks/usePermissions";
-import { ApiClientError } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import {
@@ -48,8 +46,10 @@ import {
   useUSBMappingsSettled,
   useUSBMappingUsage,
   type ClusterUSBMapping,
-  type USBMappingUsage,
 } from "../api/mapping-queries";
+import { useMappingRowHolds } from "../hooks/useMappingRowHolds";
+import { usePinnedMapping } from "../hooks/usePinnedMapping";
+import { isConflict, workLabel, type WorkKind } from "../lib/mapping-edits";
 import {
   buildUSBMappingEntry,
   characterCount,
@@ -69,6 +69,8 @@ import {
   type PickedUSBDevice,
   type USBPickMode,
 } from "../lib/usb-mapping";
+import { MappingDeleteDescription } from "./MappingDeleteDescription";
+import { NodeCheckResult } from "./NodeCheckResult";
 import { USBDevicePicker } from "./USBDevicePicker";
 
 const selectClass =
@@ -83,26 +85,6 @@ const DESCRIPTION_MAX = 4096;
  */
 const CONFLICT_NOTE =
   "The cluster's USB mappings changed since this was loaded — a change to any USB mapping counts, not only to this one.";
-
-/** A remove, delete or save refused because usb.cfg changed since its read. */
-function isConflict(err: unknown): boolean {
-  return err instanceof ApiClientError && err.status === 409;
-}
-
-/**
- * What a mapping's row is waiting on: its own write and the re-read of it, or
- * — "waiting" — another mapping's. The digest covers every USB mapping, so
- * any write outdates every row's; each row is held until the re-read lands.
- */
-type WorkKind = "removing" | "deleting" | "saving" | "waiting";
-
-/** Why a held row offers nothing, shown in it. */
-const workLabel: Record<WorkKind, string> = {
-  removing: "Removing the entry…",
-  deleting: "Deleting…",
-  saving: "Saving…",
-  waiting: "Reloading after a change…",
-};
 
 /** One node entry of a mapping, as a row shows it. */
 interface ShownEntry {
@@ -178,12 +160,9 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
   // opening: a re-read that lands after a Cancel reaches an unmounted dialog,
   // never the next one.
   const [edit, setEdit] = useState<EditTarget | null>(null);
-  // Mappings with a Remove or Delete in flight, each its own: the two
-  // mutations are shared by every row, so their own pending state would
-  // track only the latest call.
-  const [working, setWorking] = useState<ReadonlyMap<string, WorkKind>>(
-    new Map(),
-  );
+  // Every row held while a write — a Remove, Delete or save — and the re-read
+  // behind it are in flight.
+  const { holdRow, workFor } = useMappingRowHolds(settled);
   const [removeTarget, setRemoveTarget] = useState<RemoveTarget | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [actionError, setActionError] = useState("");
@@ -199,30 +178,6 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
   const openEdit = (target: EditTarget) => {
     setActionError("");
     setEdit(target);
-  };
-
-  const startWork = (id: string, kind: WorkKind) => {
-    setWorking((w) => new Map(w).set(id, kind));
-  };
-  const endWork = (id: string) => {
-    setWorking((w) => {
-      const next = new Map(w);
-      next.delete(id);
-      return next;
-    });
-  };
-
-  // Holds the row until its write has settled AND the listing has been read
-  // again: released on the write alone, the row would offer the old listing's
-  // entries — a deleted mapping's Delete, an edit pinned to the digest the
-  // write just changed — until the re-read landed.
-  const holdRow = (id: string, kind: WorkKind, write: Promise<unknown>) => {
-    startWork(id, kind);
-    void write
-      .then(() => settled())
-      .finally(() => {
-        endWork(id);
-      });
   };
 
   const focusAfterConfirm = (event: Event) => {
@@ -365,10 +320,7 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
                       mapping={m}
                       canEdit={canEdit}
                       clusterNodes={clusterNodes}
-                      working={
-                        working.get(m.id) ??
-                        (working.size > 0 ? "waiting" : undefined)
-                      }
+                      working={workFor(m.id)}
                       onAddNode={() => {
                         openEdit({ kind: "add-node", mapping: m });
                       }}
@@ -456,8 +408,18 @@ export function USBMappingsCard({ clusterId }: { clusterId: string }) {
         }}
         onConfirm={confirmDelete}
         title={({ mapping }) => `Delete USB mapping ${mapping.id}?`}
-        description={(t) => (
-          <DeleteMappingDescription target={t} usage={usage} />
+        description={({ mapping, lastEntry }) => (
+          <MappingDeleteDescription
+            kind="USB"
+            mappingId={mapping.id}
+            entries={mapping.map.length}
+            note={
+              lastEntry
+                ? "This is the mapping's only entry, so removing it deletes the mapping."
+                : undefined
+            }
+            usage={usage}
+          />
         )}
         // Held until this opening's usage check has answered, one way or the
         // other: the operator sees which VMs use the mapping — or that they
@@ -482,7 +444,7 @@ interface MappingRowsProps {
   mapping: ClusterUSBMapping;
   canEdit: boolean;
   clusterNodes: string[];
-  /** A Remove or Delete of this mapping in flight. */
+  /** A write of this mapping, or of another, in flight or being read back. */
   working: WorkKind | undefined;
   onAddNode: () => void;
   onEditDescription: () => void;
@@ -662,8 +624,6 @@ function EntryStatus({
       </p>
     );
   }
-  const unchecked = mapping.unchecked[entry.node];
-  const checks = mapping.node_checks[entry.node];
   const duplicate = entriesForNode > 1;
   return (
     <div className="space-y-0.5">
@@ -673,140 +633,13 @@ function EntryStatus({
           VM using this mapping there. Remove all but one.
         </p>
       )}
-      {unchecked !== undefined ? (
-        <p className="text-xs text-muted-foreground">
-          Not checked: {cleanDeviceText(unchecked)}
-        </p>
-      ) : checks === undefined ? (
-        <p className="text-xs text-muted-foreground">Not checked.</p>
-      ) : checks.length > 0 ? (
-        <ul className="space-y-0.5">
-          {checks.map((c) => (
-            <li
-              key={`${c.severity}:${c.message}`}
-              className={
-                c.severity === "error"
-                  ? "text-xs text-destructive"
-                  : "text-xs text-amber-700 dark:text-amber-400"
-              }
-            >
-              {cleanDeviceText(c.message)}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        !duplicate && (
-          <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            OK
-          </span>
-        )
-      )}
+      <NodeCheckResult
+        node={entry.node}
+        unchecked={mapping.unchecked}
+        checks={mapping.node_checks}
+        showOK={!duplicate}
+      />
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Delete
-// ---------------------------------------------------------------------------
-
-/**
- * The delete confirmation's text: what goes, and which VMs use the mapping.
- * Inline elements only — the dialog renders this inside a paragraph.
- */
-function DeleteMappingDescription({
-  target,
-  usage,
-}: {
-  target: DeleteTarget;
-  usage: UseQueryResult<USBMappingUsage>;
-}) {
-  const { mapping, lastEntry } = target;
-  return (
-    <>
-      {lastEntry && (
-        <span className="block">
-          This is the mapping&apos;s only entry, so removing it deletes the
-          mapping.
-        </span>
-      )}
-      <span className="block">
-        Deletes the USB mapping {mapping.id} and its{" "}
-        {mapping.map.length === 1
-          ? "entry"
-          : `${String(mapping.map.length)} entries`}{" "}
-        from the cluster. Proxmox does not check whether a VM uses it: one that
-        does will not start until a mapping named {mapping.id} exists again.
-      </span>
-      <UsageSummary usage={usage} />
-    </>
-  );
-}
-
-function UsageChecking() {
-  return (
-    <span className="mt-2 block">
-      Checking which VMs use it… The delete is on offer once the check has
-      answered.
-    </span>
-  );
-}
-
-function guestName(g: { vmid: number; name: string; node: string }): string {
-  const name = cleanDeviceText(g.name);
-  return `${String(g.vmid)}${name ? ` (${name})` : ""} on ${g.node}`;
-}
-
-function UsageSummary({ usage }: { usage: UseQueryResult<USBMappingUsage> }) {
-  if (usage.isFetching) {
-    return <UsageChecking />;
-  }
-  if (usage.isError) {
-    const why = describeError(usage.error);
-    return (
-      <span className="mt-2 block font-medium text-amber-700 dark:text-amber-400">
-        Could not check which VMs use it{why ? `: ${why}` : "."} Any VM that
-        does will not start after the delete.
-      </span>
-    );
-  }
-  if (!usage.isSuccess) {
-    return <UsageChecking />;
-  }
-  const { users, unchecked } = usage.data;
-  return (
-    <>
-      {users.length > 0 ? (
-        <span className="mt-2 block font-medium text-destructive">
-          {users.length === 1
-            ? "1 VM uses it and will not start after the delete:"
-            : `${String(users.length)} VMs use it and will not start after the delete:`}
-          {users.map((g) => (
-            <span key={g.vmid} className="block pl-3 font-normal">
-              {guestName(g)} — {(g.keys ?? []).join(", ")}
-            </span>
-          ))}
-        </span>
-      ) : (
-        <span className="mt-2 block">
-          {unchecked.length > 0
-            ? "No VM that could be checked uses it."
-            : "No VM's current configuration uses it."}
-        </span>
-      )}
-      {unchecked.length > 0 && (
-        <span className="mt-2 block text-amber-700 dark:text-amber-400">
-          {unchecked.length === 1
-            ? "1 VM could not be checked and may use it:"
-            : `${String(unchecked.length)} VMs could not be checked and may use it:`}
-          {unchecked.map((g) => (
-            <span key={g.vmid} className="block pl-3">
-              {guestName(g)} — {cleanDeviceText(g.reason ?? "")}
-            </span>
-          ))}
-        </span>
-      )}
-    </>
   );
 }
 
@@ -1116,15 +949,12 @@ function NewMappingDialog({
 // Add node, Replace device, Edit description
 // ---------------------------------------------------------------------------
 
-/** Where the re-read after a 409 stands, and what it found. */
-type Reread = "none" | "reading" | "reloaded" | "gone" | "failed";
-
 /**
  * The three edits that PUT the mapping's whole entry list. The mapping — its
  * entries and the digest they were read with — is pinned when the dialog
- * opens and saved against as it was: a refetch of the list while the dialog is
- * open does not reach it. Only a 409 this dialog was shown moves the pin, and
- * only to a re-read that succeeded.
+ * opens and saved against as it was (usePinnedMapping): a refetch of the list
+ * while the dialog is open does not reach it. Only a 409 this dialog was shown
+ * moves the pin, and only to a re-read that succeeded.
  */
 function EditMappingDialog({
   clusterId,
@@ -1148,8 +978,10 @@ function EditMappingDialog({
   const listQuery = useClusterUSBMappings(clusterId);
   const update = useUpdateUSBMapping(clusterId);
   const restoreFocus = useOpenerFocus(true, fallbackFocus);
-  const [pinned, setPinned] = useState(target.mapping);
-  const [reread, setReread] = useState<Reread>("none");
+  const { pinned, reread, onSaveError } = usePinnedMapping(
+    target.mapping,
+    listQuery,
+  );
   // Only the save locks the dialog: closing it then would leave the write to
   // land unseen. The re-read after a conflict just holds Save.
   const busy = update.isPending;
@@ -1284,36 +1116,13 @@ function EditMappingDialog({
           onClose();
         },
         onError: (err) => {
-          if (!(err instanceof ApiClientError) || err.status !== 409) return;
-          // Re-read, show it, and pin it: without this the pin would
-          // conflict forever. Not a retry — the operator checks the new
-          // state and saves again, or not.
-          setReread("reading");
-          // Joins the re-read the mutation already started (refreshAfterWrite)
-          // rather than cancelling it for a second one: that one began after
-          // the 409, so it is the read to pin.
-          void listQuery.refetch({ cancelRefetch: false }).then((res) => {
-            // isSuccess, not res.data: a failed refetch keeps the last good
-            // data, which would pin a digest nobody was shown.
-            if (!res.isSuccess) {
-              setReread("failed");
-              return;
-            }
-            const fresh = res.data.find((m) => m.id === saving.id);
-            if (fresh === undefined) {
-              setReread("gone");
-              return;
-            }
-            setPinned(fresh);
-            setReread("reloaded");
-          });
+          onSaveError(err);
         },
       },
     );
   }
 
-  const conflicted =
-    update.error instanceof ApiClientError && update.error.status === 409;
+  const conflicted = isConflict(update.error);
   const title =
     target.kind === "add-node"
       ? `Add a node to ${pinned.id}`
