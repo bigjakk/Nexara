@@ -51,8 +51,11 @@ import {
 } from "../../lib/vm-config-parsers";
 import type { NodeUSBDevice, NodePCIDevice } from "../../api/vm-queries";
 import {
+  useCreatePCIMapping,
   useCreateUSBMapping,
+  useNodePCIMappings,
   useNodeUSBMappings,
+  type PCIMapping,
   type USBMapping,
 } from "@/features/mappings/api/mapping-queries";
 import {
@@ -65,8 +68,23 @@ import {
   USB_DEVICE_ID_HINT,
   USB_DEVICE_ID_PATTERN,
 } from "@/features/mappings/lib/usb-mapping";
+import {
+  findCheckedPCIMappingAt,
+  findReusablePCIMapping,
+  parsePCIMappingEntry,
+  PCI_PATH_PATTERN,
+  pciDeviceLabel,
+  pciDevicesAt,
+  pciEntryForDevice,
+  pciHostRisks,
+  pciSlot,
+  pciUnreadPaths,
+} from "@/features/mappings/lib/pci-mapping";
 import { USBDevicePicker } from "@/features/mappings/components/USBDevicePicker";
-import { MappingCheckList } from "@/features/mappings/components/MappingCheckList";
+import {
+  MappingCheckList,
+  PCIMappingCheckList,
+} from "@/features/mappings/components/MappingCheckList";
 import type { VMConfig } from "../../types/vm";
 import { usePermissions } from "@/hooks/usePermissions";
 import { describeError } from "@/lib/api-error";
@@ -250,6 +268,8 @@ export function AddDeviceMenu({
       {dialog === "pci" && (
         <AddPCIDialog
           config={config}
+          clusterId={clusterId}
+          nodeName={nodeName}
           devices={pciDevices}
           onAdd={onAddDevice}
           onClose={() => {
@@ -916,112 +936,540 @@ function AddUSBDialog({
 // PCI Dialog
 // ---------------------------------------------------------------------------
 
+type PCIMode = "mapped" | "device";
+
+// Proxmox's own dialog offers the same two (pve-manager
+// www/manager6/qemu/PCIEdit.js). Its raw one writes the host address, which
+// qemu-server refuses to anyone but root@pam, so here it goes through a
+// mapping instead — see AddPCIDialog.
+const pciModes: ReadonlyArray<{ value: PCIMode; label: string; hint: string }> =
+  [
+    {
+      value: "mapped",
+      label: "Mapped device",
+      hint: "A cluster resource mapping",
+    },
+    {
+      value: "device",
+      label: "Host device",
+      hint: "A PCI device of this node",
+    },
+  ];
+
+function pciMappingOptionLabel(m: PCIMapping): string {
+  const description = cleanDeviceText(m.description);
+  let label = description ? `${m.id} — ${description}` : m.id;
+  if (m.checks.some((e) => e.severity === "error")) label += " (error)";
+  else if (m.checks.length > 0) label += " (warning)";
+  return label;
+}
+
+/**
+ * Adds a hostpciN. A host device can only go through a cluster resource
+ * mapping: qemu-server's check_hostpci_perm lets nobody but root@pam write a
+ * hostpciN naming a host device, and Nexara connects with an API token, which
+ * never is root@pam. So picking a host device reuses the mapping that already
+ * passes exactly that device, or creates one (which needs manage:cluster) and
+ * stages mapping=<name>. The server builds the new mapping's entry from the
+ * node's own report of the device, since Proxmox refuses to start a VM whose
+ * device does not match its mapping exactly.
+ *
+ * PCIe is offered only on the q35 machine type, as Proxmox's own dialog does:
+ * qemu-server refuses to start any other VM with pcie=1 ("q35 machine model
+ * is not enabled", print_hostpci_devices in src/PVE/QemuServer/PCI.pm).
+ *
+ * While a create is in flight the dialog is locked, for AddUSBDialog's reason.
+ */
 function AddPCIDialog({
   config,
+  clusterId,
+  nodeName,
   devices,
   onAdd,
   onClose,
 }: {
   config: VMConfig;
+  clusterId: string;
+  nodeName: string;
   devices: NodePCIDevice[] | undefined;
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
-  const [selectedDevice, setSelectedDevice] = useState("");
-  const [pcie, setPcie] = useState(true);
+  const { canManage } = usePermissions();
+  const canCreateMapping = canManage("cluster");
+  const mappingsQuery = useNodePCIMappings(clusterId, nodeName);
+  const createMapping = useCreatePCIMapping(clusterId);
+  const busy = createMapping.isPending;
+
+  // "q35" anywhere in the machine type — pc-q35-9.0, q35,viommu=intel — as
+  // Proxmox's dialog tests it; unset is i440fx.
+  const machine = config["machine"];
+  const isQ35 = typeof machine === "string" && machine.includes("q35");
+
+  const [mode, setMode] = useState<PCIMode>("device");
+  const [mappingId, setMappingId] = useState("");
+  const [addressInput, setAddress] = useState("");
+  const [allFunctions, setAllFunctions] = useState(false);
+  // null until the operator types, so the suggestion follows the pick.
+  const [nameInput, setNameInput] = useState<string | null>(null);
+  const [pcie, setPcie] = useState(isQ35);
   const [rombar, setRombar] = useState(true);
   const [xvga, setXvga] = useState(false);
 
   const idx = findNextIndex(config, "hostpci", 15);
-  const canAdd = idx >= 0 && selectedDevice.length > 0;
+  const mappings = mappingsQuery.data ?? [];
+  const deviceList = devices ?? [];
+  const hasDeviceList = deviceList.length > 0;
+  // Once the node's list is there, only a device on it counts: an address
+  // typed while the list was loading is not what the picker then shows.
+  const address =
+    hasDeviceList && !deviceList.some((d) => d.id === addressInput)
+      ? ""
+      : addressInput;
 
-  function handleAdd() {
-    if (!canAdd) return;
-    const val = buildPCI({
-      host: selectedDevice,
-      pcie,
-      rombar,
-      xvga,
-      mdev: "",
-    });
-    onAdd(`hostpci${String(idx)}`, val);
-    onClose();
-  }
+  // The address a host pick passes through: the device, or its slot for all
+  // of its functions. Typed when the node's device list is not there.
+  const typedAddressError =
+    !hasDeviceList && address !== "" && !PCI_PATH_PATTERN.test(address)
+      ? "An address like 0000:01:00.0: domain, bus, slot and function, in lowercase hex."
+      : "";
+  const pickedPath =
+    mode === "device" && address !== "" && typedAddressError === ""
+      ? allFunctions
+        ? pciSlot(address)
+        : address
+      : "";
+  // The whole device is named after function 0, as Proxmox checks it by.
+  const namedDevice =
+    deviceList.find(
+      (d) => d.id === (allFunctions ? `${pciSlot(address)}.0` : address),
+    ) ?? deviceList.find((d) => d.id === address);
+  const label = namedDevice ? pciDeviceLabel(namedDevice) : "";
+  const expected =
+    pickedPath !== ""
+      ? pciEntryForDevice(deviceList, nodeName, pickedPath)
+      : undefined;
 
-  // Group by IOMMU group
-  const grouped = new Map<number, NodePCIDevice[]>();
-  if (devices) {
-    for (const d of devices) {
-      const group = d.iommugroup;
-      let list = grouped.get(group);
-      if (!list) {
-        list = [];
-        grouped.set(group, list);
-      }
-      list.push(d);
+  // Reuse and the taken-name check both read the listing, so a host pick
+  // waits for it, for AddUSBDialog's reason.
+  const listingReady = mappingsQuery.isSuccess;
+  // Without the device's record to compare with — a typed address, or a
+  // function 0 the list leaves out — only a mapping Proxmox checked clean
+  // here is known to pass this device.
+  const reusable = !listingReady
+    ? undefined
+    : expected
+      ? findReusablePCIMapping(mappings, expected.entry, expected.mdev)
+      : pickedPath !== ""
+        ? findCheckedPCIMappingAt(mappings, nodeName, pickedPath)
+        : undefined;
+  const needsCreate =
+    pickedPath !== "" && listingReady && reusable === undefined;
+  const suggestedName =
+    pickedPath !== ""
+      ? suggestMappingName(label, new Set(mappings.map((m) => m.id)), "pci")
+      : "";
+  const newName = nameInput ?? suggestedName;
+  let nameError = "";
+  if (needsCreate) {
+    if (!MAPPING_ID_PATTERN.test(newName)) {
+      nameError =
+        "Start with a letter; use letters, digits, '_' and '-' (2 to 128 characters).";
+    } else if (mappings.some((m) => m.id === newName)) {
+      nameError = `A mapping named "${newName}" already exists for other hardware.`;
     }
   }
 
+  const selectedMapping = mappings.find((m) => m.id === mappingId);
+  const slotsFull = idx < 0;
+  const createDenied = needsCreate && !canCreateMapping;
+
+  // What the VM would take from the node: the picked device, or the devices
+  // the mapping names here. The operator is asked before a device that looks
+  // like one the node needs is added — asked, not stopped: passing a spare
+  // disk controller or NIC through is what the dialog is for — and before one
+  // the dialog cannot look at, which it cannot call safe. The tick holds only
+  // for the pick it was given for.
+  const passedPaths =
+    mode === "device"
+      ? pickedPath !== ""
+        ? [pickedPath]
+        : []
+      : (selectedMapping?.map ?? [])
+          .map(parsePCIMappingEntry)
+          .filter((e) => e.node === nodeName)
+          .map((e) => e.path);
+  const passedDevices = passedPaths.flatMap((p) =>
+    pciDevicesAt(deviceList, p),
+  );
+  const hostRisks = [
+    ...pciHostRisks(passedDevices, deviceList),
+    ...pciUnreadPaths(passedPaths, deviceList).map(
+      (p) =>
+        `Nexara cannot tell what ${p} is, or what shares its IOMMU group: check in Proxmox that ${nodeName} does not need it.`,
+    ),
+  ];
+  // Keyed by what was said too: a warning that arrives after the tick — the
+  // device list loading late — is asked about afresh.
+  const riskKey =
+    hostRisks.length > 0
+      ? `${mode}|${pickedPath}|${mappingId}|${hostRisks.join("\n")}`
+      : "";
+  const [acknowledgedRisk, setAcknowledgedRisk] = useState("");
+  const risksAccepted = riskKey === "" || acknowledgedRisk === riskKey;
+
+  const canAdd =
+    !slotsFull &&
+    !busy &&
+    risksAccepted &&
+    ((mode === "mapped" && selectedMapping !== undefined) ||
+      (mode === "device" &&
+        pickedPath !== "" &&
+        listingReady &&
+        (reusable !== undefined || (!createDenied && nameError === ""))));
+
+  // A new pick or name makes the last refusal stale. Never while a create is
+  // in flight: resetting then would detach the dialog from it.
+  function clearCreateError() {
+    if (!createMapping.isPending) createMapping.reset();
+  }
+
+  async function handleAdd() {
+    if (!canAdd) return;
+    let id: string;
+    if (mode === "mapped") {
+      id = mappingId;
+    } else if (reusable) {
+      id = reusable.id;
+    } else {
+      try {
+        await createMapping.mutateAsync({
+          mapping_id: newName,
+          node: nodeName,
+          path: pickedPath,
+          // Already cleaned: pciDeviceLabel's.
+          ...(label ? { description: label } : {}),
+        });
+      } catch {
+        return; // rendered below from createMapping.error
+      }
+      id = newName;
+    }
+    onAdd(
+      `hostpci${String(idx)}`,
+      buildPCI({
+        host: "",
+        mapping: id,
+        pcie: isQ35 && pcie,
+        rombar,
+        xvga,
+        mdev: "",
+        romfile: "",
+      }),
+    );
+    onClose();
+  }
+
+  const listingFailure = mappingsQuery.isError
+    ? `Could not list the cluster's PCI mappings${
+        describeError(mappingsQuery.error)
+          ? `: ${describeError(mappingsQuery.error)}`
+          : "."
+      }`
+    : "";
+
+  // Grouped by IOMMU group, as Proxmox lists them: a device shares its group
+  // with whatever else is in it.
+  const grouped = new Map<number, NodePCIDevice[]>();
+  for (const d of deviceList) {
+    const list = grouped.get(d.iommugroup) ?? [];
+    list.push(d);
+    grouped.set(d.iommugroup, list);
+  }
+
   return (
-    <Dialog open onOpenChange={onClose}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+    >
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Add PCI Device (hostpci{String(idx)})</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
-          <div className="space-y-1">
-            <Label className="text-xs">Device</Label>
-            {devices && devices.length > 0 ? (
-              <select
-                className={selectClass}
-                value={selectedDevice}
-                onChange={(e) => {
-                  setSelectedDevice(e.target.value);
-                }}
+          <fieldset className="grid gap-1.5" disabled={busy}>
+            <legend className="sr-only">Pass through</legend>
+            {pciModes.map((m) => (
+              <label
+                key={m.value}
+                className="flex items-baseline gap-2 text-sm"
               >
-                <option value="">Select a device...</option>
-                {Array.from(grouped.entries())
-                  .sort(([a], [b]) => a - b)
-                  .map(([group, devs]) => (
-                    <optgroup
-                      key={group}
-                      label={`IOMMU Group ${String(group)}`}
-                    >
-                      {devs.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.id} — {d.device_name || d.vendor_name || "Unknown"}
-                        </option>
-                      ))}
-                    </optgroup>
+                <input
+                  type="radio"
+                  name="add-pci-mode"
+                  value={m.value}
+                  checked={mode === m.value}
+                  onChange={() => {
+                    setMode(m.value);
+                    clearCreateError();
+                  }}
+                  className="h-4 w-4 translate-y-0.5 accent-primary"
+                />
+                <span>
+                  {m.label}
+                  <span className="ml-1.5 text-xs text-muted-foreground">
+                    {m.hint}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+
+          {mode === "mapped" && (
+            <div className="space-y-1">
+              <Label htmlFor="add-pci-mapping" className="text-xs">
+                Mapping
+              </Label>
+              {listingFailure ? (
+                <p className="text-xs text-destructive">{listingFailure}</p>
+              ) : mappingsQuery.isPending ? (
+                <p className="text-xs text-muted-foreground">
+                  Loading mappings…
+                </p>
+              ) : mappings.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  This cluster has no PCI mappings yet.{" "}
+                  {canCreateMapping
+                    ? "Pick a host device instead, and Nexara creates one."
+                    : "Creating one needs the Manage Cluster permission; ask an administrator."}
+                </p>
+              ) : (
+                <select
+                  id="add-pci-mapping"
+                  className={selectClass}
+                  value={mappingId}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setMappingId(e.target.value);
+                  }}
+                >
+                  <option value="">Select a mapping...</option>
+                  {mappings.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {pciMappingOptionLabel(m)}
+                    </option>
                   ))}
-              </select>
-            ) : (
-              <Input
-                value={selectedDevice}
-                onChange={(e) => {
-                  setSelectedDevice(e.target.value);
-                }}
-                placeholder="PCI address (e.g. 02:00.0)"
-              />
+                </select>
+              )}
+              {selectedMapping && (
+                <PCIMappingCheckList
+                  mapping={selectedMapping}
+                  node={nodeName}
+                />
+              )}
+            </div>
+          )}
+
+          {mode === "device" && (
+            <div className="space-y-1">
+              <Label htmlFor="add-pci-device" className="text-xs">
+                Device
+              </Label>
+              {hasDeviceList ? (
+                <select
+                  id="add-pci-device"
+                  className={selectClass}
+                  value={address}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setAddress(e.target.value);
+                    clearCreateError();
+                  }}
+                >
+                  <option value="">Select a device...</option>
+                  {Array.from(grouped.entries())
+                    .sort(([a], [b]) => a - b)
+                    .map(([group, devs]) => (
+                      <optgroup
+                        key={group}
+                        label={
+                          group < 0 ? "No IOMMU group" : `IOMMU Group ${String(group)}`
+                        }
+                      >
+                        {devs.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.id} — {pciDeviceLabel(d)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                </select>
+              ) : (
+                <Input
+                  id="add-pci-device"
+                  value={address}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setAddress(e.target.value);
+                    clearCreateError();
+                  }}
+                  placeholder="PCI address, e.g. 0000:01:00.0"
+                  aria-invalid={typedAddressError !== ""}
+                />
+              )}
+              {typedAddressError && (
+                <p className="text-xs text-destructive">{typedAddressError}</p>
+              )}
+              <div className="flex items-center gap-1.5 pt-1">
+                <Checkbox
+                  id="add-pci-all-functions"
+                  checked={allFunctions}
+                  disabled={busy}
+                  onCheckedChange={(v) => {
+                    setAllFunctions(v === true);
+                    clearCreateError();
+                  }}
+                />
+                <Label
+                  htmlFor="add-pci-all-functions"
+                  className="cursor-pointer text-xs"
+                >
+                  All functions
+                  <span className="ml-1.5 text-muted-foreground">
+                    Pass the whole device through, every function as one
+                  </span>
+                </Label>
+              </div>
+            </div>
+          )}
+
+          {mode === "device" && pickedPath !== "" && listingFailure && (
+            <p className="text-xs text-destructive">{listingFailure}</p>
+          )}
+          {mode === "device" &&
+            pickedPath !== "" &&
+            mappingsQuery.isPending && (
+              <p className="text-xs text-muted-foreground">
+                Checking the cluster's PCI mappings…
+              </p>
             )}
-          </div>
+          {mode === "device" && reusable && (
+            <div className="space-y-0.5">
+              <p className="text-xs text-muted-foreground">
+                Uses the existing mapping “{reusable.id}”
+                {cleanDeviceText(reusable.description)
+                  ? ` (${cleanDeviceText(reusable.description)})`
+                  : ""}
+                .
+              </p>
+              {reusable.checks.length > 0 && (
+                <PCIMappingCheckList mapping={reusable} node={nodeName} />
+              )}
+            </div>
+          )}
+          {needsCreate && (
+            <div className="space-y-1">
+              <Label htmlFor="add-pci-mapping-name" className="text-xs">
+                Mapping name
+              </Label>
+              <Input
+                id="add-pci-mapping-name"
+                value={newName}
+                disabled={busy}
+                onChange={(e) => {
+                  setNameInput(e.target.value);
+                  clearCreateError();
+                }}
+                aria-invalid={nameError !== ""}
+              />
+              {nameError && (
+                <p className="text-xs text-destructive">{nameError}</p>
+              )}
+            </div>
+          )}
+          {mode === "device" && (
+            <p className="text-xs text-muted-foreground">
+              Proxmox passes a PCI device straight through only for root@pam,
+              and Nexara connects with an API token, so the device goes through
+              a cluster resource mapping
+              {needsCreate
+                ? ", which Nexara creates now, even if you then discard this change"
+                : ""}
+              . Proxmox will not start the VM while the device is missing or no
+              longer matches the mapping.
+            </p>
+          )}
+          {createDenied && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              Creating a mapping needs the Manage Cluster permission. Pick an
+              existing mapping instead, or ask an administrator.
+            </p>
+          )}
+          {hostRisks.length > 0 && (
+            <div className="space-y-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+              <p>
+                When the VM starts, the device is taken away from {nodeName}{" "}
+                — check that the node does not need it:
+              </p>
+              <ul className="list-disc space-y-0.5 pl-4">
+                {hostRisks.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+              <div className="flex items-center gap-1.5">
+                <Checkbox
+                  id="add-pci-host-risk"
+                  checked={risksAccepted}
+                  disabled={busy}
+                  onCheckedChange={(v) => {
+                    setAcknowledgedRisk(v === true ? riskKey : "");
+                  }}
+                />
+                <Label
+                  htmlFor="add-pci-host-risk"
+                  className="cursor-pointer text-xs"
+                >
+                  The node does not need it; pass it through
+                </Label>
+              </div>
+            </div>
+          )}
+          {slotsFull && (
+            <p className="text-xs text-destructive">
+              All 16 PCI slots are in use.
+            </p>
+          )}
+          {createMapping.isError && (
+            <p className="text-xs text-destructive">
+              {describeError(createMapping.error) ||
+                "Could not create the mapping."}
+            </p>
+          )}
+
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-1.5">
               <Checkbox
                 id="add-pci-pcie"
-                checked={pcie}
+                checked={isQ35 && pcie}
+                disabled={busy || !isQ35}
                 onCheckedChange={(v) => {
                   setPcie(v === true);
                 }}
               />
               <Label htmlFor="add-pci-pcie" className="cursor-pointer text-xs">
                 PCIe
+                {!isQ35 && (
+                  <span className="ml-1 text-muted-foreground">(q35 only)</span>
+                )}
               </Label>
             </div>
             <div className="flex items-center gap-1.5">
               <Checkbox
                 id="add-pci-rombar"
                 checked={rombar}
+                disabled={busy}
                 onCheckedChange={(v) => {
                   setRombar(v === true);
                 }}
@@ -1037,6 +1485,7 @@ function AddPCIDialog({
               <Checkbox
                 id="add-pci-xvga"
                 checked={xvga}
+                disabled={busy}
                 onCheckedChange={(v) => {
                   setXvga(v === true);
                 }}
@@ -1048,11 +1497,20 @@ function AddPCIDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={handleAdd} disabled={!canAdd}>
-            Add
+          <Button
+            onClick={() => {
+              void handleAdd();
+            }}
+            disabled={!canAdd}
+          >
+            {busy
+              ? "Creating mapping…"
+              : needsCreate
+                ? "Create mapping & add"
+                : "Add"}
           </Button>
         </DialogFooter>
       </DialogContent>

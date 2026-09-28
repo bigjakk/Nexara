@@ -11,9 +11,12 @@ import type { NodeUSBDevice } from "@/features/vms/api/vm-queries";
 /**
  * The parts of a property string, split as pve-common's parse_property_string
  * (src/PVE/JSONSchema.pm) does: on ",", each part at its first "=". Key and
- * value are trimmed for reading, and a part with no "=" has no key.
+ * value are trimmed for reading, and a part with no "=" has no key. Mapping
+ * entries of every kind are property strings.
  */
-function entrySegments(raw: string): { key: string | null; value: string }[] {
+export function entrySegments(
+  raw: string,
+): { key: string | null; value: string }[] {
   if (raw === "") return [];
   return raw.split(",").map((part) => {
     const idx = part.indexOf("=");
@@ -142,17 +145,19 @@ export const MAPPING_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{1,127}$/;
  * one "-", starting with a letter, at most 32 characters — cut at the last
  * word that fits rather than mid-word, unless that would keep under half —
  * before a -2, -3, … suffix that steps past the names already `taken`
- * (compared case-insensitively).
+ * (compared case-insensitively). `kind` ("usb", "pci") starts a name that
+ * would not start with a letter, and names a device with no usable label.
  */
 export function suggestMappingName(
   label: string,
   taken: ReadonlySet<string>,
+  kind = "usb",
 ): string {
   let base = label
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  if (base !== "" && !/^[a-z]/.test(base)) base = `usb-${base}`;
+  if (base !== "" && !/^[a-z]/.test(base)) base = `${kind}-${base}`;
   if (base.length > 32) {
     // The 33rd character decides: a "-" there means the first 32 end on a
     // word; otherwise back up to the last "-" within them.
@@ -160,7 +165,7 @@ export function suggestMappingName(
     base = boundary >= 16 ? base.slice(0, boundary) : base.slice(0, 32);
   }
   base = base.replace(/-+$/, "");
-  if (base.length < 2) base = "usb-device";
+  if (base.length < 2) base = `${kind}-device`;
   const lowerTaken = new Set([...taken].map((t) => t.toLowerCase()));
   let name = base;
   for (let n = 2; lowerTaken.has(name); n++) name = `${base}-${String(n)}`;

@@ -72,6 +72,66 @@ export function useCreateUSBMapping(clusterId: string) {
   });
 }
 
+/** Every PCI mapping read shares this prefix, as the USB ones share theirs. */
+function pciMappingsKey(clusterId: string) {
+  return ["clusters", clusterId, "pci-mappings"] as const;
+}
+
+/**
+ * A Proxmox PCI resource mapping, as GET …/nodes/:node/pci-mappings lists it.
+ *
+ * `map` holds the node entries verbatim — node=, path=, id= and optionally
+ * subsystem-id=, iommugroup= and description=, in any order — and a node may
+ * have several: a VM starting there takes the first device not in use.
+ * `checks` is Proxmox's check of the mapping against the node the listing was
+ * read for, what USB's listing calls `errors`. `mdev` is the mapping's
+ * mediated-device flag, which Proxmox requires to match the device.
+ */
+export interface PCIMapping {
+  id: string;
+  description: string;
+  map: string[];
+  checks: MappingCheck[];
+  mdev: boolean;
+}
+
+export function useNodePCIMappings(clusterId: string, nodeName: string) {
+  return useQuery({
+    queryKey: [...pciMappingsKey(clusterId), nodeName],
+    queryFn: () =>
+      apiClient.list<PCIMapping>(
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/pci-mappings`,
+      ),
+    enabled: clusterId.length > 0 && nodeName.length > 0,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * POST …/pci-mappings. Only the node and the device's address: the server
+ * copies the rest of the entry from the node's own report of the device.
+ */
+export interface CreatePCIMappingRequest {
+  mapping_id: string;
+  node: string;
+  path: string;
+  description?: string;
+}
+
+export function useCreatePCIMapping(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreatePCIMappingRequest) =>
+      apiClient.post(apiPath`/api/v1/clusters/${clusterId}/pci-mappings`, data),
+    // Returned, for useCreateUSBMapping's reason: the dialog stages
+    // mapping=<id> once the listing already holds the new mapping.
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: pciMappingsKey(clusterId) }),
+    // The dialog renders the failure inline.
+    onError: () => undefined,
+  });
+}
+
 /**
  * A USB mapping as the cluster's Resource Mappings tab lists it
  * (GET …/usb-mappings): the mapping as Proxmox stores it, and for each node

@@ -621,8 +621,8 @@ func TestMissingObjectPhraseSets_RejectEachOthersNegatives(t *testing.T) {
 		// Answers 409 rather than 404, but it reaches the same scan through
 		// mapProxmoxDieError and so has the same two ways to be wrong.
 		"staleDigestPhrases": staleDigestPhrases,
-		// Also 409, for a taken USB mapping id.
-		"usbMappingTakenPhrases": usbMappingTakenPhrases,
+		// Also 409, for a taken USB or PCI mapping id.
+		"mappingTakenPhrases": mappingTakenPhrases,
 		// 404, for a USB mapping update whose mapping is gone.
 		"usbMappingMissingPhrases": usbMappingMissingPhrases,
 	}
@@ -795,8 +795,8 @@ func TestMissingObjectPhrasesAreLowercase(t *testing.T) {
 		// Answers 409 rather than 404, but it reaches the same scan through
 		// mapProxmoxDieError and so has the same two ways to be wrong.
 		"staleDigestPhrases": staleDigestPhrases,
-		// Also 409, for a taken USB mapping id.
-		"usbMappingTakenPhrases": usbMappingTakenPhrases,
+		// Also 409, for a taken USB or PCI mapping id.
+		"mappingTakenPhrases": mappingTakenPhrases,
 		// 404, for a USB mapping update whose mapping is gone.
 		"usbMappingMissingPhrases": usbMappingMissingPhrases,
 	}

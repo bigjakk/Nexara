@@ -22,6 +22,9 @@ import {
   parseUSB,
   buildUSB,
   isRawUSBPassthrough,
+  parsePCI,
+  buildPCI,
+  isRootOnlyPCI,
 } from "./vm-config-parsers";
 
 describe("parseKVString / buildKVString", () => {
@@ -838,5 +841,76 @@ describe("parseUSB / buildUSB", () => {
     expect(isRawUSBPassthrough(parseUSB("mapping=usbdev01"))).toBe(false);
     expect(isRawUSBPassthrough(parseUSB("spice"))).toBe(false);
     expect(isRawUSBPassthrough(parseUSB(""))).toBe(false);
+  });
+});
+
+describe("parsePCI / buildPCI", () => {
+  const none = {
+    host: "",
+    mapping: "",
+    pcie: false,
+    rombar: true,
+    xvga: false,
+    mdev: "",
+    romfile: "",
+  };
+
+  it("reads a host, bare or as host=, and its options", () => {
+    // host is the default_key: `qm set --hostpci0 01:00.0` stores it bare.
+    expect(parsePCI("0000:01:00.0,pcie=1,x-vga=1,rombar=0")).toEqual({
+      ...none,
+      host: "0000:01:00.0",
+      pcie: true,
+      xvga: true,
+      rombar: false,
+    });
+    expect(parsePCI("host=01:00,mdev=nvidia-63")).toEqual({
+      ...none,
+      host: "01:00",
+      mdev: "nvidia-63",
+    });
+  });
+
+  it("reads a mapping, a ROM file, and booleans in every form Proxmox writes", () => {
+    expect(parsePCI("mapping=gpu01,pcie=on,x-vga=yes,romfile=vbios.bin")).toEqual({
+      ...none,
+      mapping: "gpu01",
+      pcie: true,
+      xvga: true,
+      romfile: "vbios.bin",
+    });
+    expect(parsePCI("")).toEqual(none);
+  });
+
+  it("writes the mapping in place of any host, and never a ROM file", () => {
+    expect(
+      buildPCI({ ...none, host: "0000:01:00.0", mapping: "gpu01", pcie: true, romfile: "vbios.bin" }),
+    ).toBe("mapping=gpu01,pcie=1");
+    expect(buildPCI({ ...none, host: "0000:01:00.0", rombar: false, xvga: true })).toBe(
+      "0000:01:00.0,rombar=0,x-vga=1",
+    );
+    expect(buildPCI({ ...none, mapping: "gpu01", mdev: "nvidia-63" })).toBe(
+      "mapping=gpu01,mdev=nvidia-63",
+    );
+  });
+
+  it("skips a blank part, as Proxmox does, and reads rombar in every form", () => {
+    // Proxmox stores "0000:01:00.0," verbatim and reads the host from it.
+    expect(parsePCI("0000:01:00.0,").host).toBe("0000:01:00.0");
+    expect(isRootOnlyPCI(parsePCI("0000:01:00.0,"))).toBe(true);
+    expect(parsePCI("mapping=gpu01,rombar=off").rombar).toBe(false);
+    expect(parsePCI("mapping=gpu01,rombar=on").rombar).toBe(true);
+    expect(parseUSB("host=1-2,").host).toBe("1-2");
+    expect(parseUSB("1234:5678,").host).toBe("1234:5678");
+  });
+
+  it("names what only root@pam may change or remove", () => {
+    expect(isRootOnlyPCI(parsePCI("0000:01:00.0"))).toBe(true);
+    expect(isRootOnlyPCI(parsePCI("mapping=gpu01"))).toBe(false);
+    expect(isRootOnlyPCI(parsePCI("mapping=gpu01,romfile=vbios.bin"))).toBe(true);
+    // qemu-server refuses to store both, but check_hostpci_perm reads host
+    // first: beside a mapping, a host still makes it root@pam's.
+    expect(isRootOnlyPCI(parsePCI("0000:01:00.0,mapping=gpu01"))).toBe(true);
+    expect(isRootOnlyPCI(parsePCI(""))).toBe(false);
   });
 });

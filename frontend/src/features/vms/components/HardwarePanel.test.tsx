@@ -1112,3 +1112,117 @@ describe("HardwarePanel USB devices", () => {
     ]);
   });
 });
+
+describe("HardwarePanel PCI devices", () => {
+  const PCI_URL = `/api/v1/clusters/${CLUSTER}/nodes/pve-01/hardware/pci`;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    // A raw passthrough, set in Proxmox by root; a mapped device; and a
+    // mapped device with a ROM file, which only root may set or remove.
+    serverConfig = {
+      digest: "aabbccddeeff00112233445566778899aabbccdd",
+      cores: 2,
+      memory: 2048,
+      scsi0: "store01:vm-101-disk-0,size=32G",
+      hostpci0: "01:00,x-vga=1",
+      hostpci1: "mapping=pcidev01,pcie=1",
+      hostpci2: "mapping=pcidev02,romfile=vbios.bin",
+    };
+    mockedGet.mockImplementation((path: string) =>
+      path === CONFIG_URL
+        ? Promise.resolve({ ...serverConfig })
+        : Promise.reject(new Error(`unexpected GET ${path}`)),
+    );
+    mockedList.mockImplementation((path: string) => {
+      if (path === STORAGE_URL) return Promise.resolve([imageStorage]);
+      if (path === PCI_URL)
+        return Promise.resolve([
+          {
+            id: "0000:01:00.0",
+            class: "0x030000",
+            // The device names itself; the row shows it cleaned.
+            device_name: "Example‮ GPU",
+            vendor_name: "Example Corp",
+            device: "0x5678",
+            vendor: "0x1234",
+            iommugroup: 14,
+          },
+        ]);
+      return Promise.resolve([]);
+    });
+    mockedPut.mockResolvedValue({ status: "ok" });
+  });
+
+  async function openPCISection(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByText("PCI Devices (3)"));
+  }
+
+  /** A row with no button to find it by: its key's own row. */
+  function rowOf(key: string): HTMLElement {
+    const row = screen.getByText(key, { exact: true }).parentElement;
+    if (!row) throw new Error(`no row for ${key}`);
+    return row;
+  }
+
+  it("will not offer to remove a raw passthrough or a ROM file, and says why", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<HardwarePanel {...props} />);
+    await openPCISection(user);
+
+    // Named from the node's own PCI list — the whole device by function 0,
+    // the domain qemu-server takes as optional filled in.
+    expect(
+      await within(rowOf("hostpci0")).findByText("Example GPU (01:00)"),
+    ).toBeInTheDocument();
+    expect(
+      within(rowOf("hostpci0")).getByText(/Passed through directly; only root@pam can remove it/),
+    ).toBeInTheDocument();
+    expect(within(rowOf("hostpci0")).queryAllByRole("button")).toEqual([]);
+
+    expect(
+      within(rowOf("hostpci2")).getByText(/Uses a ROM file; only root@pam can remove it/),
+    ).toBeInTheDocument();
+    expect(within(rowOf("hostpci2")).queryAllByRole("button")).toEqual([]);
+
+    // A mapping without a ROM file can go: Proxmox checks Mapping.Use and
+    // VM.Config.HWType for it, not root.
+    expect(
+      within(diskRow("hostpci1")).getByRole("button", { name: /remove/i }),
+    ).toBeEnabled();
+    expect(within(diskRow("hostpci1")).getByText("Mapped")).toBeInTheDocument();
+    expect(within(diskRow("hostpci1")).getByText("pcidev01")).toBeInTheDocument();
+  });
+
+  // The machine type is saved in the same write as a device added now, so
+  // PCIe follows the staged one, not the one Proxmox has.
+  it("offers PCIe for a q35 machine type staged but not yet saved", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<HardwarePanel {...props} />);
+    const machine = await screen.findByDisplayValue("i440fx (Default)");
+    await user.selectOptions(machine, "q35");
+
+    await user.click(screen.getByRole("button", { name: /add device/i }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: /pci device/i }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText(/^PCIe/)).toBeEnabled();
+    expect(within(dialog).getByLabelText(/^PCIe/)).toBeChecked();
+  });
+
+  it("removes a mapped device on Save", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<HardwarePanel {...props} />);
+    await openPCISection(user);
+
+    await user.click(
+      within(diskRow("hostpci1")).getByRole("button", { name: /remove/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(mockedPut.mock.calls).toEqual([
+      [CONFIG_URL, { fields: { delete: "hostpci1" } }],
+    ]);
+  });
+});

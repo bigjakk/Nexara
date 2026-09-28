@@ -869,6 +869,14 @@ type sweepEndpointOverride struct {
 }
 
 var sweepRouteOverrides = map[string]sweepEndpointOverride{
+	// Not a handler rule either, like "device_id" in sweepValueOverrides:
+	// the PCI address pattern (registry_mappings.go), which nothing in
+	// stringCandidatePool satisfies. Scoped to the route because "path" is
+	// also the USB create's port, with a pattern of its own. A made-up
+	// address in Proxmox's form.
+	"POST " + pathPrefix + "clusters/:cluster_id/pci-mappings": {
+		values: map[string]any{"path": "0000:01:00.0"},
+	},
 	// ssh-credentials: auth_type's Enum[0] is "password" (checked against
 	// registry_rolling_update.go), and the handler requires a password
 	// whenever auth_type resolves to it — registry_rolling_update.go's own

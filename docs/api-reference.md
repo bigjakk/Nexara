@@ -588,6 +588,7 @@ leaves provenance intact.
 | PUT | `/clusters/:id/usb-mappings/:mapping_id` | Replace a USB mapping's entries and description; needs the listing's `digest`, 409 when any USB mapping changed since (`manage:cluster`) |
 | DELETE | `/clusters/:id/usb-mappings/:mapping_id` | Delete a USB mapping; succeeds when it is already gone; with `?digest=` from the listing, 409 when any USB mapping changed since (`manage:cluster`) |
 | GET | `/clusters/:id/usb-mappings/:mapping_id/usage` | Which VMs use a USB mapping, and which could not be checked (`view:vm`; limited per user and per cluster, see [Rate Limits](#rate-limits)) |
+| POST | `/clusters/:id/pci-mappings` | Create a PCI resource mapping for passthrough from a node's device address; the entry's ids, IOMMU group and mdev flag are copied from the node's own report of the device (`manage:cluster`; the token needs `Mapping.Modify`) |
 
 ### Nodes
 
@@ -603,6 +604,7 @@ leaves provenance intact.
 | GET | `/clusters/:id/nodes/:node/hardware/usb` | List USB devices |
 | GET | `/clusters/:id/nodes/:node/hardware/pci` | List PCI devices |
 | GET | `/clusters/:id/nodes/:node/usb-mappings` | List the cluster's USB resource mappings, each checked against this node |
+| GET | `/clusters/:id/nodes/:node/pci-mappings` | List the cluster's PCI resource mappings, each checked against this node |
 | GET | `/clusters/:id/nodes/:node/machine-types` | List available machine types |
 | GET | `/clusters/:id/nodes/:node/cpu-models` | List available CPU models |
 | GET | `/clusters/:id/nodes/:node/cpu-flags` | List available VM CPU flags, with the nodes supporting each |

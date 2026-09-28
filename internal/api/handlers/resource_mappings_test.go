@@ -17,12 +17,14 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-func TestMapUSBMappingCreateError(t *testing.T) {
+func TestMapMappingCreateError(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
@@ -43,6 +45,15 @@ func TestMapUSBMappingCreateError(t *testing.T) {
 			err: &proxmox.APIError{
 				StatusCode: 500,
 				Message:    "create hardware mapping failed: usb ID 'usbdev01' already defined",
+			},
+			want: fiber.StatusConflict,
+		},
+		{
+			// PCI.pm's create dies the same way, with its own kind's name.
+			name: "a taken PCI id is a conflict",
+			err: &proxmox.APIError{
+				StatusCode: 500,
+				Message:    `{"data":null,"message":"create hardware mapping failed: pci ID 'gpu01' already defined\n"}`,
 			},
 			want: fiber.StatusConflict,
 		},
@@ -84,17 +95,268 @@ func TestMapUSBMappingCreateError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var fe *fiber.Error
-			err := mapUSBMappingCreateError(tt.err)
+			err := mapMappingCreateError("USB", tt.err)
 			if !errors.As(err, &fe) {
-				t.Fatalf("mapUSBMappingCreateError(%v) = %v, want a *fiber.Error", tt.err, err)
+				t.Fatalf("mapMappingCreateError(%v) = %v, want a *fiber.Error", tt.err, err)
 			}
 			if fe.Code != tt.want {
 				t.Errorf("status = %d, want %d (message %q)", fe.Code, tt.want, fe.Message)
 			}
 		})
 	}
-	if mapUSBMappingCreateError(nil) != nil {
-		t.Error("mapUSBMappingCreateError(nil) should stay nil")
+	if mapMappingCreateError("USB", nil) != nil {
+		t.Error("mapMappingCreateError(nil) should stay nil")
+	}
+	// The conflict names the kind the caller was creating.
+	taken := &proxmox.APIError{StatusCode: 500, Message: "pci ID 'gpu01' already defined"}
+	var fe *fiber.Error
+	if !errors.As(mapMappingCreateError("PCI", taken), &fe) || fe.Message != "A PCI mapping with that ID already exists" {
+		t.Errorf("PCI conflict = %v, want \"A PCI mapping with that ID already exists\"", fe)
+	}
+}
+
+// fakePCIMappingCreator answers the device listing with devices (or
+// listErr) and records the create, failing it with createErr.
+type fakePCIMappingCreator struct {
+	devices   []proxmox.NodePCIDevice
+	listErr   error
+	createErr error
+	listed    string
+	created   []proxmox.CreatePCIMappingParams
+}
+
+func (f *fakePCIMappingCreator) ListNodePCIDevicesAllClasses(_ context.Context, node string) ([]proxmox.NodePCIDevice, error) {
+	f.listed = node
+	return f.devices, f.listErr
+}
+
+func (f *fakePCIMappingCreator) CreatePCIMapping(_ context.Context, params proxmox.CreatePCIMappingParams) error {
+	f.created = append(f.created, params)
+	return f.createErr
+}
+
+// Both kinds' per-node listings are proxied to the node by name, so a node
+// that is no member of the cluster is refused before anything is sent.
+func TestListNodeMappings(t *testing.T) {
+	var asked []string
+	list := func(_ context.Context, node string) ([]proxmox.PCIMapping, error) {
+		asked = append(asked, node)
+		return []proxmox.PCIMapping{{ID: "gpu01"}}, nil
+	}
+
+	got, err := listNodeMappings(context.Background(), memberOf("pve-01"), "pve-01", list)
+	if err != nil || len(got) != 1 || !slices.Equal(asked, []string{"pve-01"}) {
+		t.Fatalf("member: got %v, %v, asked %v", got, err, asked)
+	}
+
+	asked = nil
+	_, err = listNodeMappings(context.Background(), memberOf("pve-01"), "pve-09", list)
+	var fe *fiber.Error
+	if !errors.As(err, &fe) || fe.Code != fiber.StatusNotFound {
+		t.Errorf("non-member: err = %v, want 404", err)
+	}
+	lookupFails := func(context.Context, string) (bool, error) {
+		return false, fiber.NewError(fiber.StatusInternalServerError, "Failed to look up the node")
+	}
+	if _, err := listNodeMappings(context.Background(), lookupFails, "pve-01", list); !errors.As(err, &fe) || fe.Code != fiber.StatusInternalServerError {
+		t.Errorf("failed lookup: err = %v, want 500", err)
+	}
+	if len(asked) != 0 {
+		t.Errorf("asked Proxmox about %v", asked)
+	}
+
+	failing := func(context.Context, string) ([]proxmox.PCIMapping, error) {
+		return nil, proxmox.ErrConnectionFailed
+	}
+	if _, err := listNodeMappings(context.Background(), memberOf("pve-01"), "pve-01", failing); !errors.As(err, &fe) || fe.Code != fiber.StatusBadGateway {
+		t.Errorf("failed listing: err = %v, want 502", err)
+	}
+}
+
+// fakeNodeLookup answers the node lookup with err, recording what it was
+// asked.
+type fakeNodeLookup struct {
+	err   error
+	asked db.GetNodeByClusterAndNameParams
+}
+
+func (f *fakeNodeLookup) GetNodeByClusterAndName(_ context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error) {
+	f.asked = arg
+	return db.Node{}, f.err
+}
+
+// Only "no such row" means the node is not the cluster's; any other failure
+// of the lookup must not let a Proxmox call through as if it were.
+func TestNodeMembership(t *testing.T) {
+	cluster := uuid.New()
+
+	found := &fakeNodeLookup{}
+	member, err := nodeMembership(found, cluster)(context.Background(), "pve-01")
+	if err != nil || !member {
+		t.Errorf("found: member = %v, err = %v; want true, nil", member, err)
+	}
+	if found.asked.ClusterID != cluster || found.asked.Name != "pve-01" {
+		t.Errorf("asked %+v, want cluster %s and node pve-01", found.asked, cluster)
+	}
+
+	member, err = nodeMembership(&fakeNodeLookup{err: pgx.ErrNoRows}, cluster)(context.Background(), "pve-09")
+	if err != nil || member {
+		t.Errorf("no row: member = %v, err = %v; want false, nil", member, err)
+	}
+
+	member, err = nodeMembership(&fakeNodeLookup{err: errors.New("connection reset")}, cluster)(context.Background(), "pve-01")
+	var fe *fiber.Error
+	if member || !errors.As(err, &fe) || fe.Code != fiber.StatusInternalServerError {
+		t.Errorf("failed lookup: member = %v, err = %v; want false and a 500", member, err)
+	}
+}
+
+// memberOf is a membership check that knows exactly these nodes.
+func memberOf(nodes ...string) func(context.Context, string) (bool, error) {
+	return func(_ context.Context, node string) (bool, error) {
+		return slices.Contains(nodes, node), nil
+	}
+}
+
+// Reading the node's devices is a /nodes/{node} call, which pveproxy forwards
+// to wherever the name resolves; a node that is no member of the cluster is
+// refused before anything is sent to Proxmox.
+func TestCreatePCIMapping_AsksNothingOfANodeOutsideTheCluster(t *testing.T) {
+	fake := &fakePCIMappingCreator{devices: []proxmox.NodePCIDevice{{ID: "0000:01:00.0", Vendor: "0x1234", Device: "0x5678", IOMMUGroup: -1}}}
+	_, err := createPCIMapping(context.Background(), fake, memberOf("pve-01"), "gpu01", "pve-09", "0000:01:00.0", "")
+	var fe *fiber.Error
+	if !errors.As(err, &fe) || fe.Code != fiber.StatusNotFound {
+		t.Errorf("err = %v, want 404", err)
+	}
+	if fake.listed != "" || len(fake.created) != 0 {
+		t.Errorf("asked Proxmox about %q and created %d mappings for a node outside the cluster", fake.listed, len(fake.created))
+	}
+
+	// A failed lookup is a failure, not a member.
+	lookupFails := func(context.Context, string) (bool, error) {
+		return false, fiber.NewError(fiber.StatusInternalServerError, "Failed to look up the node")
+	}
+	if _, err := createPCIMapping(context.Background(), fake, lookupFails, "gpu01", "pve-01", "0000:01:00.0", ""); !errors.As(err, &fe) || fe.Code != fiber.StatusInternalServerError {
+		t.Errorf("err = %v, want the lookup's 500", err)
+	}
+	if fake.listed != "" {
+		t.Errorf("asked Proxmox about %q after the lookup failed", fake.listed)
+	}
+}
+
+func TestCreatePCIMapping_BuildsTheEntryFromTheNodesDevice(t *testing.T) {
+	group := 14
+	fake := &fakePCIMappingCreator{devices: []proxmox.NodePCIDevice{
+		{ID: "0000:01:00.0", Vendor: "0x1234", Device: "0x5678", SubsystemVendor: "0xabcd", SubsystemDevice: "0xef01", IOMMUGroup: group, MDev: true},
+	}}
+	got, err := createPCIMapping(context.Background(), fake, memberOf("pve-01"), "gpu01", "pve-01", "0000:01:00", "Example GPU")
+	if err != nil {
+		t.Fatalf("createPCIMapping: %v", err)
+	}
+	if fake.listed != "pve-01" {
+		t.Errorf("listed the devices of %q, want pve-01", fake.listed)
+	}
+	want := proxmox.CreatePCIMappingParams{
+		ID:          "gpu01",
+		Description: "Example GPU",
+		Entry:       proxmox.PCIMapEntry{Node: "pve-01", Path: "0000:01:00", ID: "1234:5678", SubsystemID: "abcd:ef01", IOMMUGroup: &group},
+		MDev:        true,
+	}
+	if len(fake.created) != 1 || !reflect.DeepEqual(fake.created[0], want) {
+		t.Errorf("created %+v, want %+v", fake.created, want)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("returned %+v, want %+v", got, want)
+	}
+}
+
+func TestCreatePCIMapping_Refusals(t *testing.T) {
+	devices := []proxmox.NodePCIDevice{{ID: "0000:01:00.0", Vendor: "0x1234", Device: "0x5678", IOMMUGroup: -1}}
+	for _, tt := range []struct {
+		name        string
+		fake        *fakePCIMappingCreator
+		path        string
+		want        int
+		wantMessage string
+		wantCreated bool
+	}{
+		{
+			// The node's own listing is the only source of the entry, so a
+			// device it does not report is refused before anything is written.
+			name: "a device the node does not have",
+			fake: &fakePCIMappingCreator{devices: devices},
+			path: "0000:02:00.0",
+			want: fiber.StatusBadRequest,
+		},
+		{
+			name: "the listing failing",
+			fake: &fakePCIMappingCreator{listErr: proxmox.ErrConnectionFailed},
+			path: "0000:01:00.0",
+			want: fiber.StatusBadGateway,
+		},
+		{
+			// An id Nexara cannot read is Proxmox's report, not the caller's
+			// input: a server error, not a 400.
+			name: "a device the node reports oddly",
+			fake: &fakePCIMappingCreator{devices: []proxmox.NodePCIDevice{{ID: "0000:01:00.0", Vendor: "0x12345", Device: "0x5678"}}},
+			path: "0000:01:00.0",
+			want: fiber.StatusInternalServerError,
+		},
+		{
+			name: "a taken id",
+			fake: &fakePCIMappingCreator{devices: devices, createErr: &proxmox.APIError{
+				StatusCode: 500, Message: "create hardware mapping failed: pci ID 'gpu01' already defined",
+			}},
+			path:        "0000:01:00.0",
+			want:        fiber.StatusConflict,
+			wantMessage: "A PCI mapping with that ID already exists",
+			wantCreated: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := createPCIMapping(context.Background(), tt.fake, memberOf("pve-01"), "gpu01", "pve-01", tt.path, "")
+			var fe *fiber.Error
+			if !errors.As(err, &fe) || fe.Code != tt.want {
+				t.Fatalf("err = %v, want status %d", err, tt.want)
+			}
+			if tt.wantMessage != "" && fe.Message != tt.wantMessage {
+				t.Errorf("message = %q, want %q", fe.Message, tt.wantMessage)
+			}
+			if created := len(tt.fake.created) > 0; created != tt.wantCreated {
+				t.Errorf("create called = %v, want %v", created, tt.wantCreated)
+			}
+		})
+	}
+}
+
+func TestPCIMappingCreateDetails(t *testing.T) {
+	group := 0
+	for _, tt := range []struct {
+		name   string
+		params proxmox.CreatePCIMappingParams
+		want   string
+	}{
+		{
+			// Group 0 is a group, recorded like any other.
+			name: "every value",
+			params: proxmox.CreatePCIMappingParams{ID: "gpu01", MDev: true, Entry: proxmox.PCIMapEntry{
+				Node: "pve-01", Path: "0000:01:00.0", ID: "1234:5678", SubsystemID: "abcd:ef01", IOMMUGroup: &group,
+			}},
+			want: `{"device_id":"1234:5678","iommugroup":0,"mapping_id":"gpu01","mdev":true,"node":"pve-01","path":"0000:01:00.0","subsystem_id":"abcd:ef01"}`,
+		},
+		{
+			name: "only what is there",
+			params: proxmox.CreatePCIMappingParams{ID: "nic01", Entry: proxmox.PCIMapEntry{
+				Node: "pve-02", Path: "0000:02:00", ID: "1234:0002",
+			}},
+			want: `{"device_id":"1234:0002","mapping_id":"nic01","node":"pve-02","path":"0000:02:00"}`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := string(pciMappingCreateDetails(tt.params)); got != tt.want {
+				t.Errorf("details = %s, want %s", got, tt.want)
+			}
+		})
 	}
 }
 

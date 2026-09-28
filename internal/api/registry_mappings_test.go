@@ -18,6 +18,8 @@ const (
 	usbMappingClusterPath = clusterScope + "/usb-mappings"
 	usbMappingPath        = clusterScope + "/usb-mappings/:mapping_id"
 	usbMappingUsagePath   = clusterScope + "/usb-mappings/:mapping_id/usage"
+	pciMappingListPath    = clusterScope + "/nodes/:node_name/pci-mappings"
+	pciMappingCreatePath  = clusterScope + "/pci-mappings"
 )
 
 // TestUSBMappingRoutesDeclareTheirPermissions pins the gates. The node
@@ -162,6 +164,127 @@ func TestEveryUSBMappingEndpointIsDocumented(t *testing.T) {
 				t.Errorf("%s: parameter %q has no description", key, name)
 			}
 		}
+	}
+}
+
+// TestPCIMappingRoutesDeclareTheirPermissions pins the PCI gates, which are
+// the USB ones for the same reasons: the node listing sits with the node
+// hardware listings the Add PCI Device dialog also reads, and the create is
+// cluster configuration.
+func TestPCIMappingRoutesDeclareTheirPermissions(t *testing.T) {
+	for _, tt := range []struct{ method, path, want string }{
+		{fiber.MethodGet, pciMappingListPath, "view:node"},
+		{fiber.MethodPost, pciMappingCreatePath, "manage:cluster"},
+	} {
+		e := declaredEndpoint(t, tt.method, tt.path)
+		if e.Permissions.Check == nil {
+			t.Errorf("%s %s declares %q rather than a Check", tt.method, tt.path, e.Permissions.Describe())
+			continue
+		}
+		if got := e.Permissions.Describe(); got != tt.want {
+			t.Errorf("%s %s declares %q, want %q", tt.method, tt.path, got, tt.want)
+		}
+		if e.Permissions.Check.Scope != ScopeCluster {
+			t.Errorf("%s %s is %s-scoped, want cluster", tt.method, tt.path, e.Permissions.Check.Scope)
+		}
+	}
+}
+
+func TestEveryPCIMappingEndpointIsDocumented(t *testing.T) {
+	for _, tt := range []struct{ method, path, group string }{
+		{fiber.MethodGet, pciMappingListPath, "Nodes"},
+		{fiber.MethodPost, pciMappingCreatePath, "Clusters"},
+	} {
+		e := declaredEndpoint(t, tt.method, tt.path)
+		key := tt.method + " " + tt.path
+		if err := e.Parameters.Compile(); err != nil {
+			t.Errorf("%s: %v", key, err)
+		}
+		if strings.TrimSpace(e.Description) == "" {
+			t.Errorf("%s has no description", key)
+		}
+		if e.Group != tt.group {
+			t.Errorf("%s is in group %q, want %q", key, e.Group, tt.group)
+		}
+		names := pathParamNames(e.Path)
+		if len(names) == 0 || names[0] != "cluster_id" {
+			t.Errorf("%s has path parameters %v; :cluster_id must be the first", key, names)
+		}
+		for name, prop := range e.Parameters {
+			if strings.TrimSpace(prop.Description) == "" {
+				t.Errorf("%s: parameter %q has no description", key, name)
+			}
+		}
+	}
+}
+
+// TestCreatePCIMappingRefusesMalformedBodies drives the declaration with real
+// requests. The body names only the node and the device's address: the rest
+// of the entry is the node's own report of the device, so an id, a subsystem
+// id, an IOMMU group or an mdev flag in the body is refused, not used.
+func TestCreatePCIMappingRefusesMalformedBodies(t *testing.T) {
+	const valid = `"mapping_id":"gpu01","node":"pve-01","path":"0000:01:00.0","description":"Example GPU"`
+	target := strings.Replace(pciMappingCreatePath, ":cluster_id", testClusterID, 1)
+
+	t.Run("a valid body reaches the handler intact", func(t *testing.T) {
+		app, cap := mountForParams(t, fiber.MethodPost, pciMappingCreatePath)
+		status, env := send(t, app, jsonRequest(http.MethodPost, target, "{"+valid+"}"))
+		if status != fiber.StatusNoContent {
+			t.Fatalf("status = %d (%q), want 204", status, env.Message)
+		}
+		for key, want := range map[string]string{
+			"mapping_id":  "gpu01",
+			"node":        "pve-01",
+			"path":        "0000:01:00.0",
+			"description": "Example GPU",
+		} {
+			if got := cap.params.String(key); got != want {
+				t.Errorf("%s = %q, want %q", key, got, want)
+			}
+		}
+	})
+
+	for _, tt := range []struct{ name, body string }{
+		{"the whole device, without a function", `{"mapping_id":"gpu01","node":"pve-01","path":"0000:01:00"}`},
+		{"a domain wider than four digits", `{"mapping_id":"gpu01","node":"pve-01","path":"10000:01:00.0"}`},
+		{"a path of 64 characters", `{"mapping_id":"gpu01","node":"pve-01","path":"` + strings.Repeat("0", 56) + `:01:00.0"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app, _ := mountForParams(t, fiber.MethodPost, pciMappingCreatePath)
+			if status, env := send(t, app, jsonRequest(http.MethodPost, target, tt.body)); status != fiber.StatusNoContent {
+				t.Errorf("status = %d (%q), want 204", status, env.Message)
+			}
+		})
+	}
+
+	for _, tt := range []struct{ name, body string }{
+		{"no path", `{"mapping_id":"gpu01","node":"pve-01"}`},
+		{"no node", `{"mapping_id":"gpu01","path":"0000:01:00.0"}`},
+		{"no mapping id", `{"node":"pve-01","path":"0000:01:00.0"}`},
+		{"a mapping id starting with a digit", `{` + strings.Replace(valid, `"gpu01"`, `"1gpu"`, 1) + `}`},
+		{"a path without the domain", `{` + strings.Replace(valid, `"0000:01:00.0"`, `"01:00.0"`, 1) + `}`},
+		{"a path in uppercase", `{` + strings.Replace(valid, `"0000:01:00.0"`, `"0000:0A:00.0"`, 1) + `}`},
+		{"a list of paths", `{` + strings.Replace(valid, `"0000:01:00.0"`, `"0000:01:00.0;0000:02:00.0"`, 1) + `}`},
+		{"a path smuggling a key", `{` + strings.Replace(valid, `"0000:01:00.0"`, `"0000:01:00.0,node=pve-02"`, 1) + `}`},
+		{"a path over 64 characters", `{` + strings.Replace(valid, `"0000:01:00.0"`, `"`+strings.Repeat("0", 57)+`:01:00.0"`, 1) + `}`},
+		{"a node smuggling a key", `{` + strings.Replace(valid, `"pve-01"`, `"pve-01,path=0000:02:00.0"`, 1) + `}`},
+		{"a description over 4096 characters", `{` + strings.Replace(valid, `"Example GPU"`,
+			fmt.Sprintf("%q", strings.Repeat("d", 4097)), 1) + `}`},
+		{"a device id the node did not report", `{` + valid + `,"device_id":"1234:5678"}`},
+		{"an IOMMU group the node did not report", `{` + valid + `,"iommugroup":1}`},
+		{"an mdev flag the node did not report", `{` + valid + `,"mdev":true}`},
+		{"the Proxmox spelling of the id", `{"id":"gpu01","node":"pve-01","path":"0000:01:00.0"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app, cap := mountForParams(t, fiber.MethodPost, pciMappingCreatePath)
+			status, env := send(t, app, jsonRequest(http.MethodPost, target, tt.body))
+			if status != fiber.StatusBadRequest {
+				t.Errorf("status = %d (%q), want 400", status, env.Message)
+			}
+			if cap.called {
+				t.Error("the handler ran for a malformed body")
+			}
+		})
 	}
 }
 

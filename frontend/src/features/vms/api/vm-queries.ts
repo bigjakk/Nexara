@@ -1164,6 +1164,12 @@ export interface NodeUSBDevice {
   level: number;
 }
 
+/**
+ * A PCI device from GET …/hardware/pci, as Proxmox's lspci reports it:
+ * `id` is domain:bus:slot.function; `vendor`, `device` and the subsystem ids
+ * are "0x"-prefixed hex; `iommugroup` is -1 when the device is in none; `mdev`
+ * is set when it can provide mediated devices.
+ */
 export interface NodePCIDevice {
   id: string;
   class: string;
@@ -1174,6 +1180,7 @@ export interface NodePCIDevice {
   iommugroup: number;
   subsystem_device?: string;
   subsystem_vendor?: string;
+  mdev?: boolean;
 }
 
 export function useNodeUSBDevices(clusterId: string, nodeName: string) {

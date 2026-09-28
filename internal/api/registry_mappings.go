@@ -237,4 +237,67 @@ func registerResourceMappingEndpoints(reg *Registry, h *handlers.VMHandler, usag
 		RateLimiter: usageLimiter,
 		Handler:     h.GetUSBMappingUsage,
 	})
+
+	// ── PCI mappings, for the Add PCI Device dialog ──────────────────────
+	//
+	// The same reason as USB's: qemu-server's check_hostpci_perm lets only
+	// root@pam set a hostpciN that names a host device ("only root can set
+	// 'hostpciN' config for non-mapped devices"), and checks Mapping.Use on
+	// /mapping/pci/<id> for a hostpciN of mapping=<id>.
+	reg.Register(Endpoint{
+		Method: fiber.MethodGet,
+		Path:   clusterScope + "/nodes/:node_name/pci-mappings",
+		Description: "List the cluster's PCI resource mappings, each checked against this node: a mapping's " +
+			"checks say why it would not work here — a warning when it has no entry for the node, an error " +
+			"when an entry names a device the node does not have or does not match exactly. A node may have " +
+			"several entries; a VM starting there takes the first device not already in use. Proxmox lists " +
+			"only the mappings the cluster's token holds a Mapping privilege on.",
+		Group:       "Nodes",
+		Permissions: clusterCheck("view", "node"),
+		Parameters:  nodeParams(nil),
+		Handler:     h.ListNodePCIMappings,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPost,
+		Path:   clusterScope + "/pci-mappings",
+		// Gated like the USB create, on manage:cluster, for the reason given
+		// there.
+		Description: "Create a PCI resource mapping with one node entry, so a VM can pass that node's device " +
+			"through as mapping=<mapping_id>. Only the node and the device's address are taken from the " +
+			"request: the entry's device and subsystem ids, its IOMMU group and the mapping's mediated-device " +
+			"flag are copied from the node's own report of the device, because Proxmox refuses to start a VM " +
+			"whose device does not match its mapping exactly. An address without the function maps the whole " +
+			"device, every function passed through as one. The mapping may name any device the node " +
+			"reports, its own disk and network controllers included: a VM starting with it takes the " +
+			"device, and every other device in its IOMMU group but PCI-to-PCI bridges, away from the node, and anyone " +
+			"with manage:vm can attach the mapping to a VM. Needs the token to hold Mapping.Modify, which " +
+			"Proxmox's Administrator role has and PVEAdmin does not; Nexara gates it on manage:cluster.",
+		Group:       "Clusters",
+		Permissions: clusterCheck("manage", "cluster"),
+		Parameters: clusterParams(apischema.Properties{
+			// "mapping_id", not "id", for the reason on the USB create.
+			"mapping_id": {
+				Type:        apischema.String,
+				Format:      "pve-configid",
+				Typetext:    "<mapping id>",
+				Description: "Name for the new mapping, which a VM's hostpciN names as mapping=<mapping_id>: 2-128 characters, starting with a letter.",
+			},
+			"node": requiredNode("Node the device is on."),
+			// One $PCI_RE of pve-guest-common src/PVE/Mapping/PCI.pm, not the
+			// ";"-joined list its schema admits: proxmox.PCIMapEntryForDevice
+			// says why, and applies the same pattern, being the choke point.
+			// The 64 is Nexara's, as on the USB port (proxmox.pciMappingPathMax).
+			"path": {
+				Type:      apischema.String,
+				Pattern:   `^[a-f0-9]{4,}:[a-f0-9]{2}:[a-f0-9]{2}(\.[a-f0-9])?$`,
+				MaxLength: apischema.Ptr(64),
+				Typetext:  "<domain>:<bus>:<slot>[.<function>]",
+				Description: "The device's address as GET …/hardware/pci reports it, e.g. 0000:01:00.0, or without the " +
+					"function, e.g. 0000:01:00, to map the whole device; lowercase hex, at most 64 characters.",
+			},
+			"description": optString(4096, "<string>",
+				"Description Proxmox shows for the mapping. A single line: Proxmox refuses a line break."),
+		}),
+		Handler: h.CreatePCIMapping,
+	})
 }

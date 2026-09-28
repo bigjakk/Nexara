@@ -650,6 +650,9 @@ export function parseUSB(raw: string): ParsedUSB {
     spice: false,
   };
   for (const s of splitSegments(raw)) {
+    // A blank part is skipped, as parse_property_string skips it: "a,"
+    // holds the host a, not an empty one.
+    if (s.key === null && s.value === "") continue;
     if (s.key === null || s.key === "host") parsed.host = s.value;
     else if (s.key === "mapping") parsed.mapping = s.value;
     else if (s.key === "usb3") parsed.usb3 = pveBoolean(s.value);
@@ -684,63 +687,92 @@ export function isRawUSBPassthrough(parsed: ParsedUSB): boolean {
 // PCI passthrough
 // ---------------------------------------------------------------------------
 
+/*
+ * qemu-server's hostpci format (src/PVE/QemuServer/PCI.pm), in part: `host`
+ * is the default_key, so a segment with no "=" is the host address; `mapping`
+ * names a cluster resource mapping instead (a hostpciN carries one of the
+ * two); `pcie`, `rombar` and `x-vga` are booleans, rombar on unless "0";
+ * `mdev` is a mediated device type; `romfile` a ROM image.
+ *
+ * Only a mapping can be written through an API token: qemu-server's
+ * check_hostpci_perm (src/PVE/API2/Qemu.pm) lets nobody but root@pam set,
+ * change or remove a hostpciN naming a host device, nor one with a romfile.
+ * isRootOnlyPCI names those, so the panel can say so instead of offering a
+ * Remove that must fail.
+ */
 export interface ParsedPCI {
   host: string;
+  mapping: string;
   pcie: boolean;
   rombar: boolean;
   xvga: boolean;
   mdev: string;
+  romfile: string;
 }
 
 export function parsePCI(raw: string): ParsedPCI {
-  if (!raw)
-    return { host: "", pcie: false, rombar: true, xvga: false, mdev: "" };
-  const segments = raw.split(",");
   const result: ParsedPCI = {
     host: "",
+    mapping: "",
     pcie: false,
     rombar: true,
     xvga: false,
     mdev: "",
+    romfile: "",
   };
-  for (const seg of segments) {
-    const eqIdx = seg.indexOf("=");
-    if (eqIdx === -1) {
-      // bare PCI address like "02:00"
-      result.host = seg.trim();
-      continue;
-    }
-    const key = seg.slice(0, eqIdx).trim();
-    const val = seg.slice(eqIdx + 1).trim();
-    switch (key) {
+  for (const s of splitSegments(raw)) {
+    // A blank part is skipped, as in parseUSB.
+    if (s.key === null && s.value === "") continue;
+    switch (s.key) {
+      case null:
       case "host":
-        result.host = val;
+        result.host = s.value;
+        break;
+      case "mapping":
+        result.mapping = s.value;
         break;
       case "pcie":
-        result.pcie = val === "1";
+        result.pcie = pveBoolean(s.value);
         break;
       case "rombar":
-        result.rombar = val !== "0";
+        result.rombar = pveBoolean(s.value);
         break;
       case "x-vga":
-        result.xvga = val === "1";
+        result.xvga = pveBoolean(s.value);
         break;
       case "mdev":
-        result.mdev = val;
+        result.mdev = s.value;
+        break;
+      case "romfile":
+        result.romfile = s.value;
         break;
     }
   }
   return result;
 }
 
+/**
+ * Writes the mapping, or else the host, then the options that differ from
+ * qemu-server's defaults. romfile is never written: only root@pam may set it.
+ */
 export function buildPCI(parsed: ParsedPCI): string {
   const parts: string[] = [];
-  if (parsed.host) parts.push(parsed.host);
+  if (parsed.mapping) parts.push(`mapping=${parsed.mapping}`);
+  else if (parsed.host) parts.push(parsed.host);
   if (parsed.pcie) parts.push("pcie=1");
   if (!parsed.rombar) parts.push("rombar=0");
   if (parsed.xvga) parts.push("x-vga=1");
   if (parsed.mdev) parts.push(`mdev=${parsed.mdev}`);
   return parts.join(",");
+}
+
+/**
+ * A hostpciN only root@pam may change or remove: one naming a host device —
+ * check_hostpci_perm tests host before mapping, so a host decides even beside
+ * a mapping — or one with a ROM file.
+ */
+export function isRootOnlyPCI(parsed: ParsedPCI): boolean {
+  return parsed.host !== "" || parsed.romfile !== "";
 }
 
 // ---------------------------------------------------------------------------

@@ -14,8 +14,10 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -26,22 +28,71 @@ import (
 // reads Proxmox has no single call for — every mapping checked on every node
 // it names, and which guests use a mapping.
 
+// errMappingNodeNotMember answers a mapping route for a node the cluster does
+// not have.
+var errMappingNodeNotMember = fiber.NewError(fiber.StatusNotFound, "Node not found in this cluster")
+
+// nodeLookup is the query nodeMembership asks.
+type nodeLookup interface {
+	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
+}
+
+// nodeMembership says whether a node is one of clusterID's, for the mapping
+// routes whose Proxmox call pveproxy forwards to the node by name. Only "no
+// such row" is "not a member"; a lookup that fails is a failure, never a
+// yes.
+func nodeMembership(q nodeLookup, clusterID uuid.UUID) func(context.Context, string) (bool, error) {
+	return func(ctx context.Context, node string) (bool, error) {
+		_, err := q.GetNodeByClusterAndName(ctx, db.GetNodeByClusterAndNameParams{ClusterID: clusterID, Name: node})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fiber.NewError(fiber.StatusInternalServerError, "Failed to look up the node")
+		}
+		return true, nil
+	}
+}
+
+// nodeInCluster is nodeMembership over the handler's queries.
+func (h *VMHandler) nodeInCluster(clusterID uuid.UUID) func(context.Context, string) (bool, error) {
+	return nodeMembership(h.queries, clusterID)
+}
+
+// listNodeMappings lists a kind's mappings checked against node, once node is
+// known to be one of the cluster's. Nothing is sent before then: Proxmox runs
+// the check on the node itself (the listing's proxyto_callback), and pveproxy
+// resolves the host to forward to from the name before it validates it — a
+// name that is no member would have the node connect wherever it resolves.
+func listNodeMappings[T any](ctx context.Context, isMember func(context.Context, string) (bool, error), node string,
+	list func(context.Context, string) ([]T, error)) ([]T, error) {
+	member, err := isMember(ctx, node)
+	if err != nil {
+		return nil, err
+	}
+	if !member {
+		return nil, errMappingNodeNotMember
+	}
+	mappings, err := list(ctx, node)
+	if err != nil {
+		return nil, mapProxmoxError(err)
+	}
+	return mappings, nil
+}
+
 // ListNodeUSBMappings handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/usb-mappings.
 func (h *VMHandler) ListNodeUSBMappings(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
-	nodeName := p.String("node_name")
-
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-
-	mappings, err := pxClient.ListUSBMappings(c.Context(), nodeName)
+	mappings, err := listNodeMappings(c.Context(), h.nodeInCluster(clusterID), p.String("node_name"), pxClient.ListUSBMappings)
 	if err != nil {
-		return mapProxmoxError(err)
+		return err
 	}
 	return RespondItems(c, mappings)
 }
@@ -65,7 +116,7 @@ func (h *VMHandler) CreateUSBMapping(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 	if err := pxClient.CreateUSBMapping(c.Context(), req); err != nil {
-		return mapUSBMappingCreateError(err)
+		return mapMappingCreateError("USB", err)
 	}
 
 	// The device id as Proxmox stores it — the client lowercases it — and the
@@ -83,20 +134,123 @@ func (h *VMHandler) CreateUSBMapping(c fiber.Ctx, p *apischema.Params) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
-// usbMappingTakenPhrases is how Proxmox refuses a mapping id that is taken:
-// pve-manager PVE/API2/Cluster/Mapping/USB.pm, create, dies
+// mappingTakenPhrases is how Proxmox refuses a mapping id that is taken, for
+// either kind: pve-manager PVE/API2/Cluster/Mapping/USB.pm's create dies
 // "usb ID '$id' already defined" inside lock_usb_config, which re-dies it as
-// "create hardware mapping failed: usb ID '…' already defined" — a plain 500.
-// It says "already defined", not "already exists", so mapDuplicateNameError
-// cannot see it. A mapping id is a pve-configid and cannot hold a space, so
-// the id Proxmox echoes back can never be what matches.
-var usbMappingTakenPhrases = []string{"already defined"}
+// "create hardware mapping failed: usb ID '…' already defined" — a plain 500 —
+// and PCI.pm's dies "pci ID '$id' already defined" the same way. It says
+// "already defined", not "already exists", so mapDuplicateNameError cannot see
+// it. A mapping id is a pve-configid and cannot hold a space, so the id
+// Proxmox echoes back can never be what matches.
+var mappingTakenPhrases = []string{"already defined"}
 
-// mapUSBMappingCreateError answers a taken mapping id with 409, where
-// mapProxmoxError alone would report the cluster as failing.
-func mapUSBMappingCreateError(err error) error {
+// mapMappingCreateError answers a taken mapping id with 409, where
+// mapProxmoxError alone would report the cluster as failing. kind is "USB" or
+// "PCI", for the message.
+func mapMappingCreateError(kind string, err error) error {
 	return mapProxmoxDieError(fiber.StatusConflict,
-		"A USB mapping with that ID already exists", usbMappingTakenPhrases, err)
+		"A "+kind+" mapping with that ID already exists", mappingTakenPhrases, err)
+}
+
+// --- PCI mappings ---------------------------------------------------------------
+
+// ListNodePCIMappings handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/pci-mappings.
+func (h *VMHandler) ListNodePCIMappings(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	mappings, err := listNodeMappings(c.Context(), h.nodeInCluster(clusterID), p.String("node_name"), pxClient.ListPCIMappings)
+	if err != nil {
+		return err
+	}
+	return RespondItems(c, mappings)
+}
+
+// pciMappingCreator is what a PCI mapping create needs of the Proxmox client.
+type pciMappingCreator interface {
+	ListNodePCIDevicesAllClasses(ctx context.Context, node string) ([]proxmox.NodePCIDevice, error)
+	CreatePCIMapping(ctx context.Context, params proxmox.CreatePCIMappingParams) error
+}
+
+// createPCIMapping creates mapping id with one entry for node's device at
+// path, the entry built from the node's own report of the device
+// (proxmox.PCIMapEntryForDevice says why nothing else will do), and returns
+// what it created.
+//
+// isMember says whether node is one of the cluster's, and is asked before
+// anything is sent: reading the node's devices is a /nodes/{node} call, which
+// pveproxy forwards to whatever host the name resolves to — a name that is no
+// member, and not only a malformed one, would have the node connect out where
+// the caller chose, and answer with what it found there.
+func createPCIMapping(ctx context.Context, px pciMappingCreator, isMember func(context.Context, string) (bool, error),
+	id, node, path, description string) (proxmox.CreatePCIMappingParams, error) {
+	member, err := isMember(ctx, node)
+	if err != nil {
+		return proxmox.CreatePCIMappingParams{}, err
+	}
+	if !member {
+		return proxmox.CreatePCIMappingParams{}, errMappingNodeNotMember
+	}
+	devices, err := px.ListNodePCIDevicesAllClasses(ctx, node)
+	if err != nil {
+		return proxmox.CreatePCIMappingParams{}, mapProxmoxError(err)
+	}
+	entry, mdev, err := proxmox.PCIMapEntryForDevice(node, path, devices)
+	if err != nil {
+		return proxmox.CreatePCIMappingParams{}, mapProxmoxError(err)
+	}
+	params := proxmox.CreatePCIMappingParams{ID: id, Description: description, Entry: entry, MDev: mdev}
+	if err := px.CreatePCIMapping(ctx, params); err != nil {
+		return proxmox.CreatePCIMappingParams{}, mapMappingCreateError("PCI", err)
+	}
+	return params, nil
+}
+
+// pciMappingCreateDetails is the audit row of a created PCI mapping: the
+// entry as it was written, which is enough to recreate it.
+func pciMappingCreateDetails(params proxmox.CreatePCIMappingParams) json.RawMessage {
+	detail := map[string]any{
+		"mapping_id": params.ID,
+		"node":       params.Entry.Node,
+		"path":       params.Entry.Path,
+		"device_id":  params.Entry.ID,
+	}
+	if params.Entry.SubsystemID != "" {
+		detail["subsystem_id"] = params.Entry.SubsystemID
+	}
+	if params.Entry.IOMMUGroup != nil {
+		detail["iommugroup"] = *params.Entry.IOMMUGroup
+	}
+	if params.MDev {
+		detail["mdev"] = true
+	}
+	details, _ := json.Marshal(detail)
+	return details
+}
+
+// CreatePCIMapping handles POST /api/v1/clusters/:cluster_id/pci-mappings.
+func (h *VMHandler) CreatePCIMapping(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	created, err := createPCIMapping(c.Context(), pxClient, h.nodeInCluster(clusterID),
+		p.String("mapping_id"), p.String("node"), p.String("path"), p.String("description"))
+	if err != nil {
+		return err
+	}
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pci_mapping", created.ID, "created",
+		pciMappingCreateDetails(created))
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
 // --- The cluster-wide listing -------------------------------------------------

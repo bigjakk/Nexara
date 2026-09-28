@@ -20,7 +20,7 @@ import (
 // The PVE die strings behind each entry are cited on the phrase-set var next to
 // each mapper: haRuleMissingPhrases in ha.go, metricServerMissingPhrases in
 // metric_servers.go, firewallRuleMissingPhrases in networks.go,
-// staleDigestPhrases in acme.go, and usbMappingTakenPhrases and
+// staleDigestPhrases in acme.go, and mappingTakenPhrases and
 // usbMappingMissingPhrases in resource_mappings.go.
 //
 // BE CLEAR ABOUT WHAT THIS DOES NOT CATCH. It checks that the mapper is called
@@ -62,8 +62,10 @@ var dieStringMappers = map[string]string{
 	"UpdateSecurityGroupRule":   "mapFirewallRuleError",
 	"DeleteSecurityGroupRule":   "mapFirewallRuleError",
 
-	// 409, like SetNodeACMEConfig: a taken mapping id dies as a plain 500.
-	"CreateUSBMapping": "mapUSBMappingCreateError",
+	// 409, like SetNodeACMEConfig: a taken mapping id dies as a plain 500,
+	// for either kind.
+	"CreateUSBMapping": "mapMappingCreateError",
+	"CreatePCIMapping": "mapMappingCreateError",
 	// The firewall rule shape: 409 for a stale usb.cfg digest, 404 for a
 	// mapping that is gone. Not DeleteUSBMapping: like DeleteHARule, it
 	// succeeds for a missing id, so there is no die to map.

@@ -1257,12 +1257,39 @@ type USBMapping struct {
 	Digest      string         `json:"digest"`
 }
 
+// PCIMapping is one entry of GET /cluster/mapping/pci.
+//
+// Map holds the per-node entries verbatim: node=<n>, path=<domain:bus:slot[.fn]>,
+// id=<vendor:device>, and when the device has them subsystem-id=<vendor:device>
+// and iommugroup=<n>, comma-separated in any order. Unlike USB, a node may
+// have several: each is an alternative, and qemu-server takes the first one
+// not already in use when a VM starts (choose_hostpci_devices).
+//
+// Checks is USB's Errors under the name the PCI listing gives it: its index
+// sets "checks" (pve-manager PVE/API2/Cluster/Mapping/PCI.pm), with the same
+// two messages — "No mapping for node <n>." and "Invalid configuration: …".
+//
+// MDev is the mapping's "Use with Mediated Devices" flag. Proxmox compares it
+// with the device's own capability when it checks an entry, and refuses a
+// mismatch either way ('mdev' does not match, assert_valid in pve-guest-common
+// src/PVE/Mapping/PCI.pm). Digest is the whole pci.cfg's, as USBMapping's is
+// usb.cfg's.
+type PCIMapping struct {
+	ID          string         `json:"id"`
+	Description string         `json:"description"`
+	Map         []string       `json:"map"`
+	Checks      []MappingCheck `json:"checks"`
+	MDev        FlexBool       `json:"mdev"`
+	Digest      string         `json:"digest"`
+}
+
 // MappingCheck is one problem Proxmox reports for a mapping when its listing
 // is asked to check the mappings against a node (check-node).
 //
-// The field is "errors" because that is what the listing's code sets
+// For USB the field is "errors", because that is what the listing's code sets
 // (pve-manager PVE/API2/Cluster/Mapping/USB.pm, index); the endpoint's
-// declared return schema calls it "error", which nothing ever sends.
+// declared return schema calls it "error", which nothing ever sends. For PCI
+// it is "checks" (PCIMapping).
 type MappingCheck struct {
 	// Severity is "warning" (no entry for the node) or "error" (the entry
 	// names hardware the node does not have).
@@ -1271,16 +1298,22 @@ type MappingCheck struct {
 }
 
 // NodePCIDevice represents a PCI device from GET /nodes/{node}/hardware/pci.
+//
+// The listing is lspci in pve-common src/PVE/SysFSTools.pm: ID is
+// domain:bus:slot.function, and Vendor, Device and the subsystem ids are the
+// sysfs files as read, "0x"-prefixed. IOMMUGroup is -1 when the device is in
+// no IOMMU group. MDev is set when the device can provide mediated devices.
 type NodePCIDevice struct {
-	ID              string `json:"id"`
-	Class           string `json:"class"`
-	DeviceName      string `json:"device_name"`
-	VendorName      string `json:"vendor_name"`
-	Device          string `json:"device"`
-	Vendor          string `json:"vendor"`
-	IOMMUGroup      int    `json:"iommugroup"`
-	SubsystemDevice string `json:"subsystem_device,omitempty"`
-	SubsystemVendor string `json:"subsystem_vendor,omitempty"`
+	ID              string   `json:"id"`
+	Class           string   `json:"class"`
+	DeviceName      string   `json:"device_name"`
+	VendorName      string   `json:"vendor_name"`
+	Device          string   `json:"device"`
+	Vendor          string   `json:"vendor"`
+	IOMMUGroup      int      `json:"iommugroup"`
+	SubsystemDevice string   `json:"subsystem_device,omitempty"`
+	SubsystemVendor string   `json:"subsystem_vendor,omitempty"`
+	MDev            FlexBool `json:"mdev,omitempty"`
 }
 
 // VMConfig represents the full configuration of a QEMU VM from GET /nodes/{node}/qemu/{vmid}/config.

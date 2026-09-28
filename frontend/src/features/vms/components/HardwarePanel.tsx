@@ -37,6 +37,7 @@ import {
   useDetachDisk,
   useNodeUSBDevices,
   useNodePCIDevices,
+  type NodePCIDevice,
   type NodeUSBDevice,
 } from "../api/vm-queries";
 import {
@@ -84,6 +85,7 @@ import {
   parseUSB,
   isRawUSBPassthrough,
   parsePCI,
+  isRootOnlyPCI,
   parseRNG,
   parseVirtioFS,
   parseEFIDisk,
@@ -97,6 +99,7 @@ import {
   SMBIOS_TEXT_FIELDS,
 } from "../lib/vm-config-parsers";
 import { cleanDeviceText } from "@/features/mappings/lib/usb-mapping";
+import { pciDeviceLabel } from "@/features/mappings/lib/pci-mapping";
 import type {
   CPUFlagState,
   ParsedNet,
@@ -171,6 +174,22 @@ function usbHostLabel(
     cleanDeviceText(match?.product ?? "") ||
     cleanDeviceText(match?.manufacturer ?? "");
   return name ? `${name} (${host})` : host;
+}
+
+/**
+ * A raw hostpciN host as the node knows it: "Device (0000:01:00.0)", or the
+ * host alone when the node lists nothing there. qemu-server takes the domain
+ * as optional ("01:00.0" is 0000:01:00.0) and the function too — the whole
+ * device, named here after function 0.
+ */
+function pciHostLabel(
+  host: string,
+  devices: NodePCIDevice[] | undefined,
+): string {
+  const full = host.split(":").length === 2 ? `0000:${host}` : host;
+  const record = /\.[0-9a-f]$/i.test(full) ? full : `${full}.0`;
+  const match = devices?.find((d) => d.id === record.toLowerCase());
+  return match ? `${pciDeviceLabel(match)} (${host})` : host;
 }
 
 function str(val: unknown): string {
@@ -1535,8 +1554,10 @@ export function HardwarePanel({
       <AddDeviceMenu
         // Staged adds count as taken — devices, and CD/DVD drives, which are
         // staged separately — so two added before a Save land in two slots
-        // rather than the second replacing the first.
-        config={{ ...config, ...pendingDeviceAdds, ...cdromEdits }}
+        // rather than the second replacing the first. The machine type is the
+        // staged one too: it is saved in the same write as a device added
+        // now, and PCIe is offered by it.
+        config={{ ...config, ...pendingDeviceAdds, ...cdromEdits, machine }}
         clusterId={clusterId}
         nodeName={nodeName}
         diskStorages={diskStorages.map((s) => ({
@@ -3411,15 +3432,30 @@ export function HardwarePanel({
                   </div>
                 );
               }
+              // check_hostpci_perm refuses to change or delete a host
+              // device, or a romfile, for anyone but root@pam — the USB rows'
+              // reason, and said the same way.
+              const rootOnly = isRootOnlyPCI(parsed);
               return (
                 <div
                   key={key}
                   className="flex items-center gap-2 rounded border px-2 py-1"
                 >
                   <span className="font-mono text-xs font-medium">{key}</span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {parsed.host}
-                  </span>
+                  {parsed.mapping ? (
+                    <>
+                      <Badge variant="secondary" className="text-[10px]">
+                        Mapped
+                      </Badge>
+                      <span className="truncate text-[10px] text-muted-foreground">
+                        {parsed.mapping}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="truncate text-[10px] text-muted-foreground">
+                      {pciHostLabel(parsed.host, pciDevices)}
+                    </span>
+                  )}
                   {parsed.pcie && (
                     <Badge variant="outline" className="text-[10px]">
                       PCIe
@@ -3430,16 +3466,24 @@ export function HardwarePanel({
                       x-vga
                     </Badge>
                   )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      handleRemoveDevice(key);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" /> Remove
-                  </Button>
+                  {rootOnly ? (
+                    <span className="ml-auto min-w-0 text-right text-[10px] text-muted-foreground">
+                      {parsed.host
+                        ? "Passed through directly; only root@pam can remove it, in Proxmox"
+                        : "Uses a ROM file; only root@pam can remove it, in Proxmox"}
+                    </span>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
+                      onClick={() => {
+                        handleRemoveDevice(key);
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3" /> Remove
+                    </Button>
+                  )}
                 </div>
               );
             })}

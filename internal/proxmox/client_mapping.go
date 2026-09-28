@@ -82,13 +82,15 @@ func validateMappingDescription(description string) error {
 	return nil
 }
 
-// ListUSBMappings lists the cluster's USB mappings.
+// listMappings reads GET /cluster/mapping/<kind> — "usb" or "pci" — into
+// out, the kind's own slice type.
 //
 // With checkNode set, Proxmox runs the listing ON that node (the endpoint's
 // proxyto_callback) and reports, per mapping, what would stop it working there:
 // a warning "No mapping for node <n>." when it has no entry for that node, and
-// an error "Invalid configuration: …" when its entry names hardware the node
-// does not have. Without it, no mapping carries any.
+// an error "Invalid configuration: …" when an entry names hardware the node
+// does not have. Without it, no mapping carries any. The two kinds report
+// these under different keys, which is why out is typed by the caller.
 //
 // Proxmox lists only the mappings the token holds Mapping.Modify, Mapping.Use
 // or Mapping.Audit on, so a token without them gets an empty list, not a 403.
@@ -97,19 +99,28 @@ func validateMappingDescription(description string) error {
 // it is held to pve-node because Proxmox proxies the request to the node it
 // names and validates it with that same format, so the check refuses nothing
 // Proxmox would accept.
-func (c *Client) ListUSBMappings(ctx context.Context, checkNode string) ([]USBMapping, error) {
-	path := "/cluster/mapping/usb"
+func (c *Client) listMappings(ctx context.Context, kind, label, checkNode string, out any) error {
+	path := "/cluster/mapping/" + kind
 	if checkNode != "" {
 		if !mappingNodeRe.MatchString(checkNode) {
-			return nil, fmt.Errorf("%w: node name %q is not a Proxmox node name", ErrInvalidInput, checkNode)
+			return fmt.Errorf("%w: node name %q is not a Proxmox node name", ErrInvalidInput, checkNode)
 		}
 		q := url.Values{}
 		q.Set("check-node", checkNode)
 		path += "?" + q.Encode()
 	}
+	if err := c.do(ctx, path, out); err != nil {
+		return fmt.Errorf("list %s mappings: %w", label, err)
+	}
+	return nil
+}
+
+// ListUSBMappings lists the cluster's USB mappings, each checked against
+// checkNode when it is set (listMappings); the checks are in Errors.
+func (c *Client) ListUSBMappings(ctx context.Context, checkNode string) ([]USBMapping, error) {
 	var mappings []USBMapping
-	if err := c.do(ctx, path, &mappings); err != nil {
-		return nil, fmt.Errorf("list USB mappings: %w", err)
+	if err := c.listMappings(ctx, "usb", "USB", checkNode, &mappings); err != nil {
+		return nil, err
 	}
 	for i := range mappings {
 		if mappings[i].Map == nil {

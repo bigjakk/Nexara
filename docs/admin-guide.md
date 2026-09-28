@@ -76,7 +76,7 @@ A token Nexara minted itself already holds everything it needs — onboarding gr
 
 For full functionality, the token needs `Administrator` on `/`: grant the role to the token's user and create the token with privilege separation off (`--privsep 0`, or **Privilege Separation** unchecked), as in [Creating a Proxmox API Token](installation.md#creating-a-proxmox-api-token). A privilege-separated token holds only what both it and its user are granted, so it would need the grant twice. For read-only monitoring, `PVEAuditor` is sufficient.
 
-`PVEAdmin` covers most of what Nexara does, but it lacks seven privileges that `Administrator` has — `Sys.Modify`, `Sys.PowerMgmt`, `Sys.Incoming`, `Sys.AccessNetwork`, `Realm.Allocate`, `Permissions.Modify` and `Mapping.Modify` — and whatever needs one of them either fails or, where Nexara treats the step as optional, is skipped: node power actions need `Sys.PowerMgmt`, creating a USB mapping for [device passthrough](#device-passthrough) needs `Mapping.Modify`, a rolling update cannot pause Proxmox VE 9.2's native CRS auto-rebalance without `Sys.Modify` on `/` and drains with it still on, and some backup jobs cannot be run on demand (see [Backup Jobs](#backup-jobs)).
+`PVEAdmin` covers most of what Nexara does, but it lacks seven privileges that `Administrator` has — `Sys.Modify`, `Sys.PowerMgmt`, `Sys.Incoming`, `Sys.AccessNetwork`, `Realm.Allocate`, `Permissions.Modify` and `Mapping.Modify` — and whatever needs one of them either fails or, where Nexara treats the step as optional, is skipped: node power actions need `Sys.PowerMgmt`, creating a USB or PCI mapping for [device passthrough](#device-passthrough) needs `Mapping.Modify`, a rolling update cannot pause Proxmox VE 9.2's native CRS auto-rebalance without `Sys.Modify` on `/` and drains with it still on, and some backup jobs cannot be run on demand (see [Backup Jobs](#backup-jobs)).
 
 **Grant the role on `/` itself**, not only on `/nodes`, `/vms` or `/storage`. Proxmox answers some cluster-wide reads only to a holder of `Sys.Audit` on `/` — HA status, the HA resource, group and rule listings, and the backup job definitions among them — and Nexara will not act without HA state:
 
@@ -208,7 +208,7 @@ Permissions follow the pattern `action:resource`. Examples:
 | Permission | Description |
 |------------|-------------|
 | `view:cluster` | View clusters |
-| `manage:cluster` | Create, update clusters |
+| `manage:cluster` | Create, update clusters; create, change and delete the resource mappings used for [device passthrough](#device-passthrough) — a PCI mapping can name any device of a node, its own disk and network controllers included |
 | `delete:cluster` | Delete clusters |
 | `manage:vm` | Create, update VM configuration |
 | `execute:vm` | Start, stop, migrate, snapshot VMs |
@@ -560,7 +560,7 @@ use the per-guest migrate or bulk-migrate flow for those.
 
 ## Device Passthrough
 
-Proxmox lets only the `root@pam` user pass a USB device straight through to a VM, by vendor/device ID or by port (`usbN: host=…`), and it checks for that user by name. An API token is `user@realm!tokenname`, never `root@pam`, even when root owns it. Nexara connects to every cluster with an API token, so it passes a USB device through the one way Proxmox allows a token: a cluster **resource mapping** (Datacenter → Resource Mappings in Proxmox), which the VM names as `usbN: mapping=<name>`.
+Proxmox lets only the `root@pam` user pass a host device straight through to a VM — a USB device by vendor/device ID or by port (`usbN: host=…`), or a PCI device by its address (`hostpciN: 0000:01:00.0`) — and it checks for that user by name. An API token is `user@realm!tokenname`, never `root@pam`, even when root owns it. Nexara connects to every cluster with an API token, so it passes a device through the one way Proxmox allows a token: a cluster **resource mapping** (Datacenter → Resource Mappings in Proxmox), which the VM names as `usbN: mapping=<name>` or `hostpciN: mapping=<name>`.
 
 ### USB Devices
 
@@ -580,6 +580,21 @@ Two things work differently from passing a device straight through in Proxmox:
 
 A USB device passed through directly in Proxmox (`host=…`) is listed in the Hardware tab under its device name, and the row says that only `root@pam` can remove it: Proxmox refuses the change to anyone else. Remove it in Proxmox, then add the device again here if you want Nexara to manage it.
 
+### PCI Devices
+
+**Add Device → PCI Device** offers:
+
+- **Mapped device** — a PCI mapping that already exists, with what Proxmox reports for the VM's node: a warning when the mapping has no entry for that node, an error when an entry names a device the node does not have or that no longer matches it. A PCI mapping may have several entries for one node; the VM then gets the first of those devices that is not in use when it starts.
+- **Host device** — a PCI device of the VM's node, listed by IOMMU group. Tick **All functions** to pass the whole device through, every function as one — a graphics card with its audio function, for example.
+
+For a host device, Nexara reuses a mapping whose only entry for the VM's node passes exactly that device, or creates one as it does for USB, with the same permissions. Nexara builds the new mapping from what the node itself reports for the device — its vendor and device IDs, its subsystem IDs, its IOMMU group, and whether it can provide mediated devices — because Proxmox refuses to start a VM whose device does not match its mapping in every one of them. If the node's device list is not available, type the device's address instead, for example `0000:01:00.0`: Nexara still reads the device from the node when it creates the mapping.
+
+The dialog also offers **PCIe**, only when the VM uses the q35 machine type, where it is ticked by default (Proxmox refuses to start any other VM with it); **ROM-BAR**, on by default; and **Primary GPU**. It never sets a ROM file, which Proxmox lets only `root@pam` set.
+
+**A passed-through device leaves the node.** When the VM starts, Proxmox takes the device away from the node's own driver — and every other device in its IOMMU group except PCI-to-PCI bridges — whether or not the node is using it. A PCI mapping can name any device the node reports, including the controller its own disks are on or the network card its cluster network runs over, and anyone with `manage:vm` can then attach it to a VM. Passing such a device through can cut the node off its disks or its cluster, and gives the guest direct access to whatever is attached to it. So the dialog lists what it can tell — a storage, network or USB controller, and the other devices in the IOMMU group (its device list leaves out memory controllers, processors, and host and ISA bridges, which Proxmox takes too if they share the group) — and says so when it cannot tell at all, for an address you typed or a device its list does not hold; it adds the device only once you confirm the node does not need it. It weighs the VM's current node: a mapping's devices on other nodes are taken from those nodes when the VM starts there. Grant `manage:cluster`, which creates mappings, and `manage:vm` with that in mind.
+
+A PCI device passed through directly in Proxmox, or one with a ROM file, says in its row that only `root@pam` can remove it, as a direct USB passthrough does. The **Resource Mappings** tab below lists USB mappings; manage PCI mappings in Proxmox.
+
 ### Managing mappings
 
 A cluster's **Resource Mappings** tab lists its USB mappings with each node entry: the node, the device's vendor:product ID, and the port, or *Any port* for a mapping that follows the device. Every entry shows what Proxmox reports when it checks the mapping **on that node**: *OK*, the problem (the device is missing, or a different device is on the port), or *Not checked* with the reason — the node is offline or not a node of this cluster, it did not answer in time, the mappings changed while they were being checked, or Nexara could not read the cluster's node list (it then checks no node rather than guess which names are real). A node that was not checked is never shown as OK. Proxmox lists only the mappings the cluster's API token may see.
@@ -598,7 +613,7 @@ A mapping has at most one entry per node. Proxmox itself would store two, but it
 
 **A save can conflict.** Every change — deletes included — is checked against the mappings as the tab showed them. If anything changed in the meantime — in Proxmox or in another Nexara window — nothing is saved or deleted: the tab reloads the mappings and you check and try again. For a delete, Nexara makes that check itself just before asking Proxmox, whose delete has no such check: a delete confirmed as removing a mapping's only entry is refused if an entry was added since the tab loaded, though not one added in the instant between that check and the delete. Proxmox keeps all USB mappings in one file and checks the whole file, so a change to a *different* USB mapping also makes a save conflict.
 
-**Who can attach a mapping.** Nexara reaches Proxmox with one API token, which can use every mapping in the cluster, so Nexara's own permission is the only gate: anyone who can manage a VM (`manage:vm`) can attach any existing mapping to any VM in that cluster: a USB device, a PCI device (through the API), or a VirtioFS directory. Proxmox checks `Mapping.Use` on each mapping for a user signed in to it; Nexara has no per-mapping permission, just as `manage:storage` covers every storage. Bear it in mind before giving a custom role `manage:vm`.
+**Who can attach a mapping.** Nexara reaches Proxmox with one API token, which can use every mapping in the cluster, so Nexara's own permission is the only gate: anyone who can manage a VM (`manage:vm`) can attach any existing mapping to any VM in that cluster: a USB device, a PCI device, or a VirtioFS directory. Proxmox checks `Mapping.Use` on each mapping for a user signed in to it; Nexara has no per-mapping permission, just as `manage:storage` covers every storage. Bear it in mind before giving a custom role `manage:vm`.
 
 ---
 

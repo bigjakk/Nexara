@@ -308,6 +308,7 @@ func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 		"GET " + clusterScope + "/nodes/:node_name/cpu-flags":     true,
 		"GET " + clusterScope + "/nodes/:node_name/isos":          true,
 		"GET " + clusterScope + "/nodes/:node_name/usb-mappings":  true,
+		"GET " + clusterScope + "/nodes/:node_name/pci-mappings":  true,
 	}
 	s := newRouteStubServer(t)
 	seen := 0

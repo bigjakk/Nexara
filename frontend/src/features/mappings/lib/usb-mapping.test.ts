@@ -150,6 +150,14 @@ describe("suggestMappingName", () => {
     expect(suggestMappingName("x", new Set())).toBe("usb-device");
   });
 
+  it("starts a name with the kind it is given", () => {
+    expect(suggestMappingName("2080 Ti", new Set(), "pci")).toBe("pci-2080-ti");
+    expect(suggestMappingName("", new Set(), "pci")).toBe("pci-device");
+    expect(suggestMappingName("Example GPU", new Set(["example-gpu"]), "pci")).toBe(
+      "example-gpu-2",
+    );
+  });
+
   it("caps the length without ending on a dash", () => {
     const name = suggestMappingName(
       "Example Very Long Dual Serial Bridge Controller",
