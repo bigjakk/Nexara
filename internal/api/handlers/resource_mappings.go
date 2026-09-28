@@ -253,36 +253,72 @@ func (h *VMHandler) CreatePCIMapping(c fiber.Ctx, p *apischema.Params) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
+// --- The kinds, generically ---------------------------------------------------
+
+// mappingView is what the flows below need to know of one kind of mapping:
+// where its type keeps the id, the file digest, the description, the node
+// entries and a node's check. USB and PCI mappings carry the same things, each
+// under a type of its own — the check under a key of its own, "errors" and
+// "checks" — so the listing's check fan-out and merge and the delete are
+// written once, over a view. The usage scan is written once too, over the
+// kind's config keys instead (scanMappingUsage).
+type mappingView[M any] struct {
+	// kind names the kind in messages: "USB" or "PCI".
+	kind        string
+	id          func(M) string
+	digest      func(M) string
+	description func(M) string
+	entries     func(M) []string
+	checks      func(M) []proxmox.MappingCheck
+}
+
+// usbMappingView reads a USB mapping, whose check is under "errors".
+var usbMappingView = mappingView[proxmox.USBMapping]{
+	kind:        "USB",
+	id:          func(m proxmox.USBMapping) string { return m.ID },
+	digest:      func(m proxmox.USBMapping) string { return m.Digest },
+	description: func(m proxmox.USBMapping) string { return m.Description },
+	entries:     func(m proxmox.USBMapping) []string { return m.Map },
+	checks:      func(m proxmox.USBMapping) []proxmox.MappingCheck { return m.Errors },
+}
+
 // --- The cluster-wide listing -------------------------------------------------
 
-// usbMappingCheckTimeout bounds each call the cluster-wide listing makes per
-// node. Proxmox runs a check ON the node it names (the listing's
-// proxyto_callback), so a node that is up in the cluster's view but not
-// answering would otherwise hold the whole page for the client's five-minute
-// timeout: fiber.Ctx.Context() carries no deadline of its own. A variable
-// only so the tests can shorten it.
+// usbMappingCheckTimeout bounds each call a cluster-wide listing makes per
+// node, of either kind, and a usage scan's read of the nodes' status. Proxmox
+// runs a check ON the node it names (the listing's proxyto_callback), so a
+// node that is up in the cluster's view but not answering would otherwise hold
+// the whole page for the client's five-minute timeout: fiber.Ctx.Context()
+// carries no deadline of its own. A variable only so the tests can shorten it,
+// named for the USB tests that do; the flows read it when they run, so both
+// kinds see what a test set.
 var usbMappingCheckTimeout = 10 * time.Second
 
 // usbMappingCheckBudget bounds all of one listing's node checks together, so
 // a cluster of slow nodes cannot hold the page for a timeout per node. A node
-// not asked, or not answered, by then is reported unchecked. A variable only so
-// the tests can shorten it.
+// not asked, or not answered, by then is reported unchecked. Both kinds', and
+// a variable for the tests, as usbMappingCheckTimeout is.
 var usbMappingCheckBudget = 20 * time.Second
 
-// usbMappingCheckConcurrency bounds how many nodes are checked at once.
-const usbMappingCheckConcurrency = 4
+// mappingCheckConcurrency bounds how many nodes are checked at once.
+const mappingCheckConcurrency = 4
 
-// clusterUSBMapping is one USB mapping as the cluster-wide listing answers it:
-// the mapping as Proxmox stores it, and for every node one of its entries
-// names, either what Proxmox reported checking it there or why it was not
-// checked. Every such node is in exactly one of the two maps — a node that
+// usbMappingCheckConcurrency is mappingCheckConcurrency by the name the USB
+// tests use.
+const usbMappingCheckConcurrency = mappingCheckConcurrency
+
+// clusterMapping is one mapping as a cluster-wide listing answers it, of
+// either kind: the mapping as Proxmox stores it, and for every node one of its
+// entries names, either what Proxmox reported checking it there or why it was
+// not checked. Every such node is in exactly one of the two maps — a node that
 // could not be checked is never reported as a clean check.
-type clusterUSBMapping struct {
+type clusterMapping struct {
 	ID          string   `json:"id"`
 	Description string   `json:"description"`
 	Map         []string `json:"map"`
-	// Digest is the whole usb.cfg's, from the same read as Map. An update
-	// sends it back, so it conflicts if any USB mapping changed since.
+	// Digest is the whole config file's — usb.cfg's or pci.cfg's — from the
+	// same read as Map. An update sends it back, so it conflicts if any
+	// mapping of the kind changed since.
 	Digest string `json:"digest"`
 	// NodeChecks is what Proxmox reported for this mapping running the check
 	// on that node: an empty list is a clean check.
@@ -291,12 +327,16 @@ type clusterUSBMapping struct {
 	Unchecked map[string]string `json:"unchecked"`
 }
 
-// usbMappingNodeCheck is one node's check-node listing, or why there is none.
-type usbMappingNodeCheck struct {
-	mappings []proxmox.USBMapping
+// mappingNodeCheck is one node's check-node listing of a kind, or why there
+// is none.
+type mappingNodeCheck[M any] struct {
+	mappings []M
 	// reason is set, and mappings unused, when the node was not checked.
 	reason string
 }
+
+// usbMappingNodeCheck is one node's USB check-node listing.
+type usbMappingNodeCheck = mappingNodeCheck[proxmox.USBMapping]
 
 // usbMappingLister reads the cluster's USB mappings, optionally checked on a
 // node. The interfaces here are the parts of the Proxmox client each flow
@@ -305,15 +345,26 @@ type usbMappingLister interface {
 	ListUSBMappings(ctx context.Context, checkNode string) ([]proxmox.USBMapping, error)
 }
 
-// usbMappingReader is what the listing and the usage scan read through.
-type usbMappingReader interface {
-	usbMappingLister
+// nodeLister reads the cluster's nodes and their status.
+type nodeLister interface {
 	GetNodes(ctx context.Context) ([]proxmox.NodeListEntry, error)
+}
+
+// guestConfigReader is what a usage scan reads, for either kind: the cluster's
+// guests, its nodes' status, and each VM's configuration.
+type guestConfigReader interface {
+	nodeLister
 	GetClusterResources(ctx context.Context, resourceType string) ([]proxmox.ClusterResource, error)
 	GetVMConfig(ctx context.Context, node string, vmid int) (proxmox.VMConfig, error)
 }
 
-// usbMappingDeleter is what the delete flow reads and writes.
+// usbMappingReader is what the USB listing and usage scan read through.
+type usbMappingReader interface {
+	usbMappingLister
+	guestConfigReader
+}
+
+// usbMappingDeleter is what the USB delete flow reads and writes.
 type usbMappingDeleter interface {
 	usbMappingLister
 	DeleteUSBMapping(ctx context.Context, id string) error
@@ -349,13 +400,13 @@ func eachWithin[T any](budget context.Context, workers int, items []T, work, ski
 	wg.Wait()
 }
 
-// usbMapEntryNode is the node a stored entry names, or "". Deliberately
-// lenient — the first node= value, whatever else the entry holds — because it
-// only decides which node to ask: the node's own check is the authority on
-// the entry. An entry Proxmox cannot parse is one its check skips (a warning
-// in get_node_mapping), so it reports the node as having no entry, and that
-// is what the page shows.
-func usbMapEntryNode(raw string) string {
+// mapEntryNode is the node a stored entry names, of either kind, or "".
+// Deliberately lenient — the first node= value, whatever else the entry holds
+// — because it only decides which node to ask: the node's own check is the
+// authority on the entry. An entry Proxmox cannot parse is left to that check
+// (USB's skips it with a warning in get_node_mapping, and then reports the
+// node as having no entry), and what it reports is what the page shows.
+func mapEntryNode(raw string) string {
 	for _, part := range strings.Split(raw, ",") {
 		if node, ok := strings.CutPrefix(part, "node="); ok {
 			return node
@@ -364,12 +415,17 @@ func usbMapEntryNode(raw string) string {
 	return ""
 }
 
-// usbMappingEntryNodes is every node an entry of the listing names, each once.
-func usbMappingEntryNodes(mappings []proxmox.USBMapping) []string {
+// usbMapEntryNode is mapEntryNode by the name the USB tests use.
+func usbMapEntryNode(raw string) string {
+	return mapEntryNode(raw)
+}
+
+// mappingEntryNodes is every node an entry of the listing names, each once.
+func mappingEntryNodes[M any](view mappingView[M], mappings []M) []string {
 	var nodes []string
 	for _, m := range mappings {
-		for _, raw := range m.Map {
-			if node := usbMapEntryNode(raw); node != "" && !slices.Contains(nodes, node) {
+		for _, raw := range view.entries(m) {
+			if node := mapEntryNode(raw); node != "" && !slices.Contains(nodes, node) {
 				nodes = append(nodes, node)
 			}
 		}
@@ -377,9 +433,14 @@ func usbMappingEntryNodes(mappings []proxmox.USBMapping) []string {
 	return nodes
 }
 
-// usbMappingNodeState is why a node is not worth asking, or "" when it is,
-// from the cluster's node list: its members and their status.
-func usbMappingNodeState(node string, members map[string]string) string {
+// usbMappingEntryNodes is mappingEntryNodes for USB mappings.
+func usbMappingEntryNodes(mappings []proxmox.USBMapping) []string {
+	return mappingEntryNodes(usbMappingView, mappings)
+}
+
+// mappingNodeState is why a node is not worth asking, or "" when it is, from
+// the cluster's node list: its members and their status.
+func mappingNodeState(node string, members map[string]string) string {
 	status, member := members[node]
 	switch {
 	case !member:
@@ -393,9 +454,9 @@ func usbMappingNodeState(node string, members map[string]string) string {
 	}
 }
 
-// checkUSBMappingNodes runs the check-node listing on each node that the
-// mappings name and that is an online member of the cluster, a few at a time,
-// each under its own deadline and all within usbMappingCheckBudget, and
+// checkMappingNodes runs a kind's check-node listing, list, on each node that
+// the mappings name and that is an online member of the cluster, a few at a
+// time, each under its own deadline and all within usbMappingCheckBudget, and
 // returns what each answered — or why it was not asked or did not answer.
 // Every node in nodes gets an entry.
 //
@@ -403,9 +464,12 @@ func usbMappingNodeState(node string, members map[string]string) string {
 // node-name-shaped host — Proxmox does not check it against the cluster — and
 // Proxmox resolves a name that is not a member through DNS and connects to it,
 // so asking blind would let whoever stored the names point the cluster at
-// hosts of their choosing on every page load.
-func checkUSBMappingNodes(ctx context.Context, px usbMappingReader, nodes []string) map[string]usbMappingNodeCheck {
-	out := make(map[string]usbMappingNodeCheck, len(nodes))
+// hosts of their choosing on every page load. list is a method expression, run
+// on px, so the node list that decides who is asked and the checks it lets
+// through always go to the same cluster.
+func checkMappingNodes[M any, P nodeLister](ctx context.Context, px P, list func(P, context.Context, string) ([]M, error),
+	view mappingView[M], nodes []string) map[string]mappingNodeCheck[M] {
+	out := make(map[string]mappingNodeCheck[M], len(nodes))
 	if len(nodes) == 0 {
 		return out
 	}
@@ -416,9 +480,9 @@ func checkUSBMappingNodes(ctx context.Context, px usbMappingReader, nodes []stri
 	entries, statusErr := px.GetNodes(statusCtx)
 	cancelStatus()
 	if statusErr != nil {
-		slog.Warn("USB mapping listing: could not read the cluster's nodes; checking none", "error", statusErr)
+		slog.Warn(view.kind+" mapping listing: could not read the cluster's nodes; checking none", "error", statusErr)
 		for _, node := range nodes {
-			out[node] = usbMappingNodeCheck{reason: "Could not read the cluster's nodes, so no node was checked."}
+			out[node] = mappingNodeCheck[M]{reason: "Could not read the cluster's nodes, so no node was checked."}
 		}
 		return out
 	}
@@ -431,43 +495,48 @@ func checkUSBMappingNodes(ctx context.Context, px usbMappingReader, nodes []stri
 	// nothing; from the fan-out on, out is written only under mu.
 	ask := make([]string, 0, len(nodes))
 	for _, node := range nodes {
-		if reason := usbMappingNodeState(node, members); reason != "" {
-			out[node] = usbMappingNodeCheck{reason: reason}
+		if reason := mappingNodeState(node, members); reason != "" {
+			out[node] = mappingNodeCheck[M]{reason: reason}
 			continue
 		}
 		ask = append(ask, node)
 	}
 
 	var mu sync.Mutex
-	record := func(node string, check usbMappingNodeCheck) {
+	record := func(node string, check mappingNodeCheck[M]) {
 		mu.Lock()
 		out[node] = check
 		mu.Unlock()
 	}
-	outOfTime := usbMappingOutOfTime("The checks", usbMappingCheckBudget)
-	eachWithin(budget, usbMappingCheckConcurrency, ask,
+	outOfTime := mappingOutOfTime("The checks", usbMappingCheckBudget)
+	eachWithin(budget, mappingCheckConcurrency, ask,
 		func(node string) {
 			callCtx, cancel := context.WithTimeout(budget, usbMappingCheckTimeout)
 			defer cancel()
-			mappings, err := px.ListUSBMappings(callCtx, node)
+			mappings, err := list(px, callCtx, node)
 			switch {
 			case err == nil:
-				record(node, usbMappingNodeCheck{mappings: mappings})
+				record(node, mappingNodeCheck[M]{mappings: mappings})
 			case budget.Err() != nil:
-				record(node, usbMappingNodeCheck{reason: outOfTime})
+				record(node, mappingNodeCheck[M]{reason: outOfTime})
 			default:
-				record(node, usbMappingNodeCheck{reason: unansweredReason(callCtx, err, usbMappingCheckTimeout)})
+				record(node, mappingNodeCheck[M]{reason: unansweredReason(callCtx, err, usbMappingCheckTimeout)})
 			}
 		},
 		func(node string) {
-			record(node, usbMappingNodeCheck{reason: outOfTime})
+			record(node, mappingNodeCheck[M]{reason: outOfTime})
 		})
 	return out
 }
 
-// usbMappingOutOfTime is an unchecked item's reason when the whole run's
-// budget ran out before it was asked, or while it was.
-func usbMappingOutOfTime(what string, budget time.Duration) string {
+// checkUSBMappingNodes is checkMappingNodes for USB mappings.
+func checkUSBMappingNodes(ctx context.Context, px usbMappingReader, nodes []string) map[string]usbMappingNodeCheck {
+	return checkMappingNodes(ctx, px, usbMappingReader.ListUSBMappings, usbMappingView, nodes)
+}
+
+// mappingOutOfTime is an unchecked item's reason when the whole run's budget
+// ran out before it was asked, or while it was.
+func mappingOutOfTime(what string, budget time.Duration) string {
 	return fmt.Sprintf("%s ran out of their %s before this one answered.", what, budget)
 }
 
@@ -486,34 +555,36 @@ func unansweredReason(ctx context.Context, err error, timeout time.Duration) str
 	return "The request failed."
 }
 
-// mergeUSBMappingChecks folds the per-node checks into the plain listing.
+// mergeMappingChecks folds the per-node checks into the plain listing. It
+// answers one mapping for each of plain, in plain's order, so a caller can
+// pair each answer with the mapping it came from by position.
 //
-// A node's check is used for a mapping only when it came from the same
-// usb.cfg as the listing — the digests match. Otherwise the check describes a
+// A node's check is used for a mapping only when it came from the same config
+// file as the listing — the digests match. Otherwise the check describes a
 // file the page is not showing, and the node is reported unchecked rather than
 // letting, say, a check of an entry since replaced vouch for the new one.
-func mergeUSBMappingChecks(plain []proxmox.USBMapping, checks map[string]usbMappingNodeCheck) []clusterUSBMapping {
-	out := make([]clusterUSBMapping, 0, len(plain))
+func mergeMappingChecks[M any](view mappingView[M], plain []M, checks map[string]mappingNodeCheck[M]) []clusterMapping {
+	out := make([]clusterMapping, 0, len(plain))
 	for _, m := range plain {
-		cm := clusterUSBMapping{
-			ID:          m.ID,
-			Description: m.Description,
-			Map:         m.Map,
-			Digest:      m.Digest,
+		cm := clusterMapping{
+			ID:          view.id(m),
+			Description: view.description(m),
+			Map:         view.entries(m),
+			Digest:      view.digest(m),
 			NodeChecks:  map[string][]proxmox.MappingCheck{},
 			Unchecked:   map[string]string{},
 		}
 		if cm.Map == nil {
 			cm.Map = []string{}
 		}
-		for _, raw := range m.Map {
-			node := usbMapEntryNode(raw)
+		for _, raw := range cm.Map {
+			node := mapEntryNode(raw)
 			if node == "" {
 				continue
 			}
 			check, asked := checks[node]
 			if !asked {
-				// Not reachable through ListClusterUSBMappings, which asks
+				// Not reachable through the cluster-wide listings, which ask
 				// every node an entry names; said rather than assumed clean.
 				cm.Unchecked[node] = "Nexara did not check this node."
 				continue
@@ -522,14 +593,14 @@ func mergeUSBMappingChecks(plain []proxmox.USBMapping, checks map[string]usbMapp
 				cm.Unchecked[node] = check.reason
 				continue
 			}
-			i := slices.IndexFunc(check.mappings, func(c proxmox.USBMapping) bool { return c.ID == m.ID })
+			i := slices.IndexFunc(check.mappings, func(c M) bool { return view.id(c) == cm.ID })
 			switch {
 			case i < 0:
 				cm.Unchecked[node] = "The node's check did not list this mapping."
-			case check.mappings[i].Digest != m.Digest:
-				cm.Unchecked[node] = "The USB mappings changed while they were being checked. Reload to check again."
+			case view.digest(check.mappings[i]) != cm.Digest:
+				cm.Unchecked[node] = "The " + view.kind + " mappings changed while they were being checked. Reload to check again."
 			default:
-				errs := check.mappings[i].Errors
+				errs := view.checks(check.mappings[i])
 				if errs == nil {
 					errs = []proxmox.MappingCheck{}
 				}
@@ -539,6 +610,11 @@ func mergeUSBMappingChecks(plain []proxmox.USBMapping, checks map[string]usbMapp
 		out = append(out, cm)
 	}
 	return out
+}
+
+// mergeUSBMappingChecks is mergeMappingChecks for USB mappings.
+func mergeUSBMappingChecks(plain []proxmox.USBMapping, checks map[string]usbMappingNodeCheck) []clusterMapping {
+	return mergeMappingChecks(usbMappingView, plain, checks)
 }
 
 // ListClusterUSBMappings handles GET /api/v1/clusters/:cluster_id/usb-mappings.
@@ -708,28 +784,30 @@ func usbMappingUpdateDetails(written []string, description *string) json.RawMess
 	return details
 }
 
-// findUSBMapping reads the mapping id from the plain listing: the mapping when
-// it is there, nil when the listing does not hold it, and the error when the
-// listing could not be read. fileDigest is usb.cfg's digest, which every
-// listed mapping carries — "" only when the listing holds no mapping at all.
-func findUSBMapping(ctx context.Context, px usbMappingLister, id string) (mapping *proxmox.USBMapping, fileDigest string, err error) {
-	mappings, err := px.ListUSBMappings(ctx, "")
+// findMapping reads the mapping id from a kind's plain listing, list run on
+// px: the mapping when it is there, nil when the listing does not hold it, and
+// the error when the listing could not be read. fileDigest is the kind's
+// config file digest, which every listed mapping carries — "" only when the
+// listing holds no mapping at all.
+func findMapping[M, P any](ctx context.Context, px P, list func(P, context.Context, string) ([]M, error),
+	view mappingView[M], id string) (mapping *M, fileDigest string, err error) {
+	mappings, err := list(px, ctx, "")
 	if err != nil {
 		return nil, "", err
 	}
 	for i := range mappings {
 		if fileDigest == "" {
-			fileDigest = mappings[i].Digest
+			fileDigest = view.digest(mappings[i])
 		}
-		if mappings[i].ID == id {
+		if view.id(mappings[i]) == id {
 			mapping = &mappings[i]
 		}
 	}
 	return mapping, fileDigest, nil
 }
 
-// classifyUSBMappingDelete decides what a completed DELETE of a USB mapping
-// may claim, from the pre-delete snapshot attempt. The HA-rule precedent,
+// classifyMappingDelete decides what a completed DELETE of a mapping may
+// claim, from the pre-delete snapshot attempt. The HA-rule precedent,
 // classifyHARuleDelete in ha.go, for the same reason: Proxmox's delete
 // succeeds whether or not the mapping exists, so its 200 says the mapping is
 // gone now, never that this request removed it.
@@ -738,7 +816,7 @@ func findUSBMapping(ctx context.Context, px usbMappingLister, id string) (mappin
 // no digest, so this narrows the doubt rather than closing it: a mapping
 // created or deleted by someone else between the two reads is misreported.
 // "already_deleted" is evidence of a no-op, not proof of one.
-func classifyUSBMappingDelete(snapshot *proxmox.USBMapping, snapErr error) (action string, priorStateUnknown bool) {
+func classifyMappingDelete[M any](snapshot *M, snapErr error) (action string, priorStateUnknown bool) {
 	switch {
 	case snapshot != nil:
 		return "deleted", false
@@ -749,6 +827,12 @@ func classifyUSBMappingDelete(snapshot *proxmox.USBMapping, snapErr error) (acti
 	default:
 		return "already_deleted", false
 	}
+}
+
+// classifyUSBMappingDelete is classifyMappingDelete for a USB mapping, by the
+// name the USB tests use.
+func classifyUSBMappingDelete(snapshot *proxmox.USBMapping, snapErr error) (action string, priorStateUnknown bool) {
+	return classifyMappingDelete(snapshot, snapErr)
 }
 
 // usbMappingDeleteDetails is the audit detail of a completed delete: the
@@ -771,50 +855,61 @@ func usbMappingDeleteDetails(snapshot *proxmox.USBMapping, priorStateUnknown boo
 	return details
 }
 
-// usbMappingDeleteStaleMessage is the 409 a delete answers when the digest it
-// carried no longer matches usb.cfg. Nothing was deleted.
-const usbMappingDeleteStaleMessage = "The cluster's USB mappings changed since they were loaded, so nothing " +
-	"was deleted — reload and try again. A change to any USB mapping counts, not only to this one."
+// mappingDeleteStaleMessage is the 409 a delete of a kind's mapping answers
+// when the digest it carried no longer matches the kind's config file.
+// Nothing was deleted.
+func mappingDeleteStaleMessage(kind string) string {
+	return "The cluster's " + kind + " mappings changed since they were loaded, so nothing was deleted — " +
+		"reload and try again. A change to any " + kind + " mapping counts, not only to this one."
+}
 
-// usbMappingDeleteOutcome is what a completed delete may claim, for its
-// audit row.
-type usbMappingDeleteOutcome struct {
-	snapshot          *proxmox.USBMapping
+// mappingDeleteOutcome is what a completed delete may claim, for its audit
+// row.
+type mappingDeleteOutcome[M any] struct {
+	snapshot          *M
 	snapErr           error
 	action            string
 	priorStateUnknown bool
 }
 
-// deleteUSBMapping is the delete flow: a snapshot of the mapping first — the
-// audit row's entries, and what tells a deletion from a no-op — then Proxmox's
-// delete.
+// usbMappingDeleteOutcome is what a completed delete of a USB mapping may
+// claim.
+type usbMappingDeleteOutcome = mappingDeleteOutcome[proxmox.USBMapping]
+
+// deleteMapping is the delete flow, for either kind: a snapshot of the
+// mapping first, through the kind's plain listing, list — the audit row's
+// entries, and what tells a deletion from a no-op — then Proxmox's delete,
+// del. Both are method expressions of the kind's own client interface, P, run
+// on px: an interface that holds only its kind's calls cannot pair one kind's
+// listing and digest with the other kind's delete.
 //
-// With a digest, the delete is refused with 409 unless usb.cfg still has the
-// digest the caller's listing had — compared whether or not the mapping is
-// still listed, since one deleted and made again since is a change too.
-// Proxmox's delete takes no digest, so this is Nexara's check, made against
-// its own read: it narrows the window to the round trip between that read
-// and the delete rather than closing it. It is what keeps a delete aimed at
-// the mapping the operator was shown — its entries, say — from removing one
+// With a digest, the delete is refused with 409 unless the kind's config file
+// still has the digest the caller's listing had — compared whether or not the
+// mapping is still listed, since one deleted and made again since is a change
+// too. Proxmox's delete takes no digest, so this is Nexara's check, made
+// against its own read: it narrows the window to the round trip between that
+// read and the delete rather than closing it. It is what keeps a delete aimed
+// at the mapping the operator was shown — its entries, say — from removing one
 // that changed meanwhile. A snapshot that could not be read cannot be
 // compared, so a delete asked to compare does not go ahead. Only a listing
 // with no mapping at all carries no digest to compare: then the delete is the
 // no-op it would have been without one.
-func deleteUSBMapping(ctx context.Context, px usbMappingDeleter, id, digest string) (usbMappingDeleteOutcome, error) {
-	snapshot, fileDigest, snapErr := findUSBMapping(ctx, px, id)
+func deleteMapping[M, P any](ctx context.Context, px P, list func(P, context.Context, string) ([]M, error),
+	del func(P, context.Context, string) error, view mappingView[M], id, digest string) (mappingDeleteOutcome[M], error) {
+	snapshot, fileDigest, snapErr := findMapping(ctx, px, list, view, id)
 	if digest != "" {
 		switch {
 		case snapErr != nil:
-			return usbMappingDeleteOutcome{}, mapProxmoxError(snapErr)
+			return mappingDeleteOutcome[M]{}, mapProxmoxError(snapErr)
 		case fileDigest != "" && fileDigest != digest:
-			return usbMappingDeleteOutcome{}, fiber.NewError(fiber.StatusConflict, usbMappingDeleteStaleMessage)
+			return mappingDeleteOutcome[M]{}, fiber.NewError(fiber.StatusConflict, mappingDeleteStaleMessage(view.kind))
 		}
 	}
-	if err := px.DeleteUSBMapping(ctx, id); err != nil {
-		return usbMappingDeleteOutcome{}, mapProxmoxError(err)
+	if err := del(px, ctx, id); err != nil {
+		return mappingDeleteOutcome[M]{}, mapProxmoxError(err)
 	}
-	action, priorStateUnknown := classifyUSBMappingDelete(snapshot, snapErr)
-	return usbMappingDeleteOutcome{
+	action, priorStateUnknown := classifyMappingDelete(snapshot, snapErr)
+	return mappingDeleteOutcome[M]{
 		snapshot:          snapshot,
 		snapErr:           snapErr,
 		action:            action,
@@ -822,14 +917,21 @@ func deleteUSBMapping(ctx context.Context, px usbMappingDeleter, id, digest stri
 	}, nil
 }
 
+// deleteUSBMapping is deleteMapping for a USB mapping.
+func deleteUSBMapping(ctx context.Context, px usbMappingDeleter, id, digest string) (usbMappingDeleteOutcome, error) {
+	return deleteMapping(ctx, px, usbMappingDeleter.ListUSBMappings, usbMappingDeleter.DeleteUSBMapping,
+		usbMappingView, id, digest)
+}
+
 // deleteUSBMappingRequest makes the delete the request asks for: the id from
 // the path and the digest when the caller sent one — everything between
 // reading the request and auditing it, so the route's digest is tested all
 // the way to the check that uses it.
-func deleteUSBMappingRequest(ctx context.Context, px usbMappingDeleter, p *apischema.Params) (string, usbMappingDeleteOutcome, error) {
-	id := p.String("mapping_id")
+func deleteUSBMappingRequest(ctx context.Context, px usbMappingDeleter,
+	p *apischema.Params) (id string, outcome usbMappingDeleteOutcome, err error) {
+	id = p.String("mapping_id")
 	digest, _ := p.OptString("digest")
-	outcome, err := deleteUSBMapping(ctx, px, id, digest)
+	outcome, err = deleteUSBMapping(ctx, px, id, digest)
 	return id, outcome, err
 }
 
@@ -865,39 +967,56 @@ func (h *VMHandler) DeleteUSBMapping(c fiber.Ctx, p *apischema.Params) error {
 // usbMappingUsageBudget the whole scan, the guest list included: one read per
 // VM adds up on a large cluster, and the delete dialog is waiting on the
 // answer. A guest not read by then is reported unchecked, never as not using
-// the mapping. Variables only so the tests can shorten them.
+// the mapping. They bound the scans of both kinds; variables only so the tests
+// can shorten them, named for the USB tests that do.
 var (
 	usbMappingUsageTimeout = 10 * time.Second
 	usbMappingUsageBudget  = 30 * time.Second
 )
 
-// usbMappingUsageConcurrency bounds how many configs one scan reads at once.
-const usbMappingUsageConcurrency = 8
+// mappingUsageConcurrency bounds how many configs one scan reads at once.
+const mappingUsageConcurrency = 8
 
-// usbMappingUsageScansPerCluster bounds the scans in flight against one
-// cluster, and usageScanSlots holds each user to one at a time. Each scan is
-// a Proxmox request per VM, and the route's limiter
-// (usbMappingUsageLimiter in internal/api/middleware.go, per user) bounds
-// how often one starts, not how many overlap. Per cluster, so no caller can
-// hold the slots another cluster's check needs; per user, so no one account
-// can hold both of a cluster's. A caller over the cluster's cap gets 429 at
-// once rather than a wait: the SPA retries a 429 once, and the delete dialog
-// shows a failed check as a warning and still offers the delete.
-const usbMappingUsageScansPerCluster = 2
+// usbMappingUsageConcurrency is mappingUsageConcurrency by the name the USB
+// tests use.
+const usbMappingUsageConcurrency = mappingUsageConcurrency
+
+// mappingUsageScansPerCluster bounds the scans in flight against one cluster,
+// of both kinds together, and usageScanSlots holds each user to one at a time.
+// Each scan is a Proxmox request per VM, and the usage route's limiter
+// (usbMappingUsageLimiter in internal/api/middleware.go, per user) bounds how
+// often one starts, not how many overlap. Per cluster, so no caller can hold
+// the slots another cluster's check needs; per user, so no one account can
+// hold both of a cluster's. A caller over the cluster's cap gets 429 at once
+// rather than a wait: the SPA retries a 429 once, and the delete dialog shows
+// a failed check as a warning and still offers the delete.
+const mappingUsageScansPerCluster = 2
+
+// usbMappingUsageScansPerCluster is mappingUsageScansPerCluster by the name
+// the USB tests use.
+const usbMappingUsageScansPerCluster = mappingUsageScansPerCluster
 
 // usbMappingUsageSupersedeWait bounds how long a user's new scan waits for
-// the older one it replaces to stop. A variable only so the tests can
-// shorten it.
+// the older one it replaces to stop, whichever kind either scans. A variable
+// only so the tests can shorten it, named for the USB tests that do.
 var usbMappingUsageSupersedeWait = 2 * time.Second
 
-// errUSBMappingUsageClusterFull answers a scan the cluster has no room for.
-var errUSBMappingUsageClusterFull = fiber.NewError(fiber.StatusTooManyRequests,
-	"Other checks of which VMs use a USB mapping are running on this cluster; try again in a moment.")
+// errMappingUsageClusterFull answers a scan the cluster has no room for.
+var errMappingUsageClusterFull = fiber.NewError(fiber.StatusTooManyRequests,
+	"Other checks of which VMs use a mapping are running on this cluster; try again in a moment.")
 
-// errUSBMappingUsageSuperseded answers a scan a newer one of the same user's
+// errUSBMappingUsageClusterFull is errMappingUsageClusterFull by the name the
+// USB tests use.
+var errUSBMappingUsageClusterFull = errMappingUsageClusterFull
+
+// errMappingUsageSuperseded answers a scan a newer one of the same user's
 // replaced before it finished.
-var errUSBMappingUsageSuperseded = fiber.NewError(fiber.StatusConflict,
-	"A newer check of which VMs use a USB mapping, by the same user, replaced this one.")
+var errMappingUsageSuperseded = fiber.NewError(fiber.StatusConflict,
+	"A newer check of which VMs use a mapping, by the same user, replaced this one.")
+
+// errUSBMappingUsageSuperseded is errMappingUsageSuperseded by the name the
+// USB tests use.
+var errUSBMappingUsageSuperseded = errMappingUsageSuperseded
 
 // userScan is one user's scan in flight: which cluster it holds a slot of,
 // how to stop it, and when it has.
@@ -928,7 +1047,7 @@ func newUsageScanSlots() *usageScanSlots {
 // always a delete confirmation already closed — its request cannot be seen
 // to go away, since the server never learns of a disconnect — and refusing
 // the newer one would cost the dialog the operator is looking at its check.
-// The older request answers errUSBMappingUsageSuperseded.
+// The older request answers errMappingUsageSuperseded.
 //
 // release frees the slot; calling it again does nothing, so a second call can
 // never undercount the cluster and let a third scan in.
@@ -939,9 +1058,9 @@ func (s *usageScanSlots) acquire(parent context.Context, cluster, user uuid.UUID
 	// request that would be refused anyway must not cost the user that one
 	// too. The older scan's own slot counts as room when it is on this
 	// cluster, since stopping it frees that slot.
-	if s.byCluster[cluster] >= usbMappingUsageScansPerCluster && (older == nil || older.cluster != cluster) {
+	if s.byCluster[cluster] >= mappingUsageScansPerCluster && (older == nil || older.cluster != cluster) {
 		s.mu.Unlock()
-		return nil, nil, errUSBMappingUsageClusterFull
+		return nil, nil, errMappingUsageClusterFull
 	}
 	if older != nil {
 		older.cancel()
@@ -950,20 +1069,20 @@ func (s *usageScanSlots) acquire(parent context.Context, cluster, user uuid.UUID
 		case <-older.done:
 		case <-time.After(usbMappingUsageSupersedeWait):
 			return nil, nil, fiber.NewError(fiber.StatusTooManyRequests,
-				"Your previous check of which VMs use a USB mapping is still stopping; try again in a moment.")
+				"Your previous check of which VMs use a mapping is still stopping; try again in a moment.")
 		}
 		s.mu.Lock()
 		// Another request of the user's may have taken the slot meanwhile.
 		if s.byUser[user] != nil {
 			s.mu.Unlock()
 			return nil, nil, fiber.NewError(fiber.StatusTooManyRequests,
-				"Another check of which VMs use a USB mapping, by you, has just started; try again in a moment.")
+				"Another check of which VMs use a mapping, by you, has just started; try again in a moment.")
 		}
 	}
 	// Looked at again: others may have taken the room while this one waited.
-	if s.byCluster[cluster] >= usbMappingUsageScansPerCluster {
+	if s.byCluster[cluster] >= mappingUsageScansPerCluster {
 		s.mu.Unlock()
-		return nil, nil, errUSBMappingUsageClusterFull
+		return nil, nil, errMappingUsageClusterFull
 	}
 	ctx, cancel := context.WithCancel(parent)
 	scan := &userScan{cluster: cluster, cancel: cancel, done: make(chan struct{})}
@@ -989,37 +1108,53 @@ func (s *usageScanSlots) acquire(parent context.Context, cluster, user uuid.UUID
 	}, nil
 }
 
-// usbMappingUsageScans is every usage scan in flight in this process.
-var usbMappingUsageScans = newUsageScanSlots()
+// mappingUsageScans is every usage scan in flight in this process, of both
+// kinds: one pool, so the caps hold for a user's and a cluster's checks
+// whichever kind they are of.
+var mappingUsageScans = newUsageScanSlots()
 
-// usbMappingBudgetReason is an unchecked guest's reason when the scan's
-// budget ran out before its config was read, or while it was being read.
-func usbMappingBudgetReason() string {
+// usbMappingUsageScans is the same pool, by the name the USB tests use: a copy
+// of the pointer, so a test acquires through it and never reassigns it — a
+// reassigned one would no longer be the pool the handlers use.
+var usbMappingUsageScans = mappingUsageScans
+
+// mappingBudgetReason is an unchecked guest's reason when the scan's budget
+// ran out before its config was read, or while it was being read.
+func mappingBudgetReason() string {
 	return fmt.Sprintf("Not read: the scan ran out of its %s.", usbMappingUsageBudget)
 }
 
-// usbMappingGuest is a guest in the usage answer.
-type usbMappingGuest struct {
+// mappingGuest is a guest in a usage answer.
+type mappingGuest struct {
 	VMID int    `json:"vmid"`
 	Name string `json:"name"`
 	Node string `json:"node"`
-	// Keys are the usbN keys that pass the mapping through; set for a user.
+	// Keys are the config keys that pass the mapping through — usbN or
+	// hostpciN; set for a user.
 	Keys []string `json:"keys,omitempty"`
 	// Reason says why the config was not read; set for an unchecked guest.
 	Reason string `json:"reason,omitempty"`
 }
 
-// usbMappingUsage is which VMs use a USB mapping. Unchecked is not a subset
-// of anything: a guest listed there may or may not use the mapping.
-type usbMappingUsage struct {
-	MappingID string            `json:"mapping_id"`
-	Checked   int               `json:"checked"`
-	Users     []usbMappingGuest `json:"users"`
-	Unchecked []usbMappingGuest `json:"unchecked"`
+// usbMappingGuest is a guest in a USB mapping's usage answer.
+type usbMappingGuest = mappingGuest
+
+// mappingUsage is which VMs use a mapping. Unchecked is not a subset of
+// anything: a guest listed there may or may not use the mapping.
+type mappingUsage struct {
+	MappingID string         `json:"mapping_id"`
+	Checked   int            `json:"checked"`
+	Users     []mappingGuest `json:"users"`
+	Unchecked []mappingGuest `json:"unchecked"`
 }
 
-// scanUSBMappingUsage reads the config of every VM in the cluster and reports
-// the ones whose usbN names the mapping, and every one it could not read.
+// usbMappingUsage is which VMs use a USB mapping.
+type usbMappingUsage = mappingUsage
+
+// scanMappingUsage reads the config of every VM in the cluster and reports
+// the ones whose keys — keys(config, id), the usbN or hostpciN that name the
+// mapping — are not empty, and every one it could not read. kind names the
+// mapping's kind in the log, where an id alone could be either kind's.
 //
 // Nexara keeps no guest configs, so this is the only way to know. It reads
 // live: the cluster's guest list and node status from Proxmox, then each VM's
@@ -1027,9 +1162,11 @@ type usbMappingUsage struct {
 // whose read fails or runs out of time, is reported unchecked with the reason.
 // Without the node list every VM is read: the guest list comes from Proxmox,
 // so it names only real members, and a read of a VM on a dead node fails
-// alone. Containers are not read: a container cannot use a USB mapping.
-func scanUSBMappingUsage(ctx context.Context, px usbMappingReader, id string) (usbMappingUsage, error) {
-	usage := usbMappingUsage{MappingID: id, Users: []usbMappingGuest{}, Unchecked: []usbMappingGuest{}}
+// alone. Containers are not read: a mapping is passed through by a VM's usbN
+// or hostpciN, which a container does not have.
+func scanMappingUsage(ctx context.Context, px guestConfigReader, kind, id string,
+	keys func(proxmox.VMConfig, string) []string) (mappingUsage, error) {
+	usage := mappingUsage{MappingID: id, Users: []mappingGuest{}, Unchecked: []mappingGuest{}}
 	budget, cancel := context.WithTimeout(ctx, usbMappingUsageBudget)
 	defer cancel()
 
@@ -1041,7 +1178,7 @@ func scanUSBMappingUsage(ctx context.Context, px usbMappingReader, id string) (u
 	entries, statusErr := px.GetNodes(statusCtx)
 	cancelStatus()
 	if statusErr != nil {
-		slog.Warn("USB mapping usage: could not read the nodes' status; reading every guest's config",
+		slog.Warn(kind+" mapping usage: could not read the nodes' status; reading every guest's config",
 			"mapping_id", id, "error", statusErr)
 	}
 	members := make(map[string]string, len(entries))
@@ -1051,14 +1188,14 @@ func scanUSBMappingUsage(ctx context.Context, px usbMappingReader, id string) (u
 
 	// Decided before any worker starts, so these appends race with nothing;
 	// from the fan-out on, usage is written only under mu.
-	read := make([]usbMappingGuest, 0, len(guests))
+	read := make([]mappingGuest, 0, len(guests))
 	for _, g := range guests {
 		if g.Type != "qemu" {
 			continue
 		}
-		guest := usbMappingGuest{VMID: g.VMID, Name: g.Name, Node: g.Node}
+		guest := mappingGuest{VMID: g.VMID, Name: g.Name, Node: g.Node}
 		if statusErr == nil {
-			if reason := usbMappingNodeState(g.Node, members); reason != "" {
+			if reason := mappingNodeState(g.Node, members); reason != "" {
 				guest.Reason = reason
 				usage.Unchecked = append(usage.Unchecked, guest)
 				continue
@@ -1068,14 +1205,14 @@ func scanUSBMappingUsage(ctx context.Context, px usbMappingReader, id string) (u
 	}
 
 	var mu sync.Mutex
-	unchecked := func(guest usbMappingGuest, reason string) {
+	unchecked := func(guest mappingGuest, reason string) {
 		guest.Reason = reason
 		mu.Lock()
 		usage.Unchecked = append(usage.Unchecked, guest)
 		mu.Unlock()
 	}
-	eachWithin(budget, usbMappingUsageConcurrency, read,
-		func(guest usbMappingGuest) {
+	eachWithin(budget, mappingUsageConcurrency, read,
+		func(guest mappingGuest) {
 			callCtx, cancel := context.WithTimeout(budget, usbMappingUsageTimeout)
 			defer cancel()
 			config, err := px.GetVMConfig(callCtx, guest.Node, guest.VMID)
@@ -1084,24 +1221,30 @@ func scanUSBMappingUsage(ctx context.Context, px usbMappingReader, id string) (u
 				mu.Lock()
 				defer mu.Unlock()
 				usage.Checked++
-				if keys := config.USBMappingKeys(id); len(keys) > 0 {
-					guest.Keys = keys
+				if used := keys(config, id); len(used) > 0 {
+					guest.Keys = used
 					usage.Users = append(usage.Users, guest)
 				}
 			case budget.Err() != nil:
-				unchecked(guest, usbMappingBudgetReason())
+				unchecked(guest, mappingBudgetReason())
 			default:
 				unchecked(guest, unansweredReason(callCtx, err, usbMappingUsageTimeout))
 			}
 		},
-		func(guest usbMappingGuest) {
-			unchecked(guest, usbMappingBudgetReason())
+		func(guest mappingGuest) {
+			unchecked(guest, mappingBudgetReason())
 		})
 
-	byVMID := func(a, b usbMappingGuest) int { return a.VMID - b.VMID }
+	byVMID := func(a, b mappingGuest) int { return a.VMID - b.VMID }
 	slices.SortFunc(usage.Users, byVMID)
 	slices.SortFunc(usage.Unchecked, byVMID)
 	return usage, nil
+}
+
+// scanUSBMappingUsage is scanMappingUsage for a USB mapping: the VMs whose
+// usbN names it.
+func scanUSBMappingUsage(ctx context.Context, px usbMappingReader, id string) (usbMappingUsage, error) {
+	return scanMappingUsage(ctx, px, usbMappingView.kind, id, proxmox.VMConfig.USBMappingKeys)
 }
 
 // GetUSBMappingUsage handles GET /api/v1/clusters/:cluster_id/usb-mappings/:mapping_id/usage.
@@ -1113,7 +1256,7 @@ func (h *VMHandler) GetUSBMappingUsage(c fiber.Ctx, p *apischema.Params) error {
 	// A request without a user (none reaches here: the route is
 	// authenticated) would share the zero id's one slot.
 	userID, _ := c.Locals("user_id").(uuid.UUID)
-	usage, err := checkUSBMappingUsage(c.Context(), usbMappingUsageScans, clusterID, userID,
+	usage, err := checkUSBMappingUsage(c.Context(), mappingUsageScans, clusterID, userID,
 		p.String("mapping_id"), func() (usbMappingReader, error) {
 			pxClient, err := h.createProxmoxClient(c, clusterID)
 			if err != nil {
@@ -1127,36 +1270,50 @@ func (h *VMHandler) GetUSBMappingUsage(c fiber.Ctx, p *apischema.Params) error {
 	return c.JSON(usage)
 }
 
-// checkUSBMappingUsage is one usage check, whole: a slot first — before any
-// Proxmox client is made, so a refused caller costs nothing — then the scan,
-// run under the SLOT's context so that a newer check of the same user's can
-// stop it, then its answer. The client comes from reader, called only once a
-// slot is held.
-func checkUSBMappingUsage(ctx context.Context, slots *usageScanSlots, cluster, user uuid.UUID, id string,
-	reader func() (usbMappingReader, error)) (usbMappingUsage, error) {
+// checkMappingUsage is one usage check, whole, of either kind: a slot first —
+// before any Proxmox client is made, so a refused caller costs nothing — then
+// the scan, run under the SLOT's context so that a newer check of the same
+// user's can stop it, then its answer. The client comes from reader, called
+// only once a slot is held, and scan is the kind's scan of it.
+func checkMappingUsage[R any](ctx context.Context, slots *usageScanSlots, cluster, user uuid.UUID,
+	reader func() (R, error), scan func(context.Context, R) (mappingUsage, error)) (mappingUsage, error) {
 	scanCtx, release, err := slots.acquire(ctx, cluster, user)
 	if err != nil {
-		return usbMappingUsage{}, err
+		return mappingUsage{}, err
 	}
 	defer release()
 	px, err := reader()
 	if err != nil {
-		return usbMappingUsage{}, err
+		return mappingUsage{}, err
 	}
-	usage, scanErr := scanUSBMappingUsage(scanCtx, px, id)
-	return usbMappingUsageAnswer(scanCtx, usage, scanErr)
+	usage, scanErr := scan(scanCtx, px)
+	return mappingUsageAnswer(scanCtx, usage, scanErr)
 }
 
-// usbMappingUsageAnswer is what a finished scan answers. One that a newer
-// scan of the same user's replaced answers errUSBMappingUsageSuperseded, not
-// its partial result — its unread guests would carry reasons that are not
-// true of them — and not the Proxmox error its cancelled calls produced.
-func usbMappingUsageAnswer(scanCtx context.Context, usage usbMappingUsage, err error) (usbMappingUsage, error) {
+// checkUSBMappingUsage is checkMappingUsage for a USB mapping.
+func checkUSBMappingUsage(ctx context.Context, slots *usageScanSlots, cluster, user uuid.UUID, id string,
+	reader func() (usbMappingReader, error)) (usbMappingUsage, error) {
+	return checkMappingUsage(ctx, slots, cluster, user, reader,
+		func(scanCtx context.Context, px usbMappingReader) (usbMappingUsage, error) {
+			return scanUSBMappingUsage(scanCtx, px, id)
+		})
+}
+
+// mappingUsageAnswer is what a finished scan answers. One that a newer scan
+// of the same user's replaced answers errMappingUsageSuperseded, not its
+// partial result — its unread guests would carry reasons that are not true of
+// them — and not the Proxmox error its cancelled calls produced.
+func mappingUsageAnswer(scanCtx context.Context, usage mappingUsage, err error) (mappingUsage, error) {
 	if errors.Is(scanCtx.Err(), context.Canceled) {
-		return usbMappingUsage{}, errUSBMappingUsageSuperseded
+		return mappingUsage{}, errMappingUsageSuperseded
 	}
 	if err != nil {
-		return usbMappingUsage{}, mapProxmoxError(err)
+		return mappingUsage{}, mapProxmoxError(err)
 	}
 	return usage, nil
+}
+
+// usbMappingUsageAnswer is mappingUsageAnswer by the name the USB tests use.
+func usbMappingUsageAnswer(scanCtx context.Context, usage usbMappingUsage, err error) (usbMappingUsage, error) {
+	return mappingUsageAnswer(scanCtx, usage, err)
 }

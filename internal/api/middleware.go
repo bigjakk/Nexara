@@ -790,7 +790,8 @@ func (s *Server) clusterCreateLimiter() fiber.Handler {
 // Viewer holds, so under the general limiter's budget a read-only account
 // could multiply its requests into Proxmox by the size of the cluster. The
 // SPA asks once per delete confirmation. The handler also caps the scans in
-// flight, per user and per cluster (usbMappingUsageScans).
+// flight, per user and per cluster (mappingUsageScans in
+// handlers/resource_mappings.go).
 //
 // Keyed on the user, unlike the per-IP limiters, because it can be: route
 // limiters run after authRequired, which has set user_id. Per IP, everyone
