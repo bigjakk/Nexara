@@ -802,6 +802,16 @@ function UserTokens({
  * Mounted only while a target is set, so the form state resets for free on
  * close rather than needing an effect to clear it.
  *
+ * The form is drawn only from an account that was actually read, and a save
+ * carries only the fields the operator touched. Both follow from the update
+ * being tristate per field — omitted leaves the stored value alone, empty
+ * clears it — so sending what the form merely displays writes it back, and what
+ * it displays can be wrong. Values cached before the Proxmox UI changed them
+ * were written back over the change, re-enabling an account disabled there; and
+ * the form of an account that failed to load showed every field empty with
+ * "Account enabled" ticked, so saving it cleared the stored comment and e-mail
+ * and enabled the account.
+ *
  * Disabling an account is the interesting case: PVE checks the owning user when
  * it verifies an API token, so disabling the user Nexara authenticates as
  * breaks the cluster connection just as a delete would. The server refuses that
@@ -822,7 +832,8 @@ function EditUserDialog({
   const userQuery = useAccessUser(clusterId, userid);
   const updateUser = useUpdateAccessUser(clusterId);
 
-  // null means "untouched", so the fetched value shows through until edited.
+  // null means "untouched": the fetched value shows through until edited, and
+  // the field stays out of the save.
   const [comment, setComment] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [enable, setEnable] = useState<boolean | null>(null);
@@ -836,6 +847,15 @@ function EditUserDialog({
   const currentComment = comment ?? userQuery.data?.comment ?? "";
   const currentEmail = email ?? userQuery.data?.email ?? "";
   const currentEnable = enable ?? userQuery.data?.enable ?? true;
+
+  // What the PUT carries: the touched fields and nothing else. Save is held
+  // until there is at least one, so an edit is never empty.
+  const changes = {
+    ...(comment !== null ? { comment } : {}),
+    ...(email !== null ? { email } : {}),
+    ...(enable !== null ? { enable } : {}),
+  };
+  const touched = Object.keys(changes).length > 0;
 
   const save = (edit: UpdateAccessUserInput, force: boolean) => {
     setError("");
@@ -859,15 +879,10 @@ function EditUserDialog({
 
   const handleSave = (e: React.SyntheticEvent) => {
     e.preventDefault();
-    save(
-      {
-        userid,
-        comment: currentComment,
-        email: currentEmail,
-        enable: currentEnable,
-      },
-      false,
-    );
+    // Save is disabled until a field is touched, but a submit that does not go
+    // through the button (form.requestSubmit) would still send an empty edit.
+    if (!touched) return;
+    save({ userid, ...changes }, false);
   };
 
   return (
@@ -881,10 +896,21 @@ function EditUserDialog({
         <DialogHeader>
           <DialogTitle>Edit {userid}</DialogTitle>
         </DialogHeader>
-        {userQuery.isLoading ? (
-          <Skeleton className="h-32 w-full" />
-        ) : (
+        {/* Keyed on the account having been read rather than on isLoading: a
+            read that is paused (offline, or retrying while the tab is in the
+            background) is neither loading nor failed and has no data, and the
+            form drawn for it would be the empty one. And on data rather than
+            on isError, because TanStack keeps the last good data through a
+            failed refresh, which the form reports in a notice instead of
+            disappearing under the operator. */}
+        {userQuery.data !== undefined ? (
           <form onSubmit={handleSave} className="space-y-4">
+            {userQuery.isError && (
+              <p role="status" className="text-xs text-destructive">
+                {errorMessage(userQuery.error, "Failed to load user")} — showing
+                the details as last read.
+              </p>
+            )}
             <div>
               <Label htmlFor="edit-comment">Comment</Label>
               <Input
@@ -916,9 +942,9 @@ function EditUserDialog({
               />
               Account enabled
             </label>
-            {(userQuery.data?.groups?.length ?? 0) > 0 && (
+            {(userQuery.data.groups?.length ?? 0) > 0 && (
               <p className="text-xs text-muted-foreground">
-                Groups: {userQuery.data?.groups?.join(", ")} — edit these in the
+                Groups: {userQuery.data.groups?.join(", ")} — edit these in the
                 Proxmox UI.
               </p>
             )}
@@ -927,11 +953,30 @@ function EditUserDialog({
               <Button type="button" variant="outline" onClick={onClose}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={updateUser.isPending}>
+              <Button type="submit" disabled={!touched || updateUser.isPending}>
                 {updateUser.isPending ? "Saving..." : "Save"}
               </Button>
             </div>
           </form>
+        ) : userQuery.isError ? (
+          <div className="space-y-4">
+            <p role="alert" className="text-sm text-destructive">
+              {errorMessage(userQuery.error, "Failed to load user")}
+            </p>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  void userQuery.refetch();
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Skeleton className="h-32 w-full" />
         )}
         {/* Stacked over this dialog, which stays open beneath it, so
             dismissing it returns to the form with the edit intact. */}
