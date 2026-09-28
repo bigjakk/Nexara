@@ -13,13 +13,23 @@ import {
 import { Input } from "@/components/ui/input";
 import { CopyableName } from "@/components/CopyableName";
 
+import { holdFocusInDialog } from "./holdFocusInDialog";
+
 interface SelfCredentialConfirmProps {
+  /**
+   * The action being confirmed, and what it does — "Revoking this token will
+   * cut off Nexara's access". This dialog is raised for several different
+   * actions, and the title is how the operator tells them apart before reading
+   * on.
+   */
+  title: string;
   /** The server's explanation of what is about to break. */
   message: string;
   /** The identifier the operator must type to confirm. */
   confirmValue: string;
   /** Verb for the confirm button, e.g. "Revoke Token". */
   actionLabel: string;
+  /** The confirmed request is in flight; see the note on dismissing below. */
   pending: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -39,8 +49,17 @@ interface SelfCredentialConfirmProps {
  * It stays an override rather than a hard block: rotating credentials by hand
  * is legitimate, and refusing outright would push the operator to do it in the
  * Proxmox UI where Nexara cannot warn them at all.
+ *
+ * The hold starts when the pending state reaches the render, a macrotask after
+ * the click. From then until the request settles the dialog cannot be
+ * dismissed: Cancel is disabled, and Escape, an outside click and the close
+ * button are ignored. Closing would not recall the request, so "Cancel" would
+ * leave the credential to go anyway, with the operator believing they had
+ * stopped it. Focus is moved to the dialog as the request goes out, because the
+ * button that had it is disabled by then (see holdFocusInDialog).
  */
 export function SelfCredentialConfirm({
+  title,
   message,
   confirmValue,
   actionLabel,
@@ -53,13 +72,16 @@ export function SelfCredentialConfirm({
   return (
     <Dialog
       open
+      // Escape, an outside click and the close button all end here, so this
+      // one check holds them. The footer's Cancel calls onCancel itself, and is
+      // held by being disabled.
       onOpenChange={(open) => {
-        if (!open) onCancel();
+        if (!open && !pending) onCancel();
       }}
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>This will cut off Nexara&apos;s access</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{message}</DialogDescription>
         </DialogHeader>
 
@@ -88,13 +110,16 @@ export function SelfCredentialConfirm({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
+          <Button variant="outline" disabled={pending} onClick={onCancel}>
             Cancel
           </Button>
           <Button
             variant="destructive"
             disabled={typed !== confirmValue || pending}
-            onClick={onConfirm}
+            onClick={(e) => {
+              onConfirm();
+              holdFocusInDialog(e);
+            }}
           >
             {pending ? "Working..." : actionLabel}
           </Button>

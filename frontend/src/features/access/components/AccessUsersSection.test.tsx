@@ -30,6 +30,15 @@ import { AccessUsersSection } from "./AccessUsersSection";
  * or had read it before it changed, overwrote the real value: saving an e-mail
  * could re-enable a disabled account, and rewrote its comment from whatever the
  * form showed.
+ *
+ * Every confirmation holds while its request is in flight. Closing one does not
+ * recall the request, and a refusal that arrived after it had gone opened an
+ * override over whatever the operator had moved on to: the delete's over the
+ * edit dialog, a form to save an edit under a prompt to force-delete the user.
+ * A held alert dialog keeps keyboard focus too: both its buttons are disabled,
+ * which leaves the focus trap nothing to wrap between, and Tab would walk out
+ * into the page. And each override's title names the action it confirms, so the
+ * four are told apart by more than their button.
  */
 
 // The transport is mocked, not the hooks, so the real queries and mutations
@@ -68,7 +77,19 @@ const OWN_URL = `${USERS_URL}/nexara%40pve`;
 // The detail read's cache key, to see what state the query is in.
 const OWN_KEY = ["clusters", CLUSTER, "access", "users", OWN];
 
-const CONFIRM_TITLE = "This will cut off Nexara's access";
+// An API token of that account, by the id the section shows it under.
+const TOKEN = "token01";
+const FULL_TOKEN = `${OWN}!${TOKEN}`;
+const TOKENS_URL = `${OWN_URL}/tokens`;
+const TOKEN_URL = `${TOKENS_URL}/${TOKEN}`;
+
+// Each override's title names the action it confirms. They end alike, which
+// ANY_OVERRIDE matches, for asserting that none of them is open.
+const EDIT_TITLE = "Saving this edit will cut off Nexara's access";
+const DELETE_TITLE = "Deleting this user will cut off Nexara's access";
+const REVOKE_TITLE = "Revoking this token will cut off Nexara's access";
+const REGENERATE_TITLE = "Regenerating this token will cut off Nexara's access";
+const ANY_OVERRIDE = /will cut off Nexara's access$/;
 // Worded as guardSelfCredential (internal/api/handlers/access.go) words it.
 const REFUSAL =
   "This is the user nexara@pve Nexara uses to reach this cluster. " +
@@ -88,6 +109,8 @@ const capabilities: AccessCapabilities = {
   canModifyACL: true,
   canModifyRealms: true,
 };
+
+type UserEvent = ReturnType<typeof userEvent.setup>;
 
 function refused(): ApiClientError {
   return new ApiClientError(409, { error: "Conflict", message: REFUSAL });
@@ -124,9 +147,7 @@ function renderSection(): QueryClient {
 }
 
 /** Opens Edit on Nexara's own account and returns its dialog. */
-async function openEdit(
-  user: ReturnType<typeof userEvent.setup>,
-): Promise<HTMLElement> {
+async function openEdit(user: UserEvent): Promise<HTMLElement> {
   await user.click(await screen.findByRole("button", { name: `Edit ${OWN}` }));
   return screen.findByRole("dialog", { name: `Edit ${OWN}` });
 }
@@ -135,9 +156,7 @@ async function openEdit(
  * Opens Edit on Nexara's own account, unticks "Account enabled" and saves.
  * Returns the edit dialog, which an override hides from role queries.
  */
-async function saveDisabled(
-  user: ReturnType<typeof userEvent.setup>,
-): Promise<HTMLElement> {
+async function saveDisabled(user: UserEvent): Promise<HTMLElement> {
   const edit = await openEdit(user);
   await user.click(
     await within(edit).findByRole("checkbox", { name: "Account enabled" }),
@@ -146,14 +165,29 @@ async function saveDisabled(
   return edit;
 }
 
-/** The override, once open, with the user id typed into it. */
-async function typedOverride(user: ReturnType<typeof userEvent.setup>) {
-  const confirm = await screen.findByRole("dialog", { name: CONFIRM_TITLE });
+/**
+ * The override with that title, once open, with what it asks for typed into it:
+ * the user id unless told otherwise.
+ */
+async function typedOverride(user: UserEvent, title: string, typed = OWN) {
+  const confirm = await screen.findByRole("dialog", { name: title });
   await user.type(
     within(confirm).getByRole("textbox", { name: "Confirmation text" }),
-    OWN,
+    typed,
   );
   return confirm;
+}
+
+/**
+ * Asserts that no override is open. It looks at hidden elements too: Radix hides
+ * everything outside the topmost modal from role queries, and an override is
+ * spared that only while the aria-live region of the CopyableName inside it
+ * keeps it visible, which no assertion here should depend on.
+ */
+function expectNoOverride() {
+  expect(
+    screen.queryByRole("dialog", { name: ANY_OVERRIDE, hidden: true }),
+  ).toBeNull();
 }
 
 /**
@@ -167,15 +201,103 @@ function overrideAction(confirm: HTMLElement): HTMLElement {
   });
 }
 
+/**
+ * The backdrop behind a dialog. Radix portals it in just before the dialog's
+ * own element, and a click on it is a click outside the dialog.
+ */
+function backdropOf(dialog: HTMLElement): HTMLElement {
+  const backdrop = dialog.previousElementSibling;
+  if (!(backdrop instanceof HTMLElement)) {
+    throw new Error("the dialog has no backdrop before it");
+  }
+  return backdrop;
+}
+
+/**
+ * The ways out of an open dialog other than its own buttons. Each is tried on
+ * the same dialog both with nothing in flight, where it has to close it, and
+ * while its request is, where it has to be ignored: a dismissal that never
+ * reached the dialog would pass the second without proving anything.
+ */
+const DISMISSALS: [
+  name: string,
+  dismiss: (user: UserEvent, dialog: HTMLElement) => Promise<void>,
+][] = [
+  [
+    "Escape",
+    async (user) => {
+      await user.keyboard("{Escape}");
+    },
+  ],
+  [
+    "a click outside it",
+    async (user, dialog) => {
+      await user.click(backdropOf(dialog));
+    },
+  ],
+  [
+    "its Close button",
+    async (user, dialog) => {
+      await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    },
+  ],
+];
+
+/**
+ * Where focus goes once a click on an override's backdrop has dropped it to the
+ * page: the keys that carry it on from there and, by focusing them, the form's
+ * own Close and Cancel, where a browser puts it on Shift+Tab. user-event cannot
+ * say so itself: it treats a page with nothing focused as the top of the
+ * document, so its Shift+Tab lands on the last element, not the one before the
+ * backdrop. What the trap does about it is the same whichever way focus arrives.
+ */
+const ESCAPES: [
+  name: string,
+  escape: (user: UserEvent, form: HTMLElement) => Promise<void>,
+][] = [
+  [
+    "Shift+Tab",
+    async (user) => {
+      await user.tab({ shift: true });
+    },
+  ],
+  [
+    "Tab",
+    async (user) => {
+      await user.tab();
+    },
+  ],
+  [
+    "focus landing on the form's Close button",
+    (_, form) => {
+      within(form).getByRole("button", { name: "Close", hidden: true }).focus();
+      return Promise.resolve();
+    },
+  ],
+  [
+    "focus landing on the form's Cancel button",
+    (_, form) => {
+      within(form)
+        .getByRole("button", { name: "Cancel", hidden: true })
+        .focus();
+      return Promise.resolve();
+    },
+  ],
+];
+
 beforeEach(() => {
   vi.resetAllMocks();
-  mockedList.mockImplementation((path: string) =>
-    Promise.resolve(
-      path === USERS_URL
-        ? [{ userid: OWN, enable: true, comment: "service account" }]
-        : [],
-    ),
-  );
+  mockedList.mockImplementation((path: string) => {
+    if (path === USERS_URL) {
+      return Promise.resolve([
+        { userid: OWN, enable: true, comment: "service account" },
+      ]);
+    }
+    if (path === TOKENS_URL) {
+      return Promise.resolve([{ userid: OWN, tokenid: TOKEN, privsep: true }]);
+    }
+    return Promise.resolve([]);
+  });
   mockedGet.mockImplementation((path: string) =>
     path === OWN_URL
       ? Promise.resolve({ userid: OWN, enable: true, comment: "service account" })
@@ -192,7 +314,7 @@ describe("an edit refused as Nexara's own credential", () => {
     renderSection();
 
     await saveDisabled(user);
-    await user.click(overrideAction(await typedOverride(user)));
+    await user.click(overrideAction(await typedOverride(user, EDIT_TITLE)));
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
@@ -221,7 +343,7 @@ describe("an edit refused as Nexara's own credential", () => {
       within(edit).getByRole("checkbox", { name: "Account enabled" }),
     );
     await user.click(within(edit).getByRole("button", { name: "Save" }));
-    const confirm = await typedOverride(user);
+    const confirm = await typedOverride(user, EDIT_TITLE);
     // The account's e-mail changes elsewhere and is read again while the
     // override is open; the form, where it was left untouched, follows, and
     // the two fields the operator did touch stay as they set them.
@@ -287,7 +409,7 @@ describe("an edit refused as Nexara's own credential", () => {
     expect(enabled).toBeChecked();
     expect(email).toHaveValue("ops@example.com");
     first.reject(refused());
-    await user.click(overrideAction(await typedOverride(user)));
+    await user.click(overrideAction(await typedOverride(user, EDIT_TITLE)));
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
@@ -309,7 +431,7 @@ describe("an edit refused as Nexara's own credential", () => {
     renderSection();
 
     await saveDisabled(user);
-    const confirm = await screen.findByRole("dialog", { name: CONFIRM_TITLE });
+    const confirm = await screen.findByRole("dialog", { name: EDIT_TITLE });
     expect(within(confirm).getByText(REFUSAL)).toBeInTheDocument();
     expect(
       within(confirm).queryByRole("button", { name: "Delete User" }),
@@ -319,7 +441,7 @@ describe("an edit refused as Nexara's own credential", () => {
     });
     expect(saveAnyway).toBeDisabled();
 
-    await typedOverride(user);
+    await typedOverride(user, EDIT_TITLE);
     await user.click(saveAnyway);
     expect(
       await within(confirm).findByRole("button", { name: "Working..." }),
@@ -332,36 +454,109 @@ describe("an edit refused as Nexara's own credential", () => {
     expect(mockedDelete).not.toHaveBeenCalled();
   });
 
+  it.each(DISMISSALS)(
+    "ignores %s while the forced edit is in flight, with Cancel disabled",
+    async (_, dismiss) => {
+      const user = userEvent.setup();
+      const forced = deferred<unknown>();
+      mockedPut
+        .mockRejectedValueOnce(refused())
+        .mockReturnValueOnce(forced.promise);
+      renderSection();
+
+      const edit = await saveDisabled(user);
+      const confirm = await typedOverride(user, EDIT_TITLE);
+      await user.click(
+        within(confirm).getByRole("button", { name: "Save Anyway" }),
+      );
+      // The button says so once the request is out, which is when the dialog
+      // holds; a dismissal before then would close it whatever the guard does.
+      expect(
+        await within(confirm).findByRole("button", { name: "Working..." }),
+      ).toBeDisabled();
+      expect(
+        within(confirm).getByRole("button", { name: "Cancel" }),
+      ).toBeDisabled();
+
+      await dismiss(user, confirm);
+
+      // Neither the override nor the form under it went, and nothing else was
+      // sent: closing would not have recalled the forced edit.
+      expect(confirm).toBeInTheDocument();
+      expect(confirm).toHaveAttribute("data-state", "open");
+      expect(edit).toBeInTheDocument();
+      expect(mockedPut).toHaveBeenCalledTimes(2);
+
+      // The edit settles on the override it was sent from.
+      forced.resolve({ status: "ok" });
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).toBeNull();
+      });
+      expect(mockedDelete).not.toHaveBeenCalled();
+    },
+  );
+
+  // The override's confirm button is the last thing focused in it when the
+  // request disables it, and the focus trap pulls focus back by refocusing the
+  // last element that had it, which does nothing to a disabled button. Focus
+  // that gets out then stays out: a click on the backdrop drops it to the page,
+  // and where it goes next can be the form's own Cancel or Close, whose Enter
+  // closes the form and unmounts the held override, its edit still on the way.
+  it.each(ESCAPES)(
+    "brings focus back into the override after %s, while the forced edit is in flight",
+    async (_, escape) => {
+      const user = userEvent.setup();
+      const forced = deferred<unknown>();
+      mockedPut
+        .mockRejectedValueOnce(refused())
+        .mockReturnValueOnce(forced.promise);
+      renderSection();
+
+      const form = await saveDisabled(user);
+      const confirm = await typedOverride(user, EDIT_TITLE);
+      await user.click(
+        within(confirm).getByRole("button", { name: "Save Anyway" }),
+      );
+      expect(
+        await within(confirm).findByRole("button", { name: "Working..." }),
+      ).toBeDisabled();
+
+      await user.click(backdropOf(confirm));
+      await escape(user, form);
+
+      expect(
+        confirm.contains(document.activeElement),
+        "focus is outside the override",
+      ).toBe(true);
+      expect(form).toBeInTheDocument();
+      expect(mockedPut).toHaveBeenCalledTimes(2);
+
+      forced.resolve({ status: "ok" });
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).toBeNull();
+      });
+    },
+  );
+
   it.each([
     [
       "Cancel",
-      async (user: ReturnType<typeof userEvent.setup>) => {
-        const confirm = screen.getByRole("dialog", { name: CONFIRM_TITLE });
+      async (user: UserEvent, dialog: HTMLElement) => {
         await user.click(
-          within(confirm).getByRole("button", { name: "Cancel" }),
+          within(dialog).getByRole("button", { name: "Cancel" }),
         );
       },
     ],
-    [
-      "Escape",
-      async (user: ReturnType<typeof userEvent.setup>) => {
-        await user.keyboard("{Escape}");
-      },
-    ],
+    ...DISMISSALS,
   ])("goes back to the form as it was on %s", async (_, dismiss) => {
     const user = userEvent.setup();
     mockedPut.mockRejectedValueOnce(refused());
     renderSection();
 
     await saveDisabled(user);
-    await typedOverride(user);
-    await dismiss(user);
+    await dismiss(user, await typedOverride(user, EDIT_TITLE));
 
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("dialog", { name: CONFIRM_TITLE }),
-      ).toBeNull();
-    });
+    await waitFor(expectNoOverride);
     const edit = screen.getByRole("dialog", { name: `Edit ${OWN}` });
     const enabled = within(edit).getByRole("checkbox", {
       name: "Account enabled",
@@ -399,16 +594,12 @@ describe("an edit refused as Nexara's own credential", () => {
       renderSection();
 
       await saveDisabled(user);
-      const confirm = await typedOverride(user);
+      const confirm = await typedOverride(user, EDIT_TITLE);
       await user.click(
         within(confirm).getByRole("button", { name: "Save Anyway" }),
       );
 
-      await waitFor(() => {
-        expect(
-          screen.queryByRole("dialog", { name: CONFIRM_TITLE }),
-        ).toBeNull();
-      });
+      await waitFor(expectNoOverride);
       const edit = screen.getByRole("dialog", { name: `Edit ${OWN}` });
       expect(within(edit).getByText(failure.message)).toBeInTheDocument();
       expect(mockedPut).toHaveBeenCalledTimes(2);
@@ -433,9 +624,7 @@ describe("an edit that fails for any other reason", () => {
       const edit = await saveDisabled(user);
 
       expect(await within(edit).findByText(message)).toBeInTheDocument();
-      expect(
-        screen.queryByRole("dialog", { name: CONFIRM_TITLE }),
-      ).toBeNull();
+      expectNoOverride();
       expect(mockedPut).toHaveBeenCalledTimes(1);
       expect(mockedDelete).not.toHaveBeenCalled();
     },
@@ -669,7 +858,7 @@ describe("a delete refused as Nexara's own credential", () => {
       name: `Delete ${OWN}?`,
     });
     await user.click(within(ask).getByRole("button", { name: "Delete User" }));
-    const confirm = await typedOverride(user);
+    const confirm = await typedOverride(user, DELETE_TITLE);
     expect(
       within(confirm).queryByRole("button", { name: "Save Anyway" }),
     ).toBeNull();
@@ -686,4 +875,254 @@ describe("a delete refused as Nexara's own credential", () => {
     ]);
     expect(mockedPut).not.toHaveBeenCalled();
   });
+});
+
+// The three confirmations that hold while their request is out, each with the
+// request it sends, the transport that must stay silent, and the override a
+// refusal of it opens. A token's row buttons are named for its own id; its
+// dialogs and override for the full one.
+const SECRET = "00000000-0000-0000-0000-000000000000";
+const HELD = [
+  {
+    name: "user delete",
+    needsTokens: false,
+    trigger: `Delete ${OWN}`,
+    ask: `Delete ${OWN}?`,
+    send: "Delete User",
+    sending: "Deleting...",
+    request: mockedDelete,
+    other: mockedPut,
+    title: DELETE_TITLE,
+    typed: OWN,
+    confirm: "Delete User",
+    forced: undefined,
+    sent: [[OWN_URL], [`${OWN_URL}?force=true`]],
+  },
+  {
+    name: "token revoke",
+    needsTokens: true,
+    trigger: `Revoke ${TOKEN}`,
+    ask: `Revoke ${FULL_TOKEN}?`,
+    send: "Revoke Token",
+    sending: "Revoking...",
+    request: mockedDelete,
+    other: mockedPut,
+    title: REVOKE_TITLE,
+    typed: FULL_TOKEN,
+    confirm: "Revoke Token",
+    forced: undefined,
+    sent: [[TOKEN_URL], [`${TOKEN_URL}?force=true`]],
+  },
+  {
+    name: "token regenerate",
+    needsTokens: true,
+    trigger: `Regenerate ${TOKEN}`,
+    ask: `Regenerate ${FULL_TOKEN}?`,
+    send: "Regenerate",
+    sending: "Regenerating...",
+    request: mockedPut,
+    other: mockedDelete,
+    title: REGENERATE_TITLE,
+    typed: FULL_TOKEN,
+    confirm: "Regenerate Token",
+    forced: { "full-tokenid": FULL_TOKEN, value: SECRET },
+    sent: [
+      [TOKEN_URL, { regenerate: true }],
+      [`${TOKEN_URL}?force=true`, { regenerate: true }],
+    ],
+  },
+];
+type Held = (typeof HELD)[number];
+
+/** Expands Nexara's own account, when the confirmation is on one of its tokens. */
+async function expandFor(user: UserEvent, held: Held) {
+  if (held.needsTokens) await user.click(await screen.findByText(OWN));
+}
+
+/** Opens the confirmation from the button in the table that asks for it. */
+async function openHeld(user: UserEvent, held: Held): Promise<HTMLElement> {
+  await user.click(await screen.findByRole("button", { name: held.trigger }));
+  return screen.findByRole("alertdialog", { name: held.ask });
+}
+
+/**
+ * Confirms an open confirmation, and waits for its button to say the request
+ * is out. The hold starts there and not at the click: TanStack hands React
+ * isPending a macrotask after mutate(), so a dismissal in between would close
+ * the dialog whatever the guard does. No one presses a key that fast.
+ */
+async function sendHeld(user: UserEvent, held: Held, dialog: HTMLElement) {
+  await user.click(within(dialog).getByRole("button", { name: held.send }));
+  expect(
+    await within(dialog).findByRole("button", { name: held.sending }),
+  ).toBeDisabled();
+}
+
+describe("a confirmation held while its request is in flight", () => {
+  it.each(HELD)(
+    "holds the $name dialog, then the override its refusal opens, until their requests settle",
+    async (held) => {
+      const { request, other, title, typed, confirm, forced, sent } = held;
+      const user = userEvent.setup();
+      const first = deferred<unknown>();
+      const second = deferred<unknown>();
+      request
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+      renderSection();
+      await expandFor(user, held);
+
+      // With nothing in flight Cancel and Escape both close it: what the guard
+      // must let through before the request is out, and stop after.
+      const byCancel = await openHeld(user, held);
+      await user.click(
+        within(byCancel).getByRole("button", { name: "Cancel" }),
+      );
+      await waitFor(() => {
+        expect(byCancel).not.toBeInTheDocument();
+      });
+      const byEscape = await openHeld(user, held);
+      await user.keyboard("{Escape}");
+      await waitFor(() => {
+        expect(byEscape).not.toBeInTheDocument();
+      });
+      expect(request).not.toHaveBeenCalled();
+
+      const dialog = await openHeld(user, held);
+      await sendHeld(user, held, dialog);
+      expect(
+        within(dialog).getByRole("button", { name: "Cancel" }),
+      ).toBeDisabled();
+
+      // Both buttons are disabled, so the dialog has nothing to tab between,
+      // and focus left on the button that was pressed would walk out into the
+      // page on Tab, to a row's Edit that Enter opens the edit dialog from.
+      // Focus is on the dialog itself instead, and Tab leaves it there.
+      await user.tab();
+      expect(
+        dialog.contains(document.activeElement),
+        "Tab left the dialog",
+      ).toBe(true);
+      await user.tab({ shift: true });
+      expect(
+        dialog.contains(document.activeElement),
+        "Shift+Tab left the dialog",
+      ).toBe(true);
+
+      await user.keyboard("{Escape}");
+      expect(dialog).toBeInTheDocument();
+      expect(dialog).toHaveAttribute("data-state", "open");
+      expect(request).toHaveBeenCalledTimes(1);
+
+      // The refusal lands on the dialog it answers, which gives way to the
+      // override that names this action. By element and not by role: under the
+      // override, an alert dialog still open would be hidden from a role query.
+      first.reject(refused());
+      const override = await typedOverride(user, title, typed);
+      expect(within(override).getByText(REFUSAL)).toBeInTheDocument();
+      expect(dialog).not.toBeInTheDocument();
+
+      // Confirmed, it sends the request it names and no other: the other
+      // transport, where the wrong override once sent its request, stays quiet.
+      // The override then holds in its turn. Each override's call site wires its
+      // own pending, the token one to either token request, so each is proved
+      // on its own.
+      await user.click(within(override).getByRole("button", { name: confirm }));
+      expect(other).not.toHaveBeenCalled();
+      expect(
+        await within(override).findByRole("button", { name: "Working..." }),
+      ).toBeDisabled();
+      expect(
+        within(override).getByRole("button", { name: "Cancel" }),
+      ).toBeDisabled();
+      await user.keyboard("{Escape}");
+      expect(override).toBeInTheDocument();
+      expect(override).toHaveAttribute("data-state", "open");
+      expect(request).toHaveBeenCalledTimes(2);
+
+      // A regenerated token's secret opens over the override as it goes, so this
+      // looks at the element rather than at what a role query can see past it.
+      second.resolve(forced);
+      await waitFor(() => {
+        expect(override).not.toBeInTheDocument();
+      });
+      expect(request.mock.calls).toEqual(sent);
+      expect(other).not.toHaveBeenCalled();
+    },
+  );
+
+  // The override opens as the alert dialog that led to it closes, and cancelling
+  // it sends focus back through that dialog to what opened it: the row's button.
+  // The dialog it passes through is the one focus was moved to, not a button.
+  it.each(HELD)(
+    "sends focus back to the $name button when the override its refusal opens is cancelled",
+    async (held) => {
+      const user = userEvent.setup();
+      const pending = deferred<unknown>();
+      held.request.mockReturnValueOnce(pending.promise);
+      renderSection();
+      await expandFor(user, held);
+      const trigger = await screen.findByRole("button", { name: held.trigger });
+      const dialog = await openHeld(user, held);
+      await sendHeld(user, held, dialog);
+
+      pending.reject(refused());
+      const override = await screen.findByRole("dialog", { name: held.title });
+      await user.click(
+        within(override).getByRole("button", { name: "Cancel" }),
+      );
+
+      await waitFor(() => {
+        expect(trigger).toHaveFocus();
+      });
+      expect(held.other).not.toHaveBeenCalled();
+    },
+  );
+
+  // A hold that outlived its request would leave the dialog up with nothing
+  // that could close it, so it has to let go on every outcome.
+  it.each(HELD)(
+    "lets go of the $name dialog when its request succeeds",
+    async (held) => {
+      const user = userEvent.setup();
+      const pending = deferred<unknown>();
+      held.request.mockReturnValueOnce(pending.promise);
+      renderSection();
+      await expandFor(user, held);
+      const dialog = await openHeld(user, held);
+      await sendHeld(user, held, dialog);
+
+      pending.resolve(held.forced);
+
+      await waitFor(() => {
+        expect(dialog).not.toBeInTheDocument();
+      });
+      expectNoOverride();
+      expect(held.request).toHaveBeenCalledTimes(1);
+      expect(held.other).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(HELD)(
+    "lets go of the $name dialog when its request fails, and reports it without an override",
+    async (held) => {
+      const user = userEvent.setup();
+      const pending = deferred<unknown>();
+      held.request.mockReturnValueOnce(pending.promise);
+      renderSection();
+      await expandFor(user, held);
+      const dialog = await openHeld(user, held);
+      await sendHeld(user, held, dialog);
+
+      pending.reject(unreachable());
+
+      await waitFor(() => {
+        expect(dialog).not.toBeInTheDocument();
+      });
+      expect(await screen.findByText(UNREACHABLE)).toBeInTheDocument();
+      expectNoOverride();
+      expect(held.request).toHaveBeenCalledTimes(1);
+      expect(held.other).not.toHaveBeenCalled();
+    },
+  );
 });

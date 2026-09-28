@@ -62,6 +62,7 @@ import {
 } from "../api/access-queries";
 import { TokenSecretDialog } from "./TokenSecretDialog";
 import { SelfCredentialConfirm } from "./SelfCredentialConfirm";
+import { holdFocusInDialog } from "./holdFocusInDialog";
 
 interface Props {
   clusterId: string;
@@ -383,11 +384,18 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
 
         {/* Deleting a PVE user takes every API token it owns with it, and
             Proxmox cannot recreate those secrets — so this confirms, like the
-            less destructive group and role deletes already do. */}
+            less destructive group and role deletes already do.
+
+            It is held open while the DELETE is in flight. Closing it would not
+            recall the request, and the refusal, arriving after the operator
+            had moved on, would open the delete's override over whatever they
+            were doing — a prompt to force-delete a user has been seen over
+            that user's edit form. Held, the refusal lands on the dialog it
+            answers. */}
         <AlertDialog
           open={deleteTarget !== null}
           onOpenChange={(open) => {
-            if (!open) setDeleteTarget(null);
+            if (!open && !deleteUser.isPending) setDeleteTarget(null);
           }}
         >
           <AlertDialogContent>
@@ -403,13 +411,18 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel disabled={deleteUser.isPending}>
+                Cancel
+              </AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 disabled={deleteUser.isPending}
                 onClick={(e: React.MouseEvent) => {
                   e.preventDefault();
-                  if (deleteTarget) handleDelete(deleteTarget.userid, false);
+                  if (deleteTarget) {
+                    handleDelete(deleteTarget.userid, false);
+                    holdFocusInDialog(e);
+                  }
                 }}
               >
                 {deleteUser.isPending ? "Deleting..." : "Delete User"}
@@ -418,8 +431,12 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
           </AlertDialogContent>
         </AlertDialog>
 
+        {/* Keyed on the account, so the form state is always that account's:
+            what was typed, the error, and the refused edit its override would
+            force can never carry over to another. */}
         {editTarget !== null && (
           <EditUserDialog
+            key={editTarget}
             clusterId={clusterId}
             userid={editTarget}
             onClose={() => {
@@ -430,6 +447,10 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
 
         {deleteConflict && (
           <SelfCredentialConfirm
+            // A refusal for another user is a new dialog: nothing typed for the
+            // last one carries over.
+            key={deleteConflict.userid}
+            title="Deleting this user will cut off Nexara's access"
             message={deleteConflict.message}
             confirmValue={deleteConflict.userid}
             actionLabel="Delete User"
@@ -446,6 +467,22 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
     </Card>
   );
 }
+
+/**
+ * What each token override says. Its title names the action it confirms and its
+ * button is that action's verb; kept as pairs so a title and its button cannot
+ * be crossed. Which request the button sends is chosen in onConfirm.
+ */
+const TOKEN_OVERRIDE = {
+  revoke: {
+    title: "Revoking this token will cut off Nexara's access",
+    actionLabel: "Revoke Token",
+  },
+  regenerate: {
+    title: "Regenerating this token will cut off Nexara's access",
+    actionLabel: "Regenerate Token",
+  },
+} as const;
 
 /**
  * The API tokens belonging to one user, rendered inside its expanded row.
@@ -694,10 +731,13 @@ function UserTokens({
         />
       )}
 
+      {/* The revoke and regenerate confirmations are held open while their
+          request is in flight, for the reason the user delete's is (see
+          AccessUsersSection). */}
       <AlertDialog
         open={revokeTarget !== null}
         onOpenChange={(open) => {
-          if (!open) setRevokeTarget(null);
+          if (!open && !deleteToken.isPending) setRevokeTarget(null);
         }}
       >
         <AlertDialogContent>
@@ -712,13 +752,18 @@ function UserTokens({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleteToken.isPending}>
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={deleteToken.isPending}
               onClick={(e: React.MouseEvent) => {
                 e.preventDefault();
-                if (revokeTarget) handleRevoke(revokeTarget, false);
+                if (revokeTarget) {
+                  handleRevoke(revokeTarget, false);
+                  holdFocusInDialog(e);
+                }
               }}
             >
               {deleteToken.isPending ? "Revoking..." : "Revoke Token"}
@@ -730,7 +775,7 @@ function UserTokens({
       <AlertDialog
         open={regenTarget !== null}
         onOpenChange={(open) => {
-          if (!open) setRegenTarget(null);
+          if (!open && !updateToken.isPending) setRegenTarget(null);
         }}
       >
         <AlertDialogContent>
@@ -745,12 +790,17 @@ function UserTokens({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={updateToken.isPending}>
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               disabled={updateToken.isPending}
               onClick={(e: React.MouseEvent) => {
                 e.preventDefault();
-                if (regenTarget) handleRegenerate(regenTarget, false);
+                if (regenTarget) {
+                  handleRegenerate(regenTarget, false);
+                  holdFocusInDialog(e);
+                }
               }}
             >
               {updateToken.isPending ? "Regenerating..." : "Regenerate"}
@@ -771,16 +821,17 @@ function UserTokens({
 
       {selfConflict && (
         <SelfCredentialConfirm
+          // Likewise for another action or token: nothing typed carries over.
+          key={`${selfConflict.action}:${selfConflict.tokenid}`}
+          title={TOKEN_OVERRIDE[selfConflict.action].title}
           message={selfConflict.message}
           // The full "user@realm!name": the dialog body names the token that
           // way, so asking for the bare suffix would both mismatch what is on
           // screen and reduce the confirmation to a few characters.
           confirmValue={fullTokenId(selfConflict.tokenid)}
-          actionLabel={
-            selfConflict.action === "revoke"
-              ? "Revoke Token"
-              : "Regenerate Token"
-          }
+          actionLabel={TOKEN_OVERRIDE[selfConflict.action].actionLabel}
+          // Held while either token request is out, not only the one this
+          // override sends: the cautious hold, since either action can raise it.
           pending={deleteToken.isPending || updateToken.isPending}
           onCancel={() => {
             setSelfConflict(null);
@@ -799,8 +850,9 @@ function UserTokens({
 /**
  * Edits one Proxmox user, seeded from the per-user detail endpoint.
  *
- * Mounted only while a target is set, so the form state resets for free on
- * close rather than needing an effect to clear it.
+ * Mounted only while a target is set, and keyed on it by the section, so the
+ * form state resets for free on close, and on a change of account, rather than
+ * needing an effect to clear it.
  *
  * The form is drawn only from an account that was actually read, and a save
  * carries only the fields the operator touched. Both follow from the update
@@ -982,6 +1034,7 @@ function EditUserDialog({
             dismissing it returns to the form with the edit intact. */}
         {conflict && (
           <SelfCredentialConfirm
+            title="Saving this edit will cut off Nexara's access"
             message={conflict.message}
             confirmValue={conflict.edit.userid}
             actionLabel="Save Anyway"
