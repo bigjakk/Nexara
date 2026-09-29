@@ -80,8 +80,27 @@ import (
 // The sweep that produced this file also looked at every other internal/proxmox
 // struct with a credential-shaped field and settled each one. It found one leak,
 // keys on AccessUser and AccessUserDetail, since shaped and listed in
-// readStructs above. The rest needed no change, and none is enforced here, so
-// those findings are recorded rather than re-derived:
+// readStructs above. It could not find a secret under a name that is not
+// credential-SHAPED, which is the blind spot credentialish describes, and for
+// that reason it missed AccessDomain.TFA: isCredentialish("tfa") is false, yet on
+// GET .../access/domains/:realm the field was Proxmox's whole two-factor property
+// string, the Yubico API key included, readable by every Viewer. It is now
+// reduced to its type, as Proxmox's own realm list gives it, where the client
+// decodes it (proxmox.RealmTFAType, in GetAccessDomain and GetAccessDomains) and
+// again by accessDomainForRead and accessDomainsForRead; the shaper guard below
+// requires the handlers' half.
+//
+// AccessDomain is NOT listed in readStructs, and cannot be: that test fatals on a
+// struct with no credential-shaped field, and none of AccessDomain's five json
+// names is one. What guards it instead is TestAccessDomainFieldSet in
+// internal/proxmox, which pins the fields it decodes: Proxmox's read returns the
+// realm's whole section, domains.cfg holds secrets, some under names that say
+// nothing (tfa),
+// and a field added is sent the moment it is decoded. access_realm_test.go, the
+// client tests and the route tests in internal/api pin what is sent.
+//
+// The rest needed no change, and none is enforced here, so those findings are
+// recorded rather than re-derived:
 //
 //	AccessToken                              carries no secret by construction;
 //	  Proxmox returns a token's value exactly once, at creation.
@@ -124,8 +143,9 @@ import (
 // What it cannot catch, stated plainly: a credential whose field name says
 // nothing. proxmox.ACMEPlugin.Data is the live example — it holds the DNS
 // provider's API credentials and is blanked by hand in acme.go, and no list of
-// name substrings would ever have found it. A field named for its role rather
-// than its content still needs a human to notice.
+// name substrings would ever have found it. proxmox.AccessDomain.TFA is another:
+// a realm's two-factor property string, Yubico API key and all. A field named for
+// its role rather than its content still needs a human to notice.
 //
 // This list has a second consumer:
 // TestGuard_CredentialBearingTypesRedactTheirRenderings in
@@ -552,6 +572,8 @@ func TestGuard_CredentialReadsAreShapedBeforeResponding(t *testing.T) {
 		{clientCall: "GetSDNDNSPlugins", shaper: "sdnDNSForRead"},
 		{clientCall: "GetAccessUsers", shaper: "accessUsersForRead"},
 		{clientCall: "GetAccessUser", shaper: "accessUserDetailForRead"},
+		{clientCall: "GetAccessDomains", shaper: "accessDomainsForRead"},
+		{clientCall: "GetAccessDomain", shaper: "accessDomainForRead"},
 		{
 			clientCall: "GetStorageConfig",
 			shaper:     "newStorageConfigResponse",

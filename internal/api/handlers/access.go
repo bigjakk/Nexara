@@ -1195,7 +1195,7 @@ func (h *AccessHandler) ListDomains(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return RespondItems(c, domains)
+	return RespondItems(c, accessDomainsForRead(domains))
 }
 
 // GetDomain handles GET /clusters/:cluster_id/access/domains/:realm.
@@ -1216,10 +1216,31 @@ func (h *AccessHandler) GetDomain(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	// AccessDomain carries no credential field by construction — the struct
-	// deliberately omits the LDAP/AD bind password rather than fetching and
-	// blanking it.
-	return c.JSON(domain)
+	// Proxmox's read returns the realm's two-factor setting whole, the Yubico API
+	// key with it, and view:access is held by every built-in Viewer. The client
+	// reduces it to its type, as Proxmox's own realm list does; shape it again.
+	return c.JSON(accessDomainForRead(*domain))
+}
+
+// accessDomainForRead is the body of GET .../access/domains/:realm: the realm with
+// its two-factor setting reduced to a type. The client has already done that
+// (proxmox.RealmTFAType); doing it here too keeps the response from resting on
+// one layer, and costs nothing, since the reduction is idempotent. Every other
+// field is as the client read it.
+func accessDomainForRead(d proxmox.AccessDomain) proxmox.AccessDomain {
+	d.TFA = proxmox.RealmTFAType(d.TFA)
+	return d
+}
+
+// accessDomainsForRead is the body of GET .../access/domains, each realm's
+// two-factor setting reduced to a type as accessDomainForRead does it.
+func accessDomainsForRead(domains []proxmox.AccessDomain) []proxmox.AccessDomain {
+	out := make([]proxmox.AccessDomain, len(domains))
+	for i, d := range domains {
+		d.TFA = proxmox.RealmTFAType(d.TFA)
+		out[i] = d
+	}
+	return out
 }
 
 // GetPermissions handles GET /clusters/:cluster_id/access/permissions.

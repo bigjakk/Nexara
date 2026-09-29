@@ -2797,6 +2797,16 @@ type UpdateAccessTokenParams struct {
 // AccessDomain is an authentication realm. The field set is deliberately
 // partial: realms are read-only here, so this carries what a listing needs
 // rather than the ~45 LDAP/AD/OIDC configuration keys PVE accepts.
+//
+// It stays short because Proxmox's single-realm read returns a realm's section
+// as stored, and domains.cfg holds secrets: an OIDC realm's client-key, and the
+// Yubico API key inside a tfa. A field is added only after it has been
+// classified; TestAccessDomainFieldSet pins the set.
+//
+// TFA is the two-factor type, yubico or oath, in Proxmox's realm list, but on
+// its single read it is the whole property string. GetAccessDomain and
+// GetAccessDomains reduce it with RealmTFAType, so here it is the type, or empty
+// when there is none.
 type AccessDomain struct {
 	Realm   string   `json:"realm"`
 	Type    string   `json:"type"`

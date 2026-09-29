@@ -1425,9 +1425,10 @@ func TestAccessUserReadsWithholdKeys(t *testing.T) {
 	}
 }
 
-// accessUserFilled returns a T, one of the two Proxmox user structs, with every
-// field set to something that stands out — the keys included, as a probe.
-func accessUserFilled[T any](t *testing.T) T {
+// accessFilled returns a T, one of the Proxmox access structs the reads shape (a
+// user, a user's detail, or a realm), with every field set to something that
+// stands out: each string is a probe, a user's keys among them.
+func accessFilled[T any](t *testing.T) T {
 	t.Helper()
 	var user T
 	v := reflect.ValueOf(&user).Elem()
@@ -1454,7 +1455,7 @@ func accessUserFilled[T any](t *testing.T) T {
 func requireOnlyKeysChanged[T any](t *testing.T, shape func(T) any) {
 	t.Helper()
 	for _, hasKeys := range []bool{true, false} {
-		user := accessUserFilled[T](t)
+		user := accessFilled[T](t)
 		if !hasKeys {
 			reflect.ValueOf(&user).Elem().FieldByName("Keys").SetString("")
 		}

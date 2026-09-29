@@ -950,7 +950,10 @@ the built-in Admin role by default (it can mint a token with cluster-wide
 Administrator rights, which bypasses Nexara's own RBAC).
 
 Realms are read-only: creating or editing one requires the `Realm.Allocate`
-privilege, which no bundled Proxmox role except `Administrator` carries.
+privilege, which no bundled Proxmox role except `Administrator` carries. A realm's
+`tfa` is returned as its type only (`yubico` or `oath`, or empty when there is
+none), as in Proxmox's own realm list; the Yubico API id, key and url it is stored
+with are never returned.
 
 | Method | Path | Description |
 |--------|------|-------------|

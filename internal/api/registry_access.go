@@ -531,8 +531,9 @@ func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,
 		Path:   accessScope + "/domains/:realm",
-		Description: "Get one realm's configuration. Read-only, and the response carries no credential: " +
-			"the struct omits the LDAP/AD bind password by construction rather than fetching and blanking it.",
+		Description: "Get one realm's configuration: realm, type, comment, default and tfa. Read-only. " +
+			"tfa is the two-factor type alone (yubico or oath, or empty when there is none), as in the realm " +
+			"list; Proxmox stores the Yubico API id, key and url with it, and they are never returned.",
 		Group:       "Proxmox Access Control",
 		Permissions: accessView(),
 		Parameters: clusterParams(apischema.Properties{

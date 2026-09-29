@@ -117,7 +117,7 @@ func requireFields(t *testing.T, got, want map[string]any) {
 	t.Helper()
 	for name, w := range want {
 		if g, ok := got[name]; !ok || !reflect.DeepEqual(g, w) {
-			t.Errorf("%q is %v (present: %v), want %v; the user is %v", name, g, ok, w, got)
+			t.Errorf("%q is %v (present: %v), want %v; the object is %v", name, g, ok, w, got)
 		}
 	}
 }

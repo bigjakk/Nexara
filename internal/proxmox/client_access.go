@@ -644,7 +644,8 @@ func (c *Client) UpdateAccessACL(ctx context.Context, params UpdateAccessACLPara
 // Realms (read-only) and effective permissions
 // ---------------------------------------------------------------------------
 
-// GetAccessDomains lists the cluster's authentication realms.
+// GetAccessDomains lists the cluster's authentication realms, each with its TFA
+// reduced by RealmTFAType.
 //
 // Read-only by design: realm create/update/delete requires the Realm.Allocate
 // privilege, which sits in Proxmox's root privilege tier and is carried by no
@@ -654,14 +655,23 @@ func (c *Client) GetAccessDomains(ctx context.Context) ([]AccessDomain, error) {
 	if err := c.do(ctx, "/access/domains", &domains); err != nil {
 		return nil, fmt.Errorf("get access domains: %w", err)
 	}
+	// Proxmox's list already sends the type alone. Reducing it here keeps that
+	// from being something a caller has to trust.
+	for i := range domains {
+		domains[i].TFA = RealmTFAType(domains[i].TFA)
+	}
 	sortAccessList(domains, func(d AccessDomain) string { return d.Realm })
 	return domains, nil
 }
 
-// GetAccessDomain returns one realm's configuration.
+// GetAccessDomain returns one realm's configuration, as far as AccessDomain
+// decodes it, with TFA reduced by RealmTFAType.
 //
-// Callers must blank any credential-bearing field before this reaches an API
-// response: LDAP/AD realms can carry a bind password in their config.
+// Proxmox's read returns the realm's section as stored, and domains.cfg holds
+// secrets: an OIDC realm's client-key, and the Yubico API key inside a tfa. That
+// is why AccessDomain decodes only the fields it lists, and why TFA is reduced
+// here, so that the raw string never leaves the client. An LDAP/AD bind password
+// is not in the realm's config: Proxmox keeps it under /etc/pve/priv/realm.
 func (c *Client) GetAccessDomain(ctx context.Context, realm string) (*AccessDomain, error) {
 	if err := validateRealm(realm); err != nil {
 		return nil, err
@@ -671,7 +681,54 @@ func (c *Client) GetAccessDomain(ctx context.Context, realm string) (*AccessDoma
 		return nil, fmt.Errorf("get access domain %s: %w", realm, err)
 	}
 	domain.Realm = realm
+	domain.TFA = RealmTFAType(domain.TFA)
 	return &domain, nil
+}
+
+// realmTFATypes are the two-factor types Proxmox has: the enum of the type key
+// in $tfa_format (pve-access-control, src/PVE/Auth/Plugin.pm). It is an
+// allowlist by design: a type Proxmox adds later reads as "" in both realm reads
+// until it is added here.
+var realmTFATypes = []string{"yubico", "oath"}
+
+// RealmTFAType reduces a realm's two-factor setting to its type, "yubico" or
+// "oath", or "" when there is none.
+//
+// Proxmox stores the setting as a property string,
+// type=yubico,id=<API ID>,key=<API key>,url=<API URL>, and GET
+// /access/domains/{realm} returns it whole, the Yubico API key, an HMAC secret,
+// included. Its realm list, which anyone may read, sends the type alone (the
+// index in API2/Domains.pm keeps only what parse_tfa_config gives as its type),
+// and this does the same.
+//
+// The type is the value of the first type= part. Proxmox checks tfa against
+// $tfa_format when it is written and again when domains.cfg is loaded, and drops
+// a value that fails (SectionConfig.pm), so every string it returns has exactly
+// one part that starts with type=, and that part is the type key: a part's key is
+// what precedes its first =, so an id, key or url that merely holds type= is not
+// one. A bare type, as the list sends it, is returned as it is, which makes this
+// idempotent. The result is picked from realmTFATypes and never cut out of tfa, so
+// it can be nothing but a type.
+func RealmTFAType(tfa string) string {
+	if known := realmTFAKnown(tfa); known != "" {
+		return known
+	}
+	for part := range strings.SplitSeq(tfa, ",") {
+		if value, ok := strings.CutPrefix(part, "type="); ok {
+			return realmTFAKnown(value)
+		}
+	}
+	return ""
+}
+
+// realmTFAKnown returns the element of realmTFATypes that s equals, or "".
+func realmTFAKnown(s string) string {
+	for _, known := range realmTFATypes {
+		if s == known {
+			return known
+		}
+	}
+	return ""
 }
 
 // GetEffectivePermissions returns the privilege map for the credential this
