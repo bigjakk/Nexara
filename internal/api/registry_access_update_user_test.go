@@ -113,22 +113,53 @@ func (p *accessUpdatePVE) requests() []accessUpdatePVERequest {
 }
 
 // accessUpdateDB stands in for the database behind the handler. UpdateUser reads
-// the cluster row to build its Proxmox client, and a second time for the
-// self-credential guard on an unforced edit the guard covers, and it writes one
-// audit row after Proxmox has answered. Any other statement fails, so a handler
-// that starts reading something else fails here instead of being handed a row
-// that happens to satisfy it.
+// the cluster row for the self-credential guard on an unforced edit the guard
+// covers, and again to build its Proxmox client, and it writes one audit row
+// after Proxmox has answered. Any other statement fails, so a handler that starts
+// reading something else fails here instead of being handed a row that happens to
+// satisfy it.
+//
+// The two cluster reads are told apart by their order, which is what
+// failClusterRead and clusterReadCount take: the guard's is the first when it
+// runs at all, and a forced request has the client's alone.
 type accessUpdateDB struct {
 	mu      sync.Mutex
 	cluster db.Cluster
 	audits  [][]any
+	// clusterReads counts the GetCluster reads made, and clusterFailures maps the
+	// number of a read, the first being 1, to the error it fails with.
+	clusterReads    int
+	clusterFailures map[int]error
 }
 
 func (d *accessUpdateDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	if strings.Contains(sql, "-- name: GetCluster :one") && len(args) == 1 && args[0] == d.cluster.ID {
-		return accessUpdateRow{cluster: d.cluster}
+		d.mu.Lock()
+		d.clusterReads++
+		err := d.clusterFailures[d.clusterReads]
+		d.mu.Unlock()
+		return accessUpdateRow{cluster: d.cluster, err: err}
 	}
 	return accessUpdateRow{err: fmt.Errorf("%w: %.60s", errAccessUpdateUnexpected, sql)}
+}
+
+// failClusterRead makes the nth GetCluster read, the first being 1, fail with
+// err, as the database does for a cluster that is not there (pgx.ErrNoRows) or
+// for a connection that has gone.
+func (d *accessUpdateDB) failClusterRead(n int, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.clusterFailures == nil {
+		d.clusterFailures = map[int]error{}
+	}
+	d.clusterFailures[n] = err
+}
+
+// clusterReadCount is how many GetCluster reads the handler has made.
+func (d *accessUpdateDB) clusterReadCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.clusterReads
 }
 
 func (*accessUpdateDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
@@ -288,9 +319,9 @@ var accessUpdateEverythingForm = url.Values{
 // and not an edit that never carried them.
 //
 // The guard is live in this harness: the second case is the same edit without
-// force, refused by it. Without that case a stand-in that failed the guard's
-// cluster read would let every edit through, since the guard does not fail on a
-// lookup error, and the forced flag in the first case would prove nothing.
+// force, refused by it. Without that case a stand-in whose cluster row did not
+// name the account would let every edit through, and the forced flag in the first
+// case would prove nothing.
 //
 // The last case has Proxmox refuse the edit: the caller gets an error and
 // nothing is audited, because nothing changed. The other cases' stand-in always

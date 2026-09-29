@@ -994,25 +994,40 @@ account's two-factor coverage. `keys` can still be written: send it on create or
 update; on update an empty value clears it.
 
 **Self-protection.** Deleting or regenerating the token Nexara authenticates
-with, deleting the user that owns it, or editing that user to disable it
+with, deleting the user that owns it, editing that user to disable it
 (`enable=false`), give it an expiry (a non-zero `expire`) or change its groups
-(any `groups` value) returns `409` with an explanation instead of proceeding.
-Append `?force=true` to override. A delete, a regenerate or a disable cuts Nexara
-off at once, and an expiry does when it arrives; a group change can take away
-permissions the token relies on. The cluster then shows as unreachable, or fails
-some actions with permission errors (403), until its credentials are updated in
-Nexara or, for an edit, the edit is undone in Proxmox. Other edits, a comment or
-e-mail change included, are not guarded.
+(any `groups` value), or editing that token to give it an expiry (a non-zero
+`expire`) or turn privilege separation on (`privsep=true`) returns `409` with an
+explanation instead of proceeding. Append `?force=true` to override. A delete, a
+regenerate or a disable cuts Nexara off at once, and an expiry does when it
+arrives; a group change, or `privsep=true`, can take away permissions the token
+relies on — a separated token holds only what is granted to the token itself, and
+never more than its user holds, so only turning separation on can. The cluster
+then shows as unreachable, or fails some actions with permission errors (403),
+until its credentials are updated in Nexara or, for an edit, the edit is undone in
+Proxmox. Other edits, a comment or e-mail change included, are not guarded, nor
+are `privsep=false` and a token `expire` of `0`. Nor is anything outside these
+routes: ACL changes (revoking the token's or its user's grant, granting `NoAccess`
+or a narrower role on a deeper path), deleting a group its user belongs to, and
+editing or deleting a custom role it holds can each take away permissions Nexara
+relies on, and none of them is guarded.
+
+If Nexara cannot read the cluster's record to check whether the credential is its
+own, it refuses the guarded request without sending anything to Proxmox, so
+nothing has changed: `500` (try again), or `404` if the cluster does not exist. A
+request with `force=true` skips the check. Neither is a `409`.
 
 The audit rows for deleting a user or token, updating a token and editing a user
-carry `forced`: `true` whenever the request sent `force=true` on a delete, a
-regenerate or a guarded kind of edit, on any account, so it does not mean the
-account was Nexara's own or that the guard would have refused; a forced
-comment-only edit, or a token update that does not regenerate, records `false`.
-A user edit's row also carries `enable` and `expire` as sent, and
-`groups_changed: true` when it set `groups`, each only when the request set it —
-never the e-mail, comment, names, the two-factor keys field or the group list,
-since audit rows are readable by every Viewer.
+carry `forced`: `true` whenever the request sent `force=true` on a delete or on an
+update the guard covers (a regenerate, a non-zero token `expire`, `privsep=true`,
+or one of the user edits above), on any account, so it does not mean the account
+was Nexara's own or that the guard would have refused; a forced comment-only
+edit, or a token update that is none of those, records `false`. A user edit's row
+also carries `enable` and `expire` as sent, and `groups_changed: true` when it set
+`groups`, each only when the request set it — never the e-mail, comment, names,
+the two-factor keys field or the group list, since audit rows are readable by
+every Viewer. A token update's row carries `regenerate` and, each only when the
+request set it, `expire` and `privsep` as sent — never the comment.
 
 A user create's row carries `userid` and `has_password` and, each only when the
 request set that field, `enable` and `expire` as sent and `groups_set: true` —

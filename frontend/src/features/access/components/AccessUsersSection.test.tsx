@@ -110,8 +110,9 @@ const ANY_OVERRIDE = /will cut off Nexara's access$/;
 // Worded as guardSelfCredential (internal/api/handlers/access.go) words it.
 const REFUSAL =
   "This is the user nexara@pve Nexara uses to reach this cluster. " +
-  "Continuing will cut Nexara off until the cluster is reconfigured with " +
-  "new credentials. Retry with force=true to proceed anyway.";
+  "Continuing can cut Nexara off, or take away permissions it relies on, " +
+  "until its credentials are updated in Nexara or the change is undone in " +
+  "Proxmox. Retry with force=true to proceed anyway.";
 
 // The edit saveDisabled makes: the account disabled, and nothing else because
 // nothing else was touched.

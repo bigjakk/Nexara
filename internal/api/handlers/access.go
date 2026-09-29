@@ -3,11 +3,15 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -70,9 +74,17 @@ func (h *AccessHandler) publishAccessChange(ctx context.Context, clusterID uuid.
 
 // splitFullTokenID splits "user@realm!tokenname" into its two halves.
 // Returns ok=false when s carries no "!", i.e. it is a plain user id.
+//
+// The cut is at the LAST "!", where PVE's split_tokenid (pve-access-control,
+// PVE/AccessControl.pm) puts it: a user name may contain "!" ([^\s:/]+), a realm
+// and a token name never do.
 func splitFullTokenID(s string) (userid, tokenid string, ok bool) {
-	userid, tokenid, ok = strings.Cut(s, "!")
-	if !ok || userid == "" || tokenid == "" {
+	i := strings.LastIndexByte(s, '!')
+	if i < 0 {
+		return "", "", false
+	}
+	userid, tokenid = s[:i], s[i+1:]
+	if userid == "" || tokenid == "" {
 		return "", "", false
 	}
 	return userid, tokenid, true
@@ -104,34 +116,123 @@ func selfCredentialSubject(ownTokenID, userid, tokenid string) (string, bool) {
 	return "token " + ownTokenID, true
 }
 
-// guardSelfCredential refuses operations that would sever Nexara's own access
-// to the cluster: deleting or regenerating the token it authenticates with, or
-// deleting the user that owns it.
+// errAccessNoQueries is the lookup failure guardSelfCredential reports for an
+// AccessHandler built without a database, which has nowhere to read the cluster
+// from. No production wiring builds one — NewAccessHandler is called only where
+// serverDeps.hasCrypto has already required queries — so this keeps the guard
+// total; it is not a state anything reaches.
+var errAccessNoQueries = errors.New("access handler has no database")
+
+// selfCredentialRefusal is the whole decision of guardSelfCredential, over
+// everything it depends on: whether the caller sent force, whether the cluster
+// row could be read (lookupErr) and, if it was, the token id Nexara
+// authenticates with, against the account or token the request names.
 //
-// This warns rather than blocks outright — an operator rotating credentials by
-// hand has a legitimate reason to do exactly this, and a hard block would send
-// them to the Proxmox UI to do it less safely. force=true proceeds, and the UI
-// puts that behind a type-the-name confirmation.
+// It returns the refusal, or nil when the request may go on. The guard has three
+// outcomes, and each is answered here rather than in a branch nothing tests:
 //
-// A failure to read the cluster row is deliberately NOT fatal: the caller
-// already passed an RBAC check, and refusing an otherwise-valid operation
-// because a lookup hiccuped would be worse than losing the guard for one call.
-func (h *AccessHandler) guardSelfCredential(c fiber.Ctx, clusterID uuid.UUID, userid, tokenid string, force bool) error {
-	if force || h.queries == nil {
+//   - the credential is not Nexara's own: nil;
+//   - it is: 409, with the way past it, force=true;
+//   - Nexara could not tell, because the row could not be read: a refusal too, 404
+//     for a cluster that is not there and 500 for any other failure. Neither is a
+//     409, which the SPA answers with an override whose title says the action WILL
+//     cut Nexara off — not known here. They are the statuses CreateProxmoxClient
+//     gives a cluster row it cannot read, so the answer does not depend on which of
+//     the two reads met the failure.
+//
+// force wins over everything, a lookup error included: it is the operator's own
+// decision, and guardSelfCredential does not read the row for it at all.
+//
+// Kept pure and separate from the handler so the decision is testable without a
+// database or a Proxmox; TestSelfCredentialRefusal is the table.
+func selfCredentialRefusal(force bool, lookupErr error, ownTokenID, userid, tokenid string) error {
+	if force {
 		return nil
 	}
-	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
-	if err != nil {
-		return nil
+	if lookupErr != nil {
+		if errors.Is(lookupErr, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusNotFound, "Cluster not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError,
+			"Nexara could not check whether this is the credential it uses to reach this cluster, "+
+				"so nothing was changed. Try again.")
 	}
-	subject, conflict := selfCredentialSubject(cluster.TokenID, userid, tokenid)
+	subject, conflict := selfCredentialSubject(ownTokenID, userid, tokenid)
 	if !conflict {
 		return nil
 	}
 	return fiber.NewError(fiber.StatusConflict,
 		"This is the "+subject+" Nexara uses to reach this cluster. "+
-			"Continuing will cut Nexara off until the cluster is reconfigured with new credentials. "+
+			"Continuing can cut Nexara off, or take away permissions it relies on, "+
+			"until its credentials are updated in Nexara or the change is undone in Proxmox. "+
 			"Retry with force=true to proceed anyway.")
+}
+
+// guardSelfCredential refuses operations that would sever Nexara's own access
+// to the cluster: deleting or regenerating the token it authenticates with,
+// deleting the user that owns it, and the updates accessUpdateAffectsAccess and
+// accessTokenUpdateAffectsAccess pick out.
+//
+// This warns rather than blocks outright — an operator rotating credentials by
+// hand has a legitimate reason to do exactly this, and a hard block would send
+// them to the Proxmox UI to do it less safely. force=true proceeds, and the UI
+// puts that behind a type-the-name confirmation. A forced request does not read
+// the cluster row for the guard at all.
+//
+// A failure to read that row is NOT waved through. It once was, on the grounds
+// that the caller had already passed an RBAC check and that a lookup hiccup should
+// not cost an otherwise-valid operation. The costs run the other way. What the
+// guard protects cannot be undone from here — a deleted or regenerated token is
+// gone, and the way back is entering new credentials for the cluster by hand —
+// while a refusal costs almost nothing: nothing has been sent to Proxmox, a lookup
+// that failed a moment ago most likely works now, and an operator who is sure
+// passes force=true. Nor is it a read the client build would have failed on next:
+// the Proxmox client comes from ClientCache, which reads the row once in ten
+// minutes, so this is usually the request's only read of it. A guard that lets the
+// request through when it cannot look is off in exactly the case it cannot vouch
+// for. selfCredentialRefusal decides all three outcomes; the failure is logged
+// here, since the answer says only that the check could not be made.
+func (h *AccessHandler) guardSelfCredential(c fiber.Ctx, clusterID uuid.UUID, userid, tokenid string, force bool) error {
+	var ownTokenID string
+	var lookupErr error
+	if !force {
+		ownTokenID, lookupErr = h.clusterTokenID(c.Context(), clusterID)
+		logGuardLookupFailure(c.Context(), clusterID, lookupErr)
+	}
+	return selfCredentialRefusal(force, lookupErr, ownTokenID, userid, tokenid)
+}
+
+// logGuardLookupFailure records why guardSelfCredential could not read the
+// cluster row. It is a Warn only when the guard's own context has ended
+// (ctx.Err() != nil), cancelled or out of time: the caller went away, and the
+// database is not at fault. Anything else is an Error, whatever the failure's
+// chain holds, since a context error there can be the database driver's own
+// timeout. Fiber's c.Context() never ends unless something calls SetContext, so
+// today the Warn is for a caller that does. A cluster that is not there is the
+// caller's mistake and is not logged.
+func logGuardLookupFailure(ctx context.Context, clusterID uuid.UUID, err error) {
+	if err == nil || errors.Is(err, pgx.ErrNoRows) {
+		return
+	}
+	level := slog.LevelError
+	if ctx.Err() != nil {
+		level = slog.LevelWarn
+	}
+	slog.Log(ctx, level, "self-credential guard could not read the cluster; refusing the request",
+		"cluster_id", clusterID, "error", err)
+}
+
+// clusterTokenID reads the token id, in its "user@realm!tokenname" form, that the
+// cluster's row authenticates with.
+func (h *AccessHandler) clusterTokenID(ctx context.Context, clusterID uuid.UUID) (string, error) {
+	if h.queries == nil {
+		return "", errAccessNoQueries
+	}
+	cluster, err := h.queries.GetCluster(ctx, clusterID)
+	if err != nil {
+		return "", fmt.Errorf("get cluster: %w", err)
+	}
+	return cluster.TokenID, nil
 }
 
 // accessUpdateAffectsAccess reports whether a user update could stop the
@@ -159,6 +260,42 @@ func accessUpdateAffectsAccess(req proxmox.UpdateAccessUserParams) bool {
 		return true
 	}
 	return req.Groups != nil
+}
+
+// accessTokenUpdateAffectsAccess is accessUpdateAffectsAccess for the token
+// itself: whether a token update could stop the token working, or shrink what it
+// may do. Three changes can.
+//
+// Regenerate: the previous secret stops working the moment PVE writes the new one.
+//
+// Expire, set to anything but 0 (never): PVE refuses a token whose expiry has
+// passed ("access expired", PVE::AccessControl::verify_token). As on a user,
+// a value is judged by being set and not against the clock — an expiry in the
+// future is still a scheduled outage, and the operator should say so deliberately —
+// and 0, which can only lift an expiry, is not guarded.
+//
+// PrivSep, set to true. A token without privilege separation holds exactly its
+// owning user's permissions; with it, only the permissions granted to the token
+// itself, and of those only what the user also holds — PVE::RPCEnvironment's
+// permissions intersects the two (pve-access-control, src/PVE/RPCEnvironment.pm).
+// Turning separation on can therefore only take permissions away, and a token with
+// no ACL entry of its own is left with none; turning it off can only add them, so
+// privsep=false is deliberately not guarded. Like any groups value on a user, any
+// privsep=true is covered without reading the token's current setting: the handler
+// never reads the stored token, and a request that changes nothing costs the
+// operator a confirmation, not a token.
+//
+// The comment cannot affect whether a token authenticates or what it may do, and
+// is not guarded, for the reason a user's comment is not: an edit that always
+// demands a force flag trains operators to pass it reflexively.
+func accessTokenUpdateAffectsAccess(req proxmox.UpdateAccessTokenParams) bool {
+	if req.Regenerate {
+		return true
+	}
+	if req.Expire != nil && *req.Expire != 0 {
+		return true
+	}
+	return req.PrivSep != nil && *req.PrivSep
 }
 
 // accessUserUpdateDetails builds the audit details of a user update.
@@ -243,6 +380,47 @@ func accessUserCreateDetails(userid string, hasPassword bool, fields proxmox.Acc
 	}
 	if fields.Groups != nil {
 		details["groups_set"] = true
+	}
+	return details
+}
+
+// accessTokenUpdateDetails builds the audit details of a token update.
+//
+// It is an allow-list, on the model of accessUserUpdateDetails: the account and
+// the token; regenerate, whether the request rotated the secret; forced, whether
+// the caller sent force on an update that accessTokenUpdateAffectsAccess covers;
+// and, of the two other fields that function treats as capable of cutting Nexara
+// off, the ones the request set, as sent. "Set" is the tristate pointer on req,
+// so expire=0 and privsep=false are deliberate values and are recorded, and an
+// omitted field leaves no key.
+//
+// Nothing else goes in. The comment is free text, and view:audit is held by every
+// built-in Viewer. The secret a regeneration returns is not here either: the
+// builder is never handed the response that carries it.
+//
+// forced has the meaning of the key of the same name on DeleteUser, DeleteToken
+// and a user edit: the caller sent force on an action the guard covers. It does
+// not say the guard would have refused, since the cluster row that would tell is
+// read only when force is absent, nor that the token is Nexara's own. force on an
+// update accessTokenUpdateAffectsAccess does not cover — a comment change, an
+// expire of 0, privsep=false — overrides nothing and records false.
+//
+// Pure, so the exact key set is testable without a database, and pinned, as
+// accessAuditBuilders requires, by TestAccessTokenUpdateDetails,
+// TestAccessTokenUpdateDetailsRecordsOnlyTheAllowedFields and, through the real
+// route, TestAccessUpdateTokenAuditRow in internal/api.
+func accessTokenUpdateDetails(userid, tokenid string, force bool, req proxmox.UpdateAccessTokenParams) map[string]any {
+	details := map[string]any{
+		"userid":     userid,
+		"tokenid":    tokenid,
+		"regenerate": req.Regenerate,
+		"forced":     force && accessTokenUpdateAffectsAccess(req),
+	}
+	if req.Expire != nil {
+		details["expire"] = *req.Expire
+	}
+	if req.PrivSep != nil {
+		details["privsep"] = *req.PrivSep
 	}
 	return details
 }
@@ -608,7 +786,10 @@ func (h *AccessHandler) CreateToken(c fiber.Ctx, p *apischema.Params) error {
 // UpdateToken handles PUT /clusters/:cluster_id/access/users/:userid/tokens/:tokenid.
 //
 // With regenerate set, the response carries a fresh secret and the old one
-// stops working immediately — hence the self-credential guard.
+// stops working immediately — hence the self-credential guard. It covers every
+// update accessTokenUpdateAffectsAccess does, so a non-zero expire and
+// privsep=true on the token Nexara authenticates with are refused unless forced,
+// as a regeneration is.
 func (h *AccessHandler) UpdateToken(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
@@ -629,8 +810,10 @@ func (h *AccessHandler) UpdateToken(c fiber.Ctx, p *apischema.Params) error {
 		PrivSep:    optBoolPtr(p.OptBool("privsep")),
 		Regenerate: p.Bool("regenerate"),
 	}
+	// force is read once: the value the guard sees is the value the audit row
+	// records.
 	force := p.Bool("force")
-	if req.Regenerate {
+	if accessTokenUpdateAffectsAccess(req) {
 		if err := h.guardSelfCredential(c, clusterID, userid, tokenid, force); err != nil {
 			return err
 		}
@@ -648,12 +831,7 @@ func (h *AccessHandler) UpdateToken(c fiber.Ctx, p *apischema.Params) error {
 	if req.Regenerate {
 		action = "regenerated"
 	}
-	details, _ := json.Marshal(map[string]any{
-		"userid":     userid,
-		"tokenid":    tokenid,
-		"regenerate": req.Regenerate,
-		"forced":     force && req.Regenerate,
-	})
+	details, _ := json.Marshal(accessTokenUpdateDetails(userid, tokenid, force, req))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_token", userid+"!"+tokenid, action, details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_token", userid+"!"+tokenid, action)
 	return c.JSON(updated)

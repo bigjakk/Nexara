@@ -197,7 +197,9 @@ func accessForceParam(what string) apischema.Property {
 		Source:   apischema.SourceQuery,
 		Typetext: "<boolean>",
 		Description: "Proceed even though " + what + " is the credential Nexara uses to reach this " +
-			"cluster. Omitted, the request is refused with 409 and an explanation.",
+			"cluster. Omitted, the request is refused with 409 and an explanation — or, when Nexara " +
+			"cannot read the cluster's record to check, with 500 (404 if the cluster does not exist) " +
+			"and nothing is changed.",
 	}
 }
 
@@ -227,14 +229,16 @@ func accessExpireParam(description string) apischema.Property {
 // and the cluster is the first parameter of every path. There is nothing for a
 // handler to resolve that middleware could not.
 //
-// The three guards each handler keeps are unrelated to the permission and stay
-// in the handler body, which is where they can see what the schema cannot:
+// The guards each handler keeps are unrelated to the permission and stay in the
+// handler body, which is where they can see what the schema cannot:
 //
 //   - guardSelfCredential, the 409 that refuses to destroy the token Nexara
-//     authenticates with unless ?force= says so. It reads the cluster row.
+//     authenticates with unless ?force= says so. It reads the cluster row, and a
+//     row it cannot read is a refusal too (404, or 500), never a 409.
 //   - accessUpdateAffectsAccess, which decides whether a user UPDATE is one of
 //     the edits that can sever access (disable, expire, regroup) rather than one
-//     that cannot affect an API token.
+//     that cannot affect an API token, and accessTokenUpdateAffectsAccess, the
+//     same decision for a token UPDATE (regenerate, expire, privsep=true).
 //   - the identifier validators in internal/proxmox/client_access.go, which run
 //     on the DECODED path segment. See the note on the patterns above.
 func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
@@ -332,7 +336,10 @@ func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
 		Path:   accessScope + "/users/:userid/tokens/:tokenid",
 		Description: "Change an API token's metadata, or regenerate its secret. A regeneration invalidates " +
 			"the previous secret immediately and returns the new one once, so regenerating the token Nexara " +
-			"authenticates with requires ?force=true.",
+			"authenticates with requires ?force=true. So does giving that token an expiry (any value but 0) " +
+			"or turning its privilege separation on: a separated token holds only what is granted to the " +
+			"token itself, and never more than its user holds, so that can only take permissions away. " +
+			"A comment change, an expiry of 0 and turning separation off do not.",
 		Group:       "Proxmox Access Control",
 		Permissions: accessManage(),
 		Parameters: accessTokenParams(withParams(updateAccessTokenParams(), apischema.Properties{

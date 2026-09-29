@@ -315,20 +315,33 @@ user that owns it, which takes its tokens along — returns **409** with an
 explanation rather than proceeding. So does editing that user so as to
 **disable** it, give it an **expiry**, or **change its groups**: Proxmox checks
 the owning user whenever it verifies a token, and a token's permissions can come
-through that user's groups.
+through that user's groups. So does editing that token (an API call; the UI
+only regenerates tokens) to give it an **expiry** (any value but 0, which means
+never) or to turn its **privilege separation on**: an expired token is refused,
+and a separated token holds only the permissions granted to the token itself, and
+never more than its user holds, so turning separation on can only take
+permissions away.
 
 It warns rather than blocking outright: an operator rotating credentials by hand
 has a legitimate reason to do exactly this, and a hard block would just send them
 to the Proxmox UI to do it less safely. Append `?force=true` to proceed. A
 delete, a regenerate or a disable cuts Nexara off at once, and an expiry does
-when it arrives; a group change can take away permissions the token relies on.
-The cluster then shows as unreachable, or fails some actions with permission
-errors (403), until you update its credentials in Nexara or, for an edit, undo
-it in Proxmox. The audit log's `forced` is true for a delete, a regenerate or a
-guarded edit sent with `force=true`, on any account, so it alone does not mean
-the account was Nexara's own; a forced comment-only edit, or a token update that
-does not regenerate, records `forced: false`. An edit's entry also shows which
-of enable, expiry and groups it set.
+when it arrives; a group change, or privilege separation turned on, can take away
+permissions the token relies on. The cluster then shows as unreachable, or fails
+some actions with permission errors (403), until you update its credentials in
+Nexara or, for an edit, undo it in Proxmox. The audit log's `forced` is true for
+a delete, a regenerate or a guarded edit sent with `force=true`, on any account,
+so it alone does not mean the account was Nexara's own; a forced edit the guard
+does not cover (a comment-only edit, a token expiry of 0, privilege separation
+turned off) records `forced: false`. A user edit's entry also shows which of
+enable, expiry and groups it set, and a token update's shows the expiry and
+privilege separation it set.
+
+When Nexara cannot read the cluster's own record to check whether the credential
+is its own, it refuses the guarded change without sending anything to Proxmox, so
+nothing changes: **500** (try again), or **404** if the cluster no longer exists.
+A request with `?force=true` skips the check. Neither is a **409**, so the UI
+reports an ordinary failure and does not offer the override.
 
 The UI puts each override behind a type-the-name confirmation whose title says
 what it confirms — "Deleting this user will cut off Nexara's access" (button
@@ -346,7 +359,12 @@ The guard is narrow on purpose — it fires only for the specific credential thi
 cluster authenticates with, and only for changes that could actually break it.
 Edits that cannot affect an API token (comment, e-mail, names, the two-factor keys
 field) are not guarded, because making every edit to `nexara@pve` demand a force
-flag would train operators to pass it reflexively.
+flag would train operators to pass it reflexively. The same goes for a token's
+comment, an expiry of 0 and privilege separation turned off. It does not watch
+every route to the same end, though: ACL changes (revoking the token's or its
+user's grant, granting NoAccess or a narrower role on a deeper path), deleting a
+group its user belongs to, and editing or deleting a custom role it holds can
+each take away permissions Nexara relies on, and none of them is guarded.
 
 ---
 
