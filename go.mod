@@ -9,7 +9,7 @@ require (
 	github.com/gofiber/contrib/v3/websocket v1.2.5
 	github.com/gofiber/fiber/v3 v3.5.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/golang-migrate/migrate/v4 v4.19.1
+	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
@@ -19,9 +19,9 @@ require (
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/valyala/fasthttp v1.73.0
-	golang.org/x/crypto v0.56.0
-	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/oauth2 v0.37.0
+	golang.org/x/sync v0.23.0
 )
 
 require (
@@ -31,7 +31,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/fasthttp/websocket v1.5.12 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.5 // indirect
 	github.com/gofiber/schema v1.8.5 // indirect
 	github.com/gofiber/utils/v2 v2.5.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -44,9 +44,9 @@ require (
 	github.com/savsgio/gotils v0.0.0-20250924091648-bce9a52d7761 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/yuin/gopher-lua v1.1.1 // indirect
-	go.uber.org/atomic v1.11.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	github.com/yuin/gopher-lua v1.1.2 // indirect
+	go.uber.org/atomic v1.12.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 )
