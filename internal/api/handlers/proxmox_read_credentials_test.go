@@ -15,21 +15,27 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// Three GET handlers return a Proxmox config struct that carries
-// credential-shaped fields, and blank these:
+// Five GET handlers return a Proxmox struct that carries credential-shaped
+// fields, and keep these out of the response:
 //
 //	GET .../storage/:storage_id/config   StorageConfig{password,keyring}
 //	GET .../sdn/ipams                    SDNIPAM{token}
 //	GET .../sdn/dns                      SDNDNS{key}
+//	GET .../access/users                 AccessUser{keys}
+//	GET .../access/users/:userid         AccessUserDetail{keys}
 //
-// All three are gated on view:storage / view:network, which every built-in
-// Viewer holds. metric_servers.go had already established the rule for its own
-// InfluxDB token — blank the write-only credential on the read — and these
-// follow it. For the storage body it is defence in depth: Proxmox keeps a
-// storage plugin's password and keyring under /etc/pve/priv and the read should
-// never carry them (see newStorageConfigResponse). Its encryption-key is NOT
-// blanked: on this read it is the key's fingerprint, which the edit dialog
-// shows, and blanking it protected nothing.
+// All five are gated on view:storage, view:network or view:access, which every
+// built-in Viewer holds. metric_servers.go had already established the rule for
+// its own InfluxDB token — blank the write-only credential on the read — and
+// the first three follow it. For the storage body it is defence in depth:
+// Proxmox keeps a storage plugin's password and keyring under /etc/pve/priv and
+// the read should never carry them (see newStorageConfigResponse). Its
+// encryption-key is NOT blanked: on this read it is the key's fingerprint,
+// which the edit dialog shows, and blanking it protected nothing.
+//
+// The two user reads apply the same rule to a two-factor field: a user's keys
+// (see accessUserResponse for what it holds) is left out of the body, and a
+// has_keys bool says whether the field is set.
 //
 // The guards below are in three layers because each catches a different
 // mistake:
@@ -41,13 +47,14 @@ import (
 //     see.
 //  2. TestGuard_StorageConfigResponseHasOneConstructor pins the storage body
 //     to its constructor, so deleting the call rather than the assignment is
-//     caught too.
+//     caught too. TestGuard_AccessUserResponsesHaveOneConstructor does the same
+//     for the two user bodies.
 //  3. TestGuard_CredentialReadsAreShapedBeforeResponding requires every
 //     handler that performs one of these reads to call the shaper, so a
 //     handler that skips it — or a new one that never had it — is caught.
 //
 // Stated limitation: all three reason about THIS package, and only about the
-// three structs listed in readStructs. A credential leaving by another route —
+// five structs listed in readStructs. A credential leaving by another route —
 // a log line, an audit row, an error string, another package's handler — is out
 // of their sight. The audit route in particular matters here: audit_log.details
 // is readable by anyone with view:audit, which every Viewer has by default, and
@@ -55,7 +62,7 @@ import (
 // identity handlers.
 //
 // A second limitation, worth naming because it looks like coverage: the walk
-// is FLAT and string-only. readStructs lists three handler-RESPONSE structs,
+// is FLAT and string-only. readStructs lists five handler-RESPONSE structs,
 // and TestReadStructsStripCredentials iterates each one's own fields and
 // skips everything whose Kind is not reflect.String. A non-string field is
 // still examined by NAME — it is reported if its json name looks
@@ -71,16 +78,11 @@ import (
 // ClientConfig entry below.
 //
 // The sweep that produced this file also looked at every other internal/proxmox
-// struct with a credential-shaped field and settled each one. None needed a
-// change, and none is enforced here, so the findings are recorded rather than
-// re-derived:
+// struct with a credential-shaped field and settled each one. It found one leak,
+// keys on AccessUser and AccessUserDetail, since shaped and listed in
+// readStructs above. The rest needed no change, and none is enforced here, so
+// those findings are recorded rather than re-derived:
 //
-//	AccessUser.Keys, AccessUserDetail.Keys   reach the client via ListUsers and
-//	  GetUser on view:access, and still do. PVE documents `keys` as "Keys for
-//	  two factor auth (yubico)": YubiKey ids on a YubiKey realm, but on a realm
-//	  with legacy OATH two-factor the TOTP shared secrets themselves. That makes
-//	  it a credential returned unredacted; redacting it is separate work, and
-//	  is neither done nor enforced here.
 //	AccessToken                              carries no secret by construction;
 //	  Proxmox returns a token's value exactly once, at creation.
 //	AccessTokenCreated.Value                 IS the secret, returned on purpose
@@ -212,6 +214,32 @@ func readStructs() []readStruct {
 				return sdnDNSForRead([]proxmox.SDNDNS{dns})
 			},
 			stripped:   []string{"key"},
+			keptFields: map[string]string{},
+		},
+		{
+			name: "proxmox.AccessUser",
+			typ:  reflect.TypeOf(proxmox.AccessUser{}),
+			respond: func(v reflect.Value) any {
+				user, ok := v.Interface().(proxmox.AccessUser)
+				if !ok {
+					panic("readStructs: AccessUser probe built the wrong type")
+				}
+				return accessUsersForRead([]proxmox.AccessUser{user})
+			},
+			stripped:   []string{"keys"},
+			keptFields: map[string]string{},
+		},
+		{
+			name: "proxmox.AccessUserDetail",
+			typ:  reflect.TypeOf(proxmox.AccessUserDetail{}),
+			respond: func(v reflect.Value) any {
+				user, ok := v.Interface().(proxmox.AccessUserDetail)
+				if !ok {
+					panic("readStructs: AccessUserDetail probe built the wrong type")
+				}
+				return accessUserDetailForRead(user)
+			},
+			stripped:   []string{"keys"},
 			keptFields: map[string]string{},
 		},
 	}
@@ -355,9 +383,10 @@ func TestReadStructsStripCredentials(t *testing.T) {
 						"GET responses on these routes are readable by every Viewer.\nbody: %s",
 						rs.name, name, body)
 				}
-				// Every stripped field is `omitempty`, so blanking must drop
-				// the key outright rather than publish "" — which would read
-				// as "this storage has no password set". The body is already
+				// A stripped field's key must be dropped outright, not
+				// published blank — which would read as "this storage has no
+				// password set", or "this user has no two-factor keys" where
+				// has_keys is there to say so truthfully. The body is already
 				// in the message above when both fire; don't print it twice.
 				if strings.Contains(body, `"`+name+`":`) {
 					t.Errorf("%s: the %q key is still present in the response body; it should be "+
@@ -450,6 +479,52 @@ func TestGuard_StorageConfigResponseHasOneConstructor(t *testing.T) {
 	}
 }
 
+// TestGuard_AccessUserResponsesHaveOneConstructor is the same rule for the two
+// user bodies. A composite literal of either response type outside its
+// constructor would still leave keys out of the body, because the field that
+// hides it belongs to the type, but it would hold the value and never set
+// has_keys, so a user with keys would read as having none.
+func TestGuard_AccessUserResponsesHaveOneConstructor(t *testing.T) {
+	fset, files := parsePackageFiles(t)
+
+	for _, body := range []struct{ literal, constructor string }{
+		{"accessUserResponse", "accessUsersForRead"},
+		{"accessUserDetailResponse", "accessUserDetailForRead"},
+	} {
+		literals := 0
+		for _, file := range files {
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Body == nil {
+					continue
+				}
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					lit, ok := n.(*ast.CompositeLit)
+					if !ok {
+						return true
+					}
+					ident, ok := lit.Type.(*ast.Ident)
+					if !ok || ident.Name != body.literal {
+						return true
+					}
+					literals++
+					if fn.Name.Name != body.constructor {
+						t.Errorf("%s: %s is built in %s, not in %s. That construction site does not "+
+							"withhold the keys value or set has_keys — build the body through the constructor.",
+							fset.Position(lit.Pos()), body.literal, fn.Name.Name, body.constructor)
+					}
+					return true
+				})
+			}
+		}
+
+		if literals == 0 {
+			t.Fatalf("found no %s composite literal at all — the constructor was renamed or "+
+				"removed, and this guard has stopped watching anything", body.literal)
+		}
+	}
+}
+
 // credentialRead ties a Proxmox client read that returns a credential to the
 // function that must shape the result before it reaches the response writer.
 type credentialRead struct {
@@ -475,6 +550,8 @@ func TestGuard_CredentialReadsAreShapedBeforeResponding(t *testing.T) {
 	reads := []credentialRead{
 		{clientCall: "GetSDNIPAMs", shaper: "sdnIPAMsForRead"},
 		{clientCall: "GetSDNDNSPlugins", shaper: "sdnDNSForRead"},
+		{clientCall: "GetAccessUsers", shaper: "accessUsersForRead"},
+		{clientCall: "GetAccessUser", shaper: "accessUserDetailForRead"},
 		{
 			clientCall: "GetStorageConfig",
 			shaper:     "newStorageConfigResponse",
@@ -521,7 +598,8 @@ func TestGuard_CredentialReadsAreShapedBeforeResponding(t *testing.T) {
 				}
 				if !called[read.shaper] {
 					t.Errorf("%s: %s calls %s but never %s — the credential would reach the response, "+
-						"which view:storage / view:network make readable by every Viewer. Shape it, or "+
+						"which the route's view permission (view:storage, view:network or view:access) "+
+						"makes readable by every Viewer. Shape it, or "+
 						"add %s to this read's exempt map with the reason it returns nothing sensitive.",
 						fset.Position(fn.Pos()), fn.Name.Name, read.clientCall, read.shaper, fn.Name.Name)
 				}

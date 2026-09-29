@@ -50,10 +50,23 @@ type accessUpdatePVERequest struct {
 }
 
 // accessUpdatePVE stands in for the cluster's Proxmox API: it records every
-// request and answers each with an empty success envelope.
+// request and answers each with an empty success envelope, unless reply gave
+// the path a body.
 type accessUpdatePVE struct {
-	mu   sync.Mutex
-	seen []accessUpdatePVERequest
+	mu      sync.Mutex
+	seen    []accessUpdatePVERequest
+	replies map[string]string
+}
+
+// reply makes the stand-in answer requests for path, as the server sees it
+// decoded (/api2/json/access/users), with body in place of the empty envelope.
+func (p *accessUpdatePVE) reply(path, body string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.replies == nil {
+		p.replies = map[string]string{}
+	}
+	p.replies[path] = body
 }
 
 func (p *accessUpdatePVE) serve(t *testing.T) string {
@@ -64,9 +77,13 @@ func (p *accessUpdatePVE) serve(t *testing.T) string {
 		}
 		p.mu.Lock()
 		p.seen = append(p.seen, accessUpdatePVERequest{method: r.Method, path: r.URL.Path, form: r.PostForm})
+		body, ok := p.replies[r.URL.Path]
 		p.mu.Unlock()
+		if !ok {
+			body = `{"data":null}`
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":null}`))
+		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL
@@ -144,11 +161,10 @@ func (r accessUpdateRow) Scan(dest ...any) error {
 	return nil
 }
 
-// newAccessUpdateApp mounts the real PUT .../access/users/:userid declaration,
-// with its real permission, carrying the real AccessHandler.UpdateUser wired to
-// the two stand-ins in place of the one newRouteStubServer bound to an empty
-// AccessHandler. The cluster it finds authenticates as accessUpdateSelf.
-func newAccessUpdateApp(t *testing.T) (*fiber.App, *accessUpdatePVE, *accessUpdateDB) {
+// newAccessStandIns builds what a route test here mounts the real AccessHandler
+// on: the stand-in Proxmox, and the stand-in database holding the cluster row
+// that authenticates as accessUpdateSelf and points at it.
+func newAccessStandIns(t *testing.T) (*accessUpdatePVE, *accessUpdateDB, *handlers.AccessHandler) {
 	t.Helper()
 	pve := &accessUpdatePVE{}
 	secret, err := crypto.Encrypt("token-secret-value", accessUpdateEncKey)
@@ -163,9 +179,19 @@ func newAccessUpdateApp(t *testing.T) (*fiber.App, *accessUpdatePVE, *accessUpda
 		TokenSecretEncrypted: secret,
 		IsActive:             true,
 	}}
+	return pve, store, handlers.NewAccessHandler(db.New(store), accessUpdateEncKey, nil)
+}
+
+// newAccessUpdateApp mounts the real PUT .../access/users/:userid declaration,
+// with its real permission, carrying the real AccessHandler.UpdateUser wired to
+// the two stand-ins in place of the one newRouteStubServer bound to an empty
+// AccessHandler. The cluster it finds authenticates as accessUpdateSelf.
+func newAccessUpdateApp(t *testing.T) (*fiber.App, *accessUpdatePVE, *accessUpdateDB) {
+	t.Helper()
+	pve, store, h := newAccessStandIns(t)
 
 	e := declaredEndpoint(t, fiber.MethodPut, accessScope+"/users/:userid")
-	e.Handler = handlers.NewAccessHandler(db.New(store), accessUpdateEncKey, nil).UpdateUser
+	e.Handler = h.UpdateUser
 
 	// stubAuth sets the user AuditLog needs — without one it writes nothing —
 	// and grants the declared manage:access.

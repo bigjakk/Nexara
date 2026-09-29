@@ -280,7 +280,7 @@ func (h *AccessHandler) ListUsers(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return RespondItems(c, users)
+	return RespondItems(c, accessUsersForRead(users))
 }
 
 // GetUser handles GET /clusters/:cluster_id/access/users/:userid.
@@ -301,7 +301,73 @@ func (h *AccessHandler) GetUser(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(user)
+	return c.JSON(accessUserDetailForRead(*user))
+}
+
+// keysWithheld is the type of the field that stands in for keys on the two user
+// responses below. It holds nothing, so no value can be put in it, and omitzero
+// leaves it out of the JSON: all it does is take the name "keys" away from the
+// embedded Proxmox field, which encoding/json would otherwise emit. `json:"-"`
+// would not do that: a field tagged so is dropped before encoding/json picks
+// the shallowest field of a name, and the embedded keys would still be sent.
+type keysWithheld struct{}
+
+// accessUserResponse is one entry of GET .../access/users: every field of
+// proxmox.AccessUser except keys, with has_keys in its place.
+//
+// keys is Proxmox's two-factor field on a user: YubiKey ids or, on a realm with
+// legacy OATH two-factor, the TOTP shared secrets themselves — and, once the
+// user's entries live in Proxmox's TFA store, only the marker x
+// (pve-access-control, API2/TFA.pm). The route is gated on view:access, which
+// every built-in Viewer holds, so the value is never sent. has_keys says only
+// that the field holds something, so it is not a measure of the account's
+// two-factor coverage.
+//
+// AccessUser is embedded so that a field Proxmox adds to it reaches the
+// response without an edit here. The Keys field is what removes the embedded
+// one: encoding/json emits only the shallowest field of a name, and this one is
+// never emitted, so the key is absent from the body rather than blank. Build it
+// with accessUsersForRead, which also blanks the embedded value, so the
+// response holds no copy of the secret whatever later becomes of Keys.
+type accessUserResponse struct {
+	proxmox.AccessUser
+	Keys    keysWithheld `json:"keys,omitzero"`
+	HasKeys bool         `json:"has_keys"`
+}
+
+// accessUserDetailResponse is the body of GET .../access/users/:userid, shaped
+// the way accessUserResponse is (see it for what keys holds and why it is
+// withheld): proxmox.AccessUserDetail without keys, and with has_keys.
+type accessUserDetailResponse struct {
+	proxmox.AccessUserDetail
+	Keys    keysWithheld `json:"keys,omitzero"`
+	HasKeys bool         `json:"has_keys"`
+}
+
+// accessUsersForRead is the body of GET .../access/users: every user with its
+// keys withheld.
+func accessUsersForRead(users []proxmox.AccessUser) []accessUserResponse {
+	out := make([]accessUserResponse, len(users))
+	for i, u := range users {
+		hasKeys := accessKeysSet(u.Keys)
+		u.Keys = ""
+		out[i] = accessUserResponse{AccessUser: u, HasKeys: hasKeys}
+	}
+	return out
+}
+
+// accessUserDetailForRead is the body of GET .../access/users/:userid, with the
+// user's keys withheld the way accessUsersForRead withholds them.
+func accessUserDetailForRead(u proxmox.AccessUserDetail) accessUserDetailResponse {
+	hasKeys := accessKeysSet(u.Keys)
+	u.Keys = ""
+	return accessUserDetailResponse{AccessUserDetail: u, HasKeys: hasKeys}
+}
+
+// accessKeysSet reports whether a user's keys field holds anything: an absent
+// field, an empty one and a whitespace-only one all mean it is not set.
+func accessKeysSet(keys string) bool {
+	return strings.TrimSpace(keys) != ""
 }
 
 // CreateUser handles POST /clusters/:cluster_id/access/users.

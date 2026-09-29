@@ -25,7 +25,8 @@ export interface AccessUser {
   email?: string;
   comment?: string;
   groups?: string;
-  keys?: string;
+  /** Whether Proxmox's keys field is set; its value (possibly TOTP secrets) is never sent. */
+  has_keys?: boolean;
   "realm-type"?: string;
   "totp-locked"?: boolean;
   "tfa-locked-until"?: number;
@@ -47,7 +48,8 @@ export interface AccessUserDetail {
   email?: string;
   comment?: string;
   groups?: string[];
-  keys?: string;
+  /** Whether Proxmox's keys field is set; its value (possibly TOTP secrets) is never sent. */
+  has_keys?: boolean;
   [key: string]: unknown;
 }
 

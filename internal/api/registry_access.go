@@ -243,7 +243,9 @@ func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
 		Method: fiber.MethodGet,
 		Path:   accessScope + "/users",
 		Description: "List the cluster's Proxmox users. Sorted by user id, because PVE builds several " +
-			"of these responses from an unsorted Perl hash and the order changes between requests.",
+			"of these responses from an unsorted Perl hash and the order changes between requests. " +
+			"A user's keys field (legacy two-factor entries) can hold TOTP secrets, so it is never " +
+			"returned: has_keys says whether the field is set.",
 		Group:       "Proxmox Access Control",
 		Permissions: accessView(),
 		Parameters:  clusterParams(nil),
@@ -260,9 +262,11 @@ func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
 		Handler:     h.CreateUser,
 	})
 	reg.Register(Endpoint{
-		Method:      fiber.MethodGet,
-		Path:        accessScope + "/users/:userid",
-		Description: "Get one Proxmox user. Its groups arrive as an array here and as a comma-separated string in the listing — that difference is Proxmox's.",
+		Method: fiber.MethodGet,
+		Path:   accessScope + "/users/:userid",
+		Description: "Get one Proxmox user. Its groups arrive as an array here and as a comma-separated " +
+			"string in the listing — that difference is Proxmox's. Like the listing, it never returns " +
+			"the keys field, only has_keys.",
 		Group:       "Proxmox Access Control",
 		Permissions: accessView(),
 		Parameters:  accessUserParams(nil),

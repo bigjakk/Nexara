@@ -985,6 +985,14 @@ so the `value` field in the create/regenerate response is the only copy that
 will ever exist outside the cluster. It is deliberately excluded from audit
 records.
 
+**A user's `keys` are never returned.** Proxmox's `keys` field holds legacy
+two-factor entries: YubiKey ids, or, on a realm with legacy OATH two-factor, the
+TOTP shared secrets themselves. `view:access` is held by every Viewer, so the
+user list and the single-user read omit it and carry `has_keys` instead —
+`true` when Proxmox's `keys` field holds anything, which is not a measure of the
+account's two-factor coverage. `keys` can still be written: send it on create or
+update; on update an empty value clears it.
+
 **Self-protection.** Deleting or regenerating the token Nexara authenticates
 with, deleting the user that owns it, or editing that user to disable it
 (`enable=false`), give it an expiry (a non-zero `expire`) or change its groups
