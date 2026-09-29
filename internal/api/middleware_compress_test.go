@@ -19,6 +19,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	gorillaws "github.com/gorilla/websocket"
+	"github.com/valyala/fasthttp"
 
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/config"
@@ -251,9 +252,11 @@ func TestCompression_WithoutAcceptEncodingIsUnchanged(t *testing.T) {
 // sends. fasthttp checks br before gzip, so every real SPA request takes the
 // brotli path and the gzip test above never exercises it.
 //
-// The body is not decoded: andybalholm/brotli is an indirect dependency and
-// importing it here would promote it in go.mod for one assertion. The header
-// plus the size reduction is enough to prove the branch was taken.
+// The body is decoded through fasthttp's own brotli reader
+// (AppendUnbrotliBytes), so the brotli library fasthttp uses — an indirect
+// dependency, swapped for github.com/molecule-man/go-brrr in fasthttp v1.74.0
+// — is held to giving back exactly the bytes it was handed, without promoting
+// it in go.mod.
 func TestCompression_BrowserNegotiatesBrotli(t *testing.T) {
 	s, token := newCompressTestServer(t, true)
 
@@ -265,6 +268,13 @@ func TestCompression_BrowserNegotiatesBrotli(t *testing.T) {
 	}
 	if len(br.body) >= len(plain.body) {
 		t.Fatalf("brotli body is %d bytes vs %d uncompressed — no saving at all", len(br.body), len(plain.body))
+	}
+	decoded, err := fasthttp.AppendUnbrotliBytes(nil, br.body)
+	if err != nil {
+		t.Fatalf("decoding the brotli body: %v", err)
+	}
+	if !bytes.Equal(decoded, plain.body) {
+		t.Fatalf("the brotli body decodes to %d bytes that differ from the %d uncompressed ones", len(decoded), len(plain.body))
 	}
 	t.Logf("GET /api/v1/api-docs: %d bytes uncompressed → %d bytes brotli (%.1f%% of original)",
 		len(plain.body), len(br.body), 100*float64(len(br.body))/float64(len(plain.body)))

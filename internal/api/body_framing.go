@@ -12,7 +12,7 @@ import (
 )
 
 // The fasthttp and Fiber internals this file names are those of the versions
-// go.mod pins, read from their source: fasthttp v1.73.0 (http.go,
+// go.mod pins, read from their source: fasthttp v1.74.0 (http.go,
 // streaming.go, server.go, header.go, headerscanner.go) and Fiber v3.5.0
 // (router.go, router_skip.go, ctx.go). The tests in body_framing_test.go
 // exercise that behaviour over real connections; SkipUnmatchedRoutes, which is
@@ -221,13 +221,15 @@ const (
 //     400.
 //
 //   - Transfer-Encoding: identity. RequestHeader.parseHeaders refuses every
-//     transfer coding but chunked and identity, and a second
-//     Transfer-Encoding line, with a 400 of its own while it parses the head;
-//     identity it accepts and ignores, framing the body by Content-Length, or
-//     as empty without one. HTTP defines no identity transfer coding any more
-//     (RFC 9112 §7), so a proxy may frame such a body another way — as
-//     chunked, because the field is there. RFC 9112 §6.3 item 4 says what a
-//     server does with a request whose final transfer coding is not chunked:
+//     transfer coding but chunked and identity, a second Transfer-Encoding
+//     line, and any Transfer-Encoding at all on an HTTP/1.0 request (RFC 9112
+//     §6.1), with a 400 of its own while it parses the head; identity on an
+//     HTTP/1.1 request it accepts and ignores, framing the body by
+//     Content-Length, or as empty without one. HTTP defines no identity
+//     transfer coding any more (RFC 9112 §7), so a proxy may frame such a body
+//     another way — as chunked, because the field is there. RFC 9112 §6.3
+//     item 4 says what a server does with a request whose final transfer
+//     coding is not chunked:
 //     "the message body length cannot be determined reliably; the server MUST
 //     respond with the 400 (Bad Request) status code and then close the
 //     connection" — the 400 refuseAmbiguousFraming answers, and the close
@@ -293,9 +295,11 @@ const chunkedBodyRefusal = "a chunked request body is not accepted: send the bod
 // decodes chunks exactly when RequestHeader.ContentLength is -1, which
 // RequestHeader.parseHeaders sets for a Transfer-Encoding of chunked, in any
 // letter case, over any Content-Length. parseHeaders answers every other
-// transfer coding but one, and a second Transfer-Encoding line, with a 400 of
-// its own while it parses the head. The one it accepts is identity, which it
-// ignores; refuseAmbiguousFraming answers that one with a 400 of Nexara's own.
+// transfer coding but one, a second Transfer-Encoding line, and any
+// Transfer-Encoding on an HTTP/1.0 request — chunked included, so this 411 is
+// an HTTP/1.1 one — with a 400 of its own while it parses the head. The one it
+// accepts, over HTTP/1.1, is identity, which it ignores; refuseAmbiguousFraming
+// answers that one with a 400 of Nexara's own.
 // None of a chunked body has been read when this runs — readBodyWithStreaming
 // reads nothing of one — and the connection is closed after the refusal by
 // closeConnectionsLeftMidBody, which closes it after every request with a

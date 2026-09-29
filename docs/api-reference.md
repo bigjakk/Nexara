@@ -223,7 +223,12 @@ Send a request body with a `Content-Length`. A body sent chunked
 (`Transfer-Encoding: chunked`) is refused with `411` and the
 `length_required` envelope, before any of it is read: every size limit on a
 request body is a limit on the length it declares, and a chunked body declares
-none. A `Content-Length` over 10 MiB is refused with `413`.
+none. A `Content-Length` over 10 MiB is refused with `413`, and one too
+large to be a number of bytes at all with `400` and the `bad_request`
+envelope. Over HTTP/1.0, which has no chunked framing, a request with any
+`Transfer-Encoding` is refused with `400` and the `bad_request` envelope, and
+its connection closed, before it reaches any endpoint — the upload below
+included.
 
 The storage upload, `POST /api/v1/clusters/:cluster_id/storage/:storage_id/upload`,
 streams a multipart body (`Content-Type: multipart/…`) to Proxmox, and that

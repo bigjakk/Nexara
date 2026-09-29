@@ -344,9 +344,10 @@ type peerConn interface {
 // abnormal closure instead of the reason. Reading until the client's own
 // Close arrives, or closeDrainTimeout passes, empties that input first; the
 // deadline is what a client that never answers can cost. After a relay the
-// read side has usually failed already — fasthttp's read errors are
-// permanent — so there the drain returns at once. By the time this runs the
-// handler's readers have all returned, so this is the only one.
+// read side has usually failed already — the websocket library keeps the
+// first read error and returns it to every later read — so there the drain
+// returns at once. By the time this runs the handler's readers have all
+// returned, so this is the only one.
 func closeBrowserSocket(conn *fiberWs.Conn) {
 	deadline := time.Now().Add(closeDrainTimeout)
 	_ = conn.WriteControl(fiberWs.CloseMessage,

@@ -84,14 +84,13 @@ func TestWSConfigWithSubprotocol_OriginsPropagation(t *testing.T) {
 }
 
 // TestIntegrationOriginRejection mounts a server with an explicit allow-list
-// and confirms that a WS upgrade carrying an Origin not in the list is
-// rejected before the auth middleware runs the JWT.
+// and confirms that a WS upgrade carrying an Origin not in the list, or none,
+// is refused with 403. Every dial carries a valid token, so the auth gate in
+// front of the upgrade passes and the refusal is the origin check's.
 //
-// Per the gofiber/contrib upgrader, CheckOrigin runs inside Upgrade() and
-// — when it returns false — replies with HTTP 403 (the upgrader writes
-// the response itself). The wrapper then surfaces an error which Fiber's
-// default error handler may overwrite with a different status, but the
-// dial fails either way.
+// The contrib websocket middleware (v1.2.6) runs fasthttp/websocket's
+// Upgrader with CheckOrigin built from the allow-list; a failed check comes
+// back to Fiber as a 403 *fiber.Error, which the error handler answers.
 func TestIntegrationOriginRejection(t *testing.T) {
 	logger := testLogger()
 	hub := NewHub(logger, 0)
@@ -132,8 +131,8 @@ func TestIntegrationOriginRejection(t *testing.T) {
 		if resp == nil {
 			t.Fatalf("expected HTTP response, got nil; err=%v", err)
 		}
-		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusSwitchingProtocols {
-			t.Errorf("expected non-success status, got %d", resp.StatusCode)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", resp.StatusCode)
 		}
 	})
 
@@ -149,6 +148,9 @@ func TestIntegrationOriginRejection(t *testing.T) {
 		}
 		if resp == nil {
 			t.Fatalf("expected HTTP response for missing Origin, got nil; err=%v", err)
+		}
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", resp.StatusCode)
 		}
 	})
 
