@@ -220,6 +220,7 @@ export function useUpdateAccessUser(clusterId: string) {
         apiPath`/api/v1/clusters/${clusterId}/access/users/${userid}?${queryParams({ force: force ? "true" : undefined })}`,
         data,
       ),
+    ...errorsHandledLocally,
     onSuccess: () => {
       invalidateAccess(qc, clusterId);
     },
@@ -382,6 +383,7 @@ export function useUpdateAccessGroup(clusterId: string) {
   });
 }
 
+/** Keeps the global toast on purpose: its caller shows no error inline. */
 export function useDeleteAccessGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -439,6 +441,7 @@ export function useUpdateAccessRole(clusterId: string) {
   });
 }
 
+/** Keeps the global toast on purpose: its caller shows no error inline. */
 export function useDeleteAccessRole(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({

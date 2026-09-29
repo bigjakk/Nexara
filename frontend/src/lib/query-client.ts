@@ -53,17 +53,21 @@ export function retryUnlessClientError(
   return failureCount < 1;
 }
 
-// The app-wide QueryClient. Lives outside main.tsx so non-React modules
-// (e.g. the WebSocket store's reconnect catch-up) can trigger invalidation
-// without a hook context.
-export const queryClient = new QueryClient({
-  // Project rule: errors must ALWAYS surface to the user. Most action
-  // mutations (VM start/stop from the tree and tables, bulk actions, alert
-  // ack, ...) historically had no onError at all, so an HTTP failure — which
-  // never produces a UPID and therefore bypasses the task panel — was
-  // completely silent. This cache-level handler is the safety net: any
-  // mutation without its own onError gets a toast.
-  mutationCache: new MutationCache({
+/**
+ * The app's mutation cache, with its error safety net.
+ *
+ * Project rule: errors must ALWAYS surface to the user. Most action
+ * mutations (VM start/stop from the tree and tables, bulk actions, alert
+ * ack, ...) historically had no onError at all, so an HTTP failure — which
+ * never produces a UPID and therefore bypasses the task panel — was
+ * completely silent. This cache-level handler is the safety net: any
+ * mutation without its own onError gets a toast.
+ *
+ * A factory, not an inline literal, so a test can give its QueryClient this
+ * very handler (src/test/app-query-client.ts) instead of a copy of it.
+ */
+export function createMutationCache(): MutationCache {
+  return new MutationCache({
     onError: (error, _variables, _context, mutation) => {
       if (mutation.options.onError) return; // handled inline by the caller
       const message =
@@ -72,7 +76,14 @@ export const queryClient = new QueryClient({
           : "Request failed";
       toast.error(message);
     },
-  }),
+  });
+}
+
+// The app-wide QueryClient. Lives outside main.tsx so non-React modules
+// (e.g. the WebSocket store's reconnect catch-up) can trigger invalidation
+// without a hook context.
+export const queryClient = new QueryClient({
+  mutationCache: createMutationCache(),
   defaultOptions: {
     queries: {
       staleTime: 5 * 60_000, // 5 minutes — inventory data doesn't change rapidly

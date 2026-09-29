@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import {
   act,
+  cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
@@ -12,9 +15,12 @@ import {
   onlineManager,
   QueryClient,
   QueryClientProvider,
+  useMutation,
 } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
+import { createAppQueryClient } from "@/test/app-query-client";
 import type { AccessCapabilities } from "../api/access-queries";
 import { AccessUsersSection } from "./AccessUsersSection";
 
@@ -64,10 +70,17 @@ vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ canManage: () => true }),
 }));
 
+// The app's mutation-error net (lib/query-client.ts) toasts through sonner, so
+// this one mock sees every toast a run can raise.
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
+}));
+
 const mockedList = vi.mocked(apiClient.list);
 const mockedGet = vi.mocked(apiClient.get);
 const mockedPut = vi.mocked(apiClient.put);
 const mockedDelete = vi.mocked(apiClient.delete);
+const mockedToastError = vi.mocked(toast.error);
 
 const CLUSTER = "cccccccc-0000-0000-0000-000000000005";
 const USERS_URL = `/api/v1/clusters/${CLUSTER}/access/users`;
@@ -76,6 +89,10 @@ const OWN = "nexara@pve";
 const OWN_URL = `${USERS_URL}/nexara%40pve`;
 // The detail read's cache key, to see what state the query is in.
 const OWN_KEY = ["clusters", CLUSTER, "access", "users", OWN];
+
+// Another account, for an edit opened while a save of Nexara's own is still out.
+const OTHER = "alice@pve";
+const OTHER_URL = `${USERS_URL}/alice%40pve`;
 
 // An API token of that account, by the id the section shows it under.
 const TOKEN = "token01";
@@ -101,6 +118,12 @@ const REFUSAL =
 const DISABLE = { enable: false };
 // What a gateway failure reads as, wherever a test needs one.
 const UNREACHABLE = "Failed to connect to Proxmox";
+// The toast for a save of Nexara's own account that fails once its dialog is
+// gone. It names the account, because it can land on another page or over the
+// Edit dialog of another account.
+function savingFailed(message: string): string {
+  return `Saving ${OWN} failed: ${message}`;
+}
 
 const capabilities: AccessCapabilities = {
   loading: false,
@@ -133,17 +156,43 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-/** Renders the section, and hands back its client to read queries again. */
-function renderSection(): QueryClient {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+/**
+ * Lets whatever is already queued run, timers included, and React draw what it
+ * set: for looking at what did NOT happen once a request has settled.
+ */
+async function flush(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
   });
+}
+
+/** Renders the section on `qc`, and hands it back to read queries again. */
+function renderOn(qc: QueryClient): QueryClient {
   render(
     <QueryClientProvider client={qc}>
       <AccessUsersSection clusterId={CLUSTER} capabilities={capabilities} />
     </QueryClientProvider>,
   );
   return qc;
+}
+
+/** Renders the section, and hands back its client to read queries again. */
+function renderSection(): QueryClient {
+  return renderOn(
+    new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    }),
+  );
+}
+
+/** renderSection, on the app's own kind of client (test/app-query-client.ts). */
+function renderSectionOnAppClient(): QueryClient {
+  return renderOn(createAppQueryClient());
 }
 
 /** Opens Edit on Nexara's own account and returns its dialog. */
@@ -629,6 +678,326 @@ describe("an edit that fails for any other reason", () => {
       expect(mockedDelete).not.toHaveBeenCalled();
     },
   );
+});
+
+// The app's QueryClient toasts, through the MutationCache in
+// lib/query-client.ts, every failed mutation whose HOOK has no onError of its
+// own; the onError a component gives mutate() does not count. While the edit
+// dialog is open it shows the failure itself, the override for a refusal and
+// the form for anything else, so useUpdateAccessUser opts out
+// (errorsHandledLocally), and once the dialog is gone EditUserDialog toasts it
+// (below). Without the opt-out each failure was reported twice, and a refusal
+// put a toast up beside the override that answers it.
+//
+// These run on the app's own kind of client, and start from the control its docs
+// ask for (test/app-query-client.ts).
+describe("an edit's failure is reported once, not also as a toast", () => {
+  const PROBE = "PROBE-NOT-A-REAL-FAILURE";
+
+  it("control: a failed mutation with no onError of its own toasts on this client", async () => {
+    // On the client the tests below get, rendered as they are, so a change to
+    // that client shows up here.
+    const qc = renderSectionOnAppClient();
+    // What each hook in access-queries.ts is before it opts out: a mutationFn
+    // and no onError.
+    const { result } = renderHook(
+      () => useMutation({ mutationFn: () => Promise.reject(new Error(PROBE)) }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+
+    await act(async () => {
+      await result.current.mutateAsync().catch(() => undefined);
+    });
+
+    expect(mockedToastError).toHaveBeenCalledTimes(1);
+    expect(mockedToastError).toHaveBeenCalledWith(PROBE);
+  });
+
+  it("opens the Save Anyway override for a refusal, with no toast beside it", async () => {
+    const user = userEvent.setup();
+    mockedPut.mockRejectedValueOnce(refused());
+    renderSectionOnAppClient();
+
+    await saveDisabled(user);
+    const confirm = await screen.findByRole("dialog", { name: EDIT_TITLE });
+
+    // The net runs before a failure reaches the component's own handler, so
+    // with the override on screen, a toast that was coming has come.
+    expect(within(confirm).getByText(REFUSAL)).toBeInTheDocument();
+    expect(mockedToastError).not.toHaveBeenCalled();
+    expect(mockedPut.mock.calls).toEqual([[OWN_URL, DISABLE]]);
+  });
+
+  it.each([
+    [
+      "a 400",
+      new ApiClientError(400, {
+        error: "bad_request",
+        message: "Parameter verification failed",
+      }),
+      "Parameter verification failed",
+    ],
+    [
+      "a 500",
+      new ApiClientError(500, {
+        error: "internal_error",
+        message: "Internal server error",
+      }),
+      "Internal server error",
+    ],
+    // Not the server's answer, so the form words it itself, where the net
+    // would have toasted the error's own text.
+    [
+      "a failure that is not the server's",
+      new Error("socket hang up"),
+      "Failed to update user",
+    ],
+  ])(
+    "shows %s in the form, with no override and no toast",
+    async (_, failure, shown) => {
+      const user = userEvent.setup();
+      mockedPut.mockRejectedValueOnce(failure);
+      renderSectionOnAppClient();
+
+      const edit = await saveDisabled(user);
+
+      expect(await within(edit).findByText(shown)).toBeInTheDocument();
+      expectNoOverride();
+      expect(mockedToastError).not.toHaveBeenCalled();
+      expect(mockedPut).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("shows the failure of a forced edit in the form, with no toast for it or for the refusal before it", async () => {
+    const user = userEvent.setup();
+    mockedPut
+      .mockRejectedValueOnce(refused())
+      .mockRejectedValueOnce(unreachable());
+    renderSectionOnAppClient();
+
+    await saveDisabled(user);
+    const confirm = await typedOverride(user, EDIT_TITLE);
+    await user.click(
+      within(confirm).getByRole("button", { name: "Save Anyway" }),
+    );
+
+    await waitFor(expectNoOverride);
+    const edit = screen.getByRole("dialog", { name: `Edit ${OWN}` });
+    expect(within(edit).getByText(UNREACHABLE)).toBeInTheDocument();
+    expect(mockedToastError).not.toHaveBeenCalled();
+    expect(mockedPut).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Only Save is held while a save is out, so the dialog can be dismissed under
+// it, and the whole page can be left, by navigating or logging out. TanStack
+// runs the callbacks given to mutate() only while the component is mounted, and
+// the hook has opted out of the global toast, so a save that fails after that
+// would be reported nowhere: EditUserDialog toasts it instead, naming the
+// account, and one that succeeds must not close the dialog opened in the
+// meantime.
+describe("a save that settles after its edit dialog is gone", () => {
+  const DENIED = "Proxmox API permission denied";
+
+  const LEAVES: [
+    name: string,
+    leave: (user: UserEvent, dialog: HTMLElement) => Promise<void>,
+  ][] = [
+    [
+      "Cancel",
+      async (user, dialog) => {
+        await user.click(
+          within(dialog).getByRole("button", { name: "Cancel" }),
+        );
+      },
+    ],
+    ...DISMISSALS,
+    [
+      "the page being left",
+      () => {
+        cleanup();
+        return Promise.resolve();
+      },
+    ],
+  ];
+
+  it.each(LEAVES)(
+    "toasts a failure that comes after %s, once",
+    async (_, leave) => {
+      const user = userEvent.setup();
+      const held = deferred<unknown>();
+      mockedPut.mockReturnValueOnce(held.promise);
+      renderSectionOnAppClient();
+
+      const edit = await saveDisabled(user);
+      expect(
+        await within(edit).findByRole("button", { name: "Saving..." }),
+      ).toBeDisabled();
+      await leave(user, edit);
+      await waitFor(() => {
+        expect(edit).not.toBeInTheDocument();
+      });
+
+      held.reject(
+        new ApiClientError(403, { error: "forbidden", message: DENIED }),
+      );
+      await waitFor(() => {
+        expect(mockedToastError).toHaveBeenCalledWith(savingFailed(DENIED));
+      });
+      // Once: not also by the global net, and not again later.
+      await flush();
+      expect(mockedToastError).toHaveBeenCalledTimes(1);
+      expect(mockedPut).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("toasts a refusal that comes after the dialog was dismissed, and opens no override", async () => {
+    const user = userEvent.setup();
+    const held = deferred<unknown>();
+    mockedPut.mockReturnValueOnce(held.promise);
+    renderSectionOnAppClient();
+
+    const edit = await saveDisabled(user);
+    await within(edit).findByRole("button", { name: "Saving..." });
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(edit).not.toBeInTheDocument();
+    });
+
+    held.reject(refused());
+    await waitFor(() => {
+      expect(mockedToastError).toHaveBeenCalledWith(savingFailed(REFUSAL));
+    });
+    await flush();
+
+    expect(mockedToastError).toHaveBeenCalledTimes(1);
+    expectNoOverride();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Nothing forced it: there was no one to ask.
+    expect(mockedPut.mock.calls).toEqual([[OWN_URL, DISABLE]]);
+  });
+
+  it("toasts the failure of a forced edit whose page was left", async () => {
+    const user = userEvent.setup();
+    const forced = deferred<unknown>();
+    mockedPut
+      .mockRejectedValueOnce(refused())
+      .mockReturnValueOnce(forced.promise);
+    renderSectionOnAppClient();
+
+    await saveDisabled(user);
+    const confirm = await typedOverride(user, EDIT_TITLE);
+    await user.click(
+      within(confirm).getByRole("button", { name: "Save Anyway" }),
+    );
+    // Nothing on the page can dismiss the override while the forced edit is
+    // out, but leaving the page still takes it away.
+    expect(
+      await within(confirm).findByRole("button", { name: "Working..." }),
+    ).toBeDisabled();
+    cleanup();
+
+    forced.reject(unreachable());
+    await waitFor(() => {
+      expect(mockedToastError).toHaveBeenCalledWith(savingFailed(UNREACHABLE));
+    });
+    await flush();
+
+    // The refusal before it, which the override answered, raised none.
+    expect(mockedToastError).toHaveBeenCalledTimes(1);
+    expect(mockedPut).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * Saves Nexara's own account with the request held (the caller queues it),
+   * dismisses that dialog with Escape, and opens the Edit dialog of another
+   * account in its place.
+   */
+  async function dismissForAnother(user: UserEvent) {
+    mockedList.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === USERS_URL
+          ? [
+              { userid: OWN, enable: true, comment: "service account" },
+              { userid: OTHER, enable: true },
+            ]
+          : [],
+      ),
+    );
+    mockedGet.mockImplementation((path: string) => {
+      if (path === OWN_URL) {
+        return Promise.resolve({ userid: OWN, enable: true });
+      }
+      if (path === OTHER_URL) {
+        return Promise.resolve({ userid: OTHER, enable: true });
+      }
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+    const qc = renderSectionOnAppClient();
+
+    const first = await saveDisabled(user);
+    await within(first).findByRole("button", { name: "Saving..." });
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(first).not.toBeInTheDocument();
+    });
+    await user.click(
+      await screen.findByRole("button", { name: `Edit ${OTHER}` }),
+    );
+    const second = await screen.findByRole("dialog", { name: `Edit ${OTHER}` });
+    await within(second).findByRole("textbox", { name: "Comment" });
+    return { qc, second };
+  }
+
+  it("does not close the edit dialog opened in its place when it succeeds", async () => {
+    const user = userEvent.setup();
+    const held = deferred<unknown>();
+    mockedPut.mockReturnValueOnce(held.promise);
+    const { qc, second } = await dismissForAnother(user);
+
+    held.resolve({ status: "ok" });
+    await waitFor(() => {
+      expect(
+        qc
+          .getMutationCache()
+          .getAll()
+          .map((mutation) => mutation.state.status),
+      ).toEqual(["success"]);
+    });
+    await flush();
+
+    expect(second).toBeInTheDocument();
+    expect(second).toHaveAttribute("data-state", "open");
+    expect(mockedToastError).not.toHaveBeenCalled();
+    expect(mockedPut).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the account in the toast when it fails over another account's open dialog, and leaves that dialog alone", async () => {
+    const user = userEvent.setup();
+    const held = deferred<unknown>();
+    mockedPut.mockReturnValueOnce(held.promise);
+    const { second } = await dismissForAnother(user);
+
+    held.reject(
+      new ApiClientError(403, { error: "forbidden", message: DENIED }),
+    );
+    await waitFor(() => {
+      expect(mockedToastError).toHaveBeenCalledWith(savingFailed(DENIED));
+    });
+    await flush();
+
+    expect(mockedToastError).toHaveBeenCalledTimes(1);
+    // The dialog that is open is the other account's, and this was not its save.
+    expect(second).toBeInTheDocument();
+    expect(second).toHaveAttribute("data-state", "open");
+    expect(within(second).queryByText(DENIED)).toBeNull();
+    expectNoOverride();
+    expect(mockedPut).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("an edit sends only what the operator touched", () => {

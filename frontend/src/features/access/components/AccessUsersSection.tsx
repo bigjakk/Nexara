@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ChevronDown,
@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   AlertDialog,
@@ -909,22 +910,49 @@ function EditUserDialog({
   };
   const touched = Object.keys(changes).length > 0;
 
+  // Whether this dialog is still mounted. The hook opts out of the global toast
+  // because the open dialog reports its own errors, but mutate()'s per-call
+  // callbacks do not run once the component is gone, so save reads the outcome
+  // from the promise instead, and toasts a failure nobody is looking at. A
+  // layout effect, so that it clears in the commit that removes the dialog and
+  // not in the passive flush after it: a navigation runs in a transition (React
+  // Router), React can run that flush a task after such a commit, and a request
+  // settling in between would find the dialog still live and show its failure
+  // in a form no one can see. (Radix's unmount schedules a sync update, which
+  // today makes React run the passive effects inside the commit; nothing here
+  // should lean on that.)
+  const live = useRef(false);
+  useLayoutEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+
   const save = (edit: UpdateAccessUserInput, force: boolean) => {
     setError("");
-    updateUser.mutate(
-      { ...edit, force },
-      {
-        onSuccess: onClose,
-        onError: (err) => {
-          // A forced save is past the self-credential refusal, so whatever it
-          // fails with is an error for the form, never a second override.
-          if (!force && err instanceof ApiClientError && err.status === 409) {
-            setConflict({ message: err.message, edit });
-            return;
-          }
-          setConflict(null);
-          setError(errorMessage(err, "Failed to update user"));
-        },
+    updateUser.mutateAsync({ ...edit, force }).then(
+      () => {
+        // Not once dismissed: onClose would close whichever dialog has been
+        // opened in this one's place.
+        if (live.current) onClose();
+      },
+      (err: unknown) => {
+        const message = errorMessage(err, "Failed to update user");
+        if (!live.current) {
+          // Named: it can land on another page, or over another account's
+          // open Edit dialog.
+          toast.error(`Saving ${edit.userid} failed: ${message}`);
+          return;
+        }
+        // A forced save is past the self-credential refusal, so whatever it
+        // fails with is an error for the form, never a second override.
+        if (!force && err instanceof ApiClientError && err.status === 409) {
+          setConflict({ message: err.message, edit });
+          return;
+        }
+        setConflict(null);
+        setError(message);
       },
     );
   };

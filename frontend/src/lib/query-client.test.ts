@@ -1,8 +1,20 @@
-import { describe, it, expect, vi } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
-import { retryUnlessClientError, queryClient } from "./query-client";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import {
+  MutationObserver as QueryMutationObserver,
+  QueryClient,
+} from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  createMutationCache,
+  retryUnlessClientError,
+  queryClient,
+} from "./query-client";
 import { ApiClientError } from "@/lib/api-client";
 import { PathSegmentError } from "@/lib/api-path";
+
+// The mutation-error net toasts through sonner, so this one mock sees every
+// toast it raises.
+vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 function apiError(status: number) {
   return new ApiClientError(status, {
@@ -76,5 +88,74 @@ describe("the app-wide query defaults", () => {
 
     expect(queryFn).toHaveBeenCalledTimes(calls);
     client.clear();
+  });
+});
+
+describe("the app-wide mutation-error net", () => {
+  const PROBE = "PROBE-NOT-A-REAL-FAILURE";
+  const mockedToastError = vi.mocked(toast.error);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /**
+   * Fails one mutation on `client` with `failure`. `hook` is what the hook
+   * itself passes to useMutation, which is where an onError has to be for the
+   * net to see it.
+   */
+  async function fail(
+    client: QueryClient,
+    failure: unknown,
+    hook: { onError?: () => void } = {},
+  ) {
+    const observer = new QueryMutationObserver(client, {
+      mutationFn: vi.fn().mockRejectedValue(failure),
+      ...hook,
+    });
+    await observer.mutate(undefined).catch(() => undefined);
+    client.clear();
+  }
+
+  it.each([
+    ["the error's own message", new Error(PROBE), PROBE],
+    ["a generic one for an error with none", new Error(""), "Request failed"],
+    [
+      "a generic one for a failure that is not an Error",
+      PROBE,
+      "Request failed",
+    ],
+  ])(
+    "toasts %s, for a mutation whose hook has no onError",
+    async (_, failure, shown) => {
+      await fail(
+        new QueryClient({ mutationCache: createMutationCache() }),
+        failure,
+      );
+
+      expect(mockedToastError).toHaveBeenCalledTimes(1);
+      expect(mockedToastError).toHaveBeenCalledWith(shown);
+    },
+  );
+
+  it("leaves a mutation whose hook has an onError to that onError", async () => {
+    const hookOnError = vi.fn();
+
+    await fail(
+      new QueryClient({ mutationCache: createMutationCache() }),
+      new Error(PROBE),
+      { onError: hookOnError },
+    );
+
+    expect(hookOnError).toHaveBeenCalledTimes(1);
+    expect(mockedToastError).not.toHaveBeenCalled();
+  });
+
+  // The app's own client, not only one built from the factory.
+  it("is the net the app's own client runs", async () => {
+    await fail(queryClient, new Error(PROBE));
+
+    expect(mockedToastError).toHaveBeenCalledTimes(1);
+    expect(mockedToastError).toHaveBeenCalledWith(PROBE);
   });
 });
