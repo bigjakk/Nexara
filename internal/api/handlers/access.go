@@ -138,10 +138,15 @@ func (h *AccessHandler) guardSelfCredential(c fiber.Ctx, clusterID uuid.UUID, us
 // account's API tokens from working.
 //
 // Disabling the user, giving it an expiry, or changing its group membership all
-// can: PVE validates the owning user when it verifies a token, and
-// group-derived ACLs disappear with the group. Cosmetic fields (comment, email,
-// names, SSH keys) cannot, and are deliberately not guarded — making every edit
-// to nexara@pve demand a force flag would train operators to pass it reflexively.
+// can: PVE validates the owning user when it verifies a token, and a group change
+// can take permissions away in either direction — leaving a group drops its ACLs,
+// and joining one can override what the token inherits, since a group ACL on a
+// deeper path replaces the permissions from above and NoAccess cancels roles.
+// That is why any groups value is covered. The rest of an edit (comment, email,
+// names, the two-factor keys field) cannot affect an API token — realm
+// two-factor applies to password logins, not to tokens — and is deliberately not
+// guarded: making every edit to nexara@pve demand a force flag would train
+// operators to pass it reflexively.
 //
 // Expire is treated as risky whenever it is set to anything but 0 (never),
 // rather than by comparing against the clock: an expiry in the future is still a
@@ -154,6 +159,55 @@ func accessUpdateAffectsAccess(req proxmox.UpdateAccessUserParams) bool {
 		return true
 	}
 	return req.Groups != nil
+}
+
+// accessUserUpdateDetails builds the audit details of a user update.
+//
+// It is an allow-list: the account; forced, whether the caller sent force on an
+// edit that accessUpdateAffectsAccess covers; and, of the three fields that
+// function treats as capable of cutting Nexara off, the ones the request set —
+// enable and expire as sent, groups only as the fact that they were set. "Set"
+// is the tristate pointer on req, so enable=false, expire=0 and groups="" are
+// deliberate values and are recorded, and an omitted field leaves no key.
+//
+// Nothing else goes in. view:audit is held by every built-in Viewer, and the
+// rest of the request informs nothing about the guard: e-mail, comment and names
+// are personal, and keys is a credential — YubiKey ids, or on a realm with legacy
+// OATH two-factor the TOTP shared secrets themselves. For the same reason
+// groups_changed is a bool rather than the list: it says a membership was set,
+// not what it became, and since the handler never reads the stored one, not that
+// it differs either. append is not recorded: the guard ignores it, as any groups
+// value is covered.
+//
+// forced is the key DeleteUser, UpdateToken and DeleteToken write, with the same
+// meaning: the caller sent force on an action the guard covers. It does not say
+// the guard would have refused, since the cluster row that would tell is read
+// only when force is absent, nor that the account is Nexara's own. force on an
+// edit accessUpdateAffectsAccess does not cover, a comment change say, overrides
+// nothing and records false.
+//
+// Pure, so the exact key set is testable without a database. Its result reaches
+// json.Marshal as a call, and TestGuard_AccessAuditDetailsCarryNoSecrets cannot
+// read the keys of a call, only scan its arguments, so that guard admits it only
+// because it is listed in accessAuditBuilders, and exact-match tests pin the key
+// set instead: TestAccessUserUpdateDetails,
+// TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields and, through the real
+// route, TestAccessUpdateUserAuditRow in internal/api.
+func accessUserUpdateDetails(userid string, force bool, req proxmox.UpdateAccessUserParams) map[string]any {
+	details := map[string]any{
+		"userid": userid,
+		"forced": force && accessUpdateAffectsAccess(req),
+	}
+	if req.Enable != nil {
+		details["enable"] = *req.Enable
+	}
+	if req.Expire != nil {
+		details["expire"] = *req.Expire
+	}
+	if req.Groups != nil {
+		details["groups_changed"] = true
+	}
+	return details
 }
 
 // accessParam percent-decodes an /access/* path parameter that the caller has
@@ -305,8 +359,12 @@ func (h *AccessHandler) UpdateUser(c fiber.Ctx, p *apischema.Params) error {
 	// nexara@pve makes every subsequent call 401 even though the token still
 	// exists. Rewriting groups can drop the group-derived ACLs the token
 	// depends on. A comment or email change cannot, so those pass freely.
+	//
+	// force is read once: the value the guard sees is the value the audit row
+	// records.
+	force := p.Bool("force")
 	if accessUpdateAffectsAccess(req) {
-		if err := h.guardSelfCredential(c, clusterID, userid, "", p.Bool("force")); err != nil {
+		if err := h.guardSelfCredential(c, clusterID, userid, "", force); err != nil {
 			return err
 		}
 	}
@@ -317,7 +375,7 @@ func (h *AccessHandler) UpdateUser(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateAccessUser(c.Context(), userid, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"userid": userid})
+	details, _ := json.Marshal(accessUserUpdateDetails(userid, force, req))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_user", userid, "updated", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_user", userid, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})

@@ -233,8 +233,8 @@ func accessExpireParam(description string) apischema.Property {
 //   - guardSelfCredential, the 409 that refuses to destroy the token Nexara
 //     authenticates with unless ?force= says so. It reads the cluster row.
 //   - accessUpdateAffectsAccess, which decides whether a user UPDATE is one of
-//     the edits that can sever access (disable, expire, regroup) rather than a
-//     cosmetic one.
+//     the edits that can sever access (disable, expire, regroup) rather than one
+//     that cannot affect an API token.
 //   - the identifier validators in internal/proxmox/client_access.go, which run
 //     on the DECODED path segment. See the note on the patterns above.
 func registerAccessEndpoints(reg *Registry, h *handlers.AccessHandler) {
@@ -665,7 +665,8 @@ func accessUserFieldParams() apischema.Properties {
 			"Comma-separated group membership. Replaces the stored list unless append is set; sent "+
 				"empty, it removes the account from every group."),
 		"keys": optString(8192, "<string>",
-			"SSH public keys stored on the account. Sent empty, it clears them."),
+			"Legacy realm two-factor keys: YubiKey ids, or OATH (TOTP) secret keys. Not SSH keys. "+
+				"Sent empty, it clears them."),
 		"enable": {
 			Type:     apischema.Boolean,
 			Optional: true,

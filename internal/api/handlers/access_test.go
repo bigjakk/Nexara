@@ -1,9 +1,13 @@
 package handlers
 
 import (
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,7 +27,8 @@ import (
 //
 // What stays here is what is still this file's own: the percent-decode of a
 // path identifier, the self-credential guard's decision, which user edits count
-// as capable of severing access, and the static audit-detail guard.
+// as capable of severing access, the exact audit details of a user edit, and the
+// static audit-detail guard.
 
 func TestSplitFullTokenID(t *testing.T) {
 	tests := []struct {
@@ -85,9 +90,41 @@ func TestSelfCredentialSubject(t *testing.T) {
 // secretishKey matches audit-detail keys that would leak a credential.
 var secretishKey = []string{"password", "secret", "token_secret", "value", "ticket", "otp", "csrf", "privatekey", "bind_password"}
 
-// TestGuard_AccessAuditDetailsCarryNoSecrets is a static guard over access.go:
-// no map literal handed to json.Marshal may carry a credential-shaped key, and
-// none may read a credential-bearing field.
+// accessAuditBuilders are the functions whose result access.go may hand to
+// json.Marshal in place of a map literal.
+//
+// The guard below cannot read a builder's keys; it scans only the arguments a
+// builder is called with. An entry is therefore the decision to trust other tests
+// instead, and is acceptable only with all of these: tests that compare what the
+// builder returns exactly, so that a key added to it fails one whether or not it
+// looks like a credential; one of them driven through the real route, so that a
+// handler that stops calling the builder fails too; and a comment on the builder
+// naming them.
+//
+// Today that is accessUserUpdateDetails, pinned by TestAccessUserUpdateDetails,
+// TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields and, through the real
+// route, TestAccessUpdateUserAuditRow in internal/api.
+var accessAuditBuilders = map[string]bool{
+	"accessUserUpdateDetails": true,
+}
+
+// isAccessAuditBuilderCall reports whether arg is a call to a function listed in
+// accessAuditBuilders. Only a bare call counts: a method or a package-qualified
+// function of the same name is some other function.
+func isAccessAuditBuilderCall(arg ast.Expr) bool {
+	call, ok := arg.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	name, ok := call.Fun.(*ast.Ident)
+	return ok && accessAuditBuilders[name.Name]
+}
+
+// TestGuard_AccessAuditDetailsCarryNoSecrets is a static guard over access.go.
+// Every one-argument json.Marshal must be handed a map literal or a call to a
+// builder in accessAuditBuilders. A map literal may carry no credential-shaped
+// key, and nothing in it, or in a builder call's arguments, may read a
+// credential-bearing field.
 //
 // This matters more here than almost anywhere else in the codebase. Proxmox
 // returns a token secret exactly once, this file is where that value lives, and
@@ -98,18 +135,92 @@ var secretishKey = []string{"password", "secret", "token_secret", "value", "tick
 // Static rather than behavioural because the detail maps are built inline at
 // twelve call sites; a runtime test would have to reach Proxmox at each one.
 //
-// Limitation, stated plainly: this checks the marshal site only. Assigning a
-// secret to a local first and marshalling that would pass. It is aimed at the
-// realistic mistake — someone adding `"secret": created.Value` while wiring up
-// a new endpoint — not at deliberate laundering. Keeping the rule absolute
-// (never read .Value/.Password here at all) is what makes it worth having; the
-// one legitimate derived value, has_password, is computed before the literal
-// and commented as such.
+// The marshal argument is enforced, not assumed. A map assigned to a local
+// first, a struct or slice literal, or a call that is not in accessAuditBuilders
+// hides its keys from the checks on a map literal, so it is refused: a guard
+// that skipped what it could not read would pass exactly the shape a secret is
+// laundered through.
+//
+// What it cannot see, stated plainly. It inspects one-argument calls to a function
+// named Marshal (json.Marshal, here) and nothing else, so json.MarshalIndent, an
+// Encoder, or a json.RawMessage built by hand bypass it. Within a call it matches
+// string-literal key names exactly against secretishKey (has_password is
+// legitimate, so user_password would pass, and so would a constant key) and
+// refuses reads of .Value, .Password, .TokenSecret and .Secret; a credential held
+// in a local, reached through a call, or kept in a field of another name passes.
+// It is aimed at the realistic mistake — someone adding `"secret": created.Value`
+// while wiring up a new endpoint — not at deliberate laundering. Keeping the rule
+// absolute (never read .Value/.Password here at all) is what makes it worth
+// having; the one legitimate derived value, has_password, is computed before the
+// literal and commented as such.
 func TestGuard_AccessAuditDetailsCarryNoSecrets(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "access.go", nil, 0)
 	if err != nil {
 		t.Fatalf("parse access.go: %v", err)
+	}
+	line := func(n ast.Node) int { return fset.Position(n.Pos()).Line }
+
+	// An entry names a function this file declares: one that outlived its
+	// function would exempt whatever is later given that name.
+	declared := map[string]bool{}
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil {
+			declared[fn.Name.Name] = true
+		}
+	}
+	for name := range accessAuditBuilders {
+		if !declared[name] {
+			t.Errorf("accessAuditBuilders lists %s, but access.go declares no such function — "+
+				"an entry that outlives its function exempts whatever is later given that name", name)
+		}
+	}
+
+	// scanKeys refuses a credential-shaped name on any string-literal key under
+	// lit, the keys of a map nested in a value included.
+	scanKeys := func(lit *ast.CompositeLit) {
+		ast.Inspect(lit, func(n ast.Node) bool {
+			kv, ok := n.(*ast.KeyValueExpr)
+			if !ok {
+				return true
+			}
+			key, ok := kv.Key.(*ast.BasicLit)
+			if !ok || key.Kind != token.STRING {
+				return true
+			}
+			name, err := strconv.Unquote(key.Value) // a raw string is a string literal too
+			if err != nil {
+				// Unreachable: ParseFile rejects a malformed string literal before
+				// this runs, and a name still wrapped in its quotes could never match
+				// secretishKey anyway.
+				name = key.Value
+			}
+			name = strings.ToLower(name)
+			for _, bad := range secretishKey {
+				if name == bad {
+					t.Errorf("%s:%d: audit details carry key %q — token secrets and passwords must never reach an audit row (view:audit is held by every Viewer)",
+						"access.go", line(key), name)
+				}
+			}
+			return true
+		})
+	}
+
+	// scanReads refuses a read of a credential-bearing field anywhere under node,
+	// whatever key the value sits under: details{"x": created.Value} is the leak.
+	scanReads := func(node ast.Node) {
+		ast.Inspect(node, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch strings.ToLower(sel.Sel.Name) {
+			case "value", "password", "tokensecret", "secret":
+				t.Errorf("%s:%d: audit details read .%s — that is a credential, keep it out of the audit row",
+					"access.go", line(sel), sel.Sel.Name)
+			}
+			return true
+		})
 	}
 
 	var checked int
@@ -118,44 +229,27 @@ func TestGuard_AccessAuditDetailsCarryNoSecrets(t *testing.T) {
 		if !ok || callName(call) != "Marshal" || len(call.Args) != 1 {
 			return true
 		}
-		lit, ok := call.Args[0].(*ast.CompositeLit)
-		if !ok {
-			return true
-		}
-		checked++
-
-		for _, elt := range lit.Elts {
-			kv, ok := elt.(*ast.KeyValueExpr)
-			if !ok {
-				continue
+		switch arg := call.Args[0].(type) {
+		case *ast.CompositeLit:
+			if _, isMap := arg.Type.(*ast.MapType); isMap {
+				checked++
+				scanKeys(arg)
+				scanReads(arg)
+				return true
 			}
-			key, ok := kv.Key.(*ast.BasicLit)
-			if !ok {
-				continue
-			}
-			name := strings.ToLower(strings.Trim(key.Value, `"`))
-			for _, bad := range secretishKey {
-				if name == bad {
-					t.Errorf("%s:%d: audit details carry key %q — token secrets and passwords must never reach an audit row (view:audit is held by every Viewer)",
-						"access.go", fset.Position(key.Pos()).Line, name)
-				}
-			}
-
-			// Also reject reading a credential-bearing field, whatever the
-			// key is called: details{"x": created.Value} is the same leak.
-			ast.Inspect(kv.Value, func(v ast.Node) bool {
-				sel, ok := v.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				field := strings.ToLower(sel.Sel.Name)
-				if field == "value" || field == "password" || field == "tokensecret" || field == "secret" {
-					t.Errorf("%s:%d: audit details read .%s — that is a credential, keep it out of the audit row",
-						"access.go", fset.Position(sel.Pos()).Line, sel.Sel.Name)
+		case *ast.CallExpr:
+			if isAccessAuditBuilderCall(arg) {
+				for _, a := range arg.Args {
+					scanReads(a)
 				}
 				return true
-			})
+			}
 		}
+		t.Errorf("%s:%d: json.Marshal(%s) — an audit detail must be a `map[…]…{…}` literal "+
+			"(a named map type such as fiber.Map is refused too), whose keys and values this guard reads, "+
+			"or a call to a builder listed in accessAuditBuilders, whose keys exact-match tests pin; "+
+			"a struct or slice literal, a local, or any other call hides them from both, and audit rows are readable by every Viewer",
+			"access.go", line(call), types.ExprString(call.Args[0]))
 		return true
 	})
 
@@ -295,5 +389,194 @@ func TestAccessUpdateAffectsAccess(t *testing.T) {
 				t.Errorf("accessUpdateAffectsAccess = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// accessUpdateDetailsJSON is the bytes a user update's audit details marshal to,
+// which is what the audit row stores and a Viewer reads.
+func accessUpdateDetailsJSON(t *testing.T, userid string, force bool, req proxmox.UpdateAccessUserParams) string {
+	t.Helper()
+	out, err := json.Marshal(accessUserUpdateDetails(userid, force, req))
+	if err != nil {
+		t.Fatalf("marshal the audit details: %v", err)
+	}
+	return string(out)
+}
+
+// TestAccessUserUpdateDetails pins a user update's audit details to the exact
+// JSON that reaches the row, one case for each thing the builder decides.
+//
+// The comparison is on the marshalled bytes because they are what the row stores
+// and a Viewer reads. It is exact, so a key the builder gains fails every case
+// that sets the field it would come from.
+//
+// One of the guards for these keys. TestGuard_AccessAuditDetailsCarryNoSecrets
+// admits the builder without reading it (accessAuditBuilders), so what it
+// returns is pinned here, across the request type in
+// TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields, and through the real
+// route in TestAccessUpdateUserAuditRow.
+func TestAccessUserUpdateDetails(t *testing.T) {
+	const self = "nexara@pve"
+
+	// Values of the fields the row must never carry, each one recognisable in
+	// the output whatever key it might be recorded under. The group list is here
+	// too: the row says a membership was set, not what it became.
+	const (
+		sentinelComment = "sentinel-comment"
+		sentinelEmail   = "sentinel-email@example.com"
+		sentinelFirst   = "sentinel-first"
+		sentinelLast    = "sentinel-last"
+		sentinelKeys    = "sentinel-keys"
+		sentinelGroups  = "sentinel-group-list"
+	)
+	unrecorded := []string{sentinelComment, sentinelEmail, sentinelFirst, sentinelLast, sentinelKeys, sentinelGroups}
+
+	str := func(s string) *string { return &s }
+	b := func(v bool) *bool { return &v }
+	i64 := func(v int64) *int64 { return &v }
+	edit := func(f proxmox.AccessUserFields) proxmox.UpdateAccessUserParams {
+		return proxmox.UpdateAccessUserParams{AccessUserFields: f}
+	}
+
+	tests := []struct {
+		name   string
+		userid string
+		force  bool
+		req    proxmox.UpdateAccessUserParams
+		want   string
+	}{
+		{"nothing set", self, false, edit(proxmox.AccessUserFields{}),
+			`{"forced":false,"userid":"nexara@pve"}`},
+		{"force on an edit that sets nothing overrides nothing", self, true, edit(proxmox.AccessUserFields{}),
+			`{"forced":false,"userid":"nexara@pve"}`},
+		{"force on a comment change overrides nothing", self, true, edit(proxmox.AccessUserFields{Comment: str(sentinelComment)}),
+			`{"forced":false,"userid":"nexara@pve"}`},
+
+		{"disabling", self, false, edit(proxmox.AccessUserFields{Enable: b(false)}),
+			`{"enable":false,"forced":false,"userid":"nexara@pve"}`},
+		{"disabling, forced", self, true, edit(proxmox.AccessUserFields{Enable: b(false)}),
+			`{"enable":false,"forced":true,"userid":"nexara@pve"}`},
+		{"enabling is recorded although the guard ignores it", self, true, edit(proxmox.AccessUserFields{Enable: b(true)}),
+			`{"enable":true,"forced":false,"userid":"nexara@pve"}`},
+
+		{"giving an expiry, forced", self, true, edit(proxmox.AccessUserFields{Expire: i64(1767225600)}),
+			`{"expire":1767225600,"forced":true,"userid":"nexara@pve"}`},
+		{"clearing the expiry is recorded as 0", self, false, edit(proxmox.AccessUserFields{Expire: i64(0)}),
+			`{"expire":0,"forced":false,"userid":"nexara@pve"}`},
+
+		{"replacing groups, forced: the list is not recorded", self, true, edit(proxmox.AccessUserFields{Groups: str(sentinelGroups)}),
+			`{"forced":true,"groups_changed":true,"userid":"nexara@pve"}`},
+		{"removing every group", self, false, edit(proxmox.AccessUserFields{Groups: str("")}),
+			`{"forced":false,"groups_changed":true,"userid":"nexara@pve"}`},
+		{"appending groups records what replacing them does", self, true, proxmox.UpdateAccessUserParams{
+			AccessUserFields: proxmox.AccessUserFields{Groups: str(sentinelGroups)}, Append: true},
+			`{"forced":true,"groups_changed":true,"userid":"nexara@pve"}`},
+		{"append without groups sets no groups", self, true, proxmox.UpdateAccessUserParams{Append: true},
+			`{"forced":false,"userid":"nexara@pve"}`},
+
+		{"the account named is the one edited", "alice@pve", false, edit(proxmox.AccessUserFields{Enable: b(false)}),
+			`{"enable":false,"forced":false,"userid":"alice@pve"}`},
+
+		{"every field at once carries only the three", self, true, proxmox.UpdateAccessUserParams{
+			AccessUserFields: proxmox.AccessUserFields{
+				Comment:   str(sentinelComment),
+				Email:     str(sentinelEmail),
+				FirstName: str(sentinelFirst),
+				LastName:  str(sentinelLast),
+				Keys:      str(sentinelKeys),
+				Groups:    str(sentinelGroups),
+				Enable:    b(false),
+				Expire:    i64(1767225600),
+			},
+			Append: true,
+		}, `{"enable":false,"expire":1767225600,"forced":true,"groups_changed":true,"userid":"nexara@pve"}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := accessUpdateDetailsJSON(t, tc.userid, tc.force, tc.req)
+			if got != tc.want {
+				t.Errorf("details = %s, want %s", got, tc.want)
+			}
+			for _, secret := range unrecorded {
+				if strings.Contains(got, secret) {
+					t.Errorf("details %s carry %q — audit rows are readable by every Viewer", got, secret)
+				}
+			}
+		})
+	}
+}
+
+// TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields is the allow-list
+// checked against the request type rather than against a list of the fields that
+// exist today.
+//
+// It walks every field of proxmox.UpdateAccessUserParams, the embedded
+// AccessUserFields flattened and Append beside it, and sets each one that is not
+// recorded, on its own, to a value that stands out. The details must stay what an
+// empty edit's are. A field added later, to either struct, and recorded by
+// mistake fails here without anyone having had to think of a case for it. A field
+// the row is meant to carry belongs in recorded below, in the builder and in its
+// comment.
+//
+// Three checks are on the test itself, each one a slip in how a field is set: the
+// filled request must differ from an empty one (a fill that sets nothing, sets a
+// zero, or sets a copy would otherwise pass every subtest), a field of a type the
+// fill does not know fails outright, and the walk must still see the fields it
+// exists for.
+func TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields(t *testing.T) {
+	const userid = "nexara@pve"
+	recorded := map[string]bool{"Enable": true, "Expire": true, "Groups": true}
+
+	empty := accessUpdateDetailsJSON(t, userid, false, proxmox.UpdateAccessUserParams{})
+
+	// fill sets slot, a pointer or a plain value, to something that stands out.
+	fill := func(t *testing.T, slot reflect.Value, name string) {
+		t.Helper()
+		value := slot
+		if slot.Kind() == reflect.Pointer {
+			slot.Set(reflect.New(slot.Type().Elem()))
+			value = slot.Elem()
+		}
+		switch value.Kind() {
+		case reflect.String:
+			value.SetString("sentinel-" + name)
+		case reflect.Bool:
+			value.SetBool(true)
+		case reflect.Int64:
+			value.SetInt(1700000000)
+		default:
+			t.Fatalf("%s is a %s; teach this test to set it", name, slot.Type())
+		}
+	}
+
+	visited := 0
+	for _, field := range reflect.VisibleFields(reflect.TypeOf(proxmox.UpdateAccessUserParams{})) {
+		// The embedded AccessUserFields is walked through its own fields.
+		if !field.IsExported() || field.Anonymous || recorded[field.Name] {
+			continue
+		}
+		visited++
+		t.Run(field.Name, func(t *testing.T) {
+			var req proxmox.UpdateAccessUserParams
+			fill(t, reflect.ValueOf(&req).Elem().FieldByIndex(field.Index), field.Name)
+			if reflect.DeepEqual(req, proxmox.UpdateAccessUserParams{}) {
+				t.Fatalf("filling %s left the request empty; this test would pass without checking it", field.Name)
+			}
+
+			if got := accessUpdateDetailsJSON(t, userid, false, req); got != empty {
+				t.Errorf("setting %s changed the audit details to %s, from %s — "+
+					"audit rows are readable by every Viewer, so only enable, expire and groups may be recorded",
+					field.Name, got, empty)
+			}
+		})
+	}
+
+	// The five fields that are never recorded, and Append, are the reason this
+	// test exists. Fewer than that means the walk stopped seeing them and every
+	// subtest above is vacuous.
+	if visited < 6 {
+		t.Fatalf("visited %d fields of proxmox.UpdateAccessUserParams, want at least the six that are never "+
+			"recorded (comment, email, firstname, lastname, keys, append)", visited)
 	}
 }

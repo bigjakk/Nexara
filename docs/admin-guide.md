@@ -312,19 +312,41 @@ If you lose a secret, regenerate it rather than looking for it anywhere.
 
 Deleting or regenerating the token Nexara authenticates with — or deleting the
 user that owns it, which takes its tokens along — returns **409** with an
-explanation rather than proceeding.
+explanation rather than proceeding. So does editing that user so as to
+**disable** it, give it an **expiry**, or **change its groups**: Proxmox checks
+the owning user whenever it verifies a token, and a token's permissions can come
+through that user's groups.
 
 It warns rather than blocking outright: an operator rotating credentials by hand
 has a legitimate reason to do exactly this, and a hard block would just send them
-to the Proxmox UI to do it less safely. Append `?force=true` (the UI puts this
-behind a type-the-name confirmation) to proceed; the cluster will then show as
-unreachable until you update its credentials.
+to the Proxmox UI to do it less safely. Append `?force=true` to proceed. A
+delete, a regenerate or a disable cuts Nexara off at once, and an expiry does
+when it arrives; a group change can take away permissions the token relies on.
+The cluster then shows as unreachable, or fails some actions with permission
+errors (403), until you update its credentials in Nexara or, for an edit, undo
+it in Proxmox. The audit log's `forced` is true for a delete, a regenerate or a
+guarded edit sent with `force=true`, on any account, so it alone does not mean
+the account was Nexara's own; a forced comment-only edit, or a token update that
+does not regenerate, records `forced: false`. An edit's entry also shows which
+of enable, expiry and groups it set.
+
+The UI puts each override behind a type-the-name confirmation whose title says
+what it confirms — "Deleting this user will cut off Nexara's access" (button
+**Delete User**), "Revoking this token will cut off Nexara's access" (**Revoke
+Token**), "Regenerating this token will cut off Nexara's access" (**Regenerate
+Token**) and, for an edit, "Saving this edit will cut off Nexara's access"
+(**Save Anyway**). Type the user id — the full `user@realm!token` id for a
+token — to enable the button. An edit sends only the fields you changed, and
+**Save Anyway** re-sends exactly the edit that was refused, with
+`?force=true`; Cancel or Escape on that dialog goes back to the form with the
+edit intact. While a delete, revoke, regenerate or forced save is being sent,
+its dialog stays open and cannot be dismissed until the request settles.
 
 The guard is narrow on purpose — it fires only for the specific credential this
 cluster authenticates with, and only for changes that could actually break it.
-Cosmetic edits (comment, email, SSH keys) are not guarded, because making every
-edit to `nexara@pve` demand a force flag would train operators to pass it
-reflexively.
+Edits that cannot affect an API token (comment, e-mail, names, the two-factor keys
+field) are not guarded, because making every edit to `nexara@pve` demand a force
+flag would train operators to pass it reflexively.
 
 ---
 

@@ -986,9 +986,25 @@ will ever exist outside the cluster. It is deliberately excluded from audit
 records.
 
 **Self-protection.** Deleting or regenerating the token Nexara authenticates
-with returns `409` with an explanation instead of proceeding. Append
-`?force=true` to override — the cluster will then show as unreachable until you
-update its credentials.
+with, deleting the user that owns it, or editing that user to disable it
+(`enable=false`), give it an expiry (a non-zero `expire`) or change its groups
+(any `groups` value) returns `409` with an explanation instead of proceeding.
+Append `?force=true` to override. A delete, a regenerate or a disable cuts Nexara
+off at once, and an expiry does when it arrives; a group change can take away
+permissions the token relies on. The cluster then shows as unreachable, or fails
+some actions with permission errors (403), until its credentials are updated in
+Nexara or, for an edit, the edit is undone in Proxmox. Other edits, a comment or
+e-mail change included, are not guarded.
+
+The audit rows for deleting a user or token, updating a token and editing a user
+carry `forced`: `true` whenever the request sent `force=true` on a delete, a
+regenerate or a guarded kind of edit, on any account, so it does not mean the
+account was Nexara's own or that the guard would have refused; a forced
+comment-only edit, or a token update that does not regenerate, records `false`.
+A user edit's row also carries `enable` and `expire` as sent, and
+`groups_changed: true` when it set `groups`, each only when the request set it —
+never the e-mail, comment, names, the two-factor keys field or the group list,
+since audit rows are readable by every Viewer.
 
 ### Metrics
 

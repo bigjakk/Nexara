@@ -76,9 +76,11 @@ import (
 // re-derived:
 //
 //	AccessUser.Keys, AccessUserDetail.Keys   reach the client via ListUsers and
-//	  GetUser. PVE documents `keys` as "Keys for two factor auth (yubico)" —
-//	  Yubico public identities, not a secret. (registry_access.go describes it
-//	  as SSH public keys, which is wrong but equally not a secret.)
+//	  GetUser on view:access, and still do. PVE documents `keys` as "Keys for
+//	  two factor auth (yubico)": YubiKey ids on a YubiKey realm, but on a realm
+//	  with legacy OATH two-factor the TOTP shared secrets themselves. That makes
+//	  it a credential returned unredacted; redacting it is separate work, and
+//	  is neither done nor enforced here.
 //	AccessToken                              carries no secret by construction;
 //	  Proxmox returns a token's value exactly once, at creation.
 //	AccessTokenCreated.Value                 IS the secret, returned on purpose
