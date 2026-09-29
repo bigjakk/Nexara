@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -27,9 +28,9 @@ import (
 //
 // What stays here is what is still this file's own: the percent-decode of a
 // path identifier, the self-credential guard's decision, which user edits count
-// as capable of severing access, the exact audit details of a user edit, the
-// static audit-detail guard, and what the two user reads make of a user's
-// two-factor keys.
+// as capable of severing access, the exact audit details of a user create and of
+// a user edit, the static audit-detail guard, and what the two user reads make of
+// a user's two-factor keys.
 
 func TestSplitFullTokenID(t *testing.T) {
 	tests := []struct {
@@ -88,44 +89,57 @@ func TestSelfCredentialSubject(t *testing.T) {
 	}
 }
 
-// secretishKey matches audit-detail keys that would leak a credential.
-var secretishKey = []string{"password", "secret", "token_secret", "value", "ticket", "otp", "csrf", "privatekey", "bind_password"}
+// secretishKey matches audit-detail keys that would leak a credential. keys is a
+// user's legacy two-factor field, which can hold TOTP shared secrets (see
+// accessUserResponse).
+var secretishKey = []string{"password", "secret", "token_secret", "value", "ticket", "otp", "csrf", "privatekey", "bind_password", "keys"}
 
 // accessAuditBuilders are the functions whose result access.go may hand to
 // json.Marshal in place of a map literal.
 //
-// The guard below cannot read a builder's keys; it scans only the arguments a
-// builder is called with. An entry is therefore the decision to trust other tests
-// instead, and is acceptable only with all of these: tests that compare what the
-// builder returns exactly, so that a key added to it fails one whether or not it
-// looks like a credential; one of them driven through the real route, so that a
-// handler that stops calling the builder fails too; and a comment on the builder
-// naming them.
+// The guard below holds a builder's body, and the arguments it is called with, to
+// its rules about credential-shaped keys and reads, but it cannot tell what the
+// builder records under any other name. An entry is therefore also the decision
+// to trust other tests, and is acceptable only with all of these: tests that
+// compare what the builder returns exactly, so that a key added to it fails one
+// whether or not it looks like a credential; one of them driven through the real
+// route, so that a handler that stops calling the builder fails too; and a comment
+// on the builder naming them.
 //
-// Today that is accessUserUpdateDetails, pinned by TestAccessUserUpdateDetails,
-// TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields and, through the real
-// route, TestAccessUpdateUserAuditRow in internal/api.
+// Today that is two:
+//   - accessUserUpdateDetails, pinned by TestAccessUserUpdateDetails,
+//     TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields and, through the
+//     real route, TestAccessUpdateUserAuditRow in internal/api;
+//   - accessUserCreateDetails, pinned by TestAccessUserCreateDetails,
+//     TestAccessUserCreateDetailsRecordsOnlyTheAllowedFields and, through the
+//     real route, TestAccessCreateUserAuditRow in internal/api.
 var accessAuditBuilders = map[string]bool{
 	"accessUserUpdateDetails": true,
+	"accessUserCreateDetails": true,
 }
 
 // isAccessAuditBuilderCall reports whether arg is a call to a function listed in
-// accessAuditBuilders. Only a bare call counts: a method or a package-qualified
-// function of the same name is some other function.
+// accessAuditBuilders. Only a bare call counts, and only one whose name resolves
+// to a top-level function: a method or a package-qualified function of the same
+// name is some other function, and so is a local closure or parameter that
+// shadows it.
+//
+// The resolution is the parser's own lexical one, ast.Ident.Obj. Its documented
+// blind spot, the field names in a struct literal, cannot touch a callee.
 func isAccessAuditBuilderCall(arg ast.Expr) bool {
 	call, ok := arg.(*ast.CallExpr)
 	if !ok {
 		return false
 	}
 	name, ok := call.Fun.(*ast.Ident)
-	return ok && accessAuditBuilders[name.Name]
+	return ok && accessAuditBuilders[name.Name] && name.Obj != nil && name.Obj.Kind == ast.Fun
 }
 
 // TestGuard_AccessAuditDetailsCarryNoSecrets is a static guard over access.go.
 // Every one-argument json.Marshal must be handed a map literal or a call to a
-// builder in accessAuditBuilders. A map literal may carry no credential-shaped
-// key, and nothing in it, or in a builder call's arguments, may read a
-// credential-bearing field.
+// builder in accessAuditBuilders. A map literal, and the arguments of a builder
+// call, may carry no credential-shaped key, and nothing in them may read a
+// credential. A builder's own body is held to the same two rules.
 //
 // This matters more here than almost anywhere else in the codebase. Proxmox
 // returns a token secret exactly once, this file is where that value lives, and
@@ -133,27 +147,31 @@ func isAccessAuditBuilderCall(arg ast.Expr) bool {
 // Viewer does. A secret reaching an audit detail would be readable by
 // accounts that cannot even see the token list.
 //
-// Static rather than behavioural because the detail maps are built inline at
-// twelve call sites; a runtime test would have to reach Proxmox at each one.
+// Static rather than behavioural because most detail maps are built inline, one
+// per call site; a runtime test would have to reach Proxmox at each one.
 //
 // The marshal argument is enforced, not assumed. A map assigned to a local
 // first, a struct or slice literal, or a call that is not in accessAuditBuilders
 // hides its keys from the checks on a map literal, so it is refused: a guard
 // that skipped what it could not read would pass exactly the shape a secret is
-// laundered through.
+// laundered through. A call by a builder's name that resolves to a local, not to
+// the top-level function, is such a call.
 //
 // What it cannot see, stated plainly. It inspects one-argument calls to a function
 // named Marshal (json.Marshal, here) and nothing else, so json.MarshalIndent, an
-// Encoder, or a json.RawMessage built by hand bypass it. Within a call it matches
-// string-literal key names exactly against secretishKey (has_password is
-// legitimate, so user_password would pass, and so would a constant key) and
-// refuses reads of .Value, .Password, .TokenSecret and .Secret; a credential held
-// in a local, reached through a call, or kept in a field of another name passes.
-// It is aimed at the realistic mistake — someone adding `"secret": created.Value`
-// while wiring up a new endpoint — not at deliberate laundering. Keeping the rule
-// absolute (never read .Value/.Password here at all) is what makes it worth
-// having; the one legitimate derived value, has_password, is computed before the
-// literal and commented as such.
+// Encoder, or a json.RawMessage built by hand bypass it. A key is a string
+// literal, in a map literal or as the index of an assignment, matched exactly
+// against secretishKey (has_password is legitimate, so user_password would pass,
+// and so would a constant key). A read is a selector named .Value, .Password,
+// .TokenSecret, .Secret or .Keys, or a call whose first argument is a
+// secretishKey literal, as p.String("password") is. A credential held in a local,
+// reached through a call, or kept under another name passes, and so does what a
+// builder records under a name outside the list: its exact-match tests are what
+// see that. It is aimed at the realistic mistake — someone adding
+// `"secret": created.Value` while wiring up a new endpoint — not at deliberate
+// laundering. Keeping the rule absolute (never read .Value/.Password here at all)
+// is what makes it worth having; the one legitimate derived value, has_password,
+// is computed before the Marshal call and commented as such.
 func TestGuard_AccessAuditDetailsCarryNoSecrets(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "access.go", nil, 0)
@@ -162,66 +180,89 @@ func TestGuard_AccessAuditDetailsCarryNoSecrets(t *testing.T) {
 	}
 	line := func(n ast.Node) int { return fset.Position(n.Pos()).Line }
 
-	// An entry names a function this file declares: one that outlived its
-	// function would exempt whatever is later given that name.
-	declared := map[string]bool{}
+	funcs := map[string]*ast.FuncDecl{}
 	for _, decl := range file.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil {
-			declared[fn.Name.Name] = true
-		}
-	}
-	for name := range accessAuditBuilders {
-		if !declared[name] {
-			t.Errorf("accessAuditBuilders lists %s, but access.go declares no such function — "+
-				"an entry that outlives its function exempts whatever is later given that name", name)
+			funcs[fn.Name.Name] = fn
 		}
 	}
 
-	// scanKeys refuses a credential-shaped name on any string-literal key under
-	// lit, the keys of a map nested in a value included.
-	scanKeys := func(lit *ast.CompositeLit) {
-		ast.Inspect(lit, func(n ast.Node) bool {
-			kv, ok := n.(*ast.KeyValueExpr)
-			if !ok {
+	// stringLit is the lower-cased value of e when it is a string literal.
+	stringLit := func(e ast.Expr) (string, bool) {
+		lit, ok := e.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return "", false
+		}
+		s, err := strconv.Unquote(lit.Value) // a raw string is a string literal too
+		if err != nil {
+			// Unreachable: ParseFile rejects a malformed string literal before this
+			// runs, and a name still wrapped in its quotes could never match
+			// secretishKey anyway.
+			return "", false
+		}
+		return strings.ToLower(s), true
+	}
+
+	// scanKeys refuses a credential-shaped name used as a string-literal key
+	// anywhere under node: a key of a map literal, the keys of a map nested in a
+	// value included, or the index of an assignment such as details["keys"] = ….
+	scanKeys := func(node ast.Node) {
+		ast.Inspect(node, func(n ast.Node) bool {
+			var key ast.Expr
+			switch n := n.(type) {
+			case *ast.KeyValueExpr:
+				key = n.Key
+			case *ast.IndexExpr:
+				key = n.Index
+			default:
 				return true
 			}
-			key, ok := kv.Key.(*ast.BasicLit)
-			if !ok || key.Kind != token.STRING {
-				return true
+			if name, ok := stringLit(key); ok && slices.Contains(secretishKey, name) {
+				t.Errorf("%s:%d: audit details carry key %q — token secrets and passwords must never reach an audit row (view:audit is held by every Viewer)",
+					"access.go", line(key), name)
 			}
-			name, err := strconv.Unquote(key.Value) // a raw string is a string literal too
-			if err != nil {
-				// Unreachable: ParseFile rejects a malformed string literal before
-				// this runs, and a name still wrapped in its quotes could never match
-				// secretishKey anyway.
-				name = key.Value
-			}
-			name = strings.ToLower(name)
-			for _, bad := range secretishKey {
-				if name == bad {
-					t.Errorf("%s:%d: audit details carry key %q — token secrets and passwords must never reach an audit row (view:audit is held by every Viewer)",
-						"access.go", line(key), name)
+			return true
+		})
+	}
+
+	// scanReads refuses a read of a credential anywhere under node, whatever key
+	// the value sits under: details{"x": created.Value} is the leak. A read is a
+	// selector of a credential-bearing field, or a call that names a credential in
+	// its first argument, as p.String("password") does.
+	scanReads := func(node ast.Node) {
+		ast.Inspect(node, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.SelectorExpr:
+				switch strings.ToLower(n.Sel.Name) {
+				case "value", "password", "tokensecret", "secret", "keys":
+					t.Errorf("%s:%d: audit details read .%s — that is a credential, keep it out of the audit row",
+						"access.go", line(n), n.Sel.Name)
+				}
+			case *ast.CallExpr:
+				if len(n.Args) == 0 {
+					break
+				}
+				if name, ok := stringLit(n.Args[0]); ok && slices.Contains(secretishKey, name) {
+					t.Errorf("%s:%d: audit details read %s(%q) — that names a credential, keep it out of the audit row",
+						"access.go", line(n), types.ExprString(n.Fun), name)
 				}
 			}
 			return true
 		})
 	}
 
-	// scanReads refuses a read of a credential-bearing field anywhere under node,
-	// whatever key the value sits under: details{"x": created.Value} is the leak.
-	scanReads := func(node ast.Node) {
-		ast.Inspect(node, func(n ast.Node) bool {
-			sel, ok := n.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			switch strings.ToLower(sel.Sel.Name) {
-			case "value", "password", "tokensecret", "secret":
-				t.Errorf("%s:%d: audit details read .%s — that is a credential, keep it out of the audit row",
-					"access.go", line(sel), sel.Sel.Name)
-			}
-			return true
-		})
+	// An entry names a function this file declares: one that outlived its
+	// function would exempt whatever is later given that name. Its body is held to
+	// the rules a map literal is, since the guard cannot see into a call from the
+	// outside.
+	for name := range accessAuditBuilders {
+		fn := funcs[name]
+		if fn == nil || fn.Body == nil {
+			t.Fatalf("accessAuditBuilders lists %s, but access.go declares no such function — "+
+				"an entry that outlives its function exempts whatever is later given that name", name)
+		}
+		scanKeys(fn.Body)
+		scanReads(fn.Body)
 	}
 
 	var checked int
@@ -241,6 +282,7 @@ func TestGuard_AccessAuditDetailsCarryNoSecrets(t *testing.T) {
 		case *ast.CallExpr:
 			if isAccessAuditBuilderCall(arg) {
 				for _, a := range arg.Args {
+					scanKeys(a)
 					scanReads(a)
 				}
 				return true
@@ -508,6 +550,30 @@ func TestAccessUserUpdateDetails(t *testing.T) {
 	}
 }
 
+// fillAccessUserRequestField sets slot, a pointer or a plain value, to something
+// that stands out: a string carrying the field's name, true, or 1700000000. The
+// reflection tests over the user request types use it to set one field at a
+// time. A field of a type it does not know fails the test outright rather than
+// being skipped.
+func fillAccessUserRequestField(t *testing.T, slot reflect.Value, name string) {
+	t.Helper()
+	value := slot
+	if slot.Kind() == reflect.Pointer {
+		slot.Set(reflect.New(slot.Type().Elem()))
+		value = slot.Elem()
+	}
+	switch value.Kind() {
+	case reflect.String:
+		value.SetString("sentinel-" + name)
+	case reflect.Bool:
+		value.SetBool(true)
+	case reflect.Int64:
+		value.SetInt(1700000000)
+	default:
+		t.Fatalf("%s is a %s; teach this test to set it", name, slot.Type())
+	}
+}
+
 // TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields is the allow-list
 // checked against the request type rather than against a list of the fields that
 // exist today.
@@ -531,26 +597,6 @@ func TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields(t *testing.T) {
 
 	empty := accessUpdateDetailsJSON(t, userid, false, proxmox.UpdateAccessUserParams{})
 
-	// fill sets slot, a pointer or a plain value, to something that stands out.
-	fill := func(t *testing.T, slot reflect.Value, name string) {
-		t.Helper()
-		value := slot
-		if slot.Kind() == reflect.Pointer {
-			slot.Set(reflect.New(slot.Type().Elem()))
-			value = slot.Elem()
-		}
-		switch value.Kind() {
-		case reflect.String:
-			value.SetString("sentinel-" + name)
-		case reflect.Bool:
-			value.SetBool(true)
-		case reflect.Int64:
-			value.SetInt(1700000000)
-		default:
-			t.Fatalf("%s is a %s; teach this test to set it", name, slot.Type())
-		}
-	}
-
 	visited := 0
 	for _, field := range reflect.VisibleFields(reflect.TypeOf(proxmox.UpdateAccessUserParams{})) {
 		// The embedded AccessUserFields is walked through its own fields.
@@ -560,7 +606,7 @@ func TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields(t *testing.T) {
 		visited++
 		t.Run(field.Name, func(t *testing.T) {
 			var req proxmox.UpdateAccessUserParams
-			fill(t, reflect.ValueOf(&req).Elem().FieldByIndex(field.Index), field.Name)
+			fillAccessUserRequestField(t, reflect.ValueOf(&req).Elem().FieldByIndex(field.Index), field.Name)
 			if reflect.DeepEqual(req, proxmox.UpdateAccessUserParams{}) {
 				t.Fatalf("filling %s left the request empty; this test would pass without checking it", field.Name)
 			}
@@ -579,6 +625,205 @@ func TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields(t *testing.T) {
 	if visited < 6 {
 		t.Fatalf("visited %d fields of proxmox.UpdateAccessUserParams, want at least the six that are never "+
 			"recorded (comment, email, firstname, lastname, keys, append)", visited)
+	}
+}
+
+// accessCreateDetailsJSON is the bytes a user create's audit details marshal to,
+// which is what the audit row stores and a Viewer reads.
+func accessCreateDetailsJSON(t *testing.T, userid string, hasPassword bool, fields proxmox.AccessUserFields) string {
+	t.Helper()
+	out, err := json.Marshal(accessUserCreateDetails(userid, hasPassword, fields))
+	if err != nil {
+		t.Fatalf("marshal the audit details: %v", err)
+	}
+	return string(out)
+}
+
+// TestAccessUserCreateDetails pins a user create's audit details to the exact
+// JSON that reaches the row, one case for each thing the builder decides.
+//
+// The comparison is on the marshalled bytes because they are what the row stores
+// and a Viewer reads. It is exact, so a key the builder gains fails every case
+// that sets the field it would come from.
+//
+// One of the guards for these keys. TestGuard_AccessAuditDetailsCarryNoSecrets
+// admits the builder without reading it (accessAuditBuilders), so what it
+// returns is pinned here, across the fields type in
+// TestAccessUserCreateDetailsRecordsOnlyTheAllowedFields, and through the real
+// route in TestAccessCreateUserAuditRow.
+func TestAccessUserCreateDetails(t *testing.T) {
+	const (
+		self  = "nexara@pve"
+		alice = "alice@pve"
+	)
+
+	// Values of the fields the row must never carry, each one recognisable in the
+	// output whatever key it might be recorded under. The group list is here too:
+	// the row says a membership was set, not what it is.
+	const (
+		sentinelComment = "sentinel-comment"
+		sentinelEmail   = "sentinel-email@example.com"
+		sentinelFirst   = "sentinel-first"
+		sentinelLast    = "sentinel-last"
+		sentinelKeys    = "sentinel-keys"
+		sentinelGroups  = "sentinel-group-list"
+	)
+	unrecorded := []string{sentinelComment, sentinelEmail, sentinelFirst, sentinelLast, sentinelKeys, sentinelGroups}
+
+	str := func(s string) *string { return &s }
+	b := func(v bool) *bool { return &v }
+	i64 := func(v int64) *int64 { return &v }
+
+	tests := []struct {
+		name        string
+		userid      string
+		hasPassword bool
+		fields      proxmox.AccessUserFields
+		want        string
+	}{
+		{"nothing set", self, false, proxmox.AccessUserFields{},
+			`{"has_password":false,"userid":"nexara@pve"}`},
+		{"a password is recorded as the fact of it", alice, true, proxmox.AccessUserFields{},
+			`{"has_password":true,"userid":"alice@pve"}`},
+
+		{"comment, e-mail, names and keys are not recorded", self, false, proxmox.AccessUserFields{
+			Comment:   str(sentinelComment),
+			Email:     str(sentinelEmail),
+			FirstName: str(sentinelFirst),
+			LastName:  str(sentinelLast),
+			Keys:      str(sentinelKeys),
+		}, `{"has_password":false,"userid":"nexara@pve"}`},
+
+		{"disabling is recorded", alice, false, proxmox.AccessUserFields{Enable: b(false)},
+			`{"enable":false,"has_password":false,"userid":"alice@pve"}`},
+		{"enabling is recorded", alice, false, proxmox.AccessUserFields{Enable: b(true)},
+			`{"enable":true,"has_password":false,"userid":"alice@pve"}`},
+
+		{"an expiry is recorded as sent", alice, false, proxmox.AccessUserFields{Expire: i64(1767225600)},
+			`{"expire":1767225600,"has_password":false,"userid":"alice@pve"}`},
+		{"an expiry of 0, never, is recorded as 0", alice, false, proxmox.AccessUserFields{Expire: i64(0)},
+			`{"expire":0,"has_password":false,"userid":"alice@pve"}`},
+
+		{"groups: the list is not recorded, the fact that it was set is", alice, false,
+			proxmox.AccessUserFields{Groups: str(sentinelGroups)},
+			`{"groups_set":true,"has_password":false,"userid":"alice@pve"}`},
+		{"groups sent empty are still set", alice, false, proxmox.AccessUserFields{Groups: str("")},
+			`{"groups_set":true,"has_password":false,"userid":"alice@pve"}`},
+
+		{"every field at once carries only the five keys", self, true, proxmox.AccessUserFields{
+			Comment:   str(sentinelComment),
+			Email:     str(sentinelEmail),
+			FirstName: str(sentinelFirst),
+			LastName:  str(sentinelLast),
+			Keys:      str(sentinelKeys),
+			Groups:    str(sentinelGroups),
+			Enable:    b(false),
+			Expire:    i64(1767225600),
+		}, `{"enable":false,"expire":1767225600,"groups_set":true,"has_password":true,"userid":"nexara@pve"}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := accessCreateDetailsJSON(t, tc.userid, tc.hasPassword, tc.fields)
+			if got != tc.want {
+				t.Errorf("details = %s, want %s", got, tc.want)
+			}
+			for _, secret := range unrecorded {
+				if strings.Contains(got, secret) {
+					t.Errorf("details %s carry %q — audit rows are readable by every Viewer", got, secret)
+				}
+			}
+		})
+	}
+}
+
+// TestAccessUserCreateDetailsRecordsOnlyTheAllowedFields is the allow-list
+// checked against the fields type rather than against a list of the fields that
+// exist today.
+//
+// It walks every field of proxmox.AccessUserFields and sets each one, on its own,
+// to a value that stands out. Every field has to be classified below, as recorded
+// or as withheld, and one that is in neither fails: a field added later has to be
+// decided by someone, in this test, in the builder and in its comment, before
+// anything passes. A withheld field must leave the details what an empty
+// request's are; a recorded one must add its own key and nothing else: enable
+// and expire as they were given, groups as the fact that they were.
+//
+// Three checks are on the test itself. The filled fields must differ from an
+// empty set (a fill that sets nothing would otherwise pass every subtest); a
+// field of a type the fill does not know fails outright; and every field
+// classified below must still be on the type, so that a walk which stopped seeing
+// the fields, or a rename that left an entry behind, cannot leave the subtests
+// vacuous.
+func TestAccessUserCreateDetailsRecordsOnlyTheAllowedFields(t *testing.T) {
+	const userid = "alice@pve"
+
+	// recorded maps each field the row carries to the key it is carried under and
+	// the JSON that key holds when the field is set by fillAccessUserRequestField:
+	// enable and expire as sent, groups as the fact that they were set.
+	recorded := map[string]struct{ key, value string }{
+		"Enable": {"enable", "true"},
+		"Expire": {"expire", "1700000000"},
+		"Groups": {"groups_set", "true"},
+	}
+	withheld := map[string]bool{"Comment": true, "Email": true, "FirstName": true, "LastName": true, "Keys": true}
+
+	keysOf := func(t *testing.T, details string) map[string]json.RawMessage {
+		t.Helper()
+		var out map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(details), &out); err != nil {
+			t.Fatalf("the details %s are not a JSON object: %v", details, err)
+		}
+		return out
+	}
+
+	empty := accessCreateDetailsJSON(t, userid, false, proxmox.AccessUserFields{})
+
+	seen := map[string]bool{}
+	for _, field := range reflect.VisibleFields(reflect.TypeOf(proxmox.AccessUserFields{})) {
+		if !field.IsExported() {
+			continue
+		}
+		seen[field.Name] = true
+		t.Run(field.Name, func(t *testing.T) {
+			var set proxmox.AccessUserFields
+			fillAccessUserRequestField(t, reflect.ValueOf(&set).Elem().FieldByIndex(field.Index), field.Name)
+			if reflect.DeepEqual(set, proxmox.AccessUserFields{}) {
+				t.Fatalf("filling %s left the fields empty; this test would pass without checking it", field.Name)
+			}
+			got := accessCreateDetailsJSON(t, userid, false, set)
+
+			rec, isRecorded := recorded[field.Name]
+			switch {
+			case isRecorded:
+				want := keysOf(t, empty)
+				want[rec.key] = json.RawMessage(rec.value)
+				if !reflect.DeepEqual(keysOf(t, got), want) {
+					t.Errorf("setting %s made the audit details %s, want %s added to %s",
+						field.Name, got, `"`+rec.key+`":`+rec.value, empty)
+				}
+			case withheld[field.Name]:
+				if got != empty {
+					t.Errorf("setting %s changed the audit details to %s, from %s — "+
+						"audit rows are readable by every Viewer, so only enable, expire and groups_set may be recorded",
+						field.Name, got, empty)
+				}
+			default:
+				t.Errorf("%s is neither recorded nor withheld: decide whether a Viewer may read it, "+
+					"then list it here, in accessUserCreateDetails and in its comment", field.Name)
+			}
+		})
+	}
+
+	for name := range recorded {
+		if !seen[name] {
+			t.Errorf("%s is listed as recorded, but proxmox.AccessUserFields has no such field", name)
+		}
+	}
+	for name := range withheld {
+		if !seen[name] {
+			t.Errorf("%s is listed as withheld, but proxmox.AccessUserFields has no such field", name)
+		}
 	}
 }
 

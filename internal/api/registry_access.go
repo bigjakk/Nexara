@@ -651,9 +651,9 @@ func updateAccessUserParams() apischema.Properties {
 // leaves the stored value alone and an EMPTY one clears it. The pointers come
 // from p.OptString and friends, which report a default as not supplied (see
 // apischema.Property.Default), so a Default would not change what reaches
-// Proxmox; it would document a value an omitted field never gets, and feed the
-// plain reads — CreateUser's audit row records p.String("comment") and
-// p.String("groups").
+// Proxmox; it would document a value an omitted field never gets, and be what a
+// plain read of the parameter (p.String, p.Bool) returns for one the caller left
+// out.
 //
 // `email` deliberately carries no "email" format for the same reason: the format
 // refuses the empty string, which is the only way to clear a stored address.

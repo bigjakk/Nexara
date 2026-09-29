@@ -51,11 +51,12 @@ type accessUpdatePVERequest struct {
 
 // accessUpdatePVE stands in for the cluster's Proxmox API: it records every
 // request and answers each with an empty success envelope, unless reply gave
-// the path a body.
+// the path a body or refuse a status too.
 type accessUpdatePVE struct {
-	mu      sync.Mutex
-	seen    []accessUpdatePVERequest
-	replies map[string]string
+	mu       sync.Mutex
+	seen     []accessUpdatePVERequest
+	replies  map[string]string
+	statuses map[string]int
 }
 
 // reply makes the stand-in answer requests for path, as the server sees it
@@ -69,6 +70,18 @@ func (p *accessUpdatePVE) reply(path, body string) {
 	p.replies[path] = body
 }
 
+// refuse is reply with an HTTP status: a Proxmox that will not do what it was
+// asked, so that a test can follow what the handler makes of the refusal.
+func (p *accessUpdatePVE) refuse(path string, status int, body string) {
+	p.reply(path, body)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.statuses == nil {
+		p.statuses = map[string]int{}
+	}
+	p.statuses[path] = status
+}
+
 func (p *accessUpdatePVE) serve(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,11 +91,15 @@ func (p *accessUpdatePVE) serve(t *testing.T) string {
 		p.mu.Lock()
 		p.seen = append(p.seen, accessUpdatePVERequest{method: r.Method, path: r.URL.Path, form: r.PostForm})
 		body, ok := p.replies[r.URL.Path]
+		status := p.statuses[r.URL.Path]
 		p.mu.Unlock()
 		if !ok {
 			body = `{"data":null}`
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if status != 0 {
+			w.WriteHeader(status)
+		}
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
@@ -132,6 +149,38 @@ func (d *accessUpdateDB) auditRows() [][]any {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return append([][]any(nil), d.audits...)
+}
+
+// accessAuditRow is an audit row the stand-in database recorded, its arguments
+// named.
+type accessAuditRow struct {
+	resourceType, resourceID, action string
+	details                          json.RawMessage
+}
+
+// oneAccessAuditRow returns the audit row a request wrote, and fails unless it
+// wrote exactly one.
+//
+// The argument positions are InsertAuditLog's (internal/db/generated): cluster,
+// user, resource type, resource id, action, details. A regenerated query that
+// moved them fails here on a type or a value rather than reading the wrong one.
+func oneAccessAuditRow(t *testing.T, rows [][]any) accessAuditRow {
+	t.Helper()
+	if len(rows) != 1 {
+		t.Fatalf("the request wrote %d audit rows, want exactly 1", len(rows))
+	}
+	args := rows[0]
+	if len(args) != 6 {
+		t.Fatalf("the audit insert took %d arguments, want InsertAuditLog's 6", len(args))
+	}
+	details, ok := args[5].(json.RawMessage)
+	if !ok {
+		t.Fatalf("the audit details argument is %T, want json.RawMessage", args[5])
+	}
+	resourceType, _ := args[2].(string)
+	resourceID, _ := args[3].(string)
+	action, _ := args[4].(string)
+	return accessAuditRow{resourceType: resourceType, resourceID: resourceID, action: action, details: details}
 }
 
 // accessUpdateRow replays the cluster row through pgx.Row positionally, in the
@@ -242,6 +291,10 @@ var accessUpdateEverythingForm = url.Values{
 // force, refused by it. Without that case a stand-in that failed the guard's
 // cluster read would let every edit through, since the guard does not fail on a
 // lookup error, and the forced flag in the first case would prove nothing.
+//
+// The last case has Proxmox refuse the edit: the caller gets an error and
+// nothing is audited, because nothing changed. The other cases' stand-in always
+// succeeds, so without it a row written ahead of the Proxmox call would pass.
 func TestAccessUpdateUserAuditRow(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -259,6 +312,14 @@ func TestAccessUpdateUserAuditRow(t *testing.T) {
 		// wantID is the account the edit names: the row's resource id and the
 		// last segment of the Proxmox path.
 		wantID string
+		// pveStatus, when set, is the HTTP status the stand-in Proxmox refuses the
+		// edit with, and pveBody what it says. The edit still reaches Proxmox, and
+		// wantForm is what it carried. The caller must get an error, but which one
+		// is the house mappers' to decide (a 404 would be as right as today's 502
+		// for a missing user), so wantStatus is unused; and no audit row may be
+		// written, so wantAudit is too.
+		pveStatus int
+		pveBody   string
 	}{
 		{
 			name:       "a forced edit of the account Nexara uses, with every field",
@@ -319,13 +380,31 @@ func TestAccessUpdateUserAuditRow(t *testing.T) {
 			wantAudit:  `{"enable":false,"forced":true,"userid":"alice@pve"}`,
 			wantID:     "alice@pve",
 		},
+		{
+			// Proxmox says no, as it does for an account that does not exist, so
+			// nothing was edited and nothing may be recorded as if it had been.
+			name:      "an edit Proxmox refuses answers with an error and writes no audit row",
+			user:      "alice%40pve",
+			body:      `{"comment":"sentinel-comment"}`,
+			pveStatus: http.StatusInternalServerError,
+			pveBody:   `{"data":null,"message":"no such user ('alice@pve')\n"}`,
+			wantForm:  url.Values{"comment": {"sentinel-comment"}},
+			wantID:    "alice@pve",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app, pve, store := newAccessUpdateApp(t)
+			if tt.pveStatus != 0 {
+				pve.refuse("/api2/json/access/users/"+tt.wantID, tt.pveStatus, tt.pveBody)
+			}
 			status, env := send(t, app, accessUpdateRequest(tt.user, tt.query, tt.body))
-			if status != tt.wantStatus {
+			if tt.pveStatus != 0 {
+				if status < fiber.StatusBadRequest {
+					t.Fatalf("Proxmox refused the edit and the caller got %d (%q), want an error", status, env.Message)
+				}
+			} else if status != tt.wantStatus {
 				t.Fatalf("status = %d (%q), want %d", status, env.Message, tt.wantStatus)
 			}
 
@@ -360,30 +439,19 @@ func TestAccessUpdateUserAuditRow(t *testing.T) {
 				t.Errorf("Proxmox received the form %v, want %v", sent[0].form, tt.wantForm)
 			}
 
-			if len(rows) != 1 {
-				t.Fatalf("the request wrote %d audit rows, want exactly 1", len(rows))
+			if tt.pveStatus != 0 {
+				if len(rows) != 0 {
+					t.Errorf("Proxmox refused the edit and the handler wrote %d audit row(s), want none", len(rows))
+				}
+				return
 			}
-			// The argument positions are InsertAuditLog's (internal/db/generated):
-			// cluster, user, resource type, resource id, action, details. A
-			// regenerated query that moved them fails here on a type or a value
-			// rather than reading the wrong one.
-			args := rows[0]
-			if len(args) != 6 {
-				t.Fatalf("the audit insert took %d arguments, want InsertAuditLog's 6", len(args))
-			}
-			resourceType, _ := args[2].(string)
-			resourceID, _ := args[3].(string)
-			action, _ := args[4].(string)
-			if resourceType != "pve_user" || resourceID != tt.wantID || action != "updated" {
+			row := oneAccessAuditRow(t, rows)
+			if row.resourceType != "pve_user" || row.resourceID != tt.wantID || row.action != "updated" {
 				t.Errorf("the audit row is (%q, %q, %q), want (pve_user, %q, updated)",
-					resourceType, resourceID, action, tt.wantID)
+					row.resourceType, row.resourceID, row.action, tt.wantID)
 			}
-			details, ok := args[5].(json.RawMessage)
-			if !ok {
-				t.Fatalf("the audit details argument is %T, want json.RawMessage", args[5])
-			}
-			if string(details) != tt.wantAudit {
-				t.Errorf("the audit details are %s, want %s", details, tt.wantAudit)
+			if string(row.details) != tt.wantAudit {
+				t.Errorf("the audit details are %s, want %s", row.details, tt.wantAudit)
 			}
 		})
 	}

@@ -186,11 +186,8 @@ func accessUpdateAffectsAccess(req proxmox.UpdateAccessUserParams) bool {
 // edit accessUpdateAffectsAccess does not cover, a comment change say, overrides
 // nothing and records false.
 //
-// Pure, so the exact key set is testable without a database. Its result reaches
-// json.Marshal as a call, and TestGuard_AccessAuditDetailsCarryNoSecrets cannot
-// read the keys of a call, only scan its arguments, so that guard admits it only
-// because it is listed in accessAuditBuilders, and exact-match tests pin the key
-// set instead: TestAccessUserUpdateDetails,
+// Pure, so the exact key set is testable without a database, and pinned, as
+// accessAuditBuilders requires, by TestAccessUserUpdateDetails,
 // TestAccessUserUpdateDetailsRecordsOnlyTheGuardedFields and, through the real
 // route, TestAccessUpdateUserAuditRow in internal/api.
 func accessUserUpdateDetails(userid string, force bool, req proxmox.UpdateAccessUserParams) map[string]any {
@@ -206,6 +203,46 @@ func accessUserUpdateDetails(userid string, force bool, req proxmox.UpdateAccess
 	}
 	if req.Groups != nil {
 		details["groups_changed"] = true
+	}
+	return details
+}
+
+// accessUserCreateDetails builds the audit details of a user create.
+//
+// It is an allow-list, on the model of accessUserUpdateDetails: the account;
+// has_password, whether the request carried a password; and, of the other fields,
+// only those the request set: enable and expire as sent, groups as groups_set.
+// "Set" is the tristate pointer on fields, so a request's enable=false, expire=0
+// or groups="" is recorded, and an omitted field leaves no key. The row records
+// the request, not its outcome, and groups_set says the request carried groups
+// ("" included, which on a create grants none), not what they are.
+//
+// Nothing else goes in. view:audit is held by every built-in Viewer, so the
+// e-mail, comment and names, which are personal, stay out; so do keys, which can
+// hold TOTP secrets (see accessUserResponse), and the group list.
+//
+// The password is never an argument. The caller derives hasPassword from it
+// before the call, and passes the request's AccessUserFields rather than its
+// CreateAccessUserParams, so this function has no way to hold the password to
+// record it.
+//
+// Pure, so the exact key set is testable without a database, and pinned, as
+// accessAuditBuilders requires, by TestAccessUserCreateDetails,
+// TestAccessUserCreateDetailsRecordsOnlyTheAllowedFields and, through the real
+// route, TestAccessCreateUserAuditRow in internal/api.
+func accessUserCreateDetails(userid string, hasPassword bool, fields proxmox.AccessUserFields) map[string]any {
+	details := map[string]any{
+		"userid":       userid,
+		"has_password": hasPassword,
+	}
+	if fields.Enable != nil {
+		details["enable"] = *fields.Enable
+	}
+	if fields.Expire != nil {
+		details["expire"] = *fields.Expire
+	}
+	if fields.Groups != nil {
+		details["groups_set"] = true
 	}
 	return details
 }
@@ -392,14 +429,9 @@ func (h *AccessHandler) CreateUser(c fiber.Ctx, p *apischema.Params) error {
 	// Whether the account has a password is useful audit context — a
 	// passwordless @pve user cannot log in interactively at all — but the
 	// password itself must never appear. Derived here, as a bool, so the
-	// marshalled map never reads the field.
+	// builder is handed the fact and never the field.
 	hasPassword := p.String("password") != ""
-	details, _ := json.Marshal(map[string]any{
-		"userid":       req.UserID,
-		"has_password": hasPassword,
-		"groups":       p.String("groups"),
-		"comment":      p.String("comment"),
-	})
+	details, _ := json.Marshal(accessUserCreateDetails(req.UserID, hasPassword, req.AccessUserFields))
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pve_user", req.UserID, "created", details)
 	h.publishAccessChange(c.Context(), clusterID, "pve_user", req.UserID, "created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})

@@ -1014,6 +1014,11 @@ A user edit's row also carries `enable` and `expire` as sent, and
 never the e-mail, comment, names, the two-factor keys field or the group list,
 since audit rows are readable by every Viewer.
 
+A user create's row carries `userid` and `has_password` and, each only when the
+request set that field, `enable` and `expire` as sent and `groups_set: true` —
+never the password, e-mail, comment, names, the two-factor keys field or the
+group list.
+
 ### Metrics
 
 | Method | Path | Description |

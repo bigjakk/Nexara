@@ -525,8 +525,9 @@ func TestAccessForceIsReadFromTheQueryString(t *testing.T) {
 // and p.OptBool, which report a default as not supplied (see
 // apischema.Property.Default), so a Default could not make a rename clear the
 // e-mail address or re-enable a disabled account; what it would do is document
-// a value an omitted field never gets, and feed the plain reads, such as the
-// CreateUser audit row's comment and groups. See accessUserFieldParams.
+// a value an omitted field never gets, and be what a plain read of the
+// parameter (p.String, p.Bool) returns for one the caller left out. See
+// accessUserFieldParams.
 func TestAccessUserFieldsStayTristate(t *testing.T) {
 	tristate := []string{"comment", "email", "firstname", "lastname", "groups", "keys", "enable", "expire"}
 
