@@ -15,11 +15,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
-	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/rolling"
 )
 
@@ -146,9 +144,9 @@ type nodeSensorsResponse struct {
 // minute is not a correctness problem. Nexara's default deployment is a single
 // container in any case.
 //
-// Keys are (cluster, node) for nodes that were confirmed to exist — see
-// GetNodeSensors for why that check has to happen before anything is stored
-// under a caller-supplied name.
+// Keys are (cluster, node) for nodes the cluster is known to hold — see
+// GetNodeSensors for why that has to be established before anything is stored
+// under a caller-supplied name, and where it is.
 type nodeSensorsCache struct {
 	mu      sync.Mutex
 	entries map[string]nodeSensorsCacheEntry
@@ -264,21 +262,14 @@ func (h *NodeHandler) GetNodeSensors(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	// Resolve the node before touching the cache. A typo then gets a 404
-	// instead of a puzzling "not available", and — the reason this is not
-	// optional — the cache key space stays bounded by the nodes that exist.
-	// :node_name is caller-controlled, so a map keyed on it without this check
-	// is a memory leak that anyone holding view:node could drive.
-	if _, err := h.queries.GetNodeByClusterAndName(c.Context(), db.GetNodeByClusterAndNameParams{
-		ClusterID: clusterID,
-		Name:      nodeName,
-	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusNotFound, "Node not found in this cluster")
-		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up node")
-	}
-
+	// The node is one of the cluster's by the time this runs: the registry
+	// refuses a :node_name the cluster's nodes table does not hold, with 404,
+	// before calling any handler (RequireNodesInCluster, run from
+	// Endpoint.serve). That is what bounds the cache below by the nodes that
+	// exist. :node_name is caller-controlled, so a map keyed on it without that
+	// check is a memory leak anyone holding view:node could drive — which is why
+	// TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold holds this
+	// handler to routes that carry the check.
 	key := clusterID.String() + "/" + nodeName
 	if cached, ok := h.sensors.get(key); ok {
 		return c.JSON(cached)

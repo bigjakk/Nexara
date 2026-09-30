@@ -1372,8 +1372,16 @@ type sweepRequest struct {
 // parameter with a self-contradictory Enum/Pattern combination would pass
 // the required-only pass and only ever fail the second.
 func synthesizeSweepRequest(e Endpoint, includeOptional bool) sweepRequest {
-	override := sweepRouteOverrides[e.Method+" "+e.Path]
+	return synthesizeSweepRequestWith(e, includeOptional, sweepRouteOverrides[e.Method+" "+e.Path])
+}
 
+// synthesizeSweepRequestWith is synthesizeSweepRequest with the route's
+// override handed in rather than read from sweepRouteOverrides, for a test
+// that needs particular values in particular parameters —
+// TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold puts its own
+// cluster and node into every route that names a node, merged over the
+// route's own override.
+func synthesizeSweepRequestWith(e Endpoint, includeOptional bool, override sweepEndpointOverride) sweepRequest {
 	included := closeRequiredParams(e.Parameters)
 	var excluded []string
 	if includeOptional {
@@ -1513,7 +1521,13 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
 	app.Use(recover.New(recover.Config{PanicHandler: sweepPanicHandler}))
-	mountRegistry(app, s.registry, sweepAuth(s.registry))
+	// Every node is a member here, and that is load-bearing rather than
+	// convenient. The server's own lookup is its disconnected database, so
+	// serve would answer every route that names a node with the lookup's 500
+	// before its handler ran — an outcome classifySweepOutcome rightly counts
+	// as fine, which would silently take those handlers out of this sweep.
+	// Membership is TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold's.
+	mountRegistry(app, s.registry, sweepAuth(s.registry), everyNodeIsAMember())
 
 	type sweepSkip struct {
 		route  string
@@ -1737,7 +1751,7 @@ func TestGuard_RouteSweepCatchesAnUndeclaredParamRead(t *testing.T) {
 
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
 	app.Use(recover.New(recover.Config{PanicHandler: sweepPanicHandler}))
-	mountRegistry(app, reg, sweepAuth(reg))
+	mountRegistry(app, reg, sweepAuth(reg), nil)
 
 	outcome := sweepDispatch(app, fiber.MethodGet, "/api/v1/sweep-harness-demo/"+testClusterID, nil)
 	if outcome.dispatchErr != nil {

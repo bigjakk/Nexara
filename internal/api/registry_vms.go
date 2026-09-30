@@ -241,6 +241,10 @@ func vmParams(extra apischema.Properties) apischema.Properties {
 // nodeParams is the pair a per-node route carries. node_name is the
 // Proxmox node NAME, not Nexara's node row id — the two are different
 // identifiers and the routes below are the ones that take the former.
+//
+// Declaring it is also what makes the registry refuse, with 404, a node
+// the cluster's nodes table does not hold, before the handler runs: every
+// node-name parameter in a URL is checked (Endpoint.urlNodeParams, serve).
 func nodeParams(extra apischema.Properties) apischema.Properties {
 	return withParams(apischema.Properties{
 		"cluster_id": apischema.StdOption("cluster-id"),

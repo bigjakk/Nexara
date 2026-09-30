@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -16,6 +17,8 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/api/handlers"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // These tests drive synthetic endpoints through a real Fiber app, with
@@ -43,9 +46,25 @@ func noAuth() fiber.Handler {
 	return func(c fiber.Ctx) error { return c.Next() }
 }
 
+// everyNodeIsAMember is the explicit stand-in for the node lookup, for the
+// tests that are not about node membership: it answers that every node named
+// is one of the cluster's. mountRegistry refuses a nil lookup when an
+// endpoint names a node in its URL, so opting out of the check has to be
+// written down, as with noAuth. Membership itself is
+// TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold's subject,
+// which mounts a lookup that knows exactly one node.
+func everyNodeIsAMember() handlers.NodeLookup { return anyNodeLookup{} }
+
+type anyNodeLookup struct{}
+
+func (anyNodeLookup) GetNodeByClusterAndName(_ context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error) {
+	return db.Node{ClusterID: arg.ClusterID, Name: arg.Name}, nil
+}
+
 // newRegistryApp mounts es on a fresh app. auth is the authentication
 // middleware; most of these tests pass noAuth() because they are about
-// parameters, not sessions.
+// parameters, not sessions — and every node is a member, because they are
+// not about node membership either (everyNodeIsAMember).
 func newRegistryApp(t *testing.T, auth fiber.Handler, es ...Endpoint) *fiber.App {
 	t.Helper()
 	reg := NewRegistry()
@@ -53,7 +72,7 @@ func newRegistryApp(t *testing.T, auth fiber.Handler, es ...Endpoint) *fiber.App
 		reg.Register(e)
 	}
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-	mountRegistry(app, reg, auth)
+	mountRegistry(app, reg, auth, everyNodeIsAMember())
 	return app
 }
 
@@ -237,7 +256,7 @@ func TestRegistryAnswers500ForADeclarationBug(t *testing.T) {
 	reg.endpoints = append(reg.endpoints, broken)
 
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-	mountRegistry(app, reg, noAuth())
+	mountRegistry(app, reg, noAuth(), nil)
 
 	logged := captureSlog(t)
 
@@ -396,7 +415,7 @@ func TestRegistryOmitsUnseenKeysRatherThanPassingEmptyStrings(t *testing.T) {
 		e.pathParams = pathParamNames(e.Path)
 		reg.endpoints = append(reg.endpoints, e)
 		app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-		mountRegistry(app, reg, noAuth())
+		mountRegistry(app, reg, noAuth(), nil)
 
 		status, env := send(t, app, httptest.NewRequest(http.MethodGet, "/api/v1/widgets", nil))
 		if status != fiber.StatusNoContent {
@@ -684,7 +703,7 @@ func TestRegistryLeavesAStreamedNonJSONBodyAlone(t *testing.T) {
 					return c.SendStatus(fiber.StatusNoContent)
 				},
 			})
-			mountRegistry(app, reg, noAuth())
+			mountRegistry(app, reg, noAuth(), nil)
 
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads?filename=disk.img", strings.NewReader(payload))
 			if contentType != "" {
@@ -750,7 +769,7 @@ func TestRegistryLogsAHandlerPanic(t *testing.T) {
 			return errors.New(p.String("undeclared"))
 		},
 	})
-	mountRegistry(app, reg, noAuth())
+	mountRegistry(app, reg, noAuth(), nil)
 
 	logged := captureSlog(t)
 
@@ -874,7 +893,7 @@ func TestBodyIsBoundedOnAnEndpointThatDeclaresNoBodyParameter(t *testing.T) {
 		Parameters:  apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")},
 		Handler:     func(c fiber.Ctx, _ *apischema.Params) error { return c.SendString("ok") },
 	})
-	mountRegistry(app, reg, func(c fiber.Ctx) error { return c.Next() })
+	mountRegistry(app, reg, func(c fiber.Ctx) error { return c.Next() }, nil)
 
 	path := "/api/v1/clusters/" + testClusterID + "/nobody"
 
@@ -986,7 +1005,7 @@ func TestEncodedBodyIsNeverDecodedOnAnEndpointDeclaringNoBodyParameter(t *testin
 			return c.SendString("ok")
 		},
 	})
-	mountRegistry(app, reg, noAuth())
+	mountRegistry(app, reg, noAuth(), nil)
 
 	empty := []byte("{}")
 	for _, tt := range []struct {

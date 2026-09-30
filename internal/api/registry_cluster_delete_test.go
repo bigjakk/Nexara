@@ -229,7 +229,7 @@ func newClusterDeleteApp(t *testing.T, f clusterDeleteFixture) (*fiber.App, *clu
 	if grants == nil {
 		grants = map[string]bool{"delete:cluster": true, "manage:cluster": true, "manage:pool": true}
 	}
-	mountRegistry(s.app, reg, stubAuth(grants))
+	mountRegistry(s.app, reg, stubAuth(grants), nil)
 	return s.app, store, pve
 }
 

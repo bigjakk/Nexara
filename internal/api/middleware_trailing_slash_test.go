@@ -48,7 +48,7 @@ func newClusterDeleteProbe(t *testing.T, stack bool) (*fiber.App, *capture) {
 	}
 	reg := NewRegistry()
 	reg.Register(e)
-	mountRegistry(s.app, reg, noAuth())
+	mountRegistry(s.app, reg, noAuth(), nil)
 	return s.app, cap
 }
 

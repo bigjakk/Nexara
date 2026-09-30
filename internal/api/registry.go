@@ -12,6 +12,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
 // This file is the declarative endpoint registry: a route states its
@@ -191,6 +192,20 @@ func (r *Registry) register(e Endpoint) error {
 	}
 	if err := e.Permissions.validate(e.Path, e.pathParams); err != nil {
 		return fmt.Errorf("endpoint %s %s %w", e.Method, e.Path, err)
+	}
+	// A node the URL names is checked against the cluster the path names
+	// (serve), so a route that names a node and no cluster could only refuse
+	// every request. See urlNodeParams. That such a route also runs a
+	// cluster-scoped permission gate ahead of the check — so its 404 is never
+	// an answer to a caller the gate refused — is held by
+	// TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold rather
+	// than here, because the parameter fixtures drive these routes as
+	// SelfService.
+	if nodes := e.urlNodeParams(); len(nodes) > 0 && !namesACluster(e.pathParams, e.Path) {
+		return fmt.Errorf("endpoint %s %s names a Proxmox node in %s, but its path names no cluster to check "+
+			"that node against; it needs a required :cluster_id as its FIRST path parameter, or to start with %q "+
+			"and name no later :cluster_id",
+			e.Method, e.Path, strings.Join(nodes, ", "), legacyClusterPrefix)
 	}
 
 	// The reason this function exists at registration time rather than at
@@ -374,6 +389,55 @@ func (e Endpoint) runsClusterGate() bool {
 	return false
 }
 
+// isNodeNameProperty reports whether a declared property holds a Proxmox node
+// name: the node-name format every StdOption("node-name") carries, or its
+// sentinel twin emptyOrNodeName (registry_vms.go), whose empty string means
+// "no node" rather than naming one.
+func isNodeNameProperty(p apischema.Property) bool {
+	return p.Format == "node-name" || p.Pattern == emptyOrNodeName
+}
+
+// urlNodeParams returns, sorted, the parameters of e that carry a Proxmox node
+// name in the URL — a path segment such as :node_name or :node, or a query
+// parameter such as the firewall log's ?node= — which serve checks against the
+// nodes of the cluster the path names before it calls the handler.
+//
+// All but two become a Proxmox call that pveproxy forwards to the node by
+// name — the {node} of a /nodes/{node}/… path, or the check-node the two
+// mapping listings send — and pveproxy picks the host to forward to from the
+// name before it validates it: a name that is not one of the cluster's, an IP
+// address or an FQDN included, would have the node resolve and dial it and
+// hand back what it found (see RequireNodesInCluster). The other two — a
+// node's sensors and its HA maintenance — reach the node over SSH at the
+// address the database holds for it, and are checked all the same.
+//
+// The check is derived from the declaration rather than placed in each handler
+// so that no handler can forget it, and
+// TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold holds every
+// route that names a node in its URL to carrying one.
+//
+// BODY parameters are left out on purpose, and not because they are safe:
+// what a body's node means is the route's own business — a migration names the
+// node of ANOTHER cluster, a rolling job names nodes it will act on later —
+// so no single rule against the path's cluster fits them all.
+//
+// It is computed where it is used rather than cached by register, so that a
+// test fixture appended to a Registry without Register cannot dodge it.
+func (e Endpoint) urlNodeParams() []string {
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(e.Parameters)) {
+		prop := e.Parameters[name]
+		if !isNodeNameProperty(prop) {
+			continue
+		}
+		switch apischema.ResolveSource(name, prop, e.Method, e.pathParams) {
+		case apischema.SourcePath, apischema.SourceQuery:
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // pathParamNames returns the :param names in path, in order. Fiber allows
 // several params in one segment (":a-:b") and suffixes on a param
 // (":id<int>", ":name?"), so the name is read as the identifier run after
@@ -409,8 +473,10 @@ func sortedMethods() []string { return slices.Sorted(maps.Keys(knownMethods)) }
 
 // mountRegistry attaches every endpoint in reg to router.
 //
-// The chain is authRequired -> rate limiter -> permission -> handler, and
-// every link is attached PER ROUTE rather than through a Group. Fiber v3
+// The chain is authRequired -> rate limiter -> permission -> handler — the
+// handler being serve, which validates the parameters and refuses a node the
+// cluster does not hold before it calls the endpoint's Handler — and every
+// link is attached PER ROUTE rather than through a Group. Fiber v3
 // applies group middleware at match time, so it never appears in a
 // route's Handlers slice — a permission attached to a group is invisible
 // to route-table introspection and therefore unverifiable by a guard
@@ -429,9 +495,27 @@ func sortedMethods() []string { return slices.Sorted(maps.Keys(knownMethods)) }
 // and a fail-open default is exactly what a declarative registry is here
 // to remove. A test that wants unauthenticated routes passes a
 // pass-through, which reads as the deliberate stub it is.
-func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler) {
+//
+// nodes answers whether a node is one of a cluster's, for the endpoints
+// that name a node in their URL (urlNodeParams) — passed in for the same
+// reason auth is. It must not be nil when any endpoint names one: a
+// missing lookup is a boot failure, not a route that forwards whatever node
+// it is given. It may be nil when none does. A test that is not about
+// membership passes everyNodeIsAMember, which, like noAuth, says so.
+func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes handlers.NodeLookup) {
 	if auth == nil {
 		panic("api: mountRegistry needs an authentication middleware; pass an explicit pass-through if that is really the intent")
+	}
+	// Checked for every endpoint before any is mounted, so a refusal never
+	// leaves half a route table behind it.
+	if nodes == nil {
+		for _, e := range reg.endpoints {
+			if names := e.urlNodeParams(); len(names) > 0 {
+				panic(fmt.Sprintf("api: mountRegistry needs a node lookup: %s %s names a Proxmox node in %s, "+
+					"which is checked against the cluster's nodes before its handler runs",
+					e.Method, e.Path, strings.Join(names, ", ")))
+			}
+		}
 	}
 	for _, e := range reg.endpoints {
 		// []any rather than []fiber.Handler because that is what Fiber
@@ -446,14 +530,27 @@ func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler) {
 		if perm := e.Permissions.middleware(); perm != nil {
 			chain = append(chain, perm)
 		}
-		chain = append(chain, e.serve())
+		chain = append(chain, e.serve(nodes, e.urlNodeParams()))
 		router.Add([]string{e.Method}, e.Path, chain[0], chain[1:]...)
 	}
 }
 
 // serve adapts the endpoint's Handler to a fiber.Handler: extract, then
-// validate, then call.
-func (e Endpoint) serve() fiber.Handler {
+// validate, then refuse a node the cluster does not hold, then call.
+//
+// The node check sits here, between validation and the handler, rather than
+// in a middleware link of its own, because here it reads the very Params the
+// handler is handed. A link ahead of serve would have to read the request a
+// second time — the path, the query string, a repeated key, an alias — and a
+// check that reads a request differently from the code that acts on it is a
+// check an attacker can shape a request around. Here the node checked is, by
+// construction, the node the handler forwards. It still runs after the
+// permission gate, which is route middleware ahead of serve, so a caller the
+// gate refuses learns nothing about which nodes exist; and a malformed name is
+// still the validator's 400, never a lookup.
+//
+// nodeNames is e.urlNodeParams(), computed once by mountRegistry.
+func (e Endpoint) serve(nodes handlers.NodeLookup, nodeNames []string) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		raw, err := e.extract(c)
 		if err != nil {
@@ -463,8 +560,27 @@ func (e Endpoint) serve() fiber.Handler {
 		if err != nil {
 			return e.validationError(err)
 		}
+		if len(nodeNames) > 0 {
+			if err := handlers.RequireNodesInCluster(c, nodes, namedNodes(params, nodeNames)); err != nil {
+				return err
+			}
+		}
 		return e.call(c, params)
 	}
+}
+
+// namedNodes returns the node names params holds for names, skipping empty
+// ones: "" is emptyOrNodeName's "no node", which names nothing to check. The
+// values are read with the accessor a handler reads them with, defaults
+// included, so every name the handler can forward is a name that was checked.
+func namedNodes(params *apischema.Params, names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if v := params.String(name); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // call runs the handler and makes sure a panic inside it leaves a trace.

@@ -155,7 +155,7 @@ Common HTTP status codes:
 | 400 | Bad request — invalid input |
 | 401 | Unauthorized — missing or invalid token |
 | 403 | Forbidden — insufficient permissions |
-| 404 | Not found |
+| 404 | Not found — including a Proxmox node name that is not one of the cluster's nodes; see [Nodes](#nodes) |
 | 408 | Request timeout — the request's head, or the first 8 KiB of its body, took longer than 60 seconds to arrive; see Request Bodies and Connections |
 | 409 | Conflict — resource already exists |
 | 411 | Length required — the request body was sent chunked, other than as a multipart upload to the storage upload endpoint; see Request Bodies and Connections |
@@ -605,6 +605,16 @@ leaves provenance intact.
 > node UUID, as returned in the `id` field of `GET /clusters/:id/nodes`. They
 > are not interchangeable — a route taking `:node_id` rejects a node name with
 > `400 node_id: expected a UUID such as …`.
+>
+> A node name must be one of the cluster's nodes, not only well formed. Every
+> route that takes one in its URL — as `:node` in the path, wherever that
+> appears, or as `?node=` — answers `404 Node not found in this cluster` for a
+> name that is not in the cluster's node list as `GET /clusters/:id/nodes`
+> returns it, before anything is sent to Proxmox; so do the two task routes for
+> the node a UPID names. The name must match exactly, case included. A node
+> that has just joined the Proxmox cluster is refused until Nexara's next
+> collection pass records it; passes run every `METRICS_COLLECT_INTERVAL` (10
+> seconds in the Docker deployment, 30 when unset).
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1565,8 +1575,8 @@ Every schedule carries `run_as`: the user whose grants its runs read under, stam
 | POST | `/tasks` | Create a task entry |
 | PUT | `/tasks/:upid` | Update task status |
 | DELETE | `/tasks` | Clear completed tasks |
-| GET | `/clusters/:id/tasks/:upid` | Get Proxmox task status |
-| GET | `/clusters/:id/tasks/:upid/log` | Get Proxmox task log |
+| GET | `/clusters/:id/tasks/:upid` | Get Proxmox task status; 404 when the UPID's node is not one of the cluster's (see [Nodes](#nodes)) |
+| GET | `/clusters/:id/tasks/:upid/log` | Get Proxmox task log; 404 when the UPID's node is not one of the cluster's |
 
 ### Audit Log
 

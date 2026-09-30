@@ -13,7 +13,7 @@ func (s *Server) setupRoutes() {
 	// so the guard tests can read the declarations the running route
 	// table was actually built from.
 	s.registry = s.buildRegistry()
-	mountRegistry(s.app, s.registry, s.authRequired())
+	mountRegistry(s.app, s.registry, s.authRequired(), s.nodeLookup)
 
 	// Health probe — not rate-limited, not behind /api/v1.
 	s.app.Get("/healthz", s.handleHealthz)

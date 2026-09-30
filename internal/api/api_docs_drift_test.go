@@ -74,6 +74,11 @@ func newRouteStubServer(t *testing.T) *Server {
 		apiKeyHandler:          &handlers.APIKeyHandler{},
 		apiDocsHandler:         &handlers.APIDocsHandler{},
 		changelogHandler:       &handlers.ChangelogHandler{},
+		// mountRegistry refuses to mount a route naming a node without a
+		// lookup. Nothing here serves a request, so one that says yes to
+		// every node is as good as any; the tests that are about membership
+		// remount the registry with their own.
+		nodeLookup: everyNodeIsAMember(),
 	}
 	requireAllHandlersStubbed(t, s)
 	s.setupRoutes()

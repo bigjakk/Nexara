@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -395,7 +396,7 @@ func TestMountRegistryRefusesToMountWithoutAuthentication(t *testing.T) {
 			t.Errorf("panic = %q, want it to name the missing authentication middleware", msg)
 		}
 	}()
-	mountRegistry(fiber.New(), reg, nil)
+	mountRegistry(fiber.New(), reg, nil, nil)
 }
 
 // TestSetupRoutesMountsTheRegistry pins the production wiring: the
@@ -487,8 +488,8 @@ func TestGuard_EveryDeclaredGateIsMountedAsMiddleware(t *testing.T) {
 			continue
 		}
 		gated++
-		if !containsFragment(chain, "/handlers.Require") {
-			t.Errorf("%s declares the gate %q but no handlers.Require* middleware is mounted on it — "+
+		if !slices.ContainsFunc(chain, isPermissionGateLink) {
+			t.Errorf("%s declares the gate %q but no permission middleware is mounted on it — "+
 				"the declaration says it is authorized and nothing enforces that: %v",
 				key, e.Permissions.Describe(), chain)
 		}
@@ -497,6 +498,26 @@ func TestGuard_EveryDeclaredGateIsMountedAsMiddleware(t *testing.T) {
 	if gated == 0 {
 		t.Fatal("no endpoint declared a Check or Alternatives, so the gate half of this guard checked nothing")
 	}
+}
+
+// permissionGateConstructors are the handlers-package constructors
+// Permissions.middleware mounts, as they appear in a runtime handler name.
+// Named one by one rather than matched as "/handlers.Require": that prefix is
+// shared by functions that are not permission gates —
+// handlers.RequireNodesInCluster among them — and a guard satisfied by any of
+// them would pass a route that had lost its real gate.
+var permissionGateConstructors = []string{
+	"/handlers.RequirePermission.",
+	"/handlers.RequireClusterPermission.",
+	"/handlers.RequireAnyPermission.",
+}
+
+// isPermissionGateLink reports whether a handler-chain entry is one of the
+// permission middlewares Permissions.middleware mounts.
+func isPermissionGateLink(name string) bool {
+	return slices.ContainsFunc(permissionGateConstructors, func(ctor string) bool {
+		return strings.Contains(name, ctor)
+	})
 }
 
 // containsFragment reports whether any entry in names contains fragment.

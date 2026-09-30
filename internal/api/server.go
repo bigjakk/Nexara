@@ -30,6 +30,12 @@ type Server struct {
 	// mounted, bound to this Server's own handlers. See buildRegistry.
 	registry *Registry
 
+	// nodeLookup answers whether a node is one of a cluster's, for the
+	// registry routes that name a node in their URL (Endpoint.urlNodeParams).
+	// setupRoutes hands it to mountRegistry, which refuses to mount such a
+	// route without one. Set in New from queries.
+	nodeLookup handlers.NodeLookup
+
 	config                 *config.Config
 	db                     *pgxpool.Pool
 	queries                *db.Queries
@@ -165,6 +171,13 @@ func New(a *nexapp.App) *Server {
 	handlers.SetCookieSecureMode(cfg.SecureCookies)
 
 	s := &Server{config: cfg, db: a.Pool, redis: a.Redis, queries: d.queries, eventPub: d.eventPub}
+	// Only a real *db.Queries: a nil one stored in the interface would be a
+	// non-nil NodeLookup, and mountRegistry could no longer tell that none was
+	// configured. The routes that need it are built only when queries exist
+	// (hasCrypto), so leaving it nil never strands one.
+	if d.queries != nil {
+		s.nodeLookup = d.queries
+	}
 
 	s.registerInfra(d)
 	s.registerAuth(d)

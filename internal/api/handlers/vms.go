@@ -545,18 +545,27 @@ func (h *VMHandler) DestroyVM(c fiber.Ctx, p *apischema.Params) error {
 	})
 }
 
-// taskUPID reads the :upid path parameter and the node it names.
+// taskUPID reads the :upid path parameter and the node it names, and refuses
+// the request unless that node is one of the cluster's.
 //
 // The schema deliberately puts no pattern on it: the frontend
 // percent-encodes the UPID's colons and Fiber does not decode path
 // parameters, so a pattern would have to guess which of the two forms
 // arrived. What this adds is that a node name falls out of the decoded form.
-// The traversal guard is not here: the decoded UPID and the node go through
-// the proxmox client's validateTaskUPID (client_tasks.go) and
-// validateNodeName (client.go), which refuse a "/", a bare "." or "..", and
-// control characters in either — a UPID that yields a node name can still
-// carry a "../" segment, and those are what stop it.
-func taskUPID(p *apischema.Params) (upid, node string, err error) {
+// The traversal guard for the UPID as a whole is not here: the decoded UPID
+// goes through the proxmox client's validateTaskUPID (client_tasks.go), and the
+// node through its validateNodeName (client.go), which refuse a "/", a bare
+// "." or "..", and control characters — the rest of a UPID can still carry a
+// "../" segment, and those are what stop it.
+//
+// The node itself IS checked here, twice, and that is why this is the only way
+// the task routes get their node. It is held to the node-name format, and then
+// it must be one of the cluster's: the status and log calls are
+// /nodes/{node}/tasks/…, which pveproxy forwards to the node by name, so a UPID
+// naming a host that is not one of the cluster's would have the node resolve
+// and dial it — the oracle RequireNodesInCluster (node_membership.go) closes,
+// and the one the registry closes for a node in the URL itself.
+func (h *VMHandler) taskUPID(c fiber.Ctx, p *apischema.Params) (upid, node string, err error) {
 	raw := p.String("upid")
 	upid, unescapeErr := url.PathUnescape(raw)
 	if unescapeErr != nil {
@@ -568,6 +577,26 @@ func taskUPID(p *apischema.Params) (upid, node string, err error) {
 	if node == "" {
 		return "", "", fiber.NewError(fiber.StatusBadRequest, "Could not extract node from UPID")
 	}
+	// Held to the node-name format a URL's node is held to before it is looked
+	// up. The UPID is percent-decoded above, so without this a NUL or a byte
+	// that is not UTF-8 reaches the query, which Postgres refuses with an error
+	// rather than "no row" — a 500 and an error log line per request, where
+	// the caller sent nothing a real task could carry. Every node Proxmox
+	// names a task after passes it.
+	if checkNodeName, ok := apischema.LookupFormat("node-name"); !ok {
+		return "", "", fiber.NewError(fiber.StatusInternalServerError, "Node name format is not registered")
+	} else if _, err := checkNodeName(node); err != nil {
+		return "", "", fiber.NewError(fiber.StatusBadRequest, "The UPID does not name a valid node")
+	}
+	// A nil *db.Queries would be a non-nil NodeLookup, and a method call on it a
+	// panic; nil answers "not configured" instead.
+	var lookup NodeLookup
+	if h.queries != nil {
+		lookup = h.queries
+	}
+	if err := RequireNodesInCluster(c, lookup, []string{node}); err != nil {
+		return "", "", err
+	}
 	return upid, node, nil
 }
 
@@ -577,7 +606,7 @@ func (h *VMHandler) GetTaskStatus(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	upid, nodeName, err := taskUPID(p)
+	upid, nodeName, err := h.taskUPID(c, p)
 	if err != nil {
 		return err
 	}
@@ -647,7 +676,7 @@ func (h *VMHandler) GetTaskLog(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	upid, nodeName, err := taskUPID(p)
+	upid, nodeName, err := h.taskUPID(c, p)
 	if err != nil {
 		return err
 	}

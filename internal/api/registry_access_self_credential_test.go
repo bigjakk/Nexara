@@ -423,7 +423,7 @@ func TestAccessGuardRefusesWithoutADatabase(t *testing.T) {
 	reg.Register(e)
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
 	app.Use(recover.New())
-	mountRegistry(app, reg, stubAuth(map[string]bool{"manage:" + handlers.AccessResource: true}))
+	mountRegistry(app, reg, stubAuth(map[string]bool{"manage:" + handlers.AccessResource: true}), nil)
 
 	status, env := send(t, app, accessTokenRequest(http.MethodDelete, testAccessUserID, testAccessTokenID, "", ""))
 	if status != fiber.StatusInternalServerError {

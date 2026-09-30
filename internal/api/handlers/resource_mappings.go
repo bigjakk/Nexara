@@ -14,10 +14,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
-	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -28,51 +26,21 @@ import (
 // reads Proxmox has no single call for — every mapping checked on every node
 // it names, and which guests use a mapping.
 
-// errMappingNodeNotMember answers a mapping route for a node the cluster does
-// not have.
-var errMappingNodeNotMember = fiber.NewError(fiber.StatusNotFound, "Node not found in this cluster")
-
-// nodeLookup is the query nodeMembership asks.
-type nodeLookup interface {
-	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
-}
-
-// nodeMembership says whether a node is one of clusterID's, for the mapping
-// routes whose Proxmox call pveproxy forwards to the node by name. Only "no
-// such row" is "not a member"; a lookup that fails is a failure, never a
-// yes.
-func nodeMembership(q nodeLookup, clusterID uuid.UUID) func(context.Context, string) (bool, error) {
-	return func(ctx context.Context, node string) (bool, error) {
-		_, err := q.GetNodeByClusterAndName(ctx, db.GetNodeByClusterAndNameParams{ClusterID: clusterID, Name: node})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
-		}
-		if err != nil {
-			return false, fiber.NewError(fiber.StatusInternalServerError, "Failed to look up the node")
-		}
-		return true, nil
-	}
-}
-
-// nodeInCluster is nodeMembership over the handler's queries.
+// nodeInCluster is nodeMembership (node_membership.go) over the handler's
+// queries, for the mapping routes that take a node in the request BODY — the
+// registry checks one in the URL itself, before the handler runs.
 func (h *VMHandler) nodeInCluster(clusterID uuid.UUID) func(context.Context, string) (bool, error) {
 	return nodeMembership(h.queries, clusterID)
 }
 
-// listNodeMappings lists a kind's mappings checked against node, once node is
-// known to be one of the cluster's. Nothing is sent before then: Proxmox runs
-// the check on the node itself (the listing's proxyto_callback), and pveproxy
-// resolves the host to forward to from the name before it validates it — a
-// name that is no member would have the node connect wherever it resolves.
-func listNodeMappings[T any](ctx context.Context, isMember func(context.Context, string) (bool, error), node string,
+// listNodeMappings lists a kind's mappings checked against node. Proxmox runs
+// the check on the node itself (the listing's proxyto_callback), so pveproxy
+// forwards the call to the node by name — which is why both routes that reach
+// this take the node in their path: the registry refuses one the cluster does
+// not hold before the handler runs (RequireNodesInCluster), and pveproxy never
+// sees it.
+func listNodeMappings[T any](ctx context.Context, node string,
 	list func(context.Context, string) ([]T, error)) ([]T, error) {
-	member, err := isMember(ctx, node)
-	if err != nil {
-		return nil, err
-	}
-	if !member {
-		return nil, errMappingNodeNotMember
-	}
 	mappings, err := list(ctx, node)
 	if err != nil {
 		return nil, mapProxmoxError(err)
@@ -90,7 +58,7 @@ func (h *VMHandler) ListNodeUSBMappings(c fiber.Ctx, p *apischema.Params) error 
 	if err != nil {
 		return err
 	}
-	mappings, err := listNodeMappings(c.Context(), h.nodeInCluster(clusterID), p.String("node_name"), pxClient.ListUSBMappings)
+	mappings, err := listNodeMappings(c.Context(), p.String("node_name"), pxClient.ListUSBMappings)
 	if err != nil {
 		return err
 	}
@@ -164,7 +132,7 @@ func (h *VMHandler) ListNodePCIMappings(c fiber.Ctx, p *apischema.Params) error 
 	if err != nil {
 		return err
 	}
-	mappings, err := listNodeMappings(c.Context(), h.nodeInCluster(clusterID), p.String("node_name"), pxClient.ListPCIMappings)
+	mappings, err := listNodeMappings(c.Context(), p.String("node_name"), pxClient.ListPCIMappings)
 	if err != nil {
 		return err
 	}
@@ -194,7 +162,7 @@ func createPCIMapping(ctx context.Context, px pciMappingCreator, isMember func(c
 		return proxmox.CreatePCIMappingParams{}, err
 	}
 	if !member {
-		return proxmox.CreatePCIMappingParams{}, errMappingNodeNotMember
+		return proxmox.CreatePCIMappingParams{}, errNodeNotMember
 	}
 	devices, err := px.ListNodePCIDevicesAllClasses(ctx, node)
 	if err != nil {
@@ -1575,7 +1543,7 @@ func updatePCIMappingRequest(ctx context.Context, px pciMappingEditor, isMember 
 			return pciMappingUpdate{}, err
 		}
 		if !member {
-			return pciMappingUpdate{}, errMappingNodeNotMember
+			return pciMappingUpdate{}, errNodeNotMember
 		}
 	}
 
