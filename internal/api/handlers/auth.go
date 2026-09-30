@@ -799,6 +799,17 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 	if !user.IsActive {
 		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
 	}
+	// The token carries the node to /ws/console and /ws/vnc, which open a
+	// termproxy or vncproxy at /nodes/{node}/… and dial its vncwebsocket, so
+	// it must be one of the cluster's before it is signed. Checked here — after
+	// the permission check, and after the account checks, so a disabled
+	// account holding a token that has not expired yet gets its 401 whatever
+	// node it names — rather than by the registry
+	// (Endpoint.NodesCheckedByHandler), because the cluster is in the body.
+	// The token lives 60 seconds, so the WS side does not check again.
+	if err := requireNodeInCluster(c, lookupOf(h.queries), clusterUUID, node); err != nil {
+		return err
+	}
 
 	// Console tokens are bound to a single immediate WS upgrade — the SPA
 	// mints and connects within ~50ms. 60 seconds is

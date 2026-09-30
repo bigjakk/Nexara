@@ -276,8 +276,11 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 			"depending on the type requested — deliberately not view:*, which every built-in Viewer holds.",
 		Group:       "Authentication",
 		Permissions: Permissions{Deferred: consoleTokenReason},
-		Parameters:  consoleTokenParams(),
-		Handler:     h.ConsoleToken,
+		NodesCheckedByHandler: map[string]string{
+			"node": "checked against console_cluster_id after the console permission check, before the token is minted",
+		},
+		Parameters: consoleTokenParams(),
+		Handler:    h.ConsoleToken,
 	})
 }
 

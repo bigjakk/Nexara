@@ -582,6 +582,9 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler, mappingUsageLimit
 		Permissions: Permissions{Deferred: bothGuestKindsReason},
 		Parameters:  vmParams(cloneParams()),
 		Handler:     h.CloneToTemplate,
+		NodesCheckedByHandler: map[string]string{
+			"target": "checked against the path's cluster after requireClusterPerm, since the permission is Deferred",
+		},
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodPost,

@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/nodemember"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -172,6 +174,41 @@ func (o *Orchestrator) clientForCluster(ctx context.Context, clusterID uuid.UUID
 	return client, cluster, nil
 }
 
+// requireJobNodes holds a job's nodes to their clusters before anything is sent
+// to Proxmox. Both are what the caller named when the job was created, and
+// both go to Proxmox by name — the source as the /nodes/{node}/… of every
+// migrate, move and check, the target as the node a disk move runs on after a
+// live migration and the node the cross-cluster checks ask about — which
+// pveproxy resolves and dials whatever it names. The API refuses a non-member
+// at creation, but a job can predate that check, so pre-flight and Execute
+// both check again. The target belongs to the TARGET cluster; an empty target
+// (a storage-only job's is set to the source at creation) names nothing.
+//
+// Anything but nil means "do not dial": a *nodemember.NotMemberError, or a
+// *nodemember.LookupError, whose text is generic because it becomes the job's
+// error_message (the cause is logged here).
+func (o *Orchestrator) requireJobNodes(ctx context.Context, job db.MigrationJob) error {
+	for _, n := range []struct {
+		cluster uuid.UUID
+		node    string
+	}{
+		{job.SourceClusterID, job.SourceNode},
+		{job.TargetClusterID, job.TargetNode},
+	} {
+		if n.node == "" {
+			continue
+		}
+		if err := nodemember.Require(ctx, o.queries, n.cluster, n.node); err != nil {
+			if lookupErr := (*nodemember.LookupError)(nil); errors.As(err, &lookupErr) {
+				o.logger.Error("migration: node membership lookup failed",
+					"job_id", job.ID, "cluster_id", n.cluster, "error", lookupErr.Err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
 // resolveMigrationContext looks up the VM in the DB to get its name and UUID for audit/task logging.
 func (o *Orchestrator) resolveMigrationContext(ctx context.Context, job db.MigrationJob, userID uuid.UUID) migrationContext {
 	mc := migrationContext{
@@ -216,6 +253,17 @@ func (o *Orchestrator) RunPreFlight(ctx context.Context, jobID uuid.UUID) (*PreF
 		return nil, fmt.Errorf("update job status: %w", err)
 	}
 
+	// A job whose nodes the clusters do not hold fails its pre-flight here,
+	// before any client is built: the checks below send both to Proxmox by
+	// name. See requireJobNodes.
+	if err := o.requireJobNodes(ctx, job); err != nil {
+		return o.saveCheckResults(ctx, jobID, &PreFlightReport{Checks: []CheckResult{{
+			Name:     "node_membership",
+			Severity: SeverityFail,
+			Message:  err.Error(),
+		}}})
+	}
+
 	srcClient, _, err := o.clientForCluster(ctx, job.SourceClusterID)
 	if err != nil {
 		return nil, fmt.Errorf("source cluster client: %w", err)
@@ -245,8 +293,12 @@ func (o *Orchestrator) RunPreFlight(ctx context.Context, jobID uuid.UUID) (*PreF
 	if err != nil {
 		return nil, fmt.Errorf("run pre-flight checks: %w", err)
 	}
+	return o.saveCheckResults(ctx, jobID, report)
+}
 
-	// Save results to DB.
+// saveCheckResults records a pre-flight report on the job and moves it to
+// pending, or to failed when the report did not pass.
+func (o *Orchestrator) saveCheckResults(ctx context.Context, jobID uuid.UUID, report *PreFlightReport) (*PreFlightReport, error) {
 	reportJSON, _ := json.Marshal(report)
 	status := StatusPending
 	if !report.Passed {
@@ -273,6 +325,11 @@ func (o *Orchestrator) Execute(ctx context.Context, jobID uuid.UUID, userID uuid
 	}
 
 	mc := o.resolveMigrationContext(ctx, job, userID)
+
+	if err := o.requireJobNodes(ctx, job); err != nil {
+		o.failJob(ctx, jobID, err.Error(), &mc)
+		return
+	}
 
 	srcClient, srcCluster, err := o.clientForCluster(ctx, job.SourceClusterID)
 	if err != nil {

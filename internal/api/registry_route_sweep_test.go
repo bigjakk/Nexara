@@ -869,6 +869,9 @@ type sweepEndpointOverride struct {
 }
 
 var sweepRouteOverrides = map[string]sweepEndpointOverride{
+	// A handler rule: the node must be the one the UPID names (the collector
+	// polls the task there), and sweepValueOverrides' upid names pve-01.
+	"POST " + taskHistoryScope: {values: map[string]any{"node": "pve-01"}},
 	// Not a handler rule either, like "device_id" in sweepValueOverrides:
 	// the PCI address pattern (registry_mappings.go), which nothing in
 	// stringCandidatePool satisfies. Scoped to the route because "path" is

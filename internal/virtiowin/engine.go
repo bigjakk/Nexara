@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/nodemember"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -362,8 +363,21 @@ func describeDownloadError(err error) string {
 //
 // An explicit cfg.Node wins — an operator who named a node meant it, and
 // second-guessing them would hide a misconfiguration behind a silent fallback.
+// It must still be one of the cluster's nodes: it goes to Proxmox as
+// /nodes/{node}/…, which pveproxy resolves and dials whatever it names. The
+// API refuses a non-member when the config is saved, but a row can predate
+// that check, so it is checked again at every use; one the cluster does not
+// hold is an error (a *nodemember.NotMemberError, which the check records in
+// last_error) and nothing is sent.
 func (e *Engine) pickNode(ctx context.Context, cfg db.VirtioWinConfig) (string, error) {
 	if cfg.Node != "" {
+		if err := nodemember.Require(ctx, e.queries, cfg.ClusterID, cfg.Node); err != nil {
+			if lookupErr := (*nodemember.LookupError)(nil); errors.As(err, &lookupErr) {
+				e.logger.Warn("virtio-win: node membership lookup failed",
+					"cluster_id", cfg.ClusterID, "error", lookupErr.Err)
+			}
+			return "", err
+		}
 		return cfg.Node, nil
 	}
 
@@ -432,6 +446,20 @@ func (e *Engine) reconcileOne(ctx context.Context, row db.VirtioWinDownload) {
 		if time.Since(row.StartedAt) > upidGracePeriod {
 			e.finish(ctx, row, "failed", "no Proxmox task was recorded for this download")
 		}
+		return
+	}
+
+	// row.Node is the node the download was dispatched to, and the poll below
+	// and the prune after it send it to Proxmox by name. pickNode checks it
+	// before a dispatch now, but a row can predate that, so it is checked
+	// again here: one the cluster does not hold fails the row, unpolled; a
+	// lookup that fails leaves it for the next pass.
+	if err := nodemember.Require(ctx, e.queries, row.ClusterID, row.Node); err != nil {
+		if lookupErr := (*nodemember.LookupError)(nil); errors.As(err, &lookupErr) {
+			e.logger.Warn("virtio-win: node membership lookup failed", "id", row.ID, "error", lookupErr.Err)
+			return
+		}
+		e.finish(ctx, row, "failed", err.Error())
 		return
 	}
 
@@ -711,14 +739,17 @@ func (e *Engine) DownloadNow(ctx context.Context, cfg db.VirtioWinConfig, versio
 
 // locate answers the question both download paths open with: which node do we
 // talk to, over which client, and is the ISO already sitting in the storage.
+//
+// The node is picked first, so a configured node the cluster does not hold is
+// refused before a client is even built.
 func (e *Engine) locate(ctx context.Context, cfg db.VirtioWinConfig, filename string) (client *proxmox.Client, node string, present bool, err error) {
-	client, err = e.createClient(ctx, cfg.ClusterID)
-	if err != nil {
-		return nil, "", false, fmt.Errorf("proxmox client: %w", err)
-	}
 	node, err = e.pickNode(ctx, cfg)
 	if err != nil {
 		return nil, "", false, err
+	}
+	client, err = e.createClient(ctx, cfg.ClusterID)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("proxmox client: %w", err)
 	}
 	present, err = ISOPresent(ctx, client, node, cfg.Storage, filename)
 	if err != nil {

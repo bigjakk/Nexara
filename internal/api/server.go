@@ -31,7 +31,7 @@ type Server struct {
 	registry *Registry
 
 	// nodeLookup answers whether a node is one of a cluster's, for the
-	// registry routes that name a node in their URL (Endpoint.urlNodeParams).
+	// registry routes that name a node (Endpoint.checkedNodeParams).
 	// setupRoutes hands it to mountRegistry, which refuses to mount such a
 	// route without one. Set in New from queries.
 	nodeLookup handlers.NodeLookup

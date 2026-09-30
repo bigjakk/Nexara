@@ -230,10 +230,9 @@ func TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold(t *testing.T
 
 	// 3. Behaviour, route by route.
 	for _, e := range endpoints {
-		names := e.urlNodeParams()
-		for _, under := range names {
+		for _, under := range e.urlNodeParams() {
 			t.Run(e.Method+" "+e.Path+" "+under, func(t *testing.T) {
-				probeNodeMembership(t, e, under, names)
+				probeNodeMembership(t, e, under, e.checkedNodeParams())
 			})
 		}
 	}
@@ -264,7 +263,9 @@ func TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold(t *testing.T
 }
 
 // probeNodeMembership drives one route, with the node parameter under put
-// through each case and every other node parameter set to the member.
+// through each case and every other node parameter serve checks (all) set to
+// the member. An array under test carries the member first and the name under
+// test second, so a check that reads only an array's first element is caught.
 func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 	t.Helper()
 	key := e.Method + " " + e.Path
@@ -293,11 +294,23 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 		values[clusterParam] = testClusterID
 		for _, name := range all {
 			values[name] = memberNode
+			if e.Parameters[name].Type == apischema.Array {
+				values[name] = []any{memberNode}
+			}
 		}
 		values[under] = node
+		if e.Parameters[under].Type == apischema.Array {
+			values[under] = []any{memberNode, node}
+		}
+		// A node parameter that Requires a sibling (the PCI mapping update's
+		// add_node needs add_path) brings it along.
+		force := append(slices.Clone(base.forceRequired), all...)
+		for _, name := range all {
+			force = append(force, e.Parameters[name].Requires...)
+		}
 		req := synthesizeSweepRequestWith(e, false, sweepEndpointOverride{
 			values:              values,
-			forceRequired:       append(slices.Clone(base.forceRequired), all...),
+			forceRequired:       force,
 			excludeFromOptional: base.excludeFromOptional,
 		})
 		if !req.ok {
@@ -343,10 +356,9 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 	if got := dispatch(granted, lookup, memberNode); got.status != fiber.StatusNoContent || !got.reached {
 		t.Fatalf("the cluster's own node: got %+v, want 204 with the handler reached", got)
 	}
-	want := make([]db.GetNodeByClusterAndNameParams, 0, len(all))
-	for range all {
-		want = append(want, db.GetNodeByClusterAndNameParams{ClusterID: cluster, Name: memberNode})
-	}
+	// Once, however many parameters name it: a name is asked about once per
+	// request (RequireNodesInCluster).
+	want := []db.GetNodeByClusterAndNameParams{{ClusterID: cluster, Name: memberNode}}
 	if got := lookup.questions(); !slices.Equal(got, want) {
 		t.Errorf("the cluster's own node: asked %+v, want %+v", got, want)
 	}
@@ -401,8 +413,8 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 		if got := dispatch(granted, lookup, ""); got.status != fiber.StatusNoContent || !got.reached {
 			t.Errorf("an empty node: got %+v, want 204 with the handler reached", got)
 		}
-		if got := lookup.questions(); len(got) != len(all)-1 {
-			t.Errorf("an empty node: the lookup was asked %+v, want only the other node parameters", got)
+		if got := lookup.questions(); len(got) != min(len(all)-1, 1) {
+			t.Errorf("an empty node: the lookup was asked %+v, want only about the other node parameters' member", got)
 		}
 	}
 }

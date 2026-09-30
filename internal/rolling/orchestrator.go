@@ -19,6 +19,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/nodemember"
 	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	sshpkg "github.com/bigjakk/nexara/internal/ssh"
@@ -128,21 +129,7 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 
 	// Advance each active node through the state machine.
 	for _, node := range nodes {
-		switch node.Step {
-		case "draining":
-			o.advanceDraining(ctx, client, job, node)
-		case "awaiting_upgrade":
-			// This step requires manual confirmation — no automatic advance.
-			continue
-		case "upgrading":
-			o.advanceUpgrading(ctx, client, job, node)
-		case "rebooting":
-			o.advanceRebooting(ctx, client, job, node)
-		case "health_check":
-			o.advanceHealthCheck(ctx, client, job, node)
-		case "restoring":
-			o.advanceRestoring(ctx, client, job, node)
-		}
+		o.advanceNode(ctx, client, job, node)
 	}
 
 	// Check if a node failed during this tick.
@@ -212,7 +199,62 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 	}
 }
 
+// advanceNode moves one node of a running job through its next automatic step.
+func (o *Orchestrator) advanceNode(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
+	switch node.Step {
+	case "draining", "upgrading", "rebooting", "health_check", "restoring":
+		if o.requireDialableNode(ctx, job, node) != nil {
+			return
+		}
+	default:
+		// pending is started by startNode; awaiting_upgrade needs manual
+		// confirmation; the rest are terminal.
+		return
+	}
+	switch node.Step {
+	case "draining":
+		o.advanceDraining(ctx, client, job, node)
+	case "upgrading":
+		o.advanceUpgrading(ctx, client, job, node)
+	case "rebooting":
+		o.advanceRebooting(ctx, client, job, node)
+	case "health_check":
+		o.advanceHealthCheck(ctx, client, job, node)
+	case "restoring":
+		o.advanceRestoring(ctx, client, job, node)
+	}
+}
+
+// requireDialableNode holds a job's node to its cluster before a step sends it
+// to Proxmox (see package nodemember). The job's nodes are what the caller
+// named at creation, and every step sends the name as /nodes/{node}/… — apt
+// refresh, drain, reboot, status. The API refuses a non-member at creation,
+// but a job can predate that check, so every step checks again: the automatic
+// ones (startNode, advanceNode) and the confirmed one (ConfirmUpgrade).
+//
+// A node the cluster does not hold is failed, with the reason on the node, and
+// the *nodemember.NotMemberError is returned. A lookup that fails fails
+// nothing — a database hiccup is no reason to abandon an upgrade half done —
+// and leaves the node for the next tick. Either way, nothing may be sent.
+func (o *Orchestrator) requireDialableNode(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode) error {
+	err := nodemember.Require(ctx, o.queries, job.ClusterID, node.NodeName)
+	if err == nil {
+		return nil
+	}
+	if lookupErr := (*nodemember.LookupError)(nil); errors.As(err, &lookupErr) {
+		o.logger.Error("rolling update: node membership lookup failed",
+			"job_id", job.ID, "node", node.NodeName, "error", lookupErr.Err)
+		return err
+	}
+	// failNode's job-level message names the node already.
+	o.failNode(ctx, job, node, "not one of this cluster's nodes; it was not contacted")
+	return err
+}
+
 func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
+	if o.requireDialableNode(ctx, job, node) != nil {
+		return
+	}
 	o.logger.Info("starting rolling update for node", "job_id", job.ID, "node", node.NodeName)
 
 	// Check if the node actually has pending updates. Refresh apt index first
@@ -1419,6 +1461,12 @@ func (o *Orchestrator) advanceRestoring(ctx context.Context, client *proxmox.Cli
 func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode) error {
 	if node.Step != "awaiting_upgrade" {
 		return fmt.Errorf("node is not awaiting upgrade (current step: %s)", node.Step)
+	}
+	// The reboot below, and the drain check before it, send the node to
+	// Proxmox by name. A *nodemember.NotMemberError or LookupError comes back
+	// as it is, for the handler to answer 409 or 500.
+	if err := o.requireDialableNode(ctx, job, node); err != nil {
+		return err
 	}
 
 	var client *proxmox.Client

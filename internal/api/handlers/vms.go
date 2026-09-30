@@ -391,6 +391,12 @@ func (h *VMHandler) CloneToTemplate(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 	clone := vmCloneParams(p)
+	// The route's permission is Deferred, so the registry leaves this node to
+	// the handler (Endpoint.NodesCheckedByHandler): checked here, after the
+	// permission check, so a caller refused one learns nothing about nodes.
+	if err := requireNodeInCluster(c, lookupOf(h.queries), clusterID, clone.Target); err != nil {
+		return err
+	}
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {
@@ -588,13 +594,7 @@ func (h *VMHandler) taskUPID(c fiber.Ctx, p *apischema.Params) (upid, node strin
 	} else if _, err := checkNodeName(node); err != nil {
 		return "", "", fiber.NewError(fiber.StatusBadRequest, "The UPID does not name a valid node")
 	}
-	// A nil *db.Queries would be a non-nil NodeLookup, and a method call on it a
-	// panic; nil answers "not configured" instead.
-	var lookup NodeLookup
-	if h.queries != nil {
-		lookup = h.queries
-	}
-	if err := RequireNodesInCluster(c, lookup, []string{node}); err != nil {
+	if err := RequireNodesInCluster(c, lookupOf(h.queries), []string{node}); err != nil {
 		return "", "", err
 	}
 	return upid, node, nil

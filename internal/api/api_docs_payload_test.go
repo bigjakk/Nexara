@@ -822,7 +822,10 @@ func TestDocParameters_RuleText(t *testing.T) {
 				Items: &apischema.Property{Type: apischema.String, Format: "node-name"},
 			},
 		},
-		Handler: noopHandler,
+		// A node list on a path naming no cluster is only accepted as the
+		// handler's own to check (see Endpoint.NodesCheckedByHandler).
+		NodesCheckedByHandler: map[string]string{"node_names": "synthetic"},
+		Handler:               noopHandler,
 	})
 
 	t.Run("a format publishes what it permits, and its regex", func(t *testing.T) {

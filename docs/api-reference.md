@@ -607,14 +607,38 @@ leaves provenance intact.
 > `400 node_id: expected a UUID such as …`.
 >
 > A node name must be one of the cluster's nodes, not only well formed. Every
-> route that takes one in its URL — as `:node` in the path, wherever that
-> appears, or as `?node=` — answers `404 Node not found in this cluster` for a
-> name that is not in the cluster's node list as `GET /clusters/:id/nodes`
-> returns it, before anything is sent to Proxmox; so do the two task routes for
-> the node a UPID names. The name must match exactly, case included. A node
-> that has just joined the Proxmox cluster is refused until Nexara's next
-> collection pass records it; passes run every `METRICS_COLLECT_INTERVAL` (10
-> seconds in the Docker deployment, 30 when unset).
+> route that takes one — in its URL as `:node` in the path, wherever that
+> appears, or as `?node=`, or in its request body (`node`, `target`,
+> `target_node`, a rolling update's `nodes`, …) — answers
+> `404 Node not found in this cluster` for a name that is not in the cluster's
+> node list as `GET /clusters/:id/nodes` returns it, before anything is sent to
+> Proxmox or stored; so do the two task routes for the node a UPID names. Where
+> the path names no cluster, the body names the node's: a migration's
+> `source_node` must be one of `source_cluster_id`'s nodes and its
+> `target_node` one of `target_cluster_id`'s, a registered task's `node` one of
+> `cluster_id`'s (and the node its `upid` names, or `400`), a console token's
+> `node` one of `cluster_id`'s. The comma-separated node lists Proxmox keeps in
+> its own syntax — HA rules and groups, SDN zones and controllers, a storage's
+> `nodes` restriction — are passed through as they are: Proxmox checks them, or
+> only ever compares them with a node's own name. The name must match exactly,
+> case included. A node that has just joined the Proxmox cluster is refused
+> until Nexara's next collection pass records it; passes run every
+> `METRICS_COLLECT_INTERVAL` (10 seconds in the Docker deployment, 30 when
+> unset). Nexara keeps a node it has recorded after it leaves the cluster, so
+> what is refused is a name Nexara never recorded for the cluster — which
+> includes a node that left before Nexara first collected it.
+>
+> Node names stored for later are checked again each time they are used, and
+> one the cluster does not hold is never contacted: a schedule's run fails with
+> `node "…" is not one of this cluster's nodes; it was not contacted` in its
+> `last_error` and runs again at its next time; a migration job fails its
+> pre-flight check or ends `failed` with that `error_message`; a rolling
+> update's node, and with it the job, ends `failed` (confirming an upgrade on
+> such a node answers `409`); the virtio-win check records it in `last_error`,
+> its download answers `409`, and a download already in flight to such a node
+> is marked failed; a registered task is never polled and is
+> marked failed once it has been running for 24 hours, as for any task
+> Proxmox cannot report on.
 
 | Method | Path | Description |
 |--------|------|-------------|

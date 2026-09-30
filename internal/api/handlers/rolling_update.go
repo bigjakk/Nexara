@@ -16,6 +16,7 @@ import (
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/nodemember"
 	"github.com/bigjakk/nexara/internal/rolling"
 	"github.com/bigjakk/nexara/internal/safeconv"
 	sshpkg "github.com/bigjakk/nexara/internal/ssh"
@@ -616,6 +617,14 @@ func (h *RollingUpdateHandler) ConfirmUpgrade(c fiber.Ctx, p *apischema.Params) 
 	}
 
 	if err := h.orchestrator.ConfirmUpgrade(c.Context(), job, node); err != nil {
+		switch {
+		case errors.As(err, new(*nodemember.NotMemberError)):
+			// A node stored before the API checked it: nothing was sent, and
+			// the node and its job have been failed.
+			return fiber.NewError(fiber.StatusConflict, err.Error())
+		case errors.As(err, new(*nodemember.LookupError)):
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up the node")
+		}
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 

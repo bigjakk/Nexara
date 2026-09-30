@@ -19,7 +19,7 @@ import (
 )
 
 // taskInsertDBTX answers InsertTaskHistory with a row and records the
-// arguments the insert was handed.
+// arguments the insert was handed, and holds every node as a member.
 type taskInsertDBTX struct {
 	args []any
 }
@@ -33,6 +33,10 @@ func (*taskInsertDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) 
 }
 
 func (d *taskInsertDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	if strings.Contains(sql, "-- name: GetNodeByClusterAndName :one") {
+		// The node is one of the cluster's; Create checks before it inserts.
+		return replayRow{row: db.Node{Name: "pve-01"}}
+	}
 	if !strings.Contains(sql, "-- name: InsertTaskHistory :one") {
 		return failRow{err: errCaptured}
 	}

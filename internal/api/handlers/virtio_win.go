@@ -15,6 +15,7 @@ import (
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/nodemember"
 	"github.com/bigjakk/nexara/internal/safeconv"
 	"github.com/bigjakk/nexara/internal/virtiowin"
 )
@@ -325,6 +326,13 @@ func (h *VirtioWinHandler) Download(c fiber.Ctx, p *apischema.Params) error {
 			// tick. The requested state is already being reached, so this is
 			// not an error to show the caller.
 			return c.JSON(fiber.Map{"status": "already_running", "version": version})
+		case errors.As(err, new(*nodemember.NotMemberError)):
+			// The configured node is not one of the cluster's (a config saved
+			// before the API checked it): nothing was sent, and the fix is the
+			// config, not a retry.
+			return fiber.NewError(fiber.StatusConflict, err.Error())
+		case errors.As(err, new(*nodemember.LookupError)):
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up the node")
 		default:
 			return fiber.NewError(fiber.StatusBadGateway, err.Error())
 		}

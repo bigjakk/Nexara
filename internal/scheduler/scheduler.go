@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -18,6 +19,7 @@ import (
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/guesttools"
+	"github.com/bigjakk/nexara/internal/nodemember"
 	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/reports"
@@ -761,15 +763,28 @@ func dispatchOutcome(upid string, err error) runOutcome {
 func (s *Scheduler) executeTask(ctx context.Context, client *proxmox.Client, task db.ScheduledTask) {
 	now := time.Now()
 	var upid string
-	var execErr error
 
-	switch task.Action {
-	case "snapshot":
-		upid, execErr = s.executeSnapshot(ctx, client, task, now)
-	case "reboot":
-		upid, execErr = s.executeReboot(ctx, client, task)
-	default:
-		execErr = fmt.Errorf("unsupported action: %s", task.Action)
+	// task.Node is the node the caller named when the schedule was created,
+	// and both actions send it to Proxmox as /nodes/{node}/…, which pveproxy
+	// resolves and dials whatever it names. The API refuses a non-member at
+	// creation, but a row can predate that check, so it is checked again at
+	// every run: a run for a node the cluster does not hold fails with the
+	// reason in last_error and dials nothing. The schedule stays enabled.
+	execErr := nodemember.Require(ctx, s.queries, task.ClusterID, task.Node)
+	if lookupErr := (*nodemember.LookupError)(nil); errors.As(execErr, &lookupErr) {
+		s.logger.Error("scheduled task: node membership lookup failed",
+			"task_id", task.ID, "error", lookupErr.Err)
+	}
+
+	if execErr == nil {
+		switch task.Action {
+		case "snapshot":
+			upid, execErr = s.executeSnapshot(ctx, client, task, now)
+		case "reboot":
+			upid, execErr = s.executeReboot(ctx, client, task)
+		default:
+			execErr = fmt.Errorf("unsupported action: %s", task.Action)
+		}
 	}
 
 	run := dispatchOutcome(upid, execErr)

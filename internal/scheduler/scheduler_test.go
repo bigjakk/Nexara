@@ -317,6 +317,12 @@ type taskRunRecorder struct {
 	// task a run started, which is what the reconcile later reads.
 	historyInserts int
 	err            error
+	// nodeLookups is every node executeTask asked about, as "cluster/node".
+	// strangers are the ones the cluster does not hold; every other node is a
+	// member. A non-nil nodeLookupErr answers every question instead.
+	nodeLookups   []string
+	strangers     []string
+	nodeLookupErr error
 }
 
 // runWrite is one UPDATE of a scheduled_tasks row: the sqlc query that sent it,
@@ -375,13 +381,30 @@ func (r *taskRunRecorder) Query(_ context.Context, sql string, _ ...any) (pgx.Ro
 	return nil, r.err
 }
 
-func (r *taskRunRecorder) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+func (r *taskRunRecorder) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	if strings.Contains(sql, "INSERT INTO task_history") {
 		r.historyInserts++
 		return insertedRow{}
 	}
+	if strings.Contains(sql, "-- name: GetNodeByClusterAndName ") {
+		cluster, _ := args[0].(uuid.UUID)
+		name, _ := args[1].(string)
+		r.nodeLookups = append(r.nodeLookups, cluster.String()+"/"+name)
+		switch {
+		case r.nodeLookupErr != nil:
+			return errRow{r.nodeLookupErr}
+		case slices.Contains(r.strangers, name):
+			return errRow{pgx.ErrNoRows}
+		}
+		return insertedRow{}
+	}
 	panic("unexpected query row: " + sql)
 }
+
+// errRow is a row that answers err.
+type errRow struct{ err error }
+
+func (r errRow) Scan(...any) error { return r.err }
 
 // insertedRow answers InsertTaskHistory's RETURNING. trackTask discards the
 // row, so nothing needs scanning into it.
@@ -708,6 +731,69 @@ func TestExecuteSnapshot_DispatchesNamesProxmoxAccepts(t *testing.T) {
 			if !strings.Contains((*seen)[0], tt.wantGuestPath) {
 				t.Errorf("resource_type %q dispatched to %q, want the %q endpoint — the wire value "+
 					"reached the wrong guest family", tt.resourceType, (*seen)[0], tt.wantGuestPath)
+			}
+		})
+	}
+}
+
+// TestExecuteTask_RefusesANodeTheClusterDoesNotHold holds a scheduled run to
+// the node-membership check. task.Node is what a caller named at creation, and
+// both actions send it to Proxmox as /nodes/{node}/…, which pveproxy resolves
+// and dials whatever it names — so a run for a node the cluster does not hold
+// (a row that predates the API's own check) must fail with the reason where
+// the operator reads it, and send nothing. A failed lookup is a failure too,
+// never a member, and its database error stays out of last_error.
+func TestExecuteTask_RefusesANodeTheClusterDoesNotHold(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name      string
+		recorder  *taskRunRecorder
+		wantError string
+	}{
+		{
+			name:      "an address the cluster does not hold",
+			recorder:  &taskRunRecorder{strangers: []string{"192.0.2.10"}},
+			wantError: `node "192.0.2.10" is not one of this cluster's nodes; it was not contacted`,
+		},
+		{
+			name:      "a lookup that fails",
+			recorder:  &taskRunRecorder{nodeLookupErr: errors.New("connection refused")},
+			wantError: `could not confirm node "192.0.2.10" is one of this cluster's nodes; it was not contacted`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv, seen := newPVEStubAnswering(t, http.StatusOK, upidBody(rebootUPID))
+			s := newRecordingScheduler(tt.recorder)
+			task := db.ScheduledTask{
+				ID:           uuid.New(),
+				ClusterID:    uuid.New(),
+				ResourceType: "vm",
+				ResourceID:   "100",
+				Node:         "192.0.2.10",
+				Action:       "reboot",
+				Schedule:     "0 2 * * *",
+				Params:       []byte(`{}`),
+			}
+			s.executeTask(context.Background(), newStubPVEClient(t, srv.URL), task)
+
+			if len(*seen) != 0 {
+				t.Errorf("the run sent %v to Proxmox for a node it could not confirm", *seen)
+			}
+			if want := []string{task.ClusterID.String() + "/" + task.Node}; !slices.Equal(tt.recorder.nodeLookups, want) {
+				t.Errorf("asked about %v, want exactly the task's node in the task's cluster %v", tt.recorder.nodeLookups, want)
+			}
+			write := tt.recorder.onlyWrite(t)
+			if status, _ := write.text(t, "last_status"); status != runStatusFailed {
+				t.Errorf("last_status = %q, want %q", status, runStatusFailed)
+			}
+			if msg, valid := write.text(t, "last_error"); !valid || msg != tt.wantError {
+				t.Errorf("last_error = %q (valid %v), want %q", msg, valid, tt.wantError)
+			}
+			if tt.recorder.historyInserts != 0 {
+				t.Errorf("recorded %d task_history rows for a run that started nothing", tt.recorder.historyInserts)
 			}
 		})
 	}

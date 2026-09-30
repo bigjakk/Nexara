@@ -179,6 +179,9 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 			"none, so middleware cannot resolve which cluster to authorize; the handler parses it and then " +
 			"calls requireClusterPerm(c, \"manage\", \"task\", clusterID) — per-cluster deliberately, so a " +
 			"caller holding manage:task on cluster X cannot insert a record claiming cluster Y"},
+		NodesCheckedByHandler: map[string]string{
+			"node": "checked against task_cluster_id after the manage:task check; the collector polls it until the task settles",
+		},
 		Parameters: apischema.Properties{
 			"task_cluster_id": taskBodyClusterParam,
 			// Patterned, unlike upidParam (registry_vms.go) — READ THAT

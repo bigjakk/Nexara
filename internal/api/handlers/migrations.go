@@ -221,6 +221,18 @@ func (h *MigrationHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 
 	sourceNode := p.String("source_node")
 	targetNode := p.String("target_node")
+	// Both nodes are stored for the orchestrator, which sends them to Proxmox
+	// by name, so each must be one of its own cluster's — the target one of
+	// the TARGET cluster's. Checked here rather than by the registry
+	// (Endpoint.NodesCheckedByHandler) because the clusters arrive in the
+	// body, and only after both are authorized, so a caller refused either
+	// learns nothing about their nodes.
+	if err := requireNodeInCluster(c, lookupOf(h.queries), srcClusterID, sourceNode); err != nil {
+		return err
+	}
+	if err := requireNodeInCluster(c, lookupOf(h.queries), tgtClusterID, targetNode); err != nil {
+		return err
+	}
 	vmid := safeconv.Int32(int(p.Int("vmid")))
 	vmType := p.String("vm_type")
 	migrationType := p.String("migration_type")

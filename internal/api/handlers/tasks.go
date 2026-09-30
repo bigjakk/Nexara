@@ -308,6 +308,20 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	// The collector polls the task at this node until it settles
+	// (reconcileRunningTasks), so it must be one of the cluster's, and the
+	// node the UPID itself says the task runs on — the one Proxmox would
+	// answer for. Checked here, after the permission check, rather than by
+	// the registry (Endpoint.NodesCheckedByHandler): the cluster is in the
+	// body.
+	node := p.String("node")
+	if node != "" && extractNodeFromUPID(p.String("upid")) != node {
+		return fiber.NewError(fiber.StatusBadRequest, "node does not match the node the UPID names")
+	}
+	if err := requireNodeInCluster(c, lookupOf(h.queries), clusterID, node); err != nil {
+		return err
+	}
+
 	// The declaration's Default covers an omitted status. An EMPTY one meant
 	// running as well before the registry — this handler substituted it — so
 	// it still does, rather than filing a row with no state at all.
@@ -322,7 +336,7 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		Upid:        p.String("upid"),
 		Description: p.String("description"),
 		Status:      status,
-		Node:        p.String("node"),
+		Node:        node,
 		TaskType:    p.String("task_type"),
 	})
 	if err != nil {

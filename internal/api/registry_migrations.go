@@ -126,8 +126,12 @@ func registerMigrationEndpoints(reg *Registry, h *handlers.MigrationHandler) {
 			"Requires manage:migration on the source cluster, and on the target cluster as well when the two differ.",
 		Group:       "Migrations",
 		Permissions: Permissions{Deferred: migrationBodyReason},
-		Parameters:  createMigrationParams(),
-		Handler:     h.Create,
+		NodesCheckedByHandler: map[string]string{
+			"source_node": "checked against source_cluster_id, after both clusters are authorized",
+			"target_node": "checked against target_cluster_id — the TARGET cluster's node — after both clusters are authorized",
+		},
+		Parameters: createMigrationParams(),
+		Handler:    h.Create,
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,

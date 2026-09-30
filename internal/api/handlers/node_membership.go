@@ -2,14 +2,13 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/nodemember"
 )
 
 // A node name a caller supplies must be one of the cluster's nodes before it
@@ -46,22 +45,14 @@ import (
 var errNodeNotMember = fiber.NewError(fiber.StatusNotFound, "Node not found in this cluster")
 
 // NodeLookup is the query a membership check asks. *db.Queries satisfies it.
-type NodeLookup interface {
-	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
-}
+type NodeLookup = nodemember.Lookup
 
-// nodeMembership says whether a node is one of clusterID's. Only "no such row"
-// is "not a member"; a lookup that fails is a failure, never a yes.
-//
-// The name is compared exactly, as Proxmox reported it to the collector:
-// pveproxy's own node-list lookup is exact too, so a spelling in another case
-// is not a member to either of them.
+// nodeMembership says whether a node is one of clusterID's, by
+// nodemember.Check — the one definition of "member" the API and the background
+// engines share. A lookup that fails is a logged 500, never a yes.
 func nodeMembership(q NodeLookup, clusterID uuid.UUID) func(context.Context, string) (bool, error) {
 	return func(ctx context.Context, node string) (bool, error) {
-		_, err := q.GetNodeByClusterAndName(ctx, db.GetNodeByClusterAndNameParams{ClusterID: clusterID, Name: node})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
-		}
+		member, err := nodemember.Check(ctx, q, clusterID, node)
 		if err != nil {
 			// The error handler logs nothing, so without this a database
 			// outage would read as an unexplained 500 on every route that
@@ -69,17 +60,20 @@ func nodeMembership(q NodeLookup, clusterID uuid.UUID) func(context.Context, str
 			slog.Error("node membership lookup failed", "cluster_id", clusterID, "error", err)
 			return false, fiber.NewError(fiber.StatusInternalServerError, "Failed to look up the node")
 		}
-		return true, nil
+		return member, nil
 	}
 }
 
 // RequireNodesInCluster refuses a request naming a node that is not one of the
 // cluster its path names, with 404 before anything is sent to Proxmox.
 //
-// The registry runs it for every route whose URL carries a node name
-// (Endpoint.serve, internal/api/registry.go), on the values the handler is
-// about to be handed, and the two task routes run it on the node their UPID
-// carries (VMHandler.taskUPID). The cluster is resolved with clusterIDFromParam,
+// The registry runs it for every route that names a node — in its URL or its
+// body (Endpoint.serve and Endpoint.checkedNodeParams,
+// internal/api/registry.go) — on the values the handler is about to be
+// handed, and the two task routes run it on the node their UPID carries
+// (VMHandler.taskUPID). A body node on a
+// route whose permission is Deferred is the handler's to check, with
+// requireNodeInCluster. The cluster is resolved with clusterIDFromParam,
 // the permission gate's own resolution, so the node is checked against the
 // cluster the caller was authorized on. That gate runs first, as route
 // middleware, so a caller it refuses learns nothing about which nodes exist.
@@ -97,7 +91,16 @@ func RequireNodesInCluster(c fiber.Ctx, q NodeLookup, nodes []string) error {
 		return err
 	}
 	isMember := nodeMembership(q, clusterID)
+	// Each distinct name is asked about once: a node list (a rolling job's,
+	// a DRS rule's) may repeat one, and asking again cannot change the
+	// answer. That bounds the lookups one request can cost at the cluster's
+	// own node count, plus the first stranger, which ends the loop.
+	asked := make(map[string]bool, len(nodes))
 	for _, node := range nodes {
+		if asked[node] {
+			continue
+		}
+		asked[node] = true
 		member, err := isMember(c.Context(), node)
 		if err != nil {
 			return err
@@ -107,4 +110,36 @@ func RequireNodesInCluster(c fiber.Ctx, q NodeLookup, nodes []string) error {
 		}
 	}
 	return nil
+}
+
+// requireNodeInCluster refuses a node that is not one of clusterID's with the
+// same 404 RequireNodesInCluster answers. It is for the handlers that check a
+// body node themselves (Endpoint.NodesCheckedByHandler): each calls it AFTER
+// its own permission check, against the cluster the node belongs to — which
+// for a migration's target is the TARGET cluster. "" names no node.
+func requireNodeInCluster(c fiber.Ctx, q NodeLookup, clusterID uuid.UUID, node string) error {
+	if node == "" {
+		return nil
+	}
+	if q == nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Node lookup not configured")
+	}
+	member, err := nodeMembership(q, clusterID)(c.Context(), node)
+	if err != nil {
+		return err
+	}
+	if !member {
+		return errNodeNotMember
+	}
+	return nil
+}
+
+// lookupOf is q as a NodeLookup. A nil *db.Queries would be a non-nil
+// NodeLookup, and a method call on it a panic; nil answers "not configured"
+// instead.
+func lookupOf(q *db.Queries) NodeLookup {
+	if q == nil {
+		return nil
+	}
+	return q
 }

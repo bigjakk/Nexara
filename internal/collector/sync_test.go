@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -28,6 +29,7 @@ const testEncryptionKey = "0123456789abcdef0123456789abcdef0123456789abcdef01234
 
 type mockQueries struct {
 	nodes          map[string]db.Node // keyed by "clusterID:name"
+	nodeLookupErr  error              // when set, GetNodeByClusterAndName answers it
 	vms            map[string]db.Vm   // keyed by "clusterID:vmid"
 	storagePools   map[string]db.StoragePool
 	clusters       []db.Cluster
@@ -215,9 +217,14 @@ func (m *mockQueries) UpsertStoragePool(_ context.Context, arg db.UpsertStorageP
 
 func (m *mockQueries) GetNodeByClusterAndName(_ context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error) {
 	key := arg.ClusterID.String() + ":" + arg.Name
+	if m.nodeLookupErr != nil {
+		return db.Node{}, m.nodeLookupErr
+	}
 	node, ok := m.nodes[key]
 	if !ok {
-		return db.Node{}, errors.New("node not found")
+		// What the real :one query answers for no row, which callers such
+		// as nodemember.Check tell apart from a failed lookup.
+		return db.Node{}, pgx.ErrNoRows
 	}
 	return node, nil
 }

@@ -82,6 +82,24 @@ type Endpoint struct {
 	// Handler serves the request.
 	Handler Handler
 
+	// NodesCheckedByHandler lists, with the reason, the BODY parameters
+	// holding a Proxmox node name that serve does NOT check against the
+	// path's cluster, because the handler checks them itself. serve checks
+	// every other node parameter (see checkedNodeParams); a node name reaches a
+	// Proxmox call, or is stored for an engine to send later, either way.
+	//
+	// Only a route whose permission is Deferred lists one: its handler
+	// authorizes the caller itself, so a check in serve would answer 404
+	// before the handler's 403 and tell a caller nothing had authorized
+	// which nodes a cluster holds — and a route whose cluster is in the
+	// body (a migration's two clusters, a registered task's, a console
+	// token's) has no path cluster to check against at all. The handler
+	// must check each one after its permission check, with
+	// handlers.requireNodeInCluster. register refuses an entry that names
+	// no such parameter; TestGuard_EveryBodyNodeIsCheckedOrAccountedFor holds
+	// the rest.
+	NodesCheckedByHandler map[string]string
+
 	// pathParams caches the :param names parsed out of Path at
 	// registration, so that neither validation nor extraction re-parses
 	// the path per request.
@@ -193,21 +211,26 @@ func (r *Registry) register(e Endpoint) error {
 	if err := e.Permissions.validate(e.Path, e.pathParams); err != nil {
 		return fmt.Errorf("endpoint %s %s %w", e.Method, e.Path, err)
 	}
-	// A node the URL names is checked against the cluster the path names
-	// (serve), so a route that names a node and no cluster could only refuse
-	// every request. See urlNodeParams. That such a route also runs a
-	// cluster-scoped permission gate ahead of the check — so its 404 is never
-	// an answer to a caller the gate refused — is held by
-	// TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold rather
-	// than here, because the parameter fixtures drive these routes as
-	// SelfService.
-	if nodes := e.urlNodeParams(); len(nodes) > 0 && !namesACluster(e.pathParams, e.Path) {
+	// A node the request names — in the URL or the body — is checked against
+	// the cluster the path names (serve), so a route that names a node and no
+	// cluster could only refuse every request, unless its handler checks the
+	// node against a cluster of its own (NodesCheckedByHandler). See
+	// checkedNodeParams. That such a route also runs a cluster-scoped
+	// permission gate ahead of the check — so its 404 is never an answer to a
+	// caller the gate refused — is held by
+	// TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold and
+	// TestGuard_EveryBodyNodeIsCheckedOrAccountedFor rather than here, because
+	// the parameter fixtures drive these routes as SelfService.
+	if err := e.checkNodesCheckedByHandler(); err != nil {
+		return err
+	}
+	if nodes := e.checkedNodeParams(); len(nodes) > 0 && !namesACluster(e.pathParams, e.Path) {
 		return fmt.Errorf("endpoint %s %s names a Proxmox node in %s, but its path names no cluster to check "+
 			"that node against; it needs a required :cluster_id as its FIRST path parameter, or to start with %q "+
-			"and name no later :cluster_id",
+			"and name no later :cluster_id — or, for a body parameter on a route whose permission is Deferred, "+
+			"list it in NodesCheckedByHandler and check it in the handler",
 			e.Method, e.Path, strings.Join(nodes, ", "), legacyClusterPrefix)
 	}
-
 	// The reason this function exists at registration time rather than at
 	// request time. See the file comment.
 	if err := e.Parameters.Compile(); err != nil {
@@ -397,45 +420,102 @@ func isNodeNameProperty(p apischema.Property) bool {
 	return p.Format == "node-name" || p.Pattern == emptyOrNodeName
 }
 
-// urlNodeParams returns, sorted, the parameters of e that carry a Proxmox node
-// name in the URL — a path segment such as :node_name or :node, or a query
-// parameter such as the firewall log's ?node= — which serve checks against the
-// nodes of the cluster the path names before it calls the handler.
+// holdsNodeNames reports whether a declared property carries Proxmox node
+// names: one, or — for an array such as a rolling job's nodes — one per
+// element.
+func holdsNodeNames(p apischema.Property) bool {
+	if p.Type == apischema.Array && p.Items != nil {
+		return isNodeNameProperty(*p.Items)
+	}
+	return isNodeNameProperty(p)
+}
+
+// checkedNodeParams returns, sorted, the parameters of e that carry a Proxmox
+// node name and that serve checks against the nodes of the cluster the path
+// names before it calls the handler: every one — path, query or body, a
+// single name or an array of them — except the body parameters the endpoint
+// declares in NodesCheckedByHandler.
 //
-// All but two become a Proxmox call that pveproxy forwards to the node by
-// name — the {node} of a /nodes/{node}/… path, or the check-node the two
-// mapping listings send — and pveproxy picks the host to forward to from the
-// name before it validates it: a name that is not one of the cluster's, an IP
-// address or an FQDN included, would have the node resolve and dial it and
-// hand back what it found (see RequireNodesInCluster). The other two — a
-// node's sensors and its HA maintenance — reach the node over SSH at the
-// address the database holds for it, and are checked all the same.
+// Nearly all of them become a Proxmox call that pveproxy forwards to the node
+// by name — the {node} of a /nodes/{node}/… path, the check-node the two
+// mapping listings send, the node a guest is created on or a backup restored
+// to — at once, or later when a background engine replays what was stored (a
+// schedule, the virtio-win config, a rolling job's nodes). pveproxy picks the
+// host to forward to from the name before it validates it: a name that is not
+// one of the cluster's, an IP address or an FQDN included, would have the node
+// resolve and dial it and hand back what it found (see
+// RequireNodesInCluster). Some only travel as a value Proxmox checks itself
+// (a clone's or a migration's target, which qemu-server and pve-container
+// hold to PVE::Cluster::check_node_exists before anything looks the name up)
+// or stay in Nexara (a DRS rule's nodes);
+// they are checked all the same, since a valid one must be a member anyway,
+// and one rule with no exceptions is one nobody has to remember.
 //
 // The check is derived from the declaration rather than placed in each handler
-// so that no handler can forget it, and
-// TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold holds every
-// route that names a node in its URL to carrying one.
-//
-// BODY parameters are left out on purpose, and not because they are safe:
-// what a body's node means is the route's own business — a migration names the
-// node of ANOTHER cluster, a rolling job names nodes it will act on later —
-// so no single rule against the path's cluster fits them all.
+// so that no handler can forget it. TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold
+// holds every route that names a node in its URL to carrying one, and
+// TestGuard_EveryBodyNodeIsCheckedOrAccountedFor every body parameter spelled
+// like a node.
 //
 // It is computed where it is used rather than cached by register, so that a
 // test fixture appended to a Registry without Register cannot dodge it.
-func (e Endpoint) urlNodeParams() []string {
+func (e Endpoint) checkedNodeParams() []string {
 	var out []string
 	for _, name := range slices.Sorted(maps.Keys(e.Parameters)) {
-		prop := e.Parameters[name]
-		if !isNodeNameProperty(prop) {
+		if _, byHandler := e.NodesCheckedByHandler[name]; byHandler {
 			continue
 		}
-		switch apischema.ResolveSource(name, prop, e.Method, e.pathParams) {
-		case apischema.SourcePath, apischema.SourceQuery:
+		if holdsNodeNames(e.Parameters[name]) {
 			out = append(out, name)
 		}
 	}
 	return out
+}
+
+// urlNodeParams is the part of checkedNodeParams the URL carries: a path
+// segment such as :node_name or :node, or a query parameter such as the
+// firewall log's ?node=.
+func (e Endpoint) urlNodeParams() []string {
+	return e.nodeParamsFrom(apischema.SourcePath, apischema.SourceQuery)
+}
+
+// bodyNodeParams is the part of checkedNodeParams the request body carries.
+func (e Endpoint) bodyNodeParams() []string {
+	return e.nodeParamsFrom(apischema.SourceBody)
+}
+
+func (e Endpoint) nodeParamsFrom(sources ...apischema.Source) []string {
+	var out []string
+	for _, name := range e.checkedNodeParams() {
+		if slices.Contains(sources, apischema.ResolveSource(name, e.Parameters[name], e.Method, e.pathParams)) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// checkNodesCheckedByHandler refuses a NodesCheckedByHandler entry that names
+// no body parameter holding a node name, or gives no reason. That only a
+// Deferred route lists one, and that a body node serve checks sits behind a
+// cluster-scoped gate, are held by TestGuard_EveryBodyNodeIsCheckedOrAccountedFor
+// rather than here, because the parameter fixtures re-declare these routes as
+// SelfService.
+func (e Endpoint) checkNodesCheckedByHandler() error {
+	for _, name := range slices.Sorted(maps.Keys(e.NodesCheckedByHandler)) {
+		prop, declared := e.Parameters[name]
+		switch {
+		case !declared || !holdsNodeNames(prop):
+			return fmt.Errorf("endpoint %s %s lists %q in NodesCheckedByHandler, but declares no parameter by that "+
+				"name holding a Proxmox node name", e.Method, e.Path, name)
+		case apischema.ResolveSource(name, prop, e.Method, e.pathParams) != apischema.SourceBody:
+			return fmt.Errorf("endpoint %s %s lists %q in NodesCheckedByHandler, but it is not a body parameter; "+
+				"a node in the URL is always checked by serve", e.Method, e.Path, name)
+		case strings.TrimSpace(e.NodesCheckedByHandler[name]) == "":
+			return fmt.Errorf("endpoint %s %s lists %q in NodesCheckedByHandler with no reason",
+				e.Method, e.Path, name)
+		}
+	}
+	return nil
 }
 
 // pathParamNames returns the :param names in path, in order. Fiber allows
@@ -497,7 +577,7 @@ func sortedMethods() []string { return slices.Sorted(maps.Keys(knownMethods)) }
 // pass-through, which reads as the deliberate stub it is.
 //
 // nodes answers whether a node is one of a cluster's, for the endpoints
-// that name a node in their URL (urlNodeParams) — passed in for the same
+// that name a node (checkedNodeParams) — passed in for the same
 // reason auth is. It must not be nil when any endpoint names one: a
 // missing lookup is a boot failure, not a route that forwards whatever node
 // it is given. It may be nil when none does. A test that is not about
@@ -510,7 +590,7 @@ func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes
 	// leaves half a route table behind it.
 	if nodes == nil {
 		for _, e := range reg.endpoints {
-			if names := e.urlNodeParams(); len(names) > 0 {
+			if names := e.checkedNodeParams(); len(names) > 0 {
 				panic(fmt.Sprintf("api: mountRegistry needs a node lookup: %s %s names a Proxmox node in %s, "+
 					"which is checked against the cluster's nodes before its handler runs",
 					e.Method, e.Path, strings.Join(names, ", ")))
@@ -530,7 +610,7 @@ func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes
 		if perm := e.Permissions.middleware(); perm != nil {
 			chain = append(chain, perm)
 		}
-		chain = append(chain, e.serve(nodes, e.urlNodeParams()))
+		chain = append(chain, e.serve(nodes, e.checkedNodeParams()))
 		router.Add([]string{e.Method}, e.Path, chain[0], chain[1:]...)
 	}
 }
@@ -549,7 +629,7 @@ func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes
 // gate refuses learns nothing about which nodes exist; and a malformed name is
 // still the validator's 400, never a lookup.
 //
-// nodeNames is e.urlNodeParams(), computed once by mountRegistry.
+// nodeNames is e.checkedNodeParams(), computed once by mountRegistry.
 func (e Endpoint) serve(nodes handlers.NodeLookup, nodeNames []string) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		raw, err := e.extract(c)
@@ -561,7 +641,7 @@ func (e Endpoint) serve(nodes handlers.NodeLookup, nodeNames []string) fiber.Han
 			return e.validationError(err)
 		}
 		if len(nodeNames) > 0 {
-			if err := handlers.RequireNodesInCluster(c, nodes, namedNodes(params, nodeNames)); err != nil {
+			if err := handlers.RequireNodesInCluster(c, nodes, e.namedNodes(params, nodeNames)); err != nil {
 				return err
 			}
 		}
@@ -569,15 +649,24 @@ func (e Endpoint) serve(nodes handlers.NodeLookup, nodeNames []string) fiber.Han
 	}
 }
 
-// namedNodes returns the node names params holds for names, skipping empty
-// ones: "" is emptyOrNodeName's "no node", which names nothing to check. The
-// values are read with the accessor a handler reads them with, defaults
-// included, so every name the handler can forward is a name that was checked.
-func namedNodes(params *apischema.Params, names []string) []string {
+// namedNodes returns the node names params holds for names — every element of
+// an array — skipping empty ones: "" is emptyOrNodeName's "no node", which
+// names nothing to check. The values are read with the accessor a handler
+// reads them with, defaults included, so every name the handler can forward
+// is a name that was checked.
+func (e Endpoint) namedNodes(params *apischema.Params, names []string) []string {
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		if v := params.String(name); v != "" {
-			out = append(out, v)
+		values := []string{}
+		if e.Parameters[name].Type == apischema.Array {
+			values = params.Strings(name)
+		} else {
+			values = append(values, params.String(name))
+		}
+		for _, v := range values {
+			if v != "" {
+				out = append(out, v)
+			}
 		}
 	}
 	return out

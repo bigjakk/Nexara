@@ -2,12 +2,14 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/nodemember"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -51,7 +53,23 @@ func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient
 	}
 
 	for _, row := range rows {
-		st, err := client.GetTaskStatus(ctx, row.Node, row.Upid)
+		// row.Node can be what a caller named (POST /api/v1/tasks), and it
+		// goes to Proxmox as /nodes/{node}/tasks/…, which pveproxy resolves
+		// and dials whatever it names. The API refuses a non-member when the
+		// row is written, but a row can predate that check, so it is checked
+		// again here: one the cluster does not hold is never polled, and
+		// ages out through the staleTaskGrace path below like any task
+		// Proxmox cannot report on. A failed lookup skips the row this tick.
+		err := nodemember.Require(ctx, s.queries, cluster.ID, row.Node)
+		if lookupErr := (*nodemember.LookupError)(nil); errors.As(err, &lookupErr) {
+			s.logger.Warn("task reconcile: node membership lookup failed",
+				"cluster_id", cluster.ID, "upid", row.Upid, "error", lookupErr.Err)
+			continue
+		}
+		var st *proxmox.TaskStatus
+		if err == nil {
+			st, err = client.GetTaskStatus(ctx, row.Node, row.Upid)
+		}
 		if err != nil {
 			// Task may have aged out of Proxmox's task log. If it has been
 			// "running" well past any plausible lifetime, mark it failed so it
