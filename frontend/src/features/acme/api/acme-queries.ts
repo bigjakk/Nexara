@@ -206,8 +206,15 @@ export interface NodeACMEConfig {
    * rejects a key that is also being given a value in the same request.
    */
   delete?: string[];
-  /** SHA1 of the node config, returned by GET. Send it back on PUT to make the
-   * write a compare-and-swap; omit it to overwrite unconditionally. */
+  /** An opaque save token for the node's config file, returned by GET to
+   * callers with manage:certificate (it is a write's token, and a caller who
+   * cannot write is given none). It changes whenever any part of the file does
+   * — the options and the notes as well as the ACME keys — and is absent while
+   * the node has no config file, or an empty one. It is not Proxmox's own
+   * digest, and not for the client to compute or compare: send it back as it
+   * was read, on PUT, to make the write a compare-and-swap (Nexara re-reads the
+   * node and compares it before Proxmox's own check); omit it to overwrite
+   * unconditionally. */
   digest?: string;
   [key: string]: unknown;
 }

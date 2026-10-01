@@ -109,6 +109,8 @@ import { NodeAptRepositories } from "../components/NodeAptRepositories";
 import { NodePowerActions } from "../components/node/NodePowerActions";
 import { NodeReportButton } from "../components/node/NodeReportButton";
 import { NodeMetricsPanel } from "../components/node/NodeMetricsPanel";
+import { NodeNotesCard } from "../components/node/NodeNotesCard";
+import { NodeOptionsCard } from "../components/node/NodeOptionsCard";
 import { NodeTemperatures } from "../components/node/NodeTemperatures";
 import {
   EditDNSDialog,
@@ -384,6 +386,27 @@ export function NodeDetailPage() {
                   <EditDNSDialog clusterId={clusterId} nodeName={node.name} />
                 ) : undefined
               }
+            />
+            {/* Keyed on the node: the page is the same component for every node
+                it is routed to, and a dialog that survived a change of node
+                would PUT the old node's snapshot to the new one. Each has its
+                own key, because siblings cannot share one. */}
+            <NodeOptionsCard
+              key={`options-${node.id}`}
+              clusterId={clusterId}
+              nodeName={node.name}
+              pveVersion={node.pve_version}
+              online={node.status === "online"}
+              canEdit={canManage("node")}
+              className="lg:col-span-2"
+            />
+            <NodeNotesCard
+              key={`notes-${node.id}`}
+              clusterId={clusterId}
+              nodeName={node.name}
+              online={node.status === "online"}
+              canEdit={canManage("node")}
+              className="lg:col-span-2"
             />
             {/* Full-width under the hardware cards: the reading count varies
                 with the host, so a fixed grid slot would either crop a

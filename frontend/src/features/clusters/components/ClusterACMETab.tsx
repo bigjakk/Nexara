@@ -665,10 +665,13 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
       // the 409 copy talks about the node's configuration rather than ACME.
       config.digest = digest;
     }
-    // No else. An add cannot get here without a config read, so the only way
-    // to have no digest is a PVE that answered without one. That is an
-    // unconditional write, as every save was before this — the check degrades
-    // rather than locking the operator out of their own node.
+    // No else. An add cannot get here without a config read, so a read with no
+    // digest means one of two things. The node has no config file yet, or an
+    // empty one, so there is nothing to compare against: this is then an
+    // unconditional write, as every save was before this, since the check
+    // degrades rather than locking the operator out of their own node. Or the
+    // caller may not write: the server gives the digest only to callers with
+    // manage:certificate, and refuses that caller's save anyway.
     const gen = domainDialogGen.current;
     setAcmeConfig.mutate(
       { node: certNode, config },

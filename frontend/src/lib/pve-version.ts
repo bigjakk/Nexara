@@ -44,3 +44,47 @@ export const PVE_FEATURES = {
   /** Cluster-wide Arm/Disarm HA maintenance. */
   HA_ARM_DISARM: "9.2",
 } as const;
+
+/**
+ * nodePVEVersion reduces what Nexara stores for a node — the pve-manager
+ * package string, "pve-manager/9.2.20/<build hash>" — to the version number
+ * "9.2.20". Anything not in that form is returned trimmed, as it is: an empty
+ * string stays unknown, and a bare "9.2.20" passes through.
+ */
+export function nodePVEVersion(pveVersion: string): string {
+  const trimmed = pveVersion.trim();
+  const match = /^pve-manager\/([^/]+)/.exec(trimmed);
+  return match?.[1] ?? trimmed;
+}
+
+/**
+ * isNodePVEAtLeast is isPVEAtLeast for a NODE's own version string, as the
+ * node list carries it (see nodePVEVersion). Pair it with PVE_NODE_FEATURES.
+ */
+export function isNodePVEAtLeast(nodePveVersion: string, min: string): boolean {
+  return isPVEAtLeast(nodePVEVersion(nodePveVersion), min);
+}
+
+/**
+ * PVE_NODE_FEATURES maps a per-node capability to the first pve-manager
+ * release that has it, at PATCH precision. It is compared against a node's own
+ * version (isNodePVEAtLeast), not the way PVE_FEATURES is, against the
+ * cluster's `release`: that is "9.2", with no patch (the collector stores
+ * /version's `release` as the cluster's pve_version, internal/collector
+ * sync.go), which is too coarse for a key that arrived in 9.1.13.
+ *
+ * Each is the first release after the commit that added the key to
+ * PVE/NodeConfig.pm in pve-manager:
+ */
+export const PVE_NODE_FEATURES = {
+  /** "node: options: add config option for ballooning target": 8.3.6. */
+  BALLOONING_TARGET: "8.3.6",
+  /**
+   * Wake-on-LAN's bind-interface ("fix #5255: node: wol: add optional bind
+   * interface") and broadcast-address ("… configurable broadcast address"),
+   * both: 8.1.9.
+   */
+  WOL_BIND_BROADCAST: "8.1.9",
+  /** "node config: add location property": 9.1.13, five days before 9.2.0. */
+  LOCATION: "9.1.13",
+} as const;
