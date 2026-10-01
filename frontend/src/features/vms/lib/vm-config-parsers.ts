@@ -3,6 +3,13 @@
  * No React dependencies — safe for import in any context.
  */
 
+import {
+  joinSegments,
+  setSegment,
+  splitSegments,
+  type Segment,
+} from "@/lib/property-string";
+
 // ---------------------------------------------------------------------------
 // Generic key=value helpers
 // ---------------------------------------------------------------------------
@@ -39,68 +46,9 @@ export function buildKVString(map: Map<string, string>): string {
 // ---------------------------------------------------------------------------
 // Property strings, edited in place
 // ---------------------------------------------------------------------------
-
-/**
- * One comma-separated segment of a Proxmox property string. `key` is null
- * for a segment with no "=", which holds the value of the format's
- * default_key (a NIC's model, a VGA type). `raw` is the segment as stored.
- */
-interface Segment {
-  key: string | null;
-  value: string;
-  raw: string;
-}
-
-/**
- * Split one segment as pve-common's parse_property_string
- * (src/PVE/JSONSchema.pm) does: at its first "=", or not at all when it has
- * none. Key and value are trimmed for reading; `raw` is left as it was.
- */
-function segment(raw: string): Segment {
-  const idx = raw.indexOf("=");
-  if (idx === -1) return { key: null, value: raw.trim(), raw };
-  return {
-    key: raw.slice(0, idx).trim(),
-    value: raw.slice(idx + 1).trim(),
-    raw,
-  };
-}
-
-function splitSegments(raw: string): Segment[] {
-  return raw === "" ? [] : raw.split(",").map(segment);
-}
-
-function joinSegments(segs: Segment[]): string {
-  return segs.map((s) => s.raw).join(",");
-}
-
-/**
- * Write `text` in place of the segments `owns` matches: where the first one
- * stands, dropping any later match. When nothing matches it is appended, or
- * prepended for a default_key. `text` null removes the matches. Every other
- * segment keeps its bytes and its position.
- */
-function setSegment(
-  segs: Segment[],
-  owns: (s: Segment) => boolean,
-  text: string | null,
-  whenAbsent: "append" | "prepend" = "append",
-): Segment[] {
-  const out: Segment[] = [];
-  let found = false;
-  for (const s of segs) {
-    if (!owns(s)) {
-      out.push(s);
-      continue;
-    }
-    if (!found && text !== null) out.push(segment(text));
-    found = true;
-  }
-  if (found || text === null) return out;
-  return whenAbsent === "prepend"
-    ? [segment(text), ...out]
-    : [...out, segment(text)];
-}
+// The segment helpers every buildX below edits with (Segment, splitSegments,
+// joinSegments, setSegment) live in @/lib/property-string, shared with the
+// node options editor.
 
 /**
  * pve-common's parse_boolean (src/PVE/JSONSchema.pm), which
