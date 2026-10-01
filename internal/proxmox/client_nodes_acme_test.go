@@ -143,6 +143,60 @@ func TestSetNodeACMEConfig_RejectsSetAndClearTogether(t *testing.T) {
 	}
 }
 
+// TestSetNodeACMEConfig_RefusesAWriteThatChangesNothing: a request that sets nothing
+// and clears nothing is refused with ErrInvalidInput before anything is sent, as
+// SetNodeOptions refuses its own. set_options would still rewrite the whole node
+// config file for it, moving its digest under every open dialog, and the caller would
+// be left an audit row that says "updated" and names nothing. A digest is neither a
+// setting nor a clear, so a digest alone is such a request; an empty field means
+// "leave alone", so it sets nothing either; an empty list clears nothing.
+// ValidateNodeACMEConfig is the same decision, asked before a write.
+func TestSetNodeACMEConfig_RefusesAWriteThatChangesNothing(t *testing.T) {
+	const digest = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+	for _, tt := range []struct {
+		name    string
+		cfg     NodeACMEConfig
+		refused bool
+	}{
+		{"nothing at all", NodeACMEConfig{}, true},
+		{"a digest alone", NodeACMEConfig{Digest: digest}, true},
+		{"an empty list to clear", NodeACMEConfig{Delete: []string{}}, true},
+		{"an empty list to clear and a digest", NodeACMEConfig{Delete: []string{}, Digest: digest}, true},
+		{"one setting", NodeACMEConfig{ACME: "account=default"}, false},
+		{"the last domain slot and a digest", NodeACMEConfig{ACMEDomain5: "d5.example.com", Digest: digest}, false},
+		{"one key to clear", NodeACMEConfig{Delete: []string{"acmedomain1"}}, false},
+		{"the account to clear and a digest", NodeACMEConfig{Delete: []string{"acme"}, Digest: digest}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, seen := newFormCaptureServer(t)
+			c := newTestClient(t, srv.URL)
+
+			err := c.SetNodeACMEConfig(context.Background(), "pve1", tt.cfg)
+			verr := ValidateNodeACMEConfig(tt.cfg)
+			if !tt.refused {
+				if err != nil || verr != nil {
+					t.Fatalf("SetNodeACMEConfig = %v, ValidateNodeACMEConfig = %v; want both to accept it", err, verr)
+				}
+				if len(*seen) != 1 {
+					t.Errorf("issued %d requests, want 1", len(*seen))
+				}
+				return
+			}
+			for who, got := range map[string]error{"SetNodeACMEConfig": err, "ValidateNodeACMEConfig": verr} {
+				if !errors.Is(got, ErrInvalidInput) {
+					t.Errorf("%s = %v, want ErrInvalidInput so the handler answers 400", who, got)
+				} else if !strings.Contains(got.Error(), "nothing to change") {
+					t.Errorf("%s = %v, want it to say there is nothing to change", who, got)
+				}
+			}
+			if len(*seen) != 0 {
+				t.Errorf("%d request(s) reached Proxmox for a write that changes nothing", len(*seen))
+			}
+		})
+	}
+}
+
 // TestNodeACMESettingsCoverTheStruct is the drift guard, and it reads the
 // struct rather than a second hand-written list.
 //

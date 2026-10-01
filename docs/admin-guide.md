@@ -7,6 +7,7 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 - [Cluster Management](#cluster-management)
 - [Infrastructure Health](#infrastructure-health)
 - [Topology Map](#topology-map)
+- [Node Options](#node-options)
 - [User Management](#user-management)
 - [RBAC Setup](#rbac-setup)
 - [Proxmox Access Control](#proxmox-access-control)
@@ -76,7 +77,7 @@ A token Nexara minted itself already holds everything it needs — onboarding gr
 
 For full functionality, the token needs `Administrator` on `/`: grant the role to the token's user and create the token with privilege separation off (`--privsep 0`, or **Privilege Separation** unchecked), as in [Creating a Proxmox API Token](installation.md#creating-a-proxmox-api-token). A privilege-separated token holds only what both it and its user are granted, so it would need the grant twice. For read-only monitoring, `PVEAuditor` is sufficient.
 
-`PVEAdmin` covers most of what Nexara does, but it lacks seven privileges that `Administrator` has — `Sys.Modify`, `Sys.PowerMgmt`, `Sys.Incoming`, `Sys.AccessNetwork`, `Realm.Allocate`, `Permissions.Modify` and `Mapping.Modify` — and whatever needs one of them either fails or, where Nexara treats the step as optional, is skipped: node power actions need `Sys.PowerMgmt`, creating a USB or PCI mapping for [device passthrough](#device-passthrough) needs `Mapping.Modify`, a rolling update cannot pause Proxmox VE 9.2's native CRS auto-rebalance without `Sys.Modify` on `/` and drains with it still on, and some backup jobs cannot be run on demand (see [Backup Jobs](#backup-jobs)).
+`PVEAdmin` covers most of what Nexara does, but it lacks seven privileges that `Administrator` has — `Sys.Modify`, `Sys.PowerMgmt`, `Sys.Incoming`, `Sys.AccessNetwork`, `Realm.Allocate`, `Permissions.Modify` and `Mapping.Modify` — and whatever needs one of them either fails or, where Nexara treats the step as optional, is skipped: node power actions need `Sys.PowerMgmt`, saving a node's [options](#node-options) needs `Sys.Modify` on `/`, creating a USB or PCI mapping for [device passthrough](#device-passthrough) needs `Mapping.Modify`, a rolling update cannot pause Proxmox VE 9.2's native CRS auto-rebalance without `Sys.Modify` on `/` and drains with it still on, and some backup jobs cannot be run on demand (see [Backup Jobs](#backup-jobs)).
 
 **Grant the role on `/` itself**, not only on `/nodes`, `/vms` or `/storage`. Proxmox answers some cluster-wide reads only to a holder of `Sys.Audit` on `/` — HA status, the HA resource, group and rule listings, and the backup job definitions among them — and Nexara will not act without HA state:
 
@@ -127,6 +128,42 @@ Navigate to **Topology** from the sidebar for an interactive map of your infrast
 - **Health coloring** — elements are colored by status: healthy, degraded, or offline
 - **Click-through** — click any element to jump to its detail page
 - Pan and zoom with the mouse or trackpad
+
+---
+
+## Node Options
+
+A node's own settings are on its page, in the **Options** and **Notes** cards. They are the settings Proxmox shows in a node's **Options** and **Notes** panels, changed with the pencil (**Edit**) button on each card and saved to the node without leaving Nexara.
+
+| Setting | What it does | Shown when unset |
+|---------|--------------|------------------|
+| **Start on boot delay** | Seconds the node waits, once it has booted, before it starts the guests marked to start on boot (0–300). Raise it when guests start before their storage is online. Proxmox waits 0 seconds when it is unset. | *Default (no delay)* |
+| **RAM ballooning target** | The RAM usage, in percent of the node's memory, that automatic ballooning aims for (0–100). Proxmox aims for 80% when it is unset. | *Default (80%)* |
+| **Wake-on-LAN** | The MAC address this node is woken by and, optionally, the interface and the broadcast address this node uses when it sends a wake packet to another node. | *Not configured* |
+| **Location** | Latitude, longitude and an optional name of up to 128 characters. The datacenter's location applies when it is unset. | *From datacenter* |
+| **Notes** | Free text, shown as plain text. | *No notes.* |
+
+**Unset is not the same as the default.** A node's config file holds only what has been set, and Nexara shows what is stored: a delay saved as `0` is a stored value, not an absent one. To remove a setting, clear its field and save; Nexara tells Proxmox to delete it, which returns the node to its default. A field you left as it was is not sent at all.
+
+**Wake-on-LAN is read from two nodes.** The MAC is the one Proxmox wakes a node with, and it reads it from the node being woken. It is the required part of the setting, and a bare MAC is enough. The interface and the broadcast address are what a node uses when it *sends* a wake packet, and Proxmox reads them from the sending node, so set them on the node you wake others from. That also means entering that node's own MAC, because the setting is not valid without one.
+
+**Version floors.** A field is shown only when the node's Proxmox VE is new enough to have it, and is not sent to one that is not: **RAM ballooning target** needs pve-manager 8.3.6, the Wake-on-LAN interface and broadcast address need 8.1.9, and **Location** needs 9.1.13 (Proxmox VE 9.2). A setting already stored on an older node is still shown and can be removed; changing it needs a Proxmox VE that knows the setting, because Proxmox refuses a setting it has no schema for, while removing one works for any.
+
+**The node must be online.** Proxmox forwards the read and the write to the node itself, so an offline node shows no options and cannot be edited.
+
+**Concurrent edits.** Saving is a compare-and-swap against the whole node config file, and that file is shared with the node's ACME certificate settings and with the Notes panel in Proxmox's own UI. If anything changed it after you opened the dialog, the save is refused with *The node's configuration changed since it was read*; Nexara re-reads the node's stored settings, so check what changed and save again. The exception is a node that had no config file when you opened the dialog, or whose file was empty (every setting and the notes cleared, which Proxmox reads as no file): it has nothing to be checked against, so that next save is unconditional and cannot conflict.
+
+**The `digest` is an opaque token.** What the API returns as `digest` for a node's options, notes and ACME settings, and takes back on a save, is a save token that Nexara makes, not Proxmox's own digest of the file; send it back exactly as the read returned it. Proxmox's digest is never returned, because it is an unsalted hash of the whole file, notes included, and would let anyone shown it test guesses at the file's content. The token is tied to the cluster and the node it was read from and is checked against the file as it is when you save, so one read's token is refused for another node, and a client that sends Proxmox's own digest is always refused with the same *changed since it was read* message. See [the save token](api-reference.md#the-node-config-save-token) in the API reference.
+
+**ACME settings are checked on every save.** Every save of options or notes makes Proxmox re-check the node's ACME settings, so a broken ACME configuration, such as a domain whose DNS plugin has since been deleted, makes the save fail with Proxmox's own message. Fix the ACME settings first.
+
+**Size and characters.** Proxmox refuses a request over 64 KiB (512 KiB from Proxmox VE 8.4), counted after encoding, where a line break or a non-ASCII character takes several bytes. Very long notes can therefore fail well inside the 65,536-character limit: Nexara answers *The request is too large for Proxmox* and the node is unchanged, so shorten the notes. Nexara refuses a request over 512 KiB itself, before sending it. On a Proxmox VE before 8.4, a request between 64 and 512 KiB is sent, and it is Proxmox that refuses it: it answers after reading only the head of the request and may reset the connection instead, so you can see a connection error (a 502) in place of that message. The node is unchanged in either case. The Wake-on-LAN and Location fields refuse line breaks and other control characters; the notes keep them.
+
+**Permissions.** Reading the settings needs `view:node`. Reading the notes, and changing either, needs `manage:node`: notes are shown only to users who hold `manage:node` on the cluster, and everyone else sees a note saying so. The same goes for the save token a save is checked against: Nexara returns it only to users who can save, whether they read it through the node's options (`manage:node`) or through its ACME settings (`manage:certificate`), although it reveals nothing about the file's content (a holder of a token can still tell that the file changed). The cluster's Proxmox API token needs `Sys.Audit` on `/` for either read and `Sys.Modify` on `/` to write, and `Sys.Modify` is held by `Administrator` and not by `PVEAdmin`; see [API Token Requirements](#api-token-requirements).
+
+**Audit.** Each save writes one `set_options` entry against the node. It records which settings were set and which were cleared, by name, and the values of the two integers. It never records the notes, the location or the Wake-on-LAN setting: every built-in Viewer holds `view:audit`, and a position or a MAC address identifies a machine.
+
+> **Keep credentials out of notes.** Nexara shows them only to users with `manage:node`, but anyone whose Proxmox account holds `Sys.Audit` on `/` can still read them in Proxmox's own Notes panel, and they are stored as plain text in the node's config file.
 
 ---
 

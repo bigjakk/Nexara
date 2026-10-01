@@ -32,6 +32,15 @@ var (
 	// a client error rather than as a Proxmox failure.
 	ErrInvalidInput = errors.New("invalid input")
 
+	// ErrRequestTooLarge indicates the request body is over what any Proxmox
+	// accepts, and so was not sent. pveproxy refuses a body over its post limit
+	// with a 501 after reading only the request head, and does not read the rest:
+	// against a real one the sender may see the connection reset instead of the
+	// 501, so a request that is certain to be refused is refused here, where the
+	// answer is the same whatever the network does. It never reaches the network;
+	// handlers surface it as 413.
+	ErrRequestTooLarge = errors.New("request too large")
+
 	// ErrRequestNotSent marks a request that never left this process — the
 	// request was never written — so the server cannot have acted on it. It
 	// rides alongside the error that stopped it (ErrConnectionFailed, usually).

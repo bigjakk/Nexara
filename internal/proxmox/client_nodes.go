@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 func (c *Client) GetNodes(ctx context.Context) ([]NodeListEntry, error) {
@@ -707,7 +709,12 @@ var nodeACMESettings = []nodeACMESetting{
 // PUT /nodes/{node}/config takes `delete` as a raw list of option names and
 // applies it to the WHOLE node config — `description`, `location`,
 // `wakeonlan`, `startall-onboot-delay` and `ballooning-target` live in the
-// same file and would go the same way — and the handler binds NodeACMEConfig
+// same file and would go the same way. Those five are SetNodeOptions's, with an
+// allow-list of their own (deletableNodeOptionKeys) that is disjoint from this
+// one: each method may clear what it may write and nothing of the other's, and
+// TestNodeConfigAllowListsPartitionPVEsKeys holds the pair against PVE's whole
+// key set, so a key PVE adds to $confdesc has to be given to one of them rather
+// than being clearable by both or by neither. The handler binds NodeACMEConfig
 // straight from the request body, so `delete` is caller-supplied all the way
 // from the HTTP client. Validating here rather than in the handler makes it a
 // choke point no future caller can forget.
@@ -748,10 +755,45 @@ func NodeACMESetKeys(cfg NodeACMEConfig) []string {
 // `domains=a;b` list, which get_acme_conf parses into standalone domains —
 // those go with it. The acmedomainN keys hold one domain each and lose only
 // that one.
+//
+// Every refusal this method makes is ValidateNodeACMEConfig's, which the node
+// name's check precedes and the write follows, with nothing sent for a refused
+// request. One of them is a request that changes nothing — no setting and
+// nothing to clear, a digest alone being neither — because Proxmox would still
+// rewrite the whole config file for it, and the caller's audit row would name
+// nothing (SetNodeOptions refuses the same request for the same reasons).
 func (c *Client) SetNodeACMEConfig(ctx context.Context, node string, cfg NodeACMEConfig) error {
 	if err := validateNodeName(node); err != nil {
 		return err
 	}
+	form, err := buildNodeACMEForm(cfg)
+	if err != nil {
+		return err
+	}
+	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/config", form, nil); err != nil {
+		return fmt.Errorf("set node %s ACME config: %w", node, err)
+	}
+	return nil
+}
+
+// ValidateNodeACMEConfig reports what SetNodeACMEConfig would refuse about cfg
+// before sending anything: a request that changes nothing, a key to clear that is
+// no ACME setting, a key that is both set and cleared, a body too large for
+// Proxmox. It is for a caller that has something to do between deciding to write
+// and writing — the handler re-reads the node config's digest to check a save
+// token — and wants a refused request to cost no Proxmox read. SetNodeACMEConfig
+// runs the same checks itself, so it stays the choke point whether a caller asks
+// first or not. A caller that means to substitute a digest afterwards should give
+// cfg one of the length Proxmox's will be (40 hex characters), and not the one it
+// has now: the digest is part of the encoded body whose size is checked.
+func ValidateNodeACMEConfig(cfg NodeACMEConfig) error {
+	_, err := buildNodeACMEForm(cfg)
+	return err
+}
+
+// buildNodeACMEForm is the form SetNodeACMEConfig sends, and the one place that
+// decides whether it may be.
+func buildNodeACMEForm(cfg NodeACMEConfig) (url.Values, error) {
 	form := url.Values{}
 	values := make(map[string]string, len(nodeACMESettings))
 	for _, s := range nodeACMESettings {
@@ -761,16 +803,26 @@ func (c *Client) SetNodeACMEConfig(ctx context.Context, node string, cfg NodeACM
 			form.Set(s.key, v)
 		}
 	}
+	// A request that sets nothing and clears nothing is refused, as SetNodeOptions
+	// refuses its own: set_options would still rewrite the whole file (moving the
+	// digest under every open dialog), and the audit row would say "updated" and
+	// name nothing. A digest is neither a setting nor a clear, and is not in the
+	// form yet. It stays here, in the client, so that it is made after the cluster
+	// is resolved (the route sweep sends this route an empty body) and for every
+	// caller of the client.
+	if len(form) == 0 && len(cfg.Delete) == 0 {
+		return nil, fmt.Errorf("%w: nothing to change: set a setting or name one in delete", ErrInvalidInput)
+	}
 	for _, k := range cfg.Delete {
 		if !deletableNodeACMEKeys[k] {
-			return fmt.Errorf("%w: %q is not an ACME setting that can be cleared", ErrInvalidInput, k)
+			return nil, fmt.Errorf("%w: %q is not an ACME setting that can be cleared", ErrInvalidInput, k)
 		}
 		// PVE applies `delete` *after* the assignments (set_options in
 		// PVE/API2/NodeConfig.pm), so a key in both wins as a delete and the
 		// value is silently dropped — no error, and a caller that meant to
 		// replace a domain would find it gone. Refuse instead.
 		if values[k] != "" {
-			return fmt.Errorf("%w: %q cannot be set and cleared in the same request", ErrInvalidInput, k)
+			return nil, fmt.Errorf("%w: %q cannot be set and cleared in the same request", ErrInvalidInput, k)
 		}
 	}
 	if len(cfg.Delete) > 0 {
@@ -779,10 +831,316 @@ func (c *Client) SetNodeACMEConfig(ctx context.Context, node string, cfg NodeACM
 	if cfg.Digest != "" {
 		form.Set("digest", cfg.Digest)
 	}
-	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/config", form, nil); err != nil {
-		return fmt.Errorf("set node %s ACME config: %w", node, err)
+	if err := checkRequestSize(form); err != nil {
+		return nil, err
+	}
+	return form, nil
+}
+
+// maxNodeConfigBody is the largest request body every Proxmox VE accepts:
+// pveproxy refuses a non-multipart body over $limit_max_post with a 501 "for data
+// too large" (pve-http-server's src/PVE/APIServer/AnyEvent.pm,
+// authenticate_and_handle_request), 64 KiB before libpve-http-server-perl 5.2.1
+// and 512 KiB since (commit 2650923, "fix #6230: increase allowed post size").
+// It is the larger of the two, so a request refused against it is refused by
+// every version, and the client is never stricter than Proxmox.
+const maxNodeConfigBody = 512 * 1024
+
+// checkRequestSize refuses a form whose encoded body is over maxNodeConfigBody,
+// which is the length pveproxy compares (it checks Content-Length, and doPut sends
+// form.Encode()). The check is not only an economy. pveproxy answers its 501 after
+// the request head, without reading the body, so a sender still writing a body
+// that large may see the connection reset instead of the answer — a 502 for what
+// is the caller's own request. Refusing here gives the same answer every time.
+//
+// A body of exactly the limit is allowed, as Proxmox allows it: its test is
+// `$len > $limit_max_post`.
+func checkRequestSize(form url.Values) error {
+	if n := len(form.Encode()); n > maxNodeConfigBody {
+		return fmt.Errorf("%w: the request is %d bytes once encoded, and Proxmox refuses a body over %d",
+			ErrRequestTooLarge, n, maxNodeConfigBody)
 	}
 	return nil
+}
+
+// GetNodeOptions reads the node's own settings — the five non-ACME keys of
+// GET /nodes/{node}/config — and the digest of the file they live in. The ACME
+// keys come back in the same reply and are dropped, because NodeOptions names
+// none of them; NodeACMEConfig reads them from the same endpoint.
+//
+// Proxmox forwards this read to the node itself (`proxyto => 'node'` in
+// PVE/API2/NodeConfig.pm) and wants Sys.Audit on /, so an offline node answers
+// with an error rather than an empty config. An online node that has no config
+// file at all answers {} with no digest, which reads back as the zero struct.
+func (c *Client) GetNodeOptions(ctx context.Context, node string) (*NodeOptions, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var opts NodeOptions
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/config", &opts); err != nil {
+		return nil, fmt.Errorf("get node %s options: %w", node, err)
+	}
+	return &opts, nil
+}
+
+// nodeOptionSetting binds a node config key to the field that carries it, as
+// nodeACMESetting does for the ACME keys.
+//
+// value reports the form value AND whether the key is set, where
+// nodeACMESetting's reports a bare string. The pair is the difference between
+// the two families: an ACME key is set when its string is non-empty, but 0 is a
+// value for both integers here, so "set" is decided by the pointer and never by
+// what the value renders as. A table that treated "0" or "" as unset would
+// stop sending a delay of 0 — the value that turns the delay off — and would
+// stop refusing a request that sets it and clears it too.
+//
+// One table drives the write form, the set-and-clear check, the delete
+// allow-list and the audit names. TestNodeOptionSettingsCoverTheStruct holds it
+// against the struct.
+type nodeOptionSetting struct {
+	key   string
+	value func(NodeOptions) (string, bool)
+}
+
+var nodeOptionSettings = []nodeOptionSetting{
+	{"startall-onboot-delay", func(o NodeOptions) (string, bool) { return flexIntFormValue(o.StartallOnbootDelay) }},
+	{"ballooning-target", func(o NodeOptions) (string, bool) { return flexIntFormValue(o.BallooningTarget) }},
+	{"wakeonlan", func(o NodeOptions) (string, bool) { return o.WakeOnLAN, o.WakeOnLAN != "" }},
+	{"location", func(o NodeOptions) (string, bool) { return o.Location, o.Location != "" }},
+	{"description", func(o NodeOptions) (string, bool) { return o.Description, o.Description != "" }},
+}
+
+// flexIntFormValue is the form value of an optional integer, and whether it is
+// set: nil is not, and a pointer to 0 is, written as "0".
+func flexIntFormValue(v *FlexInt) (string, bool) {
+	if v == nil {
+		return "", false
+	}
+	return strconv.Itoa(int(*v)), true
+}
+
+// deletableNodeOptionKeys is exactly the keys SetNodeOptions may write, and
+// nothing else — see deletableNodeACMEKeys for why `delete` needs an allow-list
+// at all. It is disjoint from that one on purpose: the two methods share
+// PUT /nodes/{node}/config and a file, and neither may clear the other's keys.
+var deletableNodeOptionKeys = func() map[string]bool {
+	m := make(map[string]bool, len(nodeOptionSettings))
+	for _, s := range nodeOptionSettings {
+		m[s.key] = true
+	}
+	return m
+}()
+
+// NodeOptionsSetKeys names the settings the options would write, in table
+// order and without their values. The audit row records these names: the
+// notes, the location and the Wake-on-LAN MAC are free text, view:audit is
+// granted to every Viewer by default, and a MAC or a position identifies a
+// machine. A setting at 0 counts as set. The result is never nil, so a row with
+// nothing set reads [] rather than null.
+func NodeOptionsSetKeys(opts NodeOptions) []string {
+	keys := make([]string, 0, len(nodeOptionSettings))
+	for _, s := range nodeOptionSettings {
+		if _, ok := s.value(opts); ok {
+			keys = append(keys, s.key)
+		}
+	}
+	return keys
+}
+
+// NodeOptionsClearKeys names the settings the options would clear, in request
+// order, keeping only names SetNodeOptions would accept. The audit row records
+// these rather than opts.Delete itself: Delete is the caller's own strings, the
+// row is readable by every Viewer, and a filter here means a string that is not
+// a setting's name can never reach it, whatever calls the builder or however
+// it is later moved. A key named twice is named twice, as it was sent. The
+// result is never nil, so a row with nothing cleared reads [] rather than null.
+func NodeOptionsClearKeys(opts NodeOptions) []string {
+	keys := make([]string, 0, len(opts.Delete))
+	for _, k := range opts.Delete {
+		if deletableNodeOptionKeys[k] {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+// hasLineBreakOrControl reports whether v holds a control character — the C0
+// range, DEL and the C1 range, so "\n", "\r", "\t", ESC and U+0085 are all among
+// them — or one of the Unicode line and paragraph separators, U+2028 and
+// U+2029, which unicode.IsControl does not count.
+func hasLineBreakOrControl(v string) bool {
+	for _, r := range v {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return true
+		}
+	}
+	return false
+}
+
+// SetNodeOptions writes the node's own settings.
+//
+// A field left out, or an EMPTY string, leaves the stored value alone: every
+// key is optional in PVE's schema, so no value means "remove". Clearing one
+// goes through opts.Delete. An integer has no empty form: nil is absent, and a
+// pointer to 0 is a value, sent as "0".
+//
+// Everything this method refuses is refused here, with ErrInvalidInput (the last
+// of these, ErrRequestTooLarge) and before anything is sent, so that every
+// caller of the client gets the same answer whatever route it came through:
+//
+//   - A request that changes nothing: no setting and nothing to clear, a digest
+//     alone being neither. Proxmox would still rewrite the whole file — set_options
+//     ends in write_config, which writes the file out again from what it parsed
+//     — and that can move the digest under every dialog that is open on the
+//     node, for a save that changed nothing; and Nexara would record a change
+//     whose row names nothing.
+//   - A key that is both set and cleared. PVE's set_options assigns every
+//     supplied key and applies `delete` afterwards, so the value would be
+//     dropped silently, and the 200 would say it was written.
+//   - A `delete` entry that is not one of the five keys of nodeOptionSettings.
+//     PVE applies `delete` to the WHOLE file, so the ACME keys beside these
+//     would go with them; those are SetNodeACMEConfig's and are named in the
+//     refusal.
+//   - A value that is not valid UTF-8, the description included. Nothing decoded
+//     from the API's JSON can be one today, since Go replaces a bad byte with
+//     U+FFFD, and the client is where every future caller is held to the same
+//     rule: what Proxmox would make of such bytes in the file, or of its own
+//     %-encoding of them in a note, is not something to find out on a node.
+//   - A line break or any other control character in anything but the
+//     description, and U+2028 and U+2029 with them.
+//   - A request whose encoded body is over 512 KiB, the most any Proxmox accepts
+//     (ErrRequestTooLarge, checkRequestSize).
+//
+// The control-character refusal is deliberately stricter than Proxmox.
+// write_node_config in pve-manager's PVE/NodeConfig.pm dies with "detected
+// invalid newline inside property" on "\n" and on nothing else, and the format
+// check lets one through: parse_property_string skips a segment that is
+// whitespace-only (`next if $part =~ /^\s*\z/`), so "<mac>,\n" is a valid
+// wakeonlan that the write then refuses with a plain 500 — and "<mac>,\r" or
+// "<mac>,\t" is a valid one that is written. A location's `name` is free text up
+// to 128 characters, and takes anything. These values are written raw into a
+// line-oriented file, no legitimate one holds such a character, and one that did
+// would let a manage:node caller plant terminal escapes in the output of `pvenode
+// config get` or `cat`, or a line break that other line-oriented readers split
+// on. The description is exempt: write_node_config writes each of its lines as
+// '#' plus encode_text (pve-common's PVE/ParseUtils.pm), which %-escapes control
+// characters, and a note is stored as lines.
+//
+// A PVE too old to know a key (location before pve-manager 9.1.13,
+// ballooning-target before 8.3.6) refuses it with a 400 that names it; that is
+// passed on rather than guessed at here. The write needs Sys.Modify on /, which
+// PVEAdmin lacks, and Proxmox forwards it to the node itself, so an offline node
+// cannot be written. Digest makes it a compare-and-swap over the WHOLE file.
+//
+// What only Proxmox can refuse is not decided here. A body over the post limit of
+// an older pveproxy — 64 KiB before libpve-http-server-perl 5.2.1 — is answered
+// 501 "for data too large", counted after form encoding, where a line break takes
+// three bytes and a non-ASCII character at least six. The handler maps that
+// (mapNodeConfigError).
+//
+// opts.Digest is the digest Proxmox is to compare, in Proxmox's own form: it
+// goes to assert_if_modified as it is. What a caller of the API sends back is not
+// that but a save token, and the handler turns one into the other.
+func (c *Client) SetNodeOptions(ctx context.Context, node string, opts NodeOptions) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	form, err := buildNodeOptionsForm(opts)
+	if err != nil {
+		return err
+	}
+	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/config", form, nil); err != nil {
+		return fmt.Errorf("set node %s options: %w", node, err)
+	}
+	return nil
+}
+
+// ValidateNodeOptions reports what SetNodeOptions would refuse about opts before
+// sending anything: every refusal listed there. It is for a caller that has
+// something to do between deciding to write and writing — the handler re-reads
+// the node config's digest to check a save token — and wants a refused request to
+// cost no Proxmox read. SetNodeOptions runs the same checks itself, so it stays
+// the choke point whether a caller asks first or not. A caller that means to
+// substitute a digest afterwards should give opts one of the length Proxmox's will
+// be (40 hex characters), and not the one it has now: the digest is part of the
+// encoded body whose size is checked, and the one it will carry is not the one it
+// has now.
+func ValidateNodeOptions(opts NodeOptions) error {
+	_, err := buildNodeOptionsForm(opts)
+	return err
+}
+
+// buildNodeOptionsForm is the form SetNodeOptions sends, and the one place that
+// decides whether it may be.
+func buildNodeOptionsForm(opts NodeOptions) (url.Values, error) {
+	form := url.Values{}
+	set := make(map[string]bool, len(nodeOptionSettings))
+	for _, s := range nodeOptionSettings {
+		v, ok := s.value(opts)
+		if !ok {
+			continue
+		}
+		set[s.key] = true
+		if !utf8.ValidString(v) {
+			return nil, fmt.Errorf("%w: %q is not valid UTF-8", ErrInvalidInput, s.key)
+		}
+		if s.key != "description" && hasLineBreakOrControl(v) {
+			return nil, fmt.Errorf("%w: %q cannot contain a line break or a control character", ErrInvalidInput, s.key)
+		}
+		form.Set(s.key, v)
+	}
+	if len(set) == 0 && len(opts.Delete) == 0 {
+		return nil, fmt.Errorf("%w: nothing to change: set a setting or name one in delete", ErrInvalidInput)
+	}
+	for _, k := range opts.Delete {
+		// The allow-list is the authority; the ACME check below only picks the
+		// message. Asking the ACME list first would refuse an ACME key even if
+		// one had slipped into deletableNodeOptionKeys, and so hide that
+		// corruption from every test that sends one — it is exactly that key
+		// this refusal exists to keep out.
+		if !deletableNodeOptionKeys[k] {
+			if deletableNodeACMEKeys[k] {
+				return nil, fmt.Errorf("%w: %q is an ACME setting; clear it through the node's ACME config", ErrInvalidInput, k)
+			}
+			return nil, fmt.Errorf("%w: %q is not a node option that can be cleared", ErrInvalidInput, k)
+		}
+		if set[k] {
+			return nil, fmt.Errorf("%w: %q cannot be set and cleared in the same request", ErrInvalidInput, k)
+		}
+	}
+	if len(opts.Delete) > 0 {
+		form.Set("delete", strings.Join(opts.Delete, ","))
+	}
+	if opts.Digest != "" {
+		form.Set("digest", opts.Digest)
+	}
+	if err := checkRequestSize(form); err != nil {
+		return nil, err
+	}
+	return form, nil
+}
+
+// GetNodeConfigDigest reads the digest of the node's config file as Proxmox
+// computes it now — the SHA1 of the whole file, ACME keys and notes included —
+// and nothing else: the reply carries the whole file, and everything but the
+// digest is dropped as it is decoded. It is empty for an online node that has no
+// config file, which answers {} with no digest.
+//
+// It exists for the save check. The digest this returns is Proxmox's raw one, and
+// it is what the PUT's `digest` parameter is compared with by assert_if_modified;
+// it must never reach a caller of the API, to whom it would be a way to test
+// guesses at the file's content.
+func (c *Client) GetNodeConfigDigest(ctx context.Context, node string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	var cfg struct {
+		Digest string `json:"digest"`
+	}
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/config", &cfg); err != nil {
+		return "", fmt.Errorf("get node %s config digest: %w", node, err)
+	}
+	return cfg.Digest, nil
 }
 
 func (c *Client) GetNodeCertificates(ctx context.Context, node string) ([]NodeCertificate, error) {

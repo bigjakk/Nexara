@@ -81,6 +81,9 @@ var nonUPIDStringMethods = map[string]bool{
 	"GetNodeAptChangelog": true, // returns package changelog text
 	"GetACMETOS":          true, // returns the ACME Terms-of-Service URL
 	"GetNodeReport":       true, // returns the pvereport bundle text, generated synchronously
+
+	// returns the digest of a node's config file, read for the save check
+	"GetNodeConfigDigest": true,
 }
 
 // parseGoFiles parses every non-test .go file in dir into *ast.File. It uses

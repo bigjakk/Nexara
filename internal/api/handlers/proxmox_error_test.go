@@ -29,6 +29,42 @@ func TestMapProxmoxError_InvalidInputIsClientError(t *testing.T) {
 	}
 }
 
+// A body the client refused to send because every Proxmox would refuse it is the
+// caller's own request: 413, and in the one message the 501 pveproxy answers an
+// older limit with gets (mapNodeConfigError), so a caller sees the same thing
+// whichever of the two caught it. It is not ErrInvalidInput's 400, and not a
+// gateway failure's 502.
+func TestMapProxmoxError_RequestTooLargeIsA413(t *testing.T) {
+	err := fmt.Errorf("set node pve-01 options: %w: the request is 600000 bytes once encoded, and Proxmox refuses a body over 524288",
+		proxmox.ErrRequestTooLarge)
+
+	var fe *fiber.Error
+	if !errors.As(mapProxmoxError(err), &fe) {
+		t.Fatalf("mapProxmoxError returned %T, want *fiber.Error", mapProxmoxError(err))
+	}
+	if fe.Code != fiber.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want %d", fe.Code, fiber.StatusRequestEntityTooLarge)
+	}
+	if fe.Message != proxmoxRequestTooLargeMessage {
+		t.Errorf("message = %q, want the one message for a request that is too large", fe.Message)
+	}
+	// The same answer through the node config mapper, and the same words as its
+	// 501 mapping.
+	var viaNodeConfig *fiber.Error
+	if !errors.As(mapNodeConfigError(err), &viaNodeConfig) || viaNodeConfig.Code != fiber.StatusRequestEntityTooLarge ||
+		viaNodeConfig.Message != proxmoxRequestTooLargeMessage {
+		t.Errorf("mapNodeConfigError = %v, want the same 413", mapNodeConfigError(err))
+	}
+	var via501 *fiber.Error
+	got501 := mapNodeConfigError(&proxmox.APIError{StatusCode: 501, Message: "for data too large"})
+	if !errors.As(got501, &via501) || via501.Message != fe.Message {
+		t.Errorf("the 501 says %v, the client's refusal says %q: they are one fact and should say it once", got501, fe.Message)
+	}
+	if strings.Contains(fe.Message, "600000") {
+		t.Errorf("message %q echoes the size of the request", fe.Message)
+	}
+}
+
 func TestMapProxmoxError_SentinelsKeepTheirStatus(t *testing.T) {
 	tests := []struct {
 		name string

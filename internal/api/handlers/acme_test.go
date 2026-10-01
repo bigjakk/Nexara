@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -36,11 +37,13 @@ import (
 // asserts the same thing about the same three fields, including that `digest`
 // round-trips from the GET into the PUT.
 
-// mapNodeConfigError turns PVE's digest-mismatch die into a 409. Everything
-// else has to keep the status mapProxmoxError gave it — the phrase list is the
-// only thing separating "someone else edited this node" from every other way
-// the write can fail, and answering 409 to an unrelated failure would tell the
-// operator to reload when reloading will not help.
+// mapNodeConfigError turns PVE's digest-mismatch die into a 409, and pveproxy's
+// refusal of a body over its post limit into a 413. Everything else has to keep
+// the status mapProxmoxError gave it — the phrase list is the only thing
+// separating "someone else edited this node" from every other way the write can
+// fail, and answering 409 to an unrelated failure would tell the operator to
+// reload when reloading will not help; and 501 is also how pveproxy says "no such
+// uri", which is not a request that is too large.
 func TestMapNodeConfigError(t *testing.T) {
 	tests := []struct {
 		name string
@@ -79,6 +82,44 @@ func TestMapNodeConfigError(t *testing.T) {
 			},
 			want: fiber.StatusBadGateway,
 		},
+		{
+			// pve-http-server's authenticate_and_handle_request answers a body over
+			// $limit_max_post with `error($reqstate, 501, "for data too large")`, and
+			// error() writes the reason into the body. The client wraps it, as it
+			// does every Proxmox error.
+			name: "a body pveproxy refuses as too large is a 413",
+			err: fmt.Errorf("set node pve-01 options: %w",
+				&proxmox.APIError{StatusCode: 501, Message: "for data too large"}),
+			want: fiber.StatusRequestEntityTooLarge,
+		},
+		{
+			name: "the phrase is matched whatever its case",
+			err:  &proxmox.APIError{StatusCode: 501, Message: "For Data Too Large"},
+			want: fiber.StatusRequestEntityTooLarge,
+		},
+		{
+			name: "any other 501 stays a 502",
+			err:  &proxmox.APIError{StatusCode: 501, Message: "no such uri"},
+			want: fiber.StatusBadGateway,
+		},
+		{
+			name: "a 501 for an unimplemented method stays a 502",
+			err:  &proxmox.APIError{StatusCode: 501, Message: "method 'PATCH' not available"},
+			want: fiber.StatusBadGateway,
+		},
+		{
+			name: "the phrase on another status stays a 502",
+			err:  &proxmox.APIError{StatusCode: 500, Message: "for data too large"},
+			want: fiber.StatusBadGateway,
+		},
+		{
+			name: "a digest mismatch is still a conflict when the client wrapped it",
+			err: fmt.Errorf("set node pve-01 options: %w", &proxmox.APIError{
+				StatusCode: 500,
+				Message:    `{"data":null,"message":"detected modified configuration - file changed by other user? Try again.\n"}`,
+			}),
+			want: fiber.StatusConflict,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -95,6 +136,26 @@ func TestMapNodeConfigError(t *testing.T) {
 
 	if err := mapNodeConfigError(nil); err != nil {
 		t.Errorf("mapNodeConfigError(nil) = %v, want nil", err)
+	}
+}
+
+// TestMapNodeConfigErrorBodyTooLargeSaysTheLimit pins what the caller is told. The
+// declared bound on the notes is 65536 characters, which is not what decides the
+// refusal, so the message has to say what does: the limit in bytes, that it moved
+// at Proxmox VE 8.4, that it is counted after encoding, and what to do about it.
+func TestMapNodeConfigErrorBodyTooLargeSaysTheLimit(t *testing.T) {
+	err := mapNodeConfigError(&proxmox.APIError{StatusCode: 501, Message: "for data too large"})
+	var fe *fiber.Error
+	if !errors.As(err, &fe) || fe.Code != fiber.StatusRequestEntityTooLarge {
+		t.Fatalf("mapNodeConfigError = %v, want a 413", err)
+	}
+	for _, want := range []string{"too large for Proxmox", "64 KiB", "512 KiB", "Proxmox VE 8.4", "after encoding", "shorten the notes"} {
+		if !strings.Contains(fe.Message, want) {
+			t.Errorf("the message %q does not say %q", fe.Message, want)
+		}
+	}
+	if strings.Contains(fe.Message, "for data too large") {
+		t.Errorf("the message %q repeats pveproxy's own words, which say nothing to the caller", fe.Message)
 	}
 }
 

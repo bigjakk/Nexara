@@ -2456,6 +2456,62 @@ type NodeACMEConfig struct {
 	Digest string `json:"digest,omitempty"`
 }
 
+// NodeOptions holds the five settings of GET/PUT /nodes/{node}/config that are
+// not ACME — the node's own file, /etc/pve/nodes/<node>/config — and that
+// file's digest. The ACME keys live in the same file and belong to
+// NodeACMEConfig; neither struct carries the other's.
+//
+// Read an absent field as UNSET, not as Proxmox's default: parse_config
+// returns only the keys the file holds, so a node that never had a delay set
+// has no startall-onboot-delay here although it waits 0 seconds. ($confdesc in
+// pve-manager's PVE/NodeConfig.pm gives the delay a default of 0 and the
+// ballooning target 80; a node with no location falls back to the
+// datacenter's.)
+//
+// The two integers are *FlexInt because the value is a config string that PVE
+// hands back as either "75" or 75, and because 0 is a real value for both:
+// nil means "absent" and a pointer to 0 means "0", which no plain int under
+// omitempty can say. FlexInt has only an UnmarshalJSON, so a set one is written
+// as a plain JSON number.
+//
+// On a write an EMPTY string leaves the key alone — every key is optional in
+// PVE's schema, so there is no string that means "remove" — and clearing one
+// goes through Delete, as for NodeACMEConfig.
+type NodeOptions struct {
+	// StartallOnbootDelay is the seconds the node waits, once booted, before it
+	// starts the guests marked to start on boot (0-300).
+	StartallOnbootDelay *FlexInt `json:"startall-onboot-delay,omitempty"`
+
+	// BallooningTarget is the RAM usage, in percent of the node's memory, that
+	// automatic ballooning aims for (0-100). Needs pve-manager 8.3.6.
+	BallooningTarget *FlexInt `json:"ballooning-target,omitempty"`
+
+	// WakeOnLAN is a property string, [mac=]<MAC>[,bind-interface=<iface>]
+	// [,broadcast-address=<IPv4>]. Proxmox validates it; it is passed through.
+	WakeOnLAN string `json:"wakeonlan,omitempty"`
+
+	// Location is a property string, latitude=<n>,longitude=<n>[,name=<name>]
+	// (pve-common's pve-node-location format). Needs pve-manager 9.1.13.
+	Location string `json:"location,omitempty"`
+
+	// Description is the node's notes, up to 65536 characters — PVE counts
+	// decoded characters, $confdesc's maxLength being 64*1024, not bytes. PVE
+	// stores it as '#' comment lines and hands it back with a "\n" after every
+	// line, the last one included.
+	Description string `json:"description,omitempty"`
+
+	// Delete names the settings to clear. Write-only, and the only spelling of
+	// "remove": see NodeACMEConfig.Delete. SetNodeOptions accepts only the five
+	// keys above.
+	Delete []string `json:"delete,omitempty"`
+
+	// Digest is the SHA1 of the WHOLE node config file, ACME keys included, so
+	// an ACME edit moves it too. GET returns it — and omits it while the node
+	// has no config file at all — and PUT checks it with assert_if_modified,
+	// which is skipped unless both sides are set.
+	Digest string `json:"digest,omitempty"`
+}
+
 // NodeCertificate represents a certificate from GET /nodes/{node}/certificates/info.
 type NodeCertificate struct {
 	Filename      string          `json:"filename,omitempty"`

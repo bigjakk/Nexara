@@ -64,6 +64,24 @@ func TestOptPointerHelpers(t *testing.T) {
 	if got := optIntPtr(2048, true); got == nil || *got != 2048 {
 		t.Errorf("optIntPtr(2048, true) = %v, want a pointer to 2048", got)
 	}
+
+	if got := optFlexIntPtr(0, false); got != nil {
+		t.Errorf("optFlexIntPtr(0, false) = %v, want nil — an unsupplied integer must not be sent as 0", *got)
+	}
+	// 0 is a value for both of NodeOptions' integers — a start-on-boot delay of
+	// 0 is how the delay is turned off — so "the caller sent 0" must survive as
+	// a pointer to 0, not collapse to nil.
+	if got := optFlexIntPtr(0, true); got == nil || *got != 0 {
+		t.Errorf("optFlexIntPtr(0, true) = %v, want a pointer to 0", got)
+	}
+	if got := optFlexIntPtr(300, true); got == nil || *got != 300 {
+		t.Errorf("optFlexIntPtr(300, true) = %v, want a pointer to 300", got)
+	}
+	// A value read alongside supplied=false is the schema's default or the zero
+	// value, and never reaches the Proxmox struct.
+	if got := optFlexIntPtr(80, false); got != nil {
+		t.Errorf("optFlexIntPtr(80, false) = %v, want nil — a default is not a supplied value", *got)
+	}
 }
 
 func TestStringMap(t *testing.T) {

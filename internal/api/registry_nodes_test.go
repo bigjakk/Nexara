@@ -24,7 +24,11 @@ import (
 // nodeRouteCount is how many endpoints registerNodeEndpoints declares. See
 // vmRouteCount in registry_vms_test.go for why the registry total is a sum
 // of per-domain constants rather than one number.
-const nodeRouteCount = 38
+//
+// It is the 38 routes migrated from hand-placed checks
+// (nodeLegacyPermissions) plus the 3 node options and notes routes, declared
+// from the start (nodeAddedPermissions).
+const nodeRouteCount = 41
 
 const (
 	testNodeRowID = "5c4b3a29-1817-4655-9443-000000000038"
@@ -155,6 +159,43 @@ var nodeIntendedPermissionChanges = map[string]struct {
 	},
 }
 
+// nodeAddedPermissions are the node routes that were declared from the day
+// they existed, so there was never a handler check to transcribe: each with the
+// permission it declares and why that one.
+//
+// They are kept out of nodeLegacyPermissions on purpose. That table is a
+// historical record of what the handlers enforced at be1379f, and a route that
+// never had a handler in it would turn the record into a statement of intent,
+// which its own comment says it must not be. The two maps are disjoint, and
+// between them hold every route registerNodeEndpoints declares.
+//
+// What no test here can judge is whether the permission is the RIGHT one; see
+// nodeIntendedPermissionChanges. Adding an entry is a review decision, and the
+// reason is what there is to review.
+var nodeAddedPermissions = map[string]struct {
+	permission string
+	reason     string
+}{
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/options": {
+		"view:node",
+		"a node's settings are read like its DNS and timezone, on the node resource",
+	},
+	"PUT /api/v1/clusters/:cluster_id/nodes/:node_name/options": {
+		"manage:node",
+		"a node's settings are written like its DNS and timezone, on the node resource — not on " +
+			"certificate, which gates the ACME half of the same config file",
+	},
+	// The one read in this table that is NOT view:node, and the reason it exists:
+	// the notes are free text that old nodes sometimes hold credentials in, and
+	// every built-in Viewer holds view:node. The operator decided they are read
+	// with manage:node, the permission that writes them.
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/notes": {
+		"manage:node",
+		"a node's notes can hold credentials and every built-in Viewer holds view:node, so they are read " +
+			"with the permission that writes them",
+	},
+}
+
 // declaredNodeEndpoints returns every declaration in this domain, keyed
 // "METHOD path".
 //
@@ -162,16 +203,18 @@ var nodeIntendedPermissionChanges = map[string]struct {
 // registerNodeEndpoints, which the path prefix alone cannot do: the seven
 // node-hardware listings the VM dialogs use (/bridges, /hardware/*, …) sit
 // under the same prefix and are declared in registry_vms.go. The
-// difference that separates them is the tally table, so anything under the
-// prefix that is not in it is reported rather than silently filtered — see
-// the final loop of TestNodeRoutesDeclareTheSamePermissionTheyEnforced.
+// difference that separates them is the tally tables, so anything under the
+// prefix that is in none of them is reported rather than silently filtered —
+// see TestEveryDeclaredNodeRouteIsInTheTally.
 func declaredNodeEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
 	s := newRouteStubServer(t)
 	out := map[string]Endpoint{}
 	for _, e := range s.registry.Endpoints() {
 		key := e.Method + " " + e.Path
-		if _, ours := nodeLegacyPermissions[key]; ours {
+		_, legacy := nodeLegacyPermissions[key]
+		_, added := nodeAddedPermissions[key]
+		if legacy || added {
 			out[key] = e
 		}
 	}
@@ -192,9 +235,17 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	if len(declared) != nodeRouteCount {
 		t.Fatalf("the registry declares %d node routes, want %d", len(declared), nodeRouteCount)
 	}
-	if len(nodeLegacyPermissions) != nodeRouteCount {
-		t.Fatalf("nodeLegacyPermissions has %d entries, want %d — the table must cover every route",
-			len(nodeLegacyPermissions), nodeRouteCount)
+	if len(nodeLegacyPermissions)+len(nodeAddedPermissions) != nodeRouteCount {
+		t.Fatalf("nodeLegacyPermissions has %d entries and nodeAddedPermissions %d, want %d between them — "+
+			"the tables must cover every route", len(nodeLegacyPermissions), len(nodeAddedPermissions), nodeRouteCount)
+	}
+	// Disjoint: a route in both would be counted twice towards the total above
+	// while a third one went unaccounted for, and would be held to the historical
+	// record AND to a statement of intent.
+	for key := range nodeAddedPermissions {
+		if _, dup := nodeLegacyPermissions[key]; dup {
+			t.Errorf("%s is in both nodeLegacyPermissions and nodeAddedPermissions", key)
+		}
 	}
 
 	// The divergence map only means anything against the legacy record: an
@@ -276,6 +327,31 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 		}
 	}
 
+	// The routes declared from the start have no handler check to compare with,
+	// so they are held to the permission recorded for them instead. They stay out
+	// of byPermission: that breakdown is the legacy shape, and a count that moved
+	// with every new route would stop saying which migrated pair drifted.
+	for key, want := range nodeAddedPermissions {
+		if want.reason == "" {
+			t.Errorf("nodeAddedPermissions[%s] has no reason", key)
+		}
+		e, ok := declared[key]
+		if !ok {
+			t.Errorf("%s is expected in the registry (nodeAddedPermissions) but is not declared", key)
+			continue
+		}
+		if e.Permissions.Check == nil {
+			t.Errorf("%s declares %q rather than a Check; its cluster is the first parameter in its own path",
+				key, e.Permissions.Describe())
+			continue
+		}
+		if got := e.Permissions.Describe(); got != want.permission {
+			t.Errorf("%s declares %q, want %q (%s)", key, got, want.permission, want.reason)
+		}
+		if e.Permissions.Check.Scope != ScopeCluster {
+			t.Errorf("%s is %s-scoped; a node belongs to the cluster in its path", key, e.Permissions.Check.Scope)
+		}
+	}
 }
 
 // TestEveryDeclaredNodeRouteIsInTheTally is the other direction of the
@@ -319,6 +395,9 @@ func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 		}
 		seen++
 		_, inNodeTally := nodeLegacyPermissions[key]
+		if _, added := nodeAddedPermissions[key]; added {
+			inNodeTally = true
+		}
 		_, inACMETally := acmeLegacyPermissions[key]
 		_, inRollingTally := rollingLegacyPermissions[key]
 		_, inAptTally := aptLegacyPermissions[key]
@@ -327,9 +406,9 @@ func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 			continue
 		}
 		t.Errorf("%s is declared under the node scope but is in none of nodeLegacyPermissions, "+
-			"acmeLegacyPermissions, rollingLegacyPermissions, aptLegacyPermissions, "+
-			"metricsLegacyPermissions or the VM-dialog hardware set — add it to its domain's tally, "+
-			"or the tally stops being a review surface", key)
+			"nodeAddedPermissions, acmeLegacyPermissions, rollingLegacyPermissions, "+
+			"aptLegacyPermissions, metricsLegacyPermissions or the VM-dialog hardware set — add it "+
+			"to its domain's tally, or the tally stops being a review surface", key)
 	}
 	if seen == 0 {
 		t.Fatal("no declared route matched the node scope; this guard would pass vacuously")

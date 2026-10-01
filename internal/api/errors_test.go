@@ -84,6 +84,12 @@ var statusNamesTheAPISends = map[string]int{
 	"StatusServiceUnavailable":   fiber.StatusServiceUnavailable,
 	"ErrRequestEntityTooLarge":   fiber.ErrRequestEntityTooLarge.Code,
 	"ErrUpgradeRequired":         fiber.ErrUpgradeRequired.Code,
+
+	// mapNodeConfigError (handlers/acme.go): 413 is what a body pveproxy refuses as
+	// too large is answered with, and 501 is the status pveproxy refuses it with,
+	// named there so that it is told apart from the other 501s pveproxy sends.
+	"StatusRequestEntityTooLarge": fiber.StatusRequestEntityTooLarge,
+	"StatusNotImplemented":        fiber.StatusNotImplemented,
 }
 
 // statusesFiberSendsThroughErrorHandler are the error statuses Fiber hands

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // Helpers shared by the handlers that take their request through the
@@ -74,6 +75,21 @@ func optInt64Ptr(value int64, supplied bool) *int64 {
 		return nil
 	}
 	return &value
+}
+
+// optFlexIntPtr is optIntPtr for a parameter whose Proxmox struct field is a
+// *proxmox.FlexInt — the two integers of proxmox.NodeOptions, which Proxmox
+// hands back as either a number or a string. Read the same way:
+// optFlexIntPtr(p.OptInt("ballooning-target")).
+//
+// 0 is a value, not an absent one: a node whose start-on-boot delay is being
+// set to 0 sends the key, and a pointer to 0 is how that survives to the form.
+func optFlexIntPtr(value int64, supplied bool) *proxmox.FlexInt {
+	if !supplied {
+		return nil
+	}
+	n := proxmox.FlexInt(value)
+	return &n
 }
 
 // optStringPtr is optBoolPtr for a string parameter, read the same way:

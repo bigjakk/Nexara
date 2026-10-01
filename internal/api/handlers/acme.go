@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -40,19 +42,55 @@ func (h *ACMEHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*pr
 // ACME settings produce it routinely.
 //
 // Note the digest covers the WHOLE node config file, not just the ACME keys, so
-// an operator editing the node's Notes in the PVE UI can trigger this too. The
-// message says "changed" rather than naming ACME for that reason.
+// an operator editing the node's Notes in the PVE UI can trigger this too, and
+// so can a save of the node's options (NodeHandler.SetNodeOptions, which maps
+// with the same mapper) — an ACME edit and an options edit each make the other's
+// pending save conflict. The message says "changed" rather than naming ACME for
+// that reason.
 //
 // The die string is pve-common's, not the node config's, so the firewall rule
 // mapper (mapFirewallRuleError, firewall.go) matches the same phrase for a rule
 // list digest that no longer matches.
 var staleDigestPhrases = []string{"detected modified configuration"}
 
-// mapNodeConfigError adds the digest-mismatch case to the shared mapping.
+// proxmoxBodyTooLargePhrase is what pveproxy answers a request whose body is
+// over its post limit: 501, with the reason written into the body (pve-http-server
+// src/PVE/APIServer/AnyEvent.pm — authenticate_and_handle_request calls
+// `$self->error($reqstate, 501, "for data too large")`, and error() puts `$msg`
+// in the body when no content is given), so checkStatus hands back an APIError
+// with StatusCode 501 and exactly this Message.
+//
+// The limit is `$limit_max_post` in the same file: 64 KiB before
+// libpve-http-server-perl 5.2.1 (commit 2650923, "fix #6230: increase allowed
+// post size", 2025-04-03, about Proxmox VE 8.4) and 512 KiB since. It is checked
+// against Content-Length, so it is the FORM-ENCODED body that is counted: a
+// line break takes three bytes (%0A) and a non-ASCII character at least six
+// (%C3%A9 for é), which is how notes well inside the declared 65536 characters
+// can be over it.
+const proxmoxBodyTooLargePhrase = "for data too large"
+
+// isProxmoxBodyTooLarge reports whether err is pveproxy refusing the size of the
+// request body. Both halves are needed: 501 is also how pveproxy says "no such
+// uri" and "method not available", and a 501 that carries another sentence is
+// one of those, not this.
+func isProxmoxBodyTooLarge(err error) bool {
+	var apiErr *proxmox.APIError
+	return errors.As(err, &apiErr) &&
+		apiErr.StatusCode == fiber.StatusNotImplemented &&
+		strings.Contains(strings.ToLower(apiErr.Message), proxmoxBodyTooLargePhrase)
+}
+
+// mapNodeConfigError adds the two answers a write of the node's config file can
+// get that the shared mapping would call a gateway failure: the digest mismatch
+// (409), and a body pveproxy refuses as too large (413). The first is the
+// compare-and-swap doing its job; the second is the caller's own request, which
+// no retry will shrink. It serves both writers of the file, the ACME settings and
+// the node's options.
 func mapNodeConfigError(err error) error {
-	return mapProxmoxDieError(fiber.StatusConflict,
-		"The node's configuration changed since it was read — reload and try again.",
-		staleDigestPhrases, err)
+	if isProxmoxBodyTooLarge(err) {
+		return fiber.NewError(fiber.StatusRequestEntityTooLarge, proxmoxRequestTooLargeMessage)
+	}
+	return mapProxmoxDieError(fiber.StatusConflict, nodeConfigChangedMessage, staleDigestPhrases, err)
 }
 
 // --- ACME Accounts ---
@@ -384,12 +422,44 @@ func (h *ACMEHandler) GetTOS(c fiber.Ctx, p *apischema.Params) error {
 // --- Node ACME Config ---
 
 // GetNodeACMEConfig handles GET /clusters/:cluster_id/nodes/:node/acme-config.
+//
+// The `digest` it returns is the save token (node_config_token.go), and only to a
+// caller who holds manage:certificate, the permission the compare-and-swap PUT is
+// gated on. Proxmox's own digest is never returned. It is the unsalted SHA1 of the
+// WHOLE node config file, which holds the node's notes, and Proxmox writes that
+// file deterministically (the notes as '#' lines first, then every other key
+// sorted), so a caller who can read the rest of it can hash a guess at the notes
+// and compare, offline, with no rate limit and no audit row. A built-in Viewer
+// holds view:certificate and so reads the ACME settings here, and view:node and so
+// reads the other settings through .../options; and a caller holding
+// manage:certificate without manage:node would otherwise have the digest, the rest
+// of the file and a PUT that tells a hit from a miss by its 409. The token is an
+// HMAC of the digest under a key only Nexara has, bound to the cluster and the
+// node, and nothing can be tested against it. The settings read
+// (NodeHandler.GetNodeOptions) returns the same token to its writers, and the two
+// have to agree on all of it, or the oracle stays open through the one that does
+// not. The notes are read under manage:node because old ones sometimes hold
+// credentials.
+//
+// It is withheld from a caller who cannot write as well, which would not strictly
+// be needed: a token that changed whenever the file did would tell a Viewer for
+// free whether a node has notes and when they change, and a Viewer has no use for
+// one. The permission is the path's cluster's, read with hasClusterPerm
+// (TestNodeConfigTokenPermissionIsScopedToThePathsCluster).
+//
+// The permission is read before anything is sent to Proxmox, and a lookup that
+// fails fails the request: leaving the token out instead would turn a manager's
+// next save into an unconditional write, the compare-and-swap failing open.
 func (h *ACMEHandler) GetNodeACMEConfig(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
 		return err
 	}
 	node := p.String("node")
+	canWrite, err := hasClusterPerm(c, "manage", "certificate", clusterID)
+	if err != nil {
+		return err
+	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -398,6 +468,16 @@ func (h *ACMEHandler) GetNodeACMEConfig(c fiber.Ctx, p *apischema.Params) error 
 	if err != nil {
 		return mapProxmoxError(err)
 	}
+	// cfg.Digest is Proxmox's raw digest, and is replaced, not filtered: what the
+	// response carries is the token, or nothing. omitempty makes "nothing" an
+	// absent key, so the page cannot mistake a missing token for one to send back.
+	token := ""
+	if canWrite {
+		if token, err = readNodeConfigToken(h.encryptionKey, clusterID, node, cfg.Digest); err != nil {
+			return err
+		}
+	}
+	cfg.Digest = token
 	return c.JSON(cfg)
 }
 
@@ -408,6 +488,8 @@ func (h *ACMEHandler) SetNodeACMEConfig(c fiber.Ctx, p *apischema.Params) error 
 		return err
 	}
 	node := p.String("node")
+	// Digest is what a read returned in its `digest` field, the save token; it is
+	// turned into the digest Proxmox compares below.
 	req := proxmox.NodeACMEConfig{
 		ACME:        p.String("acme"),
 		ACMEDomain0: p.String("acmedomain0"),
@@ -423,11 +505,39 @@ func (h *ACMEHandler) SetNodeACMEConfig(c fiber.Ctx, p *apischema.Params) error 
 	if err != nil {
 		return err
 	}
-	// The delete allow-list and the "set and cleared in one request" refusal
-	// live in proxmox.SetNodeACMEConfig, not here. They are choke-point checks
-	// that protect every caller of the client — see deletableNodeACMEKeys — and
-	// the schema deliberately does not restate either: it bounds the list, it
-	// does not decide what may be in it.
+	// The delete allow-list, the "set and cleared in one request" refusal, the
+	// "nothing to change" refusal and the size refusal live in
+	// proxmox.SetNodeACMEConfig, not here. They are choke-point checks that protect
+	// every caller of the client — see deletableNodeACMEKeys — and the schema
+	// deliberately does not restate any of them: it bounds the list, it does not
+	// decide what may be in it.
+	//
+	// They run again here, ahead of the save check, and not only inside
+	// SetNodeACMEConfig where they have to stay: the check re-reads the node's
+	// digest from Proxmox, and a request that is going to be refused anyway should
+	// cost that read nothing. The digest is swapped for a 40-character placeholder,
+	// since the one the request carries is about to be replaced by Proxmox's own,
+	// which is that long, and the size refusal has to count the request as Proxmox
+	// will be sent it (nodeConfigValidationDigest). They sit after
+	// createProxmoxClient like every refusal, which is what the route sweep needs.
+	checked := req
+	checked.Digest = nodeConfigValidationDigest(req.Digest)
+	if err := proxmox.ValidateNodeACMEConfig(checked); err != nil {
+		return mapNodeConfigError(err)
+	}
+	// The save check: a token is only good for the file as it was when it was
+	// read, and what goes to Proxmox is the file's digest as it is now. A caller
+	// that echoes back what a read returned is unaffected; one that sends Proxmox's
+	// own raw digest, which no read of Nexara's returns, is always told 409.
+	req.Digest, err = nodeConfigSaveDigest(c.Context(), pxClient, h.encryptionKey, clusterID, node, req.Digest)
+	if err != nil {
+		return err
+	}
+	// The audit row is built from a copy without the digest, taken here, before the
+	// write: req.Digest is Proxmox's raw digest from this point on, and nothing
+	// after the write may read req (nodeACMEConfigForAudit;
+	// TestGuard_NodeConfigAuditIsBuiltFromACopyWithoutTheDigest).
+	audited := nodeACMEConfigForAudit(req)
 	if err := pxClient.SetNodeACMEConfig(c.Context(), node, req); err != nil {
 		return mapNodeConfigError(err)
 	}
@@ -441,13 +551,13 @@ func (h *ACMEHandler) SetNodeACMEConfig(c fiber.Ctx, p *apischema.Params) error 
 	// Both keys are non-nil slices so "nothing set" and "nothing cleared" read
 	// as [] rather than one of them being null: a reader filtering on the row
 	// should not have to handle two spellings of empty.
-	cleared := req.Delete
+	cleared := audited.Delete
 	if cleared == nil {
 		cleared = []string{}
 	}
 	details, _ := json.Marshal(map[string]any{
 		"node":     node,
-		"settings": proxmox.NodeACMESetKeys(req),
+		"settings": proxmox.NodeACMESetKeys(audited),
 		"cleared":  cleared,
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_config", node, "updated", details)

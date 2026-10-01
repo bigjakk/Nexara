@@ -40,7 +40,7 @@ import (
 // recognised — a node parameter given a looser schema, a route dropped or
 // added — moves a number somebody has to look at and update deliberately.
 const (
-	nodeNamePathRouteCount  = 59
+	nodeNamePathRouteCount  = 62
 	nodeNameQueryRouteCount = 6
 )
 

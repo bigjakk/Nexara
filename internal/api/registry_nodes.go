@@ -128,14 +128,19 @@ func syslogTimeParam(description string) apischema.Property {
 	return optString(64, "<YYYY-MM-DD[ HH:MM[:SS]]|-1h|30m ago|unix seconds>", description)
 }
 
-// registerNodeEndpoints declares the 38 node routes served by NodeHandler.
+// registerNodeEndpoints declares the 41 node routes served by NodeHandler.
 //
 // Every one of them is the uniform shape: resolve the cluster from the
-// path, then one static requireClusterPerm. So all 38 declare a plain
+// path, then one static requireClusterPerm. So all 41 declare a plain
 // cluster-scoped Check and every hand-placed call is gone from the handler
 // bodies — nothing here is Deferred, Advisory, Public or SelfService, and
 // nothing is global: a node belongs to exactly one cluster, and that
 // cluster is the first placeholder in every path.
+//
+// 38 of the 41 were migrated from hand-placed checks. The last three, the node
+// options and notes routes, were born declared: there is no handler check of
+// theirs to compare against, so registry_nodes_test.go records them apart from
+// that historical table (nodeAddedPermissions).
 //
 // Two permission choices are worth naming because they are not the
 // obvious one:
@@ -314,6 +319,92 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 			},
 		}),
 		Handler: h.EvacuateNode,
+	})
+
+	// ── Node options and notes ────────────────────────────────────────
+	// The node's own settings and its notes. They live in the same file as the
+	// node's ACME settings (/etc/pve/nodes/<node>/config), which
+	// registry_acme.go declares under .../acme-config: the routes share one
+	// compare-and-swap, so each one's sees the others' writes, and the delete
+	// allow-lists of the two writers are kept disjoint in the client
+	// (deletableNodeOptionKeys, deletableNodeACMEKeys), which is where every
+	// refusal below is made.
+	//
+	// What the reads return as `digest`, and the writes take, is a save token and
+	// not Proxmox's digest of the file (handlers/node_config_token.go). Proxmox's
+	// is the unsalted SHA1 of the whole file, notes included, which it writes
+	// deterministically, so a caller shown it could test guesses at the notes
+	// against it; the token is an HMAC of it under a key only Nexara has, bound to
+	// the cluster and the node, and the save re-reads the digest to check it.
+	//
+	// The notes are read on their own route and under their own permission.
+	// Old notes sometimes hold credentials, and view:node — which the settings
+	// are read under — is held by every built-in Viewer, an SSO user
+	// provisioned on first login included. Both reads are the one client call;
+	// what each route sends is decided by its own response type
+	// (nodeOptionsResponse, nodeNotesResponse in the handler), so the settings
+	// never carry the notes along.
+	//
+	// Not acmeView()/acmeManage() and not the :node spelling: those tie a route
+	// to the certificate permissions and to the ACME tally in
+	// registry_acme_test.go, and these are node settings.
+	reg.Register(Endpoint{
+		Method: fiber.MethodGet,
+		Path:   nodeScope + "/:node_name/options",
+		Description: "Read one node's own settings — the delay before it starts its on-boot guests, the " +
+			"auto-ballooning target, Wake-on-LAN and location — with `digest`, a save token for the node " +
+			"config file they live in. The notes are not in this answer: they are read through .../notes, " +
+			"which needs manage:node. Only the settings the node has are returned: an absent one is unset " +
+			"and Proxmox's default applies. `digest` is an opaque token and not Proxmox's own digest of the " +
+			"file, which Nexara never returns: that one hashes the whole file, the notes included, and would " +
+			"let a caller test guesses at them. Send the token back on the PUT, exactly as it was returned, " +
+			"to make the write a compare-and-swap. It is returned only to a caller who holds manage:node, " +
+			"who is the one who can use it, and is absent while the node has no config file, which includes " +
+			"a file that has been emptied: Proxmox reads that as none. The node's ACME settings live in the " +
+			"same file and are read through .../acme-config instead. The node must be online, and the " +
+			"cluster's Proxmox API token must hold Sys.Audit on /.",
+		Group:       "Nodes",
+		Permissions: clusterCheck("view", "node"),
+		Parameters:  nodeParams(nil),
+		Handler:     h.GetNodeOptions,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodGet,
+		Path:   nodeScope + "/:node_name/notes",
+		Description: "Read one node's notes, with `digest`, a save token for the node config file they live " +
+			"in. This needs manage:node and not view:node: the notes are free text that sometimes holds " +
+			"credentials, and every built-in Viewer holds view:node. A node with no notes answers without " +
+			"a description, and `digest` is absent while the node has no config file, or an emptied one. " +
+			"`digest` is an opaque token and not Proxmox's own digest of the file, which Nexara never " +
+			"returns; send it back on the PUT, exactly as it was returned, to make the write a " +
+			"compare-and-swap. The answer is marked no-store. The settings are read through .../options. " +
+			"The node must be online, and the cluster's Proxmox API token must hold Sys.Audit on /.",
+		Group:       "Nodes",
+		Permissions: clusterCheck("manage", "node"),
+		Parameters:  nodeParams(nil),
+		Handler:     h.GetNodeNotes,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPut,
+		Path:   nodeScope + "/:node_name/options",
+		Description: "Change one node's own settings and notes. An omitted or EMPTY field leaves the stored " +
+			"value alone, and 0 is written like any other value; clearing a setting means naming it in " +
+			"`delete`. A request that sets nothing and clears nothing is refused, because Proxmox would " +
+			"rewrite the whole config file for it. Naming a key in both is refused rather than silently " +
+			"resolved as a delete, which is what Proxmox would do. Sending `digest` makes the write a " +
+			"compare-and-swap: it is the save token a read returned, sent back unchanged — not Proxmox's own " +
+			"digest, which no read returns and which is always answered 409 — and Nexara checks it against " +
+			"the node config as it is now, answering 409, with nothing written, when the config changed " +
+			"since the token was read (an ACME settings change counts, as they share the file) or the token " +
+			"is not one a read returned. Omitting it writes unconditionally. A Proxmox VE too old to know a " +
+			"setting refuses it with 400 naming it, and a request body over Proxmox's limit is answered " +
+			"413. The notes are written here, as `description`, and read back through .../notes, which " +
+			"needs manage:node. The node must be online, and the cluster's Proxmox API token must hold " +
+			"Sys.Modify on /, which Proxmox's Administrator role has and PVEAdmin does not.",
+		Group:       "Nodes",
+		Permissions: clusterCheck("manage", "node"),
+		Parameters:  nodeParams(nodeOptionsParams()),
+		Handler:     h.SetNodeOptions,
 	})
 
 	// ── Disks, ZFS, LVM and directories ───────────────────────────────
@@ -783,4 +874,89 @@ func updateNodeFirewallRuleParams() apischema.Properties {
 	p["pos"] = firewallRulePosParam
 	p["digest"] = firewallRuleDigestParam
 	return p
+}
+
+// nodeOptionsParams is the body of PUT .../nodes/:node_name/options.
+//
+// The keys and their bounds are `$confdesc` in pve-manager's PVE/NodeConfig.pm,
+// read 2026-10-01: startall-onboot-delay is an integer 0-300, ballooning-target
+// an integer 0-100, description a string of at most 64*1024 characters,
+// wakeonlan a property string with a required mac and optional bind-interface
+// and broadcast-address, location the pve-node-location format. Every one is
+// optional there.
+//
+// No parameter carries a Default, for the reason nodeACMEConfigParams gives and
+// one more: the handler reads the two integers with p.OptInt, which a Default
+// cannot fool (apischema.Property.Default), so a declared one would only
+// document a second copy of Proxmox's own — and 0 is a value here, so a
+// "default of 0" on the delay would read as a request to write it.
+//
+// wakeonlan and location are free of any Format or Pattern on purpose. Both are
+// property strings Proxmox owns and versions — bind-interface and
+// broadcast-address arrived in 8.1.9, location in 9.1.13 — and validates with
+// its own messages, so a pattern here could only restate (and date) a rule the
+// cluster in front of the operator applies for itself. The cap is a bound on the
+// request, not a restatement of the format; see clusterOptionString. The one
+// refusal that is Nexara's own, and not Proxmox's — no line break or other
+// control character in either — is the client's, with the others
+// (hasLineBreakOrControl in internal/proxmox), and is only described here.
+func nodeOptionsParams() apischema.Properties {
+	return apischema.Properties{
+		"startall-onboot-delay": optCount(300,
+			"Seconds the node waits, once booted, before it starts the guests marked to start on boot. "+
+				"0 is written like any other value; omitted leaves the stored delay alone. "+
+				"Unset, Proxmox waits 0 seconds."),
+		"ballooning-target": optCount(100,
+			"RAM usage, in percent of the node's memory, that automatic ballooning aims for. "+
+				"0 is written like any other value; omitted leaves the stored target alone. "+
+				"Unset, Proxmox aims for 80. Needs pve-manager 8.3.6 or later."),
+		"wakeonlan": optString(256, "[mac=]<MAC>[,bind-interface=<iface>][,broadcast-address=<IPv4>]",
+			"Wake-on-LAN settings, as a Proxmox property string. mac is the MAC address this node is woken "+
+				"by, and is required — it is the default key, so a bare MAC is enough. bind-interface and "+
+				"broadcast-address (both need pve-manager 8.1.9) are what this node uses when it SENDS a wake "+
+				"packet to another node: Proxmox reads mac from the node being woken and those two from the "+
+				"node that sends, so setting them on a node also means entering that node's own MAC. "+
+				"Proxmox validates it. No line breaks or other control characters. Empty or omitted leaves "+
+				"it alone; naming it in delete removes it."),
+		"location": optString(512, "latitude=<number>,longitude=<number>[,name=<name>]",
+			"The node's location, as a Proxmox property string: latitude, longitude and an optional name "+
+				"of up to 128 characters. Needs pve-manager 9.1.13 or later. Proxmox validates it. No line "+
+				"breaks or other control characters. Empty or omitted leaves it alone; naming it in delete "+
+				"removes it."),
+		"description": optString(65536, "<string>",
+			"Free-text notes, as Proxmox's node Notes panel shows them; line breaks are kept. Up to 65536 "+
+				"characters, but Proxmox refuses a request body over 64 KiB (512 KiB from Proxmox VE 8.4) "+
+				"counted after encoding, where a line break or a non-ASCII character takes several bytes, "+
+				"and that is answered 413. Empty or omitted leaves the notes alone; naming description in "+
+				"delete removes them. Read back through .../notes, which needs manage:node."),
+		"delete": {
+			Type:     apischema.Array,
+			Optional: true,
+			// A bound on the list, not a restatement of what may be in it:
+			// proxmox.SetNodeOptions owns the membership rule
+			// (deletableNodeOptionKeys), the refusal of an ACME key and the
+			// refusal of a key that is being SET in the same request — a
+			// cross-field rule apischema cannot state, and one that matters
+			// because PVE applies `delete` after the assignments and would
+			// silently drop the value. No Enum for the same reason as
+			// nodeACMEConfigParams' delete: the client is the choke point.
+			MaxLength: apischema.Ptr(16),
+			Items: &apischema.Property{
+				Type:      apischema.String,
+				MaxLength: apischema.Ptr(32),
+				Typetext:  "<key>",
+			},
+			Typetext: "<key>[,<key>…]",
+			Description: "Settings to clear. Only startall-onboot-delay, ballooning-target, wakeonlan, " +
+				"location and description may be named; anything else is refused, because PVE applies " +
+				"delete to the WHOLE node config and the ACME settings live in the same file — clear " +
+				"those through .../acme-config.",
+		},
+		"digest": optString(128, "<token>",
+			"The save token a read of this node's config returned as `digest`, sent back unchanged. It is "+
+				"opaque, and not Proxmox's own digest of the file, which Nexara never returns and which would "+
+				"let a caller test guesses at the file's content, notes included. Sending it makes the write "+
+				"a compare-and-swap, answered 409 if the config changed since the token was read or the "+
+				"token is not one a read returned; omitting it overwrites unconditionally."),
+	}
 }

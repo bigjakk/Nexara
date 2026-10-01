@@ -481,6 +481,274 @@ func (h *NodeHandler) SetNodeTimezone(c fiber.Ctx, p *apischema.Params) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
+// nodeOptionsResponse is what GET .../options sends: the four settings, the save
+// token for the node config file they live in for a caller who may write, and
+// never the notes. Those are GET .../notes, under manage:node — old notes
+// sometimes hold credentials, and view:node, which this route is gated on, is
+// held by every built-in Viewer.
+//
+// It is its own type, filled field by field by nodeOptionsView, rather than
+// proxmox.NodeOptions serialised with one field left out: the other way round, a
+// field added to NodeOptions reaches every Viewer until somebody remembers to
+// leave it out, and this way it reaches nobody until somebody decides which
+// view it belongs to (TestNodeViewsClassifyEveryNodeOptionsField).
+//
+// The integers are *int so that a setting at 0 is sent as 0 and an unset one is
+// absent: omitempty drops a nil pointer and keeps a pointer to 0.
+//
+// Digest is the save token (node_config_token.go), not Proxmox's own digest of the
+// file. The view is never handed that one: nodeOptionsView does not read
+// NodeOptions.Digest at all.
+type nodeOptionsResponse struct {
+	StartallOnbootDelay *int   `json:"startall-onboot-delay,omitempty"`
+	BallooningTarget    *int   `json:"ballooning-target,omitempty"`
+	WakeOnLAN           string `json:"wakeonlan,omitempty"`
+	Location            string `json:"location,omitempty"`
+	Digest              string `json:"digest,omitempty"`
+}
+
+// nodeNotesResponse is what GET .../notes sends: the notes, exactly as Proxmox
+// stores them, and the save token for the node config file they live in — which
+// the Notes dialog pins for its compare-and-swap, the file being the one the
+// settings share. Nothing else: not one of the settings, which GET .../options
+// serves under view:node. Digest is the save token, as above.
+type nodeNotesResponse struct {
+	Description string `json:"description,omitempty"`
+	Digest      string `json:"digest,omitempty"`
+}
+
+// nodeOptionsView is the options half of a node config read. token is what the
+// caller is to be shown as `digest`: the save token for a caller who may write,
+// "" for one who may not (GetNodeOptions decides, for the reason it gives). The
+// view never reads opts.Digest, Proxmox's raw digest, so there is no way for it to
+// reach a caller by this path. Pure, so the exact key set is testable without a
+// Proxmox; pinned by TestNodeOptionsView, by
+// TestNodeViewsClassifyEveryNodeOptionsField across the read type and, through the
+// real route, by TestNodeOptionsReadShowsOnlyItsOwnKeys and
+// TestNodeConfigReadsReturnTheSaveToken in internal/api.
+func nodeOptionsView(opts proxmox.NodeOptions, token string) nodeOptionsResponse {
+	view := nodeOptionsResponse{
+		WakeOnLAN: opts.WakeOnLAN,
+		Location:  opts.Location,
+		Digest:    token,
+	}
+	if opts.StartallOnbootDelay != nil {
+		n := int(*opts.StartallOnbootDelay)
+		view.StartallOnbootDelay = &n
+	}
+	if opts.BallooningTarget != nil {
+		n := int(*opts.BallooningTarget)
+		view.BallooningTarget = &n
+	}
+	return view
+}
+
+// nodeNotesView is the notes half of a node config read, with the save token as
+// its `digest`. Pure, and pinned like nodeOptionsView, by TestNodeNotesView and
+// TestNodeNotesReadIsManageNodeOnly. It does not read opts.Digest either.
+func nodeNotesView(opts proxmox.NodeOptions, token string) nodeNotesResponse {
+	return nodeNotesResponse{Description: opts.Description, Digest: token}
+}
+
+// GetNodeOptions handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/options.
+//
+// One read of the node config, shaped by nodeOptionsView: the notes Proxmox
+// returns in the same reply are dropped here, and served by GetNodeNotes.
+//
+// The `digest` it returns is the save token, and only to a caller who holds
+// manage:node, the permission the route's one user of it, the compare-and-swap
+// PUT, is gated on. Proxmox's own digest is never returned: it is the unsalted
+// SHA1 of the WHOLE node config file, and Proxmox writes that file
+// deterministically — the notes as '#' lines first, then every other key sorted
+// (write_node_config) — so a caller who can read the rest of the file can hash a
+// guess at the notes and compare, offline, with no rate limit and no audit row.
+// The token is an HMAC of it under a key only Nexara has, bound to this cluster and
+// this node (node_config_token.go), and nothing can be tested against it.
+//
+// It is withheld from a caller who cannot write as well, which would not strictly
+// be needed. A token that changed whenever the file did would tell a Viewer for
+// free whether a node has notes and when they change, and a Viewer has no use for
+// one: only the PUT takes it. The permission is the path's cluster's, read with
+// hasClusterPerm (TestNodeConfigTokenPermissionIsScopedToThePathsCluster).
+//
+// The permission is read before anything is sent to Proxmox, and a lookup that
+// fails fails the request. Leaving the token out instead would turn a manager's
+// next save into an unconditional write — the compare-and-swap failing open.
+func (h *NodeHandler) GetNodeOptions(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
+	if err != nil {
+		return err
+	}
+	canWrite, err := hasClusterPerm(c, "manage", "node", clusterID)
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	opts, err := pxClient.GetNodeOptions(c.Context(), nodeName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+	token := ""
+	if canWrite {
+		if token, err = readNodeConfigToken(h.encryptionKey, clusterID, nodeName, opts.Digest); err != nil {
+			return err
+		}
+	}
+	return c.JSON(nodeOptionsView(*opts, token))
+}
+
+// GetNodeNotes handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/notes.
+//
+// It is the same read of the node config as GetNodeOptions, shaped by
+// nodeNotesView, and it is gated on manage:node where that one is gated on
+// view:node: the notes are free text, old ones sometimes hold credentials, and
+// every built-in Viewer — an SSO user provisioned on first login included —
+// holds view:node.
+//
+// Its `digest` is the save token, for the same file and the same reason as the
+// settings read's. It needs no permission lookup of its own: the route's gate is
+// already the writer's.
+func (h *NodeHandler) GetNodeNotes(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	opts, err := pxClient.GetNodeOptions(c.Context(), nodeName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+	token, err := readNodeConfigToken(h.encryptionKey, clusterID, nodeName, opts.Digest)
+	if err != nil {
+		return err
+	}
+	// no-store, for the reason respondStorageWrite gives for a generated key: the
+	// notes may hold a secret, and no cache between Nexara and the operator
+	// should keep a copy of the one response it is handed over in.
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	return c.JSON(nodeNotesView(*opts, token))
+}
+
+// SetNodeOptions handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/options.
+func (h *NodeHandler) SetNodeOptions(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, nodeName, err := clusterAndNodeName(p)
+	if err != nil {
+		return err
+	}
+	// Left unset when omitted: an omitted integer is not 0, which is a value
+	// (optFlexIntPtr), and an omitted or empty string leaves the key alone.
+	//
+	// Digest is what a read returned in its `digest` field, the save token; it is
+	// turned into the digest Proxmox compares below.
+	req := proxmox.NodeOptions{
+		StartallOnbootDelay: optFlexIntPtr(p.OptInt("startall-onboot-delay")),
+		BallooningTarget:    optFlexIntPtr(p.OptInt("ballooning-target")),
+		WakeOnLAN:           p.String("wakeonlan"),
+		Location:            p.String("location"),
+		Description:         p.String("description"),
+		Delete:              p.Strings("delete"),
+		Digest:              p.String("digest"),
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	// Every refusal this write can get from Nexara — a key that is set and
+	// cleared, a key to clear that is no node option, a line break or other
+	// control character in a setting, a value that is not UTF-8, a request that
+	// changes nothing, a body too large for Proxmox — lives in the proxmox
+	// package, not here. They are choke-point checks that protect every caller of
+	// the client, and the schema bounds the request without restating them.
+	// (SetNodeACMEConfig keeps its allow-list, set-and-cleared, empty-write and size
+	// refusals in the client the same way; the character and UTF-8 refusals are this
+	// method's own.) They also have to stay AFTER createProxmoxClient. The
+	// route sweep (registry_route_sweep_test.go) sends every declared parameter at
+	// once, and its `delete` entry is a made-up string the client refuses as no
+	// node option, so a refusal made ahead of the client would answer the sweep's
+	// request with a 400 it reports as a finding.
+	//
+	// They run again here, ahead of the save check, and not only inside
+	// SetNodeOptions where they have to stay: the check re-reads the node's digest
+	// from Proxmox, and a request that is going to be refused anyway should cost
+	// that read nothing. The digest is swapped for a 40-character placeholder, since
+	// the one the request carries is about to be replaced by Proxmox's own, which is
+	// that long, and the size refusal has to count the request as Proxmox will be
+	// sent it (nodeConfigValidationDigest).
+	checked := req
+	checked.Digest = nodeConfigValidationDigest(req.Digest)
+	if err := proxmox.ValidateNodeOptions(checked); err != nil {
+		return mapNodeConfigError(err)
+	}
+	// The save check: a token is only good for the file as it was when it was
+	// read, and what goes to Proxmox is the file's digest as it is now.
+	req.Digest, err = nodeConfigSaveDigest(c.Context(), pxClient, h.encryptionKey, clusterID, nodeName, req.Digest)
+	if err != nil {
+		return err
+	}
+	// The audit row is built from a copy without the digest, taken here, before the
+	// write: req.Digest is Proxmox's raw digest from this point on, and nothing
+	// after the write may read req (nodeOptionsForAudit;
+	// TestGuard_NodeConfigAuditIsBuiltFromACopyWithoutTheDigest).
+	audited := nodeOptionsForAudit(req)
+	// mapNodeConfigError and not mapProxmoxError: the options share the node
+	// config file, and so its digest, with the ACME settings, so a stale one
+	// dies with the same plain 500 that means 409 here
+	// (TestGuard_DieStringEndpointsMapPastThe502), and a body pveproxy refuses
+	// as too large — the notes can be, inside their declared bound — is 413.
+	if err := pxClient.SetNodeOptions(c.Context(), nodeName, req); err != nil {
+		return mapNodeConfigError(err)
+	}
+	details, _ := json.Marshal(nodeOptionsAuditDetails(audited))
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "set_options", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// nodeOptionsAuditDetails builds the audit details of a node options write.
+//
+// It records which settings the request set and which it cleared, by key name,
+// and the VALUE of the two integers — a delay in seconds and a ballooning
+// percentage, which say nothing about the estate. It never records the notes,
+// the location or the Wake-on-LAN setting: view:audit is granted to every
+// built-in Viewer, the notes are free text that gets credentials pasted into
+// it, and a position or a MAC identifies a machine. The row's resource id is
+// the node, so the node is not repeated here (as for set_dns).
+//
+// "cleared" is [] rather than null when nothing was cleared, and "settings" is
+// [] when nothing was set, so a reader filtering on either never has to handle
+// two spellings of empty. A setting at 0 is recorded as set, with its 0.
+//
+// Both lists come from the proxmox package's own tables — NodeOptionsSetKeys
+// and NodeOptionsClearKeys — so a string the caller sent can never reach the
+// row: "cleared" is req.Delete filtered through the allow-list, not req.Delete.
+// SetNodeOptions has already refused every entry that is not on it, which makes
+// the filter a no-op on this path; it is there for the day this builder is
+// reused or moved ahead of that check, when the row would otherwise carry free
+// text to every Viewer.
+//
+// Pure, so the exact key set is testable without a database; pinned by
+// TestNodeOptionsAuditDetails, by TestNodeOptionsAuditDetailsRecordsOnlyTheAllowedFields
+// across the request type and, through the real route, by
+// TestNodeOptionsWriteAuditRow in internal/api.
+func nodeOptionsAuditDetails(req proxmox.NodeOptions) map[string]any {
+	details := map[string]any{
+		"settings": proxmox.NodeOptionsSetKeys(req),
+		"cleared":  proxmox.NodeOptionsClearKeys(req),
+	}
+	if req.StartallOnbootDelay != nil {
+		details["startall-onboot-delay"] = int(*req.StartallOnbootDelay)
+	}
+	if req.BallooningTarget != nil {
+		details["ballooning-target"] = int(*req.BallooningTarget)
+	}
+	return details
+}
+
 // ShutdownNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/shutdown.
 func (h *NodeHandler) ShutdownNode(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, nodeName, err := clusterAndNodeName(p)

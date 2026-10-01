@@ -159,7 +159,7 @@ Common HTTP status codes:
 | 408 | Request timeout — the request's head, or the first 8 KiB of its body, took longer than 60 seconds to arrive; see Request Bodies and Connections |
 | 409 | Conflict — resource already exists |
 | 411 | Length required — the request body was sent chunked, other than as a multipart upload to the storage upload endpoint; see Request Bodies and Connections |
-| 413 | Request body too large — a `Content-Length` over 10 MiB, other than on a multipart upload to the storage upload endpoint; see Request Bodies and Connections |
+| 413 | Request body too large — a `Content-Length` over 10 MiB, other than on a multipart upload to the storage upload endpoint; see Request Bodies and Connections. A node's options write is also refused with 413, in the words *The request is too large for Proxmox*, when its form-encoded body is over what Proxmox accepts (512 KiB, or 64 KiB before Proxmox VE 8.4). Nexara refuses a body over 512 KiB itself, before sending it. For a body between 64 and 512 KiB on a Proxmox VE before 8.4, it is Proxmox that refuses: pveproxy answers 501 after reading only the request head and may reset the connection instead, so the caller can see a connection error (502) in place of the 413. Either way the node is unchanged |
 | 415 | Unsupported media type — the request named a `Content-Encoding` other than `identity`; see Compressed Request Bodies |
 | 429 | Rate limited |
 | 500 | Internal server error |
@@ -660,6 +660,9 @@ leaves provenance intact.
 | PUT | `/clusters/:id/nodes/:node/dns` | Set node DNS config |
 | GET | `/clusters/:id/nodes/:node/time` | Get node time and timezone |
 | PUT | `/clusters/:id/nodes/:node/time` | Set node timezone |
+| GET | `/clusters/:id/nodes/:node/options` | Get a node's own settings — start-on-boot delay, ballooning target, Wake-on-LAN, location; unset settings are absent and the notes are not included. `digest` is a save token for the node config file, not Proxmox's own digest (see the note below this table), and is returned only to callers who also hold `manage:node` (`view:node`; the cluster's Proxmox API token needs `Sys.Audit` on `/`) |
+| GET | `/clusters/:id/nodes/:node/notes` | Get a node's notes and the save token as `digest`, marked `Cache-Control: no-store`; notes can hold credentials, so this is not `view:node` (`manage:node`; the cluster's Proxmox API token needs `Sys.Audit` on `/`) |
+| PUT | `/clusters/:id/nodes/:node/options` | Change those settings and the notes: an omitted or empty field is left alone, `delete` clears, a request that changes nothing is refused; with `digest`, the save token a read returned, 409 and nothing written when the node config (ACME settings included) changed since or the token is not one a read returned; 413 when the request is over Proxmox's body limit (`manage:node`; the cluster's Proxmox API token needs `Sys.Modify` on `/`) |
 | POST | `/clusters/:id/nodes/:node/shutdown` | Shut down a node |
 | POST | `/clusters/:id/nodes/:node/reboot` | Reboot a node |
 | POST | `/clusters/:id/nodes/:node/maintenance` | Enter/exit HA node maintenance (needs cluster SSH credentials) |
@@ -668,6 +671,15 @@ leaves provenance intact.
 | POST | `/clusters/:id/nodes/:node/services/:service/:action` | Start/stop/restart a node service |
 | GET | `/clusters/:id/nodes/:node/syslog` | Read node syslog over a time window |
 | GET | `/clusters/:id/nodes/:node/journal` | Read the node's systemd journal by line count or cursor |
+
+#### The node config save token
+
+`GET .../options`, `GET .../notes` and `GET .../acme-config` return a `digest`, and `PUT .../options` and `PUT .../acme-config` take one back. It is an opaque save token — `v1.` followed by 43 characters of unpadded base64url — and **not Proxmox's own digest** of the node config file, which Nexara never returns: Proxmox's is an unsalted SHA1 of the whole file, notes included, so a caller shown it could test guesses at the file's content offline. Send the token back exactly as a read returned it.
+
+- The token is tied to the cluster and the node it came from, and is checked against the config as it is when the save arrives. A save is answered `409` with nothing written when the config changed since the read (an ACME settings change, or an edit in Proxmox's own Notes panel, counts: they share the file) and when the token is not one a read returned for this node, whatever it is instead: another node's, another cluster's, Proxmox's raw digest, or something malformed. The two cases are answered in the same words.
+- Omitted or empty, the save is unconditional.
+- A node with no config file has no `digest` in a read, so there is nothing to send back; its next save is unconditional. A file that has been emptied, as when every setting and the notes were cleared, counts as no file: Proxmox reads an empty file as an empty config with no digest, so the same holds for it. A save that names a token for such a node is answered `409`.
+- A read returns the token only to a caller who could use it: `manage:node` for the options and the notes, `manage:certificate` for the ACME settings. Tokens read before `ENCRYPTION_KEY` is changed are refused afterwards with the same `409`.
 
 #### Reading node logs
 
@@ -1250,8 +1262,8 @@ Rules are addressed by position, so every rule listing returns a `digest` on eac
 | GET | `/clusters/:id/acme/challenge-schema` | List challenge schemas |
 | GET | `/clusters/:id/acme/directories` | List directories |
 | GET | `/clusters/:id/acme/tos` | Get terms of service |
-| GET | `/clusters/:id/nodes/:node/acme-config` | Get node ACME config |
-| PUT | `/clusters/:id/nodes/:node/acme-config` | Set node ACME config |
+| GET | `/clusters/:id/nodes/:node/acme-config` | Get node ACME config. `digest` is the same save token, returned only to callers who also hold `manage:certificate` |
+| PUT | `/clusters/:id/nodes/:node/acme-config` | Set node ACME config: an omitted or empty field is left alone, `delete` clears, a request that sets nothing and clears nothing (a `digest` alone is neither) is refused with 400 before anything is sent; with `digest`, the save token a read returned, 409 and nothing written when the node config changed since or the token is not one a read returned. A client that sends Proxmox's own raw digest, which no read returns, is always answered 409 |
 | GET | `/clusters/:id/nodes/:node/certificates` | List certificates |
 | POST | `/clusters/:id/nodes/:node/certificates/order` | Order certificate |
 | PUT | `/clusters/:id/nodes/:node/certificates/renew` | Renew certificate |

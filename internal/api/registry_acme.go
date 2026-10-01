@@ -262,8 +262,11 @@ func registerACMEEndpoints(reg *Registry, h *handlers.ACMEHandler) {
 		Method: fiber.MethodGet,
 		Path:   acmeNodeScope + "/acme-config",
 		Description: "Read one node's ACME settings — which account it uses and the domains it requests — " +
-			"together with the node config's digest. Send that digest back on the PUT to make the write a " +
-			"compare-and-swap.",
+			"together with `digest`, a save token for the node config file they live in, which is returned " +
+			"only to a caller who holds manage:certificate. `digest` is an opaque token and not Proxmox's " +
+			"own digest of the file, which Nexara never returns: that one hashes the whole file, the node's " +
+			"notes included, and would let a caller test guesses at them. Send the token back on the PUT, " +
+			"exactly as it was returned, to make the write a compare-and-swap.",
 		Group:       "Certificates",
 		Permissions: acmeView(),
 		Parameters:  acmeNodeParams(nil),
@@ -275,8 +278,14 @@ func registerACMEEndpoints(reg *Registry, h *handlers.ACMEHandler) {
 		Description: "Write one node's ACME settings. An omitted or EMPTY field leaves the stored value " +
 			"alone — no value means \"remove\" — so clearing one means naming its key in `delete`. Naming " +
 			"a key in both is refused rather than silently resolved as a delete, which is what Proxmox " +
-			"would do. Sending `digest` turns the write into a compare-and-swap and answers 409 when the " +
-			"node config changed since it was read.",
+			"would do. A request that sets nothing and clears nothing is refused too (a `digest` alone is " +
+			"neither), because Proxmox would rewrite the whole config file for it. " +
+			"Sending `digest` turns the write into a compare-and-swap: it is the save token " +
+			"a read returned, sent back unchanged, and Nexara checks it against the node config as it is " +
+			"now, answering 409, with nothing written, when the config changed since the token was read or " +
+			"the token is not one a read returned. A caller that echoes back what a read returned is " +
+			"unaffected; one that sends Proxmox's own raw digest, which no read returns, is always " +
+			"answered 409. Omitting it writes unconditionally.",
 		Group:       "Certificates",
 		Permissions: acmeManage(),
 		Parameters:  acmeNodeParams(nodeACMEConfigParams()),
@@ -538,12 +547,15 @@ func nodeACMEConfigParams() apischema.Properties {
 			},
 			Typetext: "<key>[,<key>…]",
 			Description: "Settings to clear. Only acme and acmedomain0..5 may be named; anything else " +
-				"is refused, because PVE applies delete to the WHOLE node config and description, " +
-				"location and wakeonlan live in the same file.",
+				"is refused, because PVE applies delete to the WHOLE node config and the node's other " +
+				"settings — startall-onboot-delay, ballooning-target, wakeonlan, location and " +
+				"description — live in the same file. Clear those through .../options.",
 		},
-		"digest": optString(128, "<digest>",
-			"Digest of the node config this edit was based on, as the GET returns it. Sending it makes "+
-				"the write a compare-and-swap and answers 409 if the config changed; omitting it "+
-				"overwrites unconditionally."),
+		"digest": optString(128, "<token>",
+			"The save token a read of this node's config returned as `digest`, sent back unchanged. It is "+
+				"opaque, and not Proxmox's own digest of the file, which Nexara never returns and which would "+
+				"let a caller test guesses at the file's content, notes included. Sending it makes the write "+
+				"a compare-and-swap, answered 409 if the config changed since the token was read or the "+
+				"token is not one a read returned; omitting it overwrites unconditionally."),
 	}
 }

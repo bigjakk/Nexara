@@ -201,6 +201,7 @@ privilege tiers only — the *root* tier is excluded. That tier holds
 
 - shut down or reboot a node (`Sys.PowerMgmt`)
 - change node network configuration (`Sys.Modify`)
+- change a node's options — start-on-boot delay, ballooning target, Wake-on-LAN, location and notes (`Sys.Modify` on `/`)
 - manage Proxmox roles from **Access Control** (`Sys.Modify` on `/access`)
 - manage authentication realms (`Realm.Allocate`)
 

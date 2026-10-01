@@ -50,6 +50,11 @@ var dieStringMappers = map[string]string{
 	"UpdateMetricServer": "mapMetricServerError",
 	"DeleteMetricServer": "mapMetricServerError",
 
+	// 409 like SetNodeACMEConfig, and for the same die: the options write is
+	// the same PUT /nodes/{node}/config against the same file and digest, so a
+	// stale one dies with assert_if_modified's plain 500.
+	"SetNodeOptions": "mapNodeConfigError",
+
 	// The firewall rule writers, which established the 404 precedent this
 	// generalises. Only the mutating ones: the client has no single-rule
 	// getter, so a stale position can only be discovered by writing to it.

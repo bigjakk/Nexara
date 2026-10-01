@@ -10,8 +10,23 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
+// proxmoxRequestTooLargeMessage is what a caller is told when the request is
+// over what Proxmox accepts, whether the client refused it before sending
+// (proxmox.ErrRequestTooLarge) or pveproxy refused it with its 501 (see
+// isProxmoxBodyTooLarge). One message for both, because they are one fact: the
+// declared bound on the notes (65536 characters) is not what decides it, so the
+// message says what does.
+const proxmoxRequestTooLargeMessage = "The request is too large for Proxmox: it accepts at most 64 KiB per request " +
+	"(512 KiB from Proxmox VE 8.4), counted after encoding, where a line break or a non-ASCII character " +
+	"takes several bytes — shorten the notes."
+
 // mapProxmoxError converts a Proxmox client error to an appropriate Fiber error.
 func mapProxmoxError(err error) error {
+	// The client refused to send a body that every Proxmox would refuse, and the
+	// body is the caller's own. 413, in the one message the 501 gets.
+	if errors.Is(err, proxmox.ErrRequestTooLarge) {
+		return fiber.NewError(fiber.StatusRequestEntityTooLarge, proxmoxRequestTooLargeMessage)
+	}
 	// The client refused to send this — it never reached Proxmox, so reporting
 	// it as a Proxmox failure (500) would misdirect the operator. The message is
 	// safe to surface: it describes their own input.

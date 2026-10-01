@@ -19,6 +19,14 @@ var (
 	ErrDecryptionFailed = errors.New("decryption failed")
 )
 
+// Key use. The encryption key (ENCRYPTION_KEY) is used raw in exactly two places in
+// this package: as the AES-256-GCM key (aeadFor below, which Encrypt and Decrypt go
+// through) and as the HKDF input from which Tag derives a subkey per purpose
+// (tagKeyFor, in tag.go). Anything new that needs a key from it must derive one
+// through Tag's HKDF, with a purpose of its own, and must never take the raw key a
+// third time: two protocols under one key are not independent of each other, and a
+// derived key keeps a weakness in one from being a weakness in the other.
+
 // aeadCache memoises the AEAD per encryption key. The AES key schedule and
 // GCM derivation cost shows up in CPU profiles for token-heavy workloads
 // (every per-cluster sync, alert evaluation, rolling-update tick, etc.
