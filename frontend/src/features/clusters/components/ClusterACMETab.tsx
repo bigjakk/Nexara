@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, RefreshCw, Trash2, ShieldCheck, ShieldOff } from "lucide-react";
+import { toast } from "sonner";
 import { ApiClientError } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
 import { useAuth } from "@/hooks/useAuth";
@@ -525,6 +526,15 @@ function buildDomainEntry(
   return entry;
 }
 
+/**
+ * What a save that never got an answer reads as. describeError returns "" for
+ * a TypeError, which is how a dropped connection rejects fetch, and the hook
+ * has opted out of the global toast — so without a floor that failure renders
+ * as nothing at all, in the dialog, on the card and in the toast alike.
+ */
+const CONNECTION_FAILED =
+  "The save request failed — check your connection and try again.";
+
 function CertificatesTab({ clusterId }: { clusterId: string }) {
   const { canManage } = useAuth();
   const nodesQuery = useClusterNodes(clusterId);
@@ -568,16 +578,102 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
   const hasDomains = configuredDomains.length > 0;
   const addingDomain = editIndex === null;
 
-  // Bumped on every open, so an async callback can tell that a DIFFERENT
-  // dialog has opened since it started. (Not that its own is still open — a
-  // close without a reopen leaves this unchanged, which is harmless: both
-  // openers set the pin themselves, so nothing stale can survive into one.)
+  // Bumped on every open, and whenever the node the tab shows changes — chosen
+  // in the selector, or followed from the node list (see shownNode; a change
+  // while a dialog is open is judged when it closes) — so an async callback can
+  // tell that a DIFFERENT dialog has opened, or a different node is on show,
+  // since it started. (Not that its own is still open — a close without a
+  // reopen leaves this unchanged, which is harmless: both openers set the pin
+  // themselves, so nothing stale can survive into one.)
   const domainDialogGen = useRef(0);
 
-  const openDomainDialog = () => {
+  // Whether this tab is still mounted. The hook opts out of the global error
+  // toast because the tab reports a failure itself, but TanStack runs the
+  // callbacks given to mutate() only while the component is mounted, so
+  // saveDomain reads the outcome from the promise instead and toasts a failure
+  // nobody is looking at. A layout effect, so that it clears in the commit that
+  // removes the tab and not in the passive flush after it: a navigation runs in
+  // a transition (React Router), React can run that flush a task after such a
+  // commit, and a request settling in between would find the tab still live and
+  // leave its failure in state no one can see. (Radix's unmount schedules a
+  // sync update, which today makes React run the passive effects inside the
+  // commit; nothing here should lean on that.)
+  const live = useRef(false);
+  useLayoutEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+
+  // The generation of the dialog whose save is out, or null. isPending — and the
+  // Save button that reads it — trails a click by a task, since TanStack tells
+  // its observers on a timer, and two clicks inside that task send two requests
+  // carrying the same digest: the second is refused as stale because of the
+  // first, a conflict the operator caused, and the tab, attached to the second,
+  // would show that refusal over the first's outcome. Scoped to the generation
+  // rather than a bare flag: forgetSave leaves a newer dialog's Save open while
+  // an older dialog's save is still out, and that Save has to be able to go.
+  const sendingGen = useRef<number | null>(null);
+
+  // The node the open dialog was opened for. certNode follows the node list
+  // while the selector is unused (the first node is the default), and the list
+  // can change under an open dialog — a node that sorts before the first joins
+  // the cluster — so certNode at save time is not necessarily the node whose
+  // values, slot and digest the dialog holds. saveDomain refuses to send them
+  // anywhere else.
+  //
+  // Refuse, rather than stabilise certNode so that it cannot move: the tab
+  // should keep following the list (a first node that leaves the cluster), and
+  // it is the dialog that must not follow it. And refuse, rather than redirect
+  // the save to the node the dialog was opened for: an add reads its slot and
+  // digest from the node on show, so aiming it at another would pair them with
+  // the wrong read. An edit could safely go to its own node, but one rule for
+  // both is simpler, and the case is rare.
+  const dialogNode = useRef("");
+
+  // Where the tab lets go of a save that may still be in flight: a dialog
+  // opening and the node changing both come through here. reset() detaches
+  // setAcmeConfig from the request, so the tab stops showing it and TanStack
+  // skips its per-call callbacks; the generation moves with it, so that
+  // saveDomain's own handlers know the save is no longer the tab's to show and
+  // report it themselves. (reset is bound to the mutation's observer, so it is
+  // one function for the life of the tab, and so is forgetSave.)
+  const { reset: resetSave } = setAcmeConfig;
+  const forgetSave = useCallback(() => {
     domainDialogGen.current += 1;
+    resetSave();
+  }, [resetSave]);
+
+  // The node the tab last showed with no dialog open. certNode follows the node
+  // list while the selector is unused, so it can change without anyone choosing
+  // — a node that sorts before the first joins the cluster — and a save still
+  // out to the node left behind is then no longer what the card shows. It is
+  // let go of the way a dialog opening lets go of it, whichever way the node
+  // changed: the generation moves, so its answer is toasted, naming the node it
+  // was sent to, and the new node's card is not given its error.
+  //
+  // An effect, not a step of the render: it resets a mutation and moves the
+  // generation the settle handlers read. A layout effect, so that this happens
+  // in the commit that shows the new node, before it is painted.
+  //
+  // Not while a dialog is open. It is the surface for what it sent, and its pin
+  // (dialogNode) already refuses a send to another node; forgetting under it
+  // would take its answer away, so that a failure only toasted and a success
+  // did not close it. When it closes the card is the surface again, and what
+  // the dialog left behind is judged then — which is why domainDialogOpen is a
+  // dependency.
+  const shownNode = useRef(certNode);
+  useLayoutEffect(() => {
+    if (domainDialogOpen || shownNode.current === certNode) return;
+    shownNode.current = certNode;
+    forgetSave();
+  }, [certNode, domainDialogOpen, forgetSave]);
+
+  const openDomainDialog = () => {
+    forgetSave();
+    dialogNode.current = certNode;
     setDomainError("");
-    setAcmeConfig.reset();
     setDomainDialogOpen(true);
   };
 
@@ -627,6 +723,15 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
 
   const saveDomain = () => {
     if (!editDomain) return;
+    // One save at a time for a dialog: see sendingGen.
+    if (sendingGen.current === domainDialogGen.current) return;
+    // Only to the node the dialog was opened for: see dialogNode.
+    if (certNode !== dialogNode.current) {
+      setDomainError(
+        `This dialog was opened for ${dialogNode.current}, which is no longer the node shown. Close it and try again.`,
+      );
+      return;
+    }
     // The rule both branches serve: the digest must come from the same read as
     // whatever the save is based on. An edit is based on the values the dialog
     // was opened with, so it keeps that read's digest and its slot. An add is
@@ -673,33 +778,63 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
     // caller may not write: the server gives the digest only to callers with
     // manage:certificate, and refuses that caller's save anyway.
     const gen = domainDialogGen.current;
-    setAcmeConfig.mutate(
-      { node: certNode, config },
-      {
-        onSuccess: closeDomainDialog,
-        onError: (err) => {
-          // Refetch so a deliberate retry carries the current digest, and
-          // re-pin it: a conflict this dialog was shown is the one thing that
-          // moves its pinned digest, or an edit could never be retried at all.
-          // Still not an automatic retry — when the conflict is another
-          // operator writing this same slot, retrying on their behalf performs
-          // exactly the overwrite that was just prevented.
-          if (!(err instanceof ApiClientError) || err.status !== 409) return;
-          void acmeConfigQuery.refetch().then((res) => {
-            // isSuccess, not res.data: a failed refetch RETAINS the last
-            // successful data, so testing the data alone is a guard that can
-            // never fail — it would move the pin onto a digest belonging to a
-            // change the operator has not seen, which is the overwrite the pin
-            // exists to prevent, reintroduced through the failure path.
-            if (!res.isSuccess || !res.data.digest) return;
-            // And only for the dialog that hit the conflict. Cancelling and
-            // opening another row while this refetch is in flight would
-            // otherwise land this digest on a pin that was just set to match
-            // different values.
-            if (domainDialogGen.current !== gen) return;
-            setEditDigest(res.data.digest);
-          });
-        },
+    // What a late failure names. Taken here, from what is being sent: by the
+    // time it lands the dialog may be on another row, or the tab on another node.
+    const node = certNode;
+    const domain = editDomain;
+    sendingGen.current = gen;
+    // mutateAsync, not mutate with per-call callbacks: those run only while this
+    // tab is mounted AND still attached to this save (see `live` and forgetSave),
+    // and a save that settles after either has ended has nowhere else to be
+    // reported — the hook has opted out of the global toast.
+    setAcmeConfig.mutateAsync({ node, config }).then(
+      () => {
+        // Released as the answer comes, before the button is: the observers are
+        // told on a timer, which runs after this. Only if it is still this
+        // dialog's — a newer dialog's save may have taken it since.
+        if (sendingGen.current === gen) sendingGen.current = null;
+        // Not once the tab has moved on: closeDomainDialog would close whichever
+        // dialog has been opened in this one's place. No `live` check, unlike
+        // the failure below: closeDomainDialog only sets this tab's own state,
+        // which is inert once the tab is gone.
+        if (domainDialogGen.current === gen) closeDomainDialog();
+      },
+      (err: unknown) => {
+        if (sendingGen.current === gen) sendingGen.current = null;
+        if (!live.current || domainDialogGen.current !== gen) {
+          // The tab is not showing this save any more — it was left, or its
+          // dialog replaced, or its node changed — so it is just a late
+          // failure: say so, naming what it was, since it can land on another
+          // page or over another row's open dialog. The server's own words:
+          // with the dialog gone, "reload and try again" is just what to do.
+          // And nothing is read or re-pinned on its behalf: the config query
+          // is the current node's, and the pin is the open dialog's.
+          toast.error(
+            `Saving the ACME domain ${domain} on ${node} failed: ${describeError(err) || CONNECTION_FAILED}`,
+          );
+          return;
+        }
+        // Refetch so a deliberate retry carries the current digest, and
+        // re-pin it: a conflict this dialog was shown is the one thing that
+        // moves its pinned digest, or an edit could never be retried at all.
+        // Still not an automatic retry — when the conflict is another
+        // operator writing this same slot, retrying on their behalf performs
+        // exactly the overwrite that was just prevented.
+        if (!(err instanceof ApiClientError) || err.status !== 409) return;
+        void acmeConfigQuery.refetch().then((res) => {
+          // isSuccess, not res.data: a failed refetch RETAINS the last
+          // successful data, so testing the data alone is a guard that can
+          // never fail — it would move the pin onto a digest belonging to a
+          // change the operator has not seen, which is the overwrite the pin
+          // exists to prevent, reintroduced through the failure path.
+          if (!res.isSuccess || !res.data.digest) return;
+          // And only for the dialog that hit the conflict. Cancelling and
+          // opening another row while this refetch is in flight would
+          // otherwise land this digest on a pin that was just set to match
+          // different values.
+          if (domainDialogGen.current !== gen) return;
+          setEditDigest(res.data.digest);
+        });
       },
     );
   };
@@ -708,15 +843,13 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
   // the card sits behind the open dialog rather than being unmounted by it, so
   // an ungated second copy shows the same message twice.
   //
-  // The fallback is load-bearing, not politeness. describeError returns "" for
-  // a TypeError, which is how a dropped connection rejects fetch, and the hook
-  // has opted out of the global toast — so without a floor here that failure
-  // renders as nothing at all, on both surfaces.
+  // The fallback is load-bearing, not politeness: see CONNECTION_FAILED. A save
+  // the tab has stopped showing (forgetSave) is not this one's to render, and
+  // reports itself with a toast.
   const domainSaveError =
     domainError ||
     (setAcmeConfig.isError
-      ? describeError(setAcmeConfig.error) ||
-        "The save request failed — check your connection and try again."
+      ? describeError(setAcmeConfig.error) || CONNECTION_FAILED
       : "");
 
   // The server's 409 copy says to reload and try again, but the dialog's own
@@ -759,13 +892,7 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
       {/* Node selector */}
       <div className="flex items-center gap-2">
         {nodesQuery.data && nodesQuery.data.length > 0 && (
-          <Select
-            value={certNode}
-            onValueChange={(node) => {
-              setSelectedNode(node);
-              setAcmeConfig.reset();
-            }}
-          >
+          <Select value={certNode} onValueChange={setSelectedNode}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="Select node..." />
             </SelectTrigger>

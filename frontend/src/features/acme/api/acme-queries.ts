@@ -14,6 +14,13 @@ import { apiPath } from "@/lib/api-path";
  * is looking at the moment it happens — an open dialog, or a banner in the
  * section body. Applying it to a mutation that relies on the toast makes the
  * failure silent, which is strictly worse than reporting it twice.
+ *
+ * "The moment it happens" can come after that place is gone, and then nothing
+ * else reports it: TanStack runs the callbacks given to mutate() only while the
+ * component is mounted, and the toast above is what this opts out of. So the
+ * caller reads the outcome from mutateAsync's promise instead, and toasts a
+ * failure that outlives the place that would have shown it (saveDomain in
+ * ClusterACMETab).
  */
 const errorsHandledLocally = { onError: () => undefined };
 
@@ -248,7 +255,10 @@ export function useSetNodeACMEConfig(clusterId: string) {
     // digest conflict is a routine outcome here rather than an exception.
     // That tab is the ONLY place it is rendered: a second caller of this hook
     // gets its own mutation instance, so it must render the error too or the
-    // failure is silent.
+    // failure is silent. A failure that lands once the tab has been left, or
+    // its dialog replaced, is toasted by the tab itself (saveDomain); a second
+    // caller must do the same, for this opt-out is what keeps the global toast
+    // from doing it.
     ...errorsHandledLocally,
   });
 }

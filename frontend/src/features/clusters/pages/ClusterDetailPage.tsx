@@ -338,7 +338,17 @@ export function ClusterDetailPage() {
             </TabsContent>
 
             <TabsContent value="certificates">
-              <ClusterACMETab clusterId={clusterId ?? ""} />
+              {/* Keyed on the cluster. This route is reused across :clusterId,
+                  and the search bar's /clusters/{id}?tab=certificates keeps
+                  this tab selected, so without a key one tab instance would
+                  carry its chosen node, its open dialog and a save still in
+                  flight over to the next cluster: a late failure of the one
+                  would render on the other's card, and the node chosen on the
+                  one would be read from the other. */}
+              <ClusterACMETab
+                key={clusterId ?? ""}
+                clusterId={clusterId ?? ""}
+              />
             </TabsContent>
 
             <TabsContent value="metric-servers">
