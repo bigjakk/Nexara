@@ -20,17 +20,13 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { sanitizeReturnTo } from "@/lib/return-to";
 import type {
   SetupStatus,
   SSOStatus,
   OIDCAuthorizeResponse,
 } from "@/types/api";
 import { InsecureConnectionBanner } from "../components/InsecureConnectionBanner";
-
-function sanitizeReturnTo(value: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
-  return value;
-}
 
 function useLoginSchema() {
   const { t } = useTranslation("auth");

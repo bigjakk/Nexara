@@ -7,13 +7,16 @@ import type { UserSession } from "@/types/api";
 /**
  * Query key for one user's session list.
  *
- * Keyed by user id, which matters more here than for most queries. Nothing
- * clears the QueryClient on logout — logout is a state change, not a reload —
- * and the client defaults to a 5 minute staleTime, so a shared key would let
- * the next person to sign in on this browser read the previous user's rows
- * straight from cache with no refetch. Those rows are device names, IP
- * addresses and activity times, so that is a cross-user disclosure rather than
- * merely stale UI.
+ * Keyed by user id, which matters more here than for most queries. Signing out
+ * clears the QueryClient (stores/session-reset.ts), and a QUERY's own response
+ * cannot land after that: clear() cancels the fetch, and the retryer ignores a
+ * later settle. So this is the second line, against a writer that is not a
+ * query — a mutation's setQueryData still in flight when the session ended runs
+ * its callbacks anyway. The client defaults to a 5 minute staleTime, so what
+ * such a write left under a shared key would let the next person to sign in on
+ * this browser read the previous user's rows straight from cache with no
+ * refetch. Those rows are device names, IP addresses and activity times, so
+ * that is a cross-user disclosure rather than merely stale UI.
  */
 const sessionsKey = (userID: string) => ["auth", "sessions", userID] as const;
 
@@ -77,7 +80,11 @@ export function useRevokeSession() {
         // signed out, so a refetch would only 401, and leaving the rows in
         // cache keeps someone else's devices one login away from being read.
         qc.removeQueries({ queryKey: sessionsKey(userID) });
-        clearAuth();
+        // The user ended this session themselves: the login page it leads to
+        // does not carry the page they were on (signedOutByUser). Explicit
+        // intent, and redundant with isLoggingOut, which onMutate raised and
+        // clearAuth also reads.
+        clearAuth({ byUser: true });
         return;
       }
       void qc.invalidateQueries({ queryKey: sessionsKey(userID) });

@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  type MockInstance,
+} from "vitest";
 import { useConsoleStore } from "./console-store";
 import { apiClient } from "@/lib/api-client";
 
@@ -260,6 +268,204 @@ describe("console-store", () => {
       expect(tab?.node).toBe("n2");
       expect(tab?.status).toBe("idle");
       expect(tab?.reconnectKey).toBe(0);
+    });
+  });
+
+  describe("resetSession", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    // zustand's persist writes the store to localStorage on EVERY set, changed or
+    // not, with a window position derived from the viewport. A signed-out boot
+    // has nothing to forget, so it must not write — least of all something that
+    // can throw (a full quota) or that was never the user's choice.
+    function consoleWrites(setItem: MockInstance<Storage["setItem"]>) {
+      return setItem.mock.calls.filter(
+        ([key]) => key === "nexara-console-tabs",
+      );
+    }
+
+    it("writes nothing when the store is already at its defaults", () => {
+      useConsoleStore.setState({
+        tabs: [],
+        activeTabId: null,
+        windowMode: "hidden",
+      });
+      const setItem = vi.spyOn(Storage.prototype, "setItem");
+
+      useConsoleStore.getState().resetSession();
+
+      expect(consoleWrites(setItem)).toEqual([]);
+    });
+
+    it("control: writes the emptied store when a tab is open", () => {
+      useConsoleStore.getState().addTab({
+        clusterID: "cluster01",
+        node: "pve-01",
+        type: "node_shell",
+        label: "pve-01 shell",
+      });
+      const setItem = vi.spyOn(Storage.prototype, "setItem");
+
+      useConsoleStore.getState().resetSession();
+
+      expect(consoleWrites(setItem)).toHaveLength(1);
+      expect(useConsoleStore.getState().tabs).toEqual([]);
+    });
+
+    // Another tab persisted its own tabs after this one loaded: this tab's memory
+    // never held them, so the in-memory check alone calls a reset a no-op, and
+    // the next user's reload would bring them back, the active one dialling at
+    // once with their token.
+    const KEY = "nexara-console-tabs";
+
+    interface Persisted {
+      state: {
+        tabs: unknown[];
+        activeTabId: string | null;
+        windowMode: string;
+      };
+    }
+
+    function persistedByAnotherTab(left: Partial<Persisted["state"]> = {}) {
+      localStorage.setItem(
+        KEY,
+        JSON.stringify({
+          state: {
+            tabs: [
+              {
+                id: "node_shell-pve-01-1",
+                clusterID: "cluster01",
+                node: "pve-01",
+                type: "node_shell",
+                label: "pve-01 shell",
+                status: "idle",
+                reconnectKey: 0,
+              },
+            ],
+            activeTabId: "node_shell-pve-01-1",
+            windowMode: "floating",
+            windowPosition: { x: 0, y: 0 },
+            windowSize: { width: 800, height: 500 },
+            ...left,
+          },
+          version: 1,
+        }),
+      );
+    }
+
+    function persisted(): Persisted["state"] {
+      return (JSON.parse(localStorage.getItem(KEY) ?? "null") as Persisted)
+        .state;
+    }
+
+    function memoryAtItsDefaults() {
+      useConsoleStore.setState({
+        tabs: [],
+        activeTabId: null,
+        windowMode: "hidden",
+      });
+    }
+
+    it("forgets what another tab persisted, though its own memory is at its defaults", () => {
+      memoryAtItsDefaults();
+      persistedByAnotherTab(); // after the setState above, which persists too
+
+      useConsoleStore.getState().resetSession();
+
+      expect(persisted()).toMatchObject({
+        tabs: [],
+        activeTabId: null,
+        windowMode: "hidden",
+      });
+    });
+
+    it.each([
+      ["tabs", { activeTabId: null, windowMode: "hidden" }],
+      ["an active tab", { tabs: [], windowMode: "hidden" }],
+      ["the window shown", { tabs: [], activeTabId: null }],
+    ])("forgets %s alone in what another tab persisted", (_what, left) => {
+      memoryAtItsDefaults();
+      persistedByAnotherTab(left);
+
+      useConsoleStore.getState().resetSession();
+
+      expect(persisted()).toMatchObject({
+        tabs: [],
+        activeTabId: null,
+        windowMode: "hidden",
+      });
+    });
+
+    it("forgets a persisted copy it cannot read, rather than leave it for the next user", () => {
+      memoryAtItsDefaults();
+      localStorage.setItem(KEY, "{ not json");
+
+      useConsoleStore.getState().resetSession();
+
+      expect(persisted()).toMatchObject({ tabs: [], activeTabId: null });
+    });
+
+    it("forgets what a storage that answers late may hold, as it cannot look", () => {
+      memoryAtItsDefaults();
+      const original = useConsoleStore.persist.getOptions().storage;
+      const setItem = vi.fn();
+      useConsoleStore.persist.setOptions({
+        storage: {
+          getItem: () => Promise.resolve(null),
+          setItem,
+          removeItem: vi.fn(),
+        },
+      });
+
+      try {
+        useConsoleStore.getState().resetSession();
+      } finally {
+        useConsoleStore.persist.setOptions({ storage: original });
+      }
+
+      expect(setItem).toHaveBeenCalledTimes(1);
+    });
+
+    it("writes nothing when nothing was ever persisted either", () => {
+      memoryAtItsDefaults();
+      localStorage.removeItem(KEY);
+      const setItem = vi.spyOn(Storage.prototype, "setItem");
+
+      useConsoleStore.getState().resetSession();
+
+      expect(consoleWrites(setItem)).toEqual([]);
+    });
+
+    it("writes nothing when the persisted copy is at its defaults, as at a signed-out boot", () => {
+      memoryAtItsDefaults();
+      const setItem = vi.spyOn(Storage.prototype, "setItem");
+
+      useConsoleStore.getState().resetSession();
+
+      expect(persisted()).toMatchObject({ tabs: [], windowMode: "hidden" });
+      expect(consoleWrites(setItem)).toEqual([]);
+    });
+
+    it.each([
+      ["a tab", () => useConsoleStore.setState({ activeTabId: "t1" })],
+      [
+        "the window shown",
+        () => useConsoleStore.setState({ windowMode: "floating" }),
+      ],
+    ])("is not a no-op when only %s is left", (_what, leave) => {
+      useConsoleStore.setState({
+        tabs: [],
+        activeTabId: null,
+        windowMode: "hidden",
+      });
+      leave();
+
+      useConsoleStore.getState().resetSession();
+
+      expect(useConsoleStore.getState().activeTabId).toBeNull();
+      expect(useConsoleStore.getState().windowMode).toBe("hidden");
     });
   });
 });

@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { sessionScope, StaleSessionError } from "@/lib/api-client";
 import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
 import {
   parseBwlimit,
@@ -277,6 +278,13 @@ export function BulkMigrateDialog({
     if (rows.length === 0) return;
     setIsCreating(true);
 
+    // The session this was started in. The check is a write to the job the create
+    // just made — it sets it to "checking", records the report and moves it on, to
+    // pending or to failed — and needs manage:migration, not ownership of the job:
+    // sent after the session changed hands it would run as whoever is signed in
+    // next, on the previous user's job.
+    const ended = sessionScope();
+
     const effectiveMode =
       migrationType === "intra-cluster" ? migrationMode : "live";
 
@@ -313,6 +321,7 @@ export function BulkMigrateDialog({
         };
 
         const created = await createMutation.mutateAsync(req);
+        if (ended()) throw new StaleSessionError();
         const report = await checkMutation.mutateAsync(created.id);
         return {
           name: r.name,

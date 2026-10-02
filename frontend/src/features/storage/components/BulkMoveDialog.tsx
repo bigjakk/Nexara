@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { useStorageContent } from "../api/storage-queries";
 import type { StorageContentItem } from "../types/storage";
@@ -98,6 +98,13 @@ export function BulkMoveDialog({
 
   const handleEvacuate = useCallback(async () => {
     if (!targetStorage || imageItems.length === 0) return;
+
+    // The session this evacuation was started in. Its loops outlive the dialog,
+    // and a sign-out with it: once that session has ended, no request goes out
+    // for it — it would carry whoever signs in next's token, and each move is a
+    // disk move on the cluster.
+    const ended = sessionScope();
+
     setRunning(true);
     setBuildingJobs(true);
 
@@ -119,6 +126,7 @@ export function BulkMoveDialog({
     // Build job list by resolving each volid to a disk key
     const newJobs: DiskMoveJob[] = [];
     for (const item of imageItems) {
+      if (ended()) break;
       if (item.vmid == null) continue;
       const vmUuid = vmidToUuid.get(item.vmid);
       if (!vmUuid) {
@@ -158,6 +166,7 @@ export function BulkMoveDialog({
 
     // Execute moves sequentially
     for (let i = 0; i < newJobs.length; i++) {
+      if (ended()) break;
       const job = newJobs[i];
       if (!job || job.status === "failed") continue;
 

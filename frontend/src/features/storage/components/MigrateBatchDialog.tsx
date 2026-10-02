@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import {
@@ -89,7 +89,14 @@ export function MigrateBatchDialog({
 
     const working = [...initial];
 
+    // The session this batch was started in. The loop outlives the dialog, and
+    // a sign-out with it: once that session has ended, no request goes out for
+    // it — it would carry whoever signs in next's token, and each is a disk move
+    // on the cluster — and nothing it started is put in their task log.
+    const ended = sessionScope();
+
     for (let i = 0; i < working.length; i++) {
+      if (ended()) break;
       const job = working[i];
       if (!job) continue;
 
@@ -101,6 +108,8 @@ export function MigrateBatchDialog({
           job.guestKind === "ct"
             ? await resolveVolidToCTVolumeKey(clusterId, job.guestId, job.volid)
             : await resolveVolidToDiskKey(clusterId, job.guestId, job.volid);
+
+        if (ended()) break;
 
         if (!configKey) {
           working[i] = {
@@ -135,7 +144,7 @@ export function MigrateBatchDialog({
         working[i] = { ...job, status: "completed", upid: resp.upid };
         setStates([...working]);
 
-        if (resp.upid && i === 0) {
+        if (resp.upid && i === 0 && !ended()) {
           // Surface the first task in the global task log so the user can
           // open it from the activity panel; subsequent jobs are tracked
           // inline in the dialog.

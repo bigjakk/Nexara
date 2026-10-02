@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import {
   Dialog,
@@ -318,7 +318,14 @@ export function MigrateJobDialog({
           : "",
     };
 
+    // The session this was started in. The check is a write to the job the create
+    // just made — it sets it to "checking", records the report and moves it on, to
+    // pending or to failed — and needs manage:migration, not ownership of the job:
+    // sent after the session changed hands it would run as whoever is signed in
+    // next, on the previous user's job.
+    const ended = sessionScope();
     void createMutation.mutateAsync(req).then((created) => {
+      if (ended()) return;
       setJobId(created.id);
       void checkMutation.mutateAsync(created.id).then(() => {
         setStep("preflight");

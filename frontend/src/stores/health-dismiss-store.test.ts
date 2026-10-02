@@ -70,6 +70,57 @@ describe("health-dismiss-store", () => {
     expect(useHealthDismissStore.getState().dismissed).toEqual(["x"]);
   });
 
+  describe("resetSession (the signed-in session ended)", () => {
+    // Another tab dismissed an issue: its dismissal is in localStorage, and this
+    // tab's list — read once, at load — never held it.
+    const OTHER_TABS = [
+      "cluster01|node_offline|pve-01|critical|pve-01 is offline",
+    ];
+
+    it("empties the persisted dismissals even when this tab's own list is empty", () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(OTHER_TABS));
+      expect(useHealthDismissStore.getState().dismissed).toEqual([]);
+      expect(stored()).toEqual(OTHER_TABS);
+
+      useHealthDismissStore.getState().resetSession();
+
+      expect(stored()).toEqual([]);
+      expect(useHealthDismissStore.getState().dismissed).toEqual([]);
+    });
+
+    it("control: restoreAll trusts this tab's list, and with it empty leaves what another tab wrote", () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(OTHER_TABS));
+
+      useHealthDismissStore.getState().restoreAll();
+
+      expect(stored()).toEqual(OTHER_TABS);
+    });
+
+    it("empties this tab's list and its persisted copy", () => {
+      useHealthDismissStore.getState().dismiss("a");
+      useHealthDismissStore.getState().dismiss("b");
+
+      useHealthDismissStore.getState().resetSession();
+
+      expect(useHealthDismissStore.getState().dismissed).toEqual([]);
+      expect(stored()).toEqual([]);
+    });
+
+    it("does not notify subscribers when the list is already empty", () => {
+      const before = useHealthDismissStore.getState().dismissed;
+      let notified = 0;
+      const unsubscribe = useHealthDismissStore.subscribe(() => {
+        notified++;
+      });
+
+      useHealthDismissStore.getState().resetSession();
+      unsubscribe();
+
+      expect(useHealthDismissStore.getState().dismissed).toBe(before);
+      expect(notified).toBe(0);
+    });
+  });
+
   it("loads previously persisted dismissals from localStorage", () => {
     // Simulate a prior session having persisted a dismissal, then re-read it
     // the same way the store does on init.

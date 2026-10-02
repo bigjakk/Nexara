@@ -16,6 +16,12 @@ interface TaskLogActions {
   setPanelOpen: (open: boolean) => void;
   setPanelHeight: (height: number) => void;
   setFocusedTask: (task: FocusedTask | null) => void;
+  /**
+   * The signed-in session ended: forget the task the panel was showing, which
+   * names the previous user's cluster and guest. Whether the panel is open and
+   * how tall it is is the browser's, and stays.
+   */
+  resetSession: () => void;
 }
 
 const STORAGE_KEY = "nexara-task-log";
@@ -64,6 +70,9 @@ export const useTaskLogStore = create<TaskLogState & TaskLogActions>()(
     },
     setFocusedTask: (task: FocusedTask | null) => {
       set({ focusedTask: task });
+    },
+    resetSession: () => {
+      set({ focusedTask: null });
     },
   }),
 );

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { signedInUserID } from "@/stores/pbs-key-store";
 import type {
   RollingUpdateJob,
   RollingUpdateNode,
@@ -334,11 +335,23 @@ export function useUpsertSSHCredentials() {
         apiPath`/api/v1/clusters/${clusterId}/ssh-credentials`,
         body,
       ),
-    onSuccess: (data, vars) => {
+    // Who was signed in when the save was sent, taken before the request goes
+    // out (the app's one answer to "who is signed in" is signedInUserID).
+    onMutate: () => ({ owner: signedInUserID() }),
+    onSuccess: (data, vars, { owner }) => {
       // Seed the cache so the view-mode form (which hosts the bulk-pin
       // dialog) renders on the next tick instead of flashing the
       // "no credentials" block while the refetch is in flight.
-      qc.setQueryData(["ssh-credentials", vars.clusterId], data);
+      //
+      // Only for the session that sent the save. One that ended while it was
+      // in flight already cleared the cache (stores/session-reset.ts), yet
+      // TanStack still runs this callback when the answer lands, and a write
+      // here would hand the credential record to whoever is signed in by
+      // then — who may not hold manage:ssh_credentials, and whose own
+      // refetch's 403 would leave it on screen.
+      if (owner !== undefined && owner === signedInUserID()) {
+        qc.setQueryData(["ssh-credentials", vars.clusterId], data);
+      }
       void qc.invalidateQueries({
         queryKey: ["ssh-credentials", vars.clusterId],
       });

@@ -33,6 +33,9 @@ function purgeLegacyTokenKeys() {
 // by the server is the persistent auth artefact across reloads.
 let accessTokenInMemory: string | null = null;
 let accessTokenExpiresAt = 0;
+// Whose token that is, so a refresh that answers for someone else is known for
+// what it is: another session (see refreshTokens).
+let accessTokenUserId: string | null = null;
 
 // One-shot legacy cleanup on module load — covers the SPA boot path before
 // any login/refresh runs.
@@ -41,6 +44,71 @@ purgeLegacyTokenKeys();
 let onAuthFailure: (() => void) | null = null;
 let onAuthRefresh: ((res: AuthResponse) => void) | null = null;
 let refreshPromise: Promise<AuthResponse> | null = null;
+
+// Which session the token above, and the refresh in flight, belong to. It
+// changes when a session begins (storeTokens, which a refresh answering for
+// someone else also does) and when one ends (clearTokens), and not when a
+// refresh rotates the tokens of the session it belongs to.
+//
+// Nothing else ties an answer to the session that asked for it. A refresh
+// started before Sign out would land after it and sign the user back in, or
+// land after the next user has signed in and replace their token and identity
+// with the previous one's. So whatever starts under one epoch and finishes
+// under another belongs to a session that has ended, and must not touch the
+// current one: it fails with a StaleSessionError instead.
+let sessionEpoch = 0;
+
+/**
+ * The epoch of the session now current (see sessionEpoch). Work that outlives
+ * a component — a loop of requests — takes it before it starts and stops once
+ * it has changed, rather than carry on as whoever is signed in next.
+ */
+export function currentSessionEpoch(): number {
+  return sessionEpoch;
+}
+
+/**
+ * `ended()` is false until the session now current ends or is replaced, and
+ * true from then on. Work that outlives a component — a loop of requests, a
+ * wait between two of them — takes one before it starts and stops once it says
+ * so, rather than carry on as whoever is signed in next:
+ *
+ *   const ended = sessionScope();
+ *   for (const item of items) {
+ *     if (ended()) break;
+ *     await apiClient.post(...);
+ *   }
+ */
+export function sessionScope(): () => boolean {
+  const session = sessionEpoch;
+  return () => sessionEpoch !== session;
+}
+
+// True from the moment a session ended here (clearTokens) until the next one
+// begins (storeTokens): nobody is signed in, and only a sign-in may change that.
+// The refresh cookie outlives a session the server could not be told about (the
+// logout request failed), and a request that finds nobody signed in would
+// otherwise use it to resume that very session: its refresh starts after the
+// sign-out, so it is nobody's stale answer and nothing above would drop it.
+// The module starts unlatched, and auth-store initialize() decides what a page
+// starts as: with no stored user it latches (clearTokens), so only a sign-in
+// begins a session on it; with one it resumes through postPublic, which is not
+// affected either way, and storeTokens takes it from there. What is left
+// unlatched is the module before initialize() has run.
+let signedOut = false;
+
+/**
+ * Something that belonged to a session that has since ended or been replaced:
+ * a refresh answered after Sign out, a request whose token was being refreshed
+ * for the session that ended. It says nothing about the session now current,
+ * so nothing that receives it ends that session.
+ */
+export class StaleSessionError extends Error {
+  constructor() {
+    super("The session this belonged to has ended");
+    this.name = "StaleSessionError";
+  }
+}
 
 export function setAuthFailureCallback(cb: () => void) {
   onAuthFailure = cb;
@@ -56,16 +124,46 @@ export function setAuthRefreshCallback(cb: (res: AuthResponse) => void) {
   onAuthRefresh = cb;
 }
 
-export function storeTokens(res: AuthResponse) {
+function writeTokens(res: AuthResponse) {
   accessTokenInMemory = res.access_token;
   accessTokenExpiresAt = res.expires_at;
-  localStorage.setItem(USER_KEY, JSON.stringify(res.user));
+  accessTokenUserId = res.user.id;
+  // The cached user only seeds the render after a reload (see USER_KEY), and a
+  // full quota refuses it. That must not fail the session this is the start
+  // of: the token above is already in use, and a throw here would leave it
+  // there for a session whose caller never got to apply it.
+  try {
+    localStorage.setItem(USER_KEY, JSON.stringify(res.user));
+  } catch {
+    // The reload resumes off the cookie, or asks for a sign-in.
+  }
   purgeLegacyTokenKeys();
 }
 
+/**
+ * A session begins: a sign-in, the SSO callback, TOTP, registration, a resume
+ * at boot. Everything started under the previous one — a refresh in flight, a
+ * request — is that one's from here on (see sessionEpoch), and a caller of
+ * refreshOnce no longer joins its refresh. A refresh rotating the tokens of
+ * the session it belongs to does not come through here (writeTokens).
+ */
+export function storeTokens(res: AuthResponse) {
+  sessionEpoch++;
+  signedOut = false;
+  refreshPromise = null;
+  writeTokens(res);
+}
+
 export function clearTokens() {
+  sessionEpoch++;
+  signedOut = true;
+  // Nothing refreshes until a session begins (signedOut), and storeTokens
+  // drops this too; it is dropped here as well so that a session that ended
+  // never has a refresh to join, whatever else changes.
+  refreshPromise = null;
   accessTokenInMemory = null;
   accessTokenExpiresAt = 0;
+  accessTokenUserId = null;
   localStorage.removeItem(USER_KEY);
   purgeLegacyTokenKeys();
 }
@@ -81,20 +179,35 @@ export function getStoredUser() {
 }
 
 async function refreshTokens(): Promise<AuthResponse> {
+  // The session this refresh is for. The answer is applied only if that is
+  // still the current one when it arrives (see sessionEpoch): a refresh that
+  // belongs to a session that ended — by Sign out, by expiry, by another
+  // sign-in — is dropped before anything of it is stored or reported, whether
+  // the server answered it, refused it, or could not be reached.
+  const epoch = sessionEpoch;
+  const stale = (err: unknown): unknown =>
+    epoch === sessionEpoch ? err : new StaleSessionError();
+
   // Body is empty — the HttpOnly cookie carries the refresh token, and since
   // v1.9.x that is the only delivery path the server offers. auth: false,
   // because this IS the refresh: resolving an access token for it would start
   // another one.
-  const res = await apiFetch(
-    apiPath`/api/v1/auth/refresh`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: "{}",
-    },
-    { auth: false },
-  );
+  let res: Response;
+  try {
+    res = await apiFetch(
+      apiPath`/api/v1/auth/refresh`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: "{}",
+      },
+      { auth: false },
+    );
+  } catch (err) {
+    throw stale(err);
+  }
+  if (epoch !== sessionEpoch) throw new StaleSessionError();
 
   if (!res.ok) {
     clearTokens();
@@ -102,44 +215,76 @@ async function refreshTokens(): Promise<AuthResponse> {
     throw new Error("Refresh failed");
   }
 
-  const data = (await res.json()) as AuthResponse;
-  storeTokens(data);
+  let data: AuthResponse;
+  try {
+    data = (await res.json()) as AuthResponse;
+  } catch (err) {
+    throw stale(err);
+  }
+  if (epoch !== sessionEpoch) throw new StaleSessionError();
+
+  // A rotation keeps its user, and so its session: no new epoch. An answer that
+  // names someone else — another tab signed them in on the shared refresh
+  // cookie — is another session, and begins one as a sign-in does: what was
+  // started for the user this tab held is not carried on as them.
+  if (accessTokenUserId !== null && accessTokenUserId !== data.user.id) {
+    storeTokens(data);
+  } else {
+    writeTokens(data);
+  }
   onAuthRefresh?.(data);
   return data;
 }
 
 function refreshOnce(): Promise<AuthResponse> {
   if (!refreshPromise) {
-    refreshPromise = refreshTokens().finally(() => {
-      refreshPromise = null;
+    const attempt: Promise<AuthResponse> = refreshTokens().finally(() => {
+      // Only its own: clearTokens() and storeTokens() have made room for a
+      // newer session's refresh, which this one settling must not forget.
+      if (refreshPromise === attempt) refreshPromise = null;
     });
+    refreshPromise = attempt;
   }
   return refreshPromise;
 }
 
 async function ensureValidToken(): Promise<string | null> {
-  // First call after page load — try a cookie-based refresh to populate memory.
+  // First call after page load, before initialize() has said whether there is a
+  // session to resume — try a cookie-based refresh to populate memory. Not once
+  // a session has ended here, nor on a page that started signed out: see
+  // signedOut.
   if (!accessTokenInMemory) {
-    try {
-      const r = await refreshOnce();
-      return r.access_token;
-    } catch {
-      return null;
-    }
+    return signedOut ? null : tokenFromRefresh();
   }
 
   // Proactively refresh if the token expires within 60 seconds.
   const now = Math.floor(Date.now() / 1000);
   if (accessTokenExpiresAt > 0 && accessTokenExpiresAt - now < 60) {
-    try {
-      const r = await refreshOnce();
-      return r.access_token;
-    } catch {
-      return null;
-    }
+    return tokenFromRefresh();
   }
 
   return accessTokenInMemory;
+}
+
+/**
+ * The access token a refresh yields, for the request that waited on it; null
+ * when there is no session to refresh. Two answers are not "no session": a
+ * refresh that went stale, and one that came back for someone else — another
+ * tab signed them in on the shared cookie, which began a session of theirs
+ * (refreshTokens). Either way the request that waited belongs to the session
+ * that ended, and is not sent for whoever is signed in by now.
+ */
+async function tokenFromRefresh(): Promise<string | null> {
+  const epoch = sessionEpoch;
+  let refreshed: AuthResponse;
+  try {
+    refreshed = await refreshOnce();
+  } catch (err) {
+    if (err instanceof StaleSessionError) throw err;
+    return null;
+  }
+  if (epoch !== sessionEpoch) throw new StaleSessionError();
+  return refreshed.access_token;
 }
 
 class ApiClientError extends Error {
@@ -271,6 +416,9 @@ async function request<T>(
     }
   }
 
+  // The session this request is sent for, which a 401 below is about.
+  const epoch = sessionEpoch;
+
   const serializedBody = body != null ? JSON.stringify(body) : null;
 
   let res = await fetch(path, {
@@ -282,16 +430,46 @@ async function request<T>(
 
   // 401 retry with refresh (single attempt)
   if (res.status === 401 && !skipAuth) {
+    // Its session may have ended while it was in flight — signed out, expired,
+    // replaced by another sign-in. A 401 for that session says nothing about the
+    // one now current, and refreshing here would replay the request under that
+    // one's token: the ended session's request would run as the new user.
+    if (epoch !== sessionEpoch) throw new StaleSessionError();
+    // Nobody is signed in here (see signedOut): this 401 is the answer, and a
+    // refresh would resume a session off a cookie nothing has a claim on.
+    if (signedOut) {
+      throw new ApiClientError(401, {
+        error: "unauthorized",
+        message: "Session expired",
+      });
+    }
     try {
       const refreshResult = await refreshOnce();
+      // It answered, perhaps for someone else (see tokenFromRefresh): replaying
+      // the request now would run it as them.
+      if (epoch !== sessionEpoch) throw new StaleSessionError();
       headers["Authorization"] = `Bearer ${refreshResult.access_token}`;
-      res = await fetch(path, {
-        method,
-        headers,
-        body: serializedBody,
-        credentials: "same-origin",
-      });
-    } catch {
+      try {
+        res = await fetch(path, {
+          method,
+          headers,
+          body: serializedBody,
+          credentials: "same-origin",
+        });
+      } catch (err) {
+        // The retry never came back, and its session may have ended while it was
+        // out: that is not this session failing, and the handling below would
+        // end the one now current. Not so for a refresh that failed, which ends
+        // a session itself — and so moves the epoch — which is why this check is
+        // here and not in the catch below.
+        if (epoch !== sessionEpoch) throw new StaleSessionError();
+        throw err;
+      }
+    } catch (err) {
+      // A refresh that belonged to a session that has since ended failed or
+      // went stale: that is not this session failing, and ending it here would
+      // sign the new user out.
+      if (err instanceof StaleSessionError) throw err;
       clearTokens();
       onAuthFailure?.();
       throw new ApiClientError(401, {

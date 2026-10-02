@@ -46,6 +46,13 @@ interface VMContextMenuActions {
   ) => void;
   openMoveToFolder: (target: VMContextTarget) => void;
   closeDialog: () => void;
+  /**
+   * The signed-in session ended: drop the target as well as the dialog.
+   * closeDialog keeps the target, which names a guest and its node, and
+   * AppShell mounts VMContextDialogs from this store — so a session that ended
+   * with the destroy dialog open would show it to whoever signs in next.
+   */
+  resetSession: () => void;
 }
 
 export const useVMContextMenuStore = create<
@@ -90,5 +97,13 @@ export const useVMContextMenuStore = create<
   },
   closeDialog: () => {
     set({ openDialog: null, confirmAction: null, confirmActionLabel: null });
+  },
+  resetSession: () => {
+    set({
+      target: null,
+      openDialog: null,
+      confirmAction: null,
+      confirmActionLabel: null,
+    });
   },
 }));

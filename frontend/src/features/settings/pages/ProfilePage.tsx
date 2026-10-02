@@ -33,7 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
-import { ApiClientError } from "@/lib/api-client";
+import { ApiClientError, sessionScope } from "@/lib/api-client";
 import {
   useProfile,
   useUpdateProfile,
@@ -113,8 +113,15 @@ export function ProfilePage() {
         onSuccess: () => {
           setPasswordSuccess(true);
           // Server revoked all sessions — force local logout after brief delay.
+          // The timer outlives this page, and is not cleared when it is left:
+          // the session is revoked either way. But it is for the session that
+          // changed the password: if that has ended by then — signed out, or
+          // someone else signed in — clearAuth() would end theirs, or turn the
+          // user's own Sign out into an expiry (the login page then carries the
+          // page they left to whoever signs in next).
+          const ended = sessionScope();
           setTimeout(() => {
-            clearAuth();
+            if (!ended()) clearAuth();
           }, 2000);
         },
         onError: (err) => {

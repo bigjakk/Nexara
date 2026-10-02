@@ -23,7 +23,7 @@ import {
   parseRetryCount,
   type HARuleEntry,
 } from "@/features/ha/api/ha-queries";
-import { ApiClientError } from "@/lib/api-client";
+import { ApiClientError, sessionScope } from "@/lib/api-client";
 import type { VMResponse } from "@/types/api";
 import type { NodeResponse } from "@/types/api";
 
@@ -253,6 +253,12 @@ export function HARuleForm(props: Props) {
     const resources = Array.from(selectedSIDs).join(",");
     const nodesStr = serializeNodes(nodePriorities);
 
+    // The session this was saved in. The writes below outlive the dialog, and
+    // a sign-out with it: once that session has ended, no further write goes
+    // out for it — each changes the cluster's HA configuration, and would carry
+    // whoever signs in next's token.
+    const ended = sessionScope();
+
     try {
       // Bring any not-yet-managed selections under HA first, so Proxmox accepts
       // the rule. Sequential — concurrent writes contend on the HA config lock.
@@ -262,6 +268,7 @@ export function HARuleForm(props: Props) {
         const maxRelocateNum = parseRetryCount(resMaxRelocate, 10);
         const groupValue = resGroup === "__none__" ? "" : resGroup;
         for (const sid of unmanagedSelected) {
+          if (ended()) return;
           await createResourceMut.mutateAsync({
             sid,
             state: resState,
@@ -276,6 +283,8 @@ export function HARuleForm(props: Props) {
           });
         }
       }
+
+      if (ended()) return;
 
       if (props.mode === "create") {
         await createMut.mutateAsync({

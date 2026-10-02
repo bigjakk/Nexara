@@ -14,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useQueryClient } from "@tanstack/react-query";
 import type { StorageContentItem } from "../types/storage";
 import { useDeleteContent } from "../api/storage-queries";
+import { sessionScope } from "@/lib/api-client";
 import { formatBytes } from "@/lib/format";
 
 interface StorageContentTableProps {
@@ -118,9 +119,17 @@ export function StorageContentTable({
     }
     setBulkDeleting(true);
     setBulkProgress({ done: 0, failed: 0 });
+
+    // The session that chose these volumes. The loop outlives the table, and a
+    // sign-out with it: once that session has ended, nothing more is deleted
+    // for it — each is a volume gone for good, and the request would carry
+    // whoever signs in next's token.
+    const ended = sessionScope();
+
     let done = 0;
     let failed = 0;
     for (const volid of volids) {
+      if (ended()) break;
       try {
         await deleteMutation.mutateAsync({
           clusterId,

@@ -16,6 +16,13 @@ interface HealthDismissState {
   restoreAll: () => void;
   /** Drop dismissals whose issue is no longer active, so recurrences re-show. */
   syncActive: (activeSigs: string[]) => void;
+  /**
+   * The signed-in session ended: drop every dismissal, in memory AND in storage.
+   * Unlike restoreAll it does not take this tab's list for what is stored — it
+   * was read once, at load, and another tab may have written dismissals since,
+   * which carry a cluster id, a target and the issue's detail text.
+   */
+  resetSession: () => void;
 }
 
 const STORAGE_KEY = "nexara-health-dismissed";
@@ -66,5 +73,9 @@ export const useHealthDismissStore = create<HealthDismissState>()((set) => ({
       save(next);
       return { dismissed: next };
     });
+  },
+  resetSession: () => {
+    save([]);
+    set((s) => (s.dismissed.length === 0 ? s : { dismissed: [] }));
   },
 }));

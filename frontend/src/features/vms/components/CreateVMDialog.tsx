@@ -27,7 +27,7 @@ import {
   useCreateVM,
   useResourcePools,
 } from "../api/vm-queries";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { NodeResponse, VMResponse } from "@/types/api";
 import { TaskProgressBanner } from "./TaskProgressBanner";
@@ -736,6 +736,11 @@ export function CreateVMDialog({
             onComplete={() => {
               // After task completes, poll for the new VM record and navigate to it
               const createdVmid = Number(vmid);
+              // The session that created it. A look at the list that is already
+              // out when it ends is answered all the same, and what it finds is
+              // that session's VM: navigating then goes through whoever is signed
+              // in next, and a protected route carries the page as returnTo.
+              const ended = sessionScope();
               const pollForVM = () => {
                 void queryClient
                   .invalidateQueries({
@@ -747,6 +752,7 @@ export function CreateVMDialog({
                     ),
                   )
                   .then((vms) => {
+                    if (ended()) return;
                     const found = vms.find((v) => v.vmid === createdVmid);
                     if (found) {
                       if (pollTimerRef.current)

@@ -33,7 +33,17 @@ interface ConsoleActions {
   setWindowSize: (size: { width: number; height: number }) => void;
   /** Show the floating console — if hidden opens as floating, if minimized restores. */
   showConsole: () => void;
+  /**
+   * The signed-in session ended: drop every tab and hide the window. The tabs
+   * name the guests and nodes the previous user opened (and, persisted, would
+   * come back on the next sign-in, the active one dialling at once), so they
+   * are theirs and not the browser's. Where the window sits and how big it is
+   * is the browser's, and stays.
+   */
+  resetSession: () => void;
 }
+
+const PERSIST_KEY = "nexara-console-tabs";
 
 let nextId = Date.now();
 
@@ -49,6 +59,28 @@ function defaultPosition(): { x: number; y: number } {
     x: Math.max(0, window.innerWidth - 820),
     y: Math.max(0, window.innerHeight - 520),
   };
+}
+
+/**
+ * Whether the copy of the store in storage holds nothing of a session: no tab,
+ * no active tab, the window not shown. Another tab persists on every change it
+ * makes, so this tab's memory can be at its defaults while storage is not, and
+ * it is storage a reload reads back. What cannot be read — a corrupt value, a
+ * storage that answers late — is not "nothing": it is replaced, which is what
+ * forgetting a session is for.
+ */
+function persistedCopyIsAtDefaults(): boolean {
+  try {
+    const stored = useConsoleStore.persist
+      .getOptions()
+      .storage?.getItem(PERSIST_KEY);
+    if (stored === undefined || stored === null) return true;
+    if (stored instanceof Promise) return false;
+    const { tabs, activeTabId, windowMode } = stored.state;
+    return tabs.length === 0 && activeTabId === null && windowMode === "hidden";
+  } catch {
+    return false;
+  }
 }
 
 export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
@@ -247,9 +279,26 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
           set({ windowMode: "floating" });
         }
       },
+
+      resetSession: () => {
+        // Nothing to forget, here or in storage: persist writes the store to
+        // localStorage on every set, changed or not, and a signed-out boot would
+        // otherwise write a window position derived from the viewport — and fail,
+        // if the quota is full — to forget nothing.
+        const state = get();
+        if (
+          state.tabs.length === 0 &&
+          state.activeTabId === null &&
+          state.windowMode === "hidden" &&
+          persistedCopyIsAtDefaults()
+        ) {
+          return;
+        }
+        set({ tabs: [], activeTabId: null, windowMode: "hidden" });
+      },
     }),
     {
-      name: "nexara-console-tabs",
+      name: PERSIST_KEY,
       // v1 persists tabs as "idle" rather than "connecting". Tabs written by
       // v0 come back mid-flight ("connecting"/"connected") even though no
       // socket survived the reload, which would leave a restored background

@@ -15,12 +15,16 @@ export interface FavoriteTarget {
 /**
  * Query key for one user's favorites.
  *
- * Keyed by user id because favorites are personal. Nothing clears the
- * QueryClient on logout — logout is a state change, not a reload — and the
- * client defaults to a 5 minute staleTime, so a shared key would let the next
- * person to sign in on this browser read the previous user's starred resources
- * straight from cache. Those rows carry cluster, node and guest names, so that
- * is a cross-user disclosure and not merely stale UI.
+ * Keyed by user id because favorites are personal. Signing out clears the
+ * QueryClient (stores/session-reset.ts), and a QUERY's own response cannot land
+ * after that: clear() cancels the fetch, and the retryer ignores a later
+ * settle. So this is the second line, against a writer that is not a query —
+ * a mutation's setQueryData still in flight when the session ended runs its
+ * callbacks anyway (useUpsertSSHCredentials had to pin its session for that
+ * reason). The client defaults to a 5 minute staleTime, so what such a write
+ * left under a shared key would be read by the next person to sign in on this
+ * browser straight from cache. Those rows carry cluster, node and guest names,
+ * so that is a cross-user disclosure and not merely stale UI.
  */
 const favoritesKey = (userID: string) => ["favorites", userID] as const;
 

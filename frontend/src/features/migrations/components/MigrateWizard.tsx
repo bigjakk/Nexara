@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { sessionScope } from "@/lib/api-client";
 import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
 import { parseBwlimit } from "@/features/storage/lib/disk-move";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
@@ -155,7 +156,14 @@ export function MigrateWizard() {
       disk_format: "",
     };
 
+    // The session this was started in. The check is a write to the job the create
+    // just made — it sets it to "checking", records the report and moves it on, to
+    // pending or to failed — and needs manage:migration, not ownership of the job:
+    // sent after the session changed hands it would run as whoever is signed in
+    // next, on the previous user's job.
+    const ended = sessionScope();
     void createMutation.mutateAsync(req).then((created) => {
+      if (ended()) return;
       setJobId(created.id);
       void checkMutation.mutateAsync(created.id).then(() => {
         setStep("preflight");

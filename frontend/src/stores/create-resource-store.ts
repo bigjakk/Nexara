@@ -20,6 +20,10 @@ interface CreateResourceActions {
   pickCluster: (clusterId: string) => void;
   cancelPending: () => void;
   close: () => void;
+  // The signed-in session ended: drop the open dialog and the cluster it
+  // targeted. AppShell mounts CreateResourceDialogs from this store, so one
+  // left open would reappear for whoever signs in next.
+  resetSession: () => void;
 }
 
 export const useCreateResourceStore = create<
@@ -45,5 +49,8 @@ export const useCreateResourceStore = create<
   },
   close: () => {
     set({ dialog: null });
+  },
+  resetSession: () => {
+    set({ dialog: null, clusterId: "", pendingType: null });
   },
 }));

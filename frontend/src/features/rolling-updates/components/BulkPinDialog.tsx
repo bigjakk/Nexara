@@ -16,7 +16,7 @@ import {
   ShieldCheck,
   Circle,
 } from "lucide-react";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { useQueryClient } from "@tanstack/react-query";
 import type { SSHTestResponse, SSHKnownHost } from "@/types/api";
@@ -79,6 +79,11 @@ export function BulkPinDialog({
     );
 
     cancelRef.current = false;
+    // The session the dialog was opened in. Closing it stops the loops
+    // (cancelRef), but a session can change hands under a dialog that stays
+    // open; from then on nothing is sent for it — a pin tells the cluster to
+    // trust a host key, and it would carry the next user's token.
+    const ended = sessionScope();
     void (async () => {
       // Scan sequentially so we don't overwhelm the cluster or the local
       // process; ≤10 nodes scan in well under 10 seconds.
@@ -88,7 +93,7 @@ export function BulkPinDialog({
             apiPath`/api/v1/clusters/${clusterId}/ssh-credentials/test`,
             { node_name: n.name },
           );
-          if (cancelRef.current) return;
+          if (cancelRef.current || ended()) return;
           setRows((prev) =>
             prev.map((row, idx) => {
               if (idx !== i) return row;
@@ -136,7 +141,7 @@ export function BulkPinDialog({
             }),
           );
         } catch (err) {
-          if (cancelRef.current) return;
+          if (cancelRef.current || ended()) return;
           const msg = err instanceof Error ? err.message : "Scan failed";
           setRows((prev) =>
             prev.map((row, idx) =>
@@ -177,6 +182,8 @@ export function BulkPinDialog({
 
   const handlePinAll = () => {
     setPhase("pinning");
+    // The session whose user chose these host keys to trust; see the scan.
+    const ended = sessionScope();
     void (async () => {
       for (const [i, row] of rows.entries()) {
         if (!row.selected) continue;
@@ -201,14 +208,14 @@ export function BulkPinDialog({
               expected_fingerprint: expectedFingerprint,
             },
           );
-          if (cancelRef.current) return;
+          if (cancelRef.current || ended()) return;
           setRows((prev) =>
             prev.map((r, idx) =>
               idx === i ? { ...r, pinResult: "pinned" } : r,
             ),
           );
         } catch (err) {
-          if (cancelRef.current) return;
+          if (cancelRef.current || ended()) return;
           const msg = err instanceof Error ? err.message : "Pin failed";
           setRows((prev) =>
             prev.map((r, idx) =>
