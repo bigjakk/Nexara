@@ -113,8 +113,10 @@ import { NodeNotesCard } from "../components/node/NodeNotesCard";
 import { NodeOptionsCard } from "../components/node/NodeOptionsCard";
 import { NodeTemperatures } from "../components/node/NodeTemperatures";
 import {
+  DNSReadNote,
   EditDNSDialog,
   EditTimezoneDialog,
+  TimezoneReadNote,
 } from "../components/node/NodeSettingsDialogs";
 import { formatBytes, formatUptime } from "@/lib/format";
 
@@ -200,6 +202,11 @@ export function NodeDetailPage() {
     node.swap_total > 0
       ? ((node.swap_used / node.swap_total) * 100).toFixed(1)
       : null;
+  // Who is shown the timezone and DNS dialogs, and who makes the reads they edit
+  // from. It gates what is DRAWN, not a flag the dialogs take: they then unmount
+  // with the permission (or the node going offline), their state with them, and
+  // nothing comes back from an old snapshot when it returns.
+  const canEditSettings = node.status === "online" && canManage("node");
 
   return (
     <div className="space-y-6 p-6">
@@ -339,6 +346,11 @@ export function NodeDetailPage() {
                 },
               ]}
             />
+            {/* The timezone and DNS dialogs are keyed on the node, like the
+                Options and Notes cards below: the page is the same component
+                for every node it is routed to, and a dialog that survived a
+                change of node would PUT what it was opened with to the new
+                one. Their notes say what could not be read, under the rows. */}
             <HardwareSectionWithAction
               icon={<Info className="h-4 w-4" />}
               title="System"
@@ -357,15 +369,19 @@ export function NodeDetailPage() {
                 { label: "Timezone", value: node.timezone || "--" },
               ]}
               action={
-                node.status === "online" ? (
+                canEditSettings ? (
                   <EditTimezoneDialog
+                    key={`timezone-${node.id}`}
                     clusterId={clusterId}
                     nodeName={node.name}
-                    currentTimezone={node.timezone}
                   />
                 ) : undefined
               }
-            />
+            >
+              {canEditSettings && (
+                <TimezoneReadNote clusterId={clusterId} nodeName={node.name} />
+              )}
+            </HardwareSectionWithAction>
             <HardwareSectionWithAction
               icon={<Globe className="h-4 w-4" />}
               title="Network & DNS"
@@ -382,11 +398,19 @@ export function NodeDetailPage() {
                   : []),
               ]}
               action={
-                node.status === "online" ? (
-                  <EditDNSDialog clusterId={clusterId} nodeName={node.name} />
+                canEditSettings ? (
+                  <EditDNSDialog
+                    key={`dns-${node.id}`}
+                    clusterId={clusterId}
+                    nodeName={node.name}
+                  />
                 ) : undefined
               }
-            />
+            >
+              {canEditSettings && (
+                <DNSReadNote clusterId={clusterId} nodeName={node.name} />
+              )}
+            </HardwareSectionWithAction>
             {/* Keyed on the node: the page is the same component for every node
                 it is routed to, and a dialog that survived a change of node
                 would PUT the old node's snapshot to the new one. Each has its
@@ -2558,11 +2582,14 @@ function HardwareSectionWithAction({
   title,
   items,
   action,
+  children,
 }: {
   icon: React.ReactNode;
   title: string;
   items: HardwareItem[];
   action?: React.ReactNode;
+  /** Under the rows: what the card has to say besides them. */
+  children?: React.ReactNode;
 }) {
   return (
     <div className="rounded-lg border p-4">
@@ -2586,6 +2613,7 @@ function HardwareSectionWithAction({
           </div>
         ))}
       </dl>
+      {children}
     </div>
   );
 }

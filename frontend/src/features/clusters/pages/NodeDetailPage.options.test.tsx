@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  configure,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
@@ -14,6 +21,13 @@ import { NodeDetailPage } from "./NodeDetailPage";
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
 }));
+
+// The whole page renders cold in the first test of this file, and under load
+// that takes longer than the second testing-library waits by default, which is
+// all vitest.config.ts leaves it: this file alone gets more (it failed 7 runs
+// of 12 under 4 concurrent runs and 14 busy CPUs at the default). A wait that
+// is really stuck still ends the test, in 5 s instead of 1.
+configure({ asyncUtilTimeout: 5000 });
 
 const CLUSTER = "cccccccc-0000-0000-0000-00000000000a";
 const NODES = `/api/v1/clusters/${CLUSTER}/nodes`;

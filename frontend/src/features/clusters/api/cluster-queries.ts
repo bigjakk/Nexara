@@ -718,6 +718,24 @@ export interface NodeTimeResponse {
   localtime: number;
 }
 
+/**
+ * The mutation key of a node's save of one of its settings, "dns" or "time". The
+ * node page reads it (useIsMutating) to hold Edit while one is pending: the
+ * dialog that made the save can be dismissed with the write still in flight, and
+ * a read made before it lands is a read of the old setting.
+ */
+export function nodeSettingSaveKey(
+  clusterId: string,
+  nodeName: string,
+  setting: "dns" | "time",
+) {
+  return ["clusters", clusterId, "nodes", nodeName, setting, "save"] as const;
+}
+
+/**
+ * Reads a node's live DNS settings: what the node holds now, where the node
+ * list's own DNS fields are the collector's stored copy.
+ */
 export function useNodeDNS(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "dns"],
@@ -732,6 +750,7 @@ export function useNodeDNS(clusterId: string, nodeName: string) {
 export function useSetNodeDNS(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: nodeSettingSaveKey(clusterId, nodeName, "dns"),
     mutationFn: (params: {
       search: string;
       dns1: string;
@@ -753,6 +772,12 @@ export function useSetNodeDNS(clusterId: string, nodeName: string) {
   });
 }
 
+/**
+ * Reads a node's timezone and clock from the node itself. The timezone the node
+ * list carries is the collector's stored copy of it: empty when the collector's
+ * last read of the node failed, and behind a change until its next sync. This
+ * is what the node has now.
+ */
 export function useNodeTime(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "time"],
@@ -767,6 +792,7 @@ export function useNodeTime(clusterId: string, nodeName: string) {
 export function useSetNodeTimezone(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: nodeSettingSaveKey(clusterId, nodeName, "time"),
     mutationFn: (params: { timezone: string }) =>
       apiClient.put<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/time`,
