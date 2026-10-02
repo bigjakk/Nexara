@@ -1481,6 +1481,7 @@ func TestNodeConfigACMESaveRefusalsComeAfterTheClusterIsResolved(t *testing.T) {
 	}{
 		{"set and cleared", map[string]any{"acmedomain0": "node.example.com", "delete": []string{"acmedomain0"}}},
 		{"a key that is no ACME setting", map[string]any{"delete": []string{"wakeonlan"}}},
+		{"a control character in a setting", map[string]any{"acmedomain0": "domain=a.example.com,\r"}},
 		{"a save token on an ordinary save", map[string]any{"acmedomain0": "node.example.com", "digest": token}},
 		// A write that changes nothing is the client's refusal too, and so is made
 		// after the cluster is resolved: the route sweep's required-only request is
@@ -1577,6 +1578,147 @@ func TestNodeConfigACMESaveOfNothingIsRefused(t *testing.T) {
 			if rows := w.store.auditRows(); len(rows) != 1 {
 				t.Errorf("the save wrote %d audit rows, want 1", len(rows))
 			}
+		})
+	}
+}
+
+// TestNodeConfigACMESaveRefusesControlCharacters: a PUT .../acme-config whose acme
+// or acmedomainN holds a line break or any other control character is refused 400,
+// with a token or without, ahead of everything that would cost Proxmox a request:
+// the read of the file's digest that a token takes, and the write. The file keeps
+// its digest and no audit row is written. Proxmox's own checks would let it through
+// (an acmedomain of "domain=a.example.com,\r" is a valid one, and is written with
+// its "\r"), or would answer a "\n" with a plain 500 that the caller is told is a
+// 502.
+//
+// The answer is the client's refusal, and it is not the registry's: the declaration
+// bounds the length of a value (optString) and nothing of what it holds, so a control
+// character reaches the handler as it was sent, and the handler asks
+// proxmox.ValidateNodeACMEConfig ahead of the save-token read. The words of the
+// answer are what tell the two apart, and are asserted. A request body can carry one
+// as a JSON escape, which is how every C0 character travels (encoding/json refuses
+// the raw byte inside a string), and DEL, the C1 range and U+2028 and U+2029 as
+// themselves. What this route can never be sent is invalid UTF-8: encoding/json turns
+// a bad byte into U+FFFD before the handler sees it, so that half of the client's
+// refusal is for the other callers of the client, and its own tests hold it.
+//
+// Each refusal has a control on the same setup: the same setting without the
+// character is saved, through the read of the digest and the write, so that "nothing
+// reached Proxmox" is something the route can be seen to do otherwise.
+func TestNodeConfigACMESaveRefusesControlCharacters(t *testing.T) {
+	// The settings are the declaration's own, everything on the PUT that is neither a
+	// path parameter nor request plumbing, so a key added to the route is held to this
+	// test as well.
+	var keys []string
+	for name := range declaredEndpoint(t, fiber.MethodPut, acmeNodeScope+"/acme-config").Parameters {
+		if !slices.Contains([]string{"cluster_id", "node", "delete", "digest"}, name) {
+			keys = append(keys, name)
+		}
+	}
+	slices.Sort(keys)
+	if len(keys) == 0 {
+		t.Fatal("PUT .../acme-config declares no setting to hold the test to")
+	}
+
+	// base is a value the key could hold, cut off where a control character does its
+	// harm: an acmedomainN ends in the comma after which Proxmox skips a segment of
+	// nothing but whitespace, and acme in the domain list it splits on any whitespace.
+	base := func(key string) string {
+		if key == "acme" {
+			return "account=default,domains=a.example.com;b.example.com"
+		}
+		return "domain=a.example.com,"
+	}
+
+	refused := func(t *testing.T, key, value string, withToken bool) {
+		t.Helper()
+		pve := newNodeConfigPVE(t)
+		pve.setFile(testNodeName, nodeConfigNotes, nodeConfigSettings())
+		w := newNodeConfigWorld(t, pve, nodeConfigWorldOptions{})
+		token := w.tokenFrom(t, w.acmeGET(testNodeName))
+		fileBefore, mark := pve.digestOf(testNodeName), pve.mark()
+		fields := map[string]any{key: value}
+		if withToken {
+			fields = withDigest(fields, token)
+		}
+
+		status, body := w.send(t, w.acmePUT(testNodeName, fields))
+		if status != fiber.StatusBadRequest {
+			t.Fatalf("status = %d (%s), want 400", status, clipForFailure(string(body), 300))
+		}
+		var env ErrorResponse
+		if err := json.Unmarshal(body, &env); err != nil ||
+			!strings.Contains(env.Message, `"`+key+`" cannot contain a line break or a control character`) {
+			t.Errorf("the answer is %s, want the client's control-character refusal naming %s", clipForFailure(string(body), 300), key)
+		}
+		if sent := pve.since(mark); len(sent) != 0 {
+			t.Errorf("a refusal Nexara makes reached Proxmox, the read of the digest included: %+v", sent)
+		}
+		if got := pve.digestOf(testNodeName); got != fileBefore {
+			t.Error("the file changed under a save that was refused")
+		}
+		if rows := w.store.auditRows(); len(rows) != 0 {
+			t.Errorf("wrote %d audit row(s) for a save that did not happen, want none", len(rows))
+		}
+	}
+
+	// Every setting the route declares, with the character Proxmox's own checks let
+	// through, and the same setting without it.
+	for _, key := range keys {
+		t.Run(key, func(t *testing.T) {
+			refused(t, key, base(key)+"\r", true)
+
+			t.Run("the same value without the control character is saved", func(t *testing.T) {
+				pve := newNodeConfigPVE(t)
+				pve.setFile(testNodeName, nodeConfigNotes, nodeConfigSettings())
+				w := newNodeConfigWorld(t, pve, nodeConfigWorldOptions{})
+				token := w.tokenFrom(t, w.acmeGET(testNodeName))
+				fileBefore, mark := pve.digestOf(testNodeName), pve.mark()
+
+				status, body := w.send(t, w.acmePUT(testNodeName, withDigest(map[string]any{key: base(key)}, token)))
+				if status != fiber.StatusOK {
+					t.Fatalf("status = %d (%s), want 200", status, clipForFailure(string(body), 300))
+				}
+				sent := pve.since(mark)
+				if len(sent) != 2 || sent[0].method != http.MethodGet || sent[1].method != http.MethodPut {
+					t.Fatalf("Proxmox received %+v, want the digest's read and then the save", sent)
+				}
+				if got := sent[1].form.Get(key); got != base(key) {
+					t.Errorf("Proxmox was sent %s = %q, want %q", key, got, base(key))
+				}
+				if got := pve.digestOf(testNodeName); got == fileBefore {
+					t.Error("the file is unchanged after a save that went through")
+				}
+				if rows := w.store.auditRows(); len(rows) != 1 {
+					t.Errorf("the save wrote %d audit rows, want 1", len(rows))
+				}
+			})
+		})
+	}
+
+	// The other kinds of character, on acme and on an acmedomain.
+	for _, key := range []string{"acme", "acmedomain0"} {
+		for _, ch := range []struct{ name, char string }{
+			{"a line feed", "\n"},
+			{"a tab", "\t"},
+			{"a NUL", "\x00"},
+			{"ESC", "\x1b"},
+			{"DEL", "\x7f"},
+			{"U+0085, the next-line character", "\u0085"},
+			{"U+2028, the line separator", "\u2028"},
+			{"U+2029, the paragraph separator", "\u2029"},
+		} {
+			t.Run(key+"/"+ch.name, func(t *testing.T) {
+				refused(t, key, base(key)+ch.char, true)
+			})
+		}
+	}
+
+	// And without a token, where there is no read of the digest to spare: the write is
+	// what is refused.
+	for _, key := range []string{"acme", "acmedomain0"} {
+		t.Run(key+"/without a save token", func(t *testing.T) {
+			refused(t, key, base(key)+"\r", false)
 		})
 	}
 }

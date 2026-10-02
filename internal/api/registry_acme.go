@@ -280,6 +280,9 @@ func registerACMEEndpoints(reg *Registry, h *handlers.ACMEHandler) {
 			"a key in both is refused rather than silently resolved as a delete, which is what Proxmox " +
 			"would do. A request that sets nothing and clears nothing is refused too (a `digest` alone is " +
 			"neither), because Proxmox would rewrite the whole config file for it. " +
+			"A value that holds a line break or any other control character is refused with 400 " +
+			"before anything is sent to Proxmox, the read that checks `digest` included, because " +
+			"the values are written raw into the node's config file. " +
 			"Sending `digest` turns the write into a compare-and-swap: it is the save token " +
 			"a read returned, sent back unchanged, and Nexara checks it against the node config as it is " +
 			"now, answering 409, with nothing written, when the config changed since the token was read or " +
@@ -511,17 +514,25 @@ func acmePluginFieldParams() apischema.Properties {
 // acmedomain0..5 is the complete set — $MAXDOMAINS is 5 in PVE::NodeConfig —
 // and it is written out rather than generated so that each one renders into the
 // API docs with a description of its own.
+//
+// The values are bounded in length and carry no Format or Pattern: the property
+// strings are Proxmox's to validate. The one rule of Nexara's own about what they
+// hold — no line break or other control character in any of them — is the
+// client's, with the others (buildNodeACMEForm in internal/proxmox), and is only
+// described here, as nodeOptionsParams does for the options route's fields.
 func nodeACMEConfigParams() apischema.Properties {
 	domain := func(n string) apischema.Property {
 		return optString(1024, "<domain=…,plugin=…>",
 			"Additional domain "+n+" to request, as a Proxmox property string: "+
-				"domain=host.example.com, optionally plugin=<id> and alias=<name>. Empty or omitted "+
-				"leaves it alone; naming it in delete removes it.")
+				"domain=host.example.com, optionally plugin=<id> and alias=<name>. No line breaks "+
+				"or other control characters. Empty or omitted leaves it alone; naming it in "+
+				"delete removes it.")
 	}
 	return apischema.Properties{
 		"acme": optString(1024, "<account=…,domains=…>",
 			"The node's ACME setting, as a Proxmox property string: account=<name> and an optional "+
-				"domains=<a;b> list. Clearing it does NOT turn ACME off — Proxmox reads a missing "+
+				"domains=<a;b> list. No line breaks or other control characters. "+
+				"Clearing it does NOT turn ACME off — Proxmox reads a missing "+
 				"account as \"default\" — and it takes any standalone domains in the property string "+
 				"with it."),
 		"acmedomain0": domain("0"),

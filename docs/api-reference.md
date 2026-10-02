@@ -1263,7 +1263,7 @@ Rules are addressed by position, so every rule listing returns a `digest` on eac
 | GET | `/clusters/:id/acme/directories` | List directories |
 | GET | `/clusters/:id/acme/tos` | Get terms of service |
 | GET | `/clusters/:id/nodes/:node/acme-config` | Get node ACME config. `digest` is the same save token, returned only to callers who also hold `manage:certificate` |
-| PUT | `/clusters/:id/nodes/:node/acme-config` | Set node ACME config: an omitted or empty field is left alone, `delete` clears, a request that sets nothing and clears nothing (a `digest` alone is neither) is refused with 400 before anything is sent; with `digest`, the save token a read returned, 409 and nothing written when the node config changed since or the token is not one a read returned. A client that sends Proxmox's own raw digest, which no read returns, is always answered 409 |
+| PUT | `/clusters/:id/nodes/:node/acme-config` | Set node ACME config: an omitted or empty field is left alone, `delete` clears, a request that sets nothing and clears nothing (a `digest` alone is neither) is refused with 400 before anything is sent, and so is a value that holds a line break or any other control character, because the values are written raw into the node's config file; with `digest`, the save token a read returned, 409 and nothing written when the node config changed since or the token is not one a read returned. A client that sends Proxmox's own raw digest, which no read returns, is always answered 409 |
 | GET | `/clusters/:id/nodes/:node/certificates` | List certificates |
 | POST | `/clusters/:id/nodes/:node/certificates/order` | Order certificate |
 | PUT | `/clusters/:id/nodes/:node/certificates/renew` | Renew certificate |

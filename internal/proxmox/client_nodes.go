@@ -762,6 +762,58 @@ func NodeACMESetKeys(cfg NodeACMEConfig) []string {
 // nothing to clear, a digest alone being neither — because Proxmox would still
 // rewrite the whole config file for it, and the caller's audit row would name
 // nothing (SetNodeOptions refuses the same request for the same reasons).
+//
+// Another is a value that holds a line break or any other control character —
+// C0, DEL and C1, and U+2028 and U+2029 with them (hasLineBreakOrControl) — or
+// that is not valid UTF-8. It is the refusal SetNodeOptions makes of its own
+// values, in the same words, and it is made of every setting nodeACMESettings
+// names.
+//
+// The settings are written raw into the node's line-oriented config file, and
+// write_node_config in pve-manager's PVE/NodeConfig.pm dies with "detected invalid
+// newline inside property" on "\n" and on nothing else. What reaches it past
+// Proxmox's own checks is a whitespace-class character or a NUL, in three places
+// where a value is not held to an anchored format:
+//
+//   - a segment of a property string that is nothing but whitespace, in acme and in
+//     an acmedomainN alike. parse_property_string (pve-common's PVE/JSONSchema.pm)
+//     skips it (`next if $part =~ /^\s*\z/`), so "domain=a.example.com,\r" and
+//     "account=default,\r" are valid, and are written with the "\r". A "\n" in its
+//     place is valid too, and is what write_node_config then refuses with a plain
+//     500, which the handler would show as a 502.
+//   - the domains list of acme. pve-acme-domain-list is the list form of
+//     pve-acme-domain, and check_format (pve-common's PVE/JSONSchema.pm) checks a
+//     list form by splitting the value with split_list (pve-common's
+//     PVE/ParseUtils.pm) and checking each entry, so a whitespace-class character at
+//     its end is a separator that yields no entry:
+//     "account=default,domains=a.example.com;b.example.com\r" is valid.
+//   - the NUL branch of split_list: a list that holds a NUL is split on NUL alone, so
+//     "account=default,domains=a.example.com\x00b.example.com" is valid too.
+//
+// So what reached the file, and is refused now, was TAB, VT, FF, CR, NEL, U+2028,
+// U+2029 and NUL, while "\n" got as far as the write, which refused it. Refusing
+// those is the fix, and a check of the whole value covers all three places at once.
+// (The plain space and the Unicode space separators reached the file too, and pass,
+// by decision: see buildNodeACMEForm.) Refusing the rest of the control characters is
+// defence in depth: ESC, CSI, OSC and DEL never reached the file, because the
+// anchored formats reject them wherever a value is checked: pve-acme-domain and
+// pve-acme-alias in PVE/NodeConfig.pm, and pve-configid, in pve-common's
+// PVE/JSONSchema.pm, for the plugin there and for the account, whose format
+// defaultACMEAccountName in internal/api/handlers/acme.go records from pve-manager's
+// PVE/CertHelpers.pm. So no legitimate account, domain, plugin id or alias holds a
+// control character of any kind, and refusing one costs nothing.
+//
+// What the caller is told changes accordingly. For TAB, VT, FF, CR, NEL, U+2028,
+// U+2029 and NUL it is a 400 where there was a write, and for "\n" a 400 in place of
+// a 502. For ESC, CSI, OSC and DEL the status is unchanged, Proxmox having answered
+// them with a 400 of its own (mapProxmoxError surfaces a parameter rejection as
+// one), but that 400 now comes from Nexara, before anything is sent, in its own
+// words.
+//
+// A value that is not valid UTF-8 is refused for the reason SetNodeOptions gives. Over
+// HTTP that half never fires: encoding/json has already replaced a bad byte with
+// U+FFFD before the handler reads the body, so it serves the direct callers of the
+// client, where every caller is held to the same rule.
 func (c *Client) SetNodeACMEConfig(ctx context.Context, node string, cfg NodeACMEConfig) error {
 	if err := validateNodeName(node); err != nil {
 		return err
@@ -778,14 +830,16 @@ func (c *Client) SetNodeACMEConfig(ctx context.Context, node string, cfg NodeACM
 
 // ValidateNodeACMEConfig reports what SetNodeACMEConfig would refuse about cfg
 // before sending anything: a request that changes nothing, a key to clear that is
-// no ACME setting, a key that is both set and cleared, a body too large for
-// Proxmox. It is for a caller that has something to do between deciding to write
-// and writing — the handler re-reads the node config's digest to check a save
-// token — and wants a refused request to cost no Proxmox read. SetNodeACMEConfig
-// runs the same checks itself, so it stays the choke point whether a caller asks
-// first or not. A caller that means to substitute a digest afterwards should give
-// cfg one of the length Proxmox's will be (40 hex characters), and not the one it
-// has now: the digest is part of the encoded body whose size is checked.
+// no ACME setting, a key that is both set and cleared, a value that is not valid
+// UTF-8 or that holds a line break or any other control character, a body too
+// large for Proxmox. It is for a caller that has something to do between
+// deciding to write and writing — the handler re-reads the node config's digest
+// to check a save token — and wants a refused request to cost no Proxmox read.
+// SetNodeACMEConfig runs the same checks itself, so it stays the choke point
+// whether a caller asks first or not. A caller that means to substitute a digest
+// afterwards should give cfg one of the length Proxmox's will be (40 hex
+// characters), and not the one it has now: the digest is part of the encoded
+// body whose size is checked.
 func ValidateNodeACMEConfig(cfg NodeACMEConfig) error {
 	_, err := buildNodeACMEForm(cfg)
 	return err
@@ -800,6 +854,33 @@ func buildNodeACMEForm(cfg NodeACMEConfig) (url.Values, error) {
 		v := s.value(cfg)
 		values[s.key] = v
 		if v != "" {
+			// SetNodeOptions's two refusals, in its order and its words, for the reason
+			// SetNodeACMEConfig gives. They are made of every key nodeACMESettings
+			// names, so a key added to it is covered with no further change here.
+			//
+			// What they leave alone is a decision, and not a gap: the plain space, and the
+			// Unicode space separators that are not control characters — U+00A0, U+1680,
+			// U+2000 to U+200A, U+202F, U+205F and U+3000. Perl's \s reads them as
+			// whitespace in the two places a value is not held to an anchored format (a
+			// whitespace-only segment, the domains list), so they can reach the file; but
+			// they have no line structure and no terminal effect, every anchored position
+			// rejects them, and refusing them would be stricter than the options form's
+			// refusal that this one matches. Nor is hasLineBreakOrControl to be widened for
+			// them: a location's name is free text, and holds them legitimately.
+			//
+			// In the domains list they do what a plain space does. Proxmox's check splits
+			// that list on any whitespace (split_list, pve-common's PVE/ParseUtils.pm), but
+			// get_acme_conf (PVE/NodeConfig.pm) reads the stored value split on ";" only, so
+			// a list that was validated as N domains is one identifier when it is read. That
+			// is Proxmox's, it is reachable with a plain space, and refusing these would not
+			// close it.
+			// TestSetNodeACMEConfig_AcceptsUnicodeSpaceSeparators pins the set.
+			if !utf8.ValidString(v) {
+				return nil, fmt.Errorf("%w: %q is not valid UTF-8", ErrInvalidInput, s.key)
+			}
+			if hasLineBreakOrControl(v) {
+				return nil, fmt.Errorf("%w: %q cannot contain a line break or a control character", ErrInvalidInput, s.key)
+			}
 			form.Set(s.key, v)
 		}
 	}
@@ -828,6 +909,13 @@ func buildNodeACMEForm(cfg NodeACMEConfig) (url.Values, error) {
 	if len(cfg.Delete) > 0 {
 		form.Set("delete", strings.Join(cfg.Delete, ","))
 	}
+	// The digest is not held to the value checks above: it is no setting, and it is
+	// never written to the file. set_options extracts it and hands it to
+	// PVE::Tools::assert_if_modified (pve-common's PVE/Tools.pm), which only
+	// compares it with the file's own, and write_node_config skips the key. When
+	// SetNodeACMEConfig is called by the handler it is Proxmox's own sha1_hex, put
+	// there in place of the save token, and for ValidateNodeACMEConfig it is a
+	// placeholder; whatever else a caller gives it can only fail that comparison.
 	if cfg.Digest != "" {
 		form.Set("digest", cfg.Digest)
 	}

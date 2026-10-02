@@ -506,11 +506,12 @@ func (h *ACMEHandler) SetNodeACMEConfig(c fiber.Ctx, p *apischema.Params) error 
 		return err
 	}
 	// The delete allow-list, the "set and cleared in one request" refusal, the
-	// "nothing to change" refusal and the size refusal live in
+	// "nothing to change" refusal, the refusal of a value that is not valid UTF-8 or
+	// holds a line break or other control character, and the size refusal live in
 	// proxmox.SetNodeACMEConfig, not here. They are choke-point checks that protect
 	// every caller of the client — see deletableNodeACMEKeys — and the schema
-	// deliberately does not restate any of them: it bounds the list, it does not
-	// decide what may be in it.
+	// deliberately does not restate any of them: it bounds the list and the length
+	// of a value, it does not decide what may be in either.
 	//
 	// They run again here, ahead of the save check, and not only inside
 	// SetNodeACMEConfig where they have to stay: the check re-reads the node's
