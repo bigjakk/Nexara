@@ -295,8 +295,16 @@ export function AppShell() {
           tabIndex={-1}
           className="flex-1 overflow-auto p-4 outline-none md:p-6"
         >
-          {/* Keyed by pathname so a crashed route doesn't hold every other
-              route hostage — navigation remounts a fresh boundary. */}
+          {/* Keyed by pathname, for two jobs. A crashed route must not hold
+              every other route hostage, so navigation remounts a fresh
+              boundary. And the routed page is rebuilt whenever the pathname
+              changes, which is what keeps one cluster's, node's or VM's page
+              state (a dialog left open, a draft typed into a form, a save in
+              flight) off the next one's: each detail page is one route across
+              its ids, and most of them key none of that on the id themselves.
+              AppShell.remount.test.tsx pins it both ways. Key on more than the
+              pathname (location.key, pathname + search) and choosing a tab
+              rebuilds the page; on less, and a move to another id does not. */}
           <ErrorBoundary key={location.pathname}>
             <Outlet />
           </ErrorBoundary>

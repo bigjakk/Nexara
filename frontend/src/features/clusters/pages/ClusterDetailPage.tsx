@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -114,7 +114,32 @@ export function ClusterDetailPage() {
           Failed to load cluster data.
         </div>
       ) : (
-        <>
+        /* Everything below is one cluster's, so it is keyed on the cluster.
+
+           The route clusters/:clusterId is one page across every cluster, and
+           the ?tab= that the search bar's shortcuts leave in the URL keeps the
+           same tab selected through a move. A tab that survived the move would
+           carry over what it holds: the node it was on, a dialog left open, a
+           note typed into a form, a save still in flight. A late failure of
+           the one would then render on the other's card, a delete confirmed in
+           the one's dialog would be sent to the other, and a note typed for
+           the one would be saved to the other. Radix already unmounts a tab's
+           content when another tab is selected, so none of that outlives a
+           change of tab; this gives a change of cluster the same lifetime. The
+           selected tab is URL state, not tab state, and is left alone.
+
+           In the app the shell already does this for every page: AppShell keys
+           its error boundary on the pathname, so a change of cluster rebuilds
+           the whole page and this key never changes under a mounted page. It is
+           here so that the page does not depend on that, which a shell that
+           stopped remounting would expose in every tab at once, and so that it
+           is right in the bare router its tests run in.
+
+           In a bare router, what the key leaves alone: the link back, and the
+           queries and live-metrics subscription above, which follow clusterId.
+           A tab's own queries are cached by key, so a rebuilt tab reads again
+           only what has gone stale. */
+        <Fragment key={clusterId ?? ""}>
           {isLoading ? (
             <div className="flex items-center gap-3">
               <Skeleton className="h-11 w-11 rounded-xl" />
@@ -338,17 +363,7 @@ export function ClusterDetailPage() {
             </TabsContent>
 
             <TabsContent value="certificates">
-              {/* Keyed on the cluster. This route is reused across :clusterId,
-                  and the search bar's /clusters/{id}?tab=certificates keeps
-                  this tab selected, so without a key one tab instance would
-                  carry its chosen node, its open dialog and a save still in
-                  flight over to the next cluster: a late failure of the one
-                  would render on the other's card, and the node chosen on the
-                  one would be read from the other. */}
-              <ClusterACMETab
-                key={clusterId ?? ""}
-                clusterId={clusterId ?? ""}
-              />
+              <ClusterACMETab clusterId={clusterId ?? ""} />
             </TabsContent>
 
             <TabsContent value="metric-servers">
@@ -363,7 +378,7 @@ export function ClusterDetailPage() {
               <ClusterGuestToolsTab clusterId={clusterId ?? ""} />
             </TabsContent>
           </Tabs>
-        </>
+        </Fragment>
       )}
     </div>
   );

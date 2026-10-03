@@ -17,8 +17,9 @@ import { ClusterDetailPage } from "./ClusterDetailPage";
  * bar's /clusters/{id}?tab=certificates leaves the Certificates tab selected, so
  * moving from one cluster to another keeps the tab on the page: what it holds —
  * the node it was on, a dialog, a save still in flight — survives into the next
- * cluster unless the page keys the tab on the cluster. These run the real page
- * through the real router.
+ * cluster unless the page keys its header, banner and tabs on the cluster (one
+ * key, in ClusterDetailPage.tsx). These run the real page through the real
+ * router.
  */
 
 const listMock = vi.fn();
