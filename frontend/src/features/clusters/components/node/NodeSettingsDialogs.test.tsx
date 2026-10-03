@@ -12,6 +12,11 @@ import { toast } from "sonner";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
 import {
+  SESSION_ENDS,
+  signInAsAdmin,
+  signOutForGood,
+} from "@/test/late-toast-sessions";
+import {
   useNodeDNS,
   useNodeTime,
   type NodeDNSResponse,
@@ -1537,3 +1542,142 @@ describe("the timezone dialog", () => {
     expect(putBody()).toEqual({ timezone: "Etc/UTC" });
   });
 });
+
+// The read an Edit button makes when it is pressed can be answered after the
+// session it was pressed in has ended — a sign-out, an expiry, another user
+// signing in. A failure toasts the node's name, and a toast raised after the
+// session ended is shown to whoever is signed in by then; and what a read found
+// must not seed a dialog for them. Each case is paired with the same answer in a
+// session that goes on.
+describe.each(KINDS)(
+  "the %s Edit button, once the session it was pressed in has ended",
+  (_, kind) => {
+    beforeEach(() => {
+      signInAsAdmin();
+    });
+
+    afterEach(() => {
+      signOutForGood();
+    });
+
+    /** Edit pressed on a node already read, with the read it makes held. */
+    async function pressedWithReadHeld(user: UserEvent) {
+      serve({ [kind.url]: [kind.stored] });
+      kind.render();
+      const edit = await editButton(kind);
+      const held = deferred<unknown>();
+      mockedGet.mockReturnValueOnce(held.promise);
+      await user.click(edit);
+      expect(reads(kind.url)).toBe(2);
+      return { edit, held };
+    }
+
+    it("control: says a read that failed in a toast naming the node, once, while the session goes on", async () => {
+      const user = userEvent.setup();
+      const { held } = await pressedWithReadHeld(user);
+
+      held.reject(badGateway());
+
+      await waitFor(() => {
+        expect(mockedToastError).toHaveBeenCalledWith(
+          `Could not load ${kind.toastSubject}: Failed to connect to Proxmox`,
+        );
+      });
+      await flush();
+      expect(mockedToastError).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(SESSION_ENDS)(
+      "says nothing of a read that fails after %s",
+      async (_, end) => {
+        const user = userEvent.setup();
+        const { held } = await pressedWithReadHeld(user);
+
+        end();
+        held.reject(badGateway());
+        await flush();
+
+        expect(mockedToastError).not.toHaveBeenCalled();
+        expect(screen.queryByRole("dialog")).toBeNull();
+      },
+    );
+
+    it("control: opens the dialog from a read that succeeds while the session goes on", async () => {
+      const user = userEvent.setup();
+      const { held } = await pressedWithReadHeld(user);
+
+      held.resolve(kind.refreshed);
+
+      const dialog = await screen.findByRole("dialog", { name: kind.dialog });
+      expect(field(dialog, kind.field)).toHaveValue(kind.refreshedValue);
+    });
+
+    it.each(SESSION_ENDS)(
+      "opens nothing from a read that succeeds after %s",
+      async (_, end) => {
+        const user = userEvent.setup();
+        const { held } = await pressedWithReadHeld(user);
+
+        end();
+        held.resolve(kind.refreshed);
+        await flush();
+
+        expect(screen.queryByRole("dialog")).toBeNull();
+        expect(mockedToastError).not.toHaveBeenCalled();
+      },
+    );
+
+    // The hold on the button is let go whatever the session, as the guards of the
+    // other sites are: a button that is somehow still there after its read ended
+    // with the session must not be left reading, and can be pressed again.
+    const ANSWERS: [
+      name: string,
+      answer: (held: ReturnType<typeof deferred<unknown>>) => void,
+    ][] = [
+      [
+        "fails",
+        (held) => {
+          held.reject(badGateway());
+        },
+      ],
+      [
+        "succeeds",
+        (held) => {
+          held.resolve(kind.refreshed);
+        },
+      ],
+    ];
+
+    it.each(
+      ANSWERS.flatMap(([name, answer]) =>
+        SESSION_ENDS.map(
+          ([session, end]) =>
+            [name, session, answer, end] as [
+              string,
+              string,
+              (held: ReturnType<typeof deferred<unknown>>) => void,
+              () => void,
+            ],
+        ),
+      ),
+    )(
+      "lets the button be pressed again after a read that %s after %s",
+      async (_name, _session, answer, end) => {
+        const user = userEvent.setup();
+        const { edit, held } = await pressedWithReadHeld(user);
+
+        end();
+        answer(held);
+        await flush();
+
+        expect(edit).toBeEnabled();
+        expect(edit).not.toHaveAttribute("aria-busy");
+        // And pressed again, it reads as the session it is in now, and opens.
+        await user.click(edit);
+        const dialog = await screen.findByRole("dialog", { name: kind.dialog });
+        expect(field(dialog, kind.field)).toHaveValue(kind.storedValue);
+        expect(reads(kind.url)).toBe(3);
+      },
+    );
+  },
+);

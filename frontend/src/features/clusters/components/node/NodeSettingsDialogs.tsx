@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { sessionScope } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
 import {
   nodeSettingSaveKey,
@@ -215,7 +216,10 @@ interface Readable<T> {
  * a button that merely did nothing would not; the button stays, so pressing it
  * again is the retry. A read that ends after this is unmounted (the page was
  * left, the node changed, the permission was lost) opens nothing and says
- * nothing: `live`.
+ * nothing: `live`. So does one that ends after the session it was pressed in
+ * has (sessionScope): a sign-out, an expiry or another user signing in. A toast
+ * raised after any of the three is shown to whoever is signed in by then, and
+ * this one names the node.
  *
  * `fallbackFocus` is the button itself, which a dialog sends focus back to when
  * the button had none to give back: a button that is disabled while it reads
@@ -284,12 +288,23 @@ function EditFromRead<T>({
     // uses a Button that is held the other way.
     if (reading || saving) return;
     const pressedAt = Date.now();
+    // The session this was pressed in, checked ahead of `live` below: a read
+    // that ends once its session is over is for nobody who is here.
+    const ended = sessionScope();
     setReading(true);
     // refetch() cancels a fetch already in flight and starts its own, so an
     // older read still on its way cannot answer for the press. It resolves,
     // whatever happened, with the query's result, and a success is not proof of
     // a read: see the comment above, and the dataUpdatedAt check.
     void query.refetch().then((result) => {
+      if (ended()) {
+        // It opens nothing and says nothing: what it found, or failed with, is
+        // not for whoever is signed in now. What holds the button is let go all
+        // the same, as the other sites let go of their guards whatever the
+        // session: a button that is somehow still there must not stay reading.
+        if (live.current) setReading(false);
+        return;
+      }
       if (!live.current) return;
       if (result.isSuccess && result.dataUpdatedAt >= pressedAt) {
         setReading(false);

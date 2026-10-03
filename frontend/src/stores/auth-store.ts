@@ -17,7 +17,7 @@ import {
   storeTokens,
 } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
-import { resetSessionState } from "@/stores/session-reset";
+import { dismissToasts, resetSessionState } from "@/stores/session-reset";
 
 interface AuthState {
   user: User | null;
@@ -91,6 +91,19 @@ function endSession(signedOut: () => void): void {
  * user's — and the new user would otherwise be served the previous one's cached
  * reads, console tabs and dialogs. So their state goes first, as if they had
  * signed out. The same user again (a refresh, a permission change) keeps theirs.
+ *
+ * Whoever begins here also starts with nothing on the toast screen. The reset
+ * dismissed what was on it when the last session ended, but sonner hands every
+ * Toaster that mounts each toast that exists and was never dismissed, and the
+ * login pages have no Toaster of their own to show a toast raised since or to
+ * clear it: the one AppShell mounts once `set` below has rendered it would show
+ * it to the person who just signed in.
+ *
+ * And with the flag that holds a refresh back mid-logout down. One raised for
+ * the identity before — by a logout, or the revoke of its current session, that
+ * has not settled — means nothing for this one, and would hold back the
+ * rehydration of every refresh they get until a reload. The same user again
+ * keeps theirs: a flag up then is a sign-out they have begun.
  */
 function adoptIdentity(
   set: SetAuth,
@@ -98,12 +111,15 @@ function adoptIdentity(
   held: Pick<User, "id"> | null,
   extra: Partial<AuthState> = {},
 ): void {
+  const begins = held === null || held.id !== res.user.id;
   if (held !== null && held.id !== res.user.id) forgetSession();
+  if (begins) dismissToasts();
   set({
     user: res.user,
     permissions: res.permissions,
     isAuthenticated: true,
     signedOutByUser: false,
+    ...(begins ? { isLoggingOut: false } : {}),
     ...extra,
   });
 }

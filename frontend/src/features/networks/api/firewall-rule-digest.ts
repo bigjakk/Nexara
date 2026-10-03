@@ -38,13 +38,26 @@ export function isStaleRuleList(error: Error): boolean {
  *
  * `outcome` is what did not happen ("Nothing was deleted"), `owner` whose list
  * it is ("the cluster", "node pve-01").
+ *
+ * `ended` is the session the write was made in, which the hook's onMutate takes
+ * with sessionScope() and TanStack hands back as onError's third argument (a
+ * hook without an onMutate gets `unknown` there, which does not compile). Once
+ * that session is over this says nothing and reloads nothing. TanStack calls a
+ * hook's onError whenever the answer lands, after the page is gone and a
+ * sign-out with it; the toast names the owner of the list and carries the
+ * server's words, and a toast raised after the session ended is shown to
+ * whoever is signed in by then. A write whose session cannot be told
+ * (`undefined`, which only a mutation that skipped onMutate has) is treated as
+ * ended.
  */
 export function onRuleWriteError(
   error: Error,
   outcome: string,
   owner: string,
   reload: () => Promise<void>,
+  ended: (() => boolean) | undefined,
 ): Promise<void> | undefined {
+  if (ended === undefined || ended()) return undefined;
   if (!isStaleRuleList(error)) {
     toast.error(error.message.length > 0 ? error.message : "Request failed");
     return undefined;

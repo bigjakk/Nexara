@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import {
@@ -7,9 +7,16 @@ import {
   type QueryClient,
   type QueryObserverResult,
 } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
+import {
+  SESSION_ENDS,
+  settle,
+  signInAsAdmin,
+  signOutForGood,
+} from "@/test/late-toast-sessions";
 import { nodeOptionsKey, type NodeOptions } from "../api/node-options-queries";
 import { useNodeOptionsSave } from "./useNodeOptionsSave";
 
@@ -34,6 +41,7 @@ vi.mock("sonner", () => ({
 }));
 
 const mockedPut = vi.mocked(apiClient.put);
+const mockedToastError = vi.mocked(toast.error);
 
 const CLUSTER = "cccccccc-0000-0000-0000-000000000009";
 const NODE = "pve-01";
@@ -369,4 +377,274 @@ describe("useNodeOptionsSave", () => {
     expect(result.current.conflict).toBeNull();
     expect(result.current.pending).toBe(true);
   });
+});
+
+// A save that is answered after the session it was made in has ended — a
+// sign-out, an expiry, another user signing in — does nothing at all: its toast
+// would be shown to whoever is signed in by then, with the node's name and the
+// server's words in it, and a re-read would be a request nobody who is here asked
+// for. Each case is paired with the same answer in a session that goes on.
+describe("a save that settles after its session ended", () => {
+  const DENIED = "Proxmox API permission denied";
+  const FAILED = `Saving the options of ${NODE} failed: ${DENIED}`;
+
+  function forbidden(): ApiClientError {
+    return new ApiClientError(403, { error: "forbidden", message: DENIED });
+  }
+
+  beforeEach(() => {
+    mockedToastError.mockReset();
+    signInAsAdmin();
+  });
+
+  afterEach(() => {
+    signOutForGood();
+  });
+
+  /** The hook, with a save of the delay sent and held. */
+  async function savingHeld(
+    reread?: () => Promise<QueryObserverResult<NodeOptions>>,
+  ) {
+    const held = deferred<unknown>();
+    mockedPut.mockReturnValueOnce(held.promise);
+    const view = setup(reread);
+    act(() => {
+      view.result.current.save({ "startall-onboot-delay": 31 });
+    });
+    // Sent in the session that is current now: what ends it comes after.
+    await waitFor(() => {
+      expect(mockedPut).toHaveBeenCalledTimes(1);
+    });
+    return { ...view, held };
+  }
+
+  /** A re-read that the test holds, and settles as it says. */
+  function heldReread() {
+    const read = deferred<QueryObserverResult<NodeOptions>>();
+    return { ...read, reread: vi.fn(() => read.promise) };
+  }
+
+  it("control: toasts a failure that lands after the dialog was dismissed, naming the node, once", async () => {
+    const { held, unmount, onSaved } = await savingHeld();
+
+    unmount();
+    held.reject(forbidden());
+    await settle();
+
+    expect(mockedToastError).toHaveBeenCalledTimes(1);
+    expect(mockedToastError).toHaveBeenCalledWith(FAILED);
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it.each(SESSION_ENDS)(
+    "toasts nothing for a failure that lands after %s, with the dialog gone",
+    async (_, end) => {
+      const { held, unmount, onSaved } = await savingHeld();
+
+      unmount();
+      end();
+      held.reject(forbidden());
+      await settle();
+
+      expect(mockedToastError).not.toHaveBeenCalled();
+      expect(onSaved).not.toHaveBeenCalled();
+    },
+  );
+
+  it("control: shows a failure in the dialog while the session goes on", async () => {
+    const { held, result } = await savingHeld();
+
+    held.reject(forbidden());
+    await waitFor(() => {
+      expect(result.current.error).toBe(DENIED);
+    });
+
+    expect(mockedToastError).not.toHaveBeenCalled();
+  });
+
+  it.each(SESSION_ENDS)(
+    "puts no failure in a dialog that is somehow still there after %s",
+    async (_, end) => {
+      const { held, result } = await savingHeld();
+
+      end();
+      held.reject(forbidden());
+      // The save has settled, and so has what answers it: TanStack tells the
+      // hook so after the continuations of the promise have run.
+      await waitFor(() => {
+        expect(result.current.pending).toBe(false);
+      });
+      await settle();
+
+      // `live` is true here, and the session still wins.
+      expect(result.current.error).toBe("");
+      expect(mockedToastError).not.toHaveBeenCalled();
+    },
+  );
+
+  // The flag that holds Save shut while a save is out is released whatever the
+  // session: a dialog that is somehow still there must not be left unable to save.
+  const ANSWERS: [
+    name: string,
+    answer: (held: ReturnType<typeof deferred<unknown>>) => void,
+  ][] = [
+    [
+      "a failure",
+      (held) => {
+        held.reject(forbidden());
+      },
+    ],
+    [
+      "a success",
+      (held) => {
+        held.resolve({ status: "ok" });
+      },
+    ],
+  ];
+
+  it.each(ANSWERS)(
+    "does not hold Save shut once the session has ended and %s has come: the dialog can save again",
+    async (_, answer) => {
+      const { held, result } = await savingHeld();
+
+      signOutForGood();
+      answer(held);
+      await settle();
+      signInAsAdmin();
+      mockedPut.mockResolvedValueOnce({ status: "ok" });
+      act(() => {
+        result.current.save({ "startall-onboot-delay": 32 });
+      });
+
+      await waitFor(() => {
+        expect(mockedPut).toHaveBeenCalledTimes(2);
+      });
+    },
+  );
+
+  it("control: reads the node again after a stale digest while the session goes on", async () => {
+    const reading = heldReread();
+    const { held, result } = await savingHeld(reading.reread);
+
+    held.reject(stale());
+    await waitFor(() => {
+      expect(result.current.conflict).toBe("rereading");
+    });
+
+    expect(reading.reread).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(SESSION_ENDS)(
+    "reads nothing again after a stale digest that lands after %s",
+    async (_, end) => {
+      const reading = heldReread();
+      const { held, result } = await savingHeld(reading.reread);
+
+      end();
+      held.reject(stale());
+      await settle();
+
+      expect(reading.reread).not.toHaveBeenCalled();
+      expect(result.current.conflict).toBeNull();
+      expect(result.current.error).toBe("");
+    },
+  );
+
+  it("control: calls a save made, and says so, while the session goes on", async () => {
+    const { held, onSaved } = await savingHeld();
+
+    held.resolve({ status: "ok" });
+    await waitFor(() => {
+      expect(onSaved).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it.each(SESSION_ENDS)(
+    "does not call a save that was answered after %s one that was made",
+    async (_, end) => {
+      const { held, onSaved } = await savingHeld();
+
+      end();
+      held.resolve({ status: "ok" });
+      await settle();
+
+      expect(onSaved).not.toHaveBeenCalled();
+    },
+  );
+
+  // The read is made in a session that is current and answered in one that is
+  // not: what it found is not for the dialog of whoever is signed in now.
+  it("control: pins to a re-read that answers while the session goes on", async () => {
+    const reading = heldReread();
+    const { held, result } = await savingHeld(reading.reread);
+    held.reject(stale());
+    await waitFor(() => {
+      expect(result.current.conflict).toBe("rereading");
+    });
+
+    reading.resolve({
+      isSuccess: true,
+      data: { digest: "d2" },
+    } as QueryObserverResult<NodeOptions>);
+
+    await waitFor(() => {
+      expect(result.current.conflict).toBe("repinned");
+    });
+    expect(result.current.latest).toEqual({ digest: "d2" });
+  });
+
+  it.each(SESSION_ENDS)(
+    "pins to nothing a re-read that answers after %s",
+    async (_, end) => {
+      const reading = heldReread();
+      const { held, result } = await savingHeld(reading.reread);
+      held.reject(stale());
+      await waitFor(() => {
+        expect(result.current.conflict).toBe("rereading");
+      });
+
+      end();
+      reading.resolve({
+        isSuccess: true,
+        data: { digest: "d2" },
+      } as QueryObserverResult<NodeOptions>);
+      await settle();
+
+      expect(result.current.conflict).toBe("rereading");
+      expect(result.current.latest).toBeNull();
+    },
+  );
+
+  it("control: calls a re-read that fails one that failed while the session goes on", async () => {
+    const reading = heldReread();
+    const { held, result } = await savingHeld(reading.reread);
+    held.reject(stale());
+    await waitFor(() => {
+      expect(result.current.conflict).toBe("rereading");
+    });
+
+    reading.reject(new Error("the re-read threw"));
+
+    await waitFor(() => {
+      expect(result.current.conflict).toBe("reread-failed");
+    });
+  });
+
+  it.each(SESSION_ENDS)(
+    "calls a re-read that fails after %s nothing",
+    async (_, end) => {
+      const reading = heldReread();
+      const { held, result } = await savingHeld(reading.reread);
+      held.reject(stale());
+      await waitFor(() => {
+        expect(result.current.conflict).toBe("rereading");
+      });
+
+      end();
+      reading.reject(new Error("the re-read threw"));
+      await settle();
+
+      expect(result.current.conflict).toBe("rereading");
+    },
+  );
 });

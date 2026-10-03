@@ -21,12 +21,22 @@ function signIn(id: string) {
 const listMock = vi.fn();
 const deleteMock = vi.fn();
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: {
-    list: (path: string) => listMock(path) as unknown,
-    delete: (path: string) => deleteMock(path) as unknown,
-  },
-}));
+// The real module with only apiClient replaced: the revoke hook takes the session
+// it is made in from sessionScope, and signing out of the current device ends the
+// session through clearTokens.
+vi.mock("@/lib/api-client", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/api-client")>(
+      "@/lib/api-client",
+    );
+  return {
+    ...actual,
+    apiClient: {
+      list: (path: string) => listMock(path) as unknown,
+      delete: (path: string) => deleteMock(path) as unknown,
+    },
+  };
+});
 
 function session(overrides: Partial<UserSession> = {}): UserSession {
   return {

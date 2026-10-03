@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { QueryObserverResult } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { ApiClientError } from "@/lib/api-client";
+import { ApiClientError, sessionScope } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
 import {
   useSetNodeOptions,
@@ -72,6 +72,15 @@ const STALE_DIGEST =
  * promise carries the outcome instead, and a failure that lands after the
  * dialog was dismissed is toasted, naming the node: it can arrive on another
  * page, or over another open dialog.
+ *
+ * Unless the session the save was made in has ended (sessionScope): a sign-out,
+ * an expiry, or another user signing in. A toast raised after any of the three
+ * is shown to whoever is signed in by then, with the node's name and the
+ * server's words in it: what is dismissed when a session ends and when the next
+ * begins (stores/session-reset.ts) is only what exists at the time. A save that
+ * settles after its session ended does nothing at all: no toast, no state, no
+ * re-read (a request that would go out as the next user, or as nobody), and no
+ * onSaved.
  */
 export function useNodeOptionsSave<TRead extends { digest?: string }>(a: {
   clusterId: string;
@@ -124,6 +133,13 @@ export function useNodeOptionsSave<TRead extends { digest?: string }>(a: {
     sending.current = true;
     attempt.current += 1;
     const gen = attempt.current;
+    // The session this save is made in, taken as the request is sent and checked
+    // first by whatever settles it, ahead of `live`. `live` says whether this
+    // dialog is still on screen; this says whether the session Save was pressed
+    // in is still the current one — which the same person signing in again ends
+    // too. Both have to hold: a failure toasted, or a node read again, for a
+    // session that has ended is for nobody who is here.
+    const ended = sessionScope();
     setError("");
     setConflict(null);
     // No digest to pin means one of two things. The node has no config file yet,
@@ -135,13 +151,19 @@ export function useNodeOptionsSave<TRead extends { digest?: string }>(a: {
     const body = pinned ? { ...changes, digest: pinned } : changes;
     mutation.mutateAsync(body).then(
       () => {
+        // Released whatever the session: the flag only holds Save shut, and a
+        // dialog that is somehow still there must not be left unable to save.
         sending.current = false;
+        if (ended()) return;
         // Not once dismissed: onSaved would close whichever dialog has been
         // opened in this one's place.
         if (live.current) a.onSaved();
       },
       (err: unknown) => {
         sending.current = false;
+        // Before the toast below, which is for a dialog that has gone, not for a
+        // session that has.
+        if (ended()) return;
         const message = describeError(err) || CONNECTION_FAILED;
         if (!live.current) {
           // The server's own words here: with the dialog gone, "reload and try
@@ -159,7 +181,8 @@ export function useNodeOptionsSave<TRead extends { digest?: string }>(a: {
           (res) => {
             // Either this dialog is gone, and its state with it, or another
             // save has been made since: whatever this would pin is not for it.
-            if (!live.current || gen !== attempt.current) return;
+            // Nor when the session ended while the node was being read.
+            if (ended() || !live.current || gen !== attempt.current) return;
             // isSuccess, not res.data: see above.
             if (!res.isSuccess) {
               setConflict("reread-failed");
@@ -170,7 +193,7 @@ export function useNodeOptionsSave<TRead extends { digest?: string }>(a: {
             setConflict("repinned");
           },
           () => {
-            if (live.current && gen === attempt.current) {
+            if (!ended() && live.current && gen === attempt.current) {
               setConflict("reread-failed");
             }
           },

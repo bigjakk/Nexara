@@ -31,7 +31,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, RefreshCw, Trash2, ShieldCheck, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
-import { ApiClientError } from "@/lib/api-client";
+import { ApiClientError, sessionScope } from "@/lib/api-client";
 import { describeError } from "@/lib/api-error";
 import { useAuth } from "@/hooks/useAuth";
 import { Textarea } from "@/components/ui/textarea";
@@ -782,6 +782,16 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
     // time it lands the dialog may be on another row, or the tab on another node.
     const node = certNode;
     const domain = editDomain;
+    // The session this save is sent in, checked first by whatever settles it,
+    // ahead of `live` and the generation. Those say whether this tab and this
+    // dialog are still the ones on screen; this says whether the session Save was
+    // pressed in is still the current one, which the same person signing in again
+    // ends too. A sign-out, an expiry or another user signing in leaves nobody to
+    // tell: a toast raised after any of the three is shown to whoever is signed in
+    // by then, with the node's name and the server's words in it. An ended
+    // session's save does nothing at all — no toast, no state, no read of the node
+    // (a request that would go out as the next user, or as nobody).
+    const ended = sessionScope();
     sendingGen.current = gen;
     // mutateAsync, not mutate with per-call callbacks: those run only while this
     // tab is mounted AND still attached to this save (see `live` and forgetSave),
@@ -791,8 +801,10 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
       () => {
         // Released as the answer comes, before the button is: the observers are
         // told on a timer, which runs after this. Only if it is still this
-        // dialog's — a newer dialog's save may have taken it since.
+        // dialog's — a newer dialog's save may have taken it since. Whatever the
+        // session: the guard only holds Save shut.
         if (sendingGen.current === gen) sendingGen.current = null;
+        if (ended()) return;
         // Not once the tab has moved on: closeDomainDialog would close whichever
         // dialog has been opened in this one's place. No `live` check, unlike
         // the failure below: closeDomainDialog only sets this tab's own state,
@@ -801,6 +813,8 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
       },
       (err: unknown) => {
         if (sendingGen.current === gen) sendingGen.current = null;
+        // Before anything else: see `ended`, above.
+        if (ended()) return;
         if (!live.current || domainDialogGen.current !== gen) {
           // The tab is not showing this save any more — it was left, or its
           // dialog replaced, or its node changed — so it is just a late
@@ -831,8 +845,9 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
           // And only for the dialog that hit the conflict. Cancelling and
           // opening another row while this refetch is in flight would
           // otherwise land this digest on a pin that was just set to match
-          // different values.
-          if (domainDialogGen.current !== gen) return;
+          // different values. Nor once the session has ended: whatever it read
+          // is not for whoever is signed in now.
+          if (ended() || domainDialogGen.current !== gen) return;
           setEditDigest(res.data.digest);
         });
       },

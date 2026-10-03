@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import {
   act,
   cleanup,
@@ -21,6 +21,12 @@ import type { ReactNode } from "react";
 import { ClusterACMETab } from "./ClusterACMETab";
 import { ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
+import {
+  SESSION_ENDS,
+  signInAsAdmin,
+  signOutForGood,
+  toastsRaised,
+} from "@/test/late-toast-sessions";
 import type { NodeACMEConfig } from "@/features/acme/api/acme-queries";
 
 const CLUSTER = "cccccccc-0000-0000-0000-000000000002";
@@ -79,15 +85,6 @@ const toastSpies = {
   message: vi.mocked(toast.message),
   loading: vi.mocked(toast.loading),
 };
-
-/** Every toast raised so far, of any kind, as "kind: message". */
-function toastsRaised(): string[] {
-  return Object.entries(toastSpies).flatMap(([kind, spy]) =>
-    (spy.mock.calls as unknown[][]).map(
-      (args) => `${kind}: ${String(args[0])}`,
-    ),
-  );
-}
 
 function expectNoToast() {
   expect(toastsRaised()).toEqual([]);
@@ -1493,5 +1490,262 @@ describe("a save that settles after the node list moved the tab to another node"
     await flush();
     expect(toastsRaised()).toHaveLength(1);
     expect(screen.queryByText(DENIED)).toBeNull();
+  });
+});
+
+// A save is made in a session, and a toast raised after that session ended is
+// shown to whoever is signed in by then: a sign-out, an expiry or another user
+// signing in would have its failure shown to them, with the node's name and the
+// server's words in it. So a save that settles after its session ended does
+// nothing at all (saveDomain). Each case is paired with the same answer in a
+// session that goes on, and the page is dropped the way a sign-out drops it: the
+// cache is cleared and the tab unmounted.
+describe("a save that settles after its session ended", () => {
+  beforeEach(() => {
+    signInAsAdmin();
+  });
+
+  afterEach(() => {
+    signOutForGood();
+  });
+
+  /**
+   * Waits until the save the tab sent has settled, as `status`, and what answers
+   * it with it: TanStack tells the cache so after the continuations of the
+   * promise have run, so a test that looks for what did NOT happen looks after
+   * that and not before.
+   */
+  async function saveSettled(qc: QueryClient, status: "success" | "error") {
+    await waitFor(() => {
+      expect(
+        qc
+          .getMutationCache()
+          .getAll()
+          .map((mutation) => mutation.state.status),
+      ).toEqual([status]);
+    });
+    await flush();
+  }
+
+  /** What the app does to the page a session leaves, as far as the tab sees it. */
+  async function dropPage(qc: QueryClient) {
+    await act(async () => {
+      await qc.cancelQueries();
+      qc.clear();
+    });
+    cleanup();
+  }
+
+  it("control: toasts a failure that comes after the page was dropped, once, when the session goes on", async () => {
+    const user = userEvent.setup();
+    serve([TWO_DOMAINS]);
+    const qc = createAppQueryClient();
+    renderTab(qc);
+    await openCertificatesTab(user);
+
+    const held = await saveHeld(user);
+    await dropPage(qc);
+    held.reject(forbidden());
+
+    await waitFor(() => {
+      expect(mockedToastError).toHaveBeenCalledWith(failedToast(DENIED));
+    });
+    await flush();
+    expect(toastsRaised()).toEqual([`error: ${failedToast(DENIED)}`]);
+    expect(putMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(SESSION_ENDS)(
+    "toasts nothing for a failure that comes after %s and the page was dropped",
+    async (_, end) => {
+      const user = userEvent.setup();
+      serve([TWO_DOMAINS]);
+      const qc = createAppQueryClient();
+      renderTab(qc);
+      await openCertificatesTab(user);
+
+      const held = await saveHeld(user);
+      end();
+      await dropPage(qc);
+      held.reject(forbidden());
+      await flush();
+
+      expectNoToast();
+      expect(putMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("control: reads the node again for a stale digest while the session goes on", async () => {
+    const user = userEvent.setup();
+    serve([TWO_DOMAINS, { ...TWO_DOMAINS, digest: "d2" }]);
+    renderTab(createAppQueryClient());
+    await openCertificatesTab(user);
+
+    const held = await saveHeld(user);
+    const before = configGets().length;
+    held.reject(conflict());
+
+    await waitFor(() => {
+      expect(configGets()).toHaveLength(before + 1);
+    });
+    expectNoToast();
+  });
+
+  it.each(SESSION_ENDS)(
+    "reads nothing again for a stale digest that comes after %s",
+    async (_, end) => {
+      const user = userEvent.setup();
+      serve([TWO_DOMAINS, { ...TWO_DOMAINS, digest: "d2" }]);
+      const { qc } = renderTab(createAppQueryClient());
+      await openCertificatesTab(user);
+
+      const held = await saveHeld(user);
+      const before = configGets().length;
+      end();
+      held.reject(conflict());
+      await saveSettled(qc, "error");
+
+      // A tab that is somehow still there: the session still wins, so there is
+      // no read of the node as whoever is signed in now, and no toast.
+      expect(configGets()).toHaveLength(before);
+      expectNoToast();
+    },
+  );
+
+  it("control: closes the dialog when the save succeeds while the session goes on", async () => {
+    const user = userEvent.setup();
+    serve([TWO_DOMAINS]);
+    renderTab(createAppQueryClient());
+    await openCertificatesTab(user);
+
+    const held = await saveHeld(user);
+    held.resolve({ status: "ok" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
+  it.each(SESSION_ENDS)(
+    "does not close the dialog for a save that succeeds after %s",
+    async (_, end) => {
+      const user = userEvent.setup();
+      serve([TWO_DOMAINS]);
+      const { qc } = renderTab(createAppQueryClient());
+      await openCertificatesTab(user);
+
+      const held = await saveHeld(user);
+      end();
+      held.resolve({ status: "ok" });
+      await saveSettled(qc, "success");
+
+      expect(screen.getByRole("dialog")).toHaveAttribute("data-state", "open");
+      expectNoToast();
+    },
+  );
+
+  // The guard that holds a dialog's Save shut while its save is out is released
+  // whatever the session: a dialog that is somehow still there must not be left
+  // unable to save.
+  it.each([
+    [
+      "a failure",
+      (held: ReturnType<typeof deferred<unknown>>) => {
+        held.reject(forbidden());
+      },
+    ],
+    [
+      "a success",
+      (held: ReturnType<typeof deferred<unknown>>) => {
+        held.resolve({ status: "ok" });
+      },
+    ],
+  ])(
+    "does not hold Save shut once the session has ended and %s has come: the dialog can save again",
+    async (_, answer) => {
+      const user = userEvent.setup();
+      serve([TWO_DOMAINS]);
+      renderTab(createAppQueryClient());
+      await openCertificatesTab(user);
+
+      const held = await saveHeld(user);
+      signOutForGood();
+      answer(held);
+      signInAsAdmin();
+      // Once the tab has been told the save is over, which is when its button
+      // reads "Save" again.
+      await user.click(await screen.findByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(putMock).toHaveBeenCalledTimes(2);
+      });
+    },
+  );
+
+  describe("whose stale digest was read again", () => {
+    /**
+     * An edit saved and refused as stale, with the read that follows held. Resolves
+     * with what to answer it with, the digest it finds being d2.
+     */
+    async function refusedWithReadHeld(user: UserEvent) {
+      listMock.mockImplementation((path: string) =>
+        path === NODES_PATH
+          ? Promise.resolve([{ name: NODE, node_name: NODE }])
+          : Promise.resolve([]),
+      );
+      const read = deferred<NodeACMEConfig>();
+      let call = 0;
+      getMock.mockImplementation((path: string) => {
+        if (path !== CONFIG_PATH) return Promise.resolve(null);
+        call += 1;
+        return call === 1 ? Promise.resolve(TWO_DOMAINS) : read.promise;
+      });
+      putMock.mockRejectedValueOnce(conflict());
+      renderTab(createAppQueryClient());
+      await openCertificatesTab(user);
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      // The read of the node that the refusal starts.
+      await waitFor(() => {
+        expect(configGets()).toHaveLength(2);
+      });
+      return () => {
+        read.resolve({ ...TWO_DOMAINS, digest: "d2" });
+      };
+    }
+
+    it("control: pins the next save to what that read found while the session goes on", async () => {
+      const user = userEvent.setup();
+      const answer = await refusedWithReadHeld(user);
+
+      answer();
+      await flush();
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(putMock).toHaveBeenCalledTimes(2);
+      });
+      expect((putMock.mock.calls[1]?.[1] as NodeACMEConfig).digest).toBe("d2");
+    });
+
+    it.each(SESSION_ENDS)(
+      "pins the next save to nothing it found after %s",
+      async (_, end) => {
+        const user = userEvent.setup();
+        const answer = await refusedWithReadHeld(user);
+
+        end();
+        answer();
+        await flush();
+        await user.click(screen.getByRole("button", { name: "Save" }));
+
+        await waitFor(() => {
+          expect(putMock).toHaveBeenCalledTimes(2);
+        });
+        expect((putMock.mock.calls[1]?.[1] as NodeACMEConfig).digest).toBe(
+          "d1",
+        );
+      },
+    );
   });
 });

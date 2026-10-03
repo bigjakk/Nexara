@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient, apiFetch } from "@/lib/api-client";
+import { apiClient, apiFetch, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import {
   onRuleWriteError,
@@ -604,16 +604,18 @@ export function useDeleteNodeFirewallRule(clusterId: string, nodeName: string) {
       apiClient.delete<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/firewall/rules/${pos}?digest=${requireRuleDigest(digest)}`,
       ),
+    onMutate: () => sessionScope(),
     // Returned, so the mutation stays pending — and the table's Delete
     // buttons disabled — until the list is refetched: a rule is deleted by
     // position, and a position read from the stale list names another rule.
     onSuccess: reload,
-    onError: (error) =>
+    onError: (error, _variables, ended) =>
       onRuleWriteError(
         error,
         "Nothing was deleted",
         `node ${nodeName}`,
         reload,
+        ended,
       ),
   });
 }

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath, queryParams } from "@/lib/api-path";
 import {
   describeBackupJobRun,
@@ -509,6 +509,14 @@ export function useDeleteBackupJob() {
  * that confirmed no task because a node failed answers an error status, which
  * the global mutation-error toast (lib/query-client.ts) shows — the message
  * names every node and why — so no onError is defined here.
+ *
+ * The toasts are for the session that started the run, and only while it is the
+ * current one. TanStack calls onSuccess whenever the answer lands, after the
+ * page is gone and a sign-out with it, and these toasts name the job and the
+ * nodes it ran on, and a toast raised after the session ended is shown to
+ * whoever is signed in by then. `onMutate` takes the session as the run is
+ * submitted and hands it to onSuccess as its context; a run whose session cannot
+ * be told is treated as ended, as the other hook-level sites treat one.
  */
 export function useRunBackupJob() {
   const queryClient = useQueryClient();
@@ -526,14 +534,20 @@ export function useRunBackupJob() {
           apiPath`/api/v1/clusters/${clusterId}/backup-jobs/${jobId}/run`,
         ),
       ),
-    onSuccess: (result, variables) => {
-      for (const notice of describeBackupJobRun(variables.jobId, result)) {
-        if (notice.description != null) {
-          toast[notice.level](notice.message, {
-            description: notice.description,
-          });
-        } else {
-          toast[notice.level](notice.message);
+    onMutate: () => sessionScope(),
+    // TanStack types the context as always there for onSuccess, and it is once
+    // onMutate has run; the parameter says what a run that skipped it would give,
+    // so that one is treated as ended and not left to throw.
+    onSuccess: (result, variables, ended: (() => boolean) | undefined) => {
+      if (ended !== undefined && !ended()) {
+        for (const notice of describeBackupJobRun(variables.jobId, result)) {
+          if (notice.description != null) {
+            toast[notice.level](notice.message, {
+              description: notice.description,
+            });
+          } else {
+            toast[notice.level](notice.message);
+          }
         }
       }
       void queryClient.invalidateQueries({

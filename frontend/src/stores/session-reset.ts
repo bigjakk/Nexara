@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { queryClient } from "@/lib/query-client";
 import { useConsoleStore } from "@/stores/console-store";
 import { useCreateResourceStore } from "@/stores/create-resource-store";
@@ -42,6 +43,28 @@ import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
  * there and so create nothing in an empty cache. The third,
  * useUpsertSSHCredentials, seeds one, and pins the session it was sent in for
  * that reason.
+ *
+ * THE TOASTS are dismissed too, and first. sonner keeps its toasts in module
+ * state, outside any Toaster, and every Toaster that mounts is handed each one
+ * that was never dismissed (Observer.subscribe replays getActiveToasts(), sonner
+ * 2.0.8; a toast on screen when its Toaster unmounted, and one raised while none
+ * was mounted, were both shown by the next Toaster in jsdom with the real
+ * library). The Toaster is AppShell's, and ProtectedRoute remounts AppShell with
+ * everything under it on every path that ends or hands over a session, so what
+ * the previous user had on screen — a failure naming a node, in the server's
+ * words — would be shown again to the next one once they are in. toast.dismiss()
+ * marks every active toast dismissed in that state, which is what the replay
+ * filters on, and tells a Toaster that is still mounted (a hand-over remounts it
+ * a render later) to take them off. It only reaches the toasts that exist when it
+ * runs. A toast raised AFTER this, while no Toaster is mounted — the login pages
+ * have none — is replayed all the same, so auth-store's adoptIdentity dismisses
+ * once more when the next identity begins, before it renders AppShell and the
+ * Toaster in it. What nothing here can catch is a toast raised after that, by
+ * work that belongs to the session that ended: it is shown at once, to whoever
+ * is in, and only the work itself can refuse to raise it (lib/query-client.ts
+ * and the hook-level sites that name sessionScope). The dismissal has its own
+ * try/catch, so that a failure in sonner cannot skip the cache and the stores,
+ * which matter more; and it goes first, so that nothing else can skip it.
  *
  * SYNCHRONOUS, ON PURPOSE. The caller sets isAuthenticated to false in the same
  * turn, and React renders after both, so ProtectedRoute unmounts the
@@ -101,6 +124,7 @@ import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
  * sign-out, or the next user's sign-in, completes regardless.
  */
 export function resetSessionState(): void {
+  dismissToasts();
   void queryClient.cancelQueries();
   queryClient.clear();
 
@@ -112,4 +136,20 @@ export function resetSessionState(): void {
   useVMContextMenuStore.getState().resetSession();
   useCreateResourceStore.getState().resetSession();
   useConsoleStore.getState().resetSession();
+}
+
+/**
+ * Takes every toast that exists off the screen and out of what sonner would show
+ * again (see THE TOASTS above). Called when a session ends, for what is on the
+ * screen, and when the next identity begins (auth-store adoptIdentity), for what
+ * was raised in between. Reported rather than thrown, as auth-store reports the
+ * rest of the reset: it is sonner's state that failed, and the session still
+ * ends — or begins.
+ */
+export function dismissToasts(): void {
+  try {
+    toast.dismiss();
+  } catch (err) {
+    console.error("Could not dismiss the toasts a session left behind", err);
+  }
 }

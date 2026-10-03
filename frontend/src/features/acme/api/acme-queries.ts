@@ -20,7 +20,9 @@ import { apiPath } from "@/lib/api-path";
  * component is mounted, and the toast above is what this opts out of. So the
  * caller reads the outcome from mutateAsync's promise instead, and toasts a
  * failure that outlives the place that would have shown it (saveDomain in
- * ClusterACMETab).
+ * ClusterACMETab) — while the session the save was sent in is still the
+ * current one, as the toast above is (sessionScope): past a sign-out it would be
+ * shown to whoever is signed in by then.
  */
 const errorsHandledLocally = { onError: () => undefined };
 
@@ -258,7 +260,8 @@ export function useSetNodeACMEConfig(clusterId: string) {
     // failure is silent. A failure that lands once the tab has been left, or
     // its dialog replaced, is toasted by the tab itself (saveDomain); a second
     // caller must do the same, for this opt-out is what keeps the global toast
-    // from doing it.
+    // from doing it — and must say nothing once the session the save was sent
+    // in has ended (sessionScope), as the global toast would not.
     ...errorsHandledLocally,
   });
 }

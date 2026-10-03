@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { queryClient } from "@/lib/query-client";
+import { signInAsAdmin, signOutForGood } from "@/test/late-toast-sessions";
 import { BackupJobTable } from "./BackupJobTable";
 import type { BackupJob } from "../types/backup";
 
@@ -41,8 +42,11 @@ function stubFetchWith(answer: () => Promise<Response>) {
           : input instanceof URL
             ? input.href
             : input.url;
-      // No session in a test: the refresh fails and the request goes out
-      // without a token, which the stub does not check.
+      // Signed in by beforeEach, so no request refreshes. A refresh that failed
+      // would end the session a run was submitted in, and what the app reports of
+      // a run is for the session that started it (lib/query-client.ts): with
+      // nobody signed in, the toasts below would depend on whether an earlier
+      // test had already made the first request.
       if (url === "/api/v1/auth/refresh") {
         return Promise.resolve(new Response("{}", { status: 401 }));
       }
@@ -85,6 +89,7 @@ async function openConfirm(user: ReturnType<typeof userEvent.setup>) {
 
 beforeEach(() => {
   sent = [];
+  signInAsAdmin();
   stubFetch(200, {
     tasks: [],
     skipped: [],
@@ -98,6 +103,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   queryClient.clear();
+  signOutForGood();
 });
 
 describe("BackupJobTable — Run now", () => {

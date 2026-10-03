@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, sessionScope } from "@/lib/api-client";
 import { apiPath, keepColons } from "@/lib/api-path";
 import { onRuleWriteError, requireRuleDigest } from "./firewall-rule-digest";
 import type {
@@ -192,9 +192,16 @@ export function useUpdateClusterFirewallRule(clusterId: string) {
         apiPath`/api/v1/clusters/${clusterId}/firewall/rules/${pos}`,
         { ...rule, digest: requireRuleDigest(digest) },
       ),
+    onMutate: () => sessionScope(),
     onSuccess: reload,
-    onError: (error) =>
-      onRuleWriteError(error, "Nothing was changed", "the cluster", reload),
+    onError: (error, _variables, ended) =>
+      onRuleWriteError(
+        error,
+        "Nothing was changed",
+        "the cluster",
+        reload,
+        ended,
+      ),
   });
 }
 
@@ -209,12 +216,19 @@ export function useDeleteClusterFirewallRule(clusterId: string) {
       apiClient.delete<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/firewall/rules/${pos}?digest=${requireRuleDigest(digest)}`,
       ),
+    onMutate: () => sessionScope(),
     // Returned, so the mutation stays pending — and the table's Delete
     // buttons disabled — until the list is refetched: a rule is deleted by
     // position, and a position read from the stale list names another rule.
     onSuccess: reload,
-    onError: (error) =>
-      onRuleWriteError(error, "Nothing was deleted", "the cluster", reload),
+    onError: (error, _variables, ended) =>
+      onRuleWriteError(
+        error,
+        "Nothing was deleted",
+        "the cluster",
+        reload,
+        ended,
+      ),
   });
 }
 
@@ -261,9 +275,16 @@ export function useDeleteVMFirewallRule(clusterId: string, vmId: string) {
       apiClient.delete<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/firewall/rules/${pos}?digest=${requireRuleDigest(digest)}`,
       ),
+    onMutate: () => sessionScope(),
     onSuccess: reload,
-    onError: (error) =>
-      onRuleWriteError(error, "Nothing was deleted", `guest ${vmId}`, reload),
+    onError: (error, _variables, ended) =>
+      onRuleWriteError(
+        error,
+        "Nothing was deleted",
+        `guest ${vmId}`,
+        reload,
+        ended,
+      ),
   });
 }
 

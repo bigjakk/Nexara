@@ -253,7 +253,9 @@ export function useSetNodeOptions(clusterId: string, nodeName: string) {
     // Both dialogs show a failure themselves while they are open and toast it
     // once they are gone (useNodeOptionsSave), and a stale digest is a routine
     // outcome here rather than an exception. A new caller of this hook gets
-    // its own mutation, so it must do the same or the failure is silent.
+    // its own mutation, so it must do the same or the failure is silent — and,
+    // as useNodeOptionsSave does, say nothing once the session the save was
+    // made in has ended (sessionScope).
     ...errorsHandledLocally,
   });
 }

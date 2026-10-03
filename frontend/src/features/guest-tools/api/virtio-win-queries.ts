@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { apiClient, ApiClientError } from "@/lib/api-client";
+import { apiClient, ApiClientError, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { MIRROR_CONFIRM_CODES } from "../types/virtio-win";
 import type {
@@ -134,7 +134,15 @@ export function useUpdateVirtioWinMirror() {
     // arrive as a red error toast on top of the prompt. Defining a handler is
     // what stands that safety net down, which means real failures have to be
     // raised here explicitly rather than being swallowed with it.
-    onError: (err: unknown) => {
+    //
+    // Not for a session that has ended, which the net would not report either:
+    // TanStack calls this whenever the answer lands, after a sign-out, and a
+    // toast raised then is shown to whoever is signed in by then, so the
+    // server's words would reach them. `onMutate` takes the session as the save
+    // is submitted; one whose session cannot be told is treated as ended.
+    onMutate: () => sessionScope(),
+    onError: (err: unknown, _variables, ended) => {
+      if (ended === undefined || ended()) return;
       if (
         err instanceof ApiClientError &&
         (MIRROR_CONFIRM_CODES as readonly string[]).includes(err.body.error)
