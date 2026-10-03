@@ -42,7 +42,7 @@ function signIn(user: User) {
   });
 }
 
-/** The session ending the way it does when a refresh fails. */
+/** The session ending the way it does when a refresh is refused. */
 function sessionExpires() {
   act(() => {
     useAuthStore.getState().clearAuth();

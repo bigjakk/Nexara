@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { clearTokens, storeTokens } from "@/lib/api-client";
 import { queryClient } from "@/lib/query-client";
+import { installFakeLocks, removeFakeLocks } from "@/test/fake-lock-manager";
 import { useAuthStore } from "@/stores/auth-store";
 import type { AuthResponse, SSHCredential, User } from "@/types/api";
 import { useUpsertSSHCredentials } from "./rolling-update-queries";
@@ -45,6 +46,8 @@ const SAVED: SSHCredential = {
 const SAVE = "PUT /api/v1/clusters/cluster01/ssh-credentials";
 
 let answer: { promise: Promise<Response>; resolve: (r: Response) => void };
+/** What the stubbed fetch was asked for, as "METHOD /path", in order. */
+let sent: string[];
 
 function deferredResponse() {
   let resolve!: (r: Response) => void;
@@ -60,12 +63,12 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function signIn(user: User) {
+function signIn(user: User, expiresIn = 3600) {
   const response: AuthResponse = {
     user,
     access_token: `token-${user.id}`,
     refresh_token: "",
-    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    expires_at: Math.floor(Date.now() / 1000) + expiresIn,
     permissions: [],
   };
   storeTokens(response);
@@ -92,6 +95,17 @@ function startSave() {
     });
   });
   return result;
+}
+
+/**
+ * Waits until the save is with the server, which holds its answer. A mutation
+ * is sent a few microtasks after mutate(), and a sign-out that begins before
+ * that is the session the save was never sent for, and nothing is sent.
+ */
+async function theSaveIsOut(): Promise<void> {
+  await waitFor(() => {
+    expect(sent).toContain(SAVE);
+  });
 }
 
 /** Lets the answer land, and waits for the mutation to finish with it. */
@@ -121,6 +135,7 @@ beforeEach(() => {
     isLoggingOut: false,
   });
   answer = deferredResponse();
+  sent = [];
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -131,6 +146,7 @@ beforeEach(() => {
             ? input.href
             : input.url;
       const key = `${init?.method ?? "GET"} ${url}`;
+      sent.push(key);
       if (key === SAVE) return answer.promise;
       // The refresh, with no session cookie to refresh from.
       if (key === "POST /api/v1/auth/refresh") {
@@ -144,6 +160,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  removeFakeLocks();
   clearTokens();
   queryClient.clear();
 });
@@ -161,6 +178,7 @@ describe("useUpsertSSHCredentials", () => {
   it("does not seed it once the session that sent the save has ended", async () => {
     signIn(ADMIN);
     const result = startSave();
+    await theSaveIsOut();
     await act(async () => {
       await useAuthStore.getState().logout();
     });
@@ -175,6 +193,7 @@ describe("useUpsertSSHCredentials", () => {
   it("does not seed it into the next user's session, who may not hold manage:ssh_credentials", async () => {
     signIn(ADMIN);
     const result = startSave();
+    await theSaveIsOut();
     await act(async () => {
       await useAuthStore.getState().logout();
     });
@@ -182,6 +201,37 @@ describe("useUpsertSSHCredentials", () => {
 
     await theAnswerLands(result);
 
+    expect(queryClient.getQueryData(KEY)).toBeUndefined();
+  });
+
+  it("is not sent at all when the sign-out gets to it first: the save is held waiting for the lock manager when the session ends, and the answer to a save that never went has nothing to seed", async () => {
+    // Made explicit, and not won by counting microtasks: the token is about to
+    // expire, so the save's token resolution refreshes ahead of it and waits to
+    // hear whether the lock is free; the lock manager's answer is held back, so
+    // the save is provably there when the sign-out completes.
+    const lock = installFakeLocks();
+    signIn(ADMIN, 30);
+    lock.pauseDecisions();
+    expect(lock.undecided).toBe(0); // nothing has asked yet
+    const result = startSave();
+    await waitFor(() => {
+      expect(lock.undecided).toBe(1);
+    });
+
+    await act(async () => {
+      await useAuthStore.getState().logout();
+    });
+    lock.resumeDecisions();
+    expect(lock.undecided).toBe(0); // answered: none is left waiting to be
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+
+    // Nothing was sent for the session that ended: not the save, and not the
+    // refresh that was made ahead of it.
+    expect(sent).not.toContain(SAVE);
+    expect(sent).not.toContain("POST /api/v1/auth/refresh");
+    expect(result.current.error?.name).toBe("StaleSessionError");
     expect(queryClient.getQueryData(KEY)).toBeUndefined();
   });
 

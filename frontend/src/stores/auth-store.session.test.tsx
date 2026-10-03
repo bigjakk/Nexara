@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { OIDCCallbackPage } from "@/features/auth/pages/OIDCCallbackPage";
-import { apiClient, clearTokens, StaleSessionError } from "@/lib/api-client";
+import {
+  apiClient,
+  clearTokens,
+  getStoredUser,
+  StaleSessionError,
+} from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { queryClient } from "@/lib/query-client";
 import {
@@ -737,6 +742,53 @@ describe("several requests that all meet an expired session at once", () => {
     // ... and the session ended exactly once.
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(resets).toHaveBeenCalledTimes(1);
+  });
+});
+
+// --- a session that ends by a refusal while another tab's record is stored -------------
+
+describe("a session that ends by a refresh the server refused, with another user's record stored", () => {
+  // Another tab has signed the viewer in, so nexara_user names them, while this
+  // tab still holds the admin's token. The refresh is refused: the cookie in the
+  // jar is dead, whoever's it was. The api-client ends the session first
+  // (clearTokens), which holds a token of the admin's and so leaves the viewer's
+  // record alone; and then the store's failure callback — the real one, wired by
+  // initialize() — signs the store out (clearAuth, which calls clearTokens again),
+  // and this time no token is held, so the record goes. A refused cookie is dead,
+  // and so is the session the record names.
+  it.each([401, 403])(
+    "removes the record when the refresh is refused with %i: the second clearTokens, from the store's own sign-out",
+    async (status) => {
+      await signInAs(ADMIN, [], -600); // expired: the next request refreshes first
+      localStorage.setItem("nexara_user", JSON.stringify(VIEWER));
+      server.routes[REFRESH] = () => json({}, status);
+      server.routes["GET /api/v1/probe"] = () =>
+        json({ error: "unauthorized", message: "no session" }, 401);
+
+      await act(async () => {
+        await settle(apiClient.get(apiPath`/api/v1/probe`));
+      });
+
+      expect(server.times(REFRESH)).toBe(1);
+      // The store's own callback ran: the session is over here as well ...
+      expect(useAuthStore.getState().isAuthenticated).toBe(false);
+      expect(useAuthStore.getState().user).toBeNull();
+      // ... and the record that the first clearTokens left is gone with it.
+      expect(getStoredUser()).toBeNull();
+    },
+  );
+
+  it("control: the same refusal, with the admin's own record stored, removes it as well", async () => {
+    await signInAs(ADMIN, [], -600);
+    expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
+    server.routes[REFRESH] = () => json({}, 401);
+
+    await act(async () => {
+      await settle(apiClient.get(apiPath`/api/v1/probe`));
+    });
+
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    expect(getStoredUser()).toBeNull();
   });
 });
 

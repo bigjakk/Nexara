@@ -26,12 +26,16 @@ function task(over: Partial<VeeamTaskSession> = {}): VeeamTaskSession {
 function stubFetch(items: VeeamTaskSession[]) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(() =>
+    vi.fn((input: RequestInfo | URL) =>
       Promise.resolve(
-        new Response(JSON.stringify({ items, total: items.length }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+        // No session in this test: the refresh cookie is refused, as on a page
+        // that has just loaded, and the request goes out without a token.
+        input === "/api/v1/auth/refresh"
+          ? new Response("{}", { status: 401 })
+          : new Response(JSON.stringify({ items, total: items.length }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
       ),
     ),
   );

@@ -129,8 +129,8 @@ func TestVeeamControl_RejectsMalformedIDs(t *testing.T) {
 // The 422-not-401 rule is the load-bearing one: the SPA reads a 401 as ITS OWN
 // session expiring, refreshes and REPLAYS the request. That spends a second
 // failed logon against the domain account per click — halving the operator's
-// lockout budget — and logs them out of Nexara if the refresh fails, because
-// their VEEAM password was wrong.
+// lockout budget — and logs them out of Nexara if the refresh is refused,
+// because their VEEAM password was wrong.
 func TestRenderVeeamControlError(t *testing.T) {
 	tests := []struct {
 		name string

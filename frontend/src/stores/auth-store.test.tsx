@@ -151,7 +151,7 @@ describe("every path that ends a session", () => {
     },
     // The callback initialize() registers with api-client: a request is
     // answered 401 and the refresh that follows is refused too.
-    "the forced logout of a request whose refresh fails": async () => {
+    "the forced logout of a request whose refresh is refused": async () => {
       routes["GET /api/v1/probe"] = () =>
         json({ error: "unauthorized", message: "expired" }, 401);
       await apiClient.get(apiPath`/api/v1/probe`).catch(() => undefined);

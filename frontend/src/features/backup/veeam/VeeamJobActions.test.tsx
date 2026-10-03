@@ -23,6 +23,12 @@ function stubFetch(body: unknown = { started: true }) {
           : input instanceof URL
             ? input.href
             : input.url;
+      // No session in this test: the refresh cookie is refused, as on a page
+      // that has just loaded, and the request goes out without a token. Not
+      // counted: `calls` is what the component issued.
+      if (url === "/api/v1/auth/refresh") {
+        return Promise.resolve(new Response("{}", { status: 401 }));
+      }
       calls.push(`${init?.method ?? "GET"} ${url}`);
       return Promise.resolve(
         new Response(JSON.stringify(body), {

@@ -802,7 +802,7 @@ func (h *VeeamHandler) publishVeeamChange(c fiber.Ctx, action string) {
 // The 422-not-401 rule is the same one renderVeeamProbeError documents: the
 // SPA reads a 401 as ITS OWN session expiring, refreshes and replays the
 // request, which spends a second failed domain logon per click and logs the
-// operator out if the refresh fails.
+// operator out if the refresh is refused.
 //
 // A 400 from Veeam becomes 409, not 400. "…job is not currently running" is
 // not a malformed request — it is a request that was fine when the operator

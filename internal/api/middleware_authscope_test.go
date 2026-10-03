@@ -84,12 +84,14 @@ func TestCompressionExclusion_TracksTheRefreshCookiePath(t *testing.T) {
 // TestRateLimitedAuthPaths_LieUnderTheCookieScope ties the other consumer of
 // the prefix to the same constant.
 //
-// The general rate limiter skips everything under authCookieScopePrefix so a
-// 429 on token refresh can never be mistaken for an auth failure and log the
-// user out. These paths carry their own brute-force caps precisely because
-// they are exempt from the general one, so a prefix that stopped covering them
-// would silently move them onto the general limiter — and a prefix that grew
-// to cover more would exempt endpoints that were never meant to be.
+// The general rate limiter skips everything under authCookieScopePrefix, so
+// ordinary traffic from an address cannot spend the budget a token refresh
+// needs and have it refused (a refused refresh no longer signs the user out,
+// but it still fails the request that waited on it). These paths carry their
+// own brute-force caps precisely because they are exempt from the general one,
+// so a prefix that stopped covering them would silently move them onto the
+// general limiter — and a prefix that grew to cover more would exempt
+// endpoints that were never meant to be.
 func TestRateLimitedAuthPaths_LieUnderTheCookieScope(t *testing.T) {
 	paths := make([]string, 0, 2+len(authLimitedPaths))
 	paths = append(paths, refreshLimitedPath, wsTokenLimitedPath)

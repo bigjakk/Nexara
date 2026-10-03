@@ -609,8 +609,8 @@ func renderVeeamProbeError(c fiber.Ctx, err error) error {
 		// refresh and REPLAYS the request, which runs the probe a second time
 		// and spends a second failed logon against what is usually a domain
 		// admin account — halving the operator's lockout budget per click.
-		// If that refresh happens to fail, the client clears the session and
-		// logs the operator out because their *Veeam* password was wrong.
+		// If that refresh happens to be refused, the client clears the session
+		// and logs the operator out because their *Veeam* password was wrong.
 		// clusters_bootstrap.go takes the same 422 line for PVE.
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error":   "veeam_auth_failed",

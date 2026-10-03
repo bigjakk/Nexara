@@ -21,9 +21,11 @@ import {
 import {
   ApiClientError,
   apiClient,
+  apiFetch,
   clearTokens,
   currentSessionEpoch,
   getStoredUser,
+  openApiRequest,
   sessionScope,
   setAuthFailureCallback,
   setAuthRefreshCallback,
@@ -632,17 +634,275 @@ describe("a request whose retry was in flight when its session ended", () => {
     });
   });
 
-  it("control: a retry that fails in a session that is still current is an expired session", async () => {
+  it("control: a retry that fails in a session that is still current is that request's own failure, and the session stands", async () => {
     const { retry, request } = await theRetryIsOut();
+    const failure = new TypeError("Failed to fetch");
 
-    retry.reject(new TypeError("Failed to fetch"));
+    retry.reject(failure);
 
-    expect(await request).toMatchObject({
+    // The network failed, not the session: the refresh before the retry was
+    // good, and no sign-out comes of one request not getting through.
+    expect(await request).toBe(failure);
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
+    server.routes[Y] = (init) => json({ owner: callerOf(init) });
+    expect(await apiClient.get(apiPath`/api/v1/y`)).toEqual({
+      owner: ADMIN.id,
+    });
+  });
+});
+
+describe("a request whose token was chosen just as its session ended", () => {
+  // ensureValidToken reads the token held from the session of the moment it
+  // returns it, and its caller reads the session again some microtasks later.
+  // Between them a session can change hands. The token is then the previous
+  // one's, and a request that took its epoch AFTER the token was sent as the old
+  // user, had its 401 taken for the new user's, and was replayed as them.
+  //
+  // The window is reachable: ensureValidToken makes one Date.now() call right
+  // before it returns the token held, and a spy on it queues the sign-in for the
+  // microtask that runs before the caller resumes.
+  function theSessionChangesAsTheTokenIsChosen(hops = 0) {
+    const real = Date.now.bind(Date);
+    let fired = false;
+    // `hops` more microtasks before the sign-in, each a turn of the queue behind
+    // whatever the request is doing meanwhile.
+    const later = (n: number, change: () => void) => {
+      if (n <= 0) change();
+      else
+        queueMicrotask(() => {
+          later(n - 1, change);
+        });
+    };
+    vi.spyOn(Date, "now").mockImplementation(() => {
+      if (!fired) {
+        fired = true;
+        queueMicrotask(() => {
+          later(hops, () => {
+            storeTokens(authResponse(VIEWER));
+          });
+        });
+      }
+      return real();
+    });
+  }
+
+  /** X refuses the admin's token, as it would an old one, and answers the viewer's. */
+  function xAnswersOnlyTheViewer() {
+    server.routes[X] = (init) =>
+      callerOf(init) === VIEWER.id
+        ? json({ owner: VIEWER.id })
+        : json({ error: "unauthorized", message: "expired" }, 401);
+  }
+
+  it("is not sent, as the admin or — after its 401 — replayed as the viewer", async () => {
+    storeTokens(authResponse(ADMIN));
+    xAnswersOnlyTheViewer();
+    theSessionChangesAsTheTokenIsChosen();
+
+    const outcome = await settle(apiClient.get(apiPath`/api/v1/x`));
+
+    expect(outcome).toBeInstanceOf(StaleSessionError);
+    expect(server.times(X)).toBe(0);
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(getStoredUser()).toMatchObject({ id: VIEWER.id }); // theirs began
+  });
+
+  // The window after the check as well: the session changes hands once the token
+  // has been judged and before request() has resumed to send it. It used to read
+  // the epoch again there — the viewer's — and judge the admin's 401 by it, and
+  // before that sent the admin's token under it. Wherever in the queue the
+  // sign-in lands, the admin's request is never sent or replayed as the viewer.
+  // Up to the turn in which request() resumes it is not sent at all (the first
+  // two positions: before the check, and between the check and the resumption),
+  // and from the one after, when the request is out, it is sent as the admin,
+  // which it was when it went, and dropped at its 401.
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])(
+    "is never sent or replayed as the viewer, whichever turn of the queue the sign-in lands in: %i microtasks on",
+    async (hops) => {
+      storeTokens(authResponse(ADMIN));
+      const callers: string[] = [];
+      server.routes[X] = (init) => {
+        callers.push(callerOf(init));
+        return callerOf(init) === VIEWER.id
+          ? json({ owner: VIEWER.id })
+          : json({ error: "unauthorized", message: "expired" }, 401);
+      };
+      // A refresh that cannot be made, so that nothing but a replay as the
+      // viewer could get the admin's request an answer.
+      server.routes[REFRESH] = () => json({ error: "x", message: "down" }, 503);
+      theSessionChangesAsTheTokenIsChosen(hops);
+
+      const outcome = await settle(apiClient.get(apiPath`/api/v1/x`));
+
+      expect(callers).not.toContain(VIEWER.id);
+      expect(outcome).toBeInstanceOf(StaleSessionError);
+      // Not sent while the sign-in lands before the request resumes (hops 0 and
+      // 1: hops 1 is the turn between the check and the resumption), sent as the
+      // admin once it is out.
+      expect(callers).toEqual(hops <= 1 ? [] : [ADMIN.id]);
+      expect(onFailure).not.toHaveBeenCalled();
+      expect(getStoredUser()).toMatchObject({ id: VIEWER.id }); // theirs began
+    },
+  );
+
+  // The turn between the check and the resumption of the caller that sends,
+  // for each of the three that send (tokenForRequest: the epoch it hands back is
+  // judged again where the request goes out). The sign-in lands there when it is
+  // relayed through one microtask (hops 1), which the first two tests above
+  // cannot reach.
+  describe("in the turn between the check and the send", () => {
+    it("is not sent by request(), nor replayed as the viewer after its 401", async () => {
+      storeTokens(authResponse(ADMIN));
+      xAnswersOnlyTheViewer();
+      theSessionChangesAsTheTokenIsChosen(1);
+
+      const outcome = await settle(apiClient.get(apiPath`/api/v1/x`));
+
+      expect(outcome).toBeInstanceOf(StaleSessionError);
+      expect(server.times(X)).toBe(0);
+    });
+
+    it("is not sent by apiFetch", async () => {
+      storeTokens(authResponse(ADMIN));
+      server.routes[X] = () => json({ ok: true });
+      theSessionChangesAsTheTokenIsChosen(1);
+
+      const outcome = await settle(apiFetch(apiPath`/api/v1/x`));
+
+      expect(outcome).toBeInstanceOf(StaleSessionError);
+      expect(server.times(X)).toBe(0);
+    });
+
+    it("is not given to openApiRequest", async () => {
+      storeTokens(authResponse(ADMIN));
+      vi.spyOn(XMLHttpRequest.prototype, "open").mockImplementation(
+        () => undefined,
+      );
+      const header = vi
+        .spyOn(XMLHttpRequest.prototype, "setRequestHeader")
+        .mockImplementation(() => undefined);
+      theSessionChangesAsTheTokenIsChosen(1);
+
+      const outcome = await settle(openApiRequest("POST", apiPath`/api/v1/x`));
+
+      expect(outcome).toBeInstanceOf(StaleSessionError);
+      expect(header).not.toHaveBeenCalled();
+    });
+  });
+
+  it("is not sent by apiFetch either", async () => {
+    storeTokens(authResponse(ADMIN));
+    xAnswersOnlyTheViewer();
+    theSessionChangesAsTheTokenIsChosen();
+
+    const outcome = await settle(apiFetch(apiPath`/api/v1/x`));
+
+    expect(outcome).toBeInstanceOf(StaleSessionError);
+    expect(server.times(X)).toBe(0);
+  });
+
+  it("is not given a token by openApiRequest either", async () => {
+    storeTokens(authResponse(ADMIN));
+    vi.spyOn(XMLHttpRequest.prototype, "open").mockImplementation(
+      () => undefined,
+    );
+    const header = vi
+      .spyOn(XMLHttpRequest.prototype, "setRequestHeader")
+      .mockImplementation(() => undefined);
+    theSessionChangesAsTheTokenIsChosen();
+
+    const outcome = await settle(openApiRequest("POST", apiPath`/api/v1/x`));
+
+    expect(outcome).toBeInstanceOf(StaleSessionError);
+    expect(header).not.toHaveBeenCalled();
+  });
+
+  it("control: with no change of session, the same request is sent under its token", async () => {
+    storeTokens(authResponse(ADMIN));
+    server.routes[X] = (init) => json({ owner: callerOf(init) });
+
+    expect(await apiClient.get(apiPath`/api/v1/x`)).toEqual({
+      owner: ADMIN.id,
+    });
+    expect(server.times(X)).toBe(1);
+  });
+});
+
+describe("a request that was given no token because nobody was signed in", () => {
+  // Nobody is signed in: beforeEach's clearTokens() latched the module. The
+  // request is chosen to go out as nobody, and what that means is that nobody
+  // is signed in when it goes — a user who signs in as it is chosen must not
+  // find it carried into their session, meet a 401 there, and be replayed as
+  // them (tokenForRequest).
+  function xAnswersNobodyWith401AndEveryoneElseWithTheirId() {
+    server.routes[X] = (init) =>
+      callerOf(init) === ""
+        ? json({ error: "unauthorized", message: "no token" }, 401)
+        : json({ owner: callerOf(init) });
+  }
+
+  it("is not carried into the session of the user who signs in a few microtasks after it was chosen", async () => {
+    xAnswersNobodyWith401AndEveryoneElseWithTheirId();
+
+    const request = settle(apiClient.get(apiPath`/api/v1/x`));
+    queueMicrotask(() => {
+      storeTokens(authResponse(VIEWER)); // after "no token" was chosen
+    });
+    const outcome = await request;
+
+    expect(outcome).toBeInstanceOf(StaleSessionError);
+    expect(server.times(X)).toBe(0);
+  });
+
+  it("is not carried into it either when the sign-in lands before the choice is looked at", async () => {
+    xAnswersNobodyWith401AndEveryoneElseWithTheirId();
+
+    queueMicrotask(() => {
+      storeTokens(authResponse(VIEWER)); // ahead of the request's own turn
+    });
+    const outcome = await settle(apiClient.get(apiPath`/api/v1/x`));
+
+    expect(outcome).toBeInstanceOf(StaleSessionError);
+    expect(server.times(X)).toBe(0);
+  });
+
+  it("is not sent by apiFetch or openApiRequest then either", async () => {
+    server.routes[X] = () => json({ ok: true });
+    vi.spyOn(XMLHttpRequest.prototype, "open").mockImplementation(
+      () => undefined,
+    );
+    vi.spyOn(XMLHttpRequest.prototype, "setRequestHeader").mockImplementation(
+      () => undefined,
+    );
+
+    const fetched = settle(apiFetch(apiPath`/api/v1/x`));
+    queueMicrotask(() => {
+      storeTokens(authResponse(VIEWER));
+    });
+    expect(await fetched).toBeInstanceOf(StaleSessionError);
+    expect(server.times(X)).toBe(0);
+
+    clearTokens(); // nobody again
+    const opened = settle(openApiRequest("POST", apiPath`/api/v1/x`));
+    queueMicrotask(() => {
+      storeTokens(authResponse(VIEWER));
+    });
+    expect(await opened).toBeInstanceOf(StaleSessionError);
+  });
+
+  it("control: with nobody signing in, it goes out as nobody and is told its session expired", async () => {
+    server.routes[X] = () =>
+      json({ error: "unauthorized", message: "no token" }, 401);
+
+    const outcome = await settle(apiClient.get(apiPath`/api/v1/x`));
+
+    expect(outcome).toMatchObject({
       name: "ApiClientError",
       status: 401,
+      message: "Session expired",
     });
-    expect(onFailure).toHaveBeenCalledTimes(1);
-    expect(getStoredUser()).toBeNull();
+    expect(server.times(X)).toBe(1);
   });
 });
 
@@ -664,6 +924,82 @@ describe("a sign-in while localStorage refuses the cached user", () => {
     expect(await apiClient.get(apiPath`/api/v1/x`)).toEqual({
       owner: ADMIN.id,
     });
+    expect(getStoredUser()).toBeNull();
+  });
+});
+
+describe("clearTokens and the user stored for the browser (nexara_user)", () => {
+  // Every tab reads the record, and a sign-in or a rotation of the cookie writes
+  // it, so it names whose session the shared refresh cookie belongs to. A tab
+  // whose own session ends takes it with it — but not when it names someone
+  // else: that is another tab's live session, which signed in on the cookie once
+  // this tab's own was orphaned, and a reload of that tab resumes off the record.
+  function anotherTabSignsIn(user: typeof ADMIN) {
+    localStorage.setItem("nexara_user", JSON.stringify(user));
+  }
+
+  it("leaves the record of another user's session alone when this tab's own ends", async () => {
+    storeTokens(authResponse(ADMIN));
+    anotherTabSignsIn(VIEWER);
+    const epoch = currentSessionEpoch();
+
+    clearTokens();
+
+    expect(getStoredUser()).toMatchObject({ id: VIEWER.id });
+    // The session itself ended all the same: the epoch moved, and nothing is
+    // held — a request goes out as nobody, and refreshes nothing.
+    expect(currentSessionEpoch()).not.toBe(epoch);
+    server.routes[X] = (init) => json({ owner: callerOf(init) });
+    expect(await apiClient.get(apiPath`/api/v1/x`)).toEqual({ owner: "" });
+    expect(server.times(REFRESH)).toBe(0);
+  });
+
+  it("control: removes the record when it is this tab's own", () => {
+    storeTokens(authResponse(ADMIN));
+    expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
+
+    clearTokens();
+
+    expect(getStoredUser()).toBeNull();
+  });
+
+  it("control: removes it when this tab holds no token: the boot's record, or a resume that failed", () => {
+    anotherTabSignsIn(VIEWER); // nothing of this tab's own to tell it from
+
+    clearTokens();
+
+    expect(getStoredUser()).toBeNull();
+  });
+
+  it("control: removes a record that names no one, as a corrupt value does: it is no session's", () => {
+    storeTokens(authResponse(ADMIN));
+    localStorage.setItem("nexara_user", JSON.stringify({ email: "x" }));
+
+    clearTokens();
+
+    expect(getStoredUser()).toBeNull();
+  });
+
+  it("control: removes it when the session ends by expiry: a refresh the server refused", async () => {
+    storeTokens(authResponse(ADMIN, { expiresIn: -10 }));
+    server.routes[REFRESH] = () => json({}, 401);
+
+    await settle(apiClient.get(apiPath`/api/v1/x`));
+
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(getStoredUser()).toBeNull();
+  });
+
+  it("control: a refresh that answered for another user makes the record this tab's: the sign-out that follows removes it", async () => {
+    storeTokens(authResponse(ADMIN, { expiresIn: -10 }));
+    // The cookie in the jar is the viewer's now, and the answer is theirs: a
+    // session begins in this tab, and the record names it.
+    server.routes[REFRESH] = () => json(authResponse(VIEWER));
+    await settle(apiClient.get(apiPath`/api/v1/x`));
+    expect(getStoredUser()).toMatchObject({ id: VIEWER.id });
+
+    clearTokens();
+
     expect(getStoredUser()).toBeNull();
   });
 });

@@ -44,12 +44,19 @@ beforeEach(async () => {
   vi.resetModules();
   api = await import("./api-client");
   ({ apiPath, PathSegmentError } = await import("./api-path"));
-  fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+  // Everything is answered with the version document, but the refresh: a page
+  // that has just loaded has no session cookie to resume, and the server says
+  // so with a 401. The version document is no answer to a refresh. The client
+  // reads it as a refresh that failed, and does not send the request that
+  // waited on it (lib/api-client.refresh.test.ts).
+  fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
     Promise.resolve(
-      new Response('{"version":"dev"}', {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
+      input === REFRESH
+        ? new Response("{}", { status: 401 })
+        : new Response('{"version":"dev"}', {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
     ),
   );
 });
@@ -83,6 +90,106 @@ describe("request()", () => {
     expect(fetchSpy.mock.calls.map((call) => call[0])).toEqual([
       "/api/v1/version",
     ]);
+  });
+
+  it("sends a public request with no Authorization header, though a session is held: postPublic and getPublic are what login and register go through", async () => {
+    signIn();
+
+    await api.apiClient.postPublic(apiPath`/api/v1/pubp`, {});
+    await api.apiClient.getPublic(apiPath`/api/v1/pub`);
+    // The control, so that the header being absent above is not the probe
+    // being blind to it: the same session's ordinary request carries it.
+    await api.apiClient.get(apiPath`/api/v1/priv`);
+
+    expect(
+      fetchSpy.mock.calls.map(([input, init]) => [
+        input,
+        (init?.headers as Record<string, string> | undefined)?.[
+          "Authorization"
+        ],
+      ]),
+    ).toEqual([
+      ["/api/v1/pubp", undefined],
+      ["/api/v1/pub", undefined],
+      ["/api/v1/priv", `Bearer ${TOKEN}`],
+    ]);
+  });
+});
+
+describe("request(), when the answer is not OK", () => {
+  /** What a read of /api/v1/version fails with, given what the server answered. */
+  async function failureOf(init: ResponseInit, body: string) {
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(new Response(body, init)),
+    );
+    return api.apiClient.getPublic(apiPath`/api/v1/version`).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+  }
+
+  // A 500 whose body parses, but is no {error, message} envelope: what a proxy
+  // or a WAF in front of the server may send. Each has to come out as an
+  // ApiClientError of its own status — `null` used to throw a TypeError out of
+  // the error's own constructor, and the others to carry a body that is none.
+  it.each([
+    ["JSON null", "null"],
+    ["a JSON string", '"oops"'],
+    ["a JSON number", "42"],
+    ["a JSON array", "[]"],
+    ["an object with no message", '{"error":"internal_server_error"}'],
+    ["an object whose message is not a string", '{"error":"x","message":7}'],
+  ])(
+    "an ApiClientError of the status, with its text as the message, for %s as the body",
+    async (_name, body) => {
+      const err = await failureOf(
+        { status: 500, statusText: "Internal Server Error" },
+        body,
+      );
+
+      expect(err).toBeInstanceOf(api.ApiClientError);
+      expect(err).toMatchObject({
+        status: 500,
+        message: "Internal Server Error",
+        body: { error: "unknown", message: "Internal Server Error" },
+      });
+    },
+  );
+
+  it("control: keeps the server's own envelope, details and all", async () => {
+    const err = await failureOf(
+      { status: 422, statusText: "Unprocessable Content" },
+      JSON.stringify({
+        error: "confirm_required",
+        message: "Are you sure?",
+        details: { target: "linux01" },
+      }),
+    );
+
+    expect(err).toBeInstanceOf(api.ApiClientError);
+    expect(err).toMatchObject({
+      status: 422,
+      message: "Are you sure?",
+      body: {
+        error: "confirm_required",
+        message: "Are you sure?",
+        details: { target: "linux01" },
+      },
+    });
+  });
+
+  it("control: a message that is the empty string is still the server's, and not replaced by the status text", async () => {
+    const err = await failureOf(
+      { status: 500, statusText: "Internal Server Error" },
+      '{"error":"internal_server_error","message":""}',
+    );
+
+    expect(err).toBeInstanceOf(api.ApiClientError);
+    expect(err).toMatchObject({
+      status: 500,
+      message: "",
+      body: { error: "internal_server_error", message: "" },
+    });
   });
 });
 

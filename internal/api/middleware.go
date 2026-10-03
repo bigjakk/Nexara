@@ -282,9 +282,15 @@ func (s *Server) setupMiddleware() {
 	}))
 
 	// General rate limiting (in-memory storage).
-	// Skip auth endpoints so token refresh is never blocked — a 429 on
-	// /auth/refresh causes the frontend to interpret it as an auth failure
-	// and log the user out.
+	// Skip everything under /api/v1/auth/ (and /ws). What needs a cap in the
+	// auth subtree has a limiter of its own above, sized for it — login and the
+	// TOTP codes, refresh, ws-token — and counting those requests against this
+	// budget as well would let ordinary traffic from the same address, a
+	// dashboard polling, spend what a refresh needs and have it refused. A
+	// refused refresh no longer signs the user out (the SPA keeps the session,
+	// fails the request that waited on it with the 429, and tries again after
+	// the Retry-After), but that request still fails, and the refresh is what
+	// keeps a session alive.
 	s.app.Use(limiter.New(limiter.Config{
 		Max:        s.config.RateLimitMax,
 		Expiration: s.config.RateLimitExpiration,
