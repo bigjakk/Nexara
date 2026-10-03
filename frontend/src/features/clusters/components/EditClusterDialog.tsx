@@ -26,6 +26,7 @@ import {
 } from "@/lib/private-address";
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import { ConfirmRequiredWarning } from "@/components/ConfirmRequiredWarning";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   confirmRequiredFromError,
   type ConfirmRequired,
@@ -74,6 +75,25 @@ export function EditClusterDialog({
   const [allowPrivate, setAllowPrivate] = useState(false);
 
   const updateMutation = useUpdateCluster();
+
+  // The hook opts out of the global error toast, because the open dialog shows
+  // its failure itself; the save settles through its promise, so that one that
+  // settles after the dialog has gone is toasted instead of lost (see
+  // useSaveOutcome). Every caller mounts this only while it is open, so each
+  // dialog is one instance, and the clusters page keys it on the cluster. What
+  // tells the dialogs of one instance apart is which cluster it is open for, or
+  // none: that is for one that stays mounted, which is what the reset() calls
+  // below allow for, and for a parent that gives it another cluster without a
+  // key. Closing it and opening it again is a different dialog, and so is
+  // another cluster's, and a save left behind by the first is not the second's.
+  //
+  // That decides where the outcome of a save goes — to this dialog, or to a
+  // toast — and whether it closes the parent's. It does not protect the dialog's
+  // own state: given another cluster without a key, the dialog still shows the
+  // first one's typed form (it is seeded once, from its props) and the error of
+  // the first one's save (it reads that from the mutation it keeps). The
+  // parent's key is what protects that.
+  const settle = useSaveOutcome(open ? cluster.id : null);
 
   // The stored token secret is only ever sent to the address it was saved for,
   // so moving the address means re-entering it. The backend refuses the
@@ -211,40 +231,42 @@ export function EditClusterDialog({
       setSshResetConfirm(null);
     }
 
-    updateMutation.mutate(
-      { id: cluster.id, body },
-      {
-        onSuccess: () => {
-          onOpenChange(false);
-          resetFingerprintState();
-        },
-        onError: (err) => {
-          const warn = privateAddressWarningFromError(err);
-          if (warn != null) {
-            setPrivateWarning(warn);
-            setPrivateWarningSource("update");
-            return;
-          }
-          // The dialog only ever edits this one cluster, so the target is
-          // fixed and a late-settling mutation cannot land on another.
-          const confirm = confirmRequiredFromError(
-            err,
-            [SSH_TRUST_RESET],
-            cluster.id,
-          );
-          if (confirm != null) {
-            setSshResetConfirm(confirm);
-            return;
-          }
-          // Anything else must reach the banner below, which is gated on this
-          // being null. Leaving a stale confirm mounted hides the failure —
-          // and on the acknowledged re-submit that failure can be a 500 AFTER
-          // the SSH credential was already deleted, which is the one outcome
-          // the operator most needs told about.
-          setSshResetConfirm(null);
-        },
+    settle(updateMutation.mutateAsync({ id: cluster.id, body }), {
+      // Named: it can land on another page, or over another cluster's open
+      // dialog.
+      action: `Saving cluster ${cluster.name}`,
+      // Not once the dialog is gone: onOpenChange(false) would close whichever
+      // dialog the parent has opened in this one's place.
+      onSuccess: () => {
+        onOpenChange(false);
+        resetFingerprintState();
       },
-    );
+      onError: (err) => {
+        const warn = privateAddressWarningFromError(err);
+        if (warn != null) {
+          setPrivateWarning(warn);
+          setPrivateWarningSource("update");
+          return;
+        }
+        // The dialog only ever edits this one cluster, so the target is
+        // fixed and a late-settling mutation cannot land on another.
+        const confirm = confirmRequiredFromError(
+          err,
+          [SSH_TRUST_RESET],
+          cluster.id,
+        );
+        if (confirm != null) {
+          setSshResetConfirm(confirm);
+          return;
+        }
+        // Anything else must reach the banner below, which is gated on this
+        // being null. Leaving a stale confirm mounted hides the failure —
+        // and on the acknowledged re-submit that failure can be a 500 AFTER
+        // the SSH credential was already deleted, which is the one outcome
+        // the operator most needs told about.
+        setSshResetConfirm(null);
+      },
+    });
   }
 
   const connectivityData = updateMutation.data?.connectivity;

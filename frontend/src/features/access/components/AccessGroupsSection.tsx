@@ -32,6 +32,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { ApiClientError } from "@/lib/api-client";
 import { unaddressableHint } from "@/lib/api-path";
 
@@ -69,16 +70,37 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
   const manageable = canManage("access") && capabilities.canModifyUsers;
   const columns = manageable ? 4 : 3;
 
+  // The hook opts out of the global error toast, because the open dialog shows
+  // its failure itself; the save settles through its promise, so that one that
+  // settles after the dialog has gone is toasted instead of lost (see
+  // useSaveOutcome). This section opens the create dialog again and again, so
+  // it is told apart by its open flag.
+  const settleCreate = useSaveOutcome(createOpen);
+
   const handleCreate = (e: React.SyntheticEvent) => {
     e.preventDefault();
     setError("");
-    createGroup.mutate(
-      { groupid: groupid.trim(), ...(comment ? { comment } : {}) },
+    const id = groupid.trim();
+    settleCreate(
+      createGroup.mutateAsync({ groupid: id, ...(comment ? { comment } : {}) }),
       {
+        action: `Creating group ${id}`,
+        // Not once the dialog has been dismissed: this would close, and clear,
+        // whichever one has been opened in its place.
         onSuccess: () => {
           setCreateOpen(false);
           setGroupid("");
           setComment("");
+        },
+        // A dismissal keeps what was typed, which is this section's and not the
+        // dialog's, so a group that was created after one would leave its own
+        // id for the next Create to repeat. Put it away as a success does,
+        // unless a dialog is open: that one is showing the same text as its own.
+        onLateSuccess: (_, { open }) => {
+          if (!open) {
+            setGroupid("");
+            setComment("");
+          }
         },
         onError: (err) => {
           setError(
@@ -249,8 +271,14 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
           </Table>
         )}
 
+        {/* Keyed on the group, so that the dialog of another is a new one: this
+            one is not held while its request is out, and Tab walks out of it to
+            the Edit buttons behind the modal, which a pointer cannot reach.
+            Without the key, Enter on another group's would give it the form
+            state, the error and the pending save of the first. */}
         {editTarget && (
           <EditGroupDialog
+            key={editTarget.groupid}
             clusterId={clusterId}
             groupid={editTarget.groupid}
             initialComment={editTarget.comment}
@@ -282,9 +310,17 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                 onClick={(e: React.MouseEvent) => {
                   e.preventDefault();
                   if (!deleteTarget) return;
-                  deleteGroup.mutate(deleteTarget, {
+                  const target = deleteTarget;
+                  deleteGroup.mutate(target, {
+                    // Only this group's confirmation. It is not held while its
+                    // request is out, so Tab walks out of it to the Delete
+                    // buttons behind the modal, which a pointer cannot reach,
+                    // and Enter on another group's opens that one in its place:
+                    // this settling must not close it.
                     onSettled: () => {
-                      setDeleteTarget(null);
+                      setDeleteTarget((open) =>
+                        open === target ? null : open,
+                      );
                     },
                   });
                 }}
@@ -367,22 +403,31 @@ function EditGroupDialog({
   const [comment, setComment] = useState(initialComment);
   const [error, setError] = useState("");
 
+  // The hook opts out of the global error toast because this dialog shows its
+  // own failure, and mutate()'s per-call callbacks do not run once the dialog
+  // is gone, so the save settles through its promise (see useSaveOutcome). This
+  // component IS the dialog, mounted only while it is open and, being keyed on
+  // its group, once for each.
+  const settle = useSaveOutcome();
+
   const handleSave = (e: React.SyntheticEvent) => {
     e.preventDefault();
     setError("");
-    updateGroup.mutate(
-      { groupid, comment },
-      {
-        onSuccess: onClose,
-        onError: (err) => {
-          setError(
-            err instanceof ApiClientError
-              ? err.message
-              : "Failed to update group",
-          );
-        },
+    settle(updateGroup.mutateAsync({ groupid, comment }), {
+      // Named: it can land on another page, or over another group's open Edit
+      // dialog.
+      action: `Saving group ${groupid}`,
+      // Not once dismissed: onClose would close whichever dialog has been
+      // opened in this one's place.
+      onSuccess: onClose,
+      onError: (err) => {
+        setError(
+          err instanceof ApiClientError
+            ? err.message
+            : "Failed to update group",
+        );
       },
-    );
+    });
   };
 
   return (

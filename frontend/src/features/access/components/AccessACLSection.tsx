@@ -41,6 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { ApiClientError } from "@/lib/api-client";
 
 import {
@@ -59,6 +60,11 @@ interface Props {
 }
 
 type SubjectKind = "user" | "group" | "token";
+
+/** What tells one ACL entry from another: the same four fields its row is keyed on. */
+function entryKey(entry: AccessACLEntry): string {
+  return `${entry.path}|${entry.type}|${entry.ugid}|${entry.roleid}`;
+}
 
 export function AccessACLSection({ clusterId, capabilities }: Props) {
   const { canManage } = useAuth();
@@ -82,23 +88,60 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
 
   const manageable = canManage("access") && capabilities.canModifyACL;
 
+  // The hook opts out of the global error toast for grant and revoke alike, so
+  // each save settles through its promise: one that settles after the dialog
+  // that sent it has gone is toasted, naming what it was, instead of lost (see
+  // useSaveOutcome). This section opens each dialog again and again.
+  //
+  // The grant's is told apart by whether it is open: it is one dialog, and its
+  // trigger closes it before anything can open it again. A revoke's confirmation
+  // is told apart by WHICH entry's is open, because one can take the place of
+  // another with nothing closed between them. The confirmation is not held while
+  // the request is out (nor does it hold focus: holdFocusInDialog is not used
+  // here), so Tab walks out of it to the rows behind the modal, which a pointer
+  // cannot reach, and Enter on another row's Revoke opens that entry's
+  // confirmation in place of this one's.
+  //
+  // A revoke is reported in the banner in the section body as well, but only
+  // while its confirmation is still open: the confirmation closes on a failure,
+  // which uncovers the banner. For one that was dismissed or replaced while the
+  // request was out the banner is no place for it. It names no entry, it sits
+  // behind whichever dialog is open next, and the next revoke clears it.
+  const settleGrant = useSaveOutcome(grantOpen);
+  const settleRevoke = useSaveOutcome(
+    revokeTarget === null ? null : entryKey(revokeTarget),
+  );
+
   const subjectField = (kind: SubjectKind): "users" | "groups" | "tokens" =>
     kind === "user" ? "users" : kind === "group" ? "groups" : "tokens";
 
   const handleGrant = (e: React.SyntheticEvent) => {
     e.preventDefault();
     setError("");
-    updateACL.mutate(
-      {
-        path: path.trim(),
+    const onPath = path.trim();
+    const to = subject.trim();
+    settleGrant(
+      updateACL.mutateAsync({
+        path: onPath,
         roles: role,
-        [subjectField(subjectKind)]: subject.trim(),
+        [subjectField(subjectKind)]: to,
         propagate,
-      },
+      }),
       {
+        action: `Granting ${role} on ${onPath} to ${to}`,
+        // Not once the dialog has been dismissed: this would close, and clear,
+        // whichever one has been opened in its place.
         onSuccess: () => {
           setGrantOpen(false);
           setSubject("");
+        },
+        // A dismissal keeps what was filled in, which is this section's and not
+        // the dialog's, so a grant that went through after one would leave the
+        // subject it has just been made to for the next Grant to repeat. Put it
+        // away as a success does, unless a dialog is open: that one is showing
+        // the same text as its own.
+        onLateSuccess: (_, { open }) => {
+          if (!open) setSubject("");
         },
         onError: (err) => {
           setError(
@@ -119,15 +162,20 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
         : entry.type === "token"
           ? "tokens"
           : "users";
-    updateACL.mutate(
-      {
+    settleRevoke(
+      updateACL.mutateAsync({
         path: entry.path,
         roles: entry.roleid,
         [kind]: entry.ugid,
         delete: true,
-      },
+      }),
       {
-        onSettled: () => {
+        action: `Revoking ${entry.roleid} on ${entry.path} from ${entry.ugid}`,
+        // These run only while the confirmation that sent the request is still
+        // the one open — this entry's, not another's that has replaced it — so
+        // closing it cannot close another's: useSaveOutcome holds them to that,
+        // and nothing here checks it a second time.
+        onSuccess: () => {
           setRevokeTarget(null);
         },
         onError: (err) => {
@@ -136,6 +184,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
               ? err.message
               : "Failed to revoke access",
           );
+          setRevokeTarget(null);
         },
       },
     );
@@ -346,9 +395,7 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
             </TableHeader>
             <TableBody>
               {aclQuery.data.map((entry) => (
-                <TableRow
-                  key={`${entry.path}|${entry.type}|${entry.ugid}|${entry.roleid}`}
-                >
+                <TableRow key={entryKey(entry)}>
                   <TableCell className="font-mono text-xs">
                     {entry.path}
                   </TableCell>

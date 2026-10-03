@@ -34,6 +34,15 @@ export function useLDAPConfig(id: string) {
  * and a confirm-required 422 reads as a hard red failure next to the amber
  * prompt offering to proceed.
  *
+ * What the component does with the failure cannot be left to the callbacks it
+ * gives mutate(), though: those are dropped once it unmounts — a dialog
+ * dismissed while the request is out, a page left, a session ended — and then
+ * neither they nor the net would report the failure. So a caller settles the
+ * save through `mutateAsync` and useSaveOutcome (hooks/useSaveOutcome.ts), which
+ * hands the outcome to the dialog while it is there and toasts a failure,
+ * naming the object, once it is not. A hook opted out and settled any other way
+ * loses its failures.
+ *
  * Apply it ONLY where the component surfaces the error somewhere the operator
  * is looking at the moment it happens — an open dialog, or a banner in the
  * section body. Applying it to a mutation that relies on the toast makes the

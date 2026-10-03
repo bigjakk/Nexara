@@ -231,8 +231,15 @@ export function ClustersListPage() {
           </div>
         )}
 
+      {/* Keyed on the cluster, so that the dialog of another is a new one. This
+          one seeds its form from its props once and reads the error of its save
+          from state it keeps, and it is not held while its request is out: Tab
+          walks out of it to the Edit buttons behind the modal, which a pointer
+          cannot reach, and Enter on another cluster's would otherwise open that
+          cluster over the first one's typed form and failed save. */}
       {editCluster && (
         <EditClusterDialog
+          key={editCluster.id}
           cluster={editCluster}
           open={true}
           onOpenChange={(v) => {
@@ -240,8 +247,17 @@ export function ClustersListPage() {
           }}
         />
       )}
+      {/* Keyed on the cluster, so that the dialog of another is a new one. This
+          one keeps what was typed and ticked in state of its own, among it "also
+          delete the Proxmox user and API token Nexara created", and it is not
+          held while its request is out: Tab walks out of it to the Delete
+          buttons behind the modal, which a pointer cannot reach, and Enter on
+          another cluster's would otherwise open that cluster's confirmation with
+          the first one's tick already on, and confirming it would delete the
+          second cluster's Proxmox user and token. */}
       {deleteCluster && (
         <DeleteClusterDialog
+          key={deleteCluster.id}
           cluster={deleteCluster}
           open={true}
           onOpenChange={(v) => {

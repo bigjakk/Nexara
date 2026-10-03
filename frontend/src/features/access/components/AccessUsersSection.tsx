@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useState } from "react";
 import {
   AlertTriangle,
   ChevronDown,
@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/table";
 import { ApiClientError } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 import {
   type AccessCapabilities,
@@ -79,6 +80,48 @@ function expiryLabel(expire?: number): string {
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiClientError ? err.message : fallback;
 }
+
+/**
+ * Whether the server refused an action because it would cut Nexara off from the
+ * cluster: a 409 from guardSelfCredential, which says why and how to go ahead
+ * anyway (force=true). Every flow it can refuse answers it with a
+ * type-to-confirm override, which sends the action again with force, and
+ * decides to open that override with this.
+ */
+function isOverridable(err: unknown): err is ApiClientError {
+  return err instanceof ApiClientError && err.status === 409;
+}
+
+/**
+ * What a refusal that has an override says when there is no one left to give
+ * it: the dialog is gone. The server's words end with "Retry with force=true to
+ * proceed anyway", which is for an API caller and cannot be acted on from a
+ * toast, so they are not used: this says what happened to the action, and what
+ * to do to go ahead.
+ */
+function refusedBeyondOverride(action: string): string {
+  return `${action} was refused, and nothing was changed, because it could cut Nexara off from the cluster. To go ahead anyway, do it again and confirm the override that is then offered.`;
+}
+
+/**
+ * How long a notice that a token's secret could not be shown stays up. Long,
+ * because it is the one thing such a toast has to be read for: Proxmox shows a
+ * secret once, so the operator has to regenerate the token, and after a
+ * regenerate the old secret is already dead. The default of a few seconds is
+ * easily missed by someone who has just navigated away from the page that would
+ * have shown it. (sonner pauses a toast under the pointer, and the Toaster has
+ * a close button.)
+ *
+ * Finite, all the same. It is about a moment: once the operator has
+ * regenerated the token, or given up on it, a notice that is still there
+ * misleads, and nothing takes it down but them. And it does not have to outlive
+ * its session to be wrong. A sign-out and a change of user dismiss every toast
+ * (stores/session-reset.ts, auth-store), and useSaveOutcome raises none for a
+ * session that has ended, so this one cannot reach the next user's Toaster. But
+ * that dismissal only reports a failure of sonner's and carries on, and a bound
+ * keeps a notice that it did not reach from lasting for ever.
+ */
+const SECRET_NOTICE_MS = 30_000;
 
 /**
  * A failure banner rendered in the section body rather than inside a dialog.
@@ -137,6 +180,16 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
   const manageable = canManage("access") && capabilities.canModifyUsers;
   const columns = manageable ? 6 : 5;
 
+  // Both hooks opt out of the global error toast, because what sent a save
+  // shows its failure itself; these settle each save through its promise, so
+  // that one that settles after that has gone is toasted instead of lost (see
+  // useSaveOutcome). The create dialog is one of several this section opens, so
+  // it is told apart by its open flag; the delete's confirmations are held
+  // while the request is out (below), and only the page being left takes them
+  // away.
+  const settleCreate = useSaveOutcome(createOpen);
+  const settleDelete = useSaveOutcome();
+
   const resetCreate = () => {
     setUserid("");
     setComment("");
@@ -147,13 +200,17 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
   const handleCreate = (e: React.SyntheticEvent) => {
     e.preventDefault();
     setCreateError("");
-    createUser.mutate(
-      {
-        userid: userid.trim(),
+    const id = userid.trim();
+    settleCreate(
+      createUser.mutateAsync({
+        userid: id,
         ...(comment ? { comment } : {}),
         ...(password ? { password } : {}),
-      },
+      }),
       {
+        action: `Creating user ${id}`,
+        // Not once the dialog has been dismissed: this would close, and clear,
+        // whichever one has been opened in its place.
         onSuccess: () => {
           setCreateOpen(false);
           resetCreate();
@@ -167,27 +224,28 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
 
   const handleDelete = (target: string, force: boolean) => {
     setSectionError("");
-    deleteUser.mutate(
-      { userid: target, force },
-      {
-        onSuccess: () => {
-          setDeleteConflict(null);
-          setDeleteTarget(null);
-        },
-        onError: (err) => {
-          setDeleteTarget(null);
-          // 409 means the target is the credential Nexara authenticates with.
-          // Hand it to the type-to-confirm override rather than reporting a
-          // plain failure — it is a refusal, not an error.
-          if (err instanceof ApiClientError && err.status === 409) {
-            setDeleteConflict({ message: err.message, userid: target });
-            return;
-          }
-          setDeleteConflict(null);
-          setSectionError(errorMessage(err, "Failed to delete user"));
-        },
+    const action = `Deleting user ${target}`;
+    settleDelete(deleteUser.mutateAsync({ userid: target, force }), {
+      action,
+      lateFailure: (err) =>
+        isOverridable(err) ? refusedBeyondOverride(action) : undefined,
+      onSuccess: () => {
+        setDeleteConflict(null);
+        setDeleteTarget(null);
       },
-    );
+      onError: (err) => {
+        setDeleteTarget(null);
+        // 409 means the target is the credential Nexara authenticates with.
+        // Hand it to the type-to-confirm override rather than reporting a
+        // plain failure — it is a refusal, not an error.
+        if (isOverridable(err)) {
+          setDeleteConflict({ message: err.message, userid: target });
+          return;
+        }
+        setDeleteConflict(null);
+        setSectionError(errorMessage(err, "Failed to delete user"));
+      },
+    });
   };
 
   return (
@@ -519,19 +577,45 @@ function UserTokens({
     action: "revoke" | "regenerate";
   } | null>(null);
 
+  // These three hooks opt out of the global error toast, so each save settles
+  // through its promise (see useSaveOutcome): a failure that comes after this
+  // row has gone — collapsed, or the page left — is toasted instead of lost.
+  // The row is the whole of what sent them, and the confirmations are held
+  // while their request is out, so there is no dialog to tell apart.
+  const settle = useSaveOutcome();
+
   const fullTokenId = (tokenid: string) => `${userid}!${tokenid}`;
+
+  // A secret is shown once, by the dialog this row raises when the answer
+  // arrives, and Proxmox keeps no copy to show again. An answer that arrives
+  // after the row has gone has nowhere to show it, so the operator is told what
+  // became of the token instead — never the secret itself, which a toast would
+  // leave on screen for anyone who looks. (And not at all once the session has
+  // ended: useSaveOutcome stays silent then, so a secret never reaches the next
+  // user's screen.)
+  const secretNotShown = (tokenid: string, regenerated: boolean) => {
+    const token = fullTokenId(tokenid);
+    toast.error(
+      regenerated
+        ? `Regenerated the API token ${token}, but its new secret could not be shown because this view was closed. The old secret no longer works, and Proxmox shows a secret only once: regenerate the token again to get a new one.`
+        : `Created the API token ${token}, but its secret could not be shown because this view was closed. Proxmox shows a secret only once: regenerate the token to get a new one.`,
+      { duration: SECRET_NOTICE_MS },
+    );
+  };
 
   const handleCreate = (e: React.SyntheticEvent) => {
     e.preventDefault();
     setError("");
-    createToken.mutate(
-      {
+    const name = tokenName.trim();
+    settle(
+      createToken.mutateAsync({
         userid,
-        tokenid: tokenName.trim(),
+        tokenid: name,
         privsep,
         ...(tokenComment ? { comment: tokenComment } : {}),
-      },
+      }),
       {
+        action: `Creating token ${fullTokenId(name)}`,
         onSuccess: (created) => {
           setMinted(created);
           setTokenName("");
@@ -541,41 +625,49 @@ function UserTokens({
         onError: (err) => {
           setError(errorMessage(err, "Failed to create token"));
         },
+        onLateSuccess: () => {
+          secretNotShown(name, false);
+        },
       },
     );
   };
 
   const handleRevoke = (tokenid: string, force: boolean) => {
     setError("");
-    deleteToken.mutate(
-      { userid, tokenid, force },
-      {
-        onSuccess: () => {
-          setSelfConflict(null);
-          setRevokeTarget(null);
-        },
-        onError: (err) => {
-          setRevokeTarget(null);
-          if (err instanceof ApiClientError && err.status === 409) {
-            setSelfConflict({
-              message: err.message,
-              tokenid,
-              action: "revoke",
-            });
-            return;
-          }
-          setSelfConflict(null);
-          setError(errorMessage(err, "Failed to revoke token"));
-        },
+    const action = `Revoking token ${fullTokenId(tokenid)}`;
+    settle(deleteToken.mutateAsync({ userid, tokenid, force }), {
+      action,
+      lateFailure: (err) =>
+        isOverridable(err) ? refusedBeyondOverride(action) : undefined,
+      onSuccess: () => {
+        setSelfConflict(null);
+        setRevokeTarget(null);
       },
-    );
+      onError: (err) => {
+        setRevokeTarget(null);
+        if (isOverridable(err)) {
+          setSelfConflict({
+            message: err.message,
+            tokenid,
+            action: "revoke",
+          });
+          return;
+        }
+        setSelfConflict(null);
+        setError(errorMessage(err, "Failed to revoke token"));
+      },
+    });
   };
 
   const handleRegenerate = (tokenid: string, force: boolean) => {
     setError("");
-    updateToken.mutate(
-      { userid, tokenid, regenerate: true, force },
+    const action = `Regenerating token ${fullTokenId(tokenid)}`;
+    settle(
+      updateToken.mutateAsync({ userid, tokenid, regenerate: true, force }),
       {
+        action,
+        lateFailure: (err) =>
+          isOverridable(err) ? refusedBeyondOverride(action) : undefined,
         onSuccess: (updated) => {
           setSelfConflict(null);
           setRegenTarget(null);
@@ -583,7 +675,7 @@ function UserTokens({
         },
         onError: (err) => {
           setRegenTarget(null);
-          if (err instanceof ApiClientError && err.status === 409) {
+          if (isOverridable(err)) {
             setSelfConflict({
               message: err.message,
               tokenid,
@@ -593,6 +685,10 @@ function UserTokens({
           }
           setSelfConflict(null);
           setError(errorMessage(err, "Failed to regenerate token"));
+        },
+        // The old secret stopped working when the new one was issued.
+        onLateSuccess: () => {
+          secretNotShown(tokenid, true);
         },
       },
     );
@@ -910,51 +1006,42 @@ function EditUserDialog({
   };
   const touched = Object.keys(changes).length > 0;
 
-  // Whether this dialog is still mounted. The hook opts out of the global toast
-  // because the open dialog reports its own errors, but mutate()'s per-call
-  // callbacks do not run once the component is gone, so save reads the outcome
-  // from the promise instead, and toasts a failure nobody is looking at. A
-  // layout effect, so that it clears in the commit that removes the dialog and
-  // not in the passive flush after it: a navigation runs in a transition (React
-  // Router), React can run that flush a task after such a commit, and a request
-  // settling in between would find the dialog still live and show its failure
-  // in a form no one can see. (Radix's unmount schedules a sync update, which
-  // today makes React run the passive effects inside the commit; nothing here
-  // should lean on that.)
-  const live = useRef(false);
-  useLayoutEffect(() => {
-    live.current = true;
-    return () => {
-      live.current = false;
-    };
-  }, []);
+  // The hook opts out of the global toast because the open dialog reports its
+  // own errors, but mutate()'s per-call callbacks do not run once the component
+  // is gone, so save settles through the promise instead, and a failure nobody
+  // is looking at is toasted (see useSaveOutcome, which also keeps the toast
+  // out of a session that has ended). This component IS the dialog, mounted
+  // only while it is open.
+  const settle = useSaveOutcome();
 
   const save = (edit: UpdateAccessUserInput, force: boolean) => {
     setError("");
-    updateUser.mutateAsync({ ...edit, force }).then(
-      () => {
-        // Not once dismissed: onClose would close whichever dialog has been
-        // opened in this one's place.
-        if (live.current) onClose();
-      },
-      (err: unknown) => {
-        const message = errorMessage(err, "Failed to update user");
-        if (!live.current) {
-          // Named: it can land on another page, or over another account's
-          // open Edit dialog.
-          toast.error(`Saving ${edit.userid} failed: ${message}`);
-          return;
-        }
+    // Named: it can land on another page, or over another account's open Edit
+    // dialog.
+    const action = `Saving ${edit.userid}`;
+    settle(updateUser.mutateAsync({ ...edit, force }), {
+      action,
+      // A forced save is past the self-credential refusal, so a 409 to it is
+      // an error like any other, in the words the server gave it: only an
+      // unforced one has an override to be sent to.
+      lateFailure: (err) =>
+        !force && isOverridable(err)
+          ? refusedBeyondOverride(action)
+          : undefined,
+      // Not once dismissed: onClose would close whichever dialog has been
+      // opened in this one's place.
+      onSuccess: onClose,
+      onError: (err) => {
         // A forced save is past the self-credential refusal, so whatever it
         // fails with is an error for the form, never a second override.
-        if (!force && err instanceof ApiClientError && err.status === 409) {
+        if (!force && isOverridable(err)) {
           setConflict({ message: err.message, edit });
           return;
         }
         setConflict(null);
-        setError(message);
+        setError(errorMessage(err, "Failed to update user"));
       },
-    );
+    });
   };
 
   const handleSave = (e: React.SyntheticEvent) => {

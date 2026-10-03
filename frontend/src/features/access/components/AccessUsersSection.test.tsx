@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import {
   act,
@@ -21,6 +21,11 @@ import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
+import {
+  SESSION_ENDINGS,
+  signIn,
+  signOutForGood,
+} from "@/test/save-outcome-kit";
 import type { AccessCapabilities } from "../api/access-queries";
 import { AccessUsersSection } from "./AccessUsersSection";
 
@@ -125,6 +130,11 @@ const UNREACHABLE = "Failed to connect to Proxmox";
 function savingFailed(message: string): string {
   return `Saving ${OWN} failed: ${message}`;
 }
+// The toast for a refusal that had an override, once its dialog is gone: what
+// became of the edit, and what to do, with none of the server's words — they
+// end in "Retry with force=true to proceed anyway", which cannot be acted on
+// from a toast.
+const SAVING_REFUSED = `Saving ${OWN} was refused, and nothing was changed, because it could cut Nexara off from the cluster. To go ahead anyway, do it again and confirm the override that is then offered.`;
 
 const capabilities: AccessCapabilities = {
   loading: false,
@@ -856,7 +866,7 @@ describe("a save that settles after its edit dialog is gone", () => {
     },
   );
 
-  it("toasts a refusal that comes after the dialog was dismissed, and opens no override", async () => {
+  it("toasts a refusal that comes after the dialog was dismissed as a refusal, saying what to do and not quoting the server", async () => {
     const user = userEvent.setup();
     const held = deferred<unknown>();
     mockedPut.mockReturnValueOnce(held.promise);
@@ -871,7 +881,7 @@ describe("a save that settles after its edit dialog is gone", () => {
 
     held.reject(refused());
     await waitFor(() => {
-      expect(mockedToastError).toHaveBeenCalledWith(savingFailed(REFUSAL));
+      expect(mockedToastError).toHaveBeenCalledWith(SAVING_REFUSED);
     });
     await flush();
 
@@ -880,6 +890,37 @@ describe("a save that settles after its edit dialog is gone", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     // Nothing forced it: there was no one to ask.
     expect(mockedPut.mock.calls).toEqual([[OWN_URL, DISABLE]]);
+  });
+
+  // The live dialog treats a 409 as a refusal to override only for an edit that
+  // was not forced: a forced one is past it, and its failure is the form's, in
+  // the server's words. A toast for it follows the same rule.
+  it("toasts a 409 to a forced edit whose page was left in the server's words, as the failure it is", async () => {
+    const user = userEvent.setup();
+    const forced = deferred<unknown>();
+    mockedPut
+      .mockRejectedValueOnce(refused())
+      .mockReturnValueOnce(forced.promise);
+    renderSectionOnAppClient();
+
+    await saveDisabled(user);
+    const confirm = await typedOverride(user, EDIT_TITLE);
+    await user.click(
+      within(confirm).getByRole("button", { name: "Save Anyway" }),
+    );
+    expect(
+      await within(confirm).findByRole("button", { name: "Working..." }),
+    ).toBeDisabled();
+    cleanup();
+
+    forced.reject(refused());
+    await waitFor(() => {
+      expect(mockedToastError).toHaveBeenCalledWith(savingFailed(REFUSAL));
+    });
+    await flush();
+
+    expect(mockedToastError).toHaveBeenCalledTimes(1);
+    expect(mockedPut).toHaveBeenCalledTimes(2);
   });
 
   it("toasts the failure of a forced edit whose page was left", async () => {
@@ -999,6 +1040,119 @@ describe("a save that settles after its edit dialog is gone", () => {
     expectNoOverride();
     expect(mockedPut).toHaveBeenCalledTimes(1);
   });
+});
+
+// A save outlives the dialog, and the session around it can end too: the
+// protected outlet is keyed by user, so a sign-out, an expiry or someone else
+// signing in takes the page away. A toast for what that user was doing would
+// then carry their account names into the next user's Toaster, so a save sent
+// in a session that has since ended reports nowhere
+// (hooks/useSaveOutcome.ts). The same-session cases above are the controls.
+describe("a save that settles after its session ended", () => {
+  const DENIED = "Proxmox API permission denied";
+
+  beforeEach(() => {
+    signIn();
+  });
+
+  afterEach(() => {
+    signOutForGood();
+  });
+
+  const GONE: [name: string, leave: (user: UserEvent) => Promise<void>][] = [
+    [
+      "the page was left",
+      () => {
+        cleanup();
+        return Promise.resolve();
+      },
+    ],
+    [
+      "the dialog was dismissed",
+      async (user) => {
+        await user.keyboard("{Escape}");
+      },
+    ],
+  ];
+
+  it.each(GONE)(
+    "control: toasts the failure once, in the same session, when %s",
+    async (_, leave) => {
+      const user = userEvent.setup();
+      const held = deferred<unknown>();
+      mockedPut.mockReturnValueOnce(held.promise);
+      renderSectionOnAppClient();
+
+      const edit = await saveDisabled(user);
+      await within(edit).findByRole("button", { name: "Saving..." });
+      await leave(user);
+      held.reject(
+        new ApiClientError(403, { error: "forbidden", message: DENIED }),
+      );
+      await waitFor(() => {
+        expect(mockedToastError).toHaveBeenCalledWith(savingFailed(DENIED));
+      });
+      await flush();
+
+      expect(mockedToastError).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  const AFTER = GONE.flatMap(([gone, leave]) =>
+    SESSION_ENDINGS.map(
+      ([ending, end]) =>
+        [`${ending}, when ${gone}`, leave, end] as [
+          name: string,
+          leave: (user: UserEvent) => Promise<void>,
+          end: () => void,
+        ],
+    ),
+  );
+
+  it.each(AFTER)(
+    "toasts nothing for a failure that comes after %s",
+    async (_, leave, end) => {
+      const user = userEvent.setup();
+      const held = deferred<unknown>();
+      mockedPut.mockReturnValueOnce(held.promise);
+      renderSectionOnAppClient();
+
+      const edit = await saveDisabled(user);
+      await within(edit).findByRole("button", { name: "Saving..." });
+      await leave(user);
+      end();
+      held.reject(
+        new ApiClientError(403, { error: "forbidden", message: DENIED }),
+      );
+      await flush();
+      await flush();
+
+      expect(mockedToastError).not.toHaveBeenCalled();
+      expect(mockedPut).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(SESSION_ENDINGS)(
+    "shows nothing in the form for a failure that comes after %s, with the dialog still there",
+    async (_, end) => {
+      const user = userEvent.setup();
+      const held = deferred<unknown>();
+      mockedPut.mockReturnValueOnce(held.promise);
+      renderSectionOnAppClient();
+
+      const edit = await saveDisabled(user);
+      await within(edit).findByRole("button", { name: "Saving..." });
+      end();
+      held.reject(
+        new ApiClientError(403, { error: "forbidden", message: DENIED }),
+      );
+      await flush();
+      await flush();
+
+      expect(within(edit).queryByText(DENIED)).toBeNull();
+      expect(mockedToastError).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("an edit sends only what the operator touched", () => {

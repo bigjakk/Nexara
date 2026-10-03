@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { AdminNav } from "../components/AdminNav";
 import { ConfirmRequiredWarning } from "@/components/ConfirmRequiredWarning";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   confirmRequiredFromError,
   type ConfirmRequired,
@@ -282,6 +283,14 @@ export function OIDCPage() {
   // operator has switched configs cannot leave its prompt on a different one.
   const saveTarget = isNew ? null : editingId;
 
+  // Both hooks opt out of the global error toast, because the open form shows
+  // its failure itself; the save settles through its promise, so that one that
+  // settles after the form has gone is toasted instead of lost (see
+  // useSaveOutcome). Cancel does not wait for a save, and the page opens one
+  // form after another, so a form is told apart by what it is: the new one, or
+  // the id of the config being edited (null when there is none).
+  const settle = useSaveOutcome(isNew ? "new" : editingId);
+
   const save = (acknowledgeInsecureRedirect: boolean) => {
     const data: OIDCConfigRequest = {
       ...form,
@@ -293,6 +302,10 @@ export function OIDCPage() {
         : {}),
     };
     const target = saveTarget;
+    // What a failure nobody is looking at names: the config as the operator
+    // knows it, which is the stored name when an edit renames it.
+    const stored = isNew ? undefined : activeConfig?.name;
+    const named = `"${stored ?? data.name}"`;
 
     setSaveError(null);
     if (!acknowledgeInsecureRedirect) {
@@ -317,8 +330,11 @@ export function OIDCPage() {
       );
     };
 
+    // Not once the form has been left: either success would close, and clear
+    // the prompt of, whichever form has been opened in its place.
     if (isNew) {
-      createConfig.mutate(data, {
+      settle(createConfig.mutateAsync(data), {
+        action: `Creating the OIDC configuration ${named}`,
         onSuccess: () => {
           setIsNew(false);
           setRedirectWarning(null);
@@ -326,16 +342,14 @@ export function OIDCPage() {
         onError,
       });
     } else if (editingId) {
-      updateConfig.mutate(
-        { ...data, id: editingId },
-        {
-          onSuccess: () => {
-            setEditingId(null);
-            setRedirectWarning(null);
-          },
-          onError,
+      settle(updateConfig.mutateAsync({ ...data, id: editingId }), {
+        action: `Saving the OIDC configuration ${named}`,
+        onSuccess: () => {
+          setEditingId(null);
+          setRedirectWarning(null);
         },
-      );
+        onError,
+      });
     }
   };
 

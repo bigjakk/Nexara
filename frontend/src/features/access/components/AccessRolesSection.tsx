@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Lock, Plus, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { ApiClientError } from "@/lib/api-client";
 import { unaddressableHint } from "@/lib/api-path";
 
@@ -48,6 +49,28 @@ import {
 interface Props {
   clusterId: string;
   capabilities: AccessCapabilities;
+}
+
+/** The role editor: a draft of a new role, or of an existing one. */
+interface RoleEditor {
+  roleid: string;
+  privs: string[];
+  isNew: boolean;
+  /** Which opening this editor is: see `openEditor`. The edits made in it keep it. */
+  openingId: number;
+}
+
+/**
+ * Whether `open` is the editor that opening `next` is for: the Create Role
+ * editor for Create Role, the editor of the same role for an Edit. A Create Role
+ * editor is never a role's, whatever id has been typed into it.
+ */
+function isEditorFor(
+  open: RoleEditor | null,
+  next: Pick<RoleEditor, "roleid" | "isNew">,
+): boolean {
+  if (open === null || open.isNew !== next.isNew) return false;
+  return next.isNew || open.roleid === next.roleid;
 }
 
 /**
@@ -88,40 +111,76 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
   const deleteRole = useDeleteAccessRole(clusterId);
 
   const catalogue = usePrivilegeCatalogue(rolesQuery.data);
-  const [editing, setEditing] = useState<{
-    roleid: string;
-    privs: string[];
-    isNew: boolean;
-  } | null>(null);
+  const [editing, setEditing] = useState<RoleEditor | null>(null);
+  // The openings so far. Every editor that is opened takes the next one, and the
+  // save of an editor is held to its number (see `settle`).
+  const openings = useRef(0);
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const manageable = canManage("access") && capabilities.canModifyRoles;
 
+  // Both hooks opt out of the global error toast, because the open editor shows
+  // its failure itself; the save settles through its promise, so that one that
+  // settles after the editor has gone is toasted instead of lost (see
+  // useSaveOutcome). This section opens one editor after another, and `error`
+  // lives here, not in the editor, so a failure let through after its editor
+  // was closed would show in the next editor opened — a role that never failed.
+  // An editor is therefore told apart by its OPENING: each editor that is opened
+  // takes the next number, which the edits made in it keep, and a save is held to
+  // the number it went out under. One editor can take the place of another with
+  // nothing closed between them: the editor is not held while the request is
+  // out, so Tab walks out of it to the Edit buttons and Create Role behind the
+  // modal, which a pointer cannot reach, and Enter on one of them sets another
+  // editor straight over this one.
+  //
+  // Opening the editor that is already open is not an opening, though (see
+  // `openEditor`): Enter on the Edit button of the role being edited, or on
+  // Create Role over a Create Role editor, leaves that editor as it is, draft and
+  // all. A save that is out is then the live editor's own, so a failure shows
+  // there and a success closes it. A second editor in its place, seeded from the
+  // list as it was while that save was out, would still hold the old privileges
+  // once the save had gone through, and saving it would write them back. (While
+  // that holds, the role the editor is for, or "new", tells editors apart just as
+  // well as the number does; the number does not depend on it holding.)
+  const settle = useSaveOutcome(editing === null ? null : editing.openingId);
+
+  /**
+   * Opens the editor `next` describes, as a new opening — unless that is the
+   * editor already open, which stays as it is.
+   */
+  const openEditor = (next: Omit<RoleEditor, "openingId">) => {
+    // Taken here and not in the updater, which React may run twice. A number
+    // that goes unused, when the editor stays, costs nothing.
+    const openingId = ++openings.current;
+    setEditing((open) =>
+      isEditorFor(open, next) ? open : { ...next, openingId },
+    );
+  };
+
   const handleSave = () => {
     if (!editing) return;
     setError("");
     const privs = editing.privs.join(",");
-    const onError = (err: unknown) => {
-      setError(
-        err instanceof ApiClientError ? err.message : "Failed to save role",
-      );
-    };
-    const onSuccess = () => {
-      setEditing(null);
-    };
-
-    if (editing.isNew) {
-      createRole.mutate(
-        { roleid: editing.roleid.trim(), privs },
-        { onSuccess, onError },
-      );
-    } else {
-      updateRole.mutate(
-        { roleid: editing.roleid, privs },
-        { onSuccess, onError },
-      );
-    }
+    const roleid = editing.isNew ? editing.roleid.trim() : editing.roleid;
+    settle(
+      editing.isNew
+        ? createRole.mutateAsync({ roleid, privs })
+        : updateRole.mutateAsync({ roleid, privs }),
+      {
+        action: `${editing.isNew ? "Creating" : "Saving"} role ${roleid}`,
+        // Not once the editor has been dismissed: this would close whichever
+        // one has been opened in its place.
+        onSuccess: () => {
+          setEditing(null);
+        },
+        onError: (err) => {
+          setError(
+            err instanceof ApiClientError ? err.message : "Failed to save role",
+          );
+        },
+      },
+    );
   };
 
   return (
@@ -142,7 +201,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
           <Button
             size="sm"
             onClick={() => {
-              setEditing({ roleid: "", privs: [], isNew: true });
+              openEditor({ roleid: "", privs: [], isNew: true });
             }}
           >
             <Plus className="mr-2 h-4 w-4" />
@@ -209,7 +268,7 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                               variant="ghost"
                               size="sm"
                               onClick={() => {
-                                setEditing({
+                                openEditor({
                                   roleid: role.roleid,
                                   privs: role.privs
                                     ? role.privs.split(",").filter(Boolean)
@@ -372,9 +431,17 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
                 onClick={(e: React.MouseEvent) => {
                   e.preventDefault();
                   if (!deleteTarget) return;
-                  deleteRole.mutate(deleteTarget, {
+                  const target = deleteTarget;
+                  deleteRole.mutate(target, {
+                    // Only this role's confirmation. It is not held while its
+                    // request is out, so Tab walks out of it to the Delete
+                    // buttons behind the modal, which a pointer cannot reach,
+                    // and Enter on another role's opens that one in its place:
+                    // this settling must not close it.
                     onSettled: () => {
-                      setDeleteTarget(null);
+                      setDeleteTarget((open) =>
+                        open === target ? null : open,
+                      );
                     },
                   });
                 }}
