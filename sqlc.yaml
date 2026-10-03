@@ -53,3 +53,11 @@ sql:
             go_struct_tag: 'json:"-"'
           - column: "users.totp_secret"
             go_struct_tag: 'json:"-"'
+          # A session's refresh-token hashes are verifiers: the current one
+          # authenticates a refresh and the previous one still signs the session
+          # out for a couple of minutes. handlers.sessionResponse is the only
+          # shape a session leaves the API in, and it leaves both behind.
+          - column: "sessions.token_hash"
+            go_struct_tag: 'json:"-"'
+          - column: "sessions.previous_token_hash"
+            go_struct_tag: 'json:"-"'

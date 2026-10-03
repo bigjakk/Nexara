@@ -14,24 +14,29 @@ import (
 
 // TestSessionResponseOmitsTokenHash is the assertion this DTO exists for.
 //
-// db.Session carries token_hash — the verifier for a live refresh token. If a
-// future change serialises the model directly, or someone adds the field to
-// sessionResponse "for debugging", every caller is handed the means to
-// impersonate their own sessions, and anything that logs the response body
-// spreads it further. Marshalling and searching the JSON catches that whatever
-// route it arrives by, including an embedded struct.
+// db.Session carries token_hash — the verifier for a live refresh token — and,
+// since migration 000105, previous_token_hash, the verifier for the token it had
+// before its last rotation, which still signs the session out for a couple of
+// minutes. If a future change serialises the model directly, or someone adds
+// either field to sessionResponse "for debugging", every caller is handed the
+// means to impersonate or end their own sessions, and anything that logs the
+// response body spreads it further. Marshalling and searching the JSON catches
+// that whatever route it arrives by, including an embedded struct.
 func TestSessionResponseOmitsTokenHash(t *testing.T) {
 	const secret = "a1b2c3d4e5f6-the-hash-value"
+	const previousSecret = "f6e5d4c3b2a1-the-previous-hash-value"
 
 	session := db.Session{
-		ID:         uuid.New(),
-		UserID:     uuid.New(),
-		TokenHash:  secret,
-		UserAgent:  "Mozilla/5.0",
-		IpAddress:  "192.0.2.10",
-		CreatedAt:  time.Now(),
-		ExpiresAt:  time.Now().Add(time.Hour),
-		LastUsedAt: time.Now(),
+		ID:                uuid.New(),
+		UserID:            uuid.New(),
+		TokenHash:         secret,
+		UserAgent:         "Mozilla/5.0",
+		IpAddress:         "192.0.2.10",
+		CreatedAt:         time.Now(),
+		ExpiresAt:         time.Now().Add(time.Hour),
+		LastUsedAt:        time.Now(),
+		PreviousTokenHash: pgtype.Text{String: previousSecret, Valid: true},
+		RotatedAt:         pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	}
 
 	encoded, err := json.Marshal(toSessionResponse(session, uuid.Nil))
@@ -42,8 +47,46 @@ func TestSessionResponseOmitsTokenHash(t *testing.T) {
 	if strings.Contains(string(encoded), secret) {
 		t.Errorf("session response leaks token_hash: %s", encoded)
 	}
+	if strings.Contains(string(encoded), previousSecret) {
+		t.Errorf("session response leaks previous_token_hash: %s", encoded)
+	}
 	if strings.Contains(strings.ToLower(string(encoded)), "token") {
 		t.Errorf("session response mentions a token field: %s", encoded)
+	}
+}
+
+// TestSessionModelNeverSerialisesItsTokenHashes is the second line of the same
+// defence. sessionResponse leaves both hashes behind by construction, but the
+// model they live in is what a stray c.JSON(session) — or a struct that embeds
+// db.Session — would serialise, and sqlc.yaml tags both columns json:"-" so that
+// it cannot. Removing either override regenerates the model with a visible tag,
+// and this fails.
+//
+// The control is a field of the same struct that DOES come out, so the test
+// cannot pass by marshalling to nothing.
+func TestSessionModelNeverSerialisesItsTokenHashes(t *testing.T) {
+	const secret = "a1b2c3d4e5f6-the-hash-value"
+	const previousSecret = "f6e5d4c3b2a1-the-previous-hash-value"
+
+	encoded, err := json.Marshal(db.Session{
+		ID:                uuid.New(),
+		UserID:            uuid.New(),
+		TokenHash:         secret,
+		UserAgent:         "Mozilla/5.0",
+		PreviousTokenHash: pgtype.Text{String: previousSecret, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("marshal session: %v", err)
+	}
+
+	if !strings.Contains(string(encoded), "Mozilla/5.0") {
+		t.Fatalf("control: the model's other fields are not serialised either, so this proves nothing: %s", encoded)
+	}
+	if strings.Contains(string(encoded), secret) {
+		t.Errorf("db.Session serialises token_hash: %s", encoded)
+	}
+	if strings.Contains(string(encoded), previousSecret) {
+		t.Errorf("db.Session serialises previous_token_hash: %s", encoded)
 	}
 }
 

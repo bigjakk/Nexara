@@ -404,7 +404,7 @@ var endpointMeta = map[string]APIEndpoint{
 	// ── Legacy routes (router.go; no registry declaration exists) ──────
 	"GET /api/v1/api-docs":           {Description: "Get this API reference", Group: "API Documentation"},
 	"GET /api/v1/auth/oidc/callback": {Description: "OIDC callback redirect target", Group: "Authentication"},
-	"POST /api/v1/auth/logout":       {Description: "End the current session", Group: "Authentication"},
+	"POST /api/v1/auth/logout":       {Description: "End the current session, including one whose refresh token a refresh has just replaced; 503 if the sign-out could not be confirmed (the session may still be active; the cookie is cleared regardless)", Group: "Authentication"},
 	"POST /api/v1/auth/register":     {Description: "Register a new user account", Group: "Authentication"},
 	"GET /api/v1/settings":           {Description: "Get application settings (scope: global or user); global keys owned by a dedicated endpoint are omitted", Group: "Settings"},
 	"GET /api/v1/settings/:key":      {Description: "Get a single setting (scope: global or user); global keys owned by a dedicated endpoint are rejected", Group: "Settings"},

@@ -710,6 +710,20 @@ type Querier interface {
 	// two identical requests could return rows in different orders.
 	GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]GetPBSDatastoreMetricsHistoryRow, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
+	// Reads the stored password hash the way a caller must when it wants to know
+	// whether a transaction that may still be running has changed it: a LOCKING
+	// read. A plain SELECT sees the newest COMMITTED version, and a transaction whose
+	// COMMIT the server has received but not finished — the commit record not yet
+	// flushed, or the wait for a synchronous replica not over — has not committed
+	// yet, so a plain read in that window finds the old hash and calls a change that
+	// is about to land one that did not. FOR SHARE conflicts with the row lock an
+	// UPDATE takes, so it waits for that transaction to end and, under READ
+	// COMMITTED, then returns the newest committed version: the new hash if the
+	// transaction committed, the old one if it rolled back. The caller bounds the
+	// wait with its context; a wait that outlasts it is an answer of "could not
+	// tell". Used by ChangePassword, and only to settle a COMMIT whose answer was
+	// lost.
+	GetPasswordHashForSettle(ctx context.Context, id uuid.UUID) (string, error)
 	GetPermission(ctx context.Context, id uuid.UUID) (Permission, error)
 	GetPermissionByActionResource(ctx context.Context, arg GetPermissionByActionResourceParams) (Permission, error)
 	GetReportRun(ctx context.Context, id uuid.UUID) (ReportRun, error)
@@ -727,6 +741,31 @@ type Querier interface {
 	GetSSHKnownHost(ctx context.Context, arg GetSSHKnownHostParams) (SshKnownHost, error)
 	GetScheduledTask(ctx context.Context, id uuid.UUID) (ScheduledTask, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
+	// NEVER AUTHENTICATES. Finds the live session whose refresh token was rotated
+	// away from the given hash within the last window_seconds. It serves two callers
+	// and both only DECIDE something: Logout, so that a sign-out sent with a cookie
+	// one rotation behind (it left the browser before a refresh's Set-Cookie landed)
+	// still reaches the session it was meant for; and Refresh, to tell a refusal that
+	// lost a race to a concurrent refresh from any other. Neither may use it to
+	// decide which session is "current" or to issue anything: GetSessionByTokenHash
+	// is the only lookup that may do either.
+	//
+	// "Live" and the window are part of the predicate, here, so that no caller can
+	// forget either: a revoked session or an expired one matches nothing, so a caller
+	// gets a live session or no row, and a rotated-away token cannot be matched for
+	// longer than the window the caller names. A NULL rotated_at compares as unknown
+	// and never matches; the same goes for a window of zero or less, so both fail
+	// closed.
+	//
+	// The window is measured from rotated_at, which RotateSessionToken stamps with the
+	// database clock as the UPDATE runs, to now() here, which for this single
+	// autocommit statement is the moment it started. Both are the database's clock,
+	// so the application's cannot skew the comparison.
+	GetSessionByPreviousTokenHash(ctx context.Context, arg GetSessionByPreviousTokenHashParams) (Session, error)
+	// The token-issuing lookup: refresh, and the session list's is_current. It
+	// matches the session's CURRENT hash only. A token that has been rotated away is
+	// in previous_token_hash and must never authenticate a refresh, so nothing here
+	// may be loosened to read that column.
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
 	// ORDER BY makes the LIMIT 1 deterministic. 000075 deduped the shared-scope
 	// rows that a plain UNIQUE let accumulate and now prevents new ones, so a
@@ -1676,6 +1715,57 @@ type Querier interface {
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error
 	RevokeUserRole(ctx context.Context, arg RevokeUserRoleParams) error
+	// Rotates a session's refresh token, and reports how many rows it changed. It is
+	// the only statement that rotates one, and 0 rows means REFUSED: the session is
+	// no longer what the refresh validated, so no token may be issued for it.
+	// auth.RotateRefreshToken turns that into an error and is its only caller.
+	//
+	// It is conditional because the validation before it (GetSessionByTokenHash) is
+	// a separate statement. Unconditional, a refresh that validated a moment before
+	// a sign-out revoked the session still wrote a new hash and went on to mint a
+	// 15-minute access token and a refresh cookie for a session that had just been
+	// ended; and two refreshes presenting the same cookie both succeeded, each
+	// handing back a different new one, of which the browser kept whichever landed
+	// last. The conditions:
+	//   id             the session being rotated
+	//   old_token_hash the hash this refresh presented. Only the session's CURRENT
+	//                  hash rotates; one already rotated away by a concurrent
+	//                  refresh matches nothing, so exactly one of two racing
+	//                  refreshes wins.
+	//   is_revoked     a revoke (Logout, LogoutAll, DELETE /auth/sessions/:id, a
+	//                  password change, an admin deactivation) beats a refresh that
+	//                  has not yet rotated.
+	//   expires_at     the session may have expired since it was validated.
+	//
+	// What each way of meeting a revoke or a second refresh comes to. Postgres runs
+	// this at READ COMMITTED, the default, which nothing here changes:
+	//   * The other change is already committed when this statement reads the row, or
+	//     commits before the row is locked, including while this statement waits on
+	//     it: the WHERE re-check against the newest row version catches it. 0 rows,
+	//     refused. This is also what makes exactly one of two refreshes win: the
+	//     second waits for the first and finds its old hash gone.
+	//   * This statement locks the row first: a revoke arriving meanwhile waits for
+	//     this transaction to commit and then sets is_revoked on top of the rotated
+	//     row. The refresh won, and the session still ends revoked.
+	// internal/db/session_rotation_db_test.go drives these against Postgres.
+	//
+	// previous_token_hash = token_hash reads the OLD row: every expression in an
+	// UPDATE's SET list sees the row as it was before the statement, which is why
+	// the two columns swap rather than both ending up as the new hash.
+	//
+	// rotated_at is what bounds GetSessionByPreviousTokenHash's window, so it is
+	// stamped with clock_timestamp(), the database clock as this UPDATE runs, and not
+	// with now(), which is the start of the TRANSACTION. Refresh runs this a few
+	// statements after it begins, and a transaction that had waited for a connection
+	// or a lock would otherwise date the rotation by that wait and eat into windows
+	// that are only seconds long. It is still a few milliseconds before the commit,
+	// which is as close as a stamp written inside the transaction can be.
+	//
+	// user_role is written on every rotation, and that is load-bearing: it is how a
+	// session issued before 000055 recorded the role (until then its role is empty),
+	// and Refresh's role-rotation guard accepts an empty role only until this fills
+	// it in.
+	RotateSessionToken(ctx context.Context, arg RotateSessionTokenParams) (int64, error)
 	SetDRSEnabled(ctx context.Context, arg SetDRSEnabledParams) error
 	// SetGuestToolsStage moves the staging state machine and records what the
 	// guest's CD-ROM looked like before we borrowed it.
@@ -1819,7 +1909,15 @@ type Querier interface {
 	UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigParams) (OidcConfig, error)
 	UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserProfileParams) (User, error)
 	UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error)
-	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
+	// A compare-and-swap on the password hash the caller verified, not a plain
+	// overwrite: it sets the new hash only on a row whose current hash is
+	// expected_hash, and says how many rows it changed. Two requests that proved the
+	// same old password cannot both succeed (the later one matches nothing once the
+	// earlier has committed: under READ COMMITTED it waits for the row lock, then
+	// re-evaluates the WHERE against the new row), and an account deleted since the
+	// check matches nothing either. The caller treats 0 rows as "nothing was
+	// changed" and rolls back.
+	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) (int64, error)
 	UpdateReportRunCompleted(ctx context.Context, arg UpdateReportRunCompletedParams) error
 	UpdateReportRunFailed(ctx context.Context, arg UpdateReportRunFailedParams) error
 	UpdateReportRunStarted(ctx context.Context, id uuid.UUID) error
@@ -1843,7 +1941,6 @@ type Querier interface {
 	// check is ever dropped, the write still cannot happen AND the caller is told,
 	// rather than the endpoint reporting success for a row it never touched.
 	UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) (int64, error)
-	UpdateSessionTokenHash(ctx context.Context, arg UpdateSessionTokenHashParams) error
 	UpdateTaskHistory(ctx context.Context, arg UpdateTaskHistoryParams) error
 	// UpdateTaskLastRun records how a run left the scheduler: 'dispatched' with the
 	// UPID in last_upid, or 'failed' with the reason in last_error and no UPID.

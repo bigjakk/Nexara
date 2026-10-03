@@ -55,12 +55,93 @@ https://nexara.example.com/api/v1
    Body: { "refresh_token": "..." }    # or pass the token explicitly
    Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...] }
    ```
-   A missing or stale refresh token returns `401` and clears the cookie.
+   A missing, unknown, revoked or expired refresh token returns `401` and clears
+   the cookie, and so does a cookie token longer than 1024 characters, which is
+   refused without being looked up. The `refresh_token` body field is limited to
+   the same length; a longer one is a `400`.
+
+   Each refresh rotates the token, so a refresh token can be exchanged once. When
+   a refresh and a logout (or any other revoke) of the same session race, the one
+   that gets to the session first decides it: a refresh that loses issues no
+   access token and no new refresh token and returns `401`, and one that wins
+   succeeds and is then ended by the logout, whose revoke lands on top. Of two
+   refreshes that present the same token one succeeds; the other, if it arrives
+   within seconds of the first, returns `409` with the error code
+   `refresh_superseded` and leaves the cookie alone, because the browser may
+   already hold the winner's newer one. Retry once with the newest cookie: the
+   web app retries once on this answer, and the browser sends whatever refresh
+   cookie its jar holds by then, which is the winning refresh's; a client that
+   manages cookies itself takes it from that response's `Set-Cookie` header. (A
+   refresh token is only ever delivered in `Set-Cookie`; the response body's
+   `refresh_token` is always empty.) A replaced token that arrives later than that
+   returns `401`. If the database cannot be reached, is shutting down or too busy,
+   or does not answer within 15 seconds, the refresh returns `503` and changes
+   nothing: the cookie and the session are left as they were. The one exception is
+   the commit that ends the refresh: when it fails without the database's answer,
+   whether it landed is unknown, and the session may have been rotated although the
+   client never received the new cookie. The old cookie then gets the `409` above
+   for a few seconds and a `401` after, and the user signs in again. A database
+   failure of any other kind is a `500`, with the cookie and the session left alone
+   in the same way; it is a defect and not worth retrying. That includes the read
+   of the user's permissions, which a refresh makes before it changes anything: it
+   never signs a user in with an empty permission list because that read failed.
 
 5. **Logout**:
    ```
    POST /api/v1/auth/logout
    ```
+   The response is `200` whether or not a session was found, and the cookie is
+   cleared either way. A logout that carries the token a refresh has just
+   replaced — it was sent while that refresh was still in flight — still ends the
+   session, for a short grace period after the refresh (the
+   `PreviousTokenRevocationWindow` constant in `internal/auth/session.go`). That
+   grace applies to logout only; a replaced token can never be exchanged for a
+   new one. A token longer than 1024 characters is treated as no token.
+
+   If the session cannot be looked up or revoked — the database cannot be
+   reached, is shutting down or too busy, or does not answer within 15 seconds —
+   the response is `503`: **the sign-out could not be confirmed and the session may
+   still be active.** (A failure of any other kind is a `500`, and the session may
+   still be active then too.) The cookie is cleared in that response anyway, so a
+   browser that simply repeats the request sends no token and is told `200` for
+   nothing. A client that sent its refresh token in the request body can retry
+   with it; a browser user can make sure by signing in again and using *Sign Out
+   All Devices* (`POST /auth/logout-all`). That request is held to the same 15
+   seconds: if its revoke does not finish in time it returns `503` with the
+   sessions possibly still active and the caller still signed in, so it can simply
+   be repeated. `POST /auth/change-password` changes the password and revokes
+   every session of the account, this one included, in one transaction, so both
+   happen or neither does. The change is conditional on the password that was
+   proved still being the one in effect: a request that races another change of
+   the same account, or whose account is removed in the meantime, changes nothing
+   and returns `409`. The database gets 15 seconds for the read of the account and
+   the same 15 seconds for the transaction; the audit entry and the cleanup that
+   follow, and the read that settles a lost commit, have up to 5 seconds each. A
+   `503` or `500` whose message says the password was **not** changed means just
+   that, and retrying is safe. When the answer to the commit is lost, the server
+   reads the account back to find out whether it landed, waiting up to 5 seconds
+   for a transaction the server is still finishing, and answers accordingly. Only
+   when that read fails, or when a transaction the server is still holding
+   outlasts the wait (a COMMIT that never reached the server, on a connection that
+   went half-open and that the server has not yet noticed is dead), does the
+   response say the change could not be confirmed, which means the new password
+   may be in effect with every session signed out: sign in with the new password,
+   and if it is refused the old one still stands. *Sign Out All Devices* makes
+   sure either way.
+
+   **How long to wait.** The 15 seconds is the bound on the database work that
+   decides the answer, not on the request. What only records or enforces the
+   decision afterwards — the audit entry and its live event, deleting the
+   session's cached rows, and, for a refused refresh, the rollback of its
+   transaction, the check for a race, the revoke of a refused account's session
+   and the audit entry of a changed role — has a bound of up to 5 seconds each, so
+   a client should allow up to 25 seconds for a sign-out or a sign-out everywhere,
+   up to 30 seconds for a refresh (a refused one is rolled back, revoked and
+   audited in turn), and up to 45 seconds for a password change, which has two
+   15 second phases (the read of the account, then the transaction) and, when the
+   answer to its commit is lost, one more read of up to 5 seconds to find out
+   whether it landed. A timeout sized from "15 seconds" alone gives up on requests
+   the server is still completing.
 
 ### TOTP Challenge
 

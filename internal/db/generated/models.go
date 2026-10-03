@@ -928,19 +928,21 @@ type ScheduledTask struct {
 }
 
 type Session struct {
-	ID         uuid.UUID   `json:"id"`
-	UserID     uuid.UUID   `json:"user_id"`
-	TokenHash  string      `json:"token_hash"`
-	UserAgent  string      `json:"user_agent"`
-	IpAddress  string      `json:"ip_address"`
-	IsRevoked  bool        `json:"is_revoked"`
-	CreatedAt  time.Time   `json:"created_at"`
-	ExpiresAt  time.Time   `json:"expires_at"`
-	LastUsedAt time.Time   `json:"last_used_at"`
-	DeviceName pgtype.Text `json:"device_name"`
-	DeviceType pgtype.Text `json:"device_type"`
-	DeviceID   pgtype.Text `json:"device_id"`
-	UserRole   string      `json:"user_role"`
+	ID                uuid.UUID          `json:"id"`
+	UserID            uuid.UUID          `json:"user_id"`
+	TokenHash         string             `json:"-"`
+	UserAgent         string             `json:"user_agent"`
+	IpAddress         string             `json:"ip_address"`
+	IsRevoked         bool               `json:"is_revoked"`
+	CreatedAt         time.Time          `json:"created_at"`
+	ExpiresAt         time.Time          `json:"expires_at"`
+	LastUsedAt        time.Time          `json:"last_used_at"`
+	DeviceName        pgtype.Text        `json:"device_name"`
+	DeviceType        pgtype.Text        `json:"device_type"`
+	DeviceID          pgtype.Text        `json:"device_id"`
+	UserRole          string             `json:"user_role"`
+	PreviousTokenHash pgtype.Text        `json:"-"`
+	RotatedAt         pgtype.Timestamptz `json:"rotated_at"`
 }
 
 type Setting struct {

@@ -107,11 +107,25 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 		Path:   authScope + "/refresh",
 		Description: "Exchange a refresh token for a new access token and rotate the refresh token. The " +
 			"HttpOnly cookie is the delivery path browsers use; the body field is retained for API " +
-			"clients. A role change since the session was created forces a fresh login.",
+			"clients. A role change since the session was created forces a fresh login. A refresh " +
+			"token is single-use: of two refreshes presenting the same token one wins, and the other " +
+			"answers 409 with the error code refresh_superseded and leaves the cookie alone — retry " +
+			"once with the newest cookie, the one the winning refresh set, which a browser's cookie jar " +
+			"already holds or is about to (a refresh token is only ever delivered in Set-Cookie, never " +
+			"in a response body). A token that is unknown, older than that, revoked or expired answers " +
+			"401 and the cookie is cleared, and so does a cookie token longer than 1024 characters, " +
+			"which is refused without being looked up (the body field is limited to the same length, " +
+			"and a longer one is a 400); a refresh the database could not complete answers 503 and " +
+			"changes nothing — except at its last step, the commit, whose outcome is then unconfirmed: " +
+			"the session may have been rotated although the client never received the new cookie. Allow " +
+			"up to 30 seconds in all: the database work that decides the answer gets 15 seconds, and each " +
+			"step that follows a refusal (the rollback of the refresh's transaction, the race check, the " +
+			"revoke of a refused account's session, the audit entry of a changed role) at up to 5 seconds " +
+			"each.",
 		Group:       "Authentication",
 		Permissions: Permissions{Public: "exchanges the refresh cookie for a new access token"},
 		Parameters: apischema.Properties{
-			"refresh_token": optString(1024, "<token>",
+			"refresh_token": optString(handlers.MaxRefreshTokenLength, "<token>",
 				"Refresh token, for a client that does not carry cookies. Omitted, the HttpOnly cookie is used."),
 		},
 		Handler: h.Refresh,
@@ -161,7 +175,10 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 		Method: fiber.MethodPost,
 		Path:   authScope + "/logout-all",
 		Description: "Revoke every session on the caller's own account and clear their refresh cookie — " +
-			"the \"sign out everywhere\" action.",
+			"the \"sign out everywhere\" action. If the database does not answer within 15 seconds it " +
+			"answers 503, the sessions may still be active, and the cookie is left alone so the call can " +
+			"be repeated. Allow up to 25 seconds in all: the audit entry and the cleanup that follow the " +
+			"revoke have up to 5 seconds each.",
 		Group:       "Authentication",
 		Permissions: Permissions{SelfService: "revokes the caller's own sessions"},
 		Parameters:  apischema.Properties{},
@@ -239,8 +256,21 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 		Method: fiber.MethodPost,
 		Path:   authScope + "/change-password",
 		Description: "Change the caller's own password, proving the current one first, and revoke every " +
-			"session on the account so each device signs in again. Refused for an account provisioned " +
-			"from LDAP or OIDC.",
+			"session on the account, the caller's included, so each device signs in again. Refused for an " +
+			"account provisioned from LDAP or OIDC. The change and the revoke are one transaction: both " +
+			"happen or neither does, and the change is conditional on the password that was proved still " +
+			"being the one in effect, so a request that races another change of the account, or whose " +
+			"account is removed meanwhile, changes nothing and answers 409. A 503 or 500 whose message " +
+			"says the password was NOT changed means just that, and retrying is safe. When the answer to " +
+			"the commit is lost the server reads the account back to find out whether it landed, waiting up " +
+			"to 5 seconds for a transaction the server is still finishing; only when that read fails, or a " +
+			"transaction the server is still holding outlasts the wait (a COMMIT that never reached the " +
+			"server, on a connection that went half-open and that the server has not yet noticed is dead), " +
+			"does the response say the change could not be confirmed, which means the new password may be " +
+			"in effect with every session signed out: sign in with the new password, and if it is refused " +
+			"the old one still stands. The database gets 15 seconds for the read of " +
+			"the account and the same 15 seconds for the transaction, and the audit entry, the cleanup and " +
+			"the read that settles a lost commit have up to 5 seconds each: allow up to 45 seconds in all.",
 		Group:       "Authentication",
 		Permissions: Permissions{SelfService: "changes the caller's own password"},
 		Parameters: apischema.Properties{

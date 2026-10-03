@@ -22,8 +22,35 @@ SET email = $2,
 WHERE id = $1
 RETURNING *;
 
--- name: UpdatePassword :exec
-UPDATE users SET password_hash = $2 WHERE id = $1;
+-- name: UpdatePassword :execrows
+-- A compare-and-swap on the password hash the caller verified, not a plain
+-- overwrite: it sets the new hash only on a row whose current hash is
+-- expected_hash, and says how many rows it changed. Two requests that proved the
+-- same old password cannot both succeed (the later one matches nothing once the
+-- earlier has committed: under READ COMMITTED it waits for the row lock, then
+-- re-evaluates the WHERE against the new row), and an account deleted since the
+-- check matches nothing either. The caller treats 0 rows as "nothing was
+-- changed" and rolls back.
+UPDATE users
+SET password_hash = sqlc.arg(password_hash)
+WHERE id = sqlc.arg(id)
+  AND password_hash = sqlc.arg(expected_hash);
+
+-- name: GetPasswordHashForSettle :one
+-- Reads the stored password hash the way a caller must when it wants to know
+-- whether a transaction that may still be running has changed it: a LOCKING
+-- read. A plain SELECT sees the newest COMMITTED version, and a transaction whose
+-- COMMIT the server has received but not finished — the commit record not yet
+-- flushed, or the wait for a synchronous replica not over — has not committed
+-- yet, so a plain read in that window finds the old hash and calls a change that
+-- is about to land one that did not. FOR SHARE conflicts with the row lock an
+-- UPDATE takes, so it waits for that transaction to end and, under READ
+-- COMMITTED, then returns the newest committed version: the new hash if the
+-- transaction committed, the old one if it rolled back. The caller bounds the
+-- wait with its context; a wait that outlasts it is an answer of "could not
+-- tell". Used by ChangePassword, and only to settle a COMMIT whose answer was
+-- lost.
+SELECT password_hash FROM users WHERE id = sqlc.arg(id) FOR SHARE;
 
 -- name: CountUsers :one
 -- Counts every login-capable row in users, including deactivated accounts.

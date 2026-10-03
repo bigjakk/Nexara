@@ -416,8 +416,11 @@ func TestMigration104_DownGivesThePreviousReleaseAStatusItReads(t *testing.T) {
 		t.Errorf("at 103 scheduled_tasks still has last_upid (%d, err %v)", cols, err)
 	}
 
-	if err := m.Migrate(104); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate back up to 104: %v", err)
+	// Back to head, not to 104: the test migrated down from head, and head moves
+	// with every migration, so a hard-coded version here would leave the schema
+	// one or more behind for the next test in the package to trip over.
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate back up to head: %v", err)
 	}
 }
 

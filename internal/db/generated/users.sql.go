@@ -81,6 +81,30 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const getPasswordHashForSettle = `-- name: GetPasswordHashForSettle :one
+SELECT password_hash FROM users WHERE id = $1 FOR SHARE
+`
+
+// Reads the stored password hash the way a caller must when it wants to know
+// whether a transaction that may still be running has changed it: a LOCKING
+// read. A plain SELECT sees the newest COMMITTED version, and a transaction whose
+// COMMIT the server has received but not finished — the commit record not yet
+// flushed, or the wait for a synchronous replica not over — has not committed
+// yet, so a plain read in that window finds the old hash and calls a change that
+// is about to land one that did not. FOR SHARE conflicts with the row lock an
+// UPDATE takes, so it waits for that transaction to end and, under READ
+// COMMITTED, then returns the newest committed version: the new hash if the
+// transaction committed, the old one if it rolled back. The caller bounds the
+// wait with its context; a wait that outlasts it is an answer of "could not
+// tell". Used by ChangePassword, and only to settle a COMMIT whose answer was
+// lost.
+func (q *Queries) GetPasswordHashForSettle(ctx context.Context, id uuid.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getPasswordHashForSettle, id)
+	var password_hash string
+	err := row.Scan(&password_hash)
+	return password_hash, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source FROM users WHERE email = $1
 `
@@ -160,18 +184,33 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const updatePassword = `-- name: UpdatePassword :exec
-UPDATE users SET password_hash = $2 WHERE id = $1
+const updatePassword = `-- name: UpdatePassword :execrows
+UPDATE users
+SET password_hash = $1
+WHERE id = $2
+  AND password_hash = $3
 `
 
 type UpdatePasswordParams struct {
-	ID           uuid.UUID `json:"id"`
 	PasswordHash string    `json:"-"`
+	ID           uuid.UUID `json:"id"`
+	ExpectedHash string    `json:"-"`
 }
 
-func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error {
-	_, err := q.db.Exec(ctx, updatePassword, arg.ID, arg.PasswordHash)
-	return err
+// A compare-and-swap on the password hash the caller verified, not a plain
+// overwrite: it sets the new hash only on a row whose current hash is
+// expected_hash, and says how many rows it changed. Two requests that proved the
+// same old password cannot both succeed (the later one matches nothing once the
+// earlier has committed: under READ COMMITTED it waits for the row lock, then
+// re-evaluates the WHERE against the new row), and an account deleted since the
+// check matches nothing either. The caller treats 0 rows as "nothing was
+// changed" and rolls back.
+func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePassword, arg.PasswordHash, arg.ID, arg.ExpectedHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateUser = `-- name: UpdateUser :one
