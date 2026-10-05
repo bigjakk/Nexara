@@ -1,8 +1,11 @@
 package auth
 
 import (
+	"slices"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestHashPassword_ValidPassword(t *testing.T) {
@@ -85,56 +88,68 @@ func TestRunDummyBcrypt_DoesNotPanic(t *testing.T) {
 	}
 }
 
-// TestRunDummyBcrypt_TimingParity asserts the dummy compare consumes wall
-// time within the same order of magnitude as a real CheckPassword failure.
-// This is the timing-oracle defence — if the dummy returned ~0ms while a
-// real bcrypt failure took ~250ms, an attacker could enumerate accounts.
-//
-// We use a generous bound (real time / 4 ≤ dummy time ≤ real time * 4) to
-// avoid CI flakiness from CPU contention; the goal is to catch a regression
-// where someone accidentally swaps RunDummyBcrypt for a no-op or
-// non-bcrypt operation.
+// TestRunDummyBcrypt_TimingParity is the timing-oracle defence: if the dummy
+// returned in ~0ms while a real bcrypt failure took ~250ms, an attacker could
+// enumerate accounts. A real hash and the dummy must both carry the production
+// work factor (two cost-12 hashes, seconds under -race), and RunDummyBcrypt must
+// actually spend it, which only timing shows. The timing
+// runs at cost 8, alternates the two calls so a busy machine slows both, and
+// allows a factor of 4 either way.
 func TestRunDummyBcrypt_TimingParity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping timing test in -short mode")
 	}
 
+	restoreProd := SetBcryptCostForTesting(0)
+	prodHash, err := HashPassword("Str0ng!Pass")
+	prodDummy := currentDummyHash()
+	restoreProd()
+	if err != nil {
+		t.Fatalf("HashPassword() error: %v", err)
+	}
+	if got, _ := bcrypt.Cost([]byte(prodHash)); got != bcryptCost {
+		t.Errorf("production password hash cost = %d, want %d", got, bcryptCost)
+	}
+	if got, err := bcrypt.Cost(prodDummy); err != nil || got != bcryptCost {
+		t.Errorf("production dummy hash cost = %d (%v), want %d", got, err, bcryptCost)
+	}
+
+	defer SetBcryptCostForTesting(8)()
 	hash, err := HashPassword("Str0ng!Pass")
 	if err != nil {
 		t.Fatalf("HashPassword() error: %v", err)
+	}
+	realCost, _ := bcrypt.Cost([]byte(hash))
+	if got, err := bcrypt.Cost(currentDummyHash()); err != nil || got != realCost {
+		t.Fatalf("dummy hash cost = %d (%v), want the real hash's %d", got, err, realCost)
 	}
 
 	// Warm caches so the first call doesn't skew the median.
 	_ = CheckPassword(hash, "wrong-warmup")
 	RunDummyBcrypt("wrong-warmup")
 
-	const iters = 3
-	realDur := medianDuration(t, iters, func() {
-		_ = CheckPassword(hash, "wrong-password")
-	})
-	dummyDur := medianDuration(t, iters, func() {
-		RunDummyBcrypt("wrong-password")
-	})
-
+	const iters = 5
+	realDurs := make([]time.Duration, iters)
+	dummyDurs := make([]time.Duration, iters)
+	for i := 0; i < iters; i++ {
+		realDurs[i] = timed(func() { _ = CheckPassword(hash, "wrong-password") })
+		dummyDurs[i] = timed(func() { RunDummyBcrypt("wrong-password") })
+	}
+	realDur, dummyDur := median(realDurs), median(dummyDurs)
 	if dummyDur*4 < realDur || dummyDur > realDur*4 {
 		t.Errorf("dummy bcrypt timing %v outside [real/4, real*4] = [%v, %v]",
 			dummyDur, realDur/4, realDur*4)
 	}
 }
 
-func medianDuration(t *testing.T, iters int, f func()) time.Duration {
-	t.Helper()
-	durs := make([]time.Duration, iters)
-	for i := 0; i < iters; i++ {
-		start := time.Now()
-		f()
-		durs[i] = time.Since(start)
-	}
-	// Tiny iters; sort by inserting in place.
-	for i := 1; i < len(durs); i++ {
-		for j := i; j > 0 && durs[j] < durs[j-1]; j-- {
-			durs[j], durs[j-1] = durs[j-1], durs[j]
-		}
-	}
-	return durs[len(durs)/2]
+func timed(f func()) time.Duration {
+	start := time.Now()
+	f()
+	return time.Since(start)
+}
+
+func median(durs []time.Duration) time.Duration {
+	sorted := slices.Clone(durs)
+	slices.Sort(sorted)
+	return sorted[len(sorted)/2]
 }

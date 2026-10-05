@@ -364,12 +364,10 @@ func TestRegister_ItsAuditRowsRunOnAFollowUpDeadline(t *testing.T) {
 		if caller != uuid.Nil {
 			headers["X-Test-Acting-User"] = caller.String()
 		}
-		// Thirty seconds, not ten: a registration hashes its password, which takes four to
-		// five seconds under the race detector, and the property under test is carried by
-		// the stall assertion below — where the stalled insert was cut — not by how long
-		// the whole request took. A site whose audit is not bounded still fails here, by
-		// never answering.
-		resp := a.send(t, http.MethodPost, "/auth/register", registerAdminBody("carol@example.com"), headers, 30*time.Second)
+		// The property under test is carried by the stall assertion below — where the
+		// stalled insert was cut — not by how long the whole request took. A site whose
+		// audit is not bounded still fails here, by never answering.
+		resp := a.send(t, http.MethodPost, "/auth/register", registerAdminBody("carol@example.com"), headers, 10*time.Second)
 		if resp.StatusCode != want {
 			t.Fatalf("status = %d, want %d", resp.StatusCode, want)
 		}

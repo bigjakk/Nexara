@@ -72,10 +72,10 @@ jobs:
 
       - name: Test
         # -timeout 30m overrides Go's 10m per-package default. internal/api
-        # runs ~482s under bare -race on a 12-core box (no -coverprofile here,
-        # unlike `make test`). A 4-vCPU hosted runner at 1.5-2x lands at 12-16
-        # minutes, past the default — and the failure surfaces as a panic that
-        # reads like a hung test rather than a slow suite.
+        # runs ~3 min under bare -race on a 12-core box (no -coverprofile here,
+        # unlike `make test`); a 4-vCPU hosted runner is 1.5-2x that, and a
+        # timeout surfaces as a panic that reads like a hung test rather than a
+        # slow suite, so the headroom stays.
         run: go test -race -count=1 -timeout 30m ./...
         env:
           # A throwaway database: the migration tests round-trip the schema all

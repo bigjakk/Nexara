@@ -572,9 +572,8 @@ func TestChangePassword_LocksTheAccountAfterRepeatedWrongPasswords(t *testing.T)
 			advance(25 * time.Minute)
 			// The lock has ended and the budget is a whole one again. The right password
 			// with a new one that is refused as too weak shows both — it is checked, and
-			// answered 400 — without hashing a password at the production cost, which is
-			// seconds under the race detector. (A change that succeeds is pinned by the
-			// rows of TestChangePassword_ASuccessHandsTheAttemptsBack.)
+			// answered 400. (A change that succeeds is pinned by the rows of
+			// TestChangePassword_ASuccessHandsTheAttemptsBack.)
 			status, body, _ = a.change(t, weakChangeBody)
 			if status != http.StatusBadRequest {
 				t.Fatalf("the right password after the lock ended = %d (%v), want 400: it must be checked again", status, body)
@@ -682,31 +681,24 @@ func TestChangePassword_WhatBecomesOfTheCountOnceThePasswordVerified(t *testing.
 			// find that out, so the store holds the new password and the count is not
 			// cleared: the safe side of not knowing.
 			landedUnseen bool
-			// heavy rows hash a new password at the production cost, which is seconds
-			// under the race detector: the memory store, which the handler treats the same
-			// way, is left to the rows that do not.
-			heavy bool
 		}{
-			{name: "the change commits", before: 3, body: changeBody, status: http.StatusOK, committed: true, heavy: true},
-			{name: "the change commits as the attempt that armed the lock", before: fresh, body: changeBody, status: http.StatusOK, committed: true, heavy: true},
+			{name: "the change commits", before: 3, body: changeBody, status: http.StatusOK, committed: true},
+			{name: "the change commits as the attempt that armed the lock", before: fresh, body: changeBody, status: http.StatusOK, committed: true},
 			{name: "the new password is refused as too weak", before: 2, body: weakChangeBody, status: http.StatusBadRequest},
 			{name: "the new password is refused, as the attempt that armed the lock", before: fresh, body: weakChangeBody, status: http.StatusBadRequest},
-			{name: "the update fails", before: 2, body: changeBody, status: http.StatusServiceUnavailable, heavy: true,
+			{name: "the update fails", before: 2, body: changeBody, status: http.StatusServiceUnavailable,
 				tweak: func(s *raceStore) { s.updatePwErr = errRaceTransient }},
-			{name: "the commit answer is lost and the change did not land", before: 2, body: changeBody, status: http.StatusServiceUnavailable, heavy: true,
+			{name: "the commit answer is lost and the change did not land", before: 2, body: changeBody, status: http.StatusServiceUnavailable,
 				tweak: func(s *raceStore) { s.commitErr = errRaceTransient }},
-			{name: "the commit answer is lost and the change landed", before: 2, body: changeBody, status: http.StatusOK, committed: true, heavy: true,
+			{name: "the commit answer is lost and the change landed", before: 2, body: changeBody, status: http.StatusOK, committed: true,
 				tweak: func(s *raceStore) { s.commitErr = errRaceTransient; s.commitLands = true }},
-			{name: "the commit answer is lost and nobody can tell: it did not land", before: 2, body: changeBody, status: http.StatusServiceUnavailable, heavy: true,
+			{name: "the commit answer is lost and nobody can tell: it did not land", before: 2, body: changeBody, status: http.StatusServiceUnavailable,
 				tweak: func(s *raceStore) { s.commitErr = errRaceTransient; s.afterCommitUserErr = errRaceTransient }},
-			{name: "the commit answer is lost and nobody can tell: it landed", before: 2, body: changeBody, status: http.StatusServiceUnavailable, heavy: true, landedUnseen: true,
+			{name: "the commit answer is lost and nobody can tell: it landed", before: 2, body: changeBody, status: http.StatusServiceUnavailable, landedUnseen: true,
 				tweak: func(s *raceStore) {
 					s.commitErr, s.commitLands, s.afterCommitUserErr = errRaceTransient, true, errRaceTransient
 				}},
 		} {
-			if tc.heavy && kind != "redis" {
-				continue
-			}
 			t.Run(kind+"/"+tc.name, func(t *testing.T) {
 				t.Parallel()
 				a, _ := lockoutAppWith(t, kind, tc.tweak, raceOptions{})
@@ -725,8 +717,7 @@ func TestChangePassword_WhatBecomesOfTheCountOnceThePasswordVerified(t *testing.
 				if got := a.passwordChanged(); got != (tc.committed || tc.landedUnseen) {
 					t.Fatalf("the password changed = %v, want %v", got, tc.committed || tc.landedUnseen)
 				}
-				// A change leaves the new password's hash, at the production cost, behind;
-				// the wrong guesses below compare against the cheap one.
+				// Every row's wrong guesses below compare against the old password's hash.
 				a.store.mu.Lock()
 				a.store.user.PasswordHash = racePasswordHash(t)
 				a.store.mu.Unlock()
@@ -983,8 +974,7 @@ func TestChangePassword_AnAttemptThatCannotBeCountedIsNotChecked(t *testing.T) {
 
 	t.Run("control: with Redis healthy the same request is checked", func(t *testing.T) {
 		// The right password with a new one that is refused as too weak: answered 400,
-		// which only a password that was counted and checked gets, and which hashes
-		// nothing at the production cost.
+		// which only a password that was counted and checked gets.
 		a, _ := lockoutApp(t, "redis", raceOptions{})
 		if status, body, _ := a.change(t, weakChangeBody); status != http.StatusBadRequest {
 			t.Fatalf("status = %d (%v), want 400", status, body)
@@ -1431,6 +1421,9 @@ func slowPasswordHash(t *testing.T) string {
 // comparison is relative — the fastest checked request against the slowest locked
 // one — so that a slow or busy machine moves both.
 func TestChangePassword_ALockedRequestIsRefusedBeforeAnyPasswordIsChecked(t *testing.T) {
+	// The production work factor, not TestMain's cheapest one: hashing the NEW
+	// password ahead of the lock must be as visible here as checking the old one.
+	defer auth.SetBcryptCostForTesting(0)()
 	a := newAuthRaceAppWith(t, func(s *raceStore) { s.user.PasswordHash = slowPasswordHash(t) }, raceOptions{})
 	a.handler.passwordLockout = newMemoryPasswordLockout(time.Now)
 

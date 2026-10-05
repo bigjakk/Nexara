@@ -26,15 +26,14 @@ import (
 // was lost skipped the revoke and left the user's retry refused for using the old
 // password; and a failure said "nothing was confirmed" about a change it had made.
 //
-// Rows that hash the new password are slow at the production cost — seconds under
-// the race detector — so they run in parallel with each other. The handler's bcrypt
-// work sits OUTSIDE any database bound (see ChangePassword), which is what lets
-// these rows set a bound far shorter than a hash takes.
+// Rows that hash the new password run in parallel with each other. The handler's
+// bcrypt work sits OUTSIDE any database bound (see ChangePassword), which is what
+// lets these rows set a bound far shorter than a hash takes at the production cost.
 
 // The account's current password, the one the request will change it to, and a
 // bcrypt hash of the first at the cheapest cost: CheckPassword reads the cost out
 // of the hash, so the comparison is fast, and the only expensive step left in a
-// request is hashing the NEW password, which always costs bcryptCost.
+// request is hashing the NEW password.
 const (
 	racePassword    = "Old-Passw0rd-Example!"
 	raceNewPassword = "New-Passw0rd-Example!"
@@ -602,6 +601,9 @@ func TestChangePassword_TheReadOfTheUserIsBoundedAndNothingFollowsAFailedOne(t *
 // between them: a single bound started before the hash would be spent by the time
 // the transaction began, and every change would end as a 503.
 func TestChangePassword_HashingIsNotChargedToTheDatabaseBound(t *testing.T) {
+	// The production work factor, not TestMain's cheapest one: the hash has to
+	// outlast the 100 ms bound with or without the race detector.
+	defer auth.SetBcryptCostForTesting(0)()
 	a := newAuthRaceAppWith(t, withPasswordHash(t, nil), raceOptions{dbTimeout: 100 * time.Millisecond, followUpTimeout: 5 * time.Second})
 
 	start := time.Now()
@@ -614,7 +616,9 @@ func TestChangePassword_HashingIsNotChargedToTheDatabaseBound(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %v)", resp.StatusCode, decodeObject(t, resp))
 	}
-	if !a.passwordChanged() || !a.store.snapshot().IsRevoked {
+	// Not a.passwordChanged(): checking the new cost-12 hash would cost another
+	// hash's worth of time, and the other change-password tests pin its content.
+	if a.store.snapshotUser().PasswordHash == racePasswordHash(t) || !a.store.snapshot().IsRevoked {
 		t.Error("the change did not go through")
 	}
 }

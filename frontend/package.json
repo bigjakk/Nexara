@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint -c eslint.config.js . --ext .ts,.tsx,.mts,.cts --report-unused-disable-directives --max-warnings 0",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:changed": "vitest run --passWithNoTests --changed"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

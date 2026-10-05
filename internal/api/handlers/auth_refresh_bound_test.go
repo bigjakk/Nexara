@@ -254,8 +254,7 @@ func TestHandlersPutTheRequestContextBackWhenTheyReturn(t *testing.T) {
 		cookie string
 		body   string
 		hdr    func(*authRaceApp) map[string]string
-		// slow marks a row that hashes a new password, which takes seconds at the
-		// production cost under the race detector: it runs in parallel.
+		// slow marks a row that hashes a new password: it runs in parallel.
 		slow bool
 	}{
 		{name: "a refresh that succeeds", path: "/auth/refresh", cookie: raceCurrentToken},

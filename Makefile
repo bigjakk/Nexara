@@ -1,4 +1,4 @@
-.PHONY: build frontend-build test lint generate migrate-up migrate-down docker-build docker-up docker-down clean audit audit-go audit-npm coverage-html
+.PHONY: build frontend-build test test-quick lint generate migrate-up migrate-down docker-build docker-up docker-down clean audit audit-go audit-npm coverage-html
 
 # Go parameters
 GOCMD=go
@@ -34,15 +34,17 @@ frontend-build:
 	rm -rf cmd/nexara/dist
 	cp -r frontend/dist cmd/nexara/dist
 
-## test: Run all tests
-# -timeout 30m, not Go's 10m default. internal/api runs ~482s under bare -race
-# on a 12-core box and 585-645s through THIS target, which adds -coverprofile
-# (coverage costs 20-40%). It builds the whole 535-route registry in-process for
-# a dozen guards, and TestGuard_RegistryHandlersOnlyReadDeclaredParams is ~82%
-# of the package on its own. Against the 10m default that is a 2.4% margin on
-# the coverage path, and the failure reads as a hung test rather than a slow one.
+## test: Run all tests (race detector + coverage) — the gate before committing
+# -timeout 30m, not Go's 10m default. internal/api, the slowest package, runs
+# ~3 min under bare -race on a 12-core box; -coverprofile adds 20-40% and a
+# 4-vCPU CI runner 1.5-2x on top, and a timeout reads as a hung test rather
+# than a slow one.
 test:
 	$(GOTEST) -race -timeout 30m -coverprofile=coverage.out ./...
+
+## test-quick: Dev-loop run (~1.5 min cold, cached packages skipped) — no race detector, no coverage, -short
+test-quick:
+	$(GOTEST) -short ./...
 
 ## lint: Run golangci-lint
 lint:

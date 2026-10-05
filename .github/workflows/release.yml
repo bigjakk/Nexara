@@ -59,9 +59,9 @@ jobs:
           version: v2.14.0
 
       - name: Test
-        # -timeout 30m: see the same override in ci.yml. internal/api under
-        # -race does not fit Go's 10m per-package default on a hosted runner,
-        # and a release is the worst place to discover that.
+        # -timeout 30m: see the same override in ci.yml. A slow hosted runner
+        # must not read as a hung test, and a release is the worst place to
+        # discover that.
         run: go test -race -count=1 -timeout 30m ./...
         env:
           NEXARA_TEST_DB_URL: postgres://nexara:nexara@localhost:5432/nexara_test?sslmode=disable

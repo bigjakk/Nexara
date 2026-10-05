@@ -100,9 +100,12 @@ func TestRegister_WeakPassword(t *testing.T) {
 // pool == nil. The new code returns 500 "registration unavailable" right
 // after password-complexity validation, well before HashPassword. If a
 // future refactor moves HashPassword back above the pool nil check, the
-// wall-clock will jump to >>1× a bcrypt cost-12 call (~80–100 ms on
-// commodity hardware) and the calibrated assertion below will catch it.
+// wall-clock will jump to >>1× a bcrypt cost-10 call (the cost this test
+// pins) and the calibrated assertion below will catch it.
 func TestRegister_StrongPassword_WithNilDB_BypassesHash(t *testing.T) {
+	// A real work factor, not TestMain's cheapest one: the comparison below
+	// needs a bcrypt that clearly outlasts the request.
+	defer auth.SetBcryptCostForTesting(10)()
 	app := newTestApp(t)
 
 	// Calibrate against the runtime — bcrypt cost varies with CPU/CI load,

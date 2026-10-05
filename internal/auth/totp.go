@@ -83,7 +83,7 @@ func (s *TOTPService) GenerateRecoveryCodes(count int) (plainCodes []string, has
 		code := sb.String()
 		plainCodes[i] = code[:4] + "-" + code[4:]
 
-		hash, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(code), costOr(recoveryCodeCost))
 		if err != nil {
 			return nil, nil, fmt.Errorf("hash recovery code: %w", err)
 		}

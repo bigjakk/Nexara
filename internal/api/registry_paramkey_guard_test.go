@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -131,7 +132,27 @@ func splitRuntimeName(full string) (importPath, key string) {
 // funcKey. It does not recurse into subdirectories. Go itself refuses two
 // declarations with the same funcKey in one package, so the index cannot
 // collide.
+//
+// The index is parsed once per directory and shared: the guard resolves each of
+// the registry's ~535 handlers to its package, and parsing the handlers
+// directory again for every one of them was ~600 s of the race-enabled suite.
+// Callers only read the returned map.
 func packageFuncDecls(dir string) (map[string]*ast.FuncDecl, error) {
+	v, _ := packageFuncDeclsCache.LoadOrStore(dir, &packageFuncDeclsEntry{})
+	e := v.(*packageFuncDeclsEntry)
+	e.once.Do(func() { e.decls, e.err = parsePackageFuncDecls(dir) })
+	return e.decls, e.err
+}
+
+type packageFuncDeclsEntry struct {
+	once  sync.Once
+	decls map[string]*ast.FuncDecl
+	err   error
+}
+
+var packageFuncDeclsCache sync.Map // dir → *packageFuncDeclsEntry
+
+func parsePackageFuncDecls(dir string) (map[string]*ast.FuncDecl, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		return nil, fmt.Errorf("glob %s: %w", dir, err)

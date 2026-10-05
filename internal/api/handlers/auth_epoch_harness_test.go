@@ -95,7 +95,7 @@ type epochStore struct {
 	// stalledFor is how long each stalled statement actually waited for its context to
 	// end, by statement name. A test that bounds a follow-up reads it to see where the
 	// stall was cut, which a request's own duration cannot say: a registration's
-	// includes hashing a password, which takes seconds under the race detector.
+	// includes hashing a password.
 	stalledFor map[string][]time.Duration
 
 	// commitErr, when set, is what a transaction's COMMIT answers; commitLands says
