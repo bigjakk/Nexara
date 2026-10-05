@@ -91,12 +91,40 @@ https://nexara.example.com/api/v1
    POST /api/v1/auth/logout
    ```
    The response is `200` whether or not a session was found, and the cookie is
-   cleared either way. A logout that carries the token a refresh has just
-   replaced — it was sent while that refresh was still in flight — still ends the
-   session, for a short grace period after the refresh (the
+   cleared either way (the exceptions follow). A logout that carries the token a
+   refresh has just replaced — it was sent while that refresh was still in flight
+   — still ends the session, for a short grace period after the refresh (the
    `PreviousTokenRevocationWindow` constant in `internal/auth/session.go`). That
    grace applies to logout only; a replaced token can never be exchanged for a
    new one. A token longer than 1024 characters is treated as no token.
+
+   The refresh token is the credential, so a logout needs no access token, and
+   one that has expired is no obstacle. When the request does carry an access
+   token or API key that this server vouches for or signed — valid, expired or
+   not yet valid — the session must be that user's. A session that belongs to
+   someone else is refused with `403`: nothing is revoked, and **the cookie is
+   left alone**. A browser's cookie jar is shared by all of its tabs, so the
+   cookie may be another user's, and it is theirs to keep. A forged, garbled or
+   unsigned token, an API key that does not authenticate, and the short-lived
+   console and WebSocket tokens name no one, and the logout is held to the refresh
+   token alone. Every other answer deletes the cookie, the `503` and `500` below
+   included, with two exceptions: the `403`, and a request whose body
+   `refresh_token` is not its cookie, which leaves the cookie alone because it is
+   not what that request acted on. Neither applies when the request carries more
+   than one refresh cookie (a page on a sibling subdomain can plant a second one):
+   the jar is then ambiguous, and the cookie is deleted as it was before these
+   exceptions.
+
+   `POST /auth/logout-all` revokes every session of the caller, and deletes the
+   refresh cookie in the request only when it is the caller's to delete: when it
+   names one of the caller's own sessions (the current token, or the one a
+   refresh has just replaced) or no live session at all — no cookie, or an
+   unknown, revoked or expired token. A cookie that names another user's live
+   session is left alone, and so is one whose session could not be looked up; the
+   caller's sessions are revoked all the same. With more than one refresh cookie
+   in the request the cookie is deleted without being looked at. The lookup has a
+   deadline of its own, up to 5 seconds, and runs before the revoke begins, so a
+   slow lookup never takes any of the revoke's time.
 
    If the session cannot be looked up or revoked — the database cannot be
    reached, is shutting down or too busy, or does not answer within 15 seconds —
@@ -106,9 +134,11 @@ https://nexara.example.com/api/v1
    browser that simply repeats the request sends no token and is told `200` for
    nothing. A client that sent its refresh token in the request body can retry
    with it; a browser user can make sure by signing in again and using *Sign Out
-   All Devices* (`POST /auth/logout-all`). That request is held to the same 15
-   seconds: if its revoke does not finish in time it returns `503` with the
-   sessions possibly still active and the caller still signed in, so it can simply
+   All Devices* (`POST /auth/logout-all`). Its revoke is held to the same 15
+   seconds, counted from when the revoke begins, which is after the look at the
+   refresh cookie and its own bound of up to 5 seconds: if the revoke does not
+   finish in time it returns `503` with the sessions possibly still active and the
+   caller still signed in, so it can simply
    be repeated. `POST /auth/change-password` changes the password and revokes
    every session of the account, this one included, in one transaction, so both
    happen or neither does. The change is conditional on the password that was
@@ -135,9 +165,10 @@ https://nexara.example.com/api/v1
    session's cached rows, and, for a refused refresh, the rollback of its
    transaction, the check for a race, the revoke of a refused account's session
    and the audit entry of a changed role — has a bound of up to 5 seconds each, so
-   a client should allow up to 25 seconds for a sign-out or a sign-out everywhere,
-   up to 30 seconds for a refresh (a refused one is rolled back, revoked and
-   audited in turn), and up to 45 seconds for a password change, which has two
+   a client should allow up to 25 seconds for a sign-out, up to 30 seconds for a
+   sign-out everywhere (it looks the refresh cookie up first, for up to 5 seconds,
+   and then revokes), up to 30 seconds for a refresh (a refused one is rolled back,
+   revoked and audited in turn), and up to 45 seconds for a password change, which has two
    15 second phases (the read of the account, then the transaction) and, when the
    answer to its commit is lost, one more read of up to 5 seconds to find out
    whether it landed. A timeout sized from "15 seconds" alone gives up on requests
@@ -520,8 +551,8 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | POST | `/auth/register` | Register a new user (first user becomes admin) |
 | POST | `/auth/login` | Login with email and password |
 | POST | `/auth/refresh` | Refresh access token |
-| POST | `/auth/logout` | Logout (invalidate tokens) |
-| POST | `/auth/logout-all` | Logout all sessions |
+| POST | `/auth/logout` | Logout: end the session the refresh token names; `403`, with the cookie left alone, for a session that belongs to another user than the access token presented |
+| POST | `/auth/logout-all` | Logout all sessions; the refresh cookie is deleted only when it is the caller's own or names no live session |
 | GET | `/auth/me` | Get current user profile |
 | PUT | `/auth/profile` | Update user profile |
 | POST | `/auth/change-password` | Change password |

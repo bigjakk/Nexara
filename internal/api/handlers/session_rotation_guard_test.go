@@ -5,8 +5,10 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -145,36 +147,43 @@ func TestGuard_PreviousTokenLookupOnlyDecides(t *testing.T) {
 	}
 }
 
-// TestGuard_FindSessionForLogoutIsOnlyReachedFromLogout keeps the sign-out lookup
+// TestGuard_FindSessionForLogoutIsOnlyReachedFromLogoutAndLogoutAll keeps the sign-out lookup
 // from becoming a way to authenticate.
 //
 // FindSessionForLogout is the one method that hands back a WHOLE session for a
 // token that is not its current one: a match on the token the session had one
-// rotation ago, for the length of the sign-out window. That is safe for exactly
-// one use, ending the session. Everything that stands on "this token is the
-// session's live credential" must go through ValidateRefreshToken instead, which
-// never matches a previous token: Refresh, and the session list's is_current
-// (currentSessionID), which resolves the caller's own session through the
-// refresh cookie.
+// rotation ago, for the length of the sign-out window. That is safe for uses that
+// issue nothing, and the two sign-out handlers are exactly those: Logout ends the
+// session the token names, and LogoutAll only decides whether the cookie in its
+// request is the caller's to delete (it issues nothing and identifies no one; the
+// caller is the access token's user, found by authRequired). Everything that
+// stands on "this token is the session's live credential" must go through
+// ValidateRefreshToken instead, which never matches a previous token: Refresh, and
+// the session list's is_current (currentSessionID), which resolves the caller's
+// own session through the refresh cookie.
 //
 // Pointing currentSessionID at FindSessionForLogout is the case worth naming,
 // because it passes every behavioural test that existed — the method returns a
 // complete, correct-looking session — and quietly makes a rotated-away cookie
 // work as an identity for the label, and for whatever is built on it later. A
 // static check, because no behavioural test can see a caller that does not exist
-// yet. So the method may be named in exactly one place outside tests: its call in
-// Logout, in internal/api/handlers/auth.go. Both spellings are watched, a call
-// and a bare reference, and the guard fails if it cannot see the one use it
-// permits.
-func TestGuard_FindSessionForLogoutIsOnlyReachedFromLogout(t *testing.T) {
-	const (
-		allowedFile = "internal/api/handlers/auth.go"
-		allowedFunc = "Logout"
-	)
+// yet. So the method may be named in exactly two places outside tests: one call
+// in Logout and one in LogoutAll, both in internal/api/handlers/auth.go. Both
+// spellings are watched, a call and a bare reference, and the guard fails if it
+// cannot see the one use each permits.
+func TestGuard_FindSessionForLogoutIsOnlyReachedFromLogoutAndLogoutAll(t *testing.T) {
+	const allowedFile = "internal/api/handlers/auth.go"
+	// Each permitted function, and the reason it may. A new entry is a decision,
+	// and its reason has to say why the lookup cannot be used to authenticate there.
+	allowed := map[string]string{
+		"Logout":    "ends the session its token names",
+		"LogoutAll": "issues nothing and identifies no one; it only decides whether the cookie in the request is the caller's to clear",
+	}
+	allowedNames := slices.Sorted(maps.Keys(allowed))
 
 	fset := token.NewFileSet()
 	scanned := 0
-	allowedHits := 0
+	hits := map[string]int{}
 	for _, path := range goSourceFiles(t) {
 		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		if err != nil {
@@ -192,14 +201,14 @@ func TestGuard_FindSessionForLogoutIsOnlyReachedFromLogout(t *testing.T) {
 				if !ok || sel.Sel.Name != "FindSessionForLogout" {
 					return true
 				}
-				if inAllowedFile && enclosing == allowedFunc {
-					allowedHits++
+				if _, permitted := allowed[enclosing]; inAllowedFile && permitted {
+					hits[enclosing]++
 					return true
 				}
 				t.Errorf("%s: %s reaches FindSessionForLogout; only %s in %s may — it matches a token the session "+
 					"had one rotation ago, which may end a session and must never identify one: use "+
 					"ValidateRefreshToken for anything that treats the cookie as the session's live credential",
-					fset.Position(sel.Pos()), cmp.Or(enclosing, "(package level)"), allowedFunc, allowedFile)
+					fset.Position(sel.Pos()), cmp.Or(enclosing, "(package level)"), strings.Join(allowedNames, " and "), allowedFile)
 				return true
 			})
 		}
@@ -208,9 +217,11 @@ func TestGuard_FindSessionForLogoutIsOnlyReachedFromLogout(t *testing.T) {
 	if scanned == 0 {
 		t.Fatal("the guard scanned no Go sources")
 	}
-	if allowedHits != 1 {
-		t.Fatalf("found %d references to FindSessionForLogout in %s of %s, want exactly 1: "+
-			"the guard cannot see what it exists to restrict", allowedHits, allowedFunc, allowedFile)
+	for _, name := range allowedNames {
+		if hits[name] != 1 {
+			t.Fatalf("found %d references to FindSessionForLogout in %s of %s, want exactly 1: "+
+				"the guard cannot see what it exists to restrict", hits[name], name, allowedFile)
+		}
 	}
 }
 

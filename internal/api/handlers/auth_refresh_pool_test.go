@@ -750,8 +750,8 @@ func checkLogoutUnconfirmed(t *testing.T, body map[string]any) {
 // no transaction, but it waits for the pool like any other request, and its
 // context has no deadline either.
 //
-// The answer is a 503 with the cookie cleared, as every Logout answer clears it,
-// and a message that does not say "try again" (see checkLogoutUnconfirmed). The
+// The answer is a 503 with the cookie cleared, as every Logout answer but the 403
+// clears it, and a message that does not say "try again" (see checkLogoutUnconfirmed). The
 // control: with the pool free, the same sign-out ends the session.
 func TestLogout_AStarvedPoolIsA503NotAHang(t *testing.T) {
 	const bound = 200 * time.Millisecond

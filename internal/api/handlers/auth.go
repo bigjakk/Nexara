@@ -39,7 +39,9 @@ const firstUserAdvisoryLockKey int64 = 0x4E455841524131 // ASCII "NEXARA1"
 // Logout both hold the token they are given — from the body or from the cookie —
 // to it themselves (refreshTokenTooLong), before anything is hashed, looked up or
 // logged. Refresh answers an over-long one as an invalid token, 401 with the
-// cookie cleared; Logout answers it as no token, 200 with the cookie cleared.
+// cookie cleared; Logout answers it as no token, 200 with the cookie cleared —
+// except that it leaves a cookie alone when the over-long token came in the body
+// and the cookie is another token, which it never looked at (see Logout).
 const MaxRefreshTokenLength = 1024
 
 // refreshTokenTooLong reports whether token is longer than any refresh token can
@@ -99,9 +101,11 @@ const authFollowUpTimeout = 5 * time.Second
 const releaseTxTimeout = 5 * time.Second
 
 // logoutUnconfirmedMessage is what a sign-out says when it could not be confirmed.
-// Its own Set-Cookie has already deleted the browser's cookie by then, so "try
-// again" would be false advice: a browser's second attempt carries no token and
-// is answered 200 for nothing. The message says what is true instead.
+// The same response deletes the browser's cookie (Logout clears it on every answer
+// but the 403 and the one to a body token that is not the request's cookie, this
+// one included — see Logout for why), so "try again" would be false advice: a
+// browser's second attempt carries no token and is answered 200 for nothing. The
+// message says what is true instead.
 const logoutUnconfirmedMessage = "The sign-out could not be confirmed and the session may still be active. " +
 	"A client that sent its refresh token in the request body can retry with it; " +
 	"otherwise sign in again and use \"Sign Out All Devices\"."
@@ -157,9 +161,11 @@ const logoutMatchedPreviousToken = `{"matched":"previous_token"}`
 // a parameter type: both are mounted with authOptional, which parses a session
 // if one is presented and lets the request through either way. Register READS
 // c.Locals("role") to decide whether the caller may create an account, and
-// Logout reads c.Locals("user_id") for its ownership cross-check — neither of
-// which a Public declaration would populate, since Public installs no
-// authentication middleware at all. See registerAuthEndpoints.
+// Logout reads c.Locals("user_id") — and, for an access token that authOptional
+// did not parse into it, the Authorization header itself (signOutIsSomeoneElses)
+// — for its ownership cross-check; neither of which a Public declaration would
+// populate, since Public installs no authentication middleware at all. See
+// registerAuthEndpoints.
 //
 // What stays here is everything a declaration cannot see: the first-user
 // advisory lock, the constant-time login failure paths, the role-rotation guard
@@ -1544,10 +1550,98 @@ func refreshLookupFailed(what string, sessionID uuid.UUID, err error) error {
 	return fiber.NewError(fiber.StatusServiceUnavailable, "Could not verify the refresh token right now; please retry shortly")
 }
 
+// apiKeyTokenPrefix starts every API key (the generator is in api_keys.go, and
+// authRequired and authOptional branch on it in internal/api/middleware.go). A
+// bearer that starts with it is a key and never a JWT: a key is one base64url
+// word, a JWT three words joined by dots, so no string is both.
+const apiKeyTokenPrefix = "nxra_"
+
+// logoutNotYoursMessage is what Logout's 403 says. "Nothing was revoked" is true of
+// every refusal: no session was ended. The cookie is left alone as well, except in a
+// jar with more than one refresh cookie, which Logout clears whatever it answers
+// (see refreshCookieCount) — the message does not claim more than the revoke.
+const logoutNotYoursMessage = "This refresh token belongs to another user's session, not to the user of the " +
+	"access token or API key sent with it; nothing was revoked."
+
+// refreshCookieCount is how many refresh cookies the request carries. A browser
+// sends one. More than one means the jar is ambiguous: the cookie is host-only and
+// path-scoped, but a page on a sibling subdomain can plant one of the same name for
+// the parent domain, which the browser then sends alongside the real one — in an
+// order the server does not control, and of which it reads the first. A deletion
+// removes the host-only cookie, so what the server read and what it would delete or
+// spare may be two different cookies. Logout and LogoutAll therefore treat such a
+// request as they did before they learned to spare a cookie, and clear it: the 403
+// would otherwise let a planted cookie that names another user's session leave the
+// real one in the browser through the very sign-out meant to remove it.
+//
+// The cookies are counted as the server parses them (fasthttp drops a pair whose
+// value it cannot parse, and that pair cannot displace the real cookie in what the
+// handlers read either), across every Cookie header line the request has.
+func refreshCookieCount(c fiber.Ctx) int {
+	n := 0
+	for name := range c.Request().Header.Cookies() {
+		if string(name) == RefreshCookieName {
+			n++
+		}
+	}
+	return n
+}
+
+// signOutIsSomeoneElses reports whether the request names a caller who is not
+// owner, the user of the session Logout is about to end.
+//
+// It is a refusal and not an identity: it returns a bool and never the user, so that
+// nothing can be built on it that treats an access token the server has stopped
+// vouching for as a signed-in user. A true answer can only turn a sign-out away; a
+// false one grants nothing, because false is also what a request that names no one
+// gets, and the refresh cookie is the credential Logout acts on. Only Logout may
+// call it (TestGuard_SignOutIsSomeoneElsesIsOnlyReachedFromLogout), and
+// TestGuard_SignOutIsSomeoneElsesReturnsOnlyABool keeps the answer a bool.
+//
+// The caller authOptional named — a valid access token or a valid API key — is
+// compared first. Where it named no one the bearer token may still say: authOptional
+// names a caller only for a token that validates, and a browser's access token is
+// exactly what lapses while its refresh cookie lives on. A token this server signed
+// still says whom it was issued to whether it has expired, is not valid yet, sits
+// after a second space in its header or was turned away for any other reason
+// (auth.AccessTokenIsSomeoneElses), which is all a refusal needs. A forged,
+// garbled, unsigned or scoped (console, WebSocket) token names no one, and the
+// sign-out is held to the cookie, as it always was.
+//
+// An API key never reaches the JWT parser, however its header is spelled — the
+// prefix is looked for past the stray space a second space leaves in front of it,
+// as the parser itself reads past it: a key that did not authenticate is not an
+// expired credential of anyone's, only a bad one, and there is nothing to read from
+// it. (No key could be parsed as a JWT in any case, which is why this is a belt for
+// braces rather than a behaviour — see apiKeyTokenPrefix.)
+func (h *AuthHandler) signOutIsSomeoneElses(c fiber.Ctx, owner uuid.UUID) bool {
+	if named, ok := c.Locals("user_id").(uuid.UUID); ok {
+		return named != owner
+	}
+	token := auth.BearerToken(c.Get("Authorization"))
+	if token == "" || strings.HasPrefix(strings.TrimSpace(token), apiKeyTokenPrefix) || h.jwtService == nil {
+		return false
+	}
+	return h.jwtService.AccessTokenIsSomeoneElses(token, owner)
+}
+
 // Logout revokes the session identified by the refresh token (cookie for
 // browser clients, body for mobile clients) and clears the browser cookie.
-// The cookie is cleared unconditionally so a stale cookie does not linger
-// after logout even if the token is already invalid.
+//
+// The refresh token is the credential, and the route is authOptional so that a
+// browser whose access token has expired can still sign out. But a browser's
+// cookie jar is shared by all of its tabs, and another tab may have signed
+// someone else in since this tab's access token was issued: the cookie in the
+// request can belong to another user, and a sign-out from one user's tab must
+// neither end the other user's session nor delete their cookie. So when the
+// request also says who is signing out, the session must be that user's. It says
+// so with a valid access token or API key (authOptional's user_id) or with an
+// access token this server signed that authOptional named no one from — expired,
+// not yet valid, anything — which signOutIsSomeoneElses reads. A session that is
+// not the caller's is a 403, nothing revoked and the cookie left alone. A request
+// that names no one — no access token, a forged or garbled one, an API key that
+// does not authenticate, a console or WebSocket token — is held to the cookie
+// alone, as it always was.
 //
 // The token may also be the one the session had before its last rotation, for
 // auth.PreviousTokenRevocationWindow after that rotation: a sign-out sent while a
@@ -1562,46 +1656,74 @@ func refreshLookupFailed(what string, sessionID uuid.UUID, err error) error {
 // session holds); 403 for a session that is not the caller's; 503 when a lookup
 // could not be made, in which case nothing was revoked and the caller is told so
 // rather than shown a success that never happened. The cookie is cleared in every
-// case — which is why the 503 does not say "try again": a browser's second attempt
-// would carry no token. Its database work is bounded by authDBTimeout; the audit
-// row and the Redis cleanup that follow run under deadlines of their own.
+// case but two — which is why the 503 does not say "try again": a browser's
+// second attempt would carry no token. The two are the 403, and a request whose
+// body token is not its cookie's (the cookie is then not what the request acted
+// on, and nothing has looked at it). Neither applies to a request with more than
+// one refresh cookie, whose jar is ambiguous (refreshCookieCount): that one is
+// cleared whatever the answer. Its database work is bounded by authDBTimeout; the
+// audit row and the Redis cleanup that follow run under deadlines of their own.
 func (h *AuthHandler) Logout(c fiber.Ctx) error {
 	var req logoutRequest
 	// Body is optional for browser clients (cookie carries the token).
 	_ = c.Bind().Body(&req)
 
-	if req.RefreshToken == "" {
-		req.RefreshToken = readRefreshTokenFromCookie(c)
+	cookieToken := readRefreshTokenFromCookie(c)
+	token := req.RefreshToken
+	if token == "" {
+		token = cookieToken
 	}
 
-	// Always clear the cookie regardless of whether we found a token.
-	clearRefreshCookie(c)
+	// The Set-Cookie that deletes the browser's cookie goes out with every answer,
+	// so that a stale cookie does not linger after a sign-out even when its token
+	// was already invalid. Two requests are spared it, because the cookie in the
+	// jar is not theirs to delete: one that is turned away as someone else's (the
+	// 403 below), and one whose body token is not its cookie's, which never looked
+	// at the cookie. A deletion cannot be made conditional on the cookie's value,
+	// so sparing a cookie means not sending one — and that is decided as the
+	// answer is, not before the lookup that tells whose session it is. A jar with
+	// more than one refresh cookie spares nothing (see refreshCookieCount).
+	ambiguous := refreshCookieCount(c) > 1
+	spareCookie := !ambiguous && cookieToken != "" && cookieToken != token
+	defer func() {
+		if !spareCookie {
+			clearRefreshCookie(c)
+		}
+	}()
 
 	// No token, or one longer than any refresh token can be (and than /auth/refresh
 	// accepts): there is nothing of ours to revoke, so treat it as the idempotent
 	// success it is — before anything is hashed, looked up or logged. The bound
 	// counts characters, as the schema's does.
-	if req.RefreshToken == "" || refreshTokenTooLong(req.RefreshToken) {
+	if token == "" || refreshTokenTooLong(token) {
 		return c.JSON(fiber.Map{"message": "Logged out successfully"})
 	}
 
 	ctx, cancel := h.dbContext(c)
 	defer cancel()
 
-	session, viaPrevious, err := h.sessionManager.FindSessionForLogout(ctx, req.RefreshToken)
+	session, viaPrevious, err := h.sessionManager.FindSessionForLogout(ctx, token)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidToken) {
 			// No live session holds this token — already revoked, expired or
-			// never ours. Idempotent success.
+			// never ours. Idempotent success, and the cookie that named it is
+			// dead: deleting it takes nothing from anyone.
 			return c.JSON(fiber.Map{"message": "Logged out successfully"})
 		}
 		// A lookup could not be made, so nothing is known about the session — and
 		// nothing was revoked. That is not "already logged out", and answering 200
-		// would tell a signed-in user otherwise. The cookie is already cleared, so
-		// the message must not tell a browser to simply try again. The database
-		// being unavailable is a 503; a lookup that failed for any other reason is
-		// a defect and a 500, with the same message, because what the caller needs
-		// to know is the same: the session may still be active.
+		// would tell a signed-in user otherwise. The cookie is still deleted, and
+		// that is a choice: with the lookup gone nothing says whose session it
+		// names, so deleting it could take another user's cookie (a user who then
+		// signs in again — their session is untouched), while leaving it keeps a
+		// live credential in the browser of someone who has just asked to sign
+		// out, and the SPA signs its page out whatever this answer is, so nobody
+		// would know. The second is the worse of the two and by far the likelier,
+		// so the cookie goes, and the message must not tell a browser to simply try
+		// again. The database being unavailable is a 503; a lookup that failed for
+		// any other reason is a defect and a 500, with the same message, because
+		// what the caller needs to know is the same: the session may still be
+		// active.
 		if isTransientDBError(err) {
 			slog.Warn("logout: session lookup failed, nothing revoked", "error", err)
 			return fiber.NewError(fiber.StatusServiceUnavailable, logoutUnconfirmedMessage)
@@ -1610,19 +1732,24 @@ func (h *AuthHandler) Logout(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, logoutUnconfirmedMessage)
 	}
 
-	// Defence-in-depth: when an access token IS present, verify the session
-	// owner matches. With authOptional Logout supports an expired access
-	// token + valid cookie; we only enforce the cross-check when a caller
-	// happens to also send an Authorization header.
-	if userID, ok := c.Locals("user_id").(uuid.UUID); ok {
-		if session.UserID != userID {
-			return fiber.NewError(fiber.StatusForbidden, "Session does not belong to authenticated user")
-		}
+	// The session is someone else's when the request names a caller and it is not
+	// the session's user. Nothing is revoked, and the cookie — theirs, not the
+	// caller's — stays where it is: this is the answer that cancels the deletion
+	// deferred above, unless the jar is ambiguous. It is logged, because the
+	// caller is told "no" and the one who most needs to know why is whoever finds a
+	// sign-out that did nothing: the session and its user, and never a token.
+	if h.signOutIsSomeoneElses(c, session.UserID) {
+		spareCookie = !ambiguous
+		slog.Info("logout: refused, the session belongs to another user than the access token or API key names",
+			"session_id", session.ID, "session_user_id", session.UserID)
+		return fiber.NewError(fiber.StatusForbidden, logoutNotYoursMessage)
 	}
 
 	// The session row is what ends the session, and it is revoked here, on the
 	// deciding bound. Its Redis row is deleted at the end, as a follow-up of its own
-	// (SessionManager.RevokeSession would do both on this one).
+	// (SessionManager.RevokeSession would do both on this one). A revoke that fails
+	// still clears the cookie: whose session it is has been settled by here — the
+	// caller's, or the cookie holder's, and it was they who asked.
 	if err := h.queries.RevokeSession(ctx, session.ID); err != nil {
 		if isTransientDBError(err) {
 			slog.Warn("logout: revoking the session did not complete", "session_id", session.ID, "error", err)
@@ -1647,18 +1774,77 @@ func (h *AuthHandler) Logout(c fiber.Ctx) error {
 }
 
 // LogoutAll revokes all sessions for the current user and clears the browser
-// refresh cookie.
+// refresh cookie — when the cookie is the caller's to clear.
+//
+// A browser's cookie jar is shared by all of its tabs, so the cookie in the
+// request may belong to another user than the one whose access token made it
+// (another tab signed them in since). Ending the caller's own sessions is what was
+// asked for; deleting someone else's cookie is not part of it. So the cookie is
+// cleared when it names one of the caller's own sessions — its current token or
+// the one before its last rotation, as Logout matches them — or no live session
+// at all (no cookie, an unknown, revoked or expired token: a dead cookie takes
+// nothing from anyone), and it is left in the jar when it names another user's
+// live session. A request with more than one refresh cookie has an ambiguous jar
+// (refreshCookieCount) and is cleared without the cookie being looked at.
+//
+// The cookie is looked up BEFORE the sessions are revoked, and only the order is
+// observable (TestLogoutAll_LooksAtTheCookieBeforeItRevokes): the lookup finds live
+// sessions only, so after the revoke the caller's own cookie would read as "no live
+// session" — which also clears, so the answer would be the same, reached for a
+// reason that is not the cookie's, and the owner test would never run on the
+// caller's own session. Asked first, each branch is taken for its own reason.
+//
+// A lookup that could not be made leaves the cookie alone, and the revoke goes
+// ahead all the same — the sessions are what was asked for. Once that revoke has
+// succeeded the caller's own cookie is dead anyway, a stale one the next refresh
+// refuses and clears, so leaving an unidentified cookie costs nothing but that,
+// where deleting it could take another user's live one.
+//
+// The lookup has a deadline of its own, the follow-up bound from a fresh start
+// (followUp), and it runs BEFORE the deciding bound begins: a statement that
+// stalls costs the caller at most that and leaves the revoke its whole
+// authDBTimeout, which "revoked all the same" needs when the database is slow for
+// the lookup and not for the revoke. The price is the worst case, which is the
+// lookup, the deciding bound and the two follow-ups: up to 30 seconds, and the API
+// reference says so.
 //
 // Its database work is bounded by authDBTimeout, like Logout's — it is the remedy
-// Logout's own 503 points a user to, so it must not be the one that hangs. A
-// revoke the database could not complete (see isTransientDBError) is a 503 saying
-// the sessions may still be active, with the cookie left alone (the caller is
-// still signed in and can try again); any other failure is the 500 it always was.
-// The audit row and the Redis cleanup that follow run under deadlines of their own.
+// Logout's own 503 points a user to, so it must not be the one that hangs. A revoke
+// the database could not complete (see isTransientDBError) is a 503 saying the
+// sessions may still be active, with the cookie left alone (the caller is still
+// signed in and can try again); any other failure is the 500 it always was. The
+// audit row and the Redis cleanup that follow run under deadlines of their own.
 func (h *AuthHandler) LogoutAll(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
+	}
+
+	// Deleting the cookie is the default — an absent cookie, one too long to be a
+	// token, one that names no live session and a jar that holds more than one are
+	// all handled by deleting — and what is looked for is the one reason not to.
+	// FindSessionForLogout is the lookup Logout makes, and this is the second
+	// caller the guard in session_rotation_guard_test.go allows it, on purpose:
+	// like Logout's, this one issues nothing and only decides what happens to a
+	// cookie.
+	clearCookie := true
+	if token := readRefreshTokenFromCookie(c); token != "" && !refreshTokenTooLong(token) && refreshCookieCount(c) <= 1 {
+		lctx, lcancel := h.followUp(c.Context())
+		session, _, err := h.sessionManager.FindSessionForLogout(lctx, token)
+		lcancel()
+		switch {
+		case err == nil:
+			clearCookie = session.UserID == userID
+		case errors.Is(err, auth.ErrInvalidToken):
+			// No live session holds it: a dead cookie.
+		default:
+			clearCookie = false
+			if isTransientDBError(err) {
+				slog.Warn("logout-all: could not tell whose session the refresh cookie names, leaving it alone", "user_id", userID, "error", err)
+			} else {
+				slog.Error("logout-all: could not tell whose session the refresh cookie names, leaving it alone", "user_id", userID, "error", err)
+			}
+		}
 	}
 
 	ctx, cancel := h.dbContext(c)
@@ -1674,7 +1860,9 @@ func (h *AuthHandler) LogoutAll(c fiber.Ctx, _ *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to revoke sessions")
 	}
 
-	clearRefreshCookie(c)
+	if clearCookie {
+		clearRefreshCookie(c)
+	}
 
 	h.withFollowUp(c, func() {
 		AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "logout_all", nil)

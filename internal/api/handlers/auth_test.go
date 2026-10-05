@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -264,29 +263,6 @@ func TestJWTRoundtrip(t *testing.T) {
 	}
 }
 
-func TestExtractBearerToken(t *testing.T) {
-	tests := []struct {
-		name   string
-		header string
-		want   string
-	}{
-		{"valid bearer", "Bearer eyJhbGciOi", "eyJhbGciOi"},
-		{"lowercase bearer", "bearer eyJhbGciOi", "eyJhbGciOi"},
-		{"no prefix", "eyJhbGciOi", ""},
-		{"empty", "", ""},
-		{"wrong prefix", "Basic abc123", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractBearerTokenFromHeader(tt.header)
-			if got != tt.want {
-				t.Errorf("extractBearerTokenFromHeader(%q) = %q, want %q", tt.header, got, tt.want)
-			}
-		})
-	}
-}
-
 // newTestApp creates a Fiber app with auth handler for unit tests (no DB/Redis).
 func newTestApp(t *testing.T) *fiber.App {
 	t.Helper()
@@ -343,16 +319,4 @@ func authRefreshMirror() apischema.Properties {
 	return apischema.Properties{
 		"refresh_token": {Type: apischema.String, Optional: true},
 	}
-}
-
-// extractBearerTokenFromHeader replicates the bearer token extraction logic for testing.
-func extractBearerTokenFromHeader(header string) string {
-	if header == "" {
-		return ""
-	}
-	parts := strings.SplitN(header, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return ""
-	}
-	return parts[1]
 }

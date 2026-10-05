@@ -694,11 +694,14 @@ func TestLoadPerms_AnEmptyListIsAnArray(t *testing.T) {
 // of its own, so the answer can take longer, and a client that sized its timeout
 // from "15 seconds" would give up on requests the server is still completing.
 //
-// Four figures follow from the constants, each the longest path of its endpoints:
+// Five figures follow from the constants, each the longest path of its endpoints:
 //
 //   - a follow-up on its own: authFollowUpTimeout;
-//   - a sign-out and a sign-out everywhere: the deciding bound and two follow-ups,
-//     the audit entry and the Redis cleanup;
+//   - a sign-out: the deciding bound and two follow-ups, the audit entry and the
+//     Redis cleanup;
+//   - a sign-out everywhere: the same, and before them the question about the
+//     refresh cookie, which has a bound of its own (a follow-up's, from a fresh
+//     start) so that a stalled lookup cannot spend the revoke's;
 //   - a refresh: the deciding bound, then, for a refused account whose role changed,
 //     the rollback of its transaction (releaseTxTimeout, on a context of its own),
 //     the revoke of its session and the audit entry, a follow-up each — the rollback
@@ -708,27 +711,50 @@ func TestLoadPerms_AnEmptyListIsAnArray(t *testing.T) {
 //     audit entry and the Redis cleanup.
 //
 // The figures are derived from the constants, so changing one fails here until the
-// prose follows: every "up to N seconds" in the two files must be one of the four
+// prose follows: every "up to N seconds" in the two files must be one of the
 // values, and each value must be stated as often as the prose states it today, so
 // that rewording a sentence out of the pattern is a failure and not a way past the
-// check.
+// check. Two figures can be the same number (a refresh and a sign-out everywhere are
+// both thirty today), and then the file must state it once for each.
+//
+// Sign-out is Logout's, a legacy route that registry_auth.go does not declare, so
+// only the API reference states it.
 func TestTheDocumentedWorstCaseIsWhatTheBoundsAddUpTo(t *testing.T) {
 	deciding := int(authDBTimeout / time.Second)
 	followUp := int(authFollowUpTimeout / time.Second)
 	rollback := int(releaseTxTimeout / time.Second)
 	signOut := deciding + 2*followUp
+	signOutAll := followUp + deciding + 2*followUp
 	refresh := deciding + rollback + 2*followUp
 	passwordChange := 2*deciding + 3*followUp
-	known := map[int]bool{followUp: true, signOut: true, refresh: true, passwordChange: true}
 	mention := regexp.MustCompile(`up to (\d+) seconds`)
+
+	// How many times each file states each figure, at least. Two figures can be the
+	// same number, and the minimums for it then add up.
+	figures := []struct {
+		value, docs, registry int
+	}{
+		{followUp, 3, 3},
+		{signOut, 1, 0},
+		{signOutAll, 1, 1},
+		{refresh, 1, 1},
+		{passwordChange, 1, 1},
+	}
+	known := map[int]bool{}
+	docsMin, registryMin := map[int]int{}, map[int]int{}
+	for _, fig := range figures {
+		known[fig.value] = true
+		docsMin[fig.value] += fig.docs
+		registryMin[fig.value] += fig.registry
+	}
 
 	for _, f := range []struct {
 		file string
 		// min is how many times the file states each figure.
 		min map[int]int
 	}{
-		{"docs/api-reference.md", map[int]int{followUp: 3, signOut: 1, refresh: 1, passwordChange: 1}},
-		{"internal/api/registry_auth.go", map[int]int{followUp: 3, signOut: 1, refresh: 1, passwordChange: 1}},
+		{"docs/api-reference.md", docsMin},
+		{"internal/api/registry_auth.go", registryMin},
 	} {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, f.file))
 		if err != nil {
@@ -745,8 +771,8 @@ func TestTheDocumentedWorstCaseIsWhatTheBoundsAddUpTo(t *testing.T) {
 			}
 			seen[n]++
 			if !known[n] {
-				t.Errorf("%s says %q; the bounds add up to %d for a sign-out, %d for a refresh, %d for a password change and %d for a follow-up",
-					f.file, m[0], signOut, refresh, passwordChange, followUp)
+				t.Errorf("%s says %q; the bounds add up to %d for a sign-out, %d for a sign-out everywhere, %d for a refresh, %d for a password change and %d for a follow-up",
+					f.file, m[0], signOut, signOutAll, refresh, passwordChange, followUp)
 			}
 		}
 		for figure, min := range f.min {

@@ -62,10 +62,15 @@ func (s *Server) setupRoutes() {
 		// Logout intentionally uses authOptional so a user with an expired
 		// access token (but a valid refresh cookie) can still revoke the
 		// server-side session. The cookie itself is the auth artefact for
-		// this endpoint; the user_id check in the handler only fires when an
-		// access token IS present, defending against an attacker with a stolen
-		// cookie attempting to log out an unrelated user (covered by
-		// SameSite=Strict + same-origin SPA already, but defence-in-depth).
+		// this endpoint. The ownership check in the handler fires whenever
+		// the request names a caller: a valid token or API key, which
+		// authOptional turns into user_id, or any other access token this
+		// server signed (expired, not yet valid), which it ignores and the
+		// handler reads for itself (signOutIsSomeoneElses). A session that is
+		// someone else's is refused with a 403 and its cookie is left in the
+		// jar — the cookie jar is shared by every tab of a browser, so a tab
+		// holding one user's token can be carrying another user's cookie. A
+		// request that names no one is held to the cookie alone.
 		authGroup.Post("/logout", s.authOptional(), s.authHandler.Logout)
 
 		if s.oidcHandler != nil {

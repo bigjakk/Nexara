@@ -174,11 +174,18 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   authScope + "/logout-all",
-		Description: "Revoke every session on the caller's own account and clear their refresh cookie — " +
-			"the \"sign out everywhere\" action. If the database does not answer within 15 seconds it " +
-			"answers 503, the sessions may still be active, and the cookie is left alone so the call can " +
-			"be repeated. Allow up to 25 seconds in all: the audit entry and the cleanup that follow the " +
-			"revoke have up to 5 seconds each.",
+		Description: "Revoke every session on the caller's own account — the \"sign out everywhere\" " +
+			"action — and clear the refresh cookie the request carries when it is the caller's to clear: " +
+			"when it names one of the caller's own sessions (the current token, or the one a refresh has " +
+			"just replaced) or no live session at all. A cookie that names another user's live session is " +
+			"left in the browser, and so is one whose session could not be looked up; the caller's sessions " +
+			"are revoked all the same. A request with more than one refresh cookie has it cleared without " +
+			"being looked at. The lookup has a deadline of its own, up to 5 seconds, and runs before the " +
+			"revoke begins, so a slow lookup never costs the revoke any of its time. If the database does " +
+			"not answer within 15 seconds of the revoke beginning — which is after the lookup, up to 5 " +
+			"seconds into the request — it answers 503, the sessions may still be active, and the cookie " +
+			"is left alone so the call can be repeated. Allow up to 30 seconds in all: the lookup, then " +
+			"the revoke, then the audit entry and the cleanup, which have up to 5 seconds each.",
 		Group:       "Authentication",
 		Permissions: Permissions{SelfService: "revokes the caller's own sessions"},
 		Parameters:  apischema.Properties{},

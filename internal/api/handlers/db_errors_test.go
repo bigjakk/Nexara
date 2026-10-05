@@ -176,7 +176,8 @@ func TestADatabaseFailureIsA503OrA500ByWhatItIs(t *testing.T) {
 				cookies := refreshCookies(resp)
 				switch st.path {
 				case "/auth/logout":
-					// Logout clears its cookie before it looks anything up, whatever follows.
+					// Logout clears its cookie on every answer but the 403 — a lookup or a revoke that
+					// failed included (see Logout for why): this site is never a 403.
 					if len(cookies) != 1 || !cookieDeleted(cookies[0]) {
 						t.Errorf("Set-Cookie = %+v, want the cookie deleted as on every sign-out answer", cookies)
 					}

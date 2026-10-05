@@ -1058,17 +1058,11 @@ func (s *Server) authOptional() fiber.Handler {
 	}
 }
 
-// extractBearerToken extracts the JWT from the Authorization header.
+// extractBearerToken extracts the JWT from the Authorization header. The reading
+// is auth.BearerToken's, which Logout's ownership check shares, so that both see
+// the same token in a request.
 func extractBearerToken(c fiber.Ctx) string {
-	header := c.Get("Authorization")
-	if header == "" {
-		return ""
-	}
-	parts := strings.SplitN(header, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return ""
-	}
-	return parts[1]
+	return auth.BearerToken(c.Get("Authorization"))
 }
 
 // authenticateAPIKey validates an nxra_ prefixed API key token and sets

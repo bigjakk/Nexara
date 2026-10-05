@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -200,14 +201,20 @@ func (j *JWTService) RefreshTokenTTL() time.Duration {
 	return j.refreshTokenTTL
 }
 
+// keyFunc is the key lookup of every parse of an access token: the signing
+// method must be HMAC, and the key is the service's one secret. ValidateAccessToken
+// and AccessTokenIsSomeoneElses both parse with it, so what counts as "signed by
+// us" is decided in this one place.
+func (j *JWTService) keyFunc(t *jwt.Token) (any, error) {
+	if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+		return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+	}
+	return j.secret, nil
+}
+
 // ValidateAccessToken parses and validates a JWT access token.
 func (j *JWTService) ValidateAccessToken(tokenString string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-		}
-		return j.secret, nil
-	})
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, j.keyFunc)
 	if err != nil {
 		return nil, ErrInvalidToken
 	}
@@ -217,4 +224,70 @@ func (j *JWTService) ValidateAccessToken(tokenString string) (*Claims, error) {
 		return nil, ErrInvalidClaim
 	}
 	return claims, nil
+}
+
+// BearerToken returns the token in the value of an Authorization header of the
+// form "Bearer <token>", and "" for anything else: no header, another scheme, no
+// token. The scheme is matched without regard to case, and the token is everything
+// after the first space, spaces included — so a second space gives a token no
+// signature will verify, which is how a header with two spaces has always been
+// read. (RFC 9110 allows more than one space; reading them would widen what
+// authRequired accepts, which is a decision about authentication and not one for
+// this function to make quietly. AccessTokenIsSomeoneElses, which can only refuse,
+// does read past them.)
+//
+// It is the one place a request's access token is read out of its header. The
+// middleware (internal/api's extractBearerToken) authenticates with it and Logout's
+// ownership check reads the token through it, so the check sees what the middleware
+// saw: two readings of one header would let one of them decide on a request the
+// other never looked at.
+func BearerToken(header string) string {
+	if header == "" {
+		return ""
+	}
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return parts[1]
+}
+
+// AccessTokenIsSomeoneElses reports whether tokenString is a correctly signed
+// access token that was issued to a user other than user. It answers false for
+// everything else: a token that names user, a bad signature or signing method, a
+// malformed string, and a console or WebSocket token (the scoped kinds, which
+// authOptional does not treat as an identity either).
+//
+// IT IS FOR REFUSING AND NOTHING ELSE, and it cannot be used to authenticate: what
+// it returns is a bool and never the user. A true answer turns a request away; a
+// false one grants nothing, because false is also what an unreadable token answers.
+// Its one caller is Logout's ownership check (AuthHandler.signOutIsSomeoneElses),
+// which uses it on an access token that authOptional named no one from, to refuse
+// ending a session that belongs to someone else; the session is still ended on the
+// strength of the refresh cookie, which is the credential there.
+// TestGuard_AccessTokenIsSomeoneElsesIsOnlyReachedFromTheSignOutCheck keeps it the
+// only caller and TestGuard_AccessTokenIsSomeoneElsesReturnsOnlyABool keeps the
+// answer a bool. Whatever wants to know who is signed in goes through
+// ValidateAccessToken.
+//
+// Time is deliberately not looked at. A refusal does not care whether the token has
+// expired, is not valid yet, or was turned away by authOptional for some other
+// reason: its signature says whom it was issued to, and something that can only
+// refuse is made better at it, not worse, by reading more tokens. So the parse
+// validates no claim — one that returns no error has verified the signature and the
+// signing method, through the same keyFunc as ValidateAccessToken, and nothing else.
+// For the same reason stray white space around the token (the second space of a
+// header BearerToken reads exactly, which authentication turns away) is read past: a
+// signed token under a spelling the middleware did not accept still says whom it is
+// for.
+func (j *JWTService) AccessTokenIsSomeoneElses(tokenString string, user uuid.UUID) bool {
+	tokenString = strings.TrimSpace(tokenString)
+	claims := &Claims{}
+	if _, err := jwt.NewParser(jwt.WithoutClaimsValidation()).ParseWithClaims(tokenString, claims, j.keyFunc); err != nil {
+		return false
+	}
+	if claims.ConsoleScope != nil || claims.WSScope != "" {
+		return false
+	}
+	return claims.UserID != user
 }

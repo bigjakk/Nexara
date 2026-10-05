@@ -1781,7 +1781,9 @@ func TestRefresh_ARefusalCarriesNoTokenUnderAnyName(t *testing.T) {
 //
 // The 503 rows are the third answer: a lookup that could not be made — the
 // current-token lookup or the previous-token one — is not "no such session". It
-// revokes nothing and says so, with the cookie cleared like every other answer.
+// revokes nothing and says so, with the cookie cleared like every answer but the
+// 403: a session that is someone else's leaves their cookie where it is
+// (auth_logout_owner_test.go has the rest of that rule).
 func TestLogout_FindsTheSessionByEitherToken(t *testing.T) {
 	window := auth.PreviousTokenRevocationWindow
 	other := uuid.New()
@@ -1890,9 +1892,14 @@ func TestLogout_FindsTheSessionByEitherToken(t *testing.T) {
 			if tt.want == http.StatusServiceUnavailable {
 				checkLogoutUnconfirmed(t, decodeObject(t, resp))
 			}
-			// Cleared whatever happened, including on the 403 and the 503: the
-			// handler clears before it looks anything up.
-			if cookies := refreshCookies(resp); len(cookies) != 1 || !cookieDeleted(cookies[0]) {
+			// Cleared whatever happened, the 503 included, except on the 403: that
+			// session, and the cookie that named it, are someone else's.
+			cookies := refreshCookies(resp)
+			if tt.want == http.StatusForbidden {
+				if len(cookies) != 0 {
+					t.Errorf("Set-Cookie = %+v, want the cookie left alone: the session is someone else's", cookies)
+				}
+			} else if len(cookies) != 1 || !cookieDeleted(cookies[0]) {
 				t.Errorf("Set-Cookie = %+v, want exactly one cookie that deletes the refresh cookie", cookies)
 			}
 
