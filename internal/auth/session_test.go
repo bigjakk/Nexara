@@ -55,6 +55,13 @@ type fakeSessionDB struct {
 	listed       []db.Session // what ListUserSessions returns
 	listErr      error        // if set, ListUserSessions fails with it
 	revokeAllErr error        // if set, RevokeAllUserSessions fails with it
+	bumpErr      error        // if set, BumpUserAuthEpoch fails with it
+
+	// created is what CreateSessionAtEpoch returns, and createErr, if set, what it
+	// fails with instead: pgx.ErrNoRows is the refusal (the insert's WHERE matched
+	// nothing), anything else is the database failing.
+	created   db.Session
+	createErr error
 
 	calls []sessionStatement
 }
@@ -86,6 +93,12 @@ func (f *fakeSessionDB) Exec(_ context.Context, sql string, args ...any) (pgconn
 		}
 		return pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", f.rotateRows)), nil
 	}
+	if strings.Contains(sql, "-- name: BumpUserAuthEpoch ") {
+		if f.bumpErr != nil {
+			return pgconn.CommandTag{}, f.bumpErr
+		}
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	}
 	if strings.Contains(sql, "-- name: RevokeAllUserSessions ") {
 		if f.revokeAllErr != nil {
 			return pgconn.CommandTag{}, f.revokeAllErr
@@ -109,6 +122,11 @@ func (f *fakeSessionDB) Query(_ context.Context, sql string, args ...any) (pgx.R
 func (f *fakeSessionDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	f.record(sql, args)
 	switch {
+	case strings.Contains(sql, "-- name: CreateSessionAtEpoch "):
+		if f.createErr != nil {
+			return sessionRow{err: f.createErr}
+		}
+		return sessionRow{session: f.created}
 	case strings.Contains(sql, "-- name: GetSessionByTokenHash "):
 		if f.currentErr != nil {
 			return sessionRow{err: f.currentErr}
@@ -559,21 +577,31 @@ func TestSessionWindowsAreBounded(t *testing.T) {
 	}
 }
 
-// TestRevokeAllUserSessionsIn pins the revoke a password change runs INSIDE its
-// transaction: it lists the user's live sessions, then revokes every session, both
-// through the Queries it is handed — the transaction's — and says which sessions
-// were live so that their Redis rows can be deleted once the transaction has
-// committed. It must send nothing anywhere else: the manager's own pool-bound
+// TestRevokeAllUserSessionsIn pins the revoke every sign-out-everywhere, password
+// change and deactivation runs: three statements, in this order — bump the user's
+// auth epoch, list the live sessions, revoke every session — all through the Queries
+// it is handed (the transaction's, for a caller that holds one), saying which
+// sessions were live so that their Redis rows can be deleted once the transaction
+// has committed. It must send nothing anywhere else: the manager's own pool-bound
 // queries and Redis are exactly what a caller holding a transaction must not touch.
 //
-// A failure of either statement is returned wrapped, with no ids: the caller rolls
+// The ORDER is the property. The bump is first because it waits for the row lock of
+// any sign-in in the middle of its insert, so the listing and the revoke that follow
+// — each with a snapshot of its own — see every session created against the old
+// epoch; bump after the revoke, or bump and revoke as one statement, leaves a session
+// that committed in between live (see CreateSessionAtEpoch and
+// TestRevokeAll_TheWrongShapesLeaveASessionLive against Postgres).
+//
+// A failure of any statement is returned wrapped, with no ids: the caller rolls
 // back, and a list of sessions whose revoke did not happen must not be cleaned up.
+// A failed bump stops everything — the revoke must not run on an epoch that did not
+// move.
 func TestRevokeAllUserSessionsIn(t *testing.T) {
 	userID := uuid.New()
 	boom := errors.New("connection reset by peer")
 	first, second := rotatedSession("a", "b"), rotatedSession("c", "d")
 
-	t.Run("it lists the live sessions, then revokes all, and returns the listed ids", func(t *testing.T) {
+	t.Run("it bumps the epoch, lists the live sessions, then revokes all, and returns the listed ids", func(t *testing.T) {
 		tx := &fakeSessionDB{listed: []db.Session{first, second}}
 		pool := &fakeSessionDB{}
 		_ = NewSessionManager(db.New(pool), nil) // a manager over the pool exists; it must stay unused
@@ -586,14 +614,22 @@ func TestRevokeAllUserSessionsIn(t *testing.T) {
 		if want := []uuid.UUID{first.ID, second.ID}; !reflect.DeepEqual(got, want) {
 			t.Errorf("ids = %v, want %v", got, want)
 		}
-		list, revoke := tx.named("ListUserSessions"), tx.named("RevokeAllUserSessions")
-		if len(list) != 1 || len(revoke) != 1 || len(tx.calls) != 2 {
-			t.Fatalf("the transaction saw %d statements (list %d, revoke %d), want exactly the two", len(tx.calls), len(list), len(revoke))
+		bump, list, revoke := tx.named("BumpUserAuthEpoch"), tx.named("ListUserSessions"), tx.named("RevokeAllUserSessions")
+		if len(bump) != 1 || len(list) != 1 || len(revoke) != 1 || len(tx.calls) != 3 {
+			t.Fatalf("the transaction saw %d statements (bump %d, list %d, revoke %d), want exactly the three",
+				len(tx.calls), len(bump), len(list), len(revoke))
 		}
-		if tx.calls[0].sql != list[0].sql {
-			t.Error("the revoke was sent before the listing: the live sessions would be read after they were ended")
+		// Bump, then list, then revoke — by position, not by count.
+		if tx.calls[0].sql != bump[0].sql {
+			t.Error("the first statement is not the epoch bump: a session inserted while the revoke-all waited for its row lock would not be refused or revoked")
 		}
-		for _, c := range []sessionStatement{list[0], revoke[0]} {
+		if tx.calls[1].sql != list[0].sql {
+			t.Error("the listing is not second: the live sessions would be read before the bump has waited for the sign-ins in flight, or after they were ended")
+		}
+		if tx.calls[2].sql != revoke[0].sql {
+			t.Error("the revoke is not last: a session committed between the revoke and the bump would stay live")
+		}
+		for _, c := range []sessionStatement{bump[0], list[0], revoke[0]} {
 			if !reflect.DeepEqual(c.args, []any{userID}) {
 				t.Errorf("statement args = %v, want the user id", c.args)
 			}
@@ -603,7 +639,7 @@ func TestRevokeAllUserSessionsIn(t *testing.T) {
 		}
 	})
 
-	t.Run("a user with no live sessions still has every session revoked, and gets an empty list", func(t *testing.T) {
+	t.Run("a user with no live sessions still has the epoch bumped and every session revoked, and gets an empty list", func(t *testing.T) {
 		tx := &fakeSessionDB{}
 
 		got, err := RevokeAllUserSessionsIn(context.Background(), db.New(tx), userID)
@@ -611,8 +647,27 @@ func TestRevokeAllUserSessionsIn(t *testing.T) {
 		if err != nil || got == nil || len(got) != 0 {
 			t.Fatalf("got (%#v, %v), want an empty non-nil list and no error", got, err)
 		}
+		if len(tx.named("BumpUserAuthEpoch")) != 1 {
+			t.Error("the epoch was not bumped: an in-flight sign-in would not be refused")
+		}
 		if len(tx.named("RevokeAllUserSessions")) != 1 {
 			t.Error("the revoke was not sent")
+		}
+	})
+
+	t.Run("a failed bump is an error, wrapped, and nothing else is sent", func(t *testing.T) {
+		tx := &fakeSessionDB{listed: []db.Session{first}, bumpErr: boom}
+
+		got, err := RevokeAllUserSessionsIn(context.Background(), db.New(tx), userID)
+
+		if !errors.Is(err, boom) || !strings.Contains(err.Error(), "auth epoch") {
+			t.Errorf("error = %v, want one wrapping the cause and naming the epoch", err)
+		}
+		if got != nil {
+			t.Errorf("ids = %v after a failure, want none", got)
+		}
+		if n := len(tx.named("ListUserSessions")) + len(tx.named("RevokeAllUserSessions")); n != 0 {
+			t.Errorf("%d statements were sent after the bump failed: the revoke must not run on an epoch that did not move", n)
 		}
 	})
 
@@ -710,61 +765,5 @@ func TestForgetSessions(t *testing.T) {
 	}
 	if !mr.Exists(redisKey(other.String())) {
 		t.Error("a row that was not named was deleted")
-	}
-}
-
-// TestRevokeAllUserSessions_RevokesThenForgets pins the manager's own entry point,
-// which the sign-out-everywhere and admin-deactivation paths use: the listing and
-// the revoke, in that order, and then — only if both worked — the Redis rows of
-// the sessions that were listed.
-func TestRevokeAllUserSessions_RevokesThenForgets(t *testing.T) {
-	userID := uuid.New()
-	boom := errors.New("connection reset by peer")
-	live := rotatedSession("a", "b")
-
-	build := func(fake *fakeSessionDB) (*SessionManager, *miniredis.Miniredis) {
-		mr := miniredis.RunT(t)
-		rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-		t.Cleanup(func() { _ = rdb.Close() })
-		if err := mr.Set(redisKey(live.ID.String()), "{}"); err != nil {
-			t.Fatal(err)
-		}
-		return NewSessionManager(db.New(fake), rdb), mr
-	}
-
-	t.Run("it revokes and forgets", func(t *testing.T) {
-		fake := &fakeSessionDB{listed: []db.Session{live}}
-		sm, mr := build(fake)
-
-		if err := sm.RevokeAllUserSessions(context.Background(), userID); err != nil {
-			t.Fatalf("error = %v", err)
-		}
-		if len(fake.named("ListUserSessions")) != 1 || len(fake.named("RevokeAllUserSessions")) != 1 {
-			t.Errorf("statements = %d, want one listing and one revoke", len(fake.calls))
-		}
-		if mr.Exists(redisKey(live.ID.String())) {
-			t.Error("the Redis row of the revoked session survived")
-		}
-	})
-
-	for _, tc := range []struct {
-		name string
-		fake *fakeSessionDB
-	}{
-		{"a failed listing", &fakeSessionDB{listed: []db.Session{live}, listErr: boom}},
-		{"a failed revoke", &fakeSessionDB{listed: []db.Session{live}, revokeAllErr: boom}},
-	} {
-		t.Run(tc.name+" returns the error and forgets nothing", func(t *testing.T) {
-			sm, mr := build(tc.fake)
-
-			err := sm.RevokeAllUserSessions(context.Background(), userID)
-
-			if !errors.Is(err, boom) {
-				t.Errorf("error = %v, want one wrapping the cause", err)
-			}
-			if !mr.Exists(redisKey(live.ID.String())) {
-				t.Error("the Redis row was deleted although the sessions were not revoked")
-			}
-		})
 	}
 }

@@ -26,11 +26,30 @@ https://nexara.example.com/api/v1
 
 ### JWT Flow
 
-1. **Register** (first user only — anonymous; subsequent registrations require an admin caller):
+1. **Register**:
    ```
    POST /api/v1/auth/register
    Body: { "email": "admin@example.com", "password": "...", "display_name": "Admin" }
    ```
+   The first registration is anonymous. It creates the first user, an administrator,
+   and signs them in: the response is a sign-in's (`user`, `access_token`,
+   `expires_at`, `permissions`, with the session's refresh token in the cookie, as
+   under Login), and the `register` audit entry names the new account as the actor.
+
+   Every later registration needs an administrator as the caller, creates a plain
+   user, and **signs nobody in**. The response is `201` with the new account's record
+   and nothing else:
+   ```
+   Response: { "id": "...", "email": "...", "display_name": "...", "role": "user" }
+   ```
+   No session is created for the new account, no access token is returned and no
+   cookie is set, so the administrator's own session is untouched; the new account
+   signs in for itself with the password it was given. The `register` audit entry
+   names the administrator as the actor and the new account as what was acted on. An
+   earlier release answered an administrator's request with a session for the new
+   account instead — its access token in the body, its refresh cookie on the
+   administrator's browser — so a client that read `access_token` from that response
+   must now sign in as the new account.
 
 2. **Login**:
    ```
@@ -41,7 +60,25 @@ https://nexara.example.com/api/v1
    The refresh token is **never** returned in the body — it is set as an
    HttpOnly, SameSite=Strict cookie, and the `refresh_token` response field is
    always an empty string (retained only so the response shape stays stable).
-   The same applies to `/auth/register`.
+   The same applies to the first registration.
+
+   A session is created only if the account's sessions have not been ended since
+   the credential was checked. If a password change, *Sign Out All Devices*
+   (`POST /auth/logout-all`) or an administrator deactivating the account lands
+   after the credential was checked and before the session exists, the sign-in is
+   refused: `401`, a message telling the user to sign in again, and no access
+   token, no cookie and no `login` audit entry — the refusal is audited as
+   `login_refused_superseded` instead. For a local account the credential is
+   checked when the password is compared; for a directory account the account is
+   read once the directory has answered, so a change that lands between the
+   directory's answer and that read is not refused (the sign-in counts as having
+   begun after it), while one that lands after is. That `401` is not the answer for
+   a wrong password, and the next sign-in with the right one works. A database that
+   cannot be reached, is shutting down or too busy while the session is created is
+   a `503`, and a failure of any other kind a `500`: both say that nothing was
+   issued and the caller is not signed in, and neither says anything about the
+   credential. The session's Redis mirror is best effort: it never fails a
+   sign-in, and a Redis that does not answer delays one by a second at most.
 
 3. **Use the token** on all subsequent requests:
    ```
@@ -218,6 +255,17 @@ Body: { "totp_pending_token": "...", "recovery_code": "..." }
 Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...] }
 ```
 
+The pending token remembers the state of the account that the first step's check
+saw, and the session is created against that, not against the account as it is when
+the code is typed. If the account's sessions were ended in between — a password
+change, *Sign Out All Devices*, a deactivation followed by a reactivation — the
+second step is refused before the code is looked at, with the answer an expired
+token gets (`401`, "Invalid or expired pending token"): no recovery code is spent,
+no failed attempt is counted, and the pending token is destroyed. A change that lands
+after the code was checked is refused at the session insert with the `401` described
+under Login. Either way nothing is issued and the user signs in again from the
+password. A pending token issued before this rule existed is refused as expired.
+
 ### OIDC Flow
 
 1. Check if SSO is available:
@@ -242,6 +290,11 @@ Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "per
    rather than returned in the body, and a user with 2FA enabled gets
    `{ "totp_required": true, "totp_pending_token": "..." }` here instead of
    tokens — complete it against `/auth/totp/verify-login` as above.
+
+   The exchange code carries the state of the account as the callback read it, and
+   the session is created against that: a revoke-all of the account's sessions
+   between the callback and the exchange refuses the sign-in with the `401` described
+   under Login, and the code is spent either way.
 
 ### Interactive-Only Routes
 
@@ -607,7 +660,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/auth/register` | Register a new user (first user becomes admin) |
+| POST | `/auth/register` | Register a new user (the first user becomes admin and is signed in; later registrations need an admin caller and sign nobody in) |
 | POST | `/auth/login` | Login with email and password |
 | POST | `/auth/refresh` | Refresh access token |
 | POST | `/auth/logout` | Logout: end the session the refresh token names; `403`, with the cookie left alone, for a session that belongs to another user than the access token presented |
@@ -1861,7 +1914,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 |--------|------|-------------|
 | GET | `/users` | List all users |
 | GET | `/users/:id` | Get user |
-| PUT | `/users/:id` | Update user |
+| PUT | `/users/:id` | Update user. Deactivating the account (`is_active: false`) changes it and ends every one of its sessions in one transaction: if the sessions cannot be ended, the account stays active and the answer (`503` or `500`) says it was **not** changed. An answer that says the change **could not be confirmed** means the deactivation may have taken effect; repeating it is safe |
 | DELETE | `/users/:id` | Delete user |
 | DELETE | `/users/:id/totp` | Admin reset user's TOTP |
 

@@ -81,7 +81,12 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Description: "Authenticate with an e-mail and password and receive an access token plus a " +
 			"refresh cookie. When the account has a second factor the response is a TOTP challenge " +
 			"instead. Every rejection is deliberately indistinguishable: wrong password, unknown " +
-			"address, disabled account and SSO-only account all answer the same way, after the same work.",
+			"address, disabled account and SSO-only account all answer the same way, after the same work. " +
+			"The one other 401 is for a CORRECT credential whose sessions were ended while the sign-in ran " +
+			"(a password change, a sign-out of all devices, a deactivation): it says to sign in again and " +
+			"issues nothing: no token, no cookie and no `login` audit entry (the refusal is recorded as " +
+			"`login_refused_superseded`). A database that could not complete the sign-in is a 503 or a " +
+			"500 and says nothing about the credential.",
 		Group:       "Authentication",
 		Permissions: Permissions{Public: "issues the session"},
 		Parameters: apischema.Properties{
@@ -160,7 +165,9 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Method: fiber.MethodPost,
 		Path:   authScope + "/oidc/token-exchange",
 		Description: "Trade the one-time code the OIDC callback redirected with for an access token and " +
-			"a refresh cookie. The code is consumed atomically, so a replay finds nothing.",
+			"a refresh cookie. The code is consumed atomically, so a replay finds nothing. The session is " +
+			"created against the state of the account the callback read: a revoke-all of the account's " +
+			"sessions since then refuses the sign-in with a 401 that says to sign in again.",
 		Group:       "Authentication",
 		Permissions: Permissions{Public: "exchanges the OIDC one-time code for tokens"},
 		Parameters: apischema.Properties{

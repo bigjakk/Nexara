@@ -13,15 +13,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createSession = `-- name: CreateSession :one
+const createSessionAtEpoch = `-- name: CreateSessionAtEpoch :one
 INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at, device_name, device_type, device_id, user_role)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+SELECT u.id,
+       $1::text,
+       $2::text,
+       $3::text,
+       $4::timestamptz,
+       $5::text,
+       $6::text,
+       $7::text,
+       $8::text
+FROM users u
+WHERE u.id = $9
+  AND u.auth_epoch = $10
+  AND u.is_active
+FOR SHARE OF u
 RETURNING id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id, user_role, previous_token_hash, rotated_at
 `
 
-type CreateSessionParams struct {
-	UserID     uuid.UUID   `json:"user_id"`
-	TokenHash  string      `json:"-"`
+type CreateSessionAtEpochParams struct {
+	TokenHash  string      `json:"token_hash"`
 	UserAgent  string      `json:"user_agent"`
 	IpAddress  string      `json:"ip_address"`
 	ExpiresAt  time.Time   `json:"expires_at"`
@@ -29,11 +41,78 @@ type CreateSessionParams struct {
 	DeviceType pgtype.Text `json:"device_type"`
 	DeviceID   pgtype.Text `json:"device_id"`
 	UserRole   string      `json:"user_role"`
+	UserID     uuid.UUID   `json:"user_id"`
+	Epoch      int64       `json:"epoch"`
 }
 
-func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
-	row := q.db.QueryRow(ctx, createSession,
-		arg.UserID,
+// Creates a session for a user whose credential check read auth_epoch = epoch,
+// and only while that is still true. 0 rows (pgx.ErrNoRows) means REFUSED: the
+// user's sessions were ended since the check (a sign-out of all devices, a
+// password change, a deactivation), or the account is no longer active, or is gone
+// — so the caller must issue nothing: no token, no cookie, no login audit row.
+// auth.SessionManager.CreateSession turns that into ErrSessionRefused and is the
+// only caller. It is also the ONLY statement that inserts a session — there is no
+// unconditional one for a caller to pick by accident
+// (TestGuard_EverySessionInsertIsConditional).
+//
+// It is conditional because the credential check — a password comparison, an LDAP
+// bind, an identity provider's answer, a TOTP code typed minutes after the password
+// — is a separate step from this insert, and nothing else ties the two together.
+// Unconditional, a login that verified the OLD password just before a password
+// change committed still inserted its session after the change had revoked every
+// other one, and that session then refreshed normally: the credential the user had
+// just replaced kept yielding a long-lived session.
+//
+// The conditions, all on the user's row, which is read and locked here:
+//
+//	auth_epoch  the generation the credential check read. Every revoke-all bumps it
+//	            (auth.RevokeAllUserSessionsIn), so one that committed since the
+//	            check leaves a different value and nothing matches. The epoch is
+//	            the one the CHECK saw, never one read afterwards: a caller that
+//	            re-read the user after the revoke-all and passed that row's epoch
+//	            would make this condition vacuous.
+//	is_active   an account deactivated since the check cannot sign in. A
+//	            deactivation through the API bumps the epoch as well; this also
+//	            covers a path that deactivates without revoking (an LDAP sync).
+//	FOR SHARE   the lock that orders this insert against a revoke-all. The insert
+//	            alone takes only FOR KEY SHARE on the users row, through the
+//	            foreign key, and that does not conflict with the UPDATE that bumps
+//	            the epoch (FOR NO KEY UPDATE) — without this lock the two would
+//	            never wait for each other and could interleave freely. FOR SHARE
+//	            does conflict with it, and with another sign-in's FOR SHARE not at
+//	            all, so concurrent logins of one user do not queue.
+//
+// What each way of meeting a revoke-all comes to. Postgres runs this at READ
+// COMMITTED, the default, which nothing here changes. A revoke-all is three
+// statements, in this order — bump the epoch, list the live sessions, revoke them
+// (auth.RevokeAllUserSessionsIn) — each with a snapshot of its own:
+//   - The bump committed before this statement read the user, or commits while this
+//     one waits for the row lock: the WHERE sees the new epoch — directly, or, after
+//     the wait, because READ COMMITTED re-evaluates it against the newest version of
+//     the row it was waiting for. 0 rows, refused, nothing inserted. If the revoke-all
+//     rolls back instead, the wait ends on the unchanged row and the insert goes ahead:
+//     nothing was revoked, so nothing was refused.
+//   - This statement locks the row first: the bump waits for this transaction to end,
+//     which for one autocommit statement is its commit, and only then runs. The list
+//     and the revoke start after that, with snapshots that include this session, and
+//     revoke it. The session was created, and ends revoked, exactly as if it had
+//     existed before the sign-out-everywhere.
+//
+// Why the bump is a statement of its own and runs first. A revoke-all written as ONE
+// statement — a data-modifying CTE that bumps the epoch and revokes the sessions —
+// takes ONE snapshot when it starts: a session this statement inserts and commits
+// while the CTE waits for the row lock is invisible to the CTE's UPDATE of sessions,
+// and survives (the parts of such a CTE also run with no order between them). And
+// "revoke, then bump" leaves a session inserted between the two live, because the
+// epoch it was conditional on has not moved yet. Bump, list, revoke: a session
+// created against the old epoch either committed before the bump could run, so the
+// later statements see it, or is refused.
+// internal/db/session_epoch_db_test.go drives both orders against Postgres.
+//
+// The parameters are cast because an INSERT ... SELECT gives sqlc nothing to infer
+// them from; the casts are the types of the columns they are written to.
+func (q *Queries) CreateSessionAtEpoch(ctx context.Context, arg CreateSessionAtEpochParams) (Session, error) {
+	row := q.db.QueryRow(ctx, createSessionAtEpoch,
 		arg.TokenHash,
 		arg.UserAgent,
 		arg.IpAddress,
@@ -42,6 +121,8 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.DeviceType,
 		arg.DeviceID,
 		arg.UserRole,
+		arg.UserID,
+		arg.Epoch,
 	)
 	var i Session
 	err := row.Scan(
@@ -114,13 +195,18 @@ type GetSessionByPreviousTokenHashParams struct {
 }
 
 // NEVER AUTHENTICATES. Finds the live session whose refresh token was rotated
-// away from the given hash within the last window_seconds. It serves two callers
-// and both only DECIDE something: Logout, so that a sign-out sent with a cookie
-// one rotation behind (it left the browser before a refresh's Set-Cookie landed)
-// still reaches the session it was meant for; and Refresh, to tell a refusal that
-// lost a race to a concurrent refresh from any other. Neither may use it to
-// decide which session is "current" or to issue anything: GetSessionByTokenHash
-// is the only lookup that may do either.
+// away from the given hash within the last window_seconds. It serves three
+// callers and all of them only DECIDE something: Logout, so that a sign-out sent
+// with a cookie one rotation behind (it left the browser before a refresh's
+// Set-Cookie landed) still reaches the session it was meant for; LogoutAll,
+// through the same lookup (SessionManager.FindSessionForLogout), only to decide
+// whether the caller's refresh cookie is cleared — it is when the cookie names a
+// live session of the caller, one rotation behind included, and left alone when it
+// names someone else's; the sessions LogoutAll ends are the caller's whole set,
+// never the one this finds; and Refresh, to tell a refusal that lost a race to a
+// concurrent refresh from any other. None may use it to decide which session is
+// "current" or to issue anything: GetSessionByTokenHash is the only lookup that
+// may do either.
 //
 // "Live" and the window are part of the predicate, here, so that no caller can
 // forget either: a revoked session or an expired one matches nothing, so a caller
@@ -229,9 +315,22 @@ func (q *Queries) ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Ses
 }
 
 const revokeAllUserSessions = `-- name: RevokeAllUserSessions :exec
-UPDATE sessions SET is_revoked = true WHERE user_id = $1
+UPDATE sessions SET is_revoked = true WHERE user_id = $1 AND is_revoked = false
 `
 
+// Ends every live session of a user: the third statement of
+// auth.RevokeAllUserSessionsIn, after the epoch bump and the listing, and the
+// only caller of this query (TestGuard_EveryRevokeAllGoesThroughTheBump).
+//
+// It writes only the sessions that are still live. Without is_revoked = false it
+// rewrote every session row the user had ever had — the revoked ones included, each
+// time — and two revoke-alls that overlapped (two sign-outs of all devices, which
+// run as separate statements on the pool) could meet each other's rows in different
+// orders, wait on each other's row locks and deadlock (SQLSTATE 40P01), the loser
+// failing its sign-out for nothing. Skipping the rows that are already revoked
+// leaves nothing for the second statement to wait on beyond the first: it re-checks
+// the predicate against the row the first one wrote (READ COMMITTED) and moves on.
+// internal/db/session_epoch_db_test.go drives overlapping revoke-alls against it.
 func (q *Queries) RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeAllUserSessions, userID)
 	return err

@@ -103,7 +103,7 @@ func (q *Queries) CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigPara
 const createLDAPUser = `-- name: CreateLDAPUser :one
 INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source)
 VALUES ($1, '', $2, true, 'user', 'ldap')
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch
 `
 
 type CreateLDAPUserParams struct {
@@ -125,6 +125,7 @@ func (q *Queries) CreateLDAPUser(ctx context.Context, arg CreateLDAPUserParams) 
 		&i.UpdatedAt,
 		&i.Role,
 		&i.AuthSource,
+		&i.AuthEpoch,
 	)
 	return i, err
 }
@@ -207,7 +208,7 @@ func (q *Queries) GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, 
 }
 
 const getUserByEmailAndSource = `-- name: GetUserByEmailAndSource :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source FROM users WHERE email = $1 AND auth_source = $2
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch FROM users WHERE email = $1 AND auth_source = $2
 `
 
 type GetUserByEmailAndSourceParams struct {
@@ -229,6 +230,7 @@ func (q *Queries) GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmai
 		&i.UpdatedAt,
 		&i.Role,
 		&i.AuthSource,
+		&i.AuthEpoch,
 	)
 	return i, err
 }
@@ -450,7 +452,7 @@ func (q *Queries) UpdateLDAPConfigLastSync(ctx context.Context, id uuid.UUID) er
 const updateLDAPUserProfile = `-- name: UpdateLDAPUserProfile :one
 UPDATE users SET display_name = $2
 WHERE id = $1 AND auth_source = 'ldap'
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch
 `
 
 type UpdateLDAPUserProfileParams struct {
@@ -472,6 +474,7 @@ func (q *Queries) UpdateLDAPUserProfile(ctx context.Context, arg UpdateLDAPUserP
 		&i.UpdatedAt,
 		&i.Role,
 		&i.AuthSource,
+		&i.AuthEpoch,
 	)
 	return i, err
 }

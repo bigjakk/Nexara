@@ -53,6 +53,7 @@ var auditClusterExempt = map[string]string{
 
 	"auth_sessions.go.RevokeSessionByID": "sessions belong to a user account, not a cluster; same scope as Logout/LogoutAll",
 
+	"totp.go.VerifyLogin":             "the second factor of a sign-in; refusing a pending token the account has outgrown is an auth event, no cluster in scope",
 	"totp.go.ConfirmSetup":            "MFA enrolment for one user; install-global",
 	"totp.go.Disable":                 "MFA change for one user; install-global",
 	"totp.go.RegenerateRecoveryCodes": "MFA change for one user; install-global",

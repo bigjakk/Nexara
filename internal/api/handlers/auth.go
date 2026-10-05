@@ -66,8 +66,12 @@ func refreshTokenTooLong(token string) bool {
 // client's source (TestGuard_TheSPAMatchesTheSupersededContract).
 const RefreshSupersededCode = "refresh_superseded"
 
-// authDBTimeout bounds the database work of one Refresh, Logout, LogoutAll or
-// ChangePassword.
+// authDBTimeout bounds the database work that DECIDES the answer of one Refresh,
+// Logout, LogoutAll or ChangePassword; of the session insert of a sign-in — Login,
+// the SSO exchange and the second step of a TOTP login through issueTokens, and
+// Register's own insert, though not the rest of Register's transaction, which still
+// runs on the request context; and of the deactivation of an account
+// (UserHandler.Update), whose one transaction, begin to commit, is held to it.
 //
 // None has a deadline of its own — in Fiber the request context is
 // context.Background() unless a handler sets one, so it never ends — and a pool
@@ -91,6 +95,15 @@ const authDBTimeout = 15 * time.Second
 // fresh start: short, because a follow-up is one statement or one command, and
 // still a bound, because a follow-up that waited for ever would hold the response
 // the decision has already been made for.
+//
+// The follow-ups are the audit rows — of a sign-in refused because its sessions were
+// ended meanwhile, of a TOTP pending token refused before its code was looked at, of
+// a registration and of a deactivation, including one whose commit could not be
+// confirmed — the RBAC cache purge and the Redis cleanup that follow a deactivation or
+// a sign-out, and LogoutAll's lookup of what its refresh cookie names. That lookup is
+// made BEFORE LogoutAll's deciding bound begins, under a bound of its own, so that a
+// statement that stalls costs the caller at most this and leaves the revoke the whole
+// of authDBTimeout.
 const authFollowUpTimeout = 5 * time.Second
 
 // releaseTxTimeout bounds the rollback releaseTx sends, on a context of its own:
@@ -181,6 +194,12 @@ const logoutMatchedPreviousToken = `{"matched":"previous_token"}`
 // NewAuthHandler is the only place that converts one.
 type txBeginner interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
+	// BeginTx begins a transaction whose isolation level the caller names. It is what a
+	// transaction whose correctness DEPENDS on the level is begun with — Register's,
+	// today — instead of trusting the server's default, which a role, a database or a
+	// connection setting can change. UserHandler's deactivation names its level through
+	// txOptionsBeginner, which this satisfies.
+	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 }
 
 // AuthHandler handles authentication endpoints.
@@ -478,6 +497,13 @@ type authUserResponse struct {
 // users require admin auth (checked via authOptional middleware + handler
 // check).
 //
+// The two answer differently, because they are for different callers. The first
+// registration signs the new administrator in: tokens, the refresh cookie and a
+// session, like a login. A registration by an administrator signs nobody in — it
+// answers 201 with the new account's record and creates no session, returns no
+// token and sets no cookie, because the caller already has a session of their own
+// and must keep it.
+//
 // Order of operations (Findings #17, #18):
 //   - Cheap validation (body shape, email format, password complexity) runs
 //     first, before any DB or bcrypt work — bcrypt at cost 12 burns ~80–100ms
@@ -515,7 +541,19 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "registration unavailable")
 	}
 
-	tx, err := h.pool.Begin(c.Context())
+	// READ COMMITTED, by name. The count below has to see the registration that held
+	// the advisory lock before this one, and it does only if its snapshot is taken
+	// AFTER the lock is granted: every statement of a READ COMMITTED transaction takes
+	// its own, so the CountUsers that follows the lock sees the earlier registration's
+	// commit. Under REPEATABLE READ the snapshot is taken by the transaction's FIRST
+	// statement — the lock request itself, before it blocks — and two concurrent first
+	// registrations would both read a count of 0 and both be told they are the first:
+	// two administrators, and two sessions handed out (internal/db's
+	// TestRegister_TwoConcurrentFirstRegistrations shows both outcomes against
+	// Postgres). That used to rest on the server's default. It matters more now that
+	// the answer decides who is signed in: the first registration is, an
+	// administrator's is not.
+	tx, err := h.pool.BeginTx(c.Context(), pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to start transaction")
 	}
@@ -548,8 +586,13 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check user count")
 	}
 
+	// Whether this is the bootstrap registration (no account exists yet) or an
+	// administrator creating one is decided here, under the advisory lock, and it
+	// decides two things below: the role the account gets, and whether anyone is
+	// signed in as a result of it.
+	firstUser := count == 0
 	role := "user"
-	if count == 0 {
+	if firstUser {
 		role = "admin"
 	} else {
 		callerRole, _ := c.Locals("role").(string)
@@ -613,6 +656,37 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		})
 	}
 
+	// An administrator created this account for someone else. The administrator is
+	// signed in already and stays signed in as themselves: nothing is issued for the
+	// new account — no session, no access token in the body, no cookie — and the
+	// answer is the account's record.
+	//
+	// This endpoint serves two callers, and used to give both the same answer. The
+	// bootstrap caller has no session, and the first administrator's is what it is
+	// for. An administrator adding a user (the Users page) has one, and was handed a
+	// session for the NEW account as well: its access token in the body, and — the
+	// part that did the damage — its refresh cookie on the administrator's browser,
+	// which replaced their own, so that their next refresh resumed as the account they
+	// had just created and what they did from then on was audited as that account. The
+	// new account signs in for itself, with the password it was given.
+	if !firstUser {
+		// The actor is the administrator who made the request — read from the request,
+		// which is also where an API key's id is picked up — and the resource is the
+		// account they created. The account exists by now, so the row is written on a
+		// follow-up deadline: a slow audit insert must not hold the answer.
+		details, _ := json.Marshal(map[string]string{"email": user.Email, "role": user.Role})
+		h.withFollowUp(c, func() {
+			AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "auth", user.ID.String(), "register", details)
+		})
+
+		return c.Status(fiber.StatusCreated).JSON(authUserResponse{
+			ID:          user.ID,
+			Email:       user.Email,
+			DisplayName: user.DisplayName,
+			Role:        user.Role,
+		})
+	}
+
 	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate access token")
@@ -623,18 +697,37 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate refresh token")
 	}
 
+	// The account was created a moment ago, in this very request, so the epoch on
+	// the row CreateUser returned is the credential's generation: there is no earlier
+	// check for a revoke-all to have outdated. The insert is still conditional like
+	// every other, so a session cannot be minted for an account that was deactivated
+	// or removed in the meantime.
+	//
+	// The insert is bounded like issueTokens': it is database work on a request
+	// context that never ends, and a pool with no free connection would hold the
+	// registration for as long as it took.
+	sessionCtx, cancelSession := h.dbContext(c)
 	_, err = h.sessionManager.CreateSession(
-		c.Context(), user.ID, refreshToken, user.Role,
+		sessionCtx, user.ID, user.AuthEpoch, refreshToken, user.Role,
 		c.Get("User-Agent"), c.IP(),
 		h.jwtService.RefreshTokenTTL(),
 		deviceInfoFromRequest(c),
 	)
+	cancelSession()
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create session")
+		if errors.Is(err, auth.ErrSessionRefused) {
+			refusedDetails, _ := json.Marshal(map[string]string{"email": user.Email, "ip": c.IP()})
+			h.withFollowUp(c, func() {
+				AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), signInRefusedAuditAction, refusedDetails)
+			})
+		}
+		return sessionNotCreated(user.ID, err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"email": user.Email, "role": user.Role})
-	AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), "register", details)
+	h.withFollowUp(c, func() {
+		AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), "register", details)
+	})
 
 	perms := h.loadPerms(c, user.ID)
 
@@ -691,7 +784,7 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		// Otherwise fall through to a dummy bcrypt so timing matches the
 		// "real user, bad password" path.
 		if ldapUser, ok := h.tryLDAPLogin(c, email, password); ok {
-			return h.issueOrTOTP(c, ldapUser, "ldap_login")
+			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login")
 		}
 		auth.RunDummyBcrypt(password)
 		return invalidCredentials
@@ -700,7 +793,7 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 	switch user.AuthSource {
 	case "ldap":
 		if ldapUser, ok := h.tryLDAPLogin(c, email, password); ok {
-			return h.issueOrTOTP(c, ldapUser, "ldap_login")
+			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login")
 		}
 		// Pad failure to keep timing roughly aligned with the local-bcrypt
 		// path. LDAP roundtrip dominates wall-clock anyway, so this is a
@@ -725,7 +818,13 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		return invalidCredentials
 	}
 
-	return h.issueOrTOTP(c, user, "login")
+	// user is the row read BEFORE the password was compared, in one statement with
+	// the hash that was compared, so user.AuthEpoch is the generation of exactly the
+	// credential that was just accepted: a password change commits the new hash and a
+	// new epoch together, and a change that lands during the comparison (bcrypt takes
+	// the better part of a hundred milliseconds) leaves the session below to be
+	// refused, not minted on the password that has just been replaced.
+	return h.issueOrTOTP(c, user, user.AuthEpoch, "login")
 }
 
 // tryLDAPLogin attempts LDAP authentication. Returns the DB user and true on success.
@@ -740,6 +839,11 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 // path discovers the conflict. Vanishingly narrow window in practice and
 // no different from the LDAP-bound attempt the user was about to make
 // anyway, but worth documenting.
+//
+// What happens once the directory has said yes — the account's lookup or creation,
+// the epoch the session will be conditional on, the active check, the role sync — is
+// provisionLDAPUser, which is what the tests drive: the bind itself needs a
+// directory.
 func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string) (db.User, bool) {
 	if h.ldapHandler == nil {
 		return db.User{}, false
@@ -772,6 +876,29 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string) (db.User
 		return db.User{}, false
 	}
 
+	return h.provisionLDAPUser(c, ldapCfg, ldapUser, email)
+}
+
+// provisionLDAPUser turns a directory user who has just authenticated into the
+// account the sign-in is for: it looks the account up by the address the directory
+// reports (the one that was typed when it reports none), creates it on first sight,
+// keeps its display name in step with the directory, refuses a deactivated one, and
+// syncs its RBAC roles from the directory's groups. It returns the row and true, or
+// false when no session may be issued.
+//
+// The row it returns carries the AuthEpoch the session will be conditional on, and
+// that is the epoch of the LAST read of the account after the bind: the lookup's, or,
+// when the directory's display name differed, the one UpdateLDAPUserProfile …
+// RETURNING * wrote back, or the one CreateLDAPUser (or the lookup after a creation
+// race) produced. That is the right place for a directory login: the credential is
+// the directory's, which no revoke-all of Nexara's replaces, so what a revoke-all
+// must refuse is a sign-in that had already read the account when it landed, and
+// every statement from that read to the session insert — the role sync included —
+// is on the wrong side of one. A revoke-all that lands before that read is not
+// refused: as far as the epoch can tell, that sign-in began after it. A deactivation
+// is caught either way, by the is_active check below on the same row and, after it,
+// by the insert's own condition.
+func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldapUser *auth.LDAPUser, email string) (db.User, bool) {
 	// Determine the email to use
 	userEmail := ldapUser.Email
 	if userEmail == "" {
@@ -839,8 +966,92 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string) (db.User
 	return user, true
 }
 
+// signInSupersededMessage is what a sign-in says when its session was refused: the
+// user's sessions were ended — by a password change, a sign-out of all devices or
+// an administrator's change to the account — after the credential check it ran, so
+// the credential it accepted is no longer one to sign in on. The remedy is the one
+// the message gives, which is also why the answer is a 401 and not a 409: the
+// client's next step is the sign-in form.
+const signInSupersededMessage = "Your sign-in could not be completed because your account's sessions were ended while it was in progress " +
+	"(a password change, a sign-out of all devices or a change to the account). Please sign in again."
+
+// signInUnavailableMessage is what a sign-in says when the session could not be
+// created because the database (or its connection) did not answer. It says only what
+// is true in every such case: that nothing was issued — no token, no cookie — so the
+// user is not signed in. A failed statement does not prove the insert did not run
+// (its reply can be lost after the server committed), so it must not say that no
+// session exists; the row, if there is one, belongs to a token nobody holds.
+const signInUnavailableMessage = "The sign-in could not be completed right now because the service was too busy or unavailable. " +
+	"Nothing was issued, so you are not signed in; please sign in again shortly."
+
+// signInFailedMessage is the same for a failure that is not the database being away
+// (a defect): nothing was issued and the user is not signed in.
+const signInFailedMessage = "The sign-in could not be completed. Nothing was issued, so you are not signed in; please sign in again."
+
+// signInRefusedAuditAction is the audit action of a sign-in that was refused after
+// its credential had been ACCEPTED: the password compared right (or the directory,
+// the identity provider or the second factor said yes) and the account's sessions
+// were ended before the session could be created. Someone presented a credential
+// that a password change, a sign-out of all devices or a deactivation had just
+// replaced — usually the owner racing themselves, and sometimes not, which is why it
+// is a row of its own and never a "login" row: no session was created. Its details
+// are the email and the IP, like the login rows.
+const signInRefusedAuditAction = "login_refused_superseded"
+
+// sessionNotCreated answers a sign-in whose session was not created, and tells the
+// three things apart that a bare error cannot:
+//
+//   - ErrSessionRefused is the insert's own answer — the credential check no longer
+//     holds — and is a 401 saying so, with no token, no cookie and no `login` audit
+//     row: the callers return straight away, so nothing of the sign-in has been
+//     issued, and a session that was not created must not be recorded as a login.
+//     They do record the refusal itself, as signInRefusedAuditAction, before they get
+//     here. It is logged at Info with the user id, which is what lets an operator see
+//     that a sign-in lost to a password change, and never anything replayable.
+//   - A database failure that is transient (isTransientDBError: unreachable, too
+//     busy, out of its bound) is a 503, "nothing was decided, try again".
+//   - Anything else is a defect and a 500.
+//
+// The second and third are NOT a refusal. Reading "could not look" as "refused"
+// would blame the credential for the database; reading it as success would issue a
+// token for a session that does not exist.
+func sessionNotCreated(userID uuid.UUID, err error) error {
+	switch {
+	case errors.Is(err, auth.ErrSessionRefused):
+		slog.Info("sign-in refused: the user's sessions were ended, or the account changed, after its credential check; "+
+			"answering 401 and issuing nothing", "user_id", userID)
+		return fiber.NewError(fiber.StatusUnauthorized, signInSupersededMessage)
+	case isTransientDBError(err):
+		slog.Warn("sign-in: the session could not be created; answering 503, nothing was issued",
+			"user_id", userID, "error", err)
+		return fiber.NewError(fiber.StatusServiceUnavailable, signInUnavailableMessage)
+	default:
+		slog.Error("sign-in: creating the session failed; answering 500, nothing was issued",
+			"user_id", userID, "error", err)
+		return fiber.NewError(fiber.StatusInternalServerError, signInFailedMessage)
+	}
+}
+
 // issueTokens creates JWT + session for the given user and returns the auth response.
-func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, auditAction string) error {
+//
+// epoch is the user's auth_epoch AS THE CREDENTIAL CHECK READ IT (see
+// SessionManager.CreateSession), and it is a parameter of its own, not read off
+// user, because user is not always the row the check read. The second step of a TOTP
+// login (VerifyLogin) and the SSO exchange (OIDCTokenExchange) both hand over a user
+// they RE-READ after the check — for the active flag and the second factor — and
+// that row carries whatever epoch is current now. Creating the session against it
+// would hand the insert the generation that a password change or a sign-out of all
+// devices has just produced, and the condition would hold for exactly the sign-ins
+// it exists to refuse. Every caller has to say where its epoch came from: the row
+// read beside the password or the directory bind, the TOTP pending token, or the SSO
+// exchange code.
+//
+// A session that is refused (auth.ErrSessionRefused) issues nothing — no token, no
+// cookie, no `login` audit row; the refusal is audited as signInRefusedAuditAction —
+// and is answered by sessionNotCreated. The insert is bounded by authDBTimeout, like
+// the rest of the auth handlers' deciding database work; a pool with no free
+// connection is a 503 and not a request that waits for ever.
+func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, epoch int64, auditAction string) error {
 	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate access token")
@@ -851,14 +1062,28 @@ func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, auditAction string)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate refresh token")
 	}
 
+	ctx, cancel := h.dbContext(c)
 	_, err = h.sessionManager.CreateSession(
-		c.Context(), user.ID, refreshToken, user.Role,
+		ctx, user.ID, epoch, refreshToken, user.Role,
 		c.Get("User-Agent"), c.IP(),
 		h.jwtService.RefreshTokenTTL(),
 		deviceInfoFromRequest(c),
 	)
+	// Back to the request's own context before anything else reads it: the audit row
+	// and the permissions below do not run on the session insert's bound.
+	cancel()
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create session")
+		if errors.Is(err, auth.ErrSessionRefused) {
+			// A correct credential whose sessions were ended while the sign-in ran is a
+			// compromise signal, so it gets a row of its own — not a login row: nothing
+			// was created — on a follow-up deadline, so that a slow audit insert cannot
+			// hold the refusal.
+			refusedDetails, _ := json.Marshal(map[string]string{"email": user.Email, "ip": c.IP()})
+			h.withFollowUp(c, func() {
+				AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), signInRefusedAuditAction, refusedDetails)
+			})
+		}
+		return sessionNotCreated(user.ID, err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"email": user.Email, "ip": c.IP()})
@@ -883,8 +1108,8 @@ func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, auditAction string)
 }
 
 // IssueTokens is the exported version of issueTokens for cross-handler use.
-func (h *AuthHandler) IssueTokens(c fiber.Ctx, user db.User, auditAction string) error {
-	return h.issueTokens(c, user, auditAction)
+func (h *AuthHandler) IssueTokens(c fiber.Ctx, user db.User, epoch int64, auditAction string) error {
+	return h.issueTokens(c, user, epoch, auditAction)
 }
 
 type consoleTokenResponse struct {
@@ -1943,6 +2168,22 @@ func (h *AuthHandler) SSOStatus(c fiber.Ctx, _ *apischema.Params) error {
 }
 
 // OIDCTokenExchange consumes the short-lived exchange code and issues standard JWT tokens.
+//
+// The session is created against the auth epoch the exchange code carries — the one
+// OIDCHandler.Callback read together with the user, after the identity provider had
+// vouched for them — and NOT against the epoch of the user row this handler re-reads
+// below. That re-read is for the active flag and the second factor, and it happens
+// after whatever has become of the account since the callback: a password change, a
+// sign-out of all devices, a deactivation. Its row carries the epoch that produced,
+// and a session created against that would be conditional on a generation that is
+// already the current one — the check would hold for the very sign-in it exists to
+// refuse. So the epoch is READ at the callback and CHECKED here, at the insert; the
+// window it closes is the code's lifetime plus the redirect that carries it, the two
+// requests being up to five seconds apart.
+//
+// A code that carries no epoch — written by a release that recorded none, in the
+// seconds around an upgrade — cannot be tied to the callback's read, and is refused
+// like an expired one; the user starts the sign-in again.
 func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error {
 	// The route is declared on AuthHandler alone, so a Server wired with an
 	// auth handler but no OIDC one reaches here rather than 404ing at the
@@ -1967,6 +2208,12 @@ func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error 
 		return fiber.NewError(fiber.StatusInternalServerError, "Invalid user in exchange data")
 	}
 
+	epoch, err := strconv.ParseInt(exchangeData[oidcExchangeEpochKey], 10, 64)
+	if err != nil {
+		slog.Warn("oidc token exchange: the exchange code carries no usable auth epoch; refusing it", "user_id", userID)
+		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired exchange code")
+	}
+
 	user, err := h.queries.GetUserByID(c.Context(), userID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "User not found")
@@ -1976,14 +2223,19 @@ func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error 
 		return fiber.NewError(fiber.StatusForbidden, "Account is disabled")
 	}
 
-	return h.issueOrTOTP(c, user, "oidc_login")
+	return h.issueOrTOTP(c, user, epoch, "oidc_login")
 }
 
 // issueOrTOTP checks if the user has TOTP enabled. If so, returns a pending token
 // instead of issuing JWT tokens directly. Otherwise, issues tokens normally.
-func (h *AuthHandler) issueOrTOTP(c fiber.Ctx, user db.User, auditAction string) error {
+//
+// epoch is the auth epoch the credential check read (see issueTokens); with a
+// second factor it is written into the pending token, so that the session the
+// second step creates minutes later is conditional on the generation the PASSWORD
+// step saw, not on whatever the user's row holds when the code is typed.
+func (h *AuthHandler) issueOrTOTP(c fiber.Ctx, user db.User, epoch int64, auditAction string) error {
 	if user.TotpSecret.Valid && h.totpHandler != nil {
-		token, err := h.totpHandler.CreateTOTPPendingToken(c.Context(), user.ID, auditAction)
+		token, err := h.totpHandler.CreateTOTPPendingToken(c.Context(), user.ID, epoch, auditAction)
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to create TOTP challenge")
 		}
@@ -1992,7 +2244,7 @@ func (h *AuthHandler) issueOrTOTP(c fiber.Ctx, user db.User, auditAction string)
 			TOTPPendingToken: token,
 		})
 	}
-	return h.issueTokens(c, user, auditAction)
+	return h.issueTokens(c, user, epoch, auditAction)
 }
 
 // profileResponse is the response for GET /api/v1/auth/me.
@@ -2210,7 +2462,7 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process password")
 	}
 
-	tx, err := h.pool.Begin(ctx)
+	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}) // named, not defaulted: see auth.RevokeAllUserSessionsIn
 	if err != nil {
 		return passwordNotChanged("start the transaction", userID, err)
 	}

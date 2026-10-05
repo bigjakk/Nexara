@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +38,13 @@ import (
 // What stays here is what a declaration cannot see: the cleartext-callback
 // confirmation, the credential-redirect refusal, and the issuer/redirect URL
 // validators — one of which resolves DNS, which no parameter schema could do.
+
+// oidcExchangeEpochKey is the key, in the JSON a callback stores under
+// oidc:exchange:<code>, that holds the user's auth epoch as the callback read it
+// (decimal). storeExchange writes it and OIDCTokenExchange reads it, and the session
+// the exchange creates is conditional on it: see OIDCTokenExchange for why the epoch
+// travels with the code instead of being read again at the exchange.
+const oidcExchangeEpochKey = "auth_epoch"
 
 // OIDCHandler handles OIDC/SSO configuration and auth flow endpoints.
 type OIDCHandler struct {
@@ -552,31 +561,9 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(errMsg))
 	}
 
-	// JIT provision or update the user
-	user, err := h.provisionUser(c, cfg, userInfo)
-	if err != nil {
-		slog.Error("OIDC user provisioning failed", "email", userInfo.Email, "error", err)
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("User provisioning failed"))
-	}
-
-	// Sync group-to-role mapping
-	mapping := make(map[string]string)
-	if len(cfg.GroupRoleMapping) > 0 {
-		_ = json.Unmarshal(cfg.GroupRoleMapping, &mapping)
-	}
-	h.syncUserRoles(c, user.ID, userInfo.Groups, mapping, cfg.DefaultRoleID)
-
-	// Store short-lived exchange code in Redis (5 second TTL)
-	exchangeCode, err := auth.GenerateRandomString(32)
-	if err != nil {
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("Internal error"))
-	}
-
-	exchangeData, _ := json.Marshal(map[string]string{
-		"user_id": user.ID.String(),
-	})
-	if err := h.rdb.Set(c.Context(), "oidc:exchange:"+exchangeCode, string(exchangeData), 5*time.Second).Err(); err != nil {
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("Internal error"))
+	user, exchangeCode, failure := h.provisionAndStoreExchange(c, cfg, userInfo)
+	if failure != "" {
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(failure))
 	}
 
 	details, _ := json.Marshal(map[string]string{"email": userInfo.Email, "ip": c.IP()})
@@ -590,6 +577,68 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 	})
 
 	return c.Redirect().Status(fiber.StatusFound).To("/oidc-callback?oidc_token=" + exchangeCode)
+}
+
+// provisionAndStoreExchange is Callback once the identity provider has vouched for
+// userInfo: it provisions or updates the account, syncs its roles from the groups,
+// and stores the one-time exchange code the browser will trade for tokens — with the
+// epoch of the account the PROVISIONING returned (storeExchange). It returns the
+// account and the code, or, when it could not, the message the login page shows in
+// place of both.
+//
+// It is split out so that the hand-off the whole SSO guarantee rests on — the user
+// provisionUser read or created is the user whose epoch the code records — is
+// something a test can drive: Callback itself needs an identity provider.
+func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, userInfo *auth.OIDCUserInfo) (user db.User, exchangeCode, failure string) {
+	// JIT provision or update the user
+	user, err := h.provisionUser(c, cfg, userInfo)
+	if err != nil {
+		slog.Error("OIDC user provisioning failed", "email", userInfo.Email, "error", err)
+		return db.User{}, "", "User provisioning failed"
+	}
+
+	// Sync group-to-role mapping
+	mapping := make(map[string]string)
+	if len(cfg.GroupRoleMapping) > 0 {
+		_ = json.Unmarshal(cfg.GroupRoleMapping, &mapping)
+	}
+	h.syncUserRoles(c, user.ID, userInfo.Groups, mapping, cfg.DefaultRoleID)
+
+	// Store short-lived exchange code in Redis (5 second TTL)
+	exchangeCode, err = h.storeExchange(c.Context(), user)
+	if err != nil {
+		slog.Error("OIDC callback: could not store the exchange code", "user_id", user.ID, "error", err)
+		return db.User{}, "", "Internal error"
+	}
+	return user, exchangeCode, ""
+}
+
+// oidcExchangeTTL is how long the code Callback redirects the browser with can be
+// traded for tokens.
+const oidcExchangeTTL = 5 * time.Second
+
+// storeExchange mints the single-use code the browser trades for tokens
+// (OIDCTokenExchange) and records, under it, who it is for and the auth epoch of
+// that user as it stands NOW — the one on the row provisionUser has just read or
+// created, after the identity provider vouched for the user, which is the
+// credential check of an SSO sign-in. The exchange creates its session against this
+// value and not against whatever the user's row holds when the browser comes back
+// with the code, so that a password change, a sign-out of all devices or a
+// deactivation that lands in between refuses the session instead of being
+// outlived by it.
+func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User) (string, error) {
+	code, err := auth.GenerateRandomString(32)
+	if err != nil {
+		return "", fmt.Errorf("generating the exchange code: %w", err)
+	}
+	data, _ := json.Marshal(map[string]string{
+		"user_id":            user.ID.String(),
+		oidcExchangeEpochKey: strconv.FormatInt(user.AuthEpoch, 10),
+	})
+	if err := h.rdb.Set(ctx, "oidc:exchange:"+code, string(data), oidcExchangeTTL).Err(); err != nil {
+		return "", fmt.Errorf("storing the exchange code: %w", err)
+	}
+	return code, nil
 }
 
 // --- User provisioning ---

@@ -427,7 +427,7 @@ func (s *Server) registerOps(d *serverDeps) {
 	}
 	if d.hasRBAC() {
 		s.rbacHandler = handlers.NewRBACHandler(d.queries, d.rbacEngine, d.eventPub)
-		s.userHandler = handlers.NewUserHandler(d.queries, d.rbacEngine, d.eventPub, d.sessionMgr)
+		s.userHandler = handlers.NewUserHandler(d.pool, d.queries, d.rbacEngine, d.eventPub, d.sessionMgr)
 	}
 }
 

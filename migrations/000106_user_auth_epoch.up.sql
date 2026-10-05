@@ -1,0 +1,33 @@
+-- 000106_user_auth_epoch.up.sql
+--
+-- A per-user generation counter for "every session of this user has just been
+-- ended". Every revoke-all — sign out of all devices, a password change, an admin
+-- deactivating the user — bumps it, in the same transaction as the revoke
+-- (auth.RevokeAllUserSessionsIn), and a session is created only against the
+-- generation the credential check saw (queries/sessions.sql, CreateSessionAtEpoch).
+--
+-- Why. A sign-in checks the credential first and inserts the session some time
+-- later, and nothing tied the two together. A login that had verified the OLD
+-- password before a password change committed could still insert its session after
+-- that change's revoke-all, and the session then refreshes like any other — a
+-- refresh checks that the session is live, the account active and the role
+-- unchanged, never the password — so the credential the user had just replaced went
+-- on yielding a long-lived session. With a second factor the window is the five
+-- minutes the pending login token lives; for SSO it is the exchange code's few
+-- seconds; for every login it is at least the bcrypt comparison.
+--
+-- Additive and self-contained. ADD COLUMN IF NOT EXISTS ... NOT NULL DEFAULT 0 gives
+-- every existing row its 0 in the same statement (a constant default is not a table
+-- rewrite), so there is nothing to backfill and no operator action: sessions that
+-- are live stay live, and the counter only matters to a sign-in that is in flight
+-- when a revoke-all lands. A sign-in that straddles the upgrade restart — a TOTP
+-- pending token minted by the previous release carries no generation — is refused
+-- once and signs in again.
+--
+-- The users updated_at trigger (000001) fires on any UPDATE of a users row, so
+-- bumping the counter moves updated_at. A sign-out of all devices moves it where it
+-- did not before; a password change and a deactivation already did. Nothing reads
+-- updated_at for a decision, and the Users page does not show it.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_epoch BIGINT NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN users.auth_epoch IS 'Bumped by every revoke-all of the user''s sessions (sign out of all devices, password change, deactivation), in the same transaction as the revoke. A session is created only while this still holds the value the credential check read, so a sign-in whose credential has been replaced since cannot mint one. See queries/sessions.sql CreateSessionAtEpoch';

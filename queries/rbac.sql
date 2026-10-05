@@ -112,7 +112,17 @@ GROUP BY u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.upd
 ORDER BY u.created_at DESC;
 
 -- name: UpdateUserProfile :one
+-- A PARTIAL update: a field the caller does not supply (NULL) is left as it is
+-- in the row at the moment of the write. The handler reads the account before it
+-- writes (to answer 404, to refuse a caller's own role or active flag) and used to
+-- write all three columns back from that read, which is a lost update: a
+-- deactivation wrote back the role a concurrent edit had just demoted, and a name
+-- edit that had read is_active = true re-activated an account that had been
+-- deactivated in between (its sessions stay revoked, but its password works again).
+-- A request now writes exactly the fields it was given.
 UPDATE users
-SET display_name = $2, is_active = $3, role = $4
-WHERE id = $1
+SET display_name = COALESCE(sqlc.narg(display_name)::text, display_name),
+    is_active    = COALESCE(sqlc.narg(is_active)::boolean, is_active),
+    role         = COALESCE(sqlc.narg(role)::text, role)
+WHERE id = sqlc.arg(id)
 RETURNING *;

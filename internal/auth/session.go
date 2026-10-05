@@ -59,6 +59,17 @@ const PreviousTokenRevocationWindow = 2 * time.Minute
 // window is kept to the race rather than to anything the race might one day need.
 const ConcurrentRefreshTolerance = 10 * time.Second
 
+// ErrSessionRefused is returned by CreateSession, having created nothing, when
+// the credential check the session was to be issued on no longer holds: every
+// session of the user was ended since the check read the user (a sign-out of all
+// devices, a password change, an admin deactivating the account — each a revoke-all
+// that bumps users.auth_epoch), or the account has since been deactivated or
+// removed. It is an answer about the sign-in and not a failure of the database:
+// callers refuse the sign-in — a 401 telling the user to sign in again, no token,
+// no cookie, no login audit row — and must not treat it as the 500/503 of a
+// statement that did not run.
+var ErrSessionRefused = errors.New("sign-in refused: the credential check no longer holds")
+
 // DeviceInfo describes the client device a session is being created for.
 // All fields are optional; a zero-value DeviceInfo creates an un-tagged session
 // (matching the legacy behavior).
@@ -79,7 +90,20 @@ func nullText(s string) pgtype.Text {
 type SessionManager struct {
 	queries *db.Queries
 	redis   *redis.Client
+
+	// mirrorWait is how long CreateSession waits for the Redis mirror of a session it
+	// has created; sessionMirrorWait when zero. A field so that a test can watch the
+	// wait end in milliseconds.
+	mirrorWait time.Duration
 }
+
+// sessionMirrorWait is how long CreateSession waits for the Redis write of a session it
+// has just created before it carries on without it, and sessionMirrorTimeout is how
+// long that write is then allowed to run on its own. See mirrorSession.
+const (
+	sessionMirrorWait    = time.Second
+	sessionMirrorTimeout = 5 * time.Second
+)
 
 // redisSession is the JSON stored under nexara:session:<id>. Nothing reads it
 // back (see WriteSessionRedis), so it is a mirror of the session, not a lookup
@@ -109,17 +133,40 @@ func redisKey(sessionID string) string {
 	return "nexara:session:" + sessionID
 }
 
-// CreateSession stores a new session in both PostgreSQL and Redis.
+// CreateSession stores a new session in both PostgreSQL and Redis, and only while
+// the credential check it is issued on still holds.
+//
+// epoch is the user's auth_epoch AS THE CREDENTIAL CHECK READ IT — the generation
+// carried by the row that was read next to the password comparison, the LDAP bind
+// or the identity provider's answer, or recorded in the TOTP pending token or the
+// SSO exchange code when the check was an earlier step. It is never the epoch of a
+// user row read afterwards: a caller that re-read the user after a revoke-all and
+// passed that row's epoch would hand the insert the new generation and make the
+// condition vacuous. There is no default for it, and no overload without it, so
+// that every caller has to say where its value came from.
+//
+// The insert (CreateSessionAtEpoch) takes a lock on the user's row and goes ahead
+// only while the row is active and still holds epoch; otherwise nothing is created
+// and the error is ErrSessionRefused. That is what ties a sign-in to the revoke-all
+// that has since invalidated its credential — see the query for why it holds for
+// both orders in which the two can meet, and RevokeAllUserSessionsIn for the other
+// half.
+//
+// The Redis row is written after the insert has committed and is best effort: it
+// mirrors the session for nobody to read, so a failed write is logged and the
+// session is returned all the same, and one that has not finished after a second is
+// not waited for (mirrorSession).
 //
 // role is the user's legacy role at the time the session was issued. It is
 // persisted to sessions.user_role so the Refresh handler can detect a role
 // rotation (e.g. admin demoting the user) and force re-login.
-func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, refreshToken, role, userAgent, ipAddress string, ttl time.Duration, device DeviceInfo) (db.Session, error) {
+func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, epoch int64, refreshToken, role, userAgent, ipAddress string, ttl time.Duration, device DeviceInfo) (db.Session, error) {
 	tokenHash := HashToken(refreshToken)
 	expiresAt := time.Now().Add(ttl)
 
-	session, err := sm.queries.CreateSession(ctx, db.CreateSessionParams{
+	session, err := sm.queries.CreateSessionAtEpoch(ctx, db.CreateSessionAtEpochParams{
 		UserID:     userID,
+		Epoch:      epoch,
 		TokenHash:  tokenHash,
 		UserAgent:  userAgent,
 		IpAddress:  ipAddress,
@@ -130,25 +177,76 @@ func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, r
 		UserRole:   role,
 	})
 	if err != nil {
+		// No row is the insert's refusal (see ErrSessionRefused), and it is the only
+		// thing pgx.ErrNoRows can mean for a statement that RETURNs what it inserted:
+		// any other error is the database failing, and says nothing about the
+		// credential.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Session{}, fmt.Errorf("creating session for user %s: %w", userID, ErrSessionRefused)
+		}
 		return db.Session{}, fmt.Errorf("creating session in db: %w", err)
 	}
 
-	rs := redisSession{
-		SessionID: session.ID.String(),
-		UserID:    userID.String(),
-		TokenHash: tokenHash,
-		Role:      role,
-	}
-	data, err := json.Marshal(rs)
-	if err != nil {
-		return db.Session{}, fmt.Errorf("marshaling redis session: %w", err)
-	}
-
-	if err := sm.redis.Set(ctx, redisKey(session.ID.String()), data, ttl).Err(); err != nil {
-		return db.Session{}, fmt.Errorf("storing session in redis: %w", err)
-	}
+	// The session exists from here on. Its Redis row is a mirror that nothing reads
+	// (see WriteSessionRedis), so a failure to write it is logged and nothing more:
+	// failing the sign-in over it would answer "nothing was issued" for a session
+	// that is live in PostgreSQL, with no token anybody holds for it. Nor may a Redis
+	// that does not answer hold the sign-in: see mirrorSession.
+	sm.mirrorSession(ctx, session.ID, userID, tokenHash, role, ttl)
 
 	return session, nil
+}
+
+// mirrorSession writes the Redis row of a session CreateSession has just created, and
+// waits for it for at most sessionMirrorWait.
+//
+// The write runs on a goroutine of its own, on a context that is not the caller's —
+// the caller's is cancelled as soon as CreateSession returns, and the write must not
+// die with it — under a deadline of its own, sessionMirrorTimeout. The caller waits
+// for whichever comes first, the write's end or the wait's. That is what bounds it:
+// the bound cannot be left to the Redis client. The one production builds
+// (pkg/redisutil, from redis.ParseURL with its defaults) does not let a context's
+// deadline reach the socket (ContextTimeoutEnabled is off), so a Redis that accepts
+// the connection and never answers would hold every sign-in for the client's read
+// timeout, five seconds, and a failed read is tried again. Not waiting is the only
+// bound that holds whatever the client does.
+//
+// A write that is given up on is not cancelled. It ends when the client's own timeout
+// ends it, and if it lands afterwards the row is one nothing reads for a session that
+// exists. Everything about it is a warning and nothing else — what failed, for which
+// session and which user, never a token or its hash — and a panic in it is recovered
+// into one, because a goroutine nothing is waiting on must not take the process down
+// for the sake of a cache row.
+func (sm *SessionManager) mirrorSession(ctx context.Context, sessionID, userID uuid.UUID, tokenHash, role string, ttl time.Duration) {
+	done := make(chan struct{})
+	go func() { //nolint:gosec // G118: intentionally detached — the write must outlive the request, and nothing may wait on it for long
+		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("create session: the Redis mirror write panicked; the session exists and nothing reads the row",
+					"session_id", sessionID, "user_id", userID, "panic", r)
+			}
+		}()
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionMirrorTimeout)
+		defer cancel()
+		if err := sm.WriteSessionRedis(wctx, sessionID, userID, tokenHash, role, ttl); err != nil {
+			slog.Warn("create session: the Redis mirror of the session was not written; the session exists and nothing reads the row",
+				"session_id", sessionID, "user_id", userID, "error", err)
+		}
+	}()
+
+	wait := sm.mirrorWait
+	if wait <= 0 {
+		wait = sessionMirrorWait
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		slog.Warn("create session: the Redis mirror write is taking too long and is not being waited for; the session exists and nothing reads the row",
+			"session_id", sessionID, "user_id", userID, "waited", wait)
+	}
 }
 
 // ValidateRefreshToken looks up a session by refresh token hash in PostgreSQL.
@@ -359,8 +457,10 @@ func RotateRefreshToken(ctx context.Context, q *db.Queries, session db.Session, 
 // confirm against Postgres, for exactly that reason.
 //
 // Because nothing waits on the row, a caller on the request path must not wait on
-// it either: Refresh writes it from its own goroutine, after the response is on
-// its way, so that a slow Redis cannot delay the new cookie reaching the browser.
+// it for long either: Refresh writes it from its own goroutine, after the response is
+// on its way, so that a slow Redis cannot delay the new cookie reaching the browser,
+// and CreateSession waits for it for at most a second before carrying on without it
+// (mirrorSession).
 func (sm *SessionManager) WriteSessionRedis(ctx context.Context, sessionID, userID uuid.UUID, tokenHash, role string, ttl time.Duration) error {
 	rs := redisSession{
 		SessionID: sessionID.String(),
@@ -387,27 +487,60 @@ func (sm *SessionManager) RevokeSession(ctx context.Context, sessionID uuid.UUID
 	return nil
 }
 
-// RevokeAllUserSessions revokes all sessions for a user.
-func (sm *SessionManager) RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error {
-	ids, err := RevokeAllUserSessionsIn(ctx, sm.queries, userID)
-	if err != nil {
-		return err
-	}
-	sm.ForgetSessions(ctx, ids)
-	return nil
-}
-
-// RevokeAllUserSessionsIn revokes every session of a user through q, and returns
-// the ids of the sessions that were live — the ones with Redis rows to delete.
+// RevokeAllUserSessionsIn ends every session of a user through q, and returns the
+// ids of the sessions that were live — the ones with Redis rows to delete. EVERY
+// revoke-all goes through it — a password change, a sign-out of all devices, an
+// admin deactivating the account — and that is what makes the epoch below mean
+// "this user's sessions were just ended".
+//
+// It is THREE statements, in this order, and the order is the point:
+//
+//  1. BumpUserAuthEpoch. A session is created only against the epoch its credential
+//     check read (CreateSession), so moving the epoch is what refuses every sign-in
+//     whose check is older than this revoke-all. It runs FIRST, as a statement of
+//     its own, because it waits for the row lock of any sign-in that is in the middle
+//     of its insert: when it returns, every session created against the old epoch
+//     has committed, and the next two statements — each with a snapshot of its own
+//     under READ COMMITTED — see it. Written as one statement together with the
+//     revoke (a data-modifying CTE) it would share the revoke's single snapshot, and
+//     a session committed while it waited for that lock would be invisible to it and
+//     survive. Revoking first and bumping afterwards leaves a session inserted
+//     between the two live: the epoch it was conditional on has not moved yet.
+//  2. ListUserSessions, the live sessions, for their Redis rows.
+//  3. RevokeAllUserSessions.
 //
 // q is the Queries of a transaction the caller owns when the revoke has to commit
 // or roll back together with something else: a password change must end the user's
 // sessions or not happen at all, and a change that lands while the revoke fails
-// leaves every other device signed in on the old credentials. Nothing here touches
-// the pool or Redis, so a caller that holds a transaction never asks the pool for
-// a second connection by calling it; the Redis rows are deleted with ForgetSessions
-// once — and only if — the transaction has committed.
+// leaves every other device signed in on the old credentials; a deactivation must
+// not leave an account disabled with its sessions live. The bump takes the user
+// row's lock and the transaction holds it until it ends, so a sign-in racing the
+// revoke-all queues behind the whole of it and is decided against the committed
+// epoch — and if the transaction rolls back the epoch is unchanged and the sign-in
+// goes ahead, as nothing was revoked. Nothing here touches the pool or Redis, so a
+// caller that holds a transaction never asks the pool for a second connection by
+// calling it; the Redis rows are deleted with ForgetSessions once — and only if —
+// the transaction has committed.
+//
+// When q is the pool's (the sign-out of all devices) the three are separate
+// autocommit statements and the order is still the safe one. A sign-in that inserts
+// after the bump carries the new epoch — it read the user after the bump committed,
+// so it is a new sign-in and not a replaced credential — or is refused; the
+// listing and the revoke can therefore meet, besides the old sessions, only such a
+// new sign-in that finished in the same instants, and ending it is a
+// sign-out-everywhere racing a sign-in, which is what was asked for. A crash or a
+// failed statement between the three leaves a bumped epoch and sessions that are
+// still live: the caller reports the failure — the sessions may still be active —
+// and repeating the call ends them; the bump on its own only refuses sign-ins that
+// were in flight, who sign in again. The reverse order would leave a session
+// inserted between the revoke and the bump live, with nothing to say so.
 func RevokeAllUserSessionsIn(ctx context.Context, q *db.Queries, userID uuid.UUID) ([]uuid.UUID, error) {
+	// The generation first; see above. How many rows it changed is not a decision:
+	// no row is a user that is gone, and there is nothing to refuse for one.
+	if _, err := q.BumpUserAuthEpoch(ctx, userID); err != nil {
+		return nil, fmt.Errorf("bumping the user's auth epoch: %w", err)
+	}
+
 	// The live sessions, for their Redis rows.
 	sessions, err := q.ListUserSessions(ctx, userID)
 	if err != nil {

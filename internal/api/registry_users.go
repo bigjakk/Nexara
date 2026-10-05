@@ -91,8 +91,14 @@ func registerUserEndpoints(reg *Registry, h *handlers.UserHandler) {
 		Description: "Change a Nexara user account. Requires manage:user; changing `role` requires " +
 			"manage:role IN ADDITION. Every field is optional and an omitted one is left alone. A caller " +
 			"cannot change their own role or their own active status, the system account cannot be " +
-			"edited, and deactivating an account revokes its sessions immediately rather than waiting " +
-			"for the access token to expire.",
+			"edited, and deactivating an account ends every one of its sessions at once, so none of its " +
+			"refresh tokens works afterwards. It does not recall an access token the account was already " +
+			"issued: that stays valid until it expires (15 minutes by default). The deactivation and the " +
+			"end of the account's sessions are one transaction: when the sessions cannot be ended the " +
+			"account stays active and the answer (503, or 500) says it was NOT changed; an answer that " +
+			"says the change could not be confirmed means it may have taken effect, and repeating it is " +
+			"safe. Only the fields in the request are written, so an edit never undoes another edit's " +
+			"change to a field it did not mention.",
 		Group:       "User Management",
 		Permissions: Permissions{Deferred: userUpdateReason},
 		Parameters:  updateUserParams(),
@@ -138,7 +144,8 @@ func updateUserParams() apischema.Properties {
 			// document every edit that never mentioned it as flipping it.
 			Typetext: "<boolean>",
 			Description: "Whether the account may sign in. Omitted, it is left as it is. Setting it false " +
-				"revokes the account's sessions immediately. A caller cannot change their own.",
+				"ends the account's sessions at once (an access token already issued stays valid until " +
+				"it expires). A caller cannot change their own.",
 		},
 		"role": {
 			Type:     apischema.String,

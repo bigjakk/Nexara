@@ -262,6 +262,16 @@ func (s *raceStore) exec(sql string, args []any, inTx bool, undo *[]func()) (pgc
 			s.session.IsRevoked = true
 		}
 		return pgconn.NewCommandTag("UPDATE 1"), nil
+	case "BumpUserAuthEpoch":
+		// Moves the user's epoch by one, as the SQL does, and — like every write the
+		// transaction makes — is undone with it. A user that is gone matches no row.
+		if id, ok := args[0].(uuid.UUID); ok && id == s.user.ID && !s.userDeleted {
+			was := s.user.AuthEpoch
+			remember(func() { s.user.AuthEpoch = was })
+			s.user.AuthEpoch++
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		}
+		return pgconn.NewCommandTag("UPDATE 0"), nil
 	case "UpdatePassword":
 		if s.updatePwErr != nil {
 			return pgconn.CommandTag{}, s.updatePwErr
@@ -803,6 +813,8 @@ type raceBeginner struct {
 	attempts int // calls to Begin, whether or not they got a connection
 	// lastBeginDeadline is the deadline the context of the latest Begin carried.
 	lastBeginDeadline time.Time
+	// txOptions are the options of every BeginTx, in order.
+	txOptions []pgx.TxOptions
 }
 
 // beginDeadline reports the deadline the context of the latest Begin carried, zero
@@ -818,6 +830,24 @@ func (b *raceBeginner) beginAttempts() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.attempts
+}
+
+// BeginTx is the transaction Begin hands out, with the options it was asked for
+// recorded: a transaction whose correctness depends on its isolation level (a
+// password change's revoke-all, see auth.RevokeAllUserSessionsIn) names it, and a
+// test reads what it named from beginOptions.
+func (b *raceBeginner) BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error) {
+	b.mu.Lock()
+	b.txOptions = append(b.txOptions, opts)
+	b.mu.Unlock()
+	return b.Begin(ctx)
+}
+
+// beginOptions are the options of every BeginTx so far, in order.
+func (b *raceBeginner) beginOptions() []pgx.TxOptions {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]pgx.TxOptions(nil), b.txOptions...)
 }
 
 func (b *raceBeginner) Begin(ctx context.Context) (pgx.Tx, error) {

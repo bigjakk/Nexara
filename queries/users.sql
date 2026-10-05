@@ -52,6 +52,24 @@ WHERE id = sqlc.arg(id)
 -- lost.
 SELECT password_hash FROM users WHERE id = sqlc.arg(id) FOR SHARE;
 
+-- name: BumpUserAuthEpoch :execrows
+-- Moves the user's auth_epoch to its next value and says how many rows it changed
+-- (0: there is no such user). It is the FIRST statement of every revoke-all —
+-- before the listing of the live sessions and the revoke of them — and a statement
+-- of its own, never part of another: the order and the separation are what let a
+-- session created by a sign-in whose credential check is older than this revoke-all
+-- be refused or revoked, and never survive. The reasoning, for both orders in which
+-- an insert and a revoke-all can meet, is on CreateSessionAtEpoch in sessions.sql.
+-- auth.RevokeAllUserSessionsIn is the only caller, and every revoke-all goes
+-- through it: ChangePassword (inside its transaction), sign-out of all devices, and
+-- the deactivation of an account.
+--
+-- The UPDATE takes the users row's FOR NO KEY UPDATE lock, which waits for any
+-- sign-in's FOR SHARE and is waited for by the next one; inside a caller's
+-- transaction the lock is held until that transaction ends, so the sign-ins that
+-- raced it decide after the whole revoke-all, not between its statements.
+UPDATE users SET auth_epoch = auth_epoch + 1 WHERE id = sqlc.arg(id);
+
 -- name: CountUsers :one
 -- Counts every login-capable row in users, including deactivated accounts.
 -- Excludes only the well-known system actor seeded by 000013_system_user —

@@ -578,24 +578,34 @@ func (q *Queries) UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, e
 
 const updateUserProfile = `-- name: UpdateUserProfile :one
 UPDATE users
-SET display_name = $2, is_active = $3, role = $4
-WHERE id = $1
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source
+SET display_name = COALESCE($1::text, display_name),
+    is_active    = COALESCE($2::boolean, is_active),
+    role         = COALESCE($3::text, role)
+WHERE id = $4
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch
 `
 
 type UpdateUserProfileParams struct {
-	ID          uuid.UUID `json:"id"`
-	DisplayName string    `json:"display_name"`
-	IsActive    bool      `json:"is_active"`
-	Role        string    `json:"role"`
+	DisplayName pgtype.Text `json:"display_name"`
+	IsActive    pgtype.Bool `json:"is_active"`
+	Role        pgtype.Text `json:"role"`
+	ID          uuid.UUID   `json:"id"`
 }
 
+// A PARTIAL update: a field the caller does not supply (NULL) is left as it is
+// in the row at the moment of the write. The handler reads the account before it
+// writes (to answer 404, to refuse a caller's own role or active flag) and used to
+// write all three columns back from that read, which is a lost update: a
+// deactivation wrote back the role a concurrent edit had just demoted, and a name
+// edit that had read is_active = true re-activated an account that had been
+// deactivated in between (its sessions stay revoked, but its password works again).
+// A request now writes exactly the fields it was given.
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
 	row := q.db.QueryRow(ctx, updateUserProfile,
-		arg.ID,
 		arg.DisplayName,
 		arg.IsActive,
 		arg.Role,
+		arg.ID,
 	)
 	var i User
 	err := row.Scan(
@@ -609,6 +619,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.UpdatedAt,
 		&i.Role,
 		&i.AuthSource,
+		&i.AuthEpoch,
 	)
 	return i, err
 }

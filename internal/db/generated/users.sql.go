@@ -12,6 +12,33 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bumpUserAuthEpoch = `-- name: BumpUserAuthEpoch :execrows
+UPDATE users SET auth_epoch = auth_epoch + 1 WHERE id = $1
+`
+
+// Moves the user's auth_epoch to its next value and says how many rows it changed
+// (0: there is no such user). It is the FIRST statement of every revoke-all —
+// before the listing of the live sessions and the revoke of them — and a statement
+// of its own, never part of another: the order and the separation are what let a
+// session created by a sign-in whose credential check is older than this revoke-all
+// be refused or revoked, and never survive. The reasoning, for both orders in which
+// an insert and a revoke-all can meet, is on CreateSessionAtEpoch in sessions.sql.
+// auth.RevokeAllUserSessionsIn is the only caller, and every revoke-all goes
+// through it: ChangePassword (inside its transaction), sign-out of all devices, and
+// the deactivation of an account.
+//
+// The UPDATE takes the users row's FOR NO KEY UPDATE lock, which waits for any
+// sign-in's FOR SHARE and is waited for by the next one; inside a caller's
+// transaction the lock is held until that transaction ends, so the sign-ins that
+// raced it decide after the whole revoke-all, not between its statements.
+func (q *Queries) BumpUserAuthEpoch(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, bumpUserAuthEpoch, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT count(*) FROM users WHERE id != '00000000-0000-0000-0000-000000000001'
 `
@@ -35,7 +62,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name, is_active, totp_secret, role)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch
 `
 
 type CreateUserParams struct {
@@ -68,6 +95,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UpdatedAt,
 		&i.Role,
 		&i.AuthSource,
+		&i.AuthEpoch,
 	)
 	return i, err
 }
@@ -106,7 +134,7 @@ func (q *Queries) GetPasswordHashForSettle(ctx context.Context, id uuid.UUID) (s
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source FROM users WHERE email = $1
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -123,12 +151,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UpdatedAt,
 		&i.Role,
 		&i.AuthSource,
+		&i.AuthEpoch,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source FROM users WHERE id = $1
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -145,12 +174,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.UpdatedAt,
 		&i.Role,
 		&i.AuthSource,
+		&i.AuthEpoch,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source FROM users ORDER BY created_at DESC
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch FROM users ORDER BY created_at DESC
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -173,6 +203,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.UpdatedAt,
 			&i.Role,
 			&i.AuthSource,
+			&i.AuthEpoch,
 		); err != nil {
 			return nil, err
 		}
@@ -221,7 +252,7 @@ SET email = $2,
     is_active = $5,
     totp_secret = $6
 WHERE id = $1
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch
 `
 
 type UpdateUserParams struct {
@@ -254,12 +285,13 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.UpdatedAt,
 		&i.Role,
 		&i.AuthSource,
+		&i.AuthEpoch,
 	)
 	return i, err
 }
 
 const updateUserDisplayName = `-- name: UpdateUserDisplayName :one
-UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source
+UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch
 `
 
 type UpdateUserDisplayNameParams struct {
@@ -281,6 +313,7 @@ func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDispl
 		&i.UpdatedAt,
 		&i.Role,
 		&i.AuthSource,
+		&i.AuthEpoch,
 	)
 	return i, err
 }

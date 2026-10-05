@@ -109,10 +109,19 @@ func (sr *sessionRace) newSession(t *testing.T, user uuid.UUID, token string) ge
 // newSessionWithRole is newSession with the recorded role of the caller's
 // choosing, "" included: that is what a session issued before migration 000055
 // holds.
+//
+// The session is created through the one statement that creates sessions,
+// CreateSessionAtEpoch, against the user's CURRENT epoch — what a credential check
+// that had just read the user would pass. The harness has to read it: a test that
+// ends the user's sessions through the manager bumps the epoch (every revoke-all
+// does, 000106), and a later fixture created against the epoch the user had at the
+// start would be refused, which is the very behaviour session_epoch_db_test.go
+// pins and not what these fixtures are for.
 func (sr *sessionRace) newSessionWithRole(t *testing.T, user uuid.UUID, token, role string) gen.Session {
 	t.Helper()
-	s, err := sr.q.CreateSession(sr.ctx, gen.CreateSessionParams{
+	s, err := sr.q.CreateSessionAtEpoch(sr.ctx, gen.CreateSessionAtEpochParams{
 		UserID:    user,
+		Epoch:     sr.epochOf(t, user),
 		TokenHash: auth.HashToken(token),
 		UserAgent: "Mozilla/5.0",
 		IpAddress: "192.0.2.10",
@@ -123,6 +132,27 @@ func (sr *sessionRace) newSessionWithRole(t *testing.T, user uuid.UUID, token, r
 		t.Fatalf("create session: %v", err)
 	}
 	return s
+}
+
+// revokeAll ends every session of user the way a sign-out of all devices does:
+// RevokeAllUserSessionsIn on the pool, then the Redis rows of the sessions it ended.
+func (sr *sessionRace) revokeAll(user uuid.UUID) error {
+	ids, err := auth.RevokeAllUserSessionsIn(sr.ctx, sr.q, user)
+	if err != nil {
+		return err
+	}
+	sr.sm.ForgetSessions(sr.ctx, ids)
+	return nil
+}
+
+// epochOf is the user's auth_epoch right now.
+func (sr *sessionRace) epochOf(t *testing.T, user uuid.UUID) int64 {
+	t.Helper()
+	u, err := sr.q.GetUserByID(sr.ctx, user)
+	if err != nil {
+		t.Fatalf("read the user's epoch: %v", err)
+	}
+	return u.AuthEpoch
 }
 
 func (sr *sessionRace) reload(t *testing.T, id uuid.UUID) gen.Session {
@@ -512,7 +542,7 @@ var sessionRevokers = []revoker{
 		name: "RevokeAllUserSessions",
 		via:  "LogoutAll, a password change, and an admin deactivating the user",
 		viaManager: func(sr *sessionRace, s gen.Session) error {
-			return sr.sm.RevokeAllUserSessions(sr.ctx, s.UserID)
+			return sr.revokeAll(s.UserID)
 		},
 		viaQueries: func(ctx context.Context, q *gen.Queries, s gen.Session) error {
 			return q.RevokeAllUserSessions(ctx, s.UserID)
@@ -947,7 +977,7 @@ func TestSignOutRacingARefresh_EndToEnd(t *testing.T) {
 
 	t.Run("a sign-out one rotation behind still ends the session", func(t *testing.T) {
 		sr.clearSessions(t)
-		session, err := sr.sm.CreateSession(sr.ctx, sessRaceUserA, "cookie-before-the-refresh", "admin",
+		session, err := sr.sm.CreateSession(sr.ctx, sessRaceUserA, sr.epochOf(t, sessRaceUserA), "cookie-before-the-refresh", "admin",
 			"Mozilla/5.0", "192.0.2.10", time.Hour, auth.DeviceInfo{Type: "web"})
 		if err != nil {
 			t.Fatalf("create session: %v", err)
@@ -999,7 +1029,7 @@ func TestSignOutRacingARefresh_EndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("validate: %v", err)
 		}
-		if err := sr.sm.RevokeAllUserSessions(sr.ctx, sessRaceUserA); err != nil {
+		if err := sr.revokeAll(sessRaceUserA); err != nil {
 			t.Fatalf("LogoutAll: %v", err)
 		}
 

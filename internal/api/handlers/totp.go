@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"time"
 
@@ -52,7 +53,30 @@ type TOTPHandler struct {
 	totpService *auth.TOTPService
 	rdb         *redis.Client
 	eventPub    *events.Publisher
-	issueTokens func(c fiber.Ctx, user db.User, auditAction string) error
+	issueTokens func(c fiber.Ctx, user db.User, epoch int64, auditAction string) error
+
+	// followUpTimeout bounds each follow-up of a decision that has been made — the
+	// audit row of a second step that was refused — and is authFollowUpTimeout when
+	// zero. A field rather than a constant so that a test can make a stalled insert
+	// fail in milliseconds instead of waiting out the production bound, as
+	// AuthHandler's and UserHandler's do.
+	followUpTimeout time.Duration
+}
+
+// totpPendingLogin is the JSON stored under totp:pending:<token> for the five
+// minutes between a login's first step and its second.
+//
+// AuthEpoch is the user's auth epoch as the FIRST step's credential check read it —
+// the password comparison, the directory bind, or the SSO callback — and it is what
+// the session the second step creates is made conditional on (VerifyLogin). It is a
+// pointer so that a token minted by a release that recorded none is told apart from
+// one that recorded 0, the epoch of every user who has never had a revoke-all: the
+// first cannot be tied to any check and is refused, the second is an ordinary
+// value.
+type totpPendingLogin struct {
+	UserID      string `json:"user_id"`
+	AuditAction string `json:"audit_action"`
+	AuthEpoch   *int64 `json:"auth_epoch"`
 }
 
 // NewTOTPHandler creates a new TOTP handler.
@@ -65,8 +89,20 @@ func NewTOTPHandler(queries *db.Queries, encryptionKey string, rdb *redis.Client
 	}
 }
 
+// followUpDuration is the deadline of one follow-up: authFollowUpTimeout unless a
+// test shortened it.
+func (h *TOTPHandler) followUpDuration() time.Duration {
+	return followUpBound(h.followUpTimeout)
+}
+
+// withFollowUp runs fn — a call that reads c.Context(), such as AuditLogAs with the
+// event it publishes — under a follow-up deadline (see runFollowUp).
+func (h *TOTPHandler) withFollowUp(c fiber.Ctx, fn func()) {
+	runFollowUp(c, h.followUpDuration(), fn)
+}
+
 // SetIssueTokensFn sets the token-issuing function (called from server setup).
-func (h *TOTPHandler) SetIssueTokensFn(fn func(c fiber.Ctx, user db.User, auditAction string) error) {
+func (h *TOTPHandler) SetIssueTokensFn(fn func(c fiber.Ctx, user db.User, epoch int64, auditAction string) error) {
 	h.issueTokens = fn
 }
 
@@ -367,10 +403,7 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired pending token")
 	}
 
-	var pending struct {
-		UserID      string `json:"user_id"`
-		AuditAction string `json:"audit_action"`
-	}
+	var pending totpPendingLogin
 	if err := json.Unmarshal([]byte(data), &pending); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Invalid pending data")
 	}
@@ -384,6 +417,21 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusTooManyRequests, "Too many failed 2FA attempts — try again in a few minutes")
 	}
 
+	// A pending token minted without an epoch (by a release before it existed, in
+	// the minutes around an upgrade) cannot be tied to the password step's check, so
+	// the session it would create could not be conditional on anything. Refused as an
+	// expired token, and destroyed — it can never succeed — before any code, and in
+	// particular any single-use recovery code, is spent on it.
+	if pending.AuthEpoch == nil {
+		slog.Warn("totp verify-login: the pending token carries no auth epoch; refusing it", "user_id", userID)
+		_ = h.rdb.Del(c.Context(), pendingKey, attemptKey).Err()
+		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired pending token")
+	}
+
+	// user is read HERE, after the password step, to check that the account is still
+	// active and has a second factor. Its AuthEpoch is whatever the account holds now:
+	// it is compared with the pending token's below, and it is NEVER what the session
+	// is created against (see the issueTokens call at the end).
 	user, err := h.queries.GetUserByID(c.Context(), userID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "User not found")
@@ -393,6 +441,34 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 	}
 	if !user.TotpSecret.Valid {
 		return fiber.NewError(fiber.StatusInternalServerError, "TOTP not configured for user")
+	}
+
+	// The account's epoch against the one the password step read. They differ when a
+	// revoke-all — a password change, a sign-out of all devices, an account
+	// deactivated and reactivated — landed since: the credential this pending token
+	// stands for has been replaced. The token is refused HERE, before any code is
+	// looked at, and as an expired token, with the same text, so that it tells its
+	// holder nothing new. That is what keeps three things from happening to a login
+	// that cannot be allowed: a single-use recovery code is not spent on it, no
+	// failure is counted against the user, and the stale token stops being an oracle
+	// for the second factor, which a holder could otherwise keep testing codes
+	// against for the rest of its five minutes. The token and its attempt counter are
+	// destroyed — it can never succeed.
+	//
+	// This comparison is the early, cheap "no". The conditional session insert in
+	// issueTokens is still the authority: it decides against the epoch at the instant
+	// of the insert, which a revoke-all landing after this read can still change.
+	if user.AuthEpoch != *pending.AuthEpoch {
+		slog.Info("totp verify-login: the account's sessions were ended since the password step; refusing the pending token",
+			"user_id", userID)
+		_ = h.rdb.Del(c.Context(), pendingKey, attemptKey).Err()
+		// A sign-in refused after a CORRECT credential is worth a row of its own (see
+		// signInRefusedAuditAction); the answer does not say so.
+		details, _ := json.Marshal(map[string]string{"email": user.Email, "ip": c.IP()})
+		h.withFollowUp(c, func() {
+			AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), signInRefusedAuditAction, details)
+		})
+		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired pending token")
 	}
 
 	validated, verr := h.validateCodeOrRecovery(c.Context(), userID, user.TotpSecret.String, code, recoveryCode)
@@ -425,7 +501,17 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Token issuer not configured")
 	}
 
-	return h.issueTokens(c, user, pending.AuditAction)
+	// The session is created against the epoch the pending token carries — the one
+	// the PASSWORD step read. At this point it equals user.AuthEpoch, because the
+	// comparison above refused any token that differs, so reading it off the re-read
+	// row would behave the same today; it is written as the carried value because
+	// that is the one that is true by construction, and it stays tied to the password
+	// step if that comparison is ever loosened. A revoke-all that lands after the
+	// re-read leaves the insert conditional on the old epoch, and it is refused (401,
+	// nothing issued): the user signs in again. The epoch-source guard
+	// (TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead) holds this argument to
+	// exactly `*pending.AuthEpoch`, and user.AuthEpoch to that comparison alone.
+	return h.issueTokens(c, user, *pending.AuthEpoch, pending.AuditAction)
 }
 
 // AdminReset handles DELETE /api/v1/users/:id/totp — admin resets user's TOTP.
@@ -460,17 +546,20 @@ func (h *TOTPHandler) AdminReset(c fiber.Ctx, p *apischema.Params) error {
 	return c.JSON(fiber.Map{"message": "TOTP reset for user"})
 }
 
-// CreateTOTPPendingToken generates a random token and stores it in Redis with user data.
-func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UUID, auditAction string) (string, error) {
+// CreateTOTPPendingToken generates a random token and stores it in Redis with user
+// data, among it epoch: the user's auth epoch as the credential check that earned
+// this challenge read it. VerifyLogin creates the session against that value.
+func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UUID, epoch int64, auditAction string) (string, error) {
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return "", fmt.Errorf("generate pending token: %w", err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 
-	data, _ := json.Marshal(map[string]string{
-		"user_id":      userID.String(),
-		"audit_action": auditAction,
+	data, _ := json.Marshal(totpPendingLogin{
+		UserID:      userID.String(),
+		AuditAction: auditAction,
+		AuthEpoch:   &epoch,
 	})
 
 	key := fmt.Sprintf("totp:pending:%s", token)
