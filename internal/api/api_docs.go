@@ -52,7 +52,10 @@ func docEndpoints(reg *Registry) []handlers.APIEndpoint {
 			// every declaration to.
 			Permission: e.Permissions.Describe(),
 			Group:      e.Group,
-			Parameters: docParameters(e),
+			// The reason an API key is refused here, when it is: what a reader
+			// building an automation needs to know before it finds out from a 403.
+			InteractiveOnly: e.InteractiveOnly,
+			Parameters:      docParameters(e),
 		})
 	}
 	return out

@@ -371,6 +371,9 @@ func (s *Server) registerInfra(d *serverDeps) {
 func (s *Server) registerAuth(d *serverDeps) {
 	if d.hasDB() && d.jwt != nil && d.sessionMgr != nil {
 		s.authHandler = handlers.NewAuthHandler(d.pool, d.queries, d.jwt, d.sessionMgr, d.rbacEngine, d.eventPub)
+		// The change-password attempt counts live in Redis, shared by every replica.
+		// sessionMgr exists only with Redis, so d.rdb is set whenever this runs.
+		s.authHandler.SetPasswordLockoutStore(d.rdb)
 	}
 	if d.hasRBAC() && d.encryptionKey != "" {
 		s.ldapHandler = handlers.NewLDAPHandler(d.queries, d.encryptionKey, d.rbacEngine, d.eventPub)

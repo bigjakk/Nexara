@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/gofiber/fiber/v3"
 )
 
 // The three auth-facing rate limiters — the 15/min login-and-TOTP cap, the
@@ -73,12 +75,12 @@ func TestGuard_RateLimitedPathsAreRegisteredRoutes(t *testing.T) {
 // TestGuard_CredentialRoutesKeepTheirRateLimit is the other direction, and the
 // one that matters more.
 //
-// The routes below all accept a credential or mint a token, and each was given
-// a per-IP cap for a stated reason: brute-forcing a password, grinding a
-// six-digit TOTP code, replaying a refresh cookie, or looping the unauthenticated
-// OIDC flow to pin the server on outbound HTTP. Dropping one from the limiter's
-// path set is a one-line edit with no other symptom, so the set is pinned here
-// rather than left to review.
+// The routes below all accept a credential or mint a token, and each was given a
+// per-IP cap for a stated reason: brute-forcing a password, grinding a six-digit
+// TOTP code, replaying a refresh cookie, or looping the unauthenticated OIDC flow
+// to pin the server on outbound HTTP. Dropping one from the limiter's path set is
+// a one-line edit with no other symptom, so the set is pinned here rather than
+// left to review.
 //
 // This deliberately restates the list rather than deriving it: a guard that
 // reads the same map it is checking would pass whatever that map said.
@@ -88,8 +90,13 @@ func TestGuard_RateLimitedPathsAreRegisteredRoutes(t *testing.T) {
 // authLimitedPaths means it has NO per-IP cap at all, and an omission nobody
 // wrote down is an omission nobody re-reads:
 //
-//   - /api/v1/auth/logout and /api/v1/auth/logout-all revoke a session the
-//     caller already holds; there is nothing to guess.
+//   - /api/v1/auth/logout revokes the one session whose cookie the caller
+//     already holds; there is nothing to guess, and nothing to loop on — the
+//     cookie is dead after the first call. (/api/v1/auth/logout-all and
+//     DELETE /api/v1/auth/sessions/:id are the other case: they end the
+//     sessions of the account, so a loop of either keeps the owner signed out.
+//     Each is capped per USER on its own route, and both are held OUT of this
+//     set on purpose — see below.)
 //   - /api/v1/auth/setup-status and /api/v1/auth/sso-status are anonymous but
 //     answer with one boolean (plus, for SSO, a display name), from a single
 //     indexed read.
@@ -105,6 +112,7 @@ func TestGuard_CredentialRoutesKeepTheirRateLimit(t *testing.T) {
 	mustBeLimited := map[string]string{
 		"/api/v1/auth/login":                          "password brute force",
 		"/api/v1/auth/register":                       "unauthenticated account creation on a fresh install",
+		"/api/v1/auth/change-password":                "checks the CURRENT password, so it is a second place to guess it, reachable with nothing but a bearer token",
 		"/api/v1/auth/totp/verify-login":              "six-digit second factor",
 		"/api/v1/auth/totp":                           "the disable route validates a TOTP or recovery code",
 		"/api/v1/auth/totp/recovery-codes/regenerate": "validates a TOTP code",
@@ -122,6 +130,30 @@ func TestGuard_CredentialRoutesKeepTheirRateLimit(t *testing.T) {
 		if _, expected := mustBeLimited[path]; !expected {
 			t.Errorf("authLimitedPaths caps %q, which this guard does not know about — add it with the "+
 				"reason, so the set stays a review surface", path)
+		}
+	}
+
+	// The two routes that end sessions must stay OUT of the per-address set and
+	// each carry a limiter of its own. That set is one bucket per address, spent
+	// before authentication and shared with login, so anyone with no credential at
+	// all could drain it and refuse the owner the remedy for a stolen token. Their
+	// caps are per user, on the route (TestLogoutAll_* and TestSessionRevoke_* drive
+	// them, and TestSessionEndingRoutesHaveBudgetsOfTheirOwn that they are two);
+	// what is pinned here is the declaration of each, and that the shared set holds
+	// neither path. The second is not a detail: ending one session is signing out
+	// everywhere one device at a time, so a route without a cap of its own is the
+	// way round the first.
+	for _, route := range []struct{ method, path, what string }{
+		{fiber.MethodPost, "/api/v1/auth/logout-all", "ends every session of the account"},
+		{fiber.MethodDelete, "/api/v1/auth/sessions/:id", "ends one session of the account, so a loop of it is logout-all one device at a time"},
+	} {
+		if authLimitedPaths[limiterPathOf(route.path)] {
+			t.Errorf("%s is in authLimitedPaths: anyone could drain the bucket it would share with login, and with it the owner's way "+
+				"to end a stolen session — it is capped per user on its route instead", route.path)
+		}
+		if e := declaredEndpoint(t, route.method, route.path); e.RateLimiter == nil {
+			t.Errorf("%s %s declares no RateLimiter: it %s, so a loop of it keeps the owner signed out, and nothing caps it per user",
+				route.method, route.path, route.what)
 		}
 	}
 

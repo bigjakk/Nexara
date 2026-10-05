@@ -245,6 +245,28 @@ func TestAccessTokenIsSomeoneElses(t *testing.T) {
 				return tok
 			},
 		},
+		// Claims of no kind this code knows (Claims.Kind is TokenKindUnknown) name no one,
+		// as the scoped kinds do: the refusal asks whether a token is a SESSION, so what
+		// is not one — whatever the combination of markers — is turned away from it too.
+		// A check that refused only the two kinds it recognised would read these as a
+		// stranger's.
+		{
+			name: "an expired token carrying both scope markers at once",
+			token: func(t *testing.T) string {
+				claims := claimsExpiring(user, ago(time.Hour))
+				claims.ConsoleScope = &scope
+				claims.WSScope = WSScopeHub
+				return signedClaims(t, jwt.SigningMethodHS256, secret, claims)
+			},
+		},
+		{
+			name: "an expired token with a WebSocket scope this code does not issue",
+			token: func(t *testing.T) string {
+				claims := claimsExpiring(user, ago(time.Hour))
+				claims.WSScope = "elsewhere"
+				return signedClaims(t, jwt.SigningMethodHS256, secret, claims)
+			},
+		},
 
 		{name: "an empty string", token: func(*testing.T) string { return "" }},
 		{name: "text that is not a token", token: func(*testing.T) string { return "not-a-token" }},

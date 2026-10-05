@@ -255,8 +255,10 @@ func BearerToken(header string) string {
 // AccessTokenIsSomeoneElses reports whether tokenString is a correctly signed
 // access token that was issued to a user other than user. It answers false for
 // everything else: a token that names user, a bad signature or signing method, a
-// malformed string, and a console or WebSocket token (the scoped kinds, which
-// authOptional does not treat as an identity either).
+// malformed string, and a token that is not an interactive session's — a console or
+// WebSocket token (the scoped kinds, which authOptional does not treat as an
+// identity either) or claims of no kind this code knows (Claims.Kind), which name
+// no one for the same reason.
 //
 // IT IS FOR REFUSING AND NOTHING ELSE, and it cannot be used to authenticate: what
 // it returns is a bool and never the user. A true answer turns a request away; a
@@ -286,7 +288,10 @@ func (j *JWTService) AccessTokenIsSomeoneElses(tokenString string, user uuid.UUI
 	if _, err := jwt.NewParser(jwt.WithoutClaimsValidation()).ParseWithClaims(tokenString, claims, j.keyFunc); err != nil {
 		return false
 	}
-	if claims.ConsoleScope != nil || claims.WSScope != "" {
+	// Asked of the one predicate authRequired and authOptional ask (claims_kind.go),
+	// and not re-derived from the fields: TestGuard_OnlyClaimsKindAndTheWebSocketUpgradeReadTheScopeMarkers
+	// keeps it so.
+	if !claims.IsSession() {
 		return false
 	}
 	return claims.UserID != user

@@ -646,7 +646,7 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	declared["registerTOTPEndpoints"] = reg.Len() - before
 
 	before = reg.Len()
-	registerAuthEndpoints(reg, s.authHandler)
+	registerAuthEndpoints(reg, s.authHandler, nil, nil)
 	declared["registerAuthEndpoints"] = reg.Len() - before
 
 	before = reg.Len()

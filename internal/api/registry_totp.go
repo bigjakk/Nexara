@@ -130,6 +130,8 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 		Permissions: Permissions{SelfService: "enrolls the caller's own second factor"},
 		Parameters:  apischema.Properties{},
 		Handler:     h.BeginSetup,
+
+		InteractiveOnly: "starts enrolling a second factor on the account: a leaked key must not be able to begin taking over its login",
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
@@ -142,6 +144,8 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 			"code": totpRequiredCodeParam("Current code from the authenticator being enrolled."),
 		},
 		Handler: h.ConfirmSetup,
+
+		InteractiveOnly: "turns a second factor on for the account and hands out its recovery codes: a leaked key must not be able to lock the owner out of login",
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodDelete,
@@ -162,6 +166,8 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 			"recovery_code": withSource(totpRecoveryCodeParam, apischema.SourceBody),
 		},
 		Handler: h.Disable,
+
+		InteractiveOnly: "removes the account's second factor: a leaked key must not be able to weaken the account's login",
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,
@@ -183,6 +189,8 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 			"code": totpRequiredCodeParam("Current code from the authenticator."),
 		},
 		Handler: h.RegenerateRecoveryCodes,
+
+		InteractiveOnly: "voids the account's recovery codes and issues new ones: a leaked key must not be able to take over the owner's way back in",
 	})
 
 	// The one route in this domain that acts on somebody else. It hangs off

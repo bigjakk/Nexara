@@ -24,7 +24,7 @@ func TestRefreshSupersededCodeIsDocumentedWhereItIsPromised(t *testing.T) {
 	code := handlers.RefreshSupersededCode
 
 	reg := NewRegistry()
-	registerAuthEndpoints(reg, handlers.NewAuthHandler(nil, nil, nil, nil, nil, nil))
+	registerAuthEndpoints(reg, handlers.NewAuthHandler(nil, nil, nil, nil, nil, nil), nil, nil)
 	var description string
 	for _, e := range reg.Endpoints() {
 		if e.Method == fiber.MethodPost && e.Path == authScope+"/refresh" {

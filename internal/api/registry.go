@@ -68,6 +68,37 @@ type Endpoint struct {
 	// Permissions says how the route is authorized. Exactly one field.
 	Permissions Permissions
 
+	// InteractiveOnly, when set, admits only a request authenticated by an
+	// interactive session and refuses any other — an API key today, and anything
+	// added later that is not a session: 403, answered right after
+	// authentication — ahead of the
+	// RateLimiter, the permission check, the parameters' validation and the
+	// handler, none of which run. The string is the reason, and it must say what
+	// a leaked key would be able to do here: it is published with the route
+	// (APIEndpoint.InteractiveOnly) and read by the next person deciding whether
+	// a new route belongs in the set.
+	//
+	// "Ahead of the RateLimiter" means THIS field's route-level one. The
+	// application-level limiters (setupMiddleware) run before authentication, so a
+	// refused key has already spent a request of them: on the flagged paths that are
+	// in authLimitedPaths — change-password, DELETE /auth/totp and
+	// /auth/totp/recovery-codes/regenerate — the per-address auth bucket login
+	// shares counts a key the gate then turns away.
+	//
+	// It is for a route that changes the caller's OWN credentials or
+	// authentication factors — a password, a second factor, a new API key — where
+	// the authority a key was given (what its owner may DO) is not the authority
+	// to change what the owner IS. It is NOT a permission: no grant expresses it,
+	// which is why it is declared beside Permissions and not inside them, and why
+	// it is enforced here, once, rather than by a check at the top of each
+	// handler that the next handler can forget.
+	// TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes pins the set,
+	// and the enforcement through the real authentication middleware is pinned
+	// per route.
+	//
+	// A Public route has no caller to refuse; register refuses the pairing.
+	InteractiveOnly string
+
 	// Parameters is the route's parameter schema. Register compiles it
 	// and panics if it is malformed.
 	Parameters apischema.Properties
@@ -197,6 +228,14 @@ func (r *Registry) register(e Endpoint) error {
 	}
 	if e.Handler == nil {
 		return fmt.Errorf("endpoint %s %s has no Handler", e.Method, e.Path)
+	}
+	if e.InteractiveOnly != "" && strings.TrimSpace(e.InteractiveOnly) == "" {
+		return fmt.Errorf("endpoint %s %s has a blank InteractiveOnly: the string is the reason, and it must say "+
+			"what a leaked API key could do here", e.Method, e.Path)
+	}
+	if e.InteractiveOnly != "" && !e.Permissions.authenticated() {
+		return fmt.Errorf("endpoint %s %s is Public and InteractiveOnly: a route with no session has no caller "+
+			"authenticated by an API key to refuse", e.Method, e.Path)
 	}
 
 	key := e.Method + " " + e.Path
@@ -551,12 +590,37 @@ func isParamNameByte(b byte) bool {
 
 func sortedMethods() []string { return slices.Sorted(maps.Keys(knownMethods)) }
 
+// interactiveOnlyMessage is the answer to a request that was not authenticated by
+// an interactive session on a route that is InteractiveOnly: one message for every
+// such route, because what a client has to do about it is the same — sign in. What
+// the route would have let a leaked key do is in the declaration's reason, not here.
+const interactiveOnlyMessage = "This action requires an interactive login session; API keys and other non-interactive credentials cannot be used for it"
+
+// interactiveOnlyGate is the link an Endpoint's InteractiveOnly installs. It runs
+// after authentication, which is what records how the caller authenticated
+// (authRequired and authenticateAPIKey), and ahead of everything else on the route.
+//
+// It is an ALLOWLIST: it admits a request authenticated by an interactive session
+// and refuses every other — an API key today, and whatever principal type is added
+// tomorrow, including one that forgets to say how it authenticated. A deny-list of
+// "API key" would admit that principal until somebody remembered to add it.
+//
+// A named function and not a closure, so that the mounted chain names it and a
+// guard can find it (TestGuard_EveryInteractiveOnlyRouteMountsTheGateRightAfterAuthentication).
+func interactiveOnlyGate(c fiber.Ctx) error {
+	if !handlers.AuthenticatedWithSession(c) {
+		return fiber.NewError(fiber.StatusForbidden, interactiveOnlyMessage)
+	}
+	return c.Next()
+}
+
 // mountRegistry attaches every endpoint in reg to router.
 //
-// The chain is authRequired -> rate limiter -> permission -> handler — the
-// handler being serve, which validates the parameters and refuses a node the
-// cluster does not hold before it calls the endpoint's Handler — and every
-// link is attached PER ROUTE rather than through a Group. Fiber v3
+// The chain is authRequired -> [interactive-only gate] -> rate limiter ->
+// permission -> handler — the handler being serve, which validates the
+// parameters and refuses a node the cluster does not hold before it calls the
+// endpoint's Handler — and every link is attached PER ROUTE rather than through
+// a Group. Fiber v3
 // applies group middleware at match time, so it never appears in a
 // route's Handlers slice — a permission attached to a group is invisible
 // to route-table introspection and therefore unverifiable by a guard
@@ -600,9 +664,16 @@ func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes
 	for _, e := range reg.endpoints {
 		// []any rather than []fiber.Handler because that is what Fiber
 		// v3's Add takes; the elements are all fiber.Handler.
-		chain := make([]any, 0, 4)
+		chain := make([]any, 0, 5)
 		if e.Permissions.authenticated() {
 			chain = append(chain, auth)
+		}
+		// Straight after authentication, which is what says how the caller
+		// authenticated, and ahead of the limiter and the permission check: a key
+		// refused here must neither spend a bucket nor learn, from a permission
+		// answer, anything about what its owner may do.
+		if e.InteractiveOnly != "" {
+			chain = append(chain, interactiveOnlyGate)
 		}
 		if e.RateLimiter != nil {
 			chain = append(chain, e.RateLimiter)

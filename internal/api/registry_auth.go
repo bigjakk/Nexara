@@ -67,7 +67,13 @@ const consoleTokenReason = "the resource is chosen by the request BODY — node_
 // first-user advisory lock, the constant-time login failure paths, the
 // role-rotation guard on refresh, the session ownership check, and the
 // "auth_source must be local" refusals on profile and password edits.
-func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
+//
+// logoutAllLimiter and sessionRevokeLimiter are passed IN, like the limiters of the
+// other registrars: they are the per-user caps of POST /auth/logout-all and
+// DELETE /auth/sessions/:id (Server.logoutAllLimiter, Server.sessionRevokeLimiter),
+// which a nil — a test that is not about them — leaves off. They are two instances
+// on purpose: ending one session and ending every session are different budgets.
+func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimiter, sessionRevokeLimiter fiber.Handler) {
 	// ── Anonymous ─────────────────────────────────────────────────────
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
@@ -185,11 +191,16 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 			"not answer within 15 seconds of the revoke beginning — which is after the lookup, up to 5 " +
 			"seconds into the request — it answers 503, the sessions may still be active, and the cookie " +
 			"is left alone so the call can be repeated. Allow up to 30 seconds in all: the lookup, then " +
-			"the revoke, then the audit entry and the cleanup, which have up to 5 seconds each.",
+			"the revoke, then the audit entry and the cleanup, which have up to 5 seconds each. Each user " +
+			"may make at most 5 calls a minute, from every address together: the next is answered 429 " +
+			"with a Retry-After header (in seconds), revokes nothing and leaves the refresh cookie in place.",
 		Group:       "Authentication",
 		Permissions: Permissions{SelfService: "revokes the caller's own sessions"},
 		Parameters:  apischema.Properties{},
 		Handler:     h.LogoutAll,
+
+		InteractiveOnly: "ends every session of the account: a leaked key must not be able to loop it and refuse every sign-in the owner attempts",
+		RateLimiter:     logoutAllLimiter,
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,
@@ -206,7 +217,9 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 		Path:   authScope + "/sessions/:id",
 		Description: "Revoke one of the caller's own sessions. Somebody else's id answers 404 rather than " +
 			"403, so the endpoint cannot be used to probe which session ids exist; revoking the current " +
-			"session also clears the refresh cookie.",
+			"session also clears the refresh cookie. Each user may make at most 30 calls a minute, from " +
+			"every address together: the next is answered 429 with a Retry-After header (in seconds), " +
+			"revokes nothing and leaves the refresh cookie in place.",
 		Group:       "Authentication",
 		Permissions: Permissions{SelfService: "revokes one of the caller's own sessions; ownership is checked in the handler"},
 		Parameters: apischema.Properties{
@@ -219,6 +232,9 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 			},
 		},
 		Handler: h.RevokeSessionByID,
+
+		InteractiveOnly: "ends one session of the account, given its id: with logout-all refused, a leaked key could list the sessions and end each of them",
+		RateLimiter:     sessionRevokeLimiter,
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
@@ -264,7 +280,24 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 		Path:   authScope + "/change-password",
 		Description: "Change the caller's own password, proving the current one first, and revoke every " +
 			"session on the account, the caller's included, so each device signs in again. Refused for an " +
-			"account provisioned from LDAP or OIDC. The change and the revoke are one transaction: both " +
+			"account provisioned from LDAP or OIDC, and refused with 403 for a request authenticated with " +
+			"an API key: changing a password takes an interactive login session. A wrong current " +
+			"password is answered 403 as well, not 401, because a 401 makes a client refresh its session " +
+			"and send the request again, which would count every wrong attempt twice. The current " +
+			"password can be tried only so often: five wrong ones within 60 minutes lock the account " +
+			"out of this route for 30 minutes, the fifth wrong one is itself the 429 that says so, and " +
+			"while it is locked every request, the right password included, answers 429 with a " +
+			"Retry-After header (in seconds) and changes nothing. The lock is this route's own: signing " +
+			"in and everything else carry on, and signing out of every device or ending a session does " +
+			"not lift it. A change that goes through clears the count, because the password the guesses " +
+			"were aimed at is gone; a correct current password whose change does not go through (the new " +
+			"password is refused as too weak, the database is unavailable) gives back only the one " +
+			"attempt it took, so the wrong guesses counted before it stay counted. Every wrong current " +
+			"password is also logged by the server. Each attempt is counted before its " +
+			"password is checked, so when the count cannot be kept (Redis cannot be reached) the request " +
+			"answers 503, the password is not checked and was NOT changed, and retrying is safe. The " +
+			"route is also capped at 15 requests a minute per client address, in the budget login uses. " +
+			"The change and the revoke are one transaction: both " +
 			"happen or neither does, and the change is conditional on the password that was proved still " +
 			"being the one in effect, so a request that races another change of the account, or whose " +
 			"account is removed meanwhile, changes nothing and answers 409. A 503 or 500 whose message " +
@@ -276,14 +309,19 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 			"does the response say the change could not be confirmed, which means the new password may be " +
 			"in effect with every session signed out: sign in with the new password, and if it is refused " +
 			"the old one still stands. The database gets 15 seconds for the read of " +
-			"the account and the same 15 seconds for the transaction, and the audit entry, the cleanup and " +
-			"the read that settles a lost commit have up to 5 seconds each: allow up to 45 seconds in all.",
+			"the account and the count of the attempt, and the same 15 seconds for the transaction, and " +
+			"the audit entry (which also clears the count after a change), the cleanup, the read that " +
+			"settles a lost commit and the give-back of an attempt by a request that changed nothing " +
+			"have up to 5 seconds each, and no request needs more than three of them: allow up to 45 " +
+			"seconds in all.",
 		Group:       "Authentication",
 		Permissions: Permissions{SelfService: "changes the caller's own password"},
 		Parameters: apischema.Properties{
-			// Both are write-only, and neither reaches an audit row: the
-			// handler records the ACTION with a nil details payload, which
-			// matters because view:audit is a default Viewer grant.
+			// Both are write-only, and neither reaches an audit row: a change
+			// is recorded with a nil details payload, and the row a lockout
+			// writes carries the client address, the count and the length of
+			// the lock but never a password. That matters because view:audit
+			// is a default Viewer grant.
 			"old_password": {
 				Type:        apischema.String,
 				MinLength:   apischema.Ptr(1),
@@ -302,6 +340,8 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler) {
 			},
 		},
 		Handler: h.ChangePassword,
+
+		InteractiveOnly: "proves the current password and ends every session of the account: a leaked key must not be able to guess the password or set its own",
 	})
 
 	// ── Console ───────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/api/handlers"
 	"github.com/bigjakk/nexara/internal/auth"
 )
 
@@ -51,6 +52,8 @@ func stubAuth(grants map[string]bool) fiber.Handler {
 		}
 		c.Locals("user_id", uuid.MustParse(testUserID))
 		c.Locals("rbac_engine", &stubRBACEngine{grants: grants})
+		// An interactive session, as authRequired records one (see noAuth).
+		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
 		return c.Next()
 	}
 }

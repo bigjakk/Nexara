@@ -8,6 +8,7 @@ import (
 	"net/mail"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -193,6 +194,17 @@ type AuthHandler struct {
 	ldapHandler    *LDAPHandler
 	oidcHandler    *OIDCHandler
 	totpHandler    *TOTPHandler
+
+	// passwordLockout counts the attempts at ChangePassword's current password;
+	// SetPasswordLockoutStore puts it in Redis, and nil means the process's own
+	// memory (lockoutStore), which says so once, in memoryLockoutWarning.
+	passwordLockout      passwordLockoutStore
+	memoryLockoutWarning sync.Once
+
+	// passwordChecker stands in for auth.CheckPassword in ChangePassword when a
+	// test sets it, and is nil in production (checkCurrentPassword): it exists so a
+	// test can count the passwords that were actually checked.
+	passwordChecker func(hash, password string) error
 
 	// dbTimeout bounds Refresh's, Logout's, LogoutAll's and ChangePassword's
 	// deciding database work; authDBTimeout when zero. followUpTimeout bounds each
@@ -2065,7 +2077,39 @@ func (h *AuthHandler) UpdateProfile(c fiber.Ctx, p *apischema.Params) error {
 }
 
 // ChangePassword allows the current user to change their own password.
-// Only available for local auth users.
+// Only available for local auth users, and only from an interactive session: the
+// route is declared InteractiveOnly (registry_auth.go), so a request authenticated
+// with an API key is refused, 403, by the registry before this handler runs — the
+// route proves a password and ends every session of the owner, and a key that has
+// leaked must be able to do neither. The handler does not ask how the caller
+// authenticated; one owner for that rule is the point.
+//
+// How often the current password can be guessed is bounded. Each attempt is
+// counted BEFORE its password is checked, and passwordLockoutThreshold wrong ones
+// within passwordLockoutWindow lock the account out of this route for
+// passwordLockoutDuration — 429 with a Retry-After, and the right password is
+// refused like any other until the lock ends (password_lockout.go has the rule and
+// the reasons). The order of the request is: the read of the account, the count
+// (which is also the read of the lock), the check of the password, the hash of the
+// new password, and the transaction below. An attempt that cannot be counted is a
+// 503 and its password is not checked. Every wrong password is logged, at Warn.
+//
+// What becomes of the count once the password VERIFIED depends on whether the
+// change commits. One that commits makes the secret new, so every attempt counted
+// against the old one is cleared, in the follow-up that records the change. A
+// request that verified the password and committed nothing — the new password was
+// too weak, the database failed, another change got there first — hands back only
+// the attempt it took (handBackAttempt, deferred): the attempts already counted
+// are guesses at a secret that has not changed, and clearing them would give
+// whoever made them a fresh budget each time the owner mistypes a new password.
+//
+// A wrong current password is answered 403, not 401, and the choice is not
+// cosmetic: the SPA's client (api-client.ts, request() in its "refresh" mode)
+// takes every 401 for an expired access token, refreshes the session and sends the
+// request again once, so each wrong submit used to reach this handler twice, count
+// as two attempts, and rotate the session for nothing. The 403 says what is true —
+// the caller is who they say they are, and is refused this — and a client replays
+// nothing.
 //
 // The new password and the end of every session of the user are ONE transaction,
 // run through the transaction's own queries and nothing else — a request that
@@ -2101,38 +2145,70 @@ func (h *AuthHandler) UpdateProfile(c fiber.Ctx, p *apischema.Params) error {
 // user and then the transaction, because the bcrypt work between them is CPU time,
 // not database time: a slow hash must not be charged to the database's bound and
 // turn into a deadline on a write that the database would have answered. The
-// Redis cleanup and the audit row run under follow-up deadlines of their own.
+// lockout's Redis steps stay inside the worst case: the count is part of the read
+// of the account, under its bound; the hand-back of a request that committed
+// nothing is the last thing the handler does, under a follow-up deadline of its
+// own, and a request that commits makes no hand-back; the clear after a change
+// that did commit runs inside the follow-up of the audit row and shares its
+// seconds. Each of them stops waiting when its own context ends, whatever the
+// Redis client would have waited (boundedByContext). The Redis cleanup and the
+// audit row run under follow-up deadlines of their own.
 func (h *AuthHandler) ChangePassword(c fiber.Ctx, p *apischema.Params) error {
+	// An API key never gets here: the route is InteractiveOnly (registry_auth.go),
+	// which the registry enforces right after authentication.
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
-	readCtx, readCancel := h.dbContext(c)
-	user, err := h.queries.GetUserByID(readCtx, userID)
-	readCancel()
+	user, attempt, err := h.admitPasswordAttempt(c, userID)
 	if err != nil {
-		return passwordNotChanged("read the user", userID, err)
+		return err
 	}
 
-	if user.AuthSource != "local" {
-		return fiber.NewError(fiber.StatusForbidden, "Password is managed by your identity provider")
+	if err := h.checkCurrentPassword(user.PasswordHash, p.String("old_password")); err != nil {
+		logWrongPassword(c, userID, attempt)
+		if attempt.admission == lockoutAdmittedLast {
+			// The last wrong password of the budget: the lock is in place from now on.
+			details := passwordLockoutRecord(c, userID, attempt)
+			h.withFollowUp(c, func() {
+				AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "password_change_locked", details)
+			})
+			return passwordLocked(c, attempt.retryAfter)
+		}
+		// 403, not 401: see the note on ChangePassword.
+		return fiber.NewError(fiber.StatusForbidden, "Current password is incorrect")
 	}
 
-	if err := auth.CheckPassword(user.PasswordHash, p.String("old_password")); err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, "Current password is incorrect")
-	}
+	// The password is right, so this attempt was not a guess, and what becomes of
+	// the count depends on whether the change commits. If it does, the secret is
+	// new and the whole count is cleared with the record of the change, below. If it
+	// does not — the new password is refused, the database fails, another change got
+	// there first — the request hands back the one attempt it took and nothing more:
+	// the guesses already counted are aimed at a secret that has not changed.
+	//
+	// The hand-back is a defer registered ahead of everything that follows, so that
+	// it runs last: after the transaction's connection is back in the pool and the
+	// second phase's bound is lifted, under a follow-up deadline of its own.
+	committed := false
+	defer func() {
+		if !committed {
+			h.handBackAttempt(c, userID, attempt)
+		}
+	}()
 
-	hashedPassword, err := auth.HashPassword(p.String("new_password"))
-	if err != nil {
-		if errors.Is(err, auth.ErrPasswordTooShort) || errors.Is(err, auth.ErrPasswordTooLong) || errors.Is(err, auth.ErrPasswordWeak) {
-			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	hashedPassword, hashErr := auth.HashPassword(p.String("new_password"))
+
+	// The second phase's bound starts here, after the hash.
+	ctx, cancel := h.dbContext(c)
+	defer cancel()
+
+	if hashErr != nil {
+		if errors.Is(hashErr, auth.ErrPasswordTooShort) || errors.Is(hashErr, auth.ErrPasswordTooLong) || errors.Is(hashErr, auth.ErrPasswordWeak) {
+			return fiber.NewError(fiber.StatusBadRequest, hashErr.Error())
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process password")
 	}
-
-	ctx, cancel := h.dbContext(c)
-	defer cancel()
 
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
@@ -2185,13 +2261,23 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx, p *apischema.Params) error {
 		}
 	}
 
-	// The change is made. What is left runs under deadlines of its own, so that a
-	// request which spent its budget getting here still records it and cleans up.
-	// The record comes first: it is what must not be lost, and the cleanup is a cache
-	// that nothing reads and may take its whole deadline. A failure of either is not
-	// the user's to hear about.
+	// Every other branch above returned: the change is made, whether the COMMIT said
+	// so or reading the account back did. The unconfirmed one is not here — it
+	// returns, and hands back only its own attempt, the safe thing to do whether or
+	// not the change landed.
+	committed = true
+
+	// What is left runs under deadlines of its own, so that a request which spent
+	// its budget getting here still records the change and cleans up. The record
+	// comes first: it is what must not be lost, and the cleanup is a cache that
+	// nothing reads and may take its whole deadline. A failure of either is not the
+	// user's to hear about.
 	h.withFollowUp(c, func() {
 		AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "password_changed", nil)
+		// The secret the counted guesses were aimed at is gone, so forget them. It
+		// follows the record and shares its deadline, so that clearing the count adds
+		// nothing to the worst case the API reference states.
+		h.forgetPasswordFailures(c.Context(), userID)
 	})
 	h.forgetSessions(ctx, revoked...)
 

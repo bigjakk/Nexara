@@ -25,7 +25,8 @@ const testAPIKeyID = "d4e5f6a7-0000-4000-8000-000000000055"
 //
 // All six made exactly one static, unconditional call, so all six hoist: 6 in,
 // 6 out, none kept. Create's extra refusal — an API-key-authenticated caller
-// may not mint more keys — is NOT a permission and stays in the handler.
+// may not mint more keys — is NOT a permission: it is declared InteractiveOnly
+// on the route, and the registry enforces it.
 var apiKeyLegacyPermissions = map[string]string{
 	"POST /api/v1/api-keys":             "manage:api_key",
 	"GET /api/v1/api-keys":              "manage:api_key",

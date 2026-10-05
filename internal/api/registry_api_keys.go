@@ -53,10 +53,11 @@ var apiKeyIDParam = apischema.Property{
 // Every one is a plain global Check — an API key belongs to an ACCOUNT, and no
 // path here names a cluster — and none is Deferred or Advisory.
 //
-// What stays in the handlers is what the declaration cannot see: the refusal to
-// mint a key while authenticated BY a key (which would let a stolen key
-// self-replicate), the 25-keys-per-user cap, and the ownership check on the
-// single revoke.
+// What stays in the handlers is what the declaration cannot see: the
+// 25-keys-per-user cap and the ownership check on the single revoke. The refusal
+// to mint a key while authenticated BY a key, which would let a stolen key
+// self-replicate, is declared — InteractiveOnly on POST /api-keys — and enforced
+// by the registry ahead of the handler.
 func registerAPIKeyEndpoints(reg *Registry, h *handlers.APIKeyHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
@@ -68,6 +69,8 @@ func registerAPIKeyEndpoints(reg *Registry, h *handlers.APIKeyHandler) {
 		Permissions: apiKeyManage(),
 		Parameters:  createAPIKeyParams(),
 		Handler:     h.Create,
+
+		InteractiveOnly: "mints a credential: a leaked key must not be able to mint more of itself",
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,

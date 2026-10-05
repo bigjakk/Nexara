@@ -28,6 +28,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/api/handlers"
 	nexapp "github.com/bigjakk/nexara/internal/app"
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/config"
@@ -413,6 +414,10 @@ func sweepAuth(reg *Registry) fiber.Handler {
 		}
 		c.Locals("user_id", uuid.MustParse(testUserID))
 		c.Locals("rbac_engine", allowAllRBAC{permissions: permissions})
+		// An interactive session, as authRequired records one: an InteractiveOnly
+		// route admits only that, and the sweep is about what handlers do with a
+		// request that reached them.
+		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
 		return c.Next()
 	}
 }

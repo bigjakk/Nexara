@@ -116,7 +116,9 @@ func (s *Server) buildRegistry() *Registry {
 		registerTOTPEndpoints(reg, s.totpHandler)
 	}
 	if s.authHandler != nil {
-		registerAuthEndpoints(reg, s.authHandler)
+		// Two limiter instances, one per route: ending one session and ending every
+		// session are different budgets (see sessionRevokeLimiter).
+		registerAuthEndpoints(reg, s.authHandler, s.logoutAllLimiter(), s.sessionRevokeLimiter())
 	}
 	if s.networkHandler != nil {
 		// One handler, four declaration files: see the file comment in

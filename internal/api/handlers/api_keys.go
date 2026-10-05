@@ -101,16 +101,12 @@ func textPtr(t pgtype.Text) *string {
 // --- Handlers ---
 
 // Create handles POST /api/v1/api-keys.
+//
+// An API key cannot create new API keys, so a leaked key cannot mint more of
+// itself: the route is declared InteractiveOnly (registry_api_keys.go), which the
+// registry enforces right after authentication, before the permission check and
+// this handler. The handler does not ask how the caller authenticated.
 func (h *APIKeyHandler) Create(c fiber.Ctx, p *apischema.Params) error {
-	// API keys cannot create new API keys — require an interactive JWT session.
-	// This prevents key self-replication if a key is compromised. It is NOT the
-	// route's permission (manage:api_key is, and the middleware has already
-	// run): it is a rule about how the caller authenticated, which no grant
-	// expresses.
-	if authMethod, _ := c.Locals("auth_method").(string); authMethod == "api_key" {
-		return fiber.NewError(fiber.StatusForbidden, "API keys cannot be created using API key authentication; use an interactive login session")
-	}
-
 	// Absent means "never expires", which is why this is an OptInt read rather
 	// than a zero test: the supplied flag tells the two apart, and no declared
 	// default could set it (apischema.Property.Default).

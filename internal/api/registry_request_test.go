@@ -42,8 +42,16 @@ func (c *capture) handler() Handler {
 // noAuth is the explicit pass-through the parameter tests mount in place
 // of authentication. mountRegistry refuses a nil, so opting out of a
 // session check has to be written down rather than defaulted into.
+//
+// It records an interactive session, as authRequired does for an access token:
+// the stand-in is for a caller the test does not care about, and an
+// InteractiveOnly route admits only a session, so a route that declares it would
+// otherwise refuse every request a parameter test sends.
 func noAuth() fiber.Handler {
-	return func(c fiber.Ctx) error { return c.Next() }
+	return func(c fiber.Ctx) error {
+		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
+		return c.Next()
+	}
 }
 
 // everyNodeIsAMember is the explicit stand-in for the node lookup, for the

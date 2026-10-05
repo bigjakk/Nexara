@@ -223,6 +223,27 @@ func (s *Server) setupMiddleware() {
 	// RegenerateRecoveryCodes because both validate a TOTP code; without this,
 	// an attacker holding a stolen access token would have no per-IP cap and
 	// only the per-user lockout (5 fails / 5 min cooldown) — see Phase 4.4.
+	// Includes change-password for the same reason: it validates the current
+	// password, and the per-user lockout (handlers/password_lockout.go) is all
+	// that would otherwise stand between a stolen token and a guess.
+	//
+	// Does NOT include logout-all, nor DELETE /auth/sessions/:id. Those routes are a
+	// loop and not a guess, and each is capped per USER on the route itself
+	// (logoutAllLimiter, sessionRevokeLimiter) instead: this bucket is per ADDRESS
+	// and runs before authentication, so anyone could drain it — with no credentials
+	// at all, from one address, or from every client behind a proxy while
+	// TRUSTED_PROXIES is unset — and ending sessions is the remedy for a stolen
+	// token, the one request an owner must not be refused because a stranger sent
+	// fifteen logins.
+	//
+	// ONE bucket serves every path in the set, on purpose: login and
+	// change-password are two oracles for the same password, so an address gets
+	// 15 guesses a minute across both, not 15 at each. Because it runs before
+	// authentication it also counts what a later link refuses: an API key turned
+	// away by the InteractiveOnly gate from change-password, DELETE /auth/totp or
+	// /auth/totp/recovery-codes/regenerate has already spent a request of its
+	// address's bucket here (TestDocs_TheRoutesThatSpendTheAuthBudgetAreTheOnesThatDo
+	// holds the reference to that list).
 	s.app.Use(limiter.New(limiter.Config{
 		Max:        15,
 		Expiration: 1 * time.Minute,
@@ -828,6 +849,95 @@ func mappingUsageLimiterKey(c fiber.Ctx) string {
 	return c.IP() + ":mapping-usage"
 }
 
+// The two routes that end sessions are each capped per USER, on the route, and
+// the caps are these: five calls a minute of sign-out everywhere, thirty of ending
+// one session. They are constants so that the registry's Descriptions and the API
+// reference state the figures the limiters have, and tests hold them there
+// (TestDocs_TheSessionEndingCapsAreStatedWhereTheyAreDocumented).
+const (
+	logoutAllRateLimit     = 5
+	sessionRevokeRateLimit = 30
+)
+
+// logoutAllLimiter caps POST /api/v1/auth/logout-all at logoutAllRateLimit (5) a
+// minute per user.
+//
+// Logout-all is a loop and not a guess: it ends every session of the account, so
+// a caller that can repeat it keeps the owner signed out — every session the
+// owner opens is gone at the next call. An API key never gets as far as this
+// limiter: the route is InteractiveOnly and the gate runs ahead of it, so a leaked
+// key can neither loop the route nor spend the owner's bucket.
+//
+// What this limiter does is bound how fast THIS route can be spent: five calls a
+// minute for the account, from every address together. It is not a bound on what a
+// stolen access token can do overall. The token can still end sessions through
+// DELETE /auth/sessions/:id, at that route's own cap (sessionRevokeLimiter), for as
+// long as it lives; and the remedy stays with the OWNER, who signs out everywhere
+// (this route) and changes the password (which ends every session too).
+//
+// Keyed on the user and attached to the route, and NOT a member of
+// authLimitedPaths, for one reason: that set is a bucket per address that runs
+// before authentication and is shared with login, so anyone with no credentials at
+// all — from one address, or from every client behind a proxy while TRUSTED_PROXIES
+// is unset — could drain it and refuse the owner the remedy for a token thief,
+// "sign out everywhere". A route limiter runs after authRequired and the gate, so
+// only the account's own authenticated sessions spend its bucket. Five is a
+// working budget for a person (one press of the button, a retry or two) and far
+// from a loop. The IP is the fallback for a request without a user, which does not
+// reach here.
+func (s *Server) logoutAllLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:          logoutAllRateLimit,
+		Expiration:   1 * time.Minute,
+		KeyGenerator: logoutAllLimiterKey,
+	})
+}
+
+// logoutAllLimiterKey is logoutAllLimiter's bucket: the user when there is one,
+// else the IP.
+func logoutAllLimiterKey(c fiber.Ctx) string {
+	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
+		return "user:" + uid.String() + ":logout-all"
+	}
+	return c.IP() + ":logout-all"
+}
+
+// sessionRevokeLimiter caps DELETE /api/v1/auth/sessions/:id at
+// sessionRevokeRateLimit (30) a minute per user.
+//
+// Ending one session is sign-out everywhere one device at a time. A caller that can
+// list the account's sessions (GET /auth/sessions, which an API key may call too)
+// and end each new one in a loop keeps the owner signed out as surely as a loop of
+// logout-all — keeping its own session meanwhile — and with no limiter of its own it
+// would never meet logoutAllLimiter's cap: the first probe sent two hundred of
+// them for one user, all answered 204. So the route has a cap of its own, per user,
+// after the InteractiveOnly gate for the reasons logoutAllLimiter gives (a refused
+// key spends none of it), and a larger one, because ending several devices in one
+// sitting is what a person does with this route: thirty a minute is a long way from
+// a loop and from the way anyone uses it.
+//
+// A separate instance, not logoutAllLimiter's: ending one session and ending every
+// session are different budgets, and sharing one would let a handful of single
+// revokes refuse the owner's sign-out everywhere. Like it, this bounds how fast this
+// route can be spent and not what a stolen token can do overall: the token can still
+// end every session through logout-all, at its own cap.
+func (s *Server) sessionRevokeLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:          sessionRevokeRateLimit,
+		Expiration:   1 * time.Minute,
+		KeyGenerator: sessionRevokeLimiterKey,
+	})
+}
+
+// sessionRevokeLimiterKey is sessionRevokeLimiter's bucket: the user when there is
+// one, else the IP.
+func sessionRevokeLimiterKey(c fiber.Ctx) string {
+	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
+		return "user:" + uid.String() + ":session-revoke"
+	}
+	return c.IP() + ":session-revoke"
+}
+
 // veeamConnectLimiter caps the Veeam endpoints that spend a real logon at
 // 10/min/IP — create, update and test.
 //
@@ -934,8 +1044,19 @@ func (s *Server) fingerprintFetchLimiter() fiber.Handler {
 // its brute-force cap off. The comparison uses the same normalisation
 // limiterPath applies, since that is what the closures compare against.
 var (
-	// authLimitedPaths are the login and TOTP-code paths capped at 15
-	// attempts per minute per IP.
+	// authLimitedPaths are the login, change-password and TOTP-code paths capped
+	// at 15 attempts per minute per IP, in one bucket.
+	//
+	// Change-password checks the caller's CURRENT password, so it is a second
+	// place to guess the secret login guards, and it is reachable with nothing
+	// but a bearer token. Until it was listed here it had no per-IP cap at all,
+	// because everything under /api/v1/auth/ is exempt from the general limiter.
+	//
+	// Logout-all and DELETE /auth/sessions/:id are deliberately NOT here: a path in
+	// this set shares a bucket that anyone can drain without authenticating, which
+	// for the remedy against a stolen token is a denial of service (logoutAllLimiter
+	// and sessionRevokeLimiter cap them per user).
+	// TestGuard_CredentialRoutesKeepTheirRateLimit holds both out.
 	//
 	// The last two are the OIDC flow, which is unauthenticated and does real
 	// work on every call: /authorize performs an outbound discovery fetch to
@@ -946,6 +1067,7 @@ var (
 	authLimitedPaths = map[string]bool{
 		"/api/v1/auth/login":                          true,
 		"/api/v1/auth/register":                       true,
+		"/api/v1/auth/change-password":                true,
 		"/api/v1/auth/totp/verify-login":              true,
 		"/api/v1/auth/totp":                           true,
 		"/api/v1/auth/totp/recovery-codes/regenerate": true,
@@ -995,27 +1117,45 @@ func (s *Server) authRequired() fiber.Handler {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired token")
 		}
 
-		// Scoped console tokens are single-purpose: they ONLY authorize a
-		// specific WebSocket upgrade. Reject them at the regular API boundary
-		// so a leaked console token cannot be used to call other endpoints.
-		if claims.ConsoleScope != nil {
-			return fiber.NewError(fiber.StatusUnauthorized, "Console-scoped token cannot be used for API requests")
-		}
-		// Same logic for WS-hub-scoped tokens — they only authorize the
-		// /ws upgrade, never an API request.
-		if claims.WSScope != "" {
-			return fiber.NewError(fiber.StatusUnauthorized, "WS-scoped token cannot be used for API requests")
+		// Only an interactive session's access token authenticates an API request.
+		// Scoped console tokens are single-purpose — they ONLY authorize a specific
+		// WebSocket upgrade — and so are WS-hub tokens, which only authorize the /ws
+		// upgrade; a leaked one must not be usable to call other endpoints. The
+		// question is asked in the positive, of the one predicate (Claims.IsSession),
+		// so that a kind of token added later is refused here until it is taught to
+		// Claims.Kind, and not admitted until somebody adds a third test.
+		if !claims.IsSession() {
+			return fiber.NewError(fiber.StatusUnauthorized, refusedTokenMessage(claims))
 		}
 
 		c.Locals("user_id", claims.UserID)
 		c.Locals("email", claims.Email)
 		c.Locals("role", claims.Role)
+		// An access token is an interactive session — the predicate above said so.
+		// This is the only value the registry's InteractiveOnly gate admits, so a
+		// request authenticated any other way — or by something added later that
+		// forgot to say how — is refused there.
+		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
 
 		if s.rbacEngine != nil {
 			c.Locals("rbac_engine", s.rbacEngine)
 		}
 
 		return c.Next()
+	}
+}
+
+// refusedTokenMessage says, for a client's benefit, why a validly signed token is
+// refused as API authentication: it is a console or hub token, or claims this code
+// has no kind for. The decision is Claims.IsSession's; this is only the wording.
+func refusedTokenMessage(claims *auth.Claims) string {
+	switch claims.Kind() {
+	case auth.TokenKindConsole:
+		return "Console-scoped token cannot be used for API requests"
+	case auth.TokenKindWSHub:
+		return "WS-scoped token cannot be used for API requests"
+	default:
+		return "Token cannot be used for API requests"
 	}
 }
 
@@ -1045,14 +1185,17 @@ func (s *Server) authOptional() fiber.Handler {
 			return c.Next()
 		}
 
-		// Scoped console / WS-hub tokens must not be treated as general-purpose auth.
-		if claims.ConsoleScope != nil || claims.WSScope != "" {
+		// Scoped console / WS-hub tokens — and any kind that is not a session — must
+		// not be treated as general-purpose auth: the same predicate authRequired asks.
+		if !claims.IsSession() {
 			return c.Next()
 		}
 
 		c.Locals("user_id", claims.UserID)
 		c.Locals("email", claims.Email)
 		c.Locals("role", claims.Role)
+		// Whoever has a user_id has a method (authRequired does the same).
+		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
 
 		return c.Next()
 	}
@@ -1084,7 +1227,9 @@ func (s *Server) authenticateAPIKey(c fiber.Ctx, token string) error {
 	c.Locals("user_id", row.UserID)
 	c.Locals("email", row.UserEmail)
 	c.Locals("role", row.UserRole)
-	c.Locals("auth_method", "api_key")
+	// How the caller authenticated, for the registry's InteractiveOnly gate — one
+	// set of constants for the writers and that reader.
+	c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodAPIKey)
 	c.Locals("api_key_id", row.ID)
 
 	if s.rbacEngine != nil {

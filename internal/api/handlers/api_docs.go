@@ -101,6 +101,14 @@ type APIEndpoint struct {
 	Permission  string `json:"permission"`
 	Group       string `json:"group"`
 
+	// InteractiveOnly is the reason an API key is refused on this route, 403: a
+	// route that changes the caller's own credentials or authentication factors,
+	// or ends their sessions, takes an interactive login session, whatever the
+	// key's owner may do. It is empty — and absent from the JSON — for every other
+	// route, which a key may call as far as its owner's permissions go. Declared
+	// routes only: a legacy route has no declaration to say so.
+	InteractiveOnly string `json:"interactive_only,omitempty"`
+
 	// Parameters is the route's full request contract — path, query and
 	// body alike. It is absent in two different cases the payload does not
 	// tell apart: a declared route that declares no parameters (and so

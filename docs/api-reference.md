@@ -124,7 +124,11 @@ https://nexara.example.com/api/v1
    caller's sessions are revoked all the same. With more than one refresh cookie
    in the request the cookie is deleted without being looked at. The lookup has a
    deadline of its own, up to 5 seconds, and runs before the revoke begins, so a
-   slow lookup never takes any of the revoke's time.
+   slow lookup never takes any of the revoke's time. Each user may make at most 5
+   calls a minute to it, from every address together: the next is answered `429`
+   with a `Retry-After` header, revokes nothing and leaves the refresh cookie in
+   place. `DELETE /auth/sessions/:id`, which ends one session, is capped at 30 a
+   minute per user and refuses in the same way.
 
    If the session cannot be looked up or revoked — the database cannot be
    reached, is shutting down or too busy, or does not answer within 15 seconds —
@@ -141,12 +145,35 @@ https://nexara.example.com/api/v1
    caller still signed in, so it can simply
    be repeated. `POST /auth/change-password` changes the password and revokes
    every session of the account, this one included, in one transaction, so both
-   happen or neither does. The change is conditional on the password that was
+   happen or neither does. It takes an interactive login session: a request
+   authenticated with an API key is refused with `403` before anything else about
+   it is looked at (see Interactive-Only Routes below), because a key that has
+   leaked must not be able to guess the current password or set a new one. A wrong
+   current password is answered `403` too, not `401`: a `401` makes a client
+   refresh its session and send the request again, which would count every wrong
+   attempt twice. The current password can be tried only so often. Five wrong
+   ones within 60 minutes lock the account out of this route for 30 minutes: the
+   fifth wrong one is itself answered `429`, and while the lock lasts every
+   request, the right password included, is answered `429` with a `Retry-After`
+   header (in seconds) and changes nothing. The lock covers this route alone —
+   signing in, the sessions and every other route carry on, and signing out of
+   every device or ending a session does not lift it. A change that goes through
+   clears the count, because the password the guesses were aimed at is gone. A
+   correct current password whose change does not go through — the new password
+   is refused as too weak, the database is unavailable — gives back only the one
+   attempt it took: the wrong guesses counted before it stay counted. Every wrong
+   current password is also logged by the server. Each attempt is counted before
+   its password is checked, so when the count cannot be kept (Redis cannot be
+   reached) the request is answered `503`, its password is not checked and the
+   password is **not** changed. The change is conditional on the password that was
    proved still being the one in effect: a request that races another change of
    the same account, or whose account is removed in the meantime, changes nothing
    and returns `409`. The database gets 15 seconds for the read of the account and
-   the same 15 seconds for the transaction; the audit entry and the cleanup that
-   follow, and the read that settles a lost commit, have up to 5 seconds each. A
+   the count of the attempt, and the same 15 seconds for the transaction; the
+   audit entry (which also clears the count after a change), the cleanup that
+   follows, the read that settles a lost commit and the give-back of an attempt
+   by a request that changed nothing have up to 5 seconds each, and no request
+   needs more than three of them. A
    `503` or `500` whose message says the password was **not** changed means just
    that, and retrying is safe. When the answer to the commit is lost, the server
    reads the account back to find out whether it landed, waiting up to 5 seconds
@@ -215,6 +242,29 @@ Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "per
    rather than returned in the body, and a user with 2FA enabled gets
    `{ "totp_required": true, "totp_pending_token": "..." }` here instead of
    tokens — complete it against `/auth/totp/verify-login` as above.
+
+### Interactive-Only Routes
+
+An API key (`Authorization: Bearer nxra_…`) carries its owner's permissions, but
+a route that changes the owner's own credentials or authentication factors, or
+ends their sessions, is **interactive-only**: only a request authenticated by an
+interactive login session is admitted, and any other — an API key today — is
+refused with `403`, the first thing checked after authentication, ahead of the
+route's rate limit, its permission and its parameters, so the caller has to use
+an interactive login session instead. The routes are
+`POST /auth/change-password`, `POST /auth/totp/setup`,
+`POST /auth/totp/setup/verify`, `DELETE /auth/totp`,
+`POST /auth/totp/recovery-codes/regenerate`, `POST /auth/logout-all`,
+`DELETE /auth/sessions/:id` and `POST /api-keys`. `GET /api/v1/api-docs` gives
+each of them an `interactive_only` field holding the reason; it is absent for
+every other route.
+
+The refusal comes ahead of a route's own rate limiter, but not ahead of the
+per-address limiters, which run before any request is authenticated: a key that
+is refused still spends a request of the per-address Auth budget on the flagged
+routes that budget covers: `POST /auth/change-password`, `DELETE /auth/totp` and
+`POST /auth/totp/recovery-codes/regenerate`. It spends nothing of the caps on
+`POST /auth/logout-all` and `DELETE /auth/sessions/:id`, which are per user.
 
 ## Error Format
 
@@ -385,16 +435,19 @@ for three minutes is closed without an answer.
 
 ## Rate Limits
 
-Every limiter returns `429`, and all but one key on the client IP (`c.IP()` —
+Every limiter returns `429`, and all but three key on the client IP (`c.IP()` —
 see `TRUSTED_PROXIES` before deploying behind a reverse proxy); the mapping
-usage limiter keys on the signed-in user. Note these responses come
+usage limiter and the two that end sessions (sign out everywhere, end one
+session) key on the signed-in user. Note these responses come
 from the limiter middleware, not the API error handler: the body is the plain
 text `Too Many Requests` (`Content-Type: text/plain`), not the JSON error
 envelope documented above.
 
 | Scope | Budget | Applies to |
 |-------|--------|------------|
-| Auth | 15/min | `/auth/login`, `/auth/register`, `/auth/totp/verify-login`, `DELETE /auth/totp`, `/auth/totp/recovery-codes/regenerate`, `/auth/oidc/authorize`, `/auth/oidc/callback` |
+| Auth | 15/min, one budget for all of them | `/auth/login`, `/auth/register`, `/auth/change-password`, `/auth/totp/verify-login`, `DELETE /auth/totp`, `/auth/totp/recovery-codes/regenerate`, `/auth/oidc/authorize`, `/auth/oidc/callback` |
+| Sign out everywhere | 5/min per user | `POST /auth/logout-all` — keyed on the signed-in user, not the address, and deliberately not part of the Auth budget above: that budget is spent before a request is authenticated, so anyone could use it up and leave an account's owner without the way to end a stolen session. Only the account's own sessions spend this one; a refused API key spends none of it. A call over the cap revokes nothing and leaves the refresh cookie in place |
+| End one session | 30/min per user | `DELETE /auth/sessions/:id` — keyed on the signed-in user, with a budget of its own: ending one session is signing out everywhere one device at a time, so it is capped too, but a person ends several devices in a sitting, which is why the cap is larger. A refused API key spends none of it, and a call over the cap revokes nothing and leaves the refresh cookie in place |
 | Refresh | 30/min | `/auth/refresh` |
 | WS token | 60/min | `/auth/ws-token` |
 | Snapshot resync | 30/min | `/clusters/:id/guest-snapshots/resync` |
@@ -404,9 +457,15 @@ envelope documented above.
 
 The general limiter's exemption is by path prefix, not by coverage: the auth
 paths listed above carry their own budgets, but the remaining `/api/v1/auth/*`
-endpoints (`/auth/me`, `/auth/logout`, `/auth/change-password`,
+endpoints (`/auth/me`, `/auth/logout`,
 `/auth/totp/setup`, `/auth/oidc/token-exchange`, …) and the `/ws`,
 `/ws/console`, `/ws/vnc` upgrades have no request-rate limit at all.
+
+`POST /auth/change-password` has a second guard that is not a rate limit and is
+not in the table: five wrong current passwords within 60 minutes lock that one
+route for the account for 30 minutes, whatever addresses they came from. Its
+`429` is the handler's own — the JSON error envelope, with a `Retry-After` header
+in seconds — and is described under Authentication above.
 
 ## Request Parameters
 
@@ -555,7 +614,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | POST | `/auth/logout-all` | Logout all sessions; the refresh cookie is deleted only when it is the caller's own or names no live session |
 | GET | `/auth/me` | Get current user profile |
 | PUT | `/auth/profile` | Update user profile |
-| POST | `/auth/change-password` | Change password |
+| POST | `/auth/change-password` | Change password (interactive session only — `403` for an API key, and for a wrong current password; `429` with `Retry-After` while locked out after repeated wrong current passwords) |
 | POST | `/auth/ws-token` | Mint a 60 s scope-locked JWT for the `/ws` hub upgrade |
 | POST | `/auth/console-token` | Mint a 60 s scope-locked JWT bound to a single console (`/ws/console`, `/ws/vnc`) |
 | GET | `/auth/setup-status` | Check if initial registration is needed |
