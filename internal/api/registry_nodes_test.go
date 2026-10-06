@@ -49,34 +49,16 @@ func nodeRoute(path string) string {
 	).Replace(path)
 }
 
-// nodeLegacyPermissions is what each handler checked with a hand-placed
-// call BEFORE Phase 6d, transcribed from `git show HEAD:` over the six
-// NodeHandler files at commit be1379f: 38 requireClusterPerm calls across
-// 38 handlers, exactly one each, and nothing else — no hasClusterPerm, no
-// accessibleClusters.
-//
-// Every one of them hoists, which is what makes this domain the plainest
-// batch so far: the permission is a pair of literals in every case and the
-// cluster is the first path parameter of every route, so nothing here is
-// Deferred, Advisory, Public, SelfService or global.
-//
-// The two entries that are NOT :node are the point of writing the table
-// out: the support bundle is manage:node rather than view:node, and the
-// five firewall routes gated on a :firewall resource rather than the node
-// one.
-//
-// This table is a HISTORICAL RECORD of what the handlers enforced, not a
-// statement of what the registry should declare, and the five firewall
-// rows are why that distinction now matters: :firewall was never in the
-// permission catalogue, so those five routes 403'd every caller from the
-// day they shipped. They have since been repointed to :network. The rows
-// below still say :firewall because that is what the code did; the
-// intended divergence is recorded in nodeIntendedPermissionChanges, and
-// the comparison below consults both.
-//
-// Rewriting a row here to match a new declaration would be the exact
-// failure this repo has hit before — freezing a regression under the name
-// of the test meant to catch it. Add to the divergence map instead.
+// nodeLegacyPermissions is what each handler checked with a hand-placed call BEFORE Phase 6d,
+// transcribed from `git show HEAD:` over the six NodeHandler files at commit be1379f: 38
+// requireClusterPerm calls across 38 handlers, one each, every one hoisting (nothing here is
+// Deferred, Advisory, Public, SelfService or global). The support bundle (manage:node) and the
+// five firewall routes (gated on a :firewall resource) are the entries that are NOT :node. It
+// is a HISTORICAL RECORD of what the handlers enforced, not of what the registry should
+// declare: :firewall was never in the permission catalogue, so those five 403'd every caller
+// until they were repointed to :network, which nodeIntendedPermissionChanges records.
+// Rewriting a row to match a new declaration would freeze a regression under the name of the
+// test meant to catch it; add to the divergence map instead.
 var nodeLegacyPermissions = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/nodes":                                        "view:node",
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_id/disks":                         "view:node",
@@ -118,21 +100,12 @@ var nodeLegacyPermissions = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/log":                "view:firewall",
 }
 
-// nodeIntendedPermissionChanges are the routes whose declaration is
-// DELIBERATELY not what the handler enforced before the migration, each
-// with the permission it now declares and the reason it moved.
-//
-// Every entry must also appear in nodeLegacyPermissions, so the pair reads
-// as "was X, is now Y, because Z" rather than as an unexplained edit. A
-// route declaring neither its legacy permission nor its intended one is a
-// drift and fails.
-//
-// What no test here can judge is whether the new permission is the RIGHT
-// one. An entry moving a route from manage:node to view:cluster would
-// satisfy every check in this file and
-// TestGuard_DeclaredPermissionsExistInTheCatalogue too, since that one
-// checks existence, not appropriateness. Adding an entry is a review
-// decision; the map exists to make sure there is something to review.
+// nodeIntendedPermissionChanges are the routes whose declaration is DELIBERATELY not what the
+// handler enforced before the migration, each with the permission it now declares and why.
+// Every entry must also appear in nodeLegacyPermissions, so the pair reads "was X, is now Y,
+// because Z"; a route declaring neither is a drift and fails. No test here can judge whether
+// the new permission is the RIGHT one (TestGuard_DeclaredPermissionsExistInTheCatalogue checks
+// existence, not appropriateness): adding an entry is a review decision.
 var nodeIntendedPermissionChanges = map[string]struct {
 	now    string
 	reason string
@@ -159,19 +132,13 @@ var nodeIntendedPermissionChanges = map[string]struct {
 	},
 }
 
-// nodeAddedPermissions are the node routes that were declared from the day
-// they existed, so there was never a handler check to transcribe: each with the
-// permission it declares and why that one.
-//
-// They are kept out of nodeLegacyPermissions on purpose. That table is a
-// historical record of what the handlers enforced at be1379f, and a route that
-// never had a handler in it would turn the record into a statement of intent,
-// which its own comment says it must not be. The two maps are disjoint, and
-// between them hold every route registerNodeEndpoints declares.
-//
-// What no test here can judge is whether the permission is the RIGHT one; see
-// nodeIntendedPermissionChanges. Adding an entry is a review decision, and the
-// reason is what there is to review.
+// nodeAddedPermissions are the node routes declared from the day they existed, so there was
+// never a handler check to transcribe: each with the permission it declares and why. They are
+// kept out of nodeLegacyPermissions on purpose: that table is a historical record, which a
+// route with no handler in it would turn into a statement of intent. The two maps are
+// disjoint and between them hold every route registerNodeEndpoints declares. As with
+// nodeIntendedPermissionChanges, adding an entry is a review decision; the reason is what
+// there is to review.
 var nodeAddedPermissions = map[string]struct {
 	permission string
 	reason     string
@@ -208,7 +175,7 @@ var nodeAddedPermissions = map[string]struct {
 // see TestEveryDeclaredNodeRouteIsInTheTally.
 func declaredNodeEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	out := map[string]Endpoint{}
 	for _, e := range s.registry.Endpoints() {
 		key := e.Method + " " + e.Path
@@ -294,19 +261,12 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 		byPermission[got]++
 	}
 
-	// The per-permission breakdown, so a failure says WHICH pair drifted
-	// rather than only that the total moved.
-	//
-	// Tallied over what each route DECLARES, not over the legacy table.
-	// Counting the legacy value was right while the two were identical,
-	// but once nodeIntendedPermissionChanges existed it made this loop a
-	// comparison of one hand-written map against hand-written constants —
-	// true by construction, incapable of noticing a declaration drift,
-	// which is the one thing it is here for.
-	//
-	// The legacy shape, from `git show HEAD:` over the six NodeHandler
-	// files at commit be1379f, was: view:node 16, manage:node 17,
-	// view:firewall 2, manage:firewall 3. The last two moved to :network.
+	// The per-permission breakdown, so a failure says WHICH pair drifted rather than only that
+	// the total moved. Tallied over what each route DECLARES, not over the legacy table:
+	// counting the legacy value would compare one hand-written map against hand-written
+	// constants, true by construction and unable to notice a declaration drift. The legacy
+	// shape (be1379f) was view:node 16, manage:node 17, view:firewall 2, manage:firewall 3;
+	// the last two moved to :network.
 	for _, tt := range []struct {
 		permission string
 		calls      int
@@ -354,26 +314,15 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	}
 }
 
-// TestEveryDeclaredNodeRouteIsInTheTally is the other direction of the
-// tally, and it is a SEPARATE test for the reason its storage counterpart
-// spells out: the tally above opens with two t.Fatalf count checks, and a
-// newly declared node route trips the first of them — so a loop sharing
-// that body would never run in the one situation it exists for.
-//
-// The eight VM-dialog hardware listings share the node prefix and are
-// declared in registry_vms.go and registry_mappings.go, so they are named
-// explicitly rather than skipped by a looser prefix rule that would also
-// swallow a real omission.
-//
-// FOUR other domains also mount routes under this prefix, and they are
-// deferred to rather than re-listed: the six ACME certificate and
-// acme-config routes carry their own tally in registry_acme_test.go, the
-// rolling-update package preview carries its own in
-// registry_rolling_update_test.go, the three APT repository routes carry
-// theirs in registry_apt_repositories_test.go, and the per-node historical
-// metrics route carries its own in registry_metrics_test.go. Deferring keeps
-// every route in exactly one tally — copying them here would create a second
-// list to keep in step, which is the failure this test exists to prevent.
+// TestEveryDeclaredNodeRouteIsInTheTally is the other direction of the tally, a SEPARATE test
+// because the tally above opens with two t.Fatalf count checks, and a newly declared node
+// route trips the first of them, so a loop sharing that body would never run in the one
+// situation it exists for. The eight VM-dialog hardware listings share the node prefix and
+// are declared in registry_vms.go and registry_mappings.go, so they are named explicitly
+// rather than skipped by a looser prefix rule that would swallow a real omission. Four other
+// domains mount routes under this prefix and keep their own tallies (registry_acme_test.go,
+// registry_rolling_update_test.go, registry_apt_repositories_test.go, registry_metrics_test.go):
+// deferring keeps every route in exactly one tally, and a copy here would be a second list.
 func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 	vmDialogRoutes := map[string]bool{
 		"GET " + clusterScope + "/nodes/:node_name/bridges":       true,
@@ -386,7 +335,7 @@ func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 		"GET " + clusterScope + "/nodes/:node_name/usb-mappings":  true,
 		"GET " + clusterScope + "/nodes/:node_name/pci-mappings":  true,
 	}
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	seen := 0
 	for _, e := range s.registry.Endpoints() {
 		key := e.Method + " " + e.Path
@@ -415,28 +364,20 @@ func TestEveryDeclaredNodeRouteIsInTheTally(t *testing.T) {
 	}
 }
 
-// TestNodeNameFormatIsNoLooserThanTheShellGuard is the reason this domain
-// needed a decision rather than a default.
-//
-// :node_name reaches a shell: SetNodeMaintenance interpolates it into an
-// ha-manager command, single-quoted, and nodeMaintenanceNameRe is the
-// defence-in-depth check on top of that. THREE incompatible copies of "is
-// this a node name" exist in the tree — that one, rolling_update.go's
-// validateNodeName and proxmox.validateNodeName — and apischema's
-// node-name format is a fourth. The declaration has to be at least as
-// strict as the tightest of them, never looser.
-//
-// It is: the format bars the underscore all three others allow, requires
-// an alphanumeric at BOTH ends (so a leading dot or dash cannot start a
-// name), and caps the length at 63 where the loosest of the three caps at
-// 64 and the other two not at all. This asserts that directly against the
-// mounted route rather than against the format in isolation, because what
-// matters is what the ROUTE accepts.
+// TestNodeNameFormatIsNoLooserThanTheShellGuard is the reason this domain needed a decision
+// rather than a default. :node_name reaches a shell: SetNodeMaintenance interpolates it into
+// an ha-manager command, single-quoted, and nodeMaintenanceNameRe is the defence in depth on
+// top. THREE incompatible copies of "is this a node name" exist (that one, rolling_update.go's
+// validateNodeName and proxmox.validateNodeName) and apischema's node-name format is a fourth;
+// the declaration must be at least as strict as the tightest, never looser. It is: the format
+// bars the underscore all three allow, requires an alphanumeric at BOTH ends, and caps the
+// length at 63 where the loosest caps at 64. This asserts that against the mounted route,
+// because what matters is what the ROUTE accepts.
 func TestNodeNameFormatIsNoLooserThanTheShellGuard(t *testing.T) {
 	// The maintenance route is the one that reaches the shell, so it is the
 	// one driven here.
 	const path = clusterScope + "/nodes/:node_name/maintenance"
-	e := declaredEndpoint(t, fiber.MethodPost, path)
+	e := sharedEndpoint(t, fiber.MethodPost, path)
 	if got := e.Parameters["node_name"].Format; got != "node-name" {
 		t.Fatalf("node_name declares format %q, want node-name", got)
 	}
@@ -485,7 +426,7 @@ func TestNodeNameFormatIsNoLooserThanTheShellGuard(t *testing.T) {
 // for a capture.
 func probeNodeEndpoint(t *testing.T, method, path string, cap *capture) Endpoint {
 	t.Helper()
-	e := declaredEndpoint(t, method, path)
+	e := sharedEndpoint(t, method, path)
 	e.Handler = cap.handler()
 	e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
 	return e
@@ -530,18 +471,12 @@ func TestNodeCleanupFlagsAreCoercedRatherThanSilentlyFalse(t *testing.T) {
 	}
 }
 
-// nodeValidValues is one acceptable value per REQUIRED node parameter.
-//
-// It exists so that a case about one parameter fills in every other
-// required one, and therefore fails for the reason under test rather than
-// for a missing sibling. A Validate call that supplies a single key always
-// errors — which would make every "this value is refused" assertion pass
-// vacuously, the shape this repo has been bitten by before.
-//
-// The storage-object names are the placeholder scheme's storeNN rather
-// than the textbook "tank"/"vg0": these are route substitutions, so a name
-// that could collide with a real pool buys nothing and has to be argued
-// about in every review.
+// nodeValidValues is one acceptable value per REQUIRED node parameter, so that a case about
+// one parameter fills in every other required one and fails for the reason under test, not
+// for a missing sibling (a Validate call that supplies a single key always errors, which
+// would make every "this value is refused" assertion pass vacuously). The storage-object
+// names are the placeholder scheme's storeNN rather than "tank"/"vg0": these are route
+// substitutions, so a name that could collide with a real pool buys nothing.
 var nodeValidValues = map[string]any{
 	"cluster_id":   testClusterID,
 	"node_name":    testNodeName,
@@ -607,7 +542,7 @@ func TestNodeDeleteRoutesRefuseATraversalSegment(t *testing.T) {
 		{"service", fiber.MethodPost, clusterScope + "/nodes/:node_name/services/:service/:action", "service"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			e := declaredEndpoint(t, tt.method, tt.path)
+			e := sharedEndpoint(t, tt.method, tt.path)
 			prop, ok := e.Parameters[tt.param]
 			if !ok {
 				t.Fatalf("%s declares no %q parameter", tt.path, tt.param)
@@ -662,7 +597,7 @@ func TestNodeDeviceParametersAreAnchoredAtDev(t *testing.T) {
 		{fiber.MethodPost, clusterScope + "/nodes/:node_name/disks/zfs", "devices"},
 	} {
 		t.Run(tt.path+" "+tt.param, func(t *testing.T) {
-			e := declaredEndpoint(t, tt.method, tt.path)
+			e := sharedEndpoint(t, tt.method, tt.path)
 			if e.Parameters[tt.param].Optional {
 				t.Errorf("%s: %q is optional, but the handler refused an empty one", tt.path, tt.param)
 			}
@@ -694,7 +629,7 @@ func TestNodeDeviceParametersAreAnchoredAtDev(t *testing.T) {
 		})
 	}
 	// Only the ZFS create takes a LIST, and it has to keep taking one.
-	e := declaredEndpoint(t, fiber.MethodPost, clusterScope+"/nodes/:node_name/disks/zfs")
+	e := sharedEndpoint(t, fiber.MethodPost, clusterScope+"/nodes/:node_name/disks/zfs")
 	if _, err := e.Parameters.Validate(nodeParamsWith(t, e, map[string]any{
 		"devices": "/dev/sda,/dev/sdb",
 	})); err != nil {
@@ -725,7 +660,7 @@ func TestNodeCreateBodiesRequireOnlyWhatTheHandlersDid(t *testing.T) {
 		{clusterScope + "/nodes/:node_name/disks/initgpt", []string{"disk"}},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
-			e := declaredEndpoint(t, fiber.MethodPost, tt.path)
+			e := sharedEndpoint(t, fiber.MethodPost, tt.path)
 			var got []string
 			for name, prop := range e.Parameters {
 				// The path parameters are required by construction and are not
@@ -746,7 +681,7 @@ func TestNodeCreateBodiesRequireOnlyWhatTheHandlersDid(t *testing.T) {
 
 	// The wipe route is a PUT rather than a POST and carries the same one
 	// required field as initgpt.
-	e := declaredEndpoint(t, fiber.MethodPut, clusterScope+"/nodes/:node_name/disks/wipe")
+	e := sharedEndpoint(t, fiber.MethodPut, clusterScope+"/nodes/:node_name/disks/wipe")
 	if e.Parameters["disk"].Optional {
 		t.Error("the wipe route's disk is optional, but the handler refused an empty one")
 	}
@@ -761,13 +696,13 @@ func TestNodeCreateBodiesRequireOnlyWhatTheHandlersDid(t *testing.T) {
 // required on both would look tidier and would reject a request that has
 // always worked.
 func TestNodeFirewallRuleRequiredSetDiffersByVerb(t *testing.T) {
-	create := declaredEndpoint(t, fiber.MethodPost, clusterScope+"/nodes/:node_name/firewall/rules")
+	create := sharedEndpoint(t, fiber.MethodPost, clusterScope+"/nodes/:node_name/firewall/rules")
 	for _, name := range []string{"type", "action"} {
 		if create.Parameters[name].Optional {
 			t.Errorf("create: %q is optional, but the handler refused an empty one", name)
 		}
 	}
-	update := declaredEndpoint(t, fiber.MethodPut, clusterScope+"/nodes/:node_name/firewall/rules/:pos")
+	update := sharedEndpoint(t, fiber.MethodPut, clusterScope+"/nodes/:node_name/firewall/rules/:pos")
 	for _, name := range []string{"type", "action"} {
 		if !update.Parameters[name].Optional {
 			t.Errorf("update: %q is required, but the handler accepted a body without it", name)
@@ -796,7 +731,7 @@ func TestNodeFirewallRuleRequiredSetDiffersByVerb(t *testing.T) {
 // declaration bounds them instead.
 func TestNodeSyslogPagingIsBoundedRatherThanClamped(t *testing.T) {
 	const path = clusterScope + "/nodes/:node_name/syslog"
-	e := declaredEndpoint(t, fiber.MethodGet, path)
+	e := sharedEndpoint(t, fiber.MethodGet, path)
 	if got := e.Parameters["start"].Default; got != -1 {
 		t.Errorf("start default = %#v, want -1 — the value the handler substituted", got)
 	}
@@ -848,7 +783,7 @@ func TestNodeSyslogPagingIsBoundedRatherThanClamped(t *testing.T) {
 // request.
 func TestNodeJournalLastEntriesStaysDefaultless(t *testing.T) {
 	const path = clusterScope + "/nodes/:node_name/journal"
-	e := declaredEndpoint(t, fiber.MethodGet, path)
+	e := sharedEndpoint(t, fiber.MethodGet, path)
 	last := e.Parameters["lastentries"]
 	if !last.Optional {
 		t.Error("lastentries is required; a caller must be able to page by cursor instead")
@@ -892,7 +827,7 @@ func TestNodeSyslogTimesKeepTheirEmptySentinel(t *testing.T) {
 		clusterScope + "/nodes/:node_name/journal",
 	} {
 		t.Run(path, func(t *testing.T) {
-			e := declaredEndpoint(t, fiber.MethodGet, path)
+			e := sharedEndpoint(t, fiber.MethodGet, path)
 			for _, name := range []string{"since", "until"} {
 				if got := e.Parameters[name].Format; got != "" {
 					t.Errorf("%s declares format %q; the empty string is a meaningful value here", name, got)
@@ -918,7 +853,7 @@ func TestNodeSyslogTimesKeepTheirEmptySentinel(t *testing.T) {
 // the handler branches on twice.
 func TestNodeEvacuateTargetKeepsItsEmptySentinel(t *testing.T) {
 	const path = clusterScope + "/nodes/:node_name/evacuate"
-	e := declaredEndpoint(t, fiber.MethodPost, path)
+	e := sharedEndpoint(t, fiber.MethodPost, path)
 	if got := e.Parameters["target_node"].Format; got != "" {
 		t.Errorf("target_node declares format %q; the empty string is a meaningful value here", got)
 	}
@@ -949,7 +884,7 @@ func TestNodeEvacuateTargetKeepsItsEmptySentinel(t *testing.T) {
 // caller, not a call the handler still makes.
 func TestNodeRowIDRoutesAreGatedByTheirDeclaration(t *testing.T) {
 	const path = clusterScope + "/nodes/:node_id/disks"
-	e := declaredEndpoint(t, fiber.MethodGet, path)
+	e := sharedEndpoint(t, fiber.MethodGet, path)
 	if e.Permissions.Describe() != "view:node" {
 		t.Fatalf("the disk listing declares %q, want view:node", e.Permissions.Describe())
 	}
@@ -1029,24 +964,15 @@ func TestEveryNodeEndpointIsDocumented(t *testing.T) {
 	}
 }
 
-// TestNodeNameClientAcceptsEveryNameTheFormatDoes closes the loop between the
-// declaration and the client, from the client's side.
-//
-// TestNodeNameFormatIsNoLooserThanTheShellGuard above pins the direction that
-// keeps a bad name out. This pins the other direction: a name the declaration
-// ADMITS must reach Proxmox, because the layer that refuses it is the one with
-// no way to say so. proxmox.validateNodeName is not reached only from a
-// declared route — the collector, the scheduler and the DRS, rolling and
-// migration engines all call the same methods with node names PVE chose — and
-// reconcileRunningTasks swallows the error and eventually files the task as
-// vanished, so an over-tight client guard surfaces as missing data rather than
-// as a 400 anyone can trace.
-//
-// It drives the witnesses from apischema.LookupRule rather than a list
-// restated here, so a name added to the format is a name this test starts
-// demanding of the client on the same commit. "pve..01" is the one that
-// motivated it: proxmox.validateNodeName used to refuse ".." as a SUBSTRING
-// and so 500'd on a name the format accepts.
+// TestNodeNameClientAcceptsEveryNameTheFormatDoes closes the loop between the declaration and
+// the client, from the client's side: TestNodeNameFormatIsNoLooserThanTheShellGuard keeps a
+// bad name out; this pins that a name the declaration ADMITS reaches Proxmox, because the
+// layer that refuses it has no way to say so. proxmox.validateNodeName is reached from more
+// than declared routes (the collector, scheduler and DRS, rolling and migration engines call
+// the same methods with node names PVE chose), and reconcileRunningTasks swallows the error
+// and files the task as vanished, so an over-tight client guard surfaces as missing data. It
+// drives the witnesses from apischema.LookupRule rather than a restated list. "pve..01"
+// motivated it: validateNodeName used to refuse ".." as a SUBSTRING.
 func TestNodeNameClientAcceptsEveryNameTheFormatDoes(t *testing.T) {
 	rule, ok := apischema.LookupRule("node-name")
 	if !ok {

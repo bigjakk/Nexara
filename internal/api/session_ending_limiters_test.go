@@ -21,30 +21,16 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// POST /auth/logout-all and DELETE /auth/sessions/:id are the two routes that end
-// sessions, and each is capped per USER, on its own route: Server.logoutAllLimiter
-// (5 a minute) and Server.sessionRevokeLimiter (30 a minute). Neither is in the
-// per-address bucket login shares (authLimitedPaths).
-//
-// The difference is who can spend them. The per-address bucket runs before
-// authentication, so anyone can drain it without a credential — from one address,
-// or from every client behind a proxy while TRUSTED_PROXIES is unset — and
-// sign-out everywhere is the owner's remedy for a stolen token: the request that
-// must not be refused because a stranger sent fifteen logins. A route limiter runs
-// after authRequired and the InteractiveOnly gate, so only the account's own
-// authenticated sessions spend its bucket, and an API key — refused by the gate,
-// which is ahead of the limiter — spends none. And ending one session is signing out
-// everywhere one device at a time, so without a cap of its own the second route
-// would be the way round the first.
-//
-// What these tests drive is everything real but the handlers: the whole app-level
-// middleware stack (setupMiddleware, its per-address limiters included), the
-// registry's own declaration of each route with its own limiter and gate, the real
-// authRequired with real access tokens and a real nxra_ key, and the real error
-// handler. A handler is a recorder that does what the real ones do on success — end
-// the sessions and clear the refresh cookie — so that "a refused call revokes nothing
-// and leaves the cookie in place" is something to count and to look for in the
-// headers, not something to infer.
+// POST /auth/logout-all and DELETE /auth/sessions/:id end sessions, and each is capped per USER
+// on its own route (Server.logoutAllLimiter, 5 a minute; Server.sessionRevokeLimiter, 30),
+// neither in the per-address bucket login shares (authLimitedPaths): that bucket runs before
+// authentication, so anyone can drain it, and sign-out everywhere is the owner's remedy for a
+// stolen token. A route limiter runs after authRequired and the InteractiveOnly gate, so only
+// the account's own sessions spend its bucket and a refused key spends none. Ending one session
+// needs a cap of its own, or it would be the way round the first. These drive everything real
+// but the handlers (a recorder that clears the refresh cookie, as the real ones do on success);
+// the route limiters are the stub's instances, their buckets per user, and every harness mints
+// its own users.
 
 const (
 	logoutAllURL    = "/api/v1/auth/logout-all"
@@ -52,8 +38,8 @@ const (
 	sessionURL      = "/api/v1/auth/sessions/" + sessionRevokeID
 )
 
-// the two client addresses the harness can tell apart (X-Forwarded-For, honoured from
-// the test connection, whose own address is the proxy)
+// The two client addresses the harness can tell apart (X-Forwarded-For, honoured from
+// the test connection, whose own address is the proxy).
 const (
 	addressA = "192.0.2.10"
 	addressB = "192.0.2.20"
@@ -84,8 +70,7 @@ func newEndSessionsServer(t *testing.T) *endSessionsServer {
 		RefreshTokenTTL:     7 * 24 * time.Hour,
 		CompressionEnabled:  true,
 		// The test connection's own address is 0.0.0.0, so trusting it as the proxy lets
-		// each request claim a client address of its own in X-Forwarded-For, which is how
-		// the tests below send one user from two addresses.
+		// each request claim a client address of its own in X-Forwarded-For.
 		ProxyHeader:    fiber.HeaderXForwardedFor,
 		TrustedProxies: []string{"0.0.0.0"},
 	}
@@ -110,7 +95,7 @@ func newEndSessionsServer(t *testing.T) *endSessionsServer {
 		ownerID: uid, otherID: otherID, reached: map[string]int{},
 	}
 	reg := NewRegistry()
-	declared := declaredByKey(t)
+	declared := sharedEndpoints(t)
 	for _, route := range []string{"POST " + logoutAllURL, "DELETE /api/v1/auth/sessions/:id"} {
 		e, ok := declared[route]
 		if !ok {
@@ -164,6 +149,11 @@ func (h *endSessionsServer) revokeSession(t *testing.T, bearer, from string) *ht
 	return h.call(t, http.MethodDelete, sessionURL, bearer, from)
 }
 
+func (h *endSessionsServer) login(t *testing.T, from string) int {
+	t.Helper()
+	return h.call(t, http.MethodPost, "/api/v1/auth/login", "", from).StatusCode
+}
+
 func (h *endSessionsServer) reachedBy(route string, id uuid.UUID) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -184,8 +174,8 @@ func requireServed(t *testing.T, what string, resp *http.Response) {
 }
 
 // requireRefusedByTheCap holds what every refusal by a cap has in common: 429; a
-// Retry-After of very nearly the whole minute, which is what a cap PER MINUTE says
-// (a window of a second would say 1, and be no cap at all); and no cookie touched.
+// Retry-After of very nearly the whole minute, which is what a cap PER MINUTE says (a
+// window of a second would say 1, and be no cap at all); and no cookie touched.
 func requireRefusedByTheCap(t *testing.T, what string, resp *http.Response) {
 	t.Helper()
 	if resp.StatusCode != http.StatusTooManyRequests {
@@ -199,170 +189,115 @@ func requireRefusedByTheCap(t *testing.T, what string, resp *http.Response) {
 	}
 }
 
-// TestLogoutAll_IsCappedPerUser: five calls a minute for one user, the sixth is
-// refused 429 and never reaches the handler — nothing is revoked, and the refresh
-// cookie is left in place — and another user behind the same address still has all
-// of theirs.
-func TestLogoutAll_IsCappedPerUser(t *testing.T) {
-	h := newEndSessionsServer(t)
-	route := "POST " + logoutAllURL
-
-	for i := 1; i <= logoutAllRateLimit; i++ {
-		requireServed(t, fmt.Sprintf("call %d by the owner", i), h.logoutAll(t, h.owner, ""))
-	}
-	for i := logoutAllRateLimit + 1; i <= logoutAllRateLimit+2; i++ {
-		requireRefusedByTheCap(t, fmt.Sprintf("call %d by the owner", i), h.logoutAll(t, h.owner, ""))
-	}
-	if n := h.reachedBy(route, h.ownerID); n != logoutAllRateLimit {
-		t.Errorf("the handler ran %d times for the owner, want %d: the limiter must refuse before it", n, logoutAllRateLimit)
-	}
-
-	// Per user, not per address: everything here comes from one address.
-	requireServed(t, "another user's first call", h.logoutAll(t, h.other, ""))
-}
-
-// TestLogoutAll_OneBucketAcrossAddresses: the cap is the user's, from every address
-// together — spread over two addresses, the sixth call is still refused. A bucket per
-// user AND address would give each address five.
-func TestLogoutAll_OneBucketAcrossAddresses(t *testing.T) {
-	h := newEndSessionsServer(t)
-	requireTheHarnessTellsAddressesApart(t, h)
-
-	for i := 0; i < 3; i++ {
-		requireServed(t, "a call from address A", h.logoutAll(t, h.owner, addressA))
-	}
-	for i := 0; i < logoutAllRateLimit-3; i++ {
-		requireServed(t, "a call from address B", h.logoutAll(t, h.owner, addressB))
-	}
-	requireRefusedByTheCap(t, "the call after the cap, from address A", h.logoutAll(t, h.owner, addressA))
-	requireRefusedByTheCap(t, "the call after the cap, from address B", h.logoutAll(t, h.owner, addressB))
-}
-
-// requireTheHarnessTellsAddressesApart is the control for every test that sends one
-// user from two addresses: the per-address login bucket, drained from address A, is
-// still whole for address B. If X-Forwarded-For did not change the address the
-// limiters see, "one bucket across addresses" would hold of any key at all.
+// requireTheHarnessTellsAddressesApart is the control for every test that sends one user
+// from two addresses: the per-address login bucket, drained from address A, is still
+// whole for address B. If X-Forwarded-For did not change the address the limiters see,
+// "one bucket across addresses" would hold of any key at all.
 func requireTheHarnessTellsAddressesApart(t *testing.T, h *endSessionsServer) {
 	t.Helper()
 	var last int
 	for range 16 {
-		last = h.call(t, http.MethodPost, "/api/v1/auth/login", "", addressA).StatusCode
+		last = h.login(t, addressA)
 	}
 	if last != http.StatusTooManyRequests {
 		t.Fatalf("the sixteenth login from address A = %d, want 429: the per-address bucket cannot be drained, so the harness cannot show an address", last)
 	}
-	if got := h.call(t, http.MethodPost, "/api/v1/auth/login", "", addressB).StatusCode; got == http.StatusTooManyRequests {
+	if got := h.login(t, addressB); got == http.StatusTooManyRequests {
 		t.Fatal("a login from address B was refused although only address A sent any: the two addresses are one to the limiters, so a test of one user from two proves nothing")
 	}
 }
 
-// TestLogoutAll_AnAnonymousLoginFloodDoesNotDrainIt: the whole reason the cap is per
-// user. Twenty logins with no credentials from the owner's own address empty the
-// per-address bucket login lives in — the control: the sixteenth is refused — and
-// the owner's sign-out everywhere is still answered, as often as its own cap
-// allows.
-func TestLogoutAll_AnAnonymousLoginFloodDoesNotDrainIt(t *testing.T) {
-	h := newEndSessionsServer(t)
-
-	statuses := make([]int, 0, 20)
-	for range 20 {
-		statuses = append(statuses, h.call(t, http.MethodPost, "/api/v1/auth/login", "", "").StatusCode)
-	}
-	if statuses[15] != http.StatusTooManyRequests {
-		t.Fatalf("login statuses = %v: the sixteenth must be refused, or the flood drained nothing and this test proved nothing", statuses)
-	}
-
-	for i := 1; i <= logoutAllRateLimit; i++ {
-		requireServed(t, fmt.Sprintf("call %d by the owner after the flood", i), h.logoutAll(t, h.owner, ""))
-	}
-	requireRefusedByTheCap(t, "the call after the cap", h.logoutAll(t, h.owner, ""))
+// endRoutes are the two session-ending routes, with the cap each is declared with.
+var endRoutes = []struct {
+	name, route string // route is the declaration's "METHOD path"
+	limit       int
+	call        func(h *endSessionsServer, t *testing.T, bearer, from string) *http.Response
+}{
+	{"logout-all", "POST " + logoutAllURL, logoutAllRateLimit, (*endSessionsServer).logoutAll},
+	{"session revoke", "DELETE /api/v1/auth/sessions/:id", sessionRevokeRateLimit, (*endSessionsServer).revokeSession},
 }
 
-// TestLogoutAll_ARefusedAPIKeyDoesNotSpendTheOwnersBucket: a leaked key is refused
-// by the InteractiveOnly gate, which runs ahead of the limiter, so a loop of it can
-// neither reach the handler nor use up the five calls its owner has. With the
-// limiter first, the key — which authenticates as its owner — would drain the
-// owner's bucket and refuse the owner's sign-out everywhere.
-func TestLogoutAll_ARefusedAPIKeyDoesNotSpendTheOwnersBucket(t *testing.T) {
-	h := newEndSessionsServer(t)
-	route := "POST " + logoutAllURL
+// TestSessionEndingRoutes_AreCappedPerUser: logout-all allows five calls a minute and a
+// single session revoke thirty, per user and not per address. The call past the cap is
+// refused 429 and never reaches the handler (nothing is revoked, the refresh cookie is
+// left in place); another user behind the same address still has all of theirs; the cap
+// is the user's from every address together (a bucket per user AND address would give
+// each address its own); a leaked API key, refused by the InteractiveOnly gate ahead of
+// the limiter, neither reaches the handler nor uses up the owner's bucket (with the
+// limiter first, the key, which authenticates as its owner, would drain it and refuse
+// the owner's own sign-out); and an anonymous flood of logins, which empties the
+// per-address bucket login lives in, leaves the owner's calls answered.
+func TestSessionEndingRoutes_AreCappedPerUser(t *testing.T) {
+	for _, rt := range endRoutes {
+		t.Run(rt.name, func(t *testing.T) {
+			t.Run("capped per user", func(t *testing.T) {
+				h := newEndSessionsServer(t)
+				for i := 1; i <= rt.limit; i++ {
+					requireServed(t, fmt.Sprintf("call %d by the owner", i), rt.call(h, t, h.owner, ""))
+				}
+				for i := rt.limit + 1; i <= rt.limit+2; i++ {
+					requireRefusedByTheCap(t, fmt.Sprintf("call %d by the owner", i), rt.call(h, t, h.owner, ""))
+				}
+				if n := h.reachedBy(rt.route, h.ownerID); n != rt.limit {
+					t.Errorf("the handler ran %d times for the owner, want %d: the limiter must refuse before it", n, rt.limit)
+				}
+				// Per user, not per address: everything here comes from one address.
+				requireServed(t, "another user's first call", rt.call(h, t, h.other, ""))
+			})
 
-	for i := 1; i <= 10; i++ {
-		if resp := h.logoutAll(t, h.apiKey, ""); resp.StatusCode != http.StatusForbidden {
-			t.Fatalf("call %d with the owner's API key = %d, want 403 from the gate", i, resp.StatusCode)
-		}
-	}
-	if n := h.reachedBy(route, h.ownerID); n != 0 {
-		t.Fatalf("the handler ran %d times for an API key", n)
-	}
-	for i := 1; i <= logoutAllRateLimit; i++ {
-		requireServed(t, fmt.Sprintf("call %d by the owner's session after ten refused key calls", i), h.logoutAll(t, h.owner, ""))
-	}
-	requireRefusedByTheCap(t, "the call after the cap", h.logoutAll(t, h.owner, ""))
-}
+			t.Run("one bucket across addresses", func(t *testing.T) {
+				h := newEndSessionsServer(t)
+				requireTheHarnessTellsAddressesApart(t, h)
+				fromA := rt.limit / 2
+				for range fromA {
+					requireServed(t, "a call from address A", rt.call(h, t, h.owner, addressA))
+				}
+				for range rt.limit - fromA {
+					requireServed(t, "a call from address B", rt.call(h, t, h.owner, addressB))
+				}
+				requireRefusedByTheCap(t, "the call after the cap, from address A", rt.call(h, t, h.owner, addressA))
+				requireRefusedByTheCap(t, "the call after the cap, from address B", rt.call(h, t, h.owner, addressB))
+			})
 
-// TestSessionRevoke_IsCappedPerUser: ending ONE session is capped too — a loop of it
-// is sign-out everywhere one device at a time, which a stolen token could run without
-// ever meeting logout-all's cap. Thirty a minute for one user, the thirty-first is
-// refused 429 and never reaches the handler, and another user is unaffected.
-func TestSessionRevoke_IsCappedPerUser(t *testing.T) {
-	h := newEndSessionsServer(t)
-	route := "DELETE /api/v1/auth/sessions/:id"
+			t.Run("a refused API key does not spend the owner's bucket", func(t *testing.T) {
+				h := newEndSessionsServer(t)
+				for i := 1; i <= 2*rt.limit; i++ {
+					if resp := rt.call(h, t, h.apiKey, ""); resp.StatusCode != http.StatusForbidden {
+						t.Fatalf("call %d with the owner's API key = %d, want 403 from the gate", i, resp.StatusCode)
+					}
+				}
+				if n := h.reachedBy(rt.route, h.ownerID); n != 0 {
+					t.Fatalf("the handler ran %d times for an API key", n)
+				}
+				for i := 1; i <= rt.limit; i++ {
+					requireServed(t, fmt.Sprintf("call %d by the owner's session after %d refused key calls", i, 2*rt.limit), rt.call(h, t, h.owner, ""))
+				}
+				requireRefusedByTheCap(t, "the call after the cap", rt.call(h, t, h.owner, ""))
+			})
 
-	for i := 1; i <= sessionRevokeRateLimit; i++ {
-		requireServed(t, fmt.Sprintf("call %d by the owner", i), h.revokeSession(t, h.owner, ""))
+			t.Run("an anonymous login flood does not drain it", func(t *testing.T) {
+				h := newEndSessionsServer(t)
+				statuses := make([]int, 0, 20)
+				for range 20 {
+					statuses = append(statuses, h.login(t, ""))
+				}
+				if statuses[15] != http.StatusTooManyRequests {
+					t.Fatalf("login statuses = %v: the sixteenth must be refused, or the flood drained nothing and this test proved nothing", statuses)
+				}
+				for i := 1; i <= rt.limit; i++ {
+					requireServed(t, fmt.Sprintf("call %d by the owner after the flood", i), rt.call(h, t, h.owner, ""))
+				}
+				requireRefusedByTheCap(t, "the call after the cap", rt.call(h, t, h.owner, ""))
+			})
+		})
 	}
-	for i := sessionRevokeRateLimit + 1; i <= sessionRevokeRateLimit+2; i++ {
-		requireRefusedByTheCap(t, fmt.Sprintf("call %d by the owner", i), h.revokeSession(t, h.owner, ""))
-	}
-	if n := h.reachedBy(route, h.ownerID); n != sessionRevokeRateLimit {
-		t.Errorf("the handler ran %d times for the owner, want %d: the limiter must refuse before it", n, sessionRevokeRateLimit)
-	}
-	requireServed(t, "another user's first call", h.revokeSession(t, h.other, ""))
-}
-
-// TestSessionRevoke_OneBucketAcrossAddresses: as for logout-all, the cap is the
-// user's from every address together.
-func TestSessionRevoke_OneBucketAcrossAddresses(t *testing.T) {
-	h := newEndSessionsServer(t)
-	requireTheHarnessTellsAddressesApart(t, h)
-
-	for i := 0; i < sessionRevokeRateLimit/2; i++ {
-		requireServed(t, "a call from address A", h.revokeSession(t, h.owner, addressA))
-	}
-	for i := 0; i < sessionRevokeRateLimit-sessionRevokeRateLimit/2; i++ {
-		requireServed(t, "a call from address B", h.revokeSession(t, h.owner, addressB))
-	}
-	requireRefusedByTheCap(t, "the call after the cap, from address A", h.revokeSession(t, h.owner, addressA))
-	requireRefusedByTheCap(t, "the call after the cap, from address B", h.revokeSession(t, h.owner, addressB))
-}
-
-// TestSessionRevoke_ARefusedAPIKeyDoesNotSpendTheOwnersBucket: the same ordering,
-// for the same reason as for logout-all — the gate before the limiter, so a leaked
-// key's loop of revokes neither reaches the handler nor uses up the owner's thirty.
-func TestSessionRevoke_ARefusedAPIKeyDoesNotSpendTheOwnersBucket(t *testing.T) {
-	h := newEndSessionsServer(t)
-	route := "DELETE /api/v1/auth/sessions/:id"
-
-	for i := 1; i <= 2*sessionRevokeRateLimit; i++ {
-		if resp := h.revokeSession(t, h.apiKey, ""); resp.StatusCode != http.StatusForbidden {
-			t.Fatalf("call %d with the owner's API key = %d, want 403 from the gate", i, resp.StatusCode)
-		}
-	}
-	if n := h.reachedBy(route, h.ownerID); n != 0 {
-		t.Fatalf("the handler ran %d times for an API key", n)
-	}
-	for i := 1; i <= sessionRevokeRateLimit; i++ {
-		requireServed(t, fmt.Sprintf("call %d by the owner's session after %d refused key calls", i, 2*sessionRevokeRateLimit), h.revokeSession(t, h.owner, ""))
-	}
-	requireRefusedByTheCap(t, "the call after the cap", h.revokeSession(t, h.owner, ""))
 }
 
 // TestSessionEndingRoutesHaveBudgetsOfTheirOwn: ending one session and ending every
 // session are different budgets, in both directions. Spending all of one leaves the
 // other whole — a handful of single revokes must not refuse the owner's sign-out
-// everywhere, and a spent sign-out everywhere must not stop a person ending one
-// device — and a spent one stays spent.
+// everywhere, and a spent sign-out everywhere must not stop a person ending one device
+// — and a spent one stays spent.
 func TestSessionEndingRoutesHaveBudgetsOfTheirOwn(t *testing.T) {
 	h := newEndSessionsServer(t)
 
@@ -385,12 +320,11 @@ func TestSessionEndingRoutesHaveBudgetsOfTheirOwn(t *testing.T) {
 	requireServed(t, "the other user's sign-out everywhere, with session revokes spent", h.logoutAll(t, h.other, ""))
 }
 
-// TestSessionLimiterKeys holds the two key functions to what the caps are: one
-// bucket per user however many addresses the user comes from, a bucket of one's own
-// for each user, none shared between the two limiters, and — for a request that has
-// no user, which does not reach a limiter after authentication — the address, so
-// that it still has a bucket. A key of the user AND the address would give a user
-// one bucket per address, and a loop only has to change address.
+// TestSessionLimiterKeys holds the two key functions to what the caps are: one bucket
+// per user however many addresses the user comes from, a bucket of one's own for each
+// user, none shared between the two limiters, and — for a request with no user — the
+// address, so that it still has a bucket. A key of the user AND the address would give
+// a user one bucket per address, and a loop only has to change address.
 func TestSessionLimiterKeys(t *testing.T) {
 	cfg := &config.Config{ProxyHeader: fiber.HeaderXForwardedFor, TrustedProxies: []string{"0.0.0.0"}}
 	app := fiber.New(buildFiberConfig(cfg))
@@ -444,15 +378,14 @@ func TestSessionLimiterKeys(t *testing.T) {
 }
 
 // TestDocs_TheSessionEndingCapsAreStatedWhereTheyAreDocumented keeps the figures the
-// limiters have — logoutAllRateLimit, sessionRevokeRateLimit — in the three places
-// that tell a client: each route's declaration (what /api/v1/api-docs is rendered
-// from), the rate-limit table of the API reference, and the reference's account of
-// sign-out everywhere. In each of them the answer to a call over the cap is stated
-// too: 429 with a Retry-After, nothing revoked, the refresh cookie left in place
-// (TestLogoutAll_IsCappedPerUser and TestSessionRevoke_IsCappedPerUser hold the
-// last two to the chain). The figures follow the constants, so changing one fails
-// here until the prose does; and each place is read on its own, so a sentence that
-// survives in one cannot stand in for the others.
+// limiters have (logoutAllRateLimit, sessionRevokeRateLimit) in the three places that
+// tell a client: each route's declaration (what /api/v1/api-docs is rendered from), the
+// rate-limit table of the API reference, and the reference's account of sign-out
+// everywhere. In each of them the answer to a call over the cap is stated too: 429 with
+// a Retry-After, nothing revoked, the refresh cookie left in place (held to the chain by
+// TestSessionEndingRoutes_AreCappedPerUser). The figures follow the constants, so
+// changing one fails here until the prose does; each place is read on its own, so a
+// sentence that survives in one cannot stand in for the others.
 func TestDocs_TheSessionEndingCapsAreStatedWhereTheyAreDocumented(t *testing.T) {
 	raw, err := os.ReadFile(apiReferencePath())
 	if err != nil {
@@ -476,7 +409,7 @@ func TestDocs_TheSessionEndingCapsAreStatedWhereTheyAreDocumented(t *testing.T) 
 		{fiber.MethodPost, logoutAllURL, "Sign out everywhere", logoutAllRateLimit},
 		{fiber.MethodDelete, "/api/v1/auth/sessions/:id", "End one session", sessionRevokeRateLimit},
 	} {
-		desc := strings.Join(strings.Fields(declaredEndpoint(t, tc.method, tc.path).Description), " ")
+		desc := strings.Join(strings.Fields(sharedEndpoint(t, tc.method, tc.path).Description), " ")
 		for _, want := range []string{fmt.Sprintf("at most %d calls a minute", tc.cap), "answered 429 with a Retry-After header", refused} {
 			if !strings.Contains(desc, want) {
 				t.Errorf("%s %s: the declaration does not say %q, which the limiter makes true", tc.method, tc.path, want)

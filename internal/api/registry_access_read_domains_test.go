@@ -14,38 +14,30 @@ import (
 // Proxmox's single-realm read returns a realm's section as stored, and that holds
 // secrets: a Yubico setting's API id, key and url inside tfa, and an OIDC realm's
 // client-key. The reads send the type alone, as Proxmox's own realm list does, and
-// nothing else of the sort.
-//
-// Two layers see to it, the client (proxmox.RealmTFAType, pinned in
-// internal/proxmox) and the handlers' shapers (pinned by access_realm_test.go in
+// nothing else of the sort. Two layers see to it, the client (proxmox.RealmTFAType,
+// pinned in internal/proxmox) and the handlers' shapers (access_realm_test.go in
 // internal/api/handlers), and each hides the other's absence from a test that goes
-// through both. So this file proves the end result, not either layer. It keeps the
-// REAL declarations, permission gate, handlers and client, with stand-ins only for
-// Proxmox and the database, so a route that skips both fails here.
+// through both, so this file proves the end result on the REAL declarations, permission
+// gate, handlers and client over the stand-ins.
 
-// The secrets the stand-in Proxmox holds in a realm: the Yubico values in its tfa,
-// and a client-key. Findable in a body whatever they sit under, and none real.
+// The secrets the stand-in Proxmox holds in a realm: the Yubico values in its tfa, and
+// a client-key. Findable in a body whatever they sit under, and none real.
 const (
 	realmReadID  = "PROBE-REALM-YUBICO-ID-NOT-A-REAL-VALUE"
 	realmReadKey = "PROBE-REALM-YUBICO-KEY-NOT-A-REAL-VALUE"
 	realmReadURL = "https://example.com/wsapi/2.0/verify"
-
 	// realmReadClientKey stands for a key of domains.cfg that AccessDomain does not
-	// decode: an OIDC realm's client-key. No real section holds one beside a tfa,
-	// which is no matter here; the stand-in only has to send it.
+	// decode: an OIDC realm's client-key.
 	realmReadClientKey = "PROBE-REALM-CLIENT-KEY-NOT-A-REAL-VALUE"
-
-	// realmReadYubico is a Yubico setting as Proxmox stores it and its single
-	// read returns it.
+	// realmReadYubico is a Yubico setting as Proxmox stores it and its single read returns it.
 	realmReadYubico = "type=yubico,id=" + realmReadID + ",key=" + realmReadKey + ",url=" + realmReadURL
+
+	realmReadRealm = "realm01"
 )
 
-const realmReadRealm = "realm01"
-
-// realmReadSingle is what the stand-in Proxmox answers to GET
-// /access/domains/realm01, as its read does: the realm's stored section, tfa
-// (when there is one) in the property-string form, and keys of the realm that
-// AccessDomain does not decode, a client-key among them. It sends no realm id, as
+// realmReadSingle is what the stand-in Proxmox answers to GET /access/domains/realm01:
+// the realm's stored section, tfa (when there is one) in the property-string form, and
+// keys AccessDomain does not decode, a client-key among them. It sends no realm id, as
 // Proxmox does not, and default as 1.
 func realmReadSingle(tfa string) string {
 	stored := `"type":"ldap","comment":"sentinel-comment","default":1,"digest":"0123456789abcdef",` +
@@ -56,8 +48,8 @@ func realmReadSingle(tfa string) string {
 	return `{"data":{` + stored + `}}`
 }
 
-// realmReadIndex is what the stand-in Proxmox answers to GET /access/domains, as
-// its index does: tfa is the type alone, or absent.
+// realmReadIndex is what the stand-in Proxmox answers to GET /access/domains: tfa is
+// the type alone, or absent.
 const realmReadIndex = `{"data":[
 	{"realm":"realm02","type":"ad","tfa":"oath"},
 	{"realm":"pve","type":"pve","comment":"sentinel-builtin","default":1},
@@ -65,34 +57,23 @@ const realmReadIndex = `{"data":[
 	{"realm":"pam","type":"pam"}
 ]}`
 
-// realmReadUnreducedIndex is a realm list whose tfa is the stored string, which is
-// not what Proxmox sends and is what a Proxmox that stopped reducing it would.
-// The entries are a Yubico setting, an oath one, and one with a key Proxmox does
-// not know.
+// realmReadUnreducedIndex is a realm list whose tfa is the stored string, which is not
+// what Proxmox sends and is what a Proxmox that stopped reducing it would: a Yubico
+// setting, an oath one, and one with a key Proxmox does not know.
 const realmReadUnreducedIndex = `{"data":[
 	{"realm":"realm01","type":"ldap","tfa":"` + realmReadYubico + `"},
 	{"realm":"realm02","type":"ad","tfa":"type=oath,digits=8,step=30"},
 	{"realm":"realm03","type":"ldap","tfa":"type=yubico,key=` + realmReadKey + `,bogus=1"}
 ]}`
 
-// newAccessRealmReadApp mounts the real GET .../access/domains and
-// .../access/domains/:realm declarations, with their real permission, on the real
-// AccessHandler and the two stand-ins the user reads use, with Proxmox answering as
-// replies say. The caller holds view:access and nothing else, which is all a
-// Viewer needs for these routes.
 func newAccessRealmReadApp(t *testing.T, replies map[string]string) *fiber.App {
 	t.Helper()
-	pve, _, h := newAccessStandIns(t)
-	for path, body := range replies {
-		pve.reply(path, body)
-	}
-
-	list := declaredEndpoint(t, fiber.MethodGet, accessScope+"/domains")
-	list.Handler = h.ListDomains
-	detail := declaredEndpoint(t, fiber.MethodGet, accessScope+"/domains/:realm")
-	detail.Handler = h.GetDomain
-
-	return newRegistryApp(t, stubAuth(map[string]bool{"view:" + handlers.AccessResource: true}), list, detail)
+	return newAccessReadApp(t, replies, func(h *handlers.AccessHandler) []realRoute {
+		return []realRoute{
+			{fiber.MethodGet, accessScope + "/domains", h.ListDomains},
+			{fiber.MethodGet, accessScope + "/domains/:realm", h.GetDomain},
+		}
+	})
 }
 
 // requireNoRealmSecrets fails if body carries a Yubico value, the setting's
@@ -109,12 +90,12 @@ func requireNoRealmSecrets(t *testing.T, body string) {
 }
 
 // TestAccessRealmDetailSendsTheTypeOnly drives GET .../access/domains/:realm for a
-// realm whose stored tfa is each thing it can be, and whose section holds a
-// client-key besides. A Viewer's body never holds a Yubico value or the client-key,
-// its tfa is the type, or "" when there is no type to send, and the rest of the
-// realm comes through as it always did.
+// realm whose stored tfa is each thing it can be, and whose section holds a client-key
+// besides. A Viewer's body never holds a Yubico value or the client-key, its tfa is the
+// type, or "" when there is no type to send, and the rest of the realm comes through as
+// it always did.
 func TestAccessRealmDetailSendsTheTypeOnly(t *testing.T) {
-	tests := []struct {
+	for _, tt := range []struct {
 		name string
 		tfa  string // as Proxmox stores it; "" for a realm with none
 		want string
@@ -126,12 +107,9 @@ func TestAccessRealmDetailSendsTheTypeOnly(t *testing.T) {
 		{"no two-factor setting", "", ""},
 		{"a setting with a key Proxmox does not know", "type=yubico,key=" + realmReadKey + ",bogus=1", "yubico"},
 		{"a setting with no type", "id=" + realmReadID + ",key=" + realmReadKey, ""},
-	}
-	for _, tt := range tests {
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			app := newAccessRealmReadApp(t, map[string]string{
-				"/api2/json/access/domains/" + realmReadRealm: realmReadSingle(tt.tfa),
-			})
+			app := newAccessRealmReadApp(t, map[string]string{"/api2/json/access/domains/" + realmReadRealm: realmReadSingle(tt.tfa)})
 
 			status, body := getAccessRead(t, app, accessRoute(accessScope+"/domains")+"/"+realmReadRealm)
 			if status != fiber.StatusOK {
@@ -174,28 +152,20 @@ func realmReadListed(t *testing.T, body string) (map[string]map[string]any, int)
 	return byRealm, list.Total
 }
 
-// TestAccessRealmListSendsTheTypeOnly drives GET .../access/domains twice: with
-// the reply Proxmox gives, its tfa the type alone, which must come through as it
-// is, since the SPA shows it; and with one whose tfa is the stored string, which
-// is not what Proxmox sends, and must be reduced all the same.
+// TestAccessRealmListSendsTheTypeOnly drives GET .../access/domains twice: with the
+// reply Proxmox gives, its tfa the type alone, which must come through as it is, since
+// the SPA shows it; and with one whose tfa is the stored string, which is not what
+// Proxmox sends, and must be reduced all the same.
 func TestAccessRealmListSendsTheTypeOnly(t *testing.T) {
-	tests := []struct {
+	for _, tt := range []struct {
 		name  string
 		reply string
 		want  map[string]string // realm -> tfa
 	}{
-		{
-			name:  "as Proxmox sends it",
-			reply: realmReadIndex,
-			want:  map[string]string{"pam": "", "pve": "", "realm01": "yubico", "realm02": "oath"},
-		},
-		{
-			name:  "with the stored string in place of the type",
-			reply: realmReadUnreducedIndex,
-			want:  map[string]string{"realm01": "yubico", "realm02": "oath", "realm03": "yubico"},
-		},
-	}
-	for _, tt := range tests {
+		{"as Proxmox sends it", realmReadIndex, map[string]string{"pam": "", "pve": "", "realm01": "yubico", "realm02": "oath"}},
+		{"with the stored string in place of the type", realmReadUnreducedIndex,
+			map[string]string{"realm01": "yubico", "realm02": "oath", "realm03": "yubico"}},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
 			app := newAccessRealmReadApp(t, map[string]string{"/api2/json/access/domains": tt.reply})
 
@@ -220,9 +190,9 @@ func TestAccessRealmListSendsTheTypeOnly(t *testing.T) {
 	}
 }
 
-// TestAccessRealmListCarriesEveryOtherField keeps what the SPA reads of a realm
-// list as it was: the realm, its type and comment, and which is the default, for
-// the reply Proxmox gives.
+// TestAccessRealmListCarriesEveryOtherField keeps what the SPA reads of a realm list as
+// it was: the realm, its type and comment, and which is the default, for the reply
+// Proxmox gives.
 func TestAccessRealmListCarriesEveryOtherField(t *testing.T) {
 	app := newAccessRealmReadApp(t, map[string]string{"/api2/json/access/domains": realmReadIndex})
 
@@ -249,21 +219,6 @@ func TestAccessRealmListCarriesEveryOtherField(t *testing.T) {
 	}
 }
 
-// TestAccessRealmListOfNoRealmsIsAnEmptyList keeps the listing's envelope as it
-// was: a cluster whose Proxmox answers with no realms, or with null, still gets
-// `items: []`.
 func TestAccessRealmListOfNoRealmsIsAnEmptyList(t *testing.T) {
-	for name, reply := range map[string]string{"an empty list": `{"data":[]}`, "null": `{"data":null}`} {
-		t.Run(name, func(t *testing.T) {
-			app := newAccessRealmReadApp(t, map[string]string{"/api2/json/access/domains": reply})
-
-			status, body := getAccessRead(t, app, accessRoute(accessScope+"/domains"))
-			if status != fiber.StatusOK {
-				t.Fatalf("status = %d (%s), want 200", status, body)
-			}
-			if body != `{"items":[],"total":0}` {
-				t.Errorf("body = %s, want {\"items\":[],\"total\":0}", body)
-			}
-		})
-	}
+	requireEmptyList(t, newAccessRealmReadApp, "/api2/json/access/domains", accessRoute(accessScope+"/domains"))
 }

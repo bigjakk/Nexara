@@ -25,15 +25,14 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// POST /auth/change-password through the pieces that surround the handler: the
-// per-IP cap in the middleware chain, the authentication middleware with a real API
-// key behind it, the
-// registry's declaration and error envelope, and the wiring registerAuth gives the
-// handler. The handler's own rules are pinned in internal/api/handlers
-// (password_lockout_test.go); what is pinned HERE is that they are reached the way
-// a request reaches them. That an API key is refused on every InteractiveOnly route
-// is registry_interactive_only_test.go's subject; this file keeps the
-// change-password instance of it, through the real handler.
+// POST /auth/change-password through the pieces that surround the handler: the per-IP
+// cap in the middleware chain, the authentication middleware with a real API key behind
+// it, the registry's declaration and error envelope, and the wiring registerAuth gives
+// the handler. The handler's own rules are pinned in internal/api/handlers
+// (password_lockout_test.go); here, that they are reached the way a request reaches
+// them. That an API key is refused on every InteractiveOnly route is
+// registry_interactive_only_test.go's subject; this file keeps the change-password
+// instance, through the real handler.
 
 const (
 	chainPassword    = "Old-Passw0rd-Example!"
@@ -46,14 +45,13 @@ var (
 	chainRightBody = fmt.Sprintf(`{"old_password":%q,"new_password":%q}`, chainPassword, chainNewPassword)
 )
 
-// requireLoginsAuthBudget holds one route to the per-IP cap it was given by
-// authLimitedPaths: every spelling Fiber routes to it spends the auth budget, and
-// it is the SAME budget as login's, so that the routes cannot be used to multiply
-// what one address may try.
+// requireLoginsAuthBudget holds one route to the per-IP cap authLimitedPaths gives it:
+// every spelling Fiber routes to it spends the auth budget, and it is the SAME budget as
+// login's, so the routes cannot multiply what one address may try. newTestServer sets
+// RateLimitMax=100 and the auth cap is 15, so a 429 inside this many requests can only
+// have come from the auth limiter.
 func requireLoginsAuthBudget(t *testing.T, route string, spellings []string) {
 	t.Helper()
-	// newTestServer sets RateLimitMax=100 and the auth cap is 15, so a 429 inside
-	// this many requests can only have come from the auth limiter.
 	const limit = 15
 
 	t.Run("every spelling is capped", func(t *testing.T) {
@@ -108,11 +106,11 @@ func requireLoginsAuthBudget(t *testing.T, route string, spellings []string) {
 }
 
 // TestChangePasswordHasAPerIPCapThatLoginShares: before this route was listed in
-// authLimitedPaths it had no per-IP cap at all — everything under /api/v1/auth/ is
-// exempt from the general limiter — so a stolen token could guess the current
-// password as fast as bcrypt allowed. Every spelling Fiber routes to it must spend
-// the auth budget, and it is the SAME budget as login's: two oracles for one
-// password get 15 guesses a minute between them, not 15 each.
+// authLimitedPaths it had no per-IP cap at all (everything under /api/v1/auth/ is exempt
+// from the general limiter), so a stolen token could guess the current password as fast
+// as bcrypt allowed. Every spelling Fiber routes to it must spend the auth budget, and it
+// is the SAME budget as login's: two oracles for one password get 15 guesses a minute
+// between them, not 15 each.
 func TestChangePasswordHasAPerIPCapThatLoginShares(t *testing.T) {
 	requireLoginsAuthBudget(t, "/api/v1/auth/change-password", []string{
 		"/api/v1/auth/change-password",
@@ -122,10 +120,9 @@ func TestChangePasswordHasAPerIPCapThatLoginShares(t *testing.T) {
 	})
 }
 
-// chainDB is the database behind these requests: an API key, a user, and the two
-// writes a request here can reach. It records every statement by name, and answers
-// any other with an error, so a handler that reaches for something it should not
-// has said so.
+// chainDB is the database behind these requests: an API key, a user, and the two writes
+// a request here can reach. It records every statement by name and answers any other with
+// an error, so a handler that reaches for something it should not has said so.
 type chainDB struct {
 	mu      sync.Mutex
 	names   []string
@@ -234,11 +231,9 @@ func newChainDB(t *testing.T) (fake *chainDB, uid uuid.UUID, apiKey string) {
 	return fake, uid, apiKey
 }
 
-// waitForKeyStamp waits for authenticateAPIKey's last-used stamp, which it writes
-// from a goroutine, so that what a test reads of the statements afterwards is the
-// whole of what a request that authenticated by key did. It waits on the stamp
-// itself (chainDB.stamped), not on the clock: the wait ends the moment the statement
-// is recorded, and the limit is only how long a stamp that never comes is waited for.
+// waitForKeyStamp waits for authenticateAPIKey's last-used stamp, which it writes from a
+// goroutine, so that what a test reads of the statements afterwards is the whole of what
+// a request that authenticated by key did. It waits on the stamp itself, not on the clock.
 func (f *chainDB) waitForKeyStamp(t *testing.T) {
 	t.Helper()
 	select {
@@ -248,8 +243,8 @@ func (f *chainDB) waitForKeyStamp(t *testing.T) {
 	}
 }
 
-// newChain builds it. The handler is the one registerAuth builds — the production
-// construction, given the Redis the server was given.
+// newChain builds it. The handler is the one registerAuth builds, given the Redis the
+// server was given.
 func newChain(t *testing.T) *chain {
 	t.Helper()
 	fake, uid, apiKey := newChainDB(t)
@@ -268,10 +263,8 @@ func newChain(t *testing.T) *chain {
 	reg := NewRegistry()
 	registerAuthEndpoints(reg, s.authHandler, s.logoutAllLimiter(), s.sessionRevokeLimiter())
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-	// This chain has no pool, so a request that gets as far as the handler's
-	// transaction — the right password, from a caller nothing refused — panics on it.
-	// Recovered, that is a 500 that a test asserts against by name; unrecovered it
-	// is a crash that takes every other test of the package with it.
+	// This chain has no pool, so a request that gets as far as the handler's transaction
+	// panics on it; recovered, that is a 500 a test asserts on, and not a crash.
 	app.Use(fiberrecover.New())
 	mountRegistry(app, reg, s.authRequired(), everyNodeIsAMember())
 
@@ -298,20 +291,13 @@ func (c *chain) change(t *testing.T, bearer, body string) (*http.Response, Error
 	return resp, env
 }
 
-// TestChangePassword_AnAPIKeyIsRefusedThroughTheRealMiddleware pins the
-// change-password instance of the InteractiveOnly rule through the real handler.
-// The refusal is the registry's — the route's declaration carries the flag, and the
-// registry's gate answers right after authentication — so the handler asks nothing;
-// what this shows is that the declaration reaches a request the way a request
-// reaches it: the key here is a real nxra_ key, found by the real authRequired
-// through the real GetAPIKeyByHash, and the request goes through the registry that
-// registerAuthEndpoints fills to the real handler.
-//
-// The answer is the gate's 403, and the only statements the database saw are the
-// key's lookup and its last-used stamp: the handler never ran, so the account was
-// never read and no password was checked. The control is the same request with an
-// access token, which is not refused for how it authenticated — it gets as far as
-// the password, and is told it is wrong.
+// TestChangePassword_AnAPIKeyIsRefusedThroughTheRealMiddleware pins the change-password
+// instance of the InteractiveOnly rule through the real handler: a real nxra_ key, found
+// by the real authRequired through GetAPIKeyByHash, on the registry registerAuthEndpoints
+// fills. The answer is the gate's 403, and the database saw only the key's lookup and
+// its last-used stamp (the handler never ran, so no password was checked and Redis
+// counts no attempt). The control is the same request with an access token, which gets as
+// far as the password and is told it is wrong.
 func TestChangePassword_AnAPIKeyIsRefusedThroughTheRealMiddleware(t *testing.T) {
 	for _, tc := range []struct{ name, body string }{{"the right password", chainRightBody}, {"a wrong password", chainWrongBody}} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -347,49 +333,28 @@ func TestChangePassword_AnAPIKeyIsRefusedThroughTheRealMiddleware(t *testing.T) 
 	})
 }
 
-// TestChangePassword_AWrongCurrentPasswordIsForbiddenNotUnauthorized pins the
-// status of a wrong current password, through the real chain, and says why it
-// matters. The SPA's client (frontend/src/lib/api-client.ts, request() in its
-// "refresh" mode) takes every 401 for an expired access token: it refreshes the
-// session and sends the request again, once. A wrong password answered 401 was
-// therefore sent twice by every wrong submit, counted as two attempts against the
-// account's lockout, and rotated the session for nothing. 403 says what is true — the
-// caller is who they say they are and is refused this — and a client replays nothing.
-func TestChangePassword_AWrongCurrentPasswordIsForbiddenNotUnauthorized(t *testing.T) {
-	c := newChain(t)
-
-	resp, env := c.change(t, c.sess, chainWrongBody)
-
-	if resp.StatusCode == http.StatusUnauthorized {
-		t.Fatalf("a wrong current password is answered 401 (%q): a client takes that for an expired session, refreshes and sends it again, so every wrong attempt counts twice", env.Message)
-	}
-	if resp.StatusCode != http.StatusForbidden || env.Error != "forbidden" || env.Message != "Current password is incorrect" {
-		t.Errorf("status = %d, error = %q (%q), want 403 forbidden: Current password is incorrect", resp.StatusCode, env.Error, env.Message)
-	}
-	// One request is one attempt: what the client sent once, the server counted once.
-	if got := c.mr.Keys(); !slices.Equal(got, []string{"pwchange:user:fail:" + c.uid.String()}) {
-		t.Fatalf("Redis keys = %v, want only the account's attempt counter", got)
-	}
-	if n, err := c.rdb.Get(context.Background(), "pwchange:user:fail:"+c.uid.String()).Int(); err != nil || n != 1 {
-		t.Errorf("the attempt counter is %d (%v) after one wrong request, want 1", n, err)
-	}
-}
-
-// TestChangePassword_TheLockoutIsServedThroughTheRealChain drives the lockout the
-// way a client meets it: the real authentication middleware, the registry, the
-// real error handler. Four wrong passwords are 403; the fifth is the lock, a 429
-// whose Retry-After survives the error handler and whose body is the API's error
-// envelope; and the right password is then refused the same. The handler is
-// the one registerAuth builds, so the Redis counts that appear here — and only
-// these keys — prove registerAuth gave it the Redis the server was given: a
-// handler left to its own memory would lock too, and write none.
+// TestChangePassword_TheLockoutIsServedThroughTheRealChain drives the lockout the way a
+// client meets it: the real authentication middleware, the registry, the real error
+// handler. Four wrong passwords are 403; the fifth is the lock, a 429 whose Retry-After
+// survives the error handler and whose body is the API's error envelope; and the right
+// password is then refused the same. The handler is the one registerAuth builds, so the
+// Redis counts that appear here, and only these keys, prove registerAuth gave it the
+// Redis the server was given: a handler left to its own memory would lock too, and
+// write none.
 func TestChangePassword_TheLockoutIsServedThroughTheRealChain(t *testing.T) {
 	c := newChain(t)
 
 	for i := 1; i < 5; i++ {
 		resp, env := c.change(t, c.sess, chainWrongBody)
-		if resp.StatusCode != http.StatusForbidden {
-			t.Fatalf("wrong attempt %d = %d (%q), want 403", i, resp.StatusCode, env.Message)
+		// 403, not 401: the SPA's client takes every 401 for an expired access token,
+		// refreshes the session and sends the request again, so a wrong password
+		// answered 401 would be sent twice and count as two attempts.
+		if resp.StatusCode != http.StatusForbidden || env.Error != "forbidden" || env.Message != "Current password is incorrect" {
+			t.Fatalf("wrong attempt %d = %d, error %q (%q), want 403 forbidden: Current password is incorrect", i, resp.StatusCode, env.Error, env.Message)
+		}
+		// One request is one attempt: what the client sent once, the server counted once.
+		if n, err := c.rdb.Get(context.Background(), "pwchange:user:fail:"+c.uid.String()).Int(); err != nil || n != i {
+			t.Fatalf("the attempt counter is %d (%v) after %d wrong request(s), want %d", n, err, i, i)
 		}
 	}
 	if got := c.mr.Keys(); !slices.Equal(got, []string{"pwchange:user:fail:" + c.uid.String()}) {

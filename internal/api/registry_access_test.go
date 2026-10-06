@@ -42,21 +42,13 @@ func accessRoute(path string) string {
 	).Replace(path)
 }
 
-// accessLegacyPermissions is what each handler checked with a hand-placed
-// requireClusterPerm call BEFORE Phase 6h, transcribed from
-// `git show HEAD:internal/api/handlers/access.go` at commit 3ca85e9.
-//
-// Every entry is one call, and every call hoists: each handler resolved the
-// cluster from its own path with clusterIDFromParam and then made exactly one
-// static requireClusterPerm(c, action, accessResource, clusterID). There is no
-// Deferred, Advisory or global route in this domain and no route made two
-// calls, which is why this table carries no `calls`/`hoisted` columns the way
-// alertLegacyPermissions does — 25 calls in, 25 gates out, nothing kept.
-//
-// The RESOURCE was the package const accessResource rather than a literal, so
-// it is resolved here through the same symbol the declarations name (now
-// exported as handlers.AccessResource) instead of being re-typed as "access" —
-// a second spelling is what the export exists to prevent.
+// accessLegacyPermissions is what each handler checked with a hand-placed requireClusterPerm
+// call BEFORE Phase 6h, transcribed from `git show HEAD:internal/api/handlers/access.go` at
+// commit 3ca85e9. Every entry is one call that hoists (the cluster from the handler's own
+// path, one static action, no Deferred, Advisory or global route), so 25 calls in, 25 gates
+// out, nothing kept. The resource is resolved through the symbol the declarations name
+// (handlers.AccessResource), not re-typed as "access": a second spelling is what the export
+// exists to prevent.
 var accessLegacyPermissions = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/access/users":                            "view",
 	"POST /api/v1/clusters/:cluster_id/access/users":                           "manage",
@@ -90,7 +82,7 @@ var accessLegacyPermissions = map[string]string{
 // routes hang off one path and nothing else is mounted under it.
 func declaredAccessEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	out := map[string]Endpoint{}
 	for _, e := range s.registry.Endpoints() {
 		if strings.HasPrefix(e.Path, accessScope+"/") {
@@ -168,7 +160,7 @@ func TestAccessRoutesAreGatedByTheirDeclaration(t *testing.T) {
 		method, path, _ := strings.Cut(key, " ")
 		want := action + ":" + handlers.AccessResource
 		t.Run(key, func(t *testing.T) {
-			e := declaredEndpoint(t, method, path)
+			e := sharedEndpoint(t, method, path)
 			cap := &capture{}
 			gated := e
 			gated.Handler = cap.handler()
@@ -212,24 +204,20 @@ func TestAccessRoutesAreGatedByTheirDeclaration(t *testing.T) {
 // database nor a session.
 func probeAccessEndpoint(t *testing.T, method, path string, cap *capture) Endpoint {
 	t.Helper()
-	e := declaredEndpoint(t, method, path)
+	e := sharedEndpoint(t, method, path)
 	e.Handler = cap.handler()
 	e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
 	return e
 }
 
-// TestAccessPathSegmentsAreAnchored is the traversal guard for this domain.
-//
-// Every one of these identifiers becomes a segment of a Proxmox request path,
-// built with url.PathEscape — which escapes "/" but leaves "." and ".." alone —
-// so an un-anchored segment resolves onto the PARENT collection wherever a
-// proxy in front of pveproxy normalises the path (pveproxy itself takes it
-// literally; see proxmox.validatePathSegment). The handlers only ever checked
-// the segment was non-empty, which ".." satisfies.
-//
-// The second half is what keeps the anchor honest: a real value, including the
-// percent-encoded user id every correct client sends, must still pass. An anchor
-// that refused "nexara%40pve" would break the whole tab.
+// TestAccessPathSegmentsAreAnchored is the traversal guard for this domain. Every one of
+// these identifiers becomes a segment of a Proxmox request path, built with url.PathEscape,
+// which escapes "/" but leaves "." and ".." alone, so an un-anchored segment resolves onto
+// the PARENT collection wherever a proxy in front of pveproxy normalises the path (pveproxy
+// itself takes it literally; see proxmox.validatePathSegment). The handlers only ever checked
+// the segment was non-empty, which ".." satisfies. The second half keeps the anchor honest:
+// a real value, including the percent-encoded user id every correct client sends, must still
+// pass, or the whole tab breaks.
 func TestAccessPathSegmentsAreAnchored(t *testing.T) {
 	// The two segments a path normaliser resolves onto the parent. The anchor
 	// is "an optional leading dot, then a NON-dot" — the shape registry_ceph.go
@@ -287,7 +275,7 @@ func TestAccessPathSegmentsAreAnchored(t *testing.T) {
 
 	for _, seg := range segments {
 		t.Run(seg.name, func(t *testing.T) {
-			e := declaredEndpoint(t, fiber.MethodGet, seg.route)
+			e := sharedEndpoint(t, fiber.MethodGet, seg.route)
 			prop, ok := e.Parameters[seg.param]
 			if !ok {
 				t.Fatalf("%s declares no %q parameter", seg.route, seg.param)
@@ -343,7 +331,7 @@ func TestAccessPathSegmentsAreAnchored(t *testing.T) {
 // picking the class by eye is not good enough and why the two rules below are
 // derived from their own sources of truth instead.
 func TestAccessPatternsAreNoNarrowerThanWhatACallerCanSend(t *testing.T) {
-	userid := declaredEndpoint(t, fiber.MethodGet, accessScope+"/users/:userid").Parameters["userid"]
+	userid := sharedEndpoint(t, fiber.MethodGet, accessScope+"/users/:userid").Parameters["userid"]
 	uidRe := regexp.MustCompile(userid.Pattern)
 
 	// encodeURIComponent's unreserved set, verbatim from the ECMAScript spec:
@@ -371,7 +359,7 @@ func TestAccessPatternsAreNoNarrowerThanWhatACallerCanSend(t *testing.T) {
 	// 1..3 drawn from proxmox.accessNamePattern's own class, the declaration
 	// must accept exactly what that validator accepts — which is everything
 	// except the two literal traversal segments.
-	groupid := declaredEndpoint(t, fiber.MethodGet, accessScope+"/groups/:groupid").Parameters["groupid"]
+	groupid := sharedEndpoint(t, fiber.MethodGet, accessScope+"/groups/:groupid").Parameters["groupid"]
 	nameRe := regexp.MustCompile(groupid.Pattern)
 	const class = "aZ0._-" // one representative of each character kind in [A-Za-z0-9._-]
 	var walk func(prefix string, depth int)
@@ -404,19 +392,9 @@ func TestAccessTraversalIsRefusedAtTheRoute(t *testing.T) {
 
 	target := pathPrefix + "clusters/" + testClusterID + "/access/groups/.."
 	status, _ := send(t, app, httptest.NewRequest(http.MethodGet, target, nil))
-	// This asserted "400 OR 404", on the belief that Fiber normalises
-	// "/groups/.." out of the URL before routing, so that the request lands on
-	// a collection path this app does not mount. IT DOES NOT. Measured: the
-	// raw ".." reaches the declaration exactly as the escaped spelling below
-	// does, and the 400 comes from the pattern in both cases.
-	//
-	// The belief is easy to arrive at — a normaliser resolving the segment is
-	// precisely what makes ".." dangerous on the way to pveproxy, which does
-	// not resolve it itself — but it does not follow that anything on THIS
-	// side resolves it first. The tolerance was worse than wrong prose: 404 is
-	// exactly what a normalising Fiber would answer, so the test stayed green
-	// whichever fact held and measured neither. It is 400 alone now, which is
-	// what pins the pattern as the thing refusing this.
+	// 400 alone, not "400 or 404": Fiber does not normalise "/groups/.." away (measured), and
+	// 404 is what a normalising Fiber would answer, so a tolerance would stay green whichever
+	// fact held. 400 pins the pattern as the thing refusing this.
 	if status != fiber.StatusBadRequest {
 		t.Errorf("status = %d, want 400 from the pattern for a traversal segment", status)
 	}
@@ -458,7 +436,7 @@ var accessForceRoutes = []struct{ method, path string }{
 func TestAccessForceIsReadFromTheQueryString(t *testing.T) {
 	for _, r := range accessForceRoutes {
 		t.Run(r.method+" "+r.path, func(t *testing.T) {
-			e := declaredEndpoint(t, r.method, r.path)
+			e := sharedEndpoint(t, r.method, r.path)
 			prop, ok := e.Parameters["force"]
 			if !ok {
 				t.Fatalf("declares no force parameter, but the handler reads one")
@@ -517,17 +495,12 @@ func TestAccessForceIsReadFromTheQueryString(t *testing.T) {
 	}
 }
 
-// TestAccessUserFieldsStayTristate is the compatibility assertion for the eight
-// account attributes whose Proxmox struct field is a POINTER.
-//
-// nil omits the key from the outbound form (leave the stored value alone) and a
-// pointer to the zero value clears it. The pointers are built from p.OptString
-// and p.OptBool, which report a default as not supplied (see
-// apischema.Property.Default), so a Default could not make a rename clear the
-// e-mail address or re-enable a disabled account; what it would do is document
-// a value an omitted field never gets, and be what a plain read of the
-// parameter (p.String, p.Bool) returns for one the caller left out. See
-// accessUserFieldParams.
+// TestAccessUserFieldsStayTristate is the compatibility assertion for the eight account
+// attributes whose Proxmox struct field is a POINTER: nil omits the key from the outbound
+// form (leave the stored value alone) and a pointer to the zero value clears it. They are
+// built from p.OptString and p.OptBool, which report a default as not supplied, so a Default
+// could not make a rename clear the e-mail address or re-enable a disabled account; it would
+// only document a value an omitted field never gets. See accessUserFieldParams.
 func TestAccessUserFieldsStayTristate(t *testing.T) {
 	tristate := []string{"comment", "email", "firstname", "lastname", "groups", "keys", "enable", "expire"}
 
@@ -536,7 +509,7 @@ func TestAccessUserFieldsStayTristate(t *testing.T) {
 		{fiber.MethodPut, accessScope + "/users/:userid"},
 	} {
 		t.Run(route.method, func(t *testing.T) {
-			e := declaredEndpoint(t, route.method, route.path)
+			e := sharedEndpoint(t, route.method, route.path)
 			for _, name := range tristate {
 				prop, ok := e.Parameters[name]
 				if !ok {
@@ -560,7 +533,7 @@ func TestAccessUserFieldsStayTristate(t *testing.T) {
 		{fiber.MethodPost, accessScope + "/users"},
 		{fiber.MethodPut, accessScope + "/users/:userid"},
 	} {
-		if f := declaredEndpoint(t, route.method, route.path).Parameters["email"].Format; f != "" {
+		if f := sharedEndpoint(t, route.method, route.path).Parameters["email"].Format; f != "" {
 			t.Errorf("%s %s: email declares format %q; that refuses \"\", which is how a caller clears it",
 				route.method, route.path, f)
 		}
@@ -608,7 +581,7 @@ func TestAccessRequiredSetsMatchWhatEachHandlerEnforced(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			e := declaredEndpoint(t, tc.method, tc.path)
+			e := sharedEndpoint(t, tc.method, tc.path)
 			for _, name := range tc.required {
 				prop, ok := e.Parameters[name]
 				if !ok {
@@ -675,7 +648,7 @@ func TestAccessRoleUpdateDoesNotDeclareARoleIDBody(t *testing.T) {
 		{fiber.MethodPut, accessScope + "/groups/:groupid", "groupid", `{"comment":"x","groupid":"other"}`},
 	} {
 		t.Run(tc.ignored, func(t *testing.T) {
-			e := declaredEndpoint(t, tc.method, tc.path)
+			e := sharedEndpoint(t, tc.method, tc.path)
 			prop := e.Parameters[tc.ignored]
 			if prop.Source == apischema.SourceBody {
 				t.Fatalf("%q is declared as a body parameter; it is the path segment", tc.ignored)
@@ -705,7 +678,7 @@ func TestAccessRoleUpdateDoesNotDeclareARoleIDBody(t *testing.T) {
 // proxy), and declaring it there would create a write path whose audit row this
 // file's own guard would then have to police.
 func TestAccessPasswordIsWriteOnly(t *testing.T) {
-	create := declaredEndpoint(t, fiber.MethodPost, accessScope+"/users")
+	create := sharedEndpoint(t, fiber.MethodPost, accessScope+"/users")
 	prop, ok := create.Parameters["password"]
 	if !ok {
 		t.Fatal("POST .../access/users declares no password parameter")
@@ -719,7 +692,7 @@ func TestAccessPasswordIsWriteOnly(t *testing.T) {
 		{fiber.MethodPost, accessScope + "/users/:userid/tokens/:tokenid"},
 		{fiber.MethodPut, accessScope + "/users/:userid/tokens/:tokenid"},
 	} {
-		if _, declared := declaredEndpoint(t, route.method, route.path).Parameters["password"]; declared {
+		if _, declared := sharedEndpoint(t, route.method, route.path).Parameters["password"]; declared {
 			t.Errorf("%s %s declares a password parameter; this route has never accepted one",
 				route.method, route.path)
 		}
@@ -732,7 +705,7 @@ func TestAccessPasswordIsWriteOnly(t *testing.T) {
 func TestAccessIdentifiersAreClusterUUIDs(t *testing.T) {
 	for key := range accessLegacyPermissions {
 		method, path, _ := strings.Cut(key, " ")
-		e := declaredEndpoint(t, method, path)
+		e := sharedEndpoint(t, method, path)
 		prop, ok := e.Parameters["cluster_id"]
 		if !ok {
 			t.Errorf("%s declares no cluster_id", key)

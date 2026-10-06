@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -25,17 +25,14 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The cluster delete requires confirm=<the cluster's current name>. The tests
-// here drive the REAL declaration and the REAL ClusterHandler.Delete behind the
-// production middleware stack, with stand-ins only at the two edges the
-// handler reaches out to: the database, holding one cluster, and the cluster's
-// Proxmox API, which the credential revocation calls.
-//
-// The request that matters most is the one a proxy makes. Traefik resolves dot
-// segments by default, so a script's DELETE /api/v1/clusters/<id>/pools/..
-// reaches Nexara as DELETE /api/v1/clusters/<id>, with no trailing slash for
-// refuseTrailingSlashWrites to refuse (README.md, Reverse Proxy). It carries no
-// confirm, and neither does any other request written for some other route.
+// The cluster delete requires confirm=<the cluster's current name>. These drive the REAL
+// declaration and ClusterHandler.Delete behind the production middleware stack, with
+// stand-ins at the two edges: the database, holding one cluster, and the cluster's Proxmox
+// API, which the credential revocation calls. The request that matters most is the one a
+// proxy makes: Traefik resolves dot segments by default, so a script's
+// DELETE /api/v1/clusters/<id>/pools/.. reaches Nexara as DELETE /api/v1/clusters/<id>,
+// with no trailing slash for refuseTrailingSlashWrites to refuse (README.md, Reverse
+// Proxy), and no confirm.
 
 // clusterDeleteEncKey encrypts the stand-in cluster's token secret. A fixture.
 const clusterDeleteEncKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -52,10 +49,10 @@ const clusterDeleteWrong = "confirm: must be the cluster's current name; " +
 
 var errClusterDeleteUnexpected = errors.New("unexpected query")
 
-// clusterDeleteDB stands in for the database: one cluster row, which
-// DeleteCluster removes. The handler's other reads are answered as an idle
-// cluster would answer them.
+// clusterDeleteDB stands in for the database: one cluster row, which DeleteCluster
+// removes. The handler's other reads are answered as an idle cluster would answer them.
 type clusterDeleteDB struct {
+	t       *testing.T
 	mu      sync.Mutex
 	cluster db.Cluster
 	busy    bool // an active rolling update holds the cluster
@@ -69,20 +66,19 @@ func (d *clusterDeleteDB) QueryRow(_ context.Context, sql string, args ...any) p
 	switch {
 	case strings.Contains(sql, "-- name: GetCluster :one"):
 		if d.deleted || len(args) != 1 || args[0] != d.cluster.ID {
-			return clusterDeleteRow{err: pgx.ErrNoRows}
+			return fieldRow{err: pgx.ErrNoRows}
 		}
-		return clusterDeleteRow{values: structFields(d.cluster)}
+		return fieldRow{t: d.t, v: d.cluster}
 	case strings.Contains(sql, "-- name: HasRunningJobForCluster :one"):
-		return clusterDeleteRow{values: []any{d.busy}}
+		return fieldRow{t: d.t, v: d.busy}
 	case strings.Contains(sql, "-- name: CountClustersSharingBootstrapUser :one"):
-		return clusterDeleteRow{values: []any{int64(0)}}
+		return fieldRow{t: d.t, v: int64(0)}
 	}
-	return clusterDeleteRow{err: errClusterDeleteUnexpected}
+	return fieldRow{err: errClusterDeleteUnexpected}
 }
 
-// Query serves ListCleanupPendingJobsForCluster, the handler's one multi-row
-// read. An error reads there as "no pending cleanup", which is what an idle
-// cluster has.
+// Query serves ListCleanupPendingJobsForCluster, the handler's one multi-row read. An
+// error reads there as "no pending cleanup", which is what an idle cluster has.
 func (d *clusterDeleteDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 	if !strings.Contains(sql, "-- name: ListCleanupPendingJobsForCluster :many") {
 		return nil, fmt.Errorf("%w: %.60s", errClusterDeleteUnexpected, sql)
@@ -110,73 +106,6 @@ func (d *clusterDeleteDB) state() (deleted bool, audits int) {
 	return d.deleted, d.audits
 }
 
-// structFields lists a struct's field values in declaration order — the order
-// sqlc's generated Scan calls take their destinations in.
-func structFields(v any) []any {
-	rv := reflect.ValueOf(v)
-	out := make([]any, rv.NumField())
-	for i := range out {
-		out[i] = rv.Field(i).Interface()
-	}
-	return out
-}
-
-// clusterDeleteRow replays values through pgx.Row positionally, refusing a
-// destination of the wrong type rather than shifting a value into it.
-type clusterDeleteRow struct {
-	values []any
-	err    error
-}
-
-func (r clusterDeleteRow) Scan(dest ...any) error {
-	if r.err != nil {
-		return r.err
-	}
-	if len(dest) != len(r.values) {
-		return fmt.Errorf("scan got %d destinations, want %d", len(dest), len(r.values))
-	}
-	for i, d := range dest {
-		ptr := reflect.ValueOf(d)
-		val := reflect.ValueOf(r.values[i])
-		if ptr.Kind() != reflect.Pointer || ptr.Elem().Type() != val.Type() {
-			return fmt.Errorf("scan destination %d is %T, want *%s", i, d, val.Type())
-		}
-		ptr.Elem().Set(val)
-	}
-	return nil
-}
-
-// clusterDeletePVE stands in for the cluster's Proxmox API. It lists the one
-// token Nexara minted, so the revocation finds nothing else depending on the
-// user and deletes it, and records every request.
-type clusterDeletePVE struct {
-	mu   sync.Mutex
-	seen []string
-}
-
-func (p *clusterDeletePVE) serve(t *testing.T, userID, tokenName string) string {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p.mu.Lock()
-		p.seen = append(p.seen, r.Method+" "+r.URL.Path)
-		p.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet && r.URL.Path == "/api2/json/access/users/"+userID+"/token" {
-			_, _ = fmt.Fprintf(w, `{"data":[{"tokenid":%q}]}`, tokenName)
-			return
-		}
-		_, _ = w.Write([]byte(`{"data":null}`))
-	}))
-	t.Cleanup(srv.Close)
-	return srv.URL
-}
-
-func (p *clusterDeletePVE) requests() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return append([]string(nil), p.seen...)
-}
-
 // clusterDeleteFixture is what newClusterDeleteApp builds.
 type clusterDeleteFixture struct {
 	name string // the stored cluster's name
@@ -192,18 +121,21 @@ type clusterDeleteFixture struct {
 // cluster DELETE declaration mounted on it, its handler the real
 // ClusterHandler.Delete over a database holding one cluster, whose credential
 // Nexara minted, as the fixture describes it.
-func newClusterDeleteApp(t *testing.T, f clusterDeleteFixture) (*fiber.App, *clusterDeleteDB, *clusterDeletePVE) {
+func newClusterDeleteApp(t *testing.T, f clusterDeleteFixture) (*fiber.App, *clusterDeleteDB, *accessUpdatePVE) {
 	t.Helper()
 	const userID, tokenName = "nexara@pve", "nexara-cluster01"
-	pve := &clusterDeletePVE{}
+	// The stand-in Proxmox lists the one token Nexara minted, so the revocation finds
+	// nothing else depending on the user and deletes it.
+	pve := &accessUpdatePVE{}
+	pve.reply("/api2/json/access/users/"+userID+"/token", fmt.Sprintf(`{"data":[{"tokenid":%q}]}`, tokenName))
 	secret, err := crypto.Encrypt("token-secret-value", clusterDeleteEncKey)
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
-	store := &clusterDeleteDB{cluster: db.Cluster{
+	store := &clusterDeleteDB{t: t, cluster: db.Cluster{
 		ID:                   uuid.MustParse(testClusterID),
 		Name:                 f.name,
-		ApiUrl:               pve.serve(t, userID, tokenName),
+		ApiUrl:               pve.serve(t),
 		TokenID:              userID + "!" + tokenName,
 		TokenSecretEncrypted: secret,
 		SyncIntervalSeconds:  30,
@@ -214,7 +146,7 @@ func newClusterDeleteApp(t *testing.T, f clusterDeleteFixture) (*fiber.App, *clu
 		BootstrapCreatedUser: true,
 	}, busy: f.busy}
 
-	e := declaredEndpoint(t, fiber.MethodDelete, clusterByID)
+	e := sharedEndpoint(t, fiber.MethodDelete, clusterByID)
 	e.Handler = handlers.NewClusterHandler(db.New(store), clusterDeleteEncKey, nil).Delete
 
 	cfg := &config.Config{RateLimitMax: 1_000_000, RateLimitExpiration: time.Minute}
@@ -280,7 +212,7 @@ func TestClusterDeleteRequiresTheClusterName(t *testing.T) {
 					t.Fatalf("DELETE %s answered %d %+v (deleted: %v, audit rows: %d), want 204, the cluster "+
 						"deleted and the delete audited", tt.query, status, env, deleted, audits)
 				}
-				if got := pve.requests(); !reflect.DeepEqual(got, tt.wantPVE) {
+				if got := pve.lines(); !slices.Equal(got, tt.wantPVE) {
 					t.Errorf("Proxmox received %q, want %q", got, tt.wantPVE)
 				}
 				return
@@ -292,7 +224,7 @@ func TestClusterDeleteRequiresTheClusterName(t *testing.T) {
 				t.Errorf("DELETE %s was refused, but the cluster was deleted (%v) or audited (%d rows)",
 					tt.query, deleted, audits)
 			}
-			if got := pve.requests(); len(got) != 0 {
+			if got := pve.lines(); len(got) != 0 {
 				t.Errorf("DELETE %s was refused, but Proxmox received %q — the revocation ran", tt.query, got)
 			}
 		})
@@ -339,9 +271,9 @@ func TestClusterDeleteDoesNotTellAGuessRightFromWrong(t *testing.T) {
 				}
 				status, env := send(t, app, authedRequest(http.MethodDelete, base+query))
 				deleted, audits := store.state()
-				if status != tt.want || deleted || audits != 0 || len(pve.requests()) != 0 {
+				if status != tt.want || deleted || audits != 0 || len(pve.lines()) != 0 {
 					t.Errorf("confirm=%s answered %d %+v (deleted: %v, audit rows: %d, Proxmox: %q), want %d "+
-						"and nothing changed", guess, status, env, deleted, audits, pve.requests(), tt.want)
+						"and nothing changed", guess, status, env, deleted, audits, pve.lines(), tt.want)
 				}
 				answers[i] = fmt.Sprintf("%d %s %s %v", status, env.Error, env.Message, env.Details)
 			}
@@ -371,15 +303,15 @@ func TestAnUnresolvedDotSegmentReachesThePoolRoute(t *testing.T) {
 	} {
 		t.Run(tt.id, func(t *testing.T) {
 			pool := &capture{}
-			pe := declaredEndpoint(t, fiber.MethodDelete, clusterScope+"/pools/:pool_id")
+			pe := sharedEndpoint(t, fiber.MethodDelete, clusterScope+"/pools/:pool_id")
 			pe.Handler = pool.handler()
 			app, store, pve := newClusterDeleteApp(t, clusterDeleteFixture{name: "cluster01", extra: []Endpoint{pe}})
 
 			target := pathPrefix + "clusters/" + testClusterID + "/pools/" + tt.id
 			status, env := send(t, app, authedRequest(http.MethodDelete, target))
 			deleted, _ := store.state()
-			if deleted || len(pve.requests()) != 0 {
-				t.Fatalf("DELETE %s deleted the cluster (%v) or reached Proxmox (%q)", target, deleted, pve.requests())
+			if deleted || len(pve.lines()) != 0 {
+				t.Fatalf("DELETE %s deleted the cluster (%v) or reached Proxmox (%q)", target, deleted, pve.lines())
 			}
 			if tt.reaches {
 				if status != fiber.StatusNoContent || !pool.called || pool.params.String("pool_id") != tt.id {
@@ -407,7 +339,7 @@ func TestAnUnresolvedDotSegmentReachesThePoolRoute(t *testing.T) {
 // cluster comment, say) fails here, rather than quietly letting a rewritten
 // pool edit through as a cluster edit.
 func TestARewrittenPoolEditCannotEditTheCluster(t *testing.T) {
-	pool := declaredEndpoint(t, fiber.MethodPut, clusterScope+"/pools/:pool_id")
+	pool := sharedEndpoint(t, fiber.MethodPut, clusterScope+"/pools/:pool_id")
 	var keys []string
 	for name, prop := range pool.Parameters {
 		if apischema.ResolveSource(name, prop, pool.Method, pool.pathParams) == apischema.SourceBody {
@@ -420,7 +352,7 @@ func TestARewrittenPoolEditCannotEditTheCluster(t *testing.T) {
 	}
 
 	cap := &capture{}
-	e := declaredEndpoint(t, fiber.MethodPut, clusterByID)
+	e := sharedEndpoint(t, fiber.MethodPut, clusterByID)
 	e.Handler = cap.handler()
 	e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
 	app := newRegistryApp(t, noAuth(), e)
@@ -493,7 +425,7 @@ func TestClusterDeleteConfirmIsReadAsTheSPASendsIt(t *testing.T) {
 // API client rely on: confirm is required, read from the query of a DELETE,
 // and bounded like the name it must equal.
 func TestClusterDeleteConfirmIsDeclared(t *testing.T) {
-	e := declaredEndpoint(t, fiber.MethodDelete, clusterByID)
+	e := sharedEndpoint(t, fiber.MethodDelete, clusterByID)
 	prop, ok := e.Parameters["confirm"]
 	if !ok {
 		t.Fatal("DELETE /api/v1/clusters/:id declares no confirm parameter")

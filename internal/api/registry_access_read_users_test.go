@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -14,23 +13,21 @@ import (
 	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
-// Both user reads are gated on view:access, which every built-in Viewer holds,
-// and neither may send a user's keys (see accessUserResponse in
-// internal/api/handlers for what they hold). The shapers are pinned on their
-// own by TestAccessUserReadsWithholdKeys and TestReadStructsStripCredentials in
-// that package; this file keeps the REAL declarations, permission gate and
-// handlers, with stand-ins only for Proxmox and the database, so that a handler
-// which stops calling its shaper, or a decode that stops reaching it, fails here
-// as well.
+// Both user reads are gated on view:access, which every built-in Viewer holds, and
+// neither may send a user's keys (see accessUserResponse in internal/api/handlers). The
+// shapers are pinned on their own by TestAccessUserReadsWithholdKeys and
+// TestReadStructsStripCredentials in that package; this file keeps the REAL
+// declarations, permission gate and handlers over the stand-ins, so that a handler which
+// stops calling its shaper, or a decode that stops reaching it, fails here as well.
 
-// accessReadKeys is the value the stand-in Proxmox gives alice's keys:
-// findable in a body whatever key it sits under, and obviously not a real key.
+// accessReadKeys is the value the stand-in Proxmox gives alice's keys: findable in a
+// body whatever key it sits under, and not a real key.
 const accessReadKeys = "PROBE-ACCESS-KEYS-NOT-A-REAL-VALUE"
 
-// The stand-in cluster's three users, each answering differently for keys:
-// alice has a value, nexara sends the field empty, and root does not send it at
-// all. The list carries groups as a string and the detail as an array, as
-// Proxmox does, and enable as 0 or 1.
+// The stand-in cluster's three users, each answering differently for keys: alice has a
+// value, nexara sends the field empty, and root does not send it at all. The list
+// carries groups as a string and the detail as an array, as Proxmox does, and enable as
+// 0 or 1.
 const (
 	accessReadListJSON = `{"data":[
 		{"userid":"alice@pve","enable":1,"expire":0,"firstname":"Alice","lastname":"Example",
@@ -49,8 +46,7 @@ const (
 	accessReadRootJSON   = `{"data":{"enable":1,"expire":0,"email":"root@example.com"}}`
 )
 
-// accessReadCluster is what the stand-in Proxmox says for each read the two
-// routes make, by the path it is asked for.
+// accessReadCluster is what the stand-in Proxmox says for each read the two routes make.
 var accessReadCluster = map[string]string{
 	"/api2/json/access/users":            accessReadListJSON,
 	"/api2/json/access/users/alice@pve":  accessReadAliceJSON,
@@ -58,47 +54,41 @@ var accessReadCluster = map[string]string{
 	"/api2/json/access/users/root@pam":   accessReadRootJSON,
 }
 
-// newAccessReadApp mounts the real GET .../access/users and
-// .../access/users/:userid declarations, with their real permission, on the real
-// AccessHandler and the two stand-ins newAccessUpdateApp uses, with Proxmox
-// answering as replies say. The caller holds view:access and nothing else, which
-// is all a Viewer needs for these routes.
-func newAccessReadApp(t *testing.T, replies map[string]string) *fiber.App {
+// newAccessReadApp mounts the real read routes wire picks on the real AccessHandler over
+// a stand-in Proxmox answering as replies say, for a caller holding view:access and
+// nothing else, which is all a Viewer needs.
+func newAccessReadApp(t *testing.T, replies map[string]string, wire func(h *handlers.AccessHandler) []realRoute) *fiber.App {
 	t.Helper()
-	pve, _, h := newAccessStandIns(t)
+	app, pve, _ := newAccessApp(t, grantsOf("view:"+handlers.AccessResource), wire)
 	for path, body := range replies {
 		pve.reply(path, body)
 	}
-
-	list := declaredEndpoint(t, fiber.MethodGet, accessScope+"/users")
-	list.Handler = h.ListUsers
-	detail := declaredEndpoint(t, fiber.MethodGet, accessScope+"/users/:userid")
-	detail.Handler = h.GetUser
-
-	return newRegistryApp(t, stubAuth(map[string]bool{"view:" + handlers.AccessResource: true}), list, detail)
+	return app
 }
 
-// getAccessRead sends an authenticated GET and returns the status and the raw
-// body, which is what a Viewer receives.
+func newAccessUserReadApp(t *testing.T, replies map[string]string) *fiber.App {
+	t.Helper()
+	return newAccessReadApp(t, replies, func(h *handlers.AccessHandler) []realRoute {
+		return []realRoute{
+			{fiber.MethodGet, accessScope + "/users", h.ListUsers},
+			{fiber.MethodGet, accessScope + "/users/:userid", h.GetUser},
+		}
+	})
+}
+
+// getAccessRead sends an authenticated GET and returns the status and the raw body,
+// which is what a Viewer receives.
 func getAccessRead(t *testing.T, app *fiber.App, target string) (int, string) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	req.Header.Set("X-Test-User", "yes")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("app.Test: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
-	return resp.StatusCode, string(body)
+	status, body := sendBody(t, app, req)
+	return status, string(body)
 }
 
-// requireKeysWithheld fails unless body is free of the keys value and of a keys
-// key, blank or not, whatever object it is under. has_keys is another name and
-// is checked with the other fields.
+// requireKeysWithheld fails unless body is free of the keys value and of a keys key,
+// blank or not, whatever object it is under. has_keys is another name and is checked
+// with the other fields.
 func requireKeysWithheld(t *testing.T, body string) {
 	t.Helper()
 	if strings.Contains(body, accessReadKeys) {
@@ -109,10 +99,9 @@ func requireKeysWithheld(t *testing.T, body string) {
 	}
 }
 
-// requireFields fails unless every field want names holds that value in got.
-// Fields it does not name are not examined, so one Proxmox gains later does not
-// fail it; TestAccessUserReadsCarryEveryOtherField in internal/api/handlers
-// covers those.
+// requireFields fails unless every field want names holds that value in got. Fields it
+// does not name are not examined, so one Proxmox gains later does not fail it;
+// TestAccessUserReadsCarryEveryOtherField in internal/api/handlers covers those.
 func requireFields(t *testing.T, got, want map[string]any) {
 	t.Helper()
 	for name, w := range want {
@@ -122,12 +111,26 @@ func requireFields(t *testing.T, got, want map[string]any) {
 	}
 }
 
-// TestAccessUserListWithholdsKeys drives GET .../access/users. The value is not
-// in the body and no user has a keys key, blank or not; has_keys is true for the
-// user Proxmox sent a value for and false for one it sent "" or nothing for; and
-// the fields the SPA reads come through as they always did.
+// requireEmptyList drives a list route whose Proxmox answers with each reply and holds
+// the listing's envelope as it was: a cluster with nothing, or null, still gets `items: []`.
+func requireEmptyList(t *testing.T, newApp func(*testing.T, map[string]string) *fiber.App, proxmoxPath, listing string) {
+	t.Helper()
+	for name, reply := range map[string]string{"an empty list": `{"data":[]}`, "null": `{"data":null}`} {
+		t.Run(name, func(t *testing.T) {
+			status, body := getAccessRead(t, newApp(t, map[string]string{proxmoxPath: reply}), listing)
+			if status != fiber.StatusOK || body != `{"items":[],"total":0}` {
+				t.Errorf("status %d, body = %s, want 200 {\"items\":[],\"total\":0}", status, body)
+			}
+		})
+	}
+}
+
+// TestAccessUserListWithholdsKeys drives GET .../access/users. The value is not in the
+// body and no user has a keys key, blank or not; has_keys is true for the user Proxmox
+// sent a value for and false for one it sent "" or nothing for; and the fields the SPA
+// reads come through as they always did.
 func TestAccessUserListWithholdsKeys(t *testing.T) {
-	app := newAccessReadApp(t, accessReadCluster)
+	app := newAccessUserReadApp(t, accessReadCluster)
 
 	status, body := getAccessRead(t, app, accessRoute(accessScope+"/users"))
 	if status != fiber.StatusOK {
@@ -180,44 +183,29 @@ func TestAccessUserListWithholdsKeys(t *testing.T) {
 	}
 }
 
-// TestAccessUserDetailWithholdsKeys drives GET .../access/users/:userid for the
-// same three users. The detail sends groups as an array, and the client restores
-// the userid Proxmox leaves out of it.
+// TestAccessUserDetailWithholdsKeys drives GET .../access/users/:userid for the same
+// three users. The detail sends groups as an array, and the client restores the userid
+// Proxmox leaves out of it.
 func TestAccessUserDetailWithholdsKeys(t *testing.T) {
-	app := newAccessReadApp(t, accessReadCluster)
+	app := newAccessUserReadApp(t, accessReadCluster)
 
-	tests := []struct {
+	for _, tt := range []struct {
 		name string
 		user string // as the client sends it in the path: percent-encoded
 		want map[string]any
 	}{
-		{
-			name: "a user with keys",
-			user: "alice%40pve",
-			want: map[string]any{
-				"userid": "alice@pve", "enable": true, "expire": float64(0), "firstname": "Alice",
-				"lastname": "Example", "email": "alice@example.com", "comment": "sentinel-comment",
-				"groups": []any{"operators", "auditors"}, "has_keys": true,
-			},
-		},
-		{
-			name: "a user whose keys are sent empty",
-			user: "nexara%40pve",
-			want: map[string]any{
-				"userid": "nexara@pve", "enable": false, "expire": float64(1767225600),
-				"groups": []any{}, "has_keys": false,
-			},
-		},
-		{
-			name: "a user whose keys are not sent",
-			user: "root%40pam",
-			want: map[string]any{
-				"userid": "root@pam", "enable": true, "expire": float64(0),
-				"email": "root@example.com", "has_keys": false,
-			},
-		},
-	}
-	for _, tt := range tests {
+		{"a user with keys", "alice%40pve", map[string]any{
+			"userid": "alice@pve", "enable": true, "expire": float64(0), "firstname": "Alice",
+			"lastname": "Example", "email": "alice@example.com", "comment": "sentinel-comment",
+			"groups": []any{"operators", "auditors"}, "has_keys": true,
+		}},
+		{"a user whose keys are sent empty", "nexara%40pve", map[string]any{
+			"userid": "nexara@pve", "enable": false, "expire": float64(1767225600), "groups": []any{}, "has_keys": false,
+		}},
+		{"a user whose keys are not sent", "root%40pam", map[string]any{
+			"userid": "root@pam", "enable": true, "expire": float64(0), "email": "root@example.com", "has_keys": false,
+		}},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
 			target := strings.Replace(accessRoute(accessScope+"/users/:userid"), testAccessUserID, tt.user, 1)
 			status, body := getAccessRead(t, app, target)
@@ -235,21 +223,6 @@ func TestAccessUserDetailWithholdsKeys(t *testing.T) {
 	}
 }
 
-// TestAccessUserListOfNoUsersIsAnEmptyList keeps the listing's envelope as it
-// was: a cluster whose Proxmox answers with no users, or with null, still gets
-// `items: []`.
 func TestAccessUserListOfNoUsersIsAnEmptyList(t *testing.T) {
-	for name, reply := range map[string]string{"an empty list": `{"data":[]}`, "null": `{"data":null}`} {
-		t.Run(name, func(t *testing.T) {
-			app := newAccessReadApp(t, map[string]string{"/api2/json/access/users": reply})
-
-			status, body := getAccessRead(t, app, accessRoute(accessScope+"/users"))
-			if status != fiber.StatusOK {
-				t.Fatalf("status = %d (%s), want 200", status, body)
-			}
-			if body != `{"items":[],"total":0}` {
-				t.Errorf("body = %s, want {\"items\":[],\"total\":0}", body)
-			}
-		})
-	}
+	requireEmptyList(t, newAccessUserReadApp, "/api2/json/access/users", accessRoute(accessScope+"/users"))
 }

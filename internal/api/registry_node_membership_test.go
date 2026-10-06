@@ -1,11 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -20,25 +18,22 @@ import (
 	fiberrecover "github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/api/handlers"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// These tests hold the registry to refusing, with 404 and before any handler
-// runs, a Proxmox node the cluster's nodes table does not hold — on every
-// route that names a node in its URL (Endpoint.urlNodeParams, checked in serve)
-// and on the two task routes whose node sits inside the UPID
-// (VMHandler.taskUPID). See handlers.RequireNodesInCluster for why: pveproxy
-// resolves and dials a name that is not a cluster member, and the error it
-// gets back reaches the caller.
+// These tests hold the registry to refusing, with 404 and before any handler runs, a
+// Proxmox node the cluster's nodes table does not hold, on every route that names a
+// node in its URL (Endpoint.urlNodeParams, checked in serve) and on the two task
+// routes whose node sits inside the UPID (VMHandler.taskUPID). See
+// handlers.RequireNodesInCluster: pveproxy resolves and dials a name that is not a
+// cluster member, and the error it gets back reaches the caller.
 
-// The number of routes that name a Proxmox node in their URL, by where they
-// carry it. Pinned rather than derived, so that a declaration that stops being
-// recognised — a node parameter given a looser schema, a route dropped or
-// added — moves a number somebody has to look at and update deliberately.
+// The number of routes that name a Proxmox node in their URL, by where they carry it.
+// Pinned rather than derived, so that a declaration that stops being recognised moves
+// a number somebody has to update deliberately.
 const (
 	nodeNamePathRouteCount  = 62
 	nodeNameQueryRouteCount = 6
@@ -47,9 +42,8 @@ const (
 // memberNode is the one node the membership fakes below hold.
 const memberNode = "pve-01"
 
-// nodeMembershipFake is a handlers.NodeLookup holding exactly the nodes in
-// members, recording every question in order. err, when set, answers every
-// question instead.
+// nodeMembershipFake is a handlers.NodeLookup holding exactly the nodes in members,
+// recording every question in order. err, when set, answers every question instead.
 type nodeMembershipFake struct {
 	mu      sync.Mutex
 	members map[uuid.UUID][]string
@@ -81,8 +75,8 @@ func holdingMember() *nodeMembershipFake {
 	return &nodeMembershipFake{members: map[uuid.UUID][]string{uuid.MustParse(testClusterID): {memberNode}}}
 }
 
-// followsNodesSegment reports whether :name is the path segment right after a
-// literal "nodes" — the shape a node name has in a URL whatever it is called.
+// followsNodesSegment reports whether :name is the path segment right after a literal
+// "nodes" — the shape a node name has in a URL whatever it is called.
 func followsNodesSegment(path, name string) bool {
 	segments := strings.Split(path, "/")
 	for i := 1; i < len(segments); i++ {
@@ -93,32 +87,23 @@ func followsNodesSegment(path, name string) bool {
 	return false
 }
 
-// boundHandlerName is the runtime name of an endpoint's Handler — for a bound
-// method value, "…/handlers.(*VMHandler).ListNodeUSBMappings-fm".
+// boundHandlerName is the runtime name of an endpoint's Handler — for a bound method
+// value, "…/handlers.(*VMHandler).ListNodeUSBMappings-fm".
 func boundHandlerName(h Handler) string {
 	return runtime.FuncForPC(reflect.ValueOf(h).Pointer()).Name()
 }
 
-// TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold walks the
-// route table the server builds and holds every route that names a Proxmox
-// node in its URL to the check, from four sides:
-//
-//  1. Which routes name a node is derived here WITHOUT Endpoint.urlNodeParams —
-//     from how the URL spells its parameters — and compared with it, route by
-//     route, both ways. A new route whose node parameter the registry does not
-//     recognise (a hand-rolled pattern instead of the node-name format) fails
-//     here instead of forwarding whatever name it is given.
-//  2. Every such route runs a cluster-scoped permission gate ahead of serve, so
-//     its 404 never tells a caller the gate refused which nodes exist.
-//  3. Each one is driven with a request that is valid in every other respect,
-//     against a lookup that knows exactly one node: the member reaches the
-//     handler; a name the cluster does not hold — an address among them — is
-//     404 and does not; a refused caller, a malformed name and a failed lookup
-//     never get as far.
-//  4. The handlers that dropped their own checks when this one arrived serve
-//     only routes that carry it.
+// TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold walks the route table and
+// holds every route that names a Proxmox node in its URL to the check, from four sides: (1)
+// which routes name a node is derived WITHOUT Endpoint.urlNodeParams, from how the URL spells
+// its parameters, and compared with it route by route, both ways, so a node parameter the
+// registry does not recognise fails here instead of forwarding whatever name it is given;
+// (2) every such route runs a cluster-scoped permission gate ahead of serve, so its 404 never
+// tells a refused caller which nodes exist; (3) each is driven with a request valid in every
+// other respect (probeNodeMembership); (4) the handlers that dropped their own checks serve
+// only routes that carry it.
 func TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	endpoints := s.registry.Endpoints()
 	if len(endpoints) == 0 {
 		t.Fatal("the server declared no registry endpoints, so this guard would check nothing")
@@ -136,9 +121,9 @@ func TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold(t *testing.T
 			}
 			lower := strings.ToLower(name)
 			if strings.HasSuffix(lower, "node_id") {
-				// A node ROW id is resolved in the database and never forwarded
-				// as a name — provided it really is one: a uuid, or the
-				// uuid-or-empty rule a filter uses for "every node".
+				// A node ROW id is resolved in the database and never forwarded as a
+				// name, provided it really is one: a uuid, or the uuid-or-empty rule a
+				// filter uses for "every node".
 				if prop.Format != "uuid" && prop.Pattern != emptyOrUUID {
 					t.Errorf("%s: %s reads as a Nexara node row id but is declared neither Format uuid nor "+
 						"emptyOrUUID, so nothing stops it carrying a node name to Proxmox unchecked", key, name)
@@ -175,7 +160,6 @@ func TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold(t *testing.T
 			queryRoutes++
 		}
 	}
-
 	for _, key := range slices.Sorted(maps.Keys(derived)) {
 		if got := classified[key]; !slices.Equal(got, derived[key]) {
 			t.Errorf("%s names a node in its URL as %v, but the registry checks %v against the cluster's nodes — "+
@@ -199,17 +183,7 @@ func TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold(t *testing.T
 	}
 
 	// 2. A cluster-scoped permission gate ahead of serve, in the mounted chain.
-	chains := map[string][]string{}
-	for _, r := range s.app.GetRoutes(true) {
-		if r.Method == "USE" || len(r.Handlers) == 0 {
-			continue
-		}
-		names := make([]string, 0, len(r.Handlers))
-		for _, h := range r.Handlers {
-			names = append(names, handlerName(h))
-		}
-		chains[r.Method+" "+normalizeRoutePath(r.Path)] = names
-	}
+	chains := mountedChains(s)
 	for _, e := range endpoints {
 		if len(e.urlNodeParams()) == 0 {
 			continue
@@ -262,10 +236,10 @@ func TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold(t *testing.T
 	}
 }
 
-// probeNodeMembership drives one route, with the node parameter under put
-// through each case and every other node parameter serve checks (all) set to
-// the member. An array under test carries the member first and the name under
-// test second, so a check that reads only an array's first element is caught.
+// probeNodeMembership drives one route, with the node parameter under put through each
+// case and every other node parameter serve checks (all) set to the member. An array
+// under test carries the member first and the name under test second, so a check that
+// reads only an array's first element is caught.
 func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 	t.Helper()
 	key := e.Method + " " + e.Path
@@ -273,7 +247,6 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 	if _, ok := e.Parameters[clusterParam]; !ok {
 		clusterParam = "id"
 	}
-
 	grants := map[string]bool{}
 	if e.Permissions.Check != nil {
 		grants[e.Permissions.Check.String()] = true
@@ -282,8 +255,8 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 		grants[alt.String()] = true
 	}
 
-	// build synthesizes a request that satisfies the whole schema, the way
-	// the route sweep does, with the cluster and the node parameters set here.
+	// build synthesizes a request that satisfies the whole schema, as the route sweep
+	// does, with the cluster and the node parameters set here.
 	build := func(node string) sweepRequest {
 		t.Helper()
 		base := sweepRouteOverrides[key]
@@ -302,16 +275,14 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 		if e.Parameters[under].Type == apischema.Array {
 			values[under] = []any{memberNode, node}
 		}
-		// A node parameter that Requires a sibling (the PCI mapping update's
-		// add_node needs add_path) brings it along.
+		// A node parameter that Requires a sibling (the PCI mapping update's add_node
+		// needs add_path) brings it along.
 		force := append(slices.Clone(base.forceRequired), all...)
 		for _, name := range all {
 			force = append(force, e.Parameters[name].Requires...)
 		}
 		req := synthesizeSweepRequestWith(e, false, sweepEndpointOverride{
-			values:              values,
-			forceRequired:       force,
-			excludeFromOptional: base.excludeFromOptional,
+			values: values, forceRequired: force, excludeFromOptional: base.excludeFromOptional,
 		})
 		if !req.ok {
 			t.Fatalf("could not build a request: %s", req.reason)
@@ -329,42 +300,25 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 		cap := &capture{}
 		probe := e
 		probe.Handler = cap.handler()
-		reg := NewRegistry()
-		reg.Register(probe)
-		app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-		mountRegistry(app, reg, auth, lookup)
-
-		req := build(node)
-		var body io.Reader
-		if len(req.body) > 0 {
-			body = bytes.NewReader(req.body)
-		}
-		httpReq := httptest.NewRequest(e.Method, req.target, body)
-		if len(req.body) > 0 {
-			httpReq.Header.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
-		}
-		httpReq.Header.Set("X-Test-User", "yes")
-		status, env := send(t, app, httpReq)
+		status, env := send(t, mountWith(auth, lookup, probe), sweepHTTP(e.Method, build(node)))
 		return outcome{status: status, message: env.Message, reached: cap.called}
 	}
 
 	cluster := uuid.MustParse(testClusterID)
 	granted := stubAuth(grants)
 
-	// The member reaches the handler, asked about in the path's cluster.
+	// The member reaches the handler, asked about in the path's cluster, once however
+	// many parameters name it (RequireNodesInCluster).
 	lookup := holdingMember()
 	if got := dispatch(granted, lookup, memberNode); got.status != fiber.StatusNoContent || !got.reached {
 		t.Fatalf("the cluster's own node: got %+v, want 204 with the handler reached", got)
 	}
-	// Once, however many parameters name it: a name is asked about once per
-	// request (RequireNodesInCluster).
-	want := []db.GetNodeByClusterAndNameParams{{ClusterID: cluster, Name: memberNode}}
-	if got := lookup.questions(); !slices.Equal(got, want) {
+	if got, want := lookup.questions(), []db.GetNodeByClusterAndNameParams{{ClusterID: cluster, Name: memberNode}}; !slices.Equal(got, want) {
 		t.Errorf("the cluster's own node: asked %+v, want %+v", got, want)
 	}
 
-	// A name the cluster does not hold is refused before the handler — the
-	// address is the shape the check exists for.
+	// A name the cluster does not hold is refused before the handler — the address is
+	// the shape the check exists for.
 	for _, stranger := range []string{"pve-02", "192.0.2.10"} {
 		lookup := holdingMember()
 		got := dispatch(granted, lookup, stranger)
@@ -376,26 +330,28 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 		}
 	}
 
-	// A caller the permission gate refuses learns nothing about nodes.
-	lookup = holdingMember()
-	if got := dispatch(stubAuth(nil), lookup, "192.0.2.10"); got.status != fiber.StatusForbidden || got.reached {
-		t.Errorf("no grant: got %+v, want 403 with the handler not reached", got)
-	}
-	if got := lookup.questions(); len(got) != 0 {
-		t.Errorf("no grant: the lookup was asked %+v before the permission gate refused the caller", got)
+	// A caller the permission gate refuses, and a malformed name (the validator's 400),
+	// are never a lookup.
+	for _, tt := range []struct {
+		name   string
+		auth   fiber.Handler
+		node   string
+		status int
+	}{
+		{"no grant", stubAuth(nil), "192.0.2.10", fiber.StatusForbidden},
+		{"a malformed name", granted, "pve_01", fiber.StatusBadRequest},
+	} {
+		lookup = holdingMember()
+		if got := dispatch(tt.auth, lookup, tt.node); got.status != tt.status || got.reached {
+			t.Errorf("%s: got %+v, want %d with the handler not reached", tt.name, got, tt.status)
+		}
+		if got := lookup.questions(); len(got) != 0 {
+			t.Errorf("%s: the lookup was asked %+v", tt.name, got)
+		}
 	}
 
-	// A malformed name is the validator's 400, never a lookup.
-	lookup = holdingMember()
-	if got := dispatch(granted, lookup, "pve_01"); got.status != fiber.StatusBadRequest || got.reached {
-		t.Errorf("a malformed name: got %+v, want 400 with the handler not reached", got)
-	}
-	if got := lookup.questions(); len(got) != 0 {
-		t.Errorf("a malformed name: the lookup was asked %+v", got)
-	}
-
-	// A lookup that fails is a 500, never a member — and says why in the log,
-	// since the error handler records nothing.
+	// A lookup that fails is a 500, never a member — and says why in the log, since
+	// the error handler records nothing.
 	logged := captureSlog(t)
 	failing := &nodeMembershipFake{err: errors.New("connection refused")}
 	if got := dispatch(granted, failing, memberNode); got.status != fiber.StatusInternalServerError ||
@@ -406,8 +362,8 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 		t.Errorf("a failed lookup logged %q, want the lookup's own error", out)
 	}
 
-	// Where "" is a value the parameter takes — emptyOrNodeName's "any
-	// node" — it names nothing, and nothing is asked.
+	// Where "" is a value the parameter takes (emptyOrNodeName's "any node") it names
+	// nothing, and nothing is asked.
 	if e.Parameters[under].Pattern == emptyOrNodeName {
 		lookup = holdingMember()
 		if got := dispatch(granted, lookup, ""); got.status != fiber.StatusNoContent || !got.reached {
@@ -419,16 +375,15 @@ func probeNodeMembership(t *testing.T, e Endpoint, under string, all []string) {
 	}
 }
 
-// TestGuard_EveryRouteTakingAUPIDIsAccountedFor keeps the node inside a UPID
-// from reaching Proxmox unchecked. The registry cannot see that node — it is
-// part of another parameter's value — so the routes that take a UPID are
-// listed here with what happens to it, and a new one fails until somebody
-// decides.
+// TestGuard_EveryRouteTakingAUPIDIsAccountedFor keeps the node inside a UPID from
+// reaching Proxmox unchecked. The registry cannot see that node — it is part of another
+// parameter's value — so the routes that take a UPID are listed here with what happens
+// to it, and a new one fails until somebody decides.
 func TestGuard_EveryRouteTakingAUPIDIsAccountedFor(t *testing.T) {
 	known := map[string]string{
-		"GET " + clusterScope + "/tasks/:upid": ".(*VMHandler).GetTaskStatus-fm",
 		// VMHandler.taskUPID checks the node the UPID names; see
 		// TestTaskRoutesRefuseAUPIDNamingANodeTheClusterDoesNotHold.
+		"GET " + clusterScope + "/tasks/:upid":     ".(*VMHandler).GetTaskStatus-fm",
 		"GET " + clusterScope + "/tasks/:upid/log": ".(*VMHandler).GetTaskLog-fm",
 		// Looks the task up in the database; nothing reaches Proxmox.
 		"PUT " + taskHistoryScope + "/:upid": ".(*TaskHandler).",
@@ -437,7 +392,7 @@ func TestGuard_EveryRouteTakingAUPIDIsAccountedFor(t *testing.T) {
 		"GET " + pbsBackupScope + "/tasks/:upid/log": ".(*BackupHandler).GetTaskLog-fm",
 	}
 	seen := map[string]bool{}
-	for _, e := range newRouteStubServer(t).registry.Endpoints() {
+	for _, e := range sharedEndpoints(t) {
 		if !slices.Contains(e.pathParams, "upid") {
 			continue
 		}
@@ -461,59 +416,15 @@ func TestGuard_EveryRouteTakingAUPIDIsAccountedFor(t *testing.T) {
 	}
 }
 
-// taskNodeDB is a db.DBTX that answers the two queries a cluster task route
-// makes before it reaches Proxmox — the node lookup and the cluster read for
-// the client — and records which it was asked. The cluster is never found, so
-// a request that gets past the node check stops at "Cluster not found".
-type taskNodeDB struct {
-	mu      sync.Mutex
-	members map[uuid.UUID][]string
-	asked   []string
-}
-
-type taskNodeRow struct{ err error }
-
-func (r taskNodeRow) Scan(...any) error { return r.err }
-
-func (d *taskNodeDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	switch {
-	case strings.Contains(sql, "-- name: GetNodeByClusterAndName :one"):
-		cluster, _ := args[0].(uuid.UUID)
-		name, _ := args[1].(string)
-		d.asked = append(d.asked, "GetNodeByClusterAndName "+name)
-		if slices.Contains(d.members[cluster], name) {
-			return taskNodeRow{}
-		}
-		return taskNodeRow{err: pgx.ErrNoRows}
-	case strings.Contains(sql, "-- name: GetCluster :one"):
-		d.asked = append(d.asked, "GetCluster")
-		return taskNodeRow{err: pgx.ErrNoRows}
-	}
-	d.asked = append(d.asked, "unexpected query")
-	return taskNodeRow{err: errors.New("taskNodeDB: unexpected query")}
-}
-
-func (d *taskNodeDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	return nil, errors.New("taskNodeDB: unexpected query")
-}
-
-func (d *taskNodeDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
-	return pgconn.CommandTag{}, errors.New("taskNodeDB: unexpected exec")
-}
-
-func (d *taskNodeDB) questions() []string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return slices.Clone(d.asked)
-}
-
-// TestTaskRoutesRefuseAUPIDNamingANodeTheClusterDoesNotHold drives the real
-// task handlers: a UPID whose node is not one of the cluster's is refused
-// before a Proxmox client is even built, and one whose node is gets past the
-// check.
+// TestTaskRoutesRefuseAUPIDNamingANodeTheClusterDoesNotHold drives the real task
+// handlers: a UPID whose node is not one of the cluster's is refused before a Proxmox
+// client is even built, and one whose node is gets past the check.
 func TestTaskRoutesRefuseAUPIDNamingANodeTheClusterDoesNotHold(t *testing.T) {
+	// Percent-encoded as the SPA's apiPath sends it (encodeURIComponent escapes the
+	// colons and the "@" that url.PathEscape leaves alone), except that the node is
+	// spliced in as written so a case can put an escape of its own in it. Sent
+	// unencoded, a handler that stopped decoding the UPID would still find its node.
+	spa := strings.NewReplacer(":", "%3A", "@", "%40")
 	for _, route := range []struct {
 		path    string
 		handler func(*handlers.VMHandler) Handler
@@ -528,69 +439,57 @@ func TestTaskRoutesRefuseAUPIDNamingANodeTheClusterDoesNotHold(t *testing.T) {
 			clientReached bool
 		}{
 			{"an address", "192.0.2.10", fiber.StatusNotFound, "Node not found in this cluster", false},
-			// Percent-decoded before anything reads it: a NUL or a byte that is
-			// not UTF-8 would be refused by Postgres as an error, not "no row" —
-			// a 500 and an error log line — so the node is held to the format
-			// first, and nothing is asked.
+			// Percent-decoded before anything reads it: a NUL or a byte that is not UTF-8
+			// would be refused by Postgres as an error, not "no row" — a 500 and an error
+			// log line — so the node is held to the format first, and nothing is asked.
 			{"a NUL", "pve%0001", fiber.StatusBadRequest, "The UPID does not name a valid node", false},
 			{"a byte that is not UTF-8", "pve%FF01", fiber.StatusBadRequest, "The UPID does not name a valid node", false},
 			{"a node the cluster does not hold", "pve-02", fiber.StatusNotFound, "Node not found in this cluster", false},
-			// Past the check, the handler goes on to build its client, which
-			// this database cannot supply a cluster for.
+			// Past the check, the handler goes on to build its client, which this
+			// database cannot supply a cluster for.
 			{"the cluster's own node", memberNode, fiber.StatusNotFound, "Cluster not found", true},
 		} {
 			t.Run(route.path+" "+tc.name, func(t *testing.T) {
-				fake := &taskNodeDB{members: map[uuid.UUID][]string{uuid.MustParse(testClusterID): {memberNode}}}
-				e := declaredEndpoint(t, fiber.MethodGet, route.path)
+				fake := &handlerNodeDB{t: t, members: map[uuid.UUID]string{uuid.MustParse(testClusterID): memberNode},
+					errs: map[string]error{"GetCluster": pgx.ErrNoRows}}
+				e := sharedEndpoint(t, fiber.MethodGet, route.path)
 				e.Handler = route.handler(handlers.NewVMHandler(db.New(fake), "", nil))
-				app := newRegistryApp(t, stubAuth(map[string]bool{"view:task": true}), e)
+				app := newRegistryApp(t, stubAuth(grantsOf("view:task")), e)
 
-				// Percent-encoded as the SPA's apiPath sends it —
-				// encodeURIComponent, which escapes the colons and the "@" that
-				// url.PathEscape leaves alone — except that the node is spliced in
-				// as written, so a case can put an escape of its own in it. Sent
-				// unencoded, a handler that stopped decoding the UPID would still
-				// find its node, and this test would not notice.
-				spa := strings.NewReplacer(":", "%3A", "@", "%40")
 				upid := spa.Replace("UPID:") + tc.node + spa.Replace(":00001A2B:00003344:5F2E1A00:qmstart:100:test-user@pve:")
 				target := strings.NewReplacer(":cluster_id", testClusterID, ":upid", upid).Replace(route.path)
 				status, env := send(t, app, authedRequest(http.MethodGet, target))
 				if status != tc.status || env.Message != tc.message {
 					t.Fatalf("status = %d (%q), want %d (%q)", status, env.Message, tc.status, tc.message)
 				}
-				asked := fake.questions()
 				if tc.status == fiber.StatusBadRequest {
-					if len(asked) != 0 {
-						t.Errorf("asked %v about a node the format refuses", asked)
+					if len(fake.log) != 0 {
+						t.Errorf("asked %v about a node the format refuses", fake.log)
 					}
 					return
 				}
-				if len(asked) == 0 || asked[0] != "GetNodeByClusterAndName "+tc.node {
+				if asked := fake.asked(); len(asked) == 0 || asked[0] != testClusterID+"/"+tc.node {
 					t.Errorf("asked %v, want the node lookup for %q first", asked, tc.node)
 				}
-				if got := slices.Contains(asked, "GetCluster"); got != tc.clientReached {
-					t.Errorf("asked %v: reached the Proxmox client = %v, want %v", asked, got, tc.clientReached)
+				if got := slices.Contains(fake.log, "GetCluster"); got != tc.clientReached {
+					t.Errorf("asked %v: reached the Proxmox client = %v, want %v", fake.log, got, tc.clientReached)
 				}
 			})
 		}
 	}
 }
 
-// TestTaskRoutesFailClosedWithNoDatabase pins the other half of taskUPID's
-// lookup: a handler built without queries answers "not configured" rather
-// than letting a nil *db.Queries through as a lookup, whose first query would
-// dereference it. Unreachable in production — a VMHandler is built only when
-// the queries exist — which is exactly why nothing else would notice.
+// TestTaskRoutesFailClosedWithNoDatabase pins the other half of taskUPID's lookup: a
+// handler built without queries answers "not configured" rather than letting a nil
+// *db.Queries through as a lookup, whose first query would dereference it. Unreachable
+// in production — a VMHandler is built only when the queries exist — which is exactly
+// why nothing else would notice.
 func TestTaskRoutesFailClosedWithNoDatabase(t *testing.T) {
-	e := declaredEndpoint(t, fiber.MethodGet, clusterScope+"/tasks/:upid")
+	e := sharedEndpoint(t, fiber.MethodGet, clusterScope+"/tasks/:upid")
 	e.Handler = handlers.NewVMHandler(nil, "", nil).GetTaskStatus
-	reg := NewRegistry()
-	reg.Register(e)
-	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-	// A panic has to come back as a response this test can read rather than
-	// take the test binary down with it.
-	app.Use(fiberrecover.New())
-	mountRegistry(app, reg, stubAuth(map[string]bool{"view:task": true}), nil)
+	// A panic has to come back as a response this test can read rather than take the
+	// test binary down with it.
+	app := mountWith(stubAuth(grantsOf("view:task")), nil, e, fiberrecover.New())
 
 	spa := strings.NewReplacer(":", "%3A", "@", "%40")
 	target := strings.NewReplacer(":cluster_id", testClusterID,
@@ -602,30 +501,22 @@ func TestTaskRoutesFailClosedWithNoDatabase(t *testing.T) {
 	}
 }
 
-// TestServeChecksTheNodeAHandlerWouldRead pins what namedNodes promises: the
-// node checked is the value a handler's plain accessor hands back, a declared
-// default included — not only a value the caller sent. No node parameter in
-// the registry declares a default today, so this is a synthetic route; the
-// day one does, a check that looked only at what was sent would forward the
-// default unchecked.
+// TestServeChecksTheNodeAHandlerWouldRead pins what namedNodes promises: the node
+// checked is the value a handler's plain accessor hands back, a declared default
+// included, not only a value the caller sent. No node parameter in the registry
+// declares a default today, so this is a synthetic route; the day one does, a check
+// that looked only at what was sent would forward the default unchecked.
 func TestServeChecksTheNodeAHandlerWouldRead(t *testing.T) {
 	cap := &capture{}
 	node := apischema.StdOption("node-name")
 	node.Optional = true
 	node.Default = "pve-02"
-	e := Endpoint{
-		Method:      fiber.MethodGet,
-		Path:        clusterScope + "/probe",
-		Description: "Probe a node.",
-		Group:       "Nodes",
+	app := mountWith(noAuth(), holdingMember(), Endpoint{
+		Method: fiber.MethodGet, Path: clusterScope + "/probe", Description: "Probe a node.", Group: "Nodes",
 		Permissions: Permissions{SelfService: "serve fixture; authorization is exercised separately"},
 		Parameters:  clusterParams(apischema.Properties{"node": node}),
 		Handler:     cap.handler(),
-	}
-	reg := NewRegistry()
-	reg.Register(e)
-	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-	mountRegistry(app, reg, noAuth(), holdingMember())
+	})
 
 	base := "/api/v1/clusters/" + testClusterID + "/probe"
 	if status, env := send(t, app, httptest.NewRequest(http.MethodGet, base, nil)); status != fiber.StatusNotFound || cap.called {
@@ -637,21 +528,16 @@ func TestServeChecksTheNodeAHandlerWouldRead(t *testing.T) {
 	}
 }
 
-// TestMountRegistryRefusesARouteNamingANodeWithoutALookup pins the boot
-// failure: a route that names a node, mounted with no way to ask whether the
-// node is the cluster's, would forward whatever name it was given.
+// TestMountRegistryRefusesARouteNamingANodeWithoutALookup pins the boot failure: a
+// route that names a node, mounted with no way to ask whether the node is the
+// cluster's, would forward whatever name it was given.
 func TestMountRegistryRefusesARouteNamingANodeWithoutALookup(t *testing.T) {
 	named := Endpoint{
-		Method:      fiber.MethodGet,
-		Path:        clusterScope + "/nodes/:node_name/probe",
-		Description: "Probe a node.",
-		Group:       "Nodes",
+		Method: fiber.MethodGet, Path: clusterScope + "/nodes/:node_name/probe", Description: "Probe a node.", Group: "Nodes",
 		Permissions: Permissions{SelfService: "mount fixture; authorization is exercised separately"},
 		Parameters:  nodeParams(nil),
 		Handler:     (&capture{}).handler(),
 	}
-	reg := NewRegistry()
-	reg.Register(named)
 	func() {
 		defer func() {
 			r := recover()
@@ -662,23 +548,20 @@ func TestMountRegistryRefusesARouteNamingANodeWithoutALookup(t *testing.T) {
 				t.Errorf("panic = %q, want it to name the missing node lookup and the route", msg)
 			}
 		}()
-		mountRegistry(fiber.New(), reg, noAuth(), nil)
+		mountWith(noAuth(), nil, named)
 	}()
 
 	// The precondition twin: with no route naming a node, nil is fine.
 	plain := named
 	plain.Path = clusterScope + "/probe"
 	plain.Parameters = clusterParams(nil)
-	reg = NewRegistry()
-	reg.Register(plain)
-	mountRegistry(fiber.New(), reg, noAuth(), nil)
+	mountWith(noAuth(), nil, plain)
 }
 
-// TestRegisterRefusesANodeInAURLThatNamesNoCluster pins the startup failure
-// for a node the check would have no cluster to ask about: every request to
-// such a route could only be refused. The fixtures are SelfService on
-// purpose — a cluster-scoped Check on these paths is already refused, for its
-// own reason, and would hide this one.
+// TestRegisterRefusesANodeInAURLThatNamesNoCluster pins the startup failure for a node
+// the check would have no cluster to ask about: every request to such a route could
+// only be refused. The fixtures are SelfService on purpose — a cluster-scoped Check on
+// these paths is already refused, for its own reason, and would hide this one.
 func TestRegisterRefusesANodeInAURLThatNamesNoCluster(t *testing.T) {
 	for _, e := range []Endpoint{
 		{Method: fiber.MethodGet, Path: pathPrefix + "nodes/:node_name/probe",

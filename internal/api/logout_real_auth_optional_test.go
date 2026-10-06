@@ -21,26 +21,15 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// TestLogoutThroughTheRealAuthOptional puts the real authOptional in front of the
-// real Logout, which the handler tests cannot: they stand in for the middleware
-// with a header. What it adds is the agreement between the two halves of the
-// ownership check.
-//
-// A valid token or API key is turned into user_id by authOptional, and Logout
-// compares it with the session's owner. Any other token this server signed — expired,
-// not yet valid — is ignored by authOptional, which names a caller only for one that
-// validates, so Logout reads the Authorization header itself, and has to read it the
-// way the middleware does: both go through auth.BearerToken, and the rows that differ
-// only in how the header is spelled are the proof. "bearer" and "BEARER" are a bearer
-// to both, so a valid token under either is named by the middleware and refused. A
-// second space is read exactly by the shared parser, so authOptional sees a token no
-// signature verifies and names no one — and the refusal, which can only refuse and
-// reads past stray space, still turns the sign-out away. Another scheme is no token
-// to either, and is held to the cookie.
-//
-// The session is the owner's, found by whatever cookie the request carries; the
-// fake database answers the lookup with it and records every statement, so a row
-// says whether the session was revoked by whether RevokeSession was sent.
+// TestLogoutThroughTheRealAuthOptional puts the real authOptional in front of the real
+// Logout, which the handler tests cannot (they stand in for the middleware with a
+// header), to pin the agreement between the two halves of the ownership check: a valid
+// token or key becomes user_id in authOptional, while any other token this server signed
+// (expired, not yet valid) is ignored there, so Logout reads the Authorization header
+// itself and must read it as the middleware does, through auth.BearerToken. Rows that
+// differ only in how the header is spelled are the proof ("bearer", a second space,
+// another scheme). The fake database records every statement, so a row says whether the
+// session was revoked by whether RevokeSession was sent.
 func TestLogoutThroughTheRealAuthOptional(t *testing.T) {
 	const secret = "logout-e2e-secret"
 	owner, other := uuid.New(), uuid.New()

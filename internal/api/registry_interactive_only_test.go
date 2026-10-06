@@ -25,40 +25,24 @@ import (
 )
 
 // Endpoint.InteractiveOnly: a route that changes the caller's own credentials or
-// authentication factors, or ends their sessions, refuses a request authenticated
-// with an API key. The rule has ONE owner — the registry's gate, mounted right after
-// authentication — instead of a check at the top of each handler, which is how it
-// was kept before (two handlers, two copies, one of them with no test at all).
-//
-// Three things are pinned, and each by what it would take to break it:
-//
-//   - the gate itself: where it sits in the chain and what it refuses, with a
-//     stand-in for authentication (the first half of this file);
-//   - the set of routes that carry the flag, by name (TestGuard_InteractiveOnly…);
-//   - the enforcement on every one of those routes, through the REAL authRequired,
-//     the REAL declaration and a REAL nxra_ key (the second half).
+// authentication factors, or ends their sessions, refuses a request authenticated with
+// an API key. The rule has ONE owner, the registry's gate mounted right after
+// authentication, instead of a check at the top of each handler. Pinned: the gate
+// itself, with a stand-in for authentication (the first half of this file); the set of
+// routes that carry the flag, by name (TestGuard_InteractiveOnly…); and the enforcement
+// on every one of them through the REAL authRequired, the REAL declaration and a REAL
+// nxra_ key (the second half).
 
-// interactiveOnlyRoutes is every route that must be InteractiveOnly, with the
-// request that is valid for it — a concrete target, and a body that passes its
-// schema — so that, without the flag, a request reaches the handler, which is what
-// the controls below rely on; and what a leaked key could do there.
+// interactiveOnlyRoutes is every route that must be InteractiveOnly, with the request valid
+// for it (a concrete target and a body that passes its schema, so that without the flag a
+// request reaches the handler) and what a leaked key could do there. handler is the declared
+// Handler as routeHandlerKey names it, so the set is held by WHAT SERVES a route as well as by
+// method and path (TestGuard_NoRouteServesACredentialHandlerWithoutTheFlag).
 //
-// handler is the declared route's Handler as routeHandlerKey names it, so that the
-// set is held by WHAT SERVES a route as well as by its method and path: a second
-// route mounted on one of these handlers, without the flag, is as open to a leaked
-// key as the first (TestGuard_NoRouteServesACredentialHandlerWithoutTheFlag).
-//
-// NOT in it, and deliberately so — recorded here because an omission nobody wrote
-// down is an omission nobody re-reads. These routes accept an API key today, and
-// the operator, not this change, decides whether any of them joins: GET
-// /api/v1/auth/sessions (reads the devices and addresses of the owner's sessions),
-// PUT /api/v1/auth/profile (renames the owner), POST /api/v1/auth/ws-token (a
-// 60-second hub token, plausible for automation), GET /api/v1/auth/me, GET
-// /api/v1/auth/totp/status and POST /api/v1/auth/console-token (Deferred: an RBAC
-// question, not this one). And DELETE /api/v1/api-keys and DELETE
-// /api/v1/api-keys/:id, left out on purpose: they REVOKE keys — the owner's
-// automation can lose one, which is what revoking is for — and change neither the
-// owner's own credentials nor an authentication factor of the account.
+// NOT in it, deliberately: routes that accept an API key today, whose joining is the
+// operator's decision (GET /auth/sessions, PUT /auth/profile, POST /auth/ws-token, GET
+// /auth/me, GET /auth/totp/status, POST /auth/console-token), and DELETE /api-keys[/:id],
+// which REVOKE keys (what revoking is for) and change no credential or factor.
 var interactiveOnlyRoutes = []struct {
 	method, path string // as declared
 	handler      string // routeHandlerKey of the declared Handler
@@ -107,14 +91,13 @@ var interactiveOnlyRoutes = []struct {
 	},
 }
 
-// stubAuthKeyAware stands in for authRequired where a test is about what the
-// registry does with the principal. It authenticates anything carrying X-Test-User,
-// as a holder of the permission the endpoints here require unless X-Test-Grants says
-// "none", and records HOW, through the constants the real middleware uses, as
-// X-Test-Auth-Method says: nothing is an interactive session, "key" an API key,
-// "other" a kind of principal that does not exist yet (a method no gate has heard
-// of), and "unmarked" one that authenticated and did not say how. A named function,
-// so the chain can be read by name.
+// stubAuthKeyAware stands in for authRequired where a test is about what the registry
+// does with the principal. It authenticates anything carrying X-Test-User, as a holder
+// of the permission the endpoints here require unless X-Test-Grants says "none", and
+// records HOW through the constants the real middleware uses, as X-Test-Auth-Method
+// says: nothing is an interactive session, "key" an API key, "other" a kind of
+// principal that does not exist yet, and "unmarked" one that authenticated and did not
+// say how. A named function, so the chain can be read by name.
 func stubAuthKeyAware(c fiber.Ctx) error {
 	if c.Get("X-Test-User") == "" {
 		return fiber.NewError(fiber.StatusUnauthorized, "Missing authorization token")
@@ -137,9 +120,9 @@ func stubAuthKeyAware(c fiber.Ctx) error {
 	return c.Next()
 }
 
-// interactiveOnlyEndpoint is a synthetic route that has everything the gate has to
-// run ahead of: a rate limiter with a bucket of ONE request, a cluster-scoped
-// permission, and a path parameter whose validation refuses a malformed value.
+// interactiveOnlyEndpoint is a synthetic route that has everything the gate has to run
+// ahead of: a rate limiter with a bucket of ONE request, a cluster-scoped permission,
+// and a path parameter whose validation refuses a malformed value.
 func interactiveOnlyEndpoint(cap *capture) Endpoint {
 	e := gatedEndpoint(cap, Permissions{
 		Check: &Check{Action: "manage", Resource: "widget", Scope: ScopeCluster},
@@ -153,8 +136,8 @@ func interactiveOnlyEndpoint(cap *capture) Endpoint {
 	return e
 }
 
-// principalRequest is a request from a caller that authenticated as method says (see
-// stubAuthKeyAware; "" is an interactive session) and holds the permission unless
+// principalRequest is a request from a caller that authenticated as authMethod says
+// (see stubAuthKeyAware; "" is an interactive session) and holds the permission unless
 // grants is "none".
 func principalRequest(method, target, authMethod, grants string) *http.Request {
 	req := authedRequest(method, target)
@@ -197,16 +180,14 @@ func TestInteractiveOnlyGate_SitsRightAfterAuthentication(t *testing.T) {
 }
 
 // TestInteractiveOnlyGate_RefusesAnythingButASessionBeforeAnythingElseRuns is the
-// behaviour the order is for, and the allowlist the gate is. An API key is refused
-// 403 with the gate's message whether or not its owner holds the permission (a
-// permission answer would tell it something about the owner's grants), whether or
-// not the request is well-formed (the validation that would answer 400 has not
-// run), without spending the route's rate-limit bucket (a bucket of one, still whole
-// afterwards) and without reaching the handler. So is every OTHER caller that is
-// not a session: one whose method no gate has heard of (a principal type that does
-// not exist yet) and one that authenticated without saying how — a gate that only
-// recognised API keys would admit both. A session is not refused, which is the
-// control for all of it.
+// behaviour the order is for, and the allowlist the gate is. An API key is refused 403
+// with the gate's message whether or not its owner holds the permission (a permission
+// answer would tell it something about the owner's grants), whether or not the request
+// is well-formed (the validation that would answer 400 has not run), without spending
+// the route's rate-limit bucket (a bucket of one, still whole afterwards) and without
+// reaching the handler. So is every OTHER caller that is not a session — a method no
+// gate has heard of, and one that authenticated without saying how: a gate that only
+// recognised API keys would admit both. A session is not refused, which is the control.
 func TestInteractiveOnlyGate_RefusesAnythingButASessionBeforeAnythingElseRuns(t *testing.T) {
 	target := "/api/v1/clusters/" + testClusterID + "/widgets"
 	malformed := "/api/v1/clusters/not-a-uuid/widgets"
@@ -243,8 +224,8 @@ func TestInteractiveOnlyGate_RefusesAnythingButASessionBeforeAnythingElseRuns(t 
 	if !cap.called {
 		t.Error("the handler did not run for a session: the gate refuses sessions")
 	}
-	// ... and what the session spent is the bucket of one, so the route's own limiter
-	// is working: the control that the bucket above was a real one.
+	// ... and what the session spent is the bucket of one: the control that the bucket
+	// above was a real one.
 	if status, _ := send(t, app, principalRequest(http.MethodPost, target, "", "")); status != fiber.StatusTooManyRequests {
 		t.Errorf("a second session request = %d, want 429: the limiter in this fixture never limited, so the check above proved nothing", status)
 	}
@@ -260,60 +241,10 @@ func TestInteractiveOnlyGate_RefusesAnythingButASessionBeforeAnythingElseRuns(t 
 	})
 }
 
-// TestAuthRequiredRecordsHowTheCallerAuthenticated pins the other half of the
-// allowlist: the gate admits what authentication marks as a session, so the real
-// middleware has to mark one — and an API key as the other thing — through the
-// constants the gate reads. A request that authenticated without a method is one
-// the gate refuses, so a session that went unmarked would be refused everywhere.
-func TestAuthRequiredRecordsHowTheCallerAuthenticated(t *testing.T) {
-	fake, uid, apiKey := newChainDB(t)
-	jwtSvc := auth.NewJWTService("auth-method-test-secret", 15*time.Minute, 7*24*time.Hour)
-	srv := &Server{queries: db.New(fake), jwtService: jwtSvc}
-	token, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin")
-	if err != nil {
-		t.Fatalf("access token: %v", err)
-	}
-
-	for _, mount := range []struct {
-		name string
-		mw   fiber.Handler
-	}{
-		{"authRequired", srv.authRequired()},
-		{"authOptional", srv.authOptional()},
-	} {
-		app := fiber.New()
-		app.Get("/method", mount.mw, func(c fiber.Ctx) error {
-			method, _ := c.Locals(handlers.LocalsAuthMethod).(string)
-			return c.SendString(method)
-		})
-		for _, tc := range []struct{ name, bearer, want string }{
-			{"an access token is a session", token, handlers.AuthMethodSession},
-			{"an API key is an API key", apiKey, handlers.AuthMethodAPIKey},
-		} {
-			t.Run(mount.name+"/"+tc.name, func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "/method", nil)
-				req.Header.Set(fiber.HeaderAuthorization, "Bearer "+tc.bearer)
-				resp, err := app.Test(req)
-				if err != nil {
-					t.Fatalf("request: %v", err)
-				}
-				defer func() { _ = resp.Body.Close() }()
-				body := make([]byte, 64)
-				n, _ := resp.Body.Read(body)
-				if got := string(body[:n]); got != tc.want {
-					t.Errorf("%s recorded the method %q, want %q", mount.name, got, tc.want)
-				}
-			})
-		}
-	}
-	fake.waitForKeyStamp(t)
-}
-
-// TestRegisterRefusesAnInteractiveOnlyThatCannotWork: a blank reason says nothing
-// to the reader the string is for, and a Public route has no session — no caller
-// authenticated by an API key — for the gate to refuse. Both are mistakes in
-// Nexara's own source, so they are a panic at boot like every other malformed
-// declaration.
+// TestRegisterRefusesAnInteractiveOnlyThatCannotWork: a blank reason says nothing to
+// the reader the string is for, and a Public route has no session (no caller
+// authenticated by an API key) for the gate to refuse. Both are mistakes in Nexara's
+// own source, so a panic at boot like every other malformed declaration.
 func TestRegisterRefusesAnInteractiveOnlyThatCannotWork(t *testing.T) {
 	flagged := validEndpoint()
 	flagged.InteractiveOnly = "a leaked key must not be able to do this"
@@ -335,29 +266,14 @@ func TestRegisterRefusesAnInteractiveOnlyThatCannotWork(t *testing.T) {
 	}
 }
 
-// declaredByKey returns the stub server's registry, keyed "METHOD path".
-func declaredByKey(t *testing.T) map[string]Endpoint {
-	t.Helper()
-	out := map[string]Endpoint{}
-	for _, e := range newRouteStubServer(t).registry.Endpoints() {
-		out[e.Method+" "+e.Path] = e
-	}
-	if len(out) == 0 {
-		t.Fatal("the server declared no registry endpoints, so this guard would check nothing")
-	}
-	return out
-}
-
-// TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes pins the SET. Every
-// route in interactiveOnlyRoutes must carry the flag — drop it from one and that
-// route's name is the failure — and no other route may carry it without being
-// added here with what a leaked key could do there, so the set stays a review
-// surface rather than a list that drifts.
-//
-// It restates the list rather than deriving it: a guard that read the flags it is
-// checking would pass whatever they said.
+// TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes pins the SET. Every route
+// in interactiveOnlyRoutes must carry the flag — drop it from one and that route's name
+// is the failure — and no other route may carry it without being added here with what
+// a leaked key could do there, so the set stays a review surface rather than a list
+// that drifts. It restates the list rather than deriving it: a guard that read the
+// flags it is checking would pass whatever they said.
 func TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes(t *testing.T) {
-	declared := declaredByKey(t)
+	declared := sharedEndpoints(t)
 
 	want := map[string]string{}
 	for _, r := range interactiveOnlyRoutes {
@@ -378,22 +294,18 @@ func TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes(t *testing.T) 
 		}
 	}
 	for key, e := range declared {
-		if e.InteractiveOnly == "" {
-			continue
-		}
-		if _, expected := want[key]; !expected {
+		if _, expected := want[key]; !expected && e.InteractiveOnly != "" {
 			t.Errorf("%s is InteractiveOnly (%q), which this guard does not know about — add it to interactiveOnlyRoutes "+
 				"with what a leaked key could do there, so the set stays a review surface", key, e.InteractiveOnly)
 		}
 	}
 }
 
-// handlersOutsideTheHandlersPackage is every declared endpoint whose Handler is a
-// bound method of something other than a handler type in the handlers package, with
-// the reason it is allowed to be: the guard below can follow a method of a handler
-// type by name and nothing else, and what it cannot follow it does not let pass.
-// Adding a route here is a decision to say, in review, that the function cannot reach
-// one of the eight credential handlers.
+// handlersOutsideTheHandlersPackage is every declared endpoint whose Handler is a bound
+// method of something other than a handler type in the handlers package, with the reason
+// it is allowed to be: the guard below can follow a method of a handler type by name and
+// nothing else, and what it cannot follow it does not let pass. Adding a route here is a
+// decision to say, in review, that the function cannot reach one of the eight credential handlers.
 var handlersOutsideTheHandlersPackage = map[string]string{
 	"Server.handleVersion": "GET /api/v1/version is answered by a method of the Server itself and returns a constant: it holds no handler to reach",
 }
@@ -402,11 +314,10 @@ var handlersOutsideTheHandlersPackage = map[string]string{
 // "…/internal/api.(*Server).handleVersion-fm".
 var serverMethodValue = regexp.MustCompile(`/internal/api\.\(\*Server\)\.(\w+)-fm$`)
 
-// declaredHandlerKey names an endpoint's Handler for the guard below: "Type.Method" for
-// a bound method of a handler type (routeHandlerKey), and ok=false, with the runtime
-// name, for anything the guard cannot read the identity of — a closure, a plain
-// function, a method of another kind of type that handlersOutsideTheHandlersPackage
-// does not list.
+// declaredHandlerKey names an endpoint's Handler for the guard below: "Type.Method" for a
+// bound method of a handler type (routeHandlerKey), and ok=false, with the runtime name,
+// for anything the guard cannot read the identity of — a closure, a plain function, a
+// method of another kind of type that handlersOutsideTheHandlersPackage does not list.
 func declaredHandlerKey(h Handler) (key string, ok bool) {
 	if key := routeHandlerKey(h); key != "" {
 		return key, true
@@ -420,31 +331,18 @@ func declaredHandlerKey(h Handler) (key string, ok bool) {
 	return full, false
 }
 
-// TestGuard_NoRouteServesACredentialHandlerWithoutTheFlag holds the set by the
-// other end. TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes knows the
-// eight routes by method and path, so a ninth route that mounts one of the same
-// handlers — h.ChangePassword on a new path, say, a versioned alias or a second
-// mount — passes it, and passes every other guard, while a leaked key walks through
-// it. The handler is what changes the credential, so every declared endpoint served
-// by one of the eight must carry the flag, wherever it is mounted.
-//
-// The guard reads a handler's identity from the bound method it is declared with, so
-// a Handler that hides one — a closure, func(c, p) error { return h.ChangePassword(c,
-// p) }, which has no name but its enclosing function's — would walk past it. Rather
-// than follow calls, it refuses to read what it cannot: every declared endpoint's
-// Handler must be a bound method of a handler type (or be listed, with its reason, in
-// handlersOutsideTheHandlersPackage), and one that is not fails here BY ROUTE. No
-// production declaration is a closure today, so this costs nothing and makes the day
-// one is a decision.
-//
-// And the table is checked against the declarations the other way round: each row's
-// own route must be served by the handler the row names, so a row that drifted
-// from its route cannot leave the check below looking at the wrong function; and
-// each handler must serve at least one declared route, so a rename of a handler (the
-// key routeHandlerKey makes would no longer match) fails here and does not leave
-// this guard checking nothing.
+// TestGuard_NoRouteServesACredentialHandlerWithoutTheFlag holds the set by the other end: the
+// eight routes are known by method and path, so a ninth that mounts one of the same handlers
+// (h.ChangePassword on a versioned alias, say) passes every other guard while a leaked key
+// walks through. The handler is what changes the credential, so every declared endpoint served
+// by one of the eight must carry the flag, wherever it is mounted. The guard reads a handler's
+// identity from the bound method, so a closure would walk past it: rather than follow calls it
+// refuses what it cannot read, and every Handler must be a bound method of a handler type (or
+// be listed, with its reason, in handlersOutsideTheHandlersPackage). Each row's route must be
+// served by the handler the row names, and each handler must serve a route, so a rename fails
+// here and does not leave this guard checking nothing.
 func TestGuard_NoRouteServesACredentialHandlerWithoutTheFlag(t *testing.T) {
-	declared := declaredByKey(t)
+	declared := sharedEndpoints(t)
 
 	byHandler := map[string][]Endpoint{}
 	for route, e := range declared {
@@ -484,25 +382,13 @@ func TestGuard_NoRouteServesACredentialHandlerWithoutTheFlag(t *testing.T) {
 	}
 }
 
-// TestGuard_EveryInteractiveOnlyRouteMountsTheGateRightAfterAuthentication closes
-// the gap between "declared" and "enforced", the way
-// TestGuard_EveryDeclaredGateIsMountedAsMiddleware does for permissions: a
-// declaration nothing mounts is a promise nothing keeps, and every guard that reads
-// the declaration still passes. It walks the whole mounted route table.
+// TestGuard_EveryInteractiveOnlyRouteMountsTheGateRightAfterAuthentication closes the
+// gap between "declared" and "enforced", the way TestGuard_EveryDeclaredGateIsMountedAsMiddleware
+// does for permissions: a declaration nothing mounts is a promise nothing keeps. It
+// walks the whole mounted route table.
 func TestGuard_EveryInteractiveOnlyRouteMountsTheGateRightAfterAuthentication(t *testing.T) {
-	s := newRouteStubServer(t)
-
-	chains := map[string][]string{}
-	for _, r := range s.app.GetRoutes(true) {
-		if r.Method == "USE" || len(r.Handlers) == 0 {
-			continue
-		}
-		names := make([]string, 0, len(r.Handlers))
-		for _, h := range r.Handlers {
-			names = append(names, handlerName(h))
-		}
-		chains[r.Method+" "+normalizeRoutePath(r.Path)] = names
-	}
+	s := sharedRouteStub(t)
+	chains := mountedChains(s)
 
 	var flagged int
 	for _, e := range s.registry.Endpoints() {
@@ -530,9 +416,9 @@ func TestGuard_EveryInteractiveOnlyRouteMountsTheGateRightAfterAuthentication(t 
 	}
 }
 
-// interactiveHarness is the real authentication middleware, the real declarations
-// of the eight routes and the real error handler, with a recorder where each
-// handler was and a fake database behind the middleware.
+// interactiveHarness is the real authentication middleware, the real declarations of the
+// eight routes and the real error handler, with a recorder where each handler was and a
+// fake database behind the middleware.
 type interactiveHarness struct {
 	app     *fiber.App
 	db      *chainDB
@@ -543,12 +429,12 @@ type interactiveHarness struct {
 	reached map[string]int
 }
 
-// newInteractiveHarness mounts the eight declared routes, each with its handler
-// swapped for a recorder. edit, when given, changes each declaration first — the
-// controls use it to take the flag or the permission away.
+// newInteractiveHarness mounts the eight declared routes, each with its handler swapped
+// for a recorder. edit, when given, changes each declaration first — the controls use
+// it to take the flag or the permission away.
 func newInteractiveHarness(t *testing.T, edit func(*Endpoint)) *interactiveHarness {
 	t.Helper()
-	declared := declaredByKey(t)
+	declared := sharedEndpoints(t)
 	h := &interactiveHarness{reached: map[string]int{}}
 
 	reg := NewRegistry()
@@ -579,9 +465,9 @@ func newInteractiveHarness(t *testing.T, edit func(*Endpoint)) *interactiveHarne
 	}
 
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-	// A request that gets past the gate and finds no RBAC engine (this server has
-	// none) fails inside the permission middleware; recovered, that is a response a
-	// test asserts against by name, and not a crash of the package.
+	// A request that gets past the gate and finds no RBAC engine (this server has none)
+	// fails inside the permission middleware; recovered, that is a response a test
+	// asserts against by name, and not a crash of the package.
 	app.Use(fiberrecover.New())
 	mountRegistry(app, reg, srv.authRequired(), everyNodeIsAMember())
 
@@ -611,21 +497,15 @@ func (h *interactiveHarness) reachedCount(key string) int {
 	return h.reached[key]
 }
 
-// TestInteractiveOnly_AnAPIKeyIsRefusedOnEveryDeclaredRoute is the enforcement,
-// route by route, through everything real but the handler. The key is a real
-// nxra_ key, found by the real authRequired through the real GetAPIKeyByHash, so the
-// marker the gate reads is the one authenticateAPIKey writes; the declarations are
-// the registry's own, with their real permissions; and the handler is a recorder, so
-// "the handler is not reached" is something to count and not something to infer.
-//
-// The answer is the gate's 403 and its message, the handler never ran, and the
-// database saw nothing but the key's lookup and its last-used stamp. The request
-// carries a body that is valid for the route's schema, so a route whose gate were
-// missing would be answered by the handler (or by the permission middleware), not
-// by an accident of validation.
-//
-// Two controls say the 403 is the flag's doing: with the flag gone the same key
-// reaches the handler, and with the flag on a session does.
+// TestInteractiveOnly_AnAPIKeyIsRefusedOnEveryDeclaredRoute is the enforcement, route by
+// route, through everything real but the handler: a real nxra_ key found by the real
+// authRequired through GetAPIKeyByHash (so the marker the gate reads is the one
+// authenticateAPIKey writes), the registry's own declarations with their real permissions,
+// and a recorder for a handler, so "not reached" is something to count. The answer is the
+// gate's 403, and the database saw only the key's lookup and its last-used stamp. The bodies
+// are valid for each route's schema, so a missing gate would be answered by the handler, not
+// by an accident of validation. Two controls say the 403 is the flag's doing: without the
+// flag the same key reaches the handler, and with it a session does.
 func TestInteractiveOnly_AnAPIKeyIsRefusedOnEveryDeclaredRoute(t *testing.T) {
 	t.Run("the key is refused", func(t *testing.T) {
 		for _, r := range interactiveOnlyRoutes {
@@ -650,40 +530,41 @@ func TestInteractiveOnly_AnAPIKeyIsRefusedOnEveryDeclaredRoute(t *testing.T) {
 		}
 	})
 
-	t.Run("control: with the flag gone the same key reaches the handler", func(t *testing.T) {
-		h := newInteractiveHarness(t, func(e *Endpoint) {
+	for _, c := range []struct {
+		name, bearerOf string // "key" or "session"
+		edit           func(*Endpoint)
+		why            string
+	}{
+		{"control: with the flag gone the same key reaches the handler", "key", func(e *Endpoint) {
 			e.InteractiveOnly = ""
 			e.Permissions = Permissions{SelfService: "test control: authorization is not what is under test"}
-		})
-		for _, r := range interactiveOnlyRoutes {
-			key := r.method + " " + r.path
-			resp, env := h.request(t, r.method, r.target, r.body, h.key)
-			if resp.StatusCode != http.StatusNoContent || h.reachedCount(key) != 1 {
-				t.Errorf("%s: status = %d (%q), handler reached %d times, want 204 and once: the request is not valid for the "+
-					"route, so the refusals above proved nothing", key, resp.StatusCode, env.Message, h.reachedCount(key))
-			}
-		}
-	})
-
-	t.Run("control: with the flag on a session reaches the handler", func(t *testing.T) {
-		h := newInteractiveHarness(t, func(e *Endpoint) {
+		}, "the request is not valid for the route, so the refusals above proved nothing"},
+		{"control: with the flag on a session reaches the handler", "session", func(e *Endpoint) {
 			e.Permissions = Permissions{SelfService: "test control: authorization is not what is under test"}
-		})
-		for _, r := range interactiveOnlyRoutes {
-			key := r.method + " " + r.path
-			resp, env := h.request(t, r.method, r.target, r.body, h.session)
-			if resp.StatusCode != http.StatusNoContent || h.reachedCount(key) != 1 {
-				t.Errorf("%s: status = %d (%q), handler reached %d times, want 204 and once: the gate refuses more than API keys",
-					key, resp.StatusCode, env.Message, h.reachedCount(key))
+		}, "the gate refuses more than API keys"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newInteractiveHarness(t, c.edit)
+			bearer := h.key
+			if c.bearerOf == "session" {
+				bearer = h.session
 			}
-		}
-	})
+			for _, r := range interactiveOnlyRoutes {
+				key := r.method + " " + r.path
+				resp, env := h.request(t, r.method, r.target, r.body, bearer)
+				if resp.StatusCode != http.StatusNoContent || h.reachedCount(key) != 1 {
+					t.Errorf("%s: status = %d (%q), handler reached %d times, want 204 and once: %s",
+						key, resp.StatusCode, env.Message, h.reachedCount(key), c.why)
+				}
+			}
+		})
+	}
 }
 
-// TestDocEndpoints_PublishesTheInteractiveOnlyReason: the docs payload is rendered
-// from the declarations, so the reason an API key is refused on a route is
-// published with it — and only with it: the key is absent from the JSON of every
-// other route, which a key may call as far as its owner's permissions go.
+// TestDocEndpoints_PublishesTheInteractiveOnlyReason: the docs payload is rendered from
+// the declarations, so the reason an API key is refused on a route is published with it,
+// and only with it: the key is absent from the JSON of every other route, which a key
+// may call as far as its owner's permissions go.
 func TestDocEndpoints_PublishesTheInteractiveOnlyReason(t *testing.T) {
 	const reason = "a leaked key must not be able to do this"
 
@@ -722,9 +603,8 @@ func TestDocEndpoints_PublishesTheInteractiveOnlyReason(t *testing.T) {
 	}
 
 	// And the real registry: each of the eight publishes its own.
-	s := newRouteStubServer(t)
 	published := map[string]string{}
-	for _, ep := range docEndpoints(s.registry) {
+	for _, ep := range docEndpoints(sharedRouteStub(t).registry) {
 		if ep.InteractiveOnly != "" {
 			published[ep.Method+" "+ep.Path] = ep.InteractiveOnly
 		}

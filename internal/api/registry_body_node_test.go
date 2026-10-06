@@ -1,17 +1,13 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"io"
 	"log/slog"
 	"maps"
-	"net/http/httptest"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -32,27 +28,24 @@ import (
 	"github.com/bigjakk/nexara/internal/rolling"
 )
 
-// These tests hold every BODY parameter that names a Proxmox node to the
-// node-membership check, the way registry_node_membership_test.go holds the
-// URL's. A body node reaches Proxmox by name as surely as a URL's does — the
-// node a guest is created on, a backup restored to, a schedule replayed
-// against — and pveproxy resolves and dials whatever it names (see
-// handlers.RequireNodesInCluster).
+// These tests hold every BODY parameter that names a Proxmox node to the node-membership
+// check, the way registry_node_membership_test.go holds the URL's. A body node reaches
+// Proxmox by name as surely as a URL's does (the node a guest is created on, a backup
+// restored to, a schedule replayed against) and pveproxy resolves and dials whatever it
+// names; see handlers.RequireNodesInCluster.
 
-// The number of routes whose body names a node, by who checks it. Pinned
-// rather than derived, so that a declaration that stops being recognised moves
-// a number somebody has to look at and update deliberately.
+// The number of routes whose body names a node, by who checks it. Pinned rather than
+// derived, so that a declaration that stops being recognised moves a number somebody
+// has to update deliberately.
 const (
 	bodyNodeServeRouteCount   = 28
 	bodyNodeHandlerRouteCount = 4
 )
 
-// bodyNodeExempt lists the body parameters spelled like a node that nothing
-// checks against the cluster, with the reason — read in Proxmox's own source.
-// None of them is declared with the node-name format (each is a list in
-// Proxmox's own syntax, carried as one string), so serve cannot read them as
-// node names, and none is ever sent to Proxmox as the node of a
-// /nodes/{node}/… path.
+// bodyNodeExempt lists the body parameters spelled like a node that nothing checks
+// against the cluster, with the reason, read in Proxmox's own source. None is declared
+// with the node-name format (each is a list in Proxmox's own syntax, carried as one
+// string), and none is ever sent to Proxmox as the node of a /nodes/{node}/… path.
 var bodyNodeExempt = map[string]string{
 	"POST " + clusterScope + "/ha/rules nodes": "pve-ha-manager API2/HA/Rules.pm create_rule/update_rule " +
 		"hold every listed node to PVE::Cluster::check_node_exists (the in-memory corosync node list, no " +
@@ -74,34 +67,25 @@ var bodyNodeExempt = map[string]string{
 		"(a pve-node-list in storage.cfg), read by each node about itself; nothing dials it",
 }
 
-// isBodyNodeSpelling reports whether a body parameter's NAME reads as a node —
-// derived without holdsNodeNames, so a node parameter declared without the
-// node-name format still shows up here.
+// isBodyNodeSpelling reports whether a body parameter's NAME reads as a node, derived
+// without holdsNodeNames so a node parameter declared without the node-name format
+// still shows up here.
 func isBodyNodeSpelling(name string) bool {
 	lower := strings.ToLower(name)
 	return strings.Contains(lower, "node") || lower == "target"
 }
 
-// TestGuard_EveryBodyNodeIsCheckedOrAccountedFor walks the route table the
-// server builds and holds every body parameter that names a node to one of
-// three fates, from four sides:
-//
-//  1. Which body parameters name a node is derived here from their SPELLING
-//     (and, independently, from the node-name format) and each must be checked
-//     by serve (Endpoint.bodyNodeParams), checked by its handler
-//     (Endpoint.NodesCheckedByHandler), or listed in bodyNodeExempt with the
-//     upstream reason. A new one that is none of these fails here.
-//  2. A body node serve checks sits behind a cluster-scoped permission gate
-//     ahead of serve, so its 404 never answers a caller the gate refused; a
-//     handler-checked one is on a route whose permission is Deferred.
-//  3. Each serve-checked one is driven like the URL's: the member reaches the
-//     handler, a stranger or an address is 404 and does not, a refused caller,
-//     a malformed name and a failed lookup never get as far.
-//  4. Each handler-checked one is driven through its real handler
-//     (TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold) and its
-//     handler checks after its permission check (read from the source here).
+// TestGuard_EveryBodyNodeIsCheckedOrAccountedFor holds every body parameter that names a node
+// (derived from its SPELLING, and independently from the node-name format) to one of three
+// fates: checked by serve (Endpoint.bodyNodeParams), checked by its handler
+// (NodesCheckedByHandler), or listed in bodyNodeExempt with the upstream reason. A
+// serve-checked one sits behind a cluster-scoped permission gate ahead of serve, so its 404
+// never answers a caller the gate refused; a handler-checked one is on a Deferred route. Each
+// is then driven: serve's through probeNodeMembership, the handler's through
+// TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold, with its source read to check
+// it asks after it authorizes.
 func TestGuard_EveryBodyNodeIsCheckedOrAccountedFor(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	endpoints := s.registry.Endpoints()
 
 	// 1. Spelling and format, against the three fates.
@@ -160,22 +144,11 @@ func TestGuard_EveryBodyNodeIsCheckedOrAccountedFor(t *testing.T) {
 	}
 	if handlerRoutes != bodyNodeHandlerRouteCount {
 		t.Errorf("%d routes leave a body node to their handler, want bodyNodeHandlerRouteCount = %d; if a "+
-			"route was added or removed on purpose, update the constant — and "+
-			"handlerNodeChecks", handlerRoutes, bodyNodeHandlerRouteCount)
+			"route was added or removed on purpose, update the constant — and handlerNodeChecks", handlerRoutes, bodyNodeHandlerRouteCount)
 	}
 
 	// 2. Who authorizes first.
-	chains := map[string][]string{}
-	for _, r := range s.app.GetRoutes(true) {
-		if r.Method == "USE" || len(r.Handlers) == 0 {
-			continue
-		}
-		names := make([]string, 0, len(r.Handlers))
-		for _, h := range r.Handlers {
-			names = append(names, handlerName(h))
-		}
-		chains[r.Method+" "+normalizeRoutePath(r.Path)] = names
-	}
+	chains := mountedChains(s)
 	for _, e := range endpoints {
 		key := e.Method + " " + e.Path
 		if len(e.NodesCheckedByHandler) > 0 && e.Permissions.Deferred == "" {
@@ -209,8 +182,8 @@ func TestGuard_EveryBodyNodeIsCheckedOrAccountedFor(t *testing.T) {
 		}
 	}
 
-	// 4. The handler-checked ones: every route has a behavioural probe, and
-	// its handler checks after it authorizes.
+	// ... and the handler-checked ones: every route has a behavioural probe, and its
+	// handler checks after it authorizes.
 	for _, e := range endpoints {
 		if len(e.NodesCheckedByHandler) == 0 {
 			continue
@@ -221,94 +194,60 @@ func TestGuard_EveryBodyNodeIsCheckedOrAccountedFor(t *testing.T) {
 				"TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold drives it",
 				key, slices.Sorted(maps.Keys(e.NodesCheckedByHandler)))
 		}
-		checkHandlerChecksNodesAfterAuthorizing(t, key, boundHandlerName(e.Handler), len(e.NodesCheckedByHandler))
+		checkHandlerChecksNodesAfterAuthorizing(t, key, e.Handler, len(e.NodesCheckedByHandler))
 	}
 	for key := range handlerNodeChecks {
-		method, path, _ := strings.Cut(key, " ")
-		if e := declaredEndpoint(t, method, path); len(e.NodesCheckedByHandler) == 0 {
+		if e, ok := sharedEndpoints(t)[key]; !ok || len(e.NodesCheckedByHandler) == 0 {
 			t.Errorf("handlerNodeChecks probes %s, which leaves no node to its handler any more; remove it", key)
 		}
 	}
 }
 
-// boundMethodRe splits a bound method value's runtime name,
-// "…/handlers.(*TaskHandler).Create-fm", into receiver and method.
-var boundMethodRe = regexp.MustCompile(`handlers\.\(\*(\w+)\)\.(\w+)-fm$`)
-
-// checkHandlerChecksNodesAfterAuthorizing reads the handler's source and
-// requires at least want calls to requireNodeInCluster, every one of them
-// after its LAST requireClusterPerm — so a caller the handler refuses learns
-// nothing about which nodes a cluster holds. The last, not the first: a
-// migration authorizes two clusters, and a target node checked between the two
-// would tell a caller holding only the source which nodes the target has.
-func checkHandlerChecksNodesAfterAuthorizing(t *testing.T, key, bound string, want int) {
+// checkHandlerChecksNodesAfterAuthorizing reads the handler's source and requires at
+// least want calls to requireNodeInCluster, every one after its LAST
+// requireClusterPerm, so a caller the handler refuses learns nothing about which nodes
+// a cluster holds. The last, not the first: a migration authorizes two clusters, and a
+// target node checked between the two would tell a caller holding only the source
+// which nodes the target has.
+func checkHandlerChecksNodesAfterAuthorizing(t *testing.T, key string, h Handler, want int) {
 	t.Helper()
-	m := boundMethodRe.FindStringSubmatch(bound)
-	if m == nil {
-		t.Errorf("%s: its handler %s is not a bound handlers method, so its node check cannot be read", key, bound)
+	name := routeHandlerKey(h)
+	decls, err := packageFuncDecls("handlers")
+	if err != nil {
+		t.Fatalf("parse the handlers: %v", err)
+	}
+	fn, ok := decls[name]
+	if name == "" || !ok {
+		t.Errorf("%s: its handler %s is not a bound handlers method declared under handlers/, so its node check cannot be read", key, name)
 		return
 	}
-	recv, method := m[1], m[2]
-	fset := token.NewFileSet()
-	files, err := filepath.Glob("handlers/*.go")
-	if err != nil || len(files) == 0 {
-		t.Fatalf("list handlers sources: %v", err)
+	var perm token.Pos
+	var checks []token.Pos
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			if id, ok := call.Fun.(*ast.Ident); ok {
+				switch id.Name {
+				case "requireClusterPerm":
+					perm = max(perm, call.Pos())
+				case "requireNodeInCluster":
+					checks = append(checks, call.Pos())
+				}
+			}
+		}
+		return true
+	})
+	if perm == token.NoPos {
+		t.Errorf("%s: %s never calls requireClusterPerm, so nothing authorizes the caller before its node check", key, name)
 	}
-	for _, path := range files {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Name.Name != method || fn.Recv == nil || len(fn.Recv.List) != 1 {
-				continue
-			}
-			star, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
-			if !ok {
-				continue
-			}
-			if id, ok := star.X.(*ast.Ident); !ok || id.Name != recv {
-				continue
-			}
-			var perm token.Pos
-			var checks []token.Pos
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				if id, ok := call.Fun.(*ast.Ident); ok {
-					switch id.Name {
-					case "requireClusterPerm":
-						perm = max(perm, call.Pos())
-					case "requireNodeInCluster":
-						checks = append(checks, call.Pos())
-					}
-				}
-				return true
-			})
-			if perm == token.NoPos {
-				t.Errorf("%s: (*%s).%s never calls requireClusterPerm, so nothing authorizes the caller before "+
-					"its node check", key, recv, method)
-			}
-			if len(checks) < want {
-				t.Errorf("%s: (*%s).%s calls requireNodeInCluster %d times, want at least %d — one per node "+
-					"parameter it is left to check", key, recv, method, len(checks), want)
-			}
-			for _, pos := range checks {
-				if pos < perm {
-					t.Errorf("%s: (*%s).%s checks a node at %s, before it authorizes the caller",
-						key, recv, method, fset.Position(pos))
-				}
-			}
-			return
+	if len(checks) < want {
+		t.Errorf("%s: %s calls requireNodeInCluster %d times, want at least %d — one per node parameter it is left to check",
+			key, name, len(checks), want)
+	}
+	for _, pos := range checks {
+		if pos < perm {
+			t.Errorf("%s: %s checks a node before it authorizes the caller", key, name)
 		}
 	}
-	t.Errorf("%s: no (*%s).%s found under handlers/", key, recv, method)
 }
 
 // handlerNodeCheck is how TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold
@@ -318,20 +257,19 @@ type handlerNodeCheck struct {
 	handler func(q *db.Queries) Handler
 	// grants are the permissions that authorize the caller.
 	grants []string
-	// clusterOf names, for each node parameter, the parameter holding the
-	// cluster it belongs to.
+	// clusterOf names, for each node parameter, the parameter holding the cluster it belongs to.
 	clusterOf map[string]string
-	// values are further request values the route needs.
+	// values are further request values the route needs; adjust, when set, fixes
+	// them up after the nodes are chosen.
 	values map[string]any
-	// adjust, when set, fixes up values after the nodes are chosen.
 	adjust func(values map[string]any)
-	// rows are canned answers, by sqlc query name, for what the handler reads
-	// before its node check; every other statement is answered errStop.
+	// rows are canned answers, by sqlc query name, for what the handler reads before
+	// its node check; every other statement is answered errStop.
 	rows map[string]any
 }
 
-// otherClusterID is the second cluster the handler probes use: a node of one
-// cluster is a stranger to the other.
+// otherClusterID is the second cluster the handler probes use: a node of one cluster
+// is a stranger to the other.
 const otherClusterID = "22222222-3333-4444-5555-666666666666"
 
 // upidOn is a task id naming node, in Proxmox's shape.
@@ -381,25 +319,26 @@ var handlerNodeChecks = map[string]handlerNodeCheck{
 	},
 }
 
-// errStop answers every statement the probes below do not fake: the handler
-// has got past its node check by then, which is all a probe needs to see.
+// errStop answers every statement the probes do not fake: the handler has got past its
+// node check by then, which is all a probe needs to see.
 var errStop = errors.New("stop: past the node check")
 
 // handlerNodeDB is a db.DBTX holding one node per cluster. It answers
-// GetNodeByClusterAndName from them (or with lookErr), the statements in rows
-// with their canned row, and every other statement with errStop, logging each
-// in order.
+// GetNodeByClusterAndName from them (or with lookErr), the statements in rows with their
+// canned row and those in errs with their error, and every other statement with
+// errStop, logging each in order.
 type handlerNodeDB struct {
 	t       *testing.T
 	members map[uuid.UUID]string
 	lookErr error
 	rows    map[string]any
-	// tags answer the writes named here with that command tag instead of
-	// errStop ("UPDATE 0" reports that no row changed).
+	errs    map[string]error
+	// tags answer the writes named here with that command tag instead of errStop
+	// ("UPDATE 0" reports that no row changed).
 	tags map[string]string
 	mu   sync.Mutex
-	// log is every statement in order: "?cluster/node" for a membership
-	// question, the sqlc query name for anything else.
+	// log is every statement in order: "?cluster/node" for a membership question, the
+	// sqlc query name for anything else.
 	log []string
 }
 
@@ -431,8 +370,8 @@ func (d *handlerNodeDB) asked() []string {
 	return out
 }
 
-// beforeFirstQuestion is every statement sent before the first membership
-// question: what the handler did before it checked a node.
+// beforeFirstQuestion is every statement sent before the first membership question:
+// what the handler did before it checked a node.
 func (d *handlerNodeDB) beforeFirstQuestion() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -444,8 +383,8 @@ func (d *handlerNodeDB) beforeFirstQuestion() []string {
 	return slices.Clone(d.log)
 }
 
-// afterLastQuestion is every statement sent after the last membership
-// question: what the handler went on to do once it had its answer.
+// afterLastQuestion is every statement sent after the last membership question: what
+// the handler went on to do once it had its answer.
 func (d *handlerNodeDB) afterLastQuestion() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -475,6 +414,9 @@ func (d *handlerNodeDB) QueryRow(_ context.Context, sql string, args ...any) pgx
 	name := sqlcName(sql)
 	if name != "GetNodeByClusterAndName" {
 		d.note(name)
+		if err, ok := d.errs[name]; ok {
+			return fieldRow{err: err}
+		}
 		if row, ok := d.rows[name]; ok {
 			return fieldRow{t: d.t, v: row}
 		}
@@ -492,8 +434,8 @@ func (d *handlerNodeDB) QueryRow(_ context.Context, sql string, args ...any) pgx
 	return fieldRow{err: pgx.ErrNoRows}
 }
 
-// fieldRow scans v's fields into the destinations in order — how sqlc scans
-// a row into its struct — or answers err.
+// fieldRow scans v's fields into the destinations in order — how sqlc scans a row into
+// its struct — or, for anything but a struct, v into the one destination; or answers err.
 type fieldRow struct {
 	t   *testing.T
 	v   any
@@ -505,6 +447,13 @@ func (r fieldRow) Scan(dest ...any) error {
 		return r.err
 	}
 	v := reflect.ValueOf(r.v)
+	if v.Kind() != reflect.Struct {
+		if len(dest) != 1 {
+			r.t.Fatalf("scanned %d columns into a single %T", len(dest), r.v)
+		}
+		reflect.ValueOf(dest[0]).Elem().Set(v)
+		return nil
+	}
 	if len(dest) != v.NumField() {
 		r.t.Fatalf("scanned %d columns into a %T with %d fields", len(dest), r.v, v.NumField())
 	}
@@ -514,47 +463,23 @@ func (r fieldRow) Scan(dest ...any) error {
 	return nil
 }
 
-// clusterGrantEngine grants its actions on one cluster only — the shape of a
-// caller authorized on a migration's source cluster and not its target.
-type clusterGrantEngine struct {
-	grants  map[string]bool
-	cluster uuid.UUID
-}
-
-func (e *clusterGrantEngine) HasPermission(_ context.Context, _ uuid.UUID, action, resource, scopeType string, scopeID uuid.UUID) (bool, error) {
-	return scopeType == "cluster" && scopeID == e.cluster && e.grants[action+":"+resource], nil
-}
-
-func (e *clusterGrantEngine) HasGlobalPermission(context.Context, uuid.UUID, string, string) (bool, error) {
-	return false, nil
-}
-
-func (e *clusterGrantEngine) LoadUserPermissions(context.Context, uuid.UUID) (*auth.UserPermissions, error) {
-	return &auth.UserPermissions{}, nil
-}
-
-// grantedOn authenticates every request as testUserID holding grants on
-// cluster only.
+// grantedOn authenticates every request as testUserID holding grants on cluster only —
+// the shape of a caller authorized on a migration's source cluster and not its target.
 func grantedOn(grants []string, cluster uuid.UUID) fiber.Handler {
-	set := map[string]bool{}
-	for _, g := range grants {
-		set[g] = true
+	scoped := make([]scopedGrant, len(grants))
+	for i, g := range grants {
+		scoped[i] = scopedGrant{permission: g, cluster: cluster}
 	}
-	return func(c fiber.Ctx) error {
-		c.Locals("user_id", uuid.MustParse(testUserID))
-		c.Locals("rbac_engine", &clusterGrantEngine{grants: set, cluster: cluster})
-		return c.Next()
-	}
+	return authWithEngine(&scopedRBACEngine{grants: scoped})
 }
 
-// TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold drives each
-// route in handlerNodeChecks through its REAL handler, over a database that
-// knows one node per cluster: for each node parameter, a stranger, an address
-// and the other cluster's node are 404 before the handler goes any further
-// (the node of the wrong cluster is what catches a migration target checked
-// against its source cluster); the members get past the check; a caller the
-// handler refuses gets its 403 and no question about nodes is asked; a lookup
-// that fails is a 500.
+// TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold drives each route in
+// handlerNodeChecks through its REAL handler, over a database that knows one node per
+// cluster: for each node parameter, a stranger, an address and the other cluster's
+// node are 404 before the handler goes any further (the node of the wrong cluster is
+// what catches a migration target checked against its source cluster); the members get
+// past the check; a caller the handler refuses gets its 403 and no question about
+// nodes is asked; a lookup that fails is a 500.
 func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 	clusters := []uuid.UUID{uuid.MustParse(testClusterID), uuid.MustParse(otherClusterID)}
 	memberOf := map[uuid.UUID]string{clusters[0]: "pve-01", clusters[1]: "pve-02"}
@@ -562,14 +487,14 @@ func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 	for _, key := range slices.Sorted(maps.Keys(handlerNodeChecks)) {
 		check := handlerNodeChecks[key]
 		method, path, _ := strings.Cut(key, " ")
-		e := declaredEndpoint(t, method, path)
+		e := sharedEndpoint(t, method, path)
 		if got, want := slices.Sorted(maps.Keys(check.clusterOf)), slices.Sorted(maps.Keys(e.NodesCheckedByHandler)); !slices.Equal(got, want) {
 			t.Errorf("%s: handlerNodeChecks probes %v, but the route leaves %v to its handler", key, got, want)
 			continue
 		}
 
-		// Each cluster parameter gets its own cluster, in name order, so two
-		// node parameters with different clusters sit in different ones.
+		// Each cluster parameter gets its own cluster, in name order, so two node
+		// parameters with different clusters sit in different ones.
 		clusterIDs := map[string]uuid.UUID{}
 		var distinct []uuid.UUID
 		for i, cp := range slices.Compact(slices.Sorted(maps.Values(check.clusterOf))) {
@@ -578,10 +503,7 @@ func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 				distinct = append(distinct, clusterIDs[cp])
 			}
 		}
-		granted := map[string]bool{}
-		for _, g := range check.grants {
-			granted[g] = true
-		}
+		granted := grantsOf(check.grants...)
 
 		dispatch := func(t *testing.T, fake *handlerNodeDB, authn fiber.Handler, nodes map[string]string) (int, string) {
 			t.Helper()
@@ -598,48 +520,29 @@ func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 			if check.adjust != nil {
 				check.adjust(values)
 			}
-			req := synthesizeSweepRequestWith(e, false, sweepEndpointOverride{
-				values:        values,
-				forceRequired: slices.Collect(maps.Keys(values)),
-			})
+			req := synthesizeSweepRequestWith(e, false, sweepEndpointOverride{values: values, forceRequired: slices.Collect(maps.Keys(values))})
 			if !req.ok {
 				t.Fatalf("could not build a request: %s", req.reason)
 			}
 			probe := e
 			probe.Handler = check.handler(db.New(fake))
-			reg := NewRegistry()
-			reg.Register(probe)
-			app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-			mountRegistry(app, reg, authn, everyNodeIsAMember())
-			var body io.Reader
-			if len(req.body) > 0 {
-				body = bytes.NewReader(req.body)
-			}
-			httpReq := httptest.NewRequest(method, req.target, body)
-			if len(req.body) > 0 {
-				httpReq.Header.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
-			}
-			httpReq.Header.Set("X-Test-User", "yes")
-			status, env := send(t, app, httpReq)
+			status, env := send(t, mountWith(authn, everyNodeIsAMember(), probe), sweepHTTP(method, req))
 			return status, env.Message
 		}
 		newDB := func(t *testing.T, lookErr error) *handlerNodeDB {
 			return &handlerNodeDB{t: t, members: memberOf, lookErr: lookErr, rows: check.rows}
 		}
-		members := func() map[string]string {
-			out := map[string]string{}
-			for param, cp := range check.clusterOf {
-				out[param] = memberOf[clusterIDs[cp]]
-			}
-			return out
-		}
-		strangers := func() map[string]string {
+		nodesAll := func(f func(param string) string) map[string]string {
 			out := map[string]string{}
 			for param := range check.clusterOf {
-				out[param] = "192.0.2.10"
+				out[param] = f(param)
 			}
 			return out
 		}
+		members := func() map[string]string {
+			return nodesAll(func(param string) string { return memberOf[clusterIDs[check.clusterOf[param]]] })
+		}
+		strangers := func() map[string]string { return nodesAll(func(string) string { return "192.0.2.10" }) }
 
 		t.Run(key+": members", func(t *testing.T) {
 			fake := newDB(t, nil)
@@ -677,13 +580,12 @@ func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 					if after := fake.afterLastQuestion(); len(after) != 0 {
 						t.Errorf("the handler went on to %v after refusing the node", after)
 					}
-					// Before it, only the reads the route is known to need:
-					// nothing — an audit row, a write — may reach the database
-					// ahead of the check for a request it is about to refuse.
+					// Before it, only the reads the route is known to need: nothing (an
+					// audit row, a write) may reach the database ahead of the check for a
+					// request it is about to refuse.
 					for _, stmt := range fake.beforeFirstQuestion() {
 						if _, canned := check.rows[stmt]; !canned {
-							t.Errorf("the handler sent %s before its node check; only %v may precede it",
-								stmt, slices.Sorted(maps.Keys(check.rows)))
+							t.Errorf("the handler sent %s before its node check; only %v may precede it", stmt, slices.Sorted(maps.Keys(check.rows)))
 						}
 					}
 				})
@@ -700,9 +602,8 @@ func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 			}
 		})
 
-		// A route authorizing more than one cluster refuses a caller holding
-		// only one of them before it asks about ANY node — including the
-		// nodes of the cluster the caller does hold.
+		// A route authorizing more than one cluster refuses a caller holding only one
+		// of them before it asks about ANY node, the held cluster's included.
 		if len(distinct) > 1 {
 			for _, only := range distinct {
 				t.Run(key+": granted only on "+only.String(), func(t *testing.T) {
@@ -730,12 +631,11 @@ func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 	}
 }
 
-// TestTaskCreate_RefusesANodeTheUPIDDoesNotName: the collector polls a
-// registered task at its row's node, so the node must be the one the UPID
-// itself says the task runs on.
+// TestTaskCreate_RefusesANodeTheUPIDDoesNotName: the collector polls a registered task
+// at its row's node, so the node must be the one the UPID itself says the task runs on.
 func TestTaskCreate_RefusesANodeTheUPIDDoesNotName(t *testing.T) {
 	check := handlerNodeChecks["POST "+taskHistoryScope]
-	e := declaredEndpoint(t, "POST", taskHistoryScope)
+	e := sharedEndpoint(t, fiber.MethodPost, taskHistoryScope)
 	fake := &handlerNodeDB{t: t, members: map[uuid.UUID]string{uuid.MustParse(testClusterID): "pve-01"}}
 	req := synthesizeSweepRequestWith(e, false, sweepEndpointOverride{
 		values:        map[string]any{"task_cluster_id": testClusterID, "node": "pve-01", "upid": upidOn("pve-02")},
@@ -744,17 +644,9 @@ func TestTaskCreate_RefusesANodeTheUPIDDoesNotName(t *testing.T) {
 	if !req.ok {
 		t.Fatalf("could not build a request: %s", req.reason)
 	}
-	probe := e
-	probe.Handler = check.handler(db.New(fake))
-	reg := NewRegistry()
-	reg.Register(probe)
-	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-	mountRegistry(app, reg, stubAuth(map[string]bool{"manage:task": true}), everyNodeIsAMember())
-	httpReq := httptest.NewRequest("POST", req.target, bytes.NewReader(req.body))
-	httpReq.Header.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
-	httpReq.Header.Set("X-Test-User", "yes")
-	if status, env := send(t, app, httpReq); status != fiber.StatusBadRequest ||
-		env.Message != "node does not match the node the UPID names" {
+	e.Handler = check.handler(db.New(fake))
+	status, env := send(t, mountWith(stubAuth(grantsOf("manage:task")), everyNodeIsAMember(), e), sweepHTTP("POST", req))
+	if status != fiber.StatusBadRequest || env.Message != "node does not match the node the UPID names" {
 		t.Errorf("got %d %q, want 400 \"node does not match the node the UPID names\"", status, env.Message)
 	}
 	if len(fake.log) != 0 {
@@ -762,12 +654,11 @@ func TestTaskCreate_RefusesANodeTheUPIDDoesNotName(t *testing.T) {
 	}
 }
 
-// TestRegisterHoldsBodyNodesToAClusterOrAHandler pins register's two refusals
-// for a body node: one on a path naming no cluster that nothing claims to
-// check (serve would have no cluster to ask about), and a
-// NodesCheckedByHandler entry that could hide a node from serve with no node
-// behind it — a parameter that is not declared, holds no node name, sits in
-// the URL, or comes with no reason.
+// TestRegisterHoldsBodyNodesToAClusterOrAHandler pins register's two refusals for a
+// body node: one on a path naming no cluster that nothing claims to check (serve would
+// have no cluster to ask about), and a NodesCheckedByHandler entry that could hide a
+// node from serve with no node behind it — a parameter that is not declared, holds no
+// node name, sits in the URL, or comes with no reason.
 func TestRegisterHoldsBodyNodesToAClusterOrAHandler(t *testing.T) {
 	base := func(path string, params apischema.Properties, byHandler map[string]string) Endpoint {
 		return Endpoint{
@@ -797,11 +688,9 @@ func TestRegisterHoldsBodyNodesToAClusterOrAHandler(t *testing.T) {
 			withParams(node, apischema.Properties{"comment": {Type: apischema.String}}),
 			map[string]string{"node": "x", "comment": "x"}), "declares no parameter"},
 		{"a reasonless entry", base(pathPrefix+"probe", node, map[string]string{"node": " "}), "no reason"},
-		{"a URL node left to the handler", func() Endpoint {
-			e := base(clusterScope+"/nodes/:node_name/probe", withParams(apischema.Properties{"node_name": apischema.StdOption("node-name")}, clusterParams(nil)),
-				map[string]string{"node_name": "x"})
-			return e
-		}(), "not a body parameter"},
+		{"a URL node left to the handler", base(clusterScope+"/nodes/:node_name/probe",
+			withParams(apischema.Properties{"node_name": apischema.StdOption("node-name")}, clusterParams(nil)),
+			map[string]string{"node_name": "x"}), "not a body parameter"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := NewRegistry().register(tt.e)
@@ -815,26 +704,20 @@ func TestRegisterHoldsBodyNodesToAClusterOrAHandler(t *testing.T) {
 	}
 }
 
-// TestConsoleToken_ADisabledAccountIsRefusedBeforeItsNodeIsChecked: a JWT
-// outlives the account it was issued to by up to its lifetime, and the
-// console-token handler is where a disabled account is refused. It must get
-// the same 401 whatever node it names, so the node is only checked after the
-// account is.
+// TestConsoleToken_ADisabledAccountIsRefusedBeforeItsNodeIsChecked: a JWT outlives the
+// account it was issued to by up to its lifetime, and the console-token handler is where
+// a disabled account is refused. It must get the same 401 whatever node it names, so
+// the node is only checked after the account is.
 func TestConsoleToken_ADisabledAccountIsRefusedBeforeItsNodeIsChecked(t *testing.T) {
 	check := handlerNodeChecks["POST "+authScope+"/console-token"]
-	e := declaredEndpoint(t, fiber.MethodPost, authScope+"/console-token")
+	e := sharedEndpoint(t, fiber.MethodPost, authScope+"/console-token")
 	fake := &handlerNodeDB{t: t, members: map[uuid.UUID]string{uuid.MustParse(testClusterID): "pve-01"},
 		rows: map[string]any{"GetUserByID": db.User{ID: uuid.MustParse(testUserID), Email: "user@example.com", IsActive: false}}}
-	probe := e
-	probe.Handler = check.handler(db.New(fake))
-	reg := NewRegistry()
-	reg.Register(probe)
-	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-	mountRegistry(app, reg, stubAuth(map[string]bool{"console:node": true}), everyNodeIsAMember())
+	e.Handler = check.handler(db.New(fake))
+	app := mountWith(stubAuth(grantsOf("console:node")), everyNodeIsAMember(), e)
 	for _, node := range []string{"pve-01", "192.0.2.10"} {
-		req := httptest.NewRequest(fiber.MethodPost, authScope+"/console-token",
-			bytes.NewReader([]byte(`{"cluster_id":"`+testClusterID+`","node":"`+node+`","type":"node_shell"}`)))
-		req.Header.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
+		req := jsonRequest(fiber.MethodPost, authScope+"/console-token",
+			`{"cluster_id":"`+testClusterID+`","node":"`+node+`","type":"node_shell"}`)
 		req.Header.Set("X-Test-User", "yes")
 		if status, env := send(t, app, req); status != fiber.StatusUnauthorized || env.Message != "Account is disabled" {
 			t.Errorf("%s: got %d %q, want 401 \"Account is disabled\"", node, status, env.Message)
@@ -845,15 +728,14 @@ func TestConsoleToken_ADisabledAccountIsRefusedBeforeItsNodeIsChecked(t *testing
 	}
 }
 
-// TestConfirmUpgrade_RefusesANodeTheClusterDoesNotHold drives the real
-// confirm-upgrade route over a rolling job whose node the cluster does not hold
-// (one created before the API checked it): confirming answers 409 with the
-// reason, or 500 when the lookup fails, and never builds the Proxmox client
-// the drain check and the reboot would use — the cluster row is never read.
-// The stranger's node is failed ("UPDATE 0" here, so failNode stops before
-// failing the job, which is not what this test is about).
+// TestConfirmUpgrade_RefusesANodeTheClusterDoesNotHold drives the real confirm-upgrade
+// route over a rolling job whose node the cluster does not hold (one created before the
+// API checked it): confirming answers 409 with the reason, or 500 when the lookup
+// fails, and never builds the Proxmox client the drain check and the reboot would use —
+// the cluster row is never read. The stranger's node is failed ("UPDATE 0" here, so
+// failNode stops before failing the job, which is not what this test is about).
 func TestConfirmUpgrade_RefusesANodeTheClusterDoesNotHold(t *testing.T) {
-	e := declaredEndpoint(t, fiber.MethodPost, rollingScope+"/:id/nodes/:node_id/confirm-upgrade")
+	e := sharedEndpoint(t, fiber.MethodPost, rollingScope+"/:id/nodes/:node_id/confirm-upgrade")
 	jobID, nodeID := uuid.New(), uuid.New()
 	for _, tt := range []struct {
 		name       string
@@ -870,27 +752,20 @@ func TestConfirmUpgrade_RefusesANodeTheClusterDoesNotHold(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := &handlerNodeDB{t: t, lookErr: tt.lookErr,
 				rows: map[string]any{
-					"GetRollingUpdateJob": db.RollingUpdateJob{ID: jobID, ClusterID: uuid.MustParse(testClusterID),
-						RebootAfterUpdate: true},
+					"GetRollingUpdateJob": db.RollingUpdateJob{ID: jobID, ClusterID: uuid.MustParse(testClusterID), RebootAfterUpdate: true},
 					"GetRollingUpdateNode": db.RollingUpdateNode{ID: nodeID, JobID: jobID, NodeName: "192.0.2.10",
 						Step: "awaiting_upgrade"},
 				},
 				tags: map[string]string{"FailRollingUpdateNode": "UPDATE 0"},
 			}
 			q := db.New(fake)
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			orch := rolling.NewOrchestrator(context.Background(), q, "", logger, nil, nil)
+			orch := rolling.NewOrchestrator(context.Background(), q, "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 			probe := e
 			probe.Handler = handlers.NewRollingUpdateHandler(q, "", nil, orch).ConfirmUpgrade
-			reg := NewRegistry()
-			reg.Register(probe)
-			app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-			mountRegistry(app, reg, stubAuth(map[string]bool{"manage:rolling_update": true}), everyNodeIsAMember())
+			app := mountWith(stubAuth(grantsOf("manage:rolling_update")), everyNodeIsAMember(), probe)
 
-			target := strings.NewReplacer(":cluster_id", testClusterID, ":id", jobID.String(),
-				":node_id", nodeID.String()).Replace(probe.Path)
-			req := httptest.NewRequest(fiber.MethodPost, target, nil)
-			req.Header.Set("X-Test-User", "yes")
+			target := strings.NewReplacer(":cluster_id", testClusterID, ":id", jobID.String(), ":node_id", nodeID.String()).Replace(probe.Path)
+			req := authedRequest(fiber.MethodPost, target)
 			status, env := send(t, app, req)
 
 			if status != tt.wantStatus || env.Message != tt.wantMsg {

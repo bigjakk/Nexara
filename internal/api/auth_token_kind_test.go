@@ -19,14 +19,16 @@ import (
 )
 
 // TestAuthMiddlewares_AdmitOnlyASessionsAccessToken: authRequired and authOptional
-// authenticate a caller with ONE kind of token — an interactive session's access
-// token, as Claims.IsSession says — and with nothing else a JWT secret signed: not
-// a console token, not a WebSocket hub token, and not claims that fit no kind (both
-// markers at once, a hub scope this code does not issue), which an exclusion of "the
-// two markers it knew of" would have let through as a session. The refusal of each
-// names what it was where it can, and authOptional treats it as no caller at all.
+// authenticate a caller with ONE kind of token, an interactive session's access token
+// (Claims.IsSession), and with nothing else a JWT secret signed: not a console token,
+// not a WebSocket hub token, and not claims that fit no kind (both markers at once, a
+// hub scope this code does not issue), which an exclusion of "the two markers it knew
+// of" would have let through. authOptional treats each as no caller at all. They record
+// HOW a caller authenticated, through the constants the InteractiveOnly gate reads: a
+// session for an access token and an API key for a key (the gate refuses a request that
+// authenticated without a method, so an unmarked session would be refused everywhere).
 func TestAuthMiddlewares_AdmitOnlyASessionsAccessToken(t *testing.T) {
-	fake, _, _ := newChainDB(t)
+	fake, keyOwner, apiKey := newChainDB(t)
 	const secret = "token-kind-test-secret"
 	jwtSvc := auth.NewJWTService(secret, 15*time.Minute, 7*24*time.Hour)
 	srv := &Server{queries: db.New(fake), jwtService: jwtSvc}
@@ -86,12 +88,17 @@ func TestAuthMiddlewares_AdmitOnlyASessionsAccessToken(t *testing.T) {
 		return env.Message
 	}
 
-	session := user.String() + "|" + handlers.AuthMethodSession
-	for _, path := range []string{"/required", "/optional"} {
-		if status, body := get(path, access); status != http.StatusOK || body != session {
-			t.Errorf("%s with an access token = %d %q, want 200 %q", path, status, body, session)
+	for _, tc := range []struct{ name, token, want string }{
+		{"an access token", access, user.String() + "|" + handlers.AuthMethodSession},
+		{"an API key", apiKey, keyOwner.String() + "|" + handlers.AuthMethodAPIKey},
+	} {
+		for _, path := range []string{"/required", "/optional"} {
+			if status, body := get(path, tc.token); status != http.StatusOK || body != tc.want {
+				t.Errorf("%s with %s = %d %q, want 200 %q", path, tc.name, status, body, tc.want)
+			}
 		}
 	}
+	fake.waitForKeyStamp(t)
 
 	for _, tc := range []struct {
 		name, token, message string
