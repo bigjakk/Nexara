@@ -5,17 +5,10 @@ import { notesReadRefusal } from "./node-options-queries";
 
 /**
  * notesReadRefusal tells Nexara's own refusal of the notes read from any other
- * 403, by the message alone: the status and the error slug are the same.
- *
- * The notes route is declared clusterCheck("manage", "node"), which installs
- * RequireClusterPermission, and that refuses with "Insufficient permissions"
- * (requireClusterPerm in internal/api/handlers/permission.go; the backend pins
- * the text as rbacDeniedMessage in internal/api/registry_route_sweep_test.go).
- * A route declared with Alternatives is refused by RequireAnyPermission instead
- * (internal/api/handlers/permission_middleware.go), with "Requires one of: " and
- * the names: the notes route is not one, and it is recognised for the day it is.
- * Every other 403 here is Proxmox's, which mapProxmoxError
- * (internal/api/handlers/proxmox_error.go) passes on as a 403 of its own.
+ * 403 by the message alone (the status and error slug are the same): the notes
+ * route's "Insufficient permissions" (requireClusterPerm) or a route with
+ * Alternatives' "Requires one of: …" (RequireAnyPermission), against anything
+ * else, which is Proxmox's, passed on by mapProxmoxError.
  */
 
 function forbidden(message: string): ApiClientError {

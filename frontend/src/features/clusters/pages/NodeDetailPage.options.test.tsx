@@ -13,21 +13,30 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 
 import { createAppQueryClient } from "@/test/app-query-client";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { deferred, json } from "@/test/fake-server";
+import { flushInAct, PATIENCE_MS } from "@/test/save-outcome-kit";
 import { useAuthStore } from "@/stores/auth-store";
 import type { NodeResponse } from "@/types/api";
-import type { NodeNotes, NodeOptions } from "../api/node-options-queries";
+import {
+  nodeOptionsKey,
+  type NodeNotes,
+  type NodeOptions,
+} from "../api/node-options-queries";
 import { NodeDetailPage } from "./NodeDetailPage";
+
+/**
+ * What the page contributes to the Options and Notes cards: the props it
+ * derives from the user and the node, one card per route, and the reads the
+ * two cards take again together after either saves. The cards themselves are
+ * tested in components/node/Node{Options,Notes}Card.test.tsx.
+ */
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
 }));
 
-// The whole page renders cold in the first test of this file, and under load
-// that takes longer than the second testing-library waits by default, which is
-// all vitest.config.ts leaves it: this file alone gets more (it failed 7 runs
-// of 12 under 4 concurrent runs and 14 busy CPUs at the default). A wait that
-// is really stuck still ends the test, in 5 s instead of 1.
-configure({ asyncUtilTimeout: 5000 });
+// The whole page renders cold in the first test of the file.
+configure({ asyncUtilTimeout: PATIENCE_MS });
 
 const CLUSTER = "cccccccc-0000-0000-0000-00000000000a";
 const NODES = `/api/v1/clusters/${CLUSTER}/nodes`;
@@ -93,20 +102,14 @@ function reads(url: string): number {
 
 /**
  * Has the notes route answer 403 with `message`, in the body the backend gives
- * it ({error, message}), so what the card classifies is what arrives through the
- * real client and not an error built for the test.
+ * it, so that what the card classifies arrives through the real client.
  */
 function refuseNotesWith(message: string) {
   const inner = globalThis.fetch;
   vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
     if ((init?.method ?? "GET") === "GET" && input === notesUrl("pve-01")) {
       api.sent.push(`GET ${notesUrl("pve-01")}`);
-      return Promise.resolve(
-        new Response(JSON.stringify({ error: "forbidden", message }), {
-          status: 403,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
+      return Promise.resolve(json({ error: "forbidden", message }, 403));
     }
     return inner(input, init);
   });
@@ -138,6 +141,29 @@ function renderPage(startAt = "n1") {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { qc };
+}
+
+/** Stubs the API for one online node, pve-01, with the standard reads. */
+function stubNode(over: Partial<NodeResponse> = {}, withNotes = true) {
+  api = stubApi({
+    [NODES]: listOf([node("n1", "pve-01", over)]),
+    [optionsUrl("pve-01")]: options(),
+    ...(withNotes ? { [notesUrl("pve-01")]: notes() } : {}),
+  });
+}
+
+async function openOptions(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole("button", { name: "Edit node options" }),
+  );
+  return screen.findByRole("dialog", { name: "Edit Options - pve-01" });
+}
+
+function notesCard(): HTMLElement {
+  const card = screen.getByText("Notes").closest('[tabindex="-1"]');
+  if (!(card instanceof HTMLElement)) throw new Error("no Notes card");
+  return card;
 }
 
 let api: ReturnType<typeof stubApi>;
@@ -156,11 +182,7 @@ afterEach(() => {
 
 describe("NodeDetailPage options and notes cards", () => {
   it("shows both cards on the summary tab, editable for someone who manages nodes", async () => {
-    api = stubApi({
-      [NODES]: listOf([node("n1", "pve-01")]),
-      [optionsUrl("pve-01")]: options(),
-      [notesUrl("pve-01")]: notes(),
-    });
+    stubNode();
     renderPage();
 
     expect(await screen.findByText("30 seconds")).toBeInTheDocument();
@@ -178,19 +200,14 @@ describe("NodeDetailPage options and notes cards", () => {
     expect(
       screen.getByRole("button", { name: "Edit node notes" }),
     ).toBeInTheDocument();
-    // Each card reads its own route, once: the options with view:node and the
-    // notes with manage:node.
+    // Each card reads its own route, once.
     expect(reads(optionsUrl("pve-01"))).toBe(1);
     expect(reads(notesUrl("pve-01"))).toBe(1);
   });
 
   it("shows someone who may only view nodes the options, and no notes and no Edit", async () => {
     useAuthStore.setState({ permissions: ["view:node"] });
-    api = stubApi({
-      [NODES]: listOf([node("n1", "pve-01")]),
-      [optionsUrl("pve-01")]: options(),
-      [notesUrl("pve-01")]: notes(),
-    });
+    stubNode();
     renderPage();
 
     expect(await screen.findByText("30 seconds")).toBeInTheDocument();
@@ -208,30 +225,11 @@ describe("NodeDetailPage options and notes cards", () => {
     ).toBeNull();
     // The notes route answers 403 to them: the page does not ask.
     expect(reads(optionsUrl("pve-01"))).toBe(1);
-    expect(reads(notesUrl("pve-01"))).toBe(0);
     expect(api.sent.some((r) => r.includes("/notes"))).toBe(false);
   });
 
-  it("lets someone who may only view nodes see the options, and offers no Edit of them", async () => {
-    useAuthStore.setState({ permissions: ["view:node"] });
-    api = stubApi({
-      [NODES]: listOf([node("n1", "pve-01")]),
-      [optionsUrl("pve-01")]: options(),
-    });
-    renderPage();
-
-    expect(await screen.findByText("30 seconds")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Edit node options" }),
-    ).toBeNull();
-  });
-
-  it("does not read an offline node's options, and offers no Edit", async () => {
-    api = stubApi({
-      [NODES]: listOf([node("n1", "pve-01", { status: "offline" })]),
-      [optionsUrl("pve-01")]: options(),
-      [notesUrl("pve-01")]: notes(),
-    });
+  it("does not read an offline node's options or notes", async () => {
+    stubNode({ status: "offline" });
     renderPage();
 
     expect(
@@ -247,12 +245,7 @@ describe("NodeDetailPage options and notes cards", () => {
   });
 
   it("hides the settings a node's version lacks", async () => {
-    api = stubApi({
-      [NODES]: listOf([
-        node("n1", "pve-01", { pve_version: "pve-manager/8.1.8/0123abcd" }),
-      ]),
-      [optionsUrl("pve-01")]: options(),
-    });
+    stubNode({ pve_version: "pve-manager/8.1.8/0123abcd" }, false);
     renderPage();
 
     expect(await screen.findByText("30 seconds")).toBeInTheDocument();
@@ -262,15 +255,10 @@ describe("NodeDetailPage options and notes cards", () => {
     expect(screen.queryByText("Location", { selector: "dt" })).toBeNull();
   });
 
-  // A manager the notes route refuses. canManage is flat and its cache can lag
-  // the server's, so this happens; what the card says depends on who refused.
+  // A manager the notes route refuses: canManage is flat and its cache can lag
+  // the server's. What the card says depends on who refused (notesReadRefusal).
   it("tells a manager that Nexara refuses, in the backend's own words, who can read the notes, with no Retry and no Edit", async () => {
-    api = stubApi({
-      [NODES]: listOf([node("n1", "pve-01")]),
-      [optionsUrl("pve-01")]: options(),
-    });
-    // The notes route is declared clusterCheck("manage", "node"), whose refusal
-    // is requireClusterPerm's, word for word.
+    stubNode({}, false);
     refuseNotesWith("Insufficient permissions");
     renderPage();
 
@@ -279,8 +267,7 @@ describe("NodeDetailPage options and notes cards", () => {
         "Notes are visible to users who can manage this node.",
       ),
     ).toBeInTheDocument();
-    const card = screen.getByText("Notes").closest('[tabindex="-1"]');
-    if (!(card instanceof HTMLElement)) throw new Error("no Notes card");
+    const card = notesCard();
     expect(within(card).queryByRole("button", { name: "Retry" })).toBeNull();
     expect(within(card).queryByText(/Could not load/)).toBeNull();
     expect(within(card).queryByText("Insufficient permissions")).toBeNull();
@@ -291,20 +278,14 @@ describe("NodeDetailPage options and notes cards", () => {
   });
 
   it("shows a manager that Proxmox refuses the failure it is, with Proxmox's message and a Retry, and no Edit", async () => {
-    api = stubApi({
-      [NODES]: listOf([node("n1", "pve-01")]),
-      [optionsUrl("pve-01")]: options(),
-    });
-    // mapProxmoxError passes a Proxmox 403 on as a 403: Nexara's own API token
-    // missing a privilege, say, which says nothing about this user.
+    stubNode({}, false);
     refuseNotesWith("Proxmox API permission denied");
     renderPage();
 
     expect(
       await screen.findByText("Could not load this node's notes."),
     ).toBeInTheDocument();
-    const card = screen.getByText("Notes").closest('[tabindex="-1"]');
-    if (!(card instanceof HTMLElement)) throw new Error("no Notes card");
+    const card = notesCard();
     expect(
       within(card).getByText("Proxmox API permission denied"),
     ).toBeInTheDocument();
@@ -341,13 +322,7 @@ describe("NodeDetailPage options and notes cards", () => {
     });
     renderPage("n1");
 
-    await user.click(
-      await screen.findByRole("button", { name: "Edit node options" }),
-    );
-    await screen.findByRole("dialog", { name: "Edit Options - pve-01" });
-
-    // The route changes under the open dialog, as the browser's Back button
-    // would change it.
+    await openOptions(user);
     act(() => {
       navigateTo(`/clusters/${CLUSTER}/nodes/n2`);
     });
@@ -363,21 +338,23 @@ describe("NodeDetailPage options and notes cards", () => {
   // The two are read separately and carry the digest of one file, so a save
   // from either dialog leaves both stale: the next dialog opened from either
   // would be refused if only the card that saved were read again.
-  it("reads the notes again after the options are saved", async () => {
+  it("reads the notes again after the options are saved, and keeps the dialog open until it has", async () => {
     const user = userEvent.setup();
-    api = stubApi({
-      [NODES]: listOf([node("n1", "pve-01")]),
-      [optionsUrl("pve-01")]: options(),
-      [notesUrl("pve-01")]: notes(),
+    stubNode();
+    // The notes read that follows the save is held; the first one is not.
+    const gate = deferred<undefined>();
+    let notesReads = 0;
+    const inner = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "GET" && input === notesUrl("pve-01")) {
+        notesReads += 1;
+        if (notesReads > 1) return gate.promise.then(() => inner(input, init));
+      }
+      return inner(input, init);
     });
-    renderPage();
+    const { qc } = renderPage();
 
-    await user.click(
-      await screen.findByRole("button", { name: "Edit node options" }),
-    );
-    const dialog = await screen.findByRole("dialog", {
-      name: "Edit Options - pve-01",
-    });
+    const dialog = await openOptions(user);
     expect(reads(optionsUrl("pve-01"))).toBe(1);
     expect(reads(notesUrl("pve-01"))).toBe(1);
     const delay = within(dialog).getByLabelText(
@@ -387,6 +364,23 @@ describe("NodeDetailPage options and notes cards", () => {
     await user.type(delay, "31");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
+    // The options are read again, and the notes are out: the save is not done,
+    // whichever card it was made from.
+    await waitFor(() => {
+      expect(notesReads).toBe(2);
+      expect(
+        qc.getQueryState(nodeOptionsKey(CLUSTER, "pve-01"))?.dataUpdateCount,
+      ).toBe(2);
+    });
+    await flushInAct();
+    expect(
+      screen.getByRole("dialog", { name: "Edit Options - pve-01" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Saving..." }),
+    ).toBeDisabled();
+
+    gate.resolve(undefined);
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
@@ -395,68 +389,9 @@ describe("NodeDetailPage options and notes cards", () => {
     expect(reads(notesUrl("pve-01"))).toBe(2);
   });
 
-  it("keeps the options dialog open until the notes are read again too", async () => {
-    const user = userEvent.setup();
-    api = stubApi({
-      [NODES]: listOf([node("n1", "pve-01")]),
-      [optionsUrl("pve-01")]: options(),
-      [notesUrl("pve-01")]: notes(),
-    });
-    // The notes read that follows the save is held; the first one is not.
-    let release = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let heldNotes = 0;
-    const inner = globalThis.fetch;
-    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
-      if ((init?.method ?? "GET") === "GET" && input === notesUrl("pve-01")) {
-        heldNotes += 1;
-        if (heldNotes > 1) return gate.then(() => inner(input, init));
-      }
-      return inner(input, init);
-    });
-    renderPage();
-
-    await user.click(
-      await screen.findByRole("button", { name: "Edit node options" }),
-    );
-    const dialog = await screen.findByRole("dialog", {
-      name: "Edit Options - pve-01",
-    });
-    const delay = within(dialog).getByLabelText(
-      "Start on boot delay (seconds)",
-    );
-    await user.clear(delay);
-    await user.type(delay, "31");
-    await user.click(within(dialog).getByRole("button", { name: "Save" }));
-    await waitFor(() => {
-      expect(heldNotes).toBe(2);
-    });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    // The options are read again and the notes are not yet: the save is not
-    // done, whichever card it was made from.
-    expect(
-      within(dialog).getByRole("button", { name: "Saving..." }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("dialog", { name: "Edit Options - pve-01" }),
-    ).toBeInTheDocument();
-
-    release();
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
-  });
-
   it("reads the options again after the notes are saved", async () => {
     const user = userEvent.setup();
-    api = stubApi({
-      [NODES]: listOf([node("n1", "pve-01")]),
-      [optionsUrl("pve-01")]: options(),
-      [notesUrl("pve-01")]: notes(),
-    });
+    stubNode();
     renderPage();
 
     await user.click(

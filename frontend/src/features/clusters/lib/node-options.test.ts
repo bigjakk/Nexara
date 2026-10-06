@@ -151,6 +151,9 @@ describe("buildWakeOnLan", () => {
     expect(
       buildWakeOnLan(wol(MAC_2, "vmbr0"), `bind-interface=vmbr0,${MAC}`),
     ).toBe(`bind-interface=vmbr0,${MAC_2}`);
+    expect(
+      buildWakeOnLan(wol(MAC_2, "vmbr0"), `bind-interface=vmbr0,mac=${MAC}`),
+    ).toBe(`bind-interface=vmbr0,mac=${MAC_2}`);
   });
 
   it("adds a subkey after what is there, leaving a bare MAC bare", () => {
@@ -159,6 +162,9 @@ describe("buildWakeOnLan", () => {
     );
     expect(buildWakeOnLan(wol(MAC, "vmbr0", "192.0.2.255"), `mac=${MAC}`)).toBe(
       `mac=${MAC},bind-interface=vmbr0,broadcast-address=192.0.2.255`,
+    );
+    expect(buildWakeOnLan(wol(MAC, "vmbr0", "192.0.2.255"), MAC)).toBe(
+      `${MAC},bind-interface=vmbr0,broadcast-address=192.0.2.255`,
     );
   });
 
@@ -171,6 +177,12 @@ describe("buildWakeOnLan", () => {
       `${MAC},bind-interface=vmbr0`,
     );
     expect(buildWakeOnLan(wol(MAC), base)).toBe(MAC);
+    expect(
+      buildWakeOnLan(
+        wol(MAC, "", "192.0.2.255"),
+        `mac=${MAC},bind-interface=vmbr0,broadcast-address=192.0.2.255`,
+      ),
+    ).toBe(`mac=${MAC},broadcast-address=192.0.2.255`);
   });
 
   it("rewrites a changed subkey where it stands", () => {
@@ -288,6 +300,8 @@ describe("buildLocation", () => {
     expect(buildLocation(place("12.5", "-45.25", "Site A"))).toBe(
       "latitude=12.5,longitude=-45.25,name=Site A",
     );
+    // 0 is a coordinate, not an empty field.
+    expect(buildLocation(place("0", "0"))).toBe("latitude=0,longitude=0");
   });
 
   it("rewrites a field that is not the last where it stands", () => {
@@ -318,6 +332,12 @@ describe("buildLocation", () => {
         "longitude=-45.25,latitude=12.5",
       ),
     ).toBe("longitude=-45.25,latitude=12.5,name=Site B");
+  });
+
+  it("keeps a whitespace-only name, which Proxmox counts, where it stands", () => {
+    expect(
+      buildLocation(place("1", "3"), "latitude=1,name= ,longitude=2"),
+    ).toBe("latitude=1,name= ,longitude=3");
   });
 
   it("removes a cleared name and keeps a key it has no field for", () => {
@@ -412,41 +432,23 @@ describe("nodeOptionSupport", () => {
   const NODE = (version: string) => `pve-manager/${version}/0123abcd`;
 
   // Each version is the first release of one floor, or the one before it.
+  const flags = (
+    ballooningTarget: boolean,
+    wolBindBroadcast: boolean,
+    location: boolean,
+  ) => ({ ballooningTarget, wolBindBroadcast, location });
+
   it.each([
-    [
-      "9.2.20",
-      { ballooningTarget: true, wolBindBroadcast: true, location: true },
-    ],
-    [
-      "9.1.13",
-      { ballooningTarget: true, wolBindBroadcast: true, location: true },
-    ],
-    [
-      "9.1.12",
-      { ballooningTarget: true, wolBindBroadcast: true, location: false },
-    ],
-    [
-      "8.3.6",
-      { ballooningTarget: true, wolBindBroadcast: true, location: false },
-    ],
-    [
-      "8.3.5",
-      { ballooningTarget: false, wolBindBroadcast: true, location: false },
-    ],
-    [
-      "8.1.9",
-      { ballooningTarget: false, wolBindBroadcast: true, location: false },
-    ],
-    [
-      "8.1.8",
-      { ballooningTarget: false, wolBindBroadcast: false, location: false },
-    ],
-    [
-      "7.4.1",
-      { ballooningTarget: false, wolBindBroadcast: false, location: false },
-    ],
+    ["9.2.20", flags(true, true, true)],
+    ["9.1.13", flags(true, true, true)],
+    ["9.1.12", flags(true, true, false)],
+    ["8.3.6", flags(true, true, false)],
+    ["8.3.5", flags(false, true, false)],
+    ["8.1.9", flags(false, true, false)],
+    ["8.1.8", flags(false, false, false)],
+    ["7.4.1", flags(false, false, false)],
     // An unknown version hides every gated field.
-    ["", { ballooningTarget: false, wolBindBroadcast: false, location: false }],
+    ["", flags(false, false, false)],
   ])("for a read holding none of them, on %j", (version, support) => {
     expect(nodeOptionSupport(version === "" ? "" : NODE(version), {})).toEqual(
       support,
@@ -685,6 +687,10 @@ describe("changedNodeOptions", () => {
           { description: "sentinel notes\nand more" },
         ),
       ).toEqual({ description: "sentinel notes\nand more" });
+      // Line breaks, a trailing one included, are the author's.
+      expect(
+        changedNodeOptions({}, { description: "line one\n\nline three\n" }),
+      ).toEqual({ description: "line one\n\nline three\n" });
     });
 
     it("counts whitespace alone as none, on either side", () => {
@@ -873,6 +879,7 @@ describe("checkInteger", () => {
     ["   ", null],
     ["0", 0],
     ["30", 30],
+    ["99", 99],
     [" 30 ", 30],
     ["300", 300],
     ["+5", 5],
