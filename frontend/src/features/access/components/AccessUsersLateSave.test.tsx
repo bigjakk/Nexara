@@ -4,10 +4,24 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 
 import { ApiClientError, apiClient } from "@/lib/api-client";
-import { deferred } from "@/test/fake-server";
+import {
+  type DialogSave,
+  type Replacement,
+  type SaveRequest,
+  type SessionEnding,
+  type UserEvent,
+  SIGN_OUT,
+  TAKEN_OVER,
+  describeDialogSaves,
+  describeReplacements,
+  expectNoToast,
+  expectOneToast,
+  expectSilence,
+  failedToast,
+  heldOnce,
+} from "@/test/late-save-kit";
 import {
   DENIED,
-  SESSION_ENDINGS,
   denied,
   flushInAct,
   renderOnAppClient,
@@ -20,21 +34,11 @@ import type { AccessCapabilities } from "../api/access-queries";
 import { AccessUsersSection } from "./AccessUsersSection";
 
 /**
- * The saves of this section that opt out of the global error toast: creating a
- * user, deleting one, and creating, revoking and regenerating a token. Each is
- * reported by whatever sent it while that is on screen, and once it is gone —
- * the dialog dismissed, the row collapsed, the page left — by a toast that
- * names the object, unless the session has ended too (hooks/useSaveOutcome.ts).
- *
- * Editing a user is the same story and is tested beside the rest of that
- * dialog, in AccessUsersSection.test.tsx, apart from one thing that is about how
- * the section mounts it: its dialog replaced by another account's from the
- * keyboard (the last describe below).
- *
- * These run on the app's own kind of client, whose mutation cache is the one
- * that raises the global toast, so that "once" means once and "none" means none:
- * on a client without it, the opt-out could be taken off every hook and the
- * tests would pass.
+ * What AccessUsersSection passes useSaveOutcome: creating a user, deleting one,
+ * and creating, revoking and regenerating a token. Editing a user is tested with
+ * the rest of its dialog in AccessUsersSection.test.tsx, apart from its dialog
+ * being replaced by another account's from the keyboard (last here). The outcome
+ * matrix is hooks/useSaveOutcome.test.tsx's.
  */
 
 vi.mock("@/lib/api-client", async () => {
@@ -82,7 +86,6 @@ const NEW_TOKEN = "token02";
 const FULL_NEW_TOKEN = `${ALICE}!${NEW_TOKEN}`;
 const NEW_TOKEN_URL = `${TOKENS_URL}/${NEW_TOKEN}`;
 const CAROL = "carol@pve";
-const DAVE = "dave@pve";
 // Not a real secret: what a token's one-time answer carries in this file.
 const SECRET = "00000000-0000-0000-0000-000000000000";
 
@@ -93,6 +96,29 @@ const REFUSAL =
   "until its credentials are updated in Nexara or the change is undone in " +
   "Proxmox. Retry with force=true to proceed anyway.";
 
+/**
+ * The toast a refusal leaves once its dialog is gone, when the refusal had an
+ * override to be given: what became of the action and what to do, quoting none
+ * of the server's words, which end in "Retry with force=true to proceed anyway".
+ */
+function refusedToast(action: string): string {
+  return `${action} was refused, and nothing was changed, because it could cut Nexara off from the cluster. To go ahead anyway, do it again and confirm the override that is then offered.`;
+}
+
+// How long the notice that a token's secret could not be shown stays up
+// (SECRET_NOTICE_MS in the section): long enough to be read by someone who has
+// just left the page, and not for ever, since sonner hands a toast that was not
+// dismissed to the next Toaster that mounts.
+const SECRET_NOTICE_MS = 30_000;
+
+/** The notice that a secret could not be shown: exactly one toast, with its long duration. */
+async function expectOneNotice(message: string): Promise<void> {
+  await expectOneToast(message);
+  expect(mockedToastError).toHaveBeenCalledWith(message, {
+    duration: SECRET_NOTICE_MS,
+  });
+}
+
 const capabilities: AccessCapabilities = {
   loading: false,
   canModifyUsers: true,
@@ -101,84 +127,10 @@ const capabilities: AccessCapabilities = {
   canModifyRealms: true,
 };
 
-type UserEvent = ReturnType<typeof userEvent.setup>;
-
 function renderSection() {
   return renderOnAppClient(
     <AccessUsersSection clusterId={CLUSTER} capabilities={capabilities} />,
   );
-}
-
-/** What each way of getting rid of a dialog does to it. */
-const LEAVES: [
-  name: string,
-  leave: (user: UserEvent, dialog: HTMLElement) => Promise<void>,
-][] = [
-  [
-    "Escape",
-    async (user) => {
-      await user.keyboard("{Escape}");
-    },
-  ],
-  [
-    "its Close button",
-    async (user, dialog) => {
-      await user.click(within(dialog).getByRole("button", { name: "Close" }));
-    },
-  ],
-  [
-    "the page being left",
-    () => {
-      cleanup();
-      return Promise.resolve();
-    },
-  ],
-];
-
-/** The toast a failed save leaves once what sent it is gone. */
-function failedToast(action: string, message = DENIED): string {
-  return `${action} failed: ${message}`;
-}
-
-/**
- * The toast a refusal leaves once its dialog is gone, when the refusal had an
- * override to be given. It says what became of the action and what to do, and
- * quotes none of the server's words: they end in "Retry with force=true to
- * proceed anyway", which a person cannot act on from a toast.
- */
-function refusedToast(action: string): string {
-  return `${action} was refused, and nothing was changed, because it could cut Nexara off from the cluster. To go ahead anyway, do it again and confirm the override that is then offered.`;
-}
-
-/** Waits for a toast, then for anything else a second one could be late with. */
-async function expectOneToast(message: string): Promise<void> {
-  await waitFor(() => {
-    expect(mockedToastError).toHaveBeenCalledWith(message);
-  });
-  await flushInAct();
-  expect(mockedToastError).toHaveBeenCalledTimes(1);
-}
-
-// How long the notices that a token's secret could not be shown stay up, as
-// the section says it (SECRET_NOTICE_MS): long enough to be read by someone who
-// has just left the page, and not for ever — sonner hands a toast that was not
-// dismissed to the next Toaster that mounts, which a sign-out and the next
-// sign-in rebuild.
-const SECRET_NOTICE_MS = 30_000;
-
-/**
- * Waits for a notice that a token's secret could not be shown, which stays up
- * for SECRET_NOTICE_MS where every other toast here takes sonner's default, and
- * then for anything else a second one could be late with.
- */
-async function expectOneNotice(message: string): Promise<void> {
-  await waitFor(() => {
-    expect(mockedToastError).toHaveBeenCalledWith(message, {
-      duration: SECRET_NOTICE_MS,
-    });
-  });
-  await flushInAct();
-  expect(mockedToastError).toHaveBeenCalledTimes(1);
 }
 
 beforeEach(() => {
@@ -206,19 +158,14 @@ afterEach(() => {
   signOutForGood();
 });
 
-// ── Create user ─────────────────────────────────────────────────────────
+// ── Create user ─────────────────────────────────────────────────────────────
 
-/** Opens the Create User dialog. */
 async function openCreateUser(user: UserEvent): Promise<HTMLElement> {
   await user.click(await screen.findByRole("button", { name: "Create User" }));
   return screen.findByRole("dialog", { name: "Create Proxmox User" });
 }
 
-/**
- * Opens it, types the id and presses Create, and waits for the request to be
- * out. The id is typed with a space either side, as a pasted one often has: the
- * request and the toast carry it trimmed.
- */
+/** The id is typed with a space either side, as a pasted one is: the request and the toast carry it trimmed. */
 async function createUserNamed(
   user: UserEvent,
   userid: string,
@@ -232,224 +179,31 @@ async function createUserNamed(
   return dialog;
 }
 
-describe("a user create that settles", () => {
-  it("control: closes its dialog when it succeeds while the dialog is open", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPost.mockReturnValueOnce(held.promise);
-    renderSection();
-
-    const dialog = await createUserNamed(user, CAROL);
-    held.resolve({});
-
-    await waitFor(() => {
-      expect(dialog).not.toBeInTheDocument();
-    });
-    expect(mockedPost.mock.calls).toEqual([[USERS_URL, { userid: CAROL }]]);
-    expect(mockedToastError).not.toHaveBeenCalled();
-  });
-
-  it("control: shows a failure in its dialog while the dialog is open, with no toast", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPost.mockReturnValueOnce(held.promise);
-    renderSection();
-
-    const dialog = await createUserNamed(user, CAROL);
-    held.reject(denied());
-
-    expect(await within(dialog).findByText(DENIED)).toBeInTheDocument();
-    await flushInAct();
-    expect(mockedToastError).not.toHaveBeenCalled();
-    expect(mockedPost).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(LEAVES)(
-    "toasts a failure that comes after %s, once, naming the user",
-    async (_, leave) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPost.mockReturnValueOnce(held.promise);
-      renderSection();
-
-      const dialog = await createUserNamed(user, CAROL);
-      await leave(user, dialog);
-      await waitFor(() => {
-        expect(dialog).not.toBeInTheDocument();
-      });
-      held.reject(denied());
-
-      await expectOneToast(failedToast(`Creating user ${CAROL}`));
-      expect(mockedPost).toHaveBeenCalledTimes(1);
+// Told apart by its open flag. A dismissal clears the form, so the next dialog
+// starts blank, and a late answer must leave what is typed in it alone.
+describeDialogSaves([
+  {
+    name: "user create",
+    render: renderSection,
+    request: mockedPost,
+    sent: [USERS_URL, { userid: CAROL }],
+    button: "Create",
+    send: (user) => createUserNamed(user, CAROL),
+    action: `Creating user ${CAROL}`,
+    reopen: openCreateUser,
+    draft: {
+      values: (dialog) => [
+        within(dialog).getByLabelText<HTMLInputElement>("User ID").value,
+      ],
+      left: [""],
+      append: (user, dialog) =>
+        user.type(within(dialog).getByLabelText("User ID"), "x"),
     },
-  );
+    silentAfter: SIGN_OUT,
+  } satisfies DialogSave,
+]);
 
-  it("toasts a failure that comes after the dialog was dismissed and opened again, and shows nothing in the new one", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPost.mockReturnValueOnce(held.promise);
-    renderSection();
-
-    const first = await createUserNamed(user, CAROL);
-    await user.keyboard("{Escape}");
-    await waitFor(() => {
-      expect(first).not.toBeInTheDocument();
-    });
-    const second = await openCreateUser(user);
-    await user.type(within(second).getByLabelText("User ID"), DAVE);
-    held.reject(denied());
-
-    await expectOneToast(failedToast(`Creating user ${CAROL}`));
-    // The dialog that is open is the second one's, and this was not its save.
-    expect(second).toBeInTheDocument();
-    expect(within(second).queryByText(DENIED)).toBeNull();
-    expect(within(second).getByLabelText("User ID")).toHaveValue(DAVE);
-  });
-
-  it("does not close or clear the dialog opened in its place when it succeeds", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPost.mockReturnValueOnce(held.promise);
-    const { qc } = renderSection();
-
-    const first = await createUserNamed(user, CAROL);
-    await user.keyboard("{Escape}");
-    await waitFor(() => {
-      expect(first).not.toBeInTheDocument();
-    });
-    const second = await openCreateUser(user);
-    await user.type(within(second).getByLabelText("User ID"), DAVE);
-    held.resolve({});
-    await waitForSuccess(qc);
-
-    expect(second).toBeInTheDocument();
-    expect(second).toHaveAttribute("data-state", "open");
-    expect(within(second).getByLabelText("User ID")).toHaveValue(DAVE);
-    expect(mockedToastError).not.toHaveBeenCalled();
-    expect(mockedPost).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(SESSION_ENDINGS)(
-    "toasts nothing for a failure that comes after %s, with the page left",
-    async (_, end) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPost.mockReturnValueOnce(held.promise);
-      renderSection();
-
-      await createUserNamed(user, CAROL);
-      cleanup();
-      end();
-      held.reject(denied());
-      await flushInAct();
-      await flushInAct();
-
-      expect(mockedToastError).not.toHaveBeenCalled();
-      expect(mockedPost).toHaveBeenCalledTimes(1);
-    },
-  );
-});
-
-// ── Delete user ─────────────────────────────────────────────────────────
-
-/** Opens the delete confirmation for the user, confirms it, and waits for the request to be out. */
-async function deleteAlice(user: UserEvent): Promise<HTMLElement> {
-  await user.click(
-    await screen.findByRole("button", { name: `Delete ${ALICE}` }),
-  );
-  const ask = await screen.findByRole("alertdialog", {
-    name: `Delete ${ALICE}?`,
-  });
-  await user.click(within(ask).getByRole("button", { name: "Delete User" }));
-  expect(
-    await within(ask).findByRole("button", { name: "Deleting..." }),
-  ).toBeDisabled();
-  return ask;
-}
-
-describe("a user delete that settles", () => {
-  it("control: shows a failure in the section while the page is there, with no toast", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedDelete.mockReturnValueOnce(held.promise);
-    renderSection();
-
-    await deleteAlice(user);
-    held.reject(denied());
-
-    expect(await screen.findByText(DENIED)).toBeInTheDocument();
-    await flushInAct();
-    expect(mockedToastError).not.toHaveBeenCalled();
-    expect(mockedDelete.mock.calls).toEqual([[ALICE_URL]]);
-  });
-
-  it("toasts a failure that comes after the page was left, once, naming the user", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedDelete.mockReturnValueOnce(held.promise);
-    renderSection();
-
-    await deleteAlice(user);
-    cleanup();
-    held.reject(denied());
-
-    await expectOneToast(failedToast(`Deleting user ${ALICE}`));
-    expect(mockedDelete.mock.calls).toEqual([[ALICE_URL]]);
-  });
-
-  it("toasts the refusal that comes after the page was left as a refusal, saying what to do and not quoting the server", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedDelete.mockReturnValueOnce(held.promise);
-    renderSection();
-
-    await deleteAlice(user);
-    cleanup();
-    held.reject(
-      new ApiClientError(409, { error: "Conflict", message: REFUSAL }),
-    );
-
-    await expectOneToast(refusedToast(`Deleting user ${ALICE}`));
-    // Nothing forced it: there was no one to ask.
-    expect(mockedDelete.mock.calls).toEqual([[ALICE_URL]]);
-  });
-
-  it("toasts nothing for a success that comes after the page was left", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedDelete.mockReturnValueOnce(held.promise);
-    const { qc } = renderSection();
-
-    await deleteAlice(user);
-    cleanup();
-    held.resolve(undefined);
-    await waitForSuccess(qc);
-
-    expect(mockedToastError).not.toHaveBeenCalled();
-  });
-
-  it.each(SESSION_ENDINGS)(
-    "toasts nothing for a failure that comes after %s, with the page left",
-    async (_, end) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedDelete.mockReturnValueOnce(held.promise);
-      renderSection();
-
-      await deleteAlice(user);
-      cleanup();
-      end();
-      held.reject(denied());
-      await flushInAct();
-      await flushInAct();
-
-      expect(mockedToastError).not.toHaveBeenCalled();
-      expect(mockedDelete).toHaveBeenCalledTimes(1);
-    },
-  );
-});
-
-// ── Tokens ──────────────────────────────────────────────────────────────
+// ── Tokens ──────────────────────────────────────────────────────────────────
 
 /** Expands the user's row, which reads its tokens. */
 async function expandAlice(user: UserEvent): Promise<void> {
@@ -457,11 +211,7 @@ async function expandAlice(user: UserEvent): Promise<void> {
   await screen.findByText(FULL_TOKEN);
 }
 
-/**
- * Expands the row, types a name into the create form and presses Create Token.
- * The name is typed with a space either side: the request and the toast carry
- * it trimmed.
- */
+/** The name is typed with a space either side: the request and the toast carry it trimmed. */
 async function createNewToken(user: UserEvent): Promise<void> {
   await expandAlice(user);
   await user.type(screen.getByLabelText("New token name"), ` ${NEW_TOKEN} `);
@@ -476,401 +226,324 @@ function minted(fullTokenId: string) {
   return { "full-tokenid": fullTokenId, value: SECRET };
 }
 
-/** Asserts that the secret is in no toast, whatever kind it was raised as. */
+/** The secret is in no toast, whatever kind it was raised as. */
 function expectSecretInNoToast(): void {
   for (const spy of [toast.error, toast.success, toast.warning]) {
     expect(JSON.stringify(vi.mocked(spy).mock.calls)).not.toContain(SECRET);
   }
 }
 
-/**
- * Asserts that the secret is not on the page. Only for a test in which the
- * section is still mounted when the answer arrives: the secret dialog is drawn
- * from state of the row that asked for it, so with the row collapsed or the page
- * left there is nothing to draw it, and the page cannot show the secret
- * whatever the code does. A test that has left has the toast half only.
- */
-function expectSecretNotOnPage(): void {
-  expect(document.body).not.toHaveTextContent(SECRET);
-}
+const SECRET_DIALOG = { name: "API Token Created" };
 
+// The secret dialog is drawn from state of the row that asked for it: with the
+// row collapsed or the page left there is nothing to draw it, so what is told
+// of a secret that came too late is a toast, never the secret itself.
 describe("a token create that settles", () => {
-  it("control: shows the one-time secret when it succeeds while the row is there", async () => {
+  it("shows a failure in the row while the row is there, with no toast", async () => {
     const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPost.mockReturnValueOnce(held.promise);
+    const held = heldOnce(mockedPost);
+    renderSection();
+
+    await createNewToken(user);
+    held.reject(denied());
+
+    expect(await screen.findByText(DENIED)).toBeInTheDocument();
+    await flushInAct();
+    expectNoToast();
+  });
+
+  it("shows the one-time secret when it succeeds while the row is there", async () => {
+    const user = userEvent.setup();
+    const held = heldOnce(mockedPost);
     renderSection();
 
     await createNewToken(user);
     held.resolve(minted(FULL_NEW_TOKEN));
 
-    const shown = await screen.findByRole("dialog", {
-      name: "API Token Created",
-    });
+    const shown = await screen.findByRole("dialog", SECRET_DIALOG);
     expect(within(shown).getByText(SECRET)).toBeInTheDocument();
-    expect(mockedToastError).not.toHaveBeenCalled();
+    expectNoToast();
     expect(mockedPost.mock.calls).toEqual([[NEW_TOKEN_URL, { privsep: true }]]);
   });
 
-  it("control: shows a failure in the row while the row is there, with no toast", async () => {
+  /** Sends the create, then collapses the row: its tokens, and what asked for the secret, are gone. */
+  async function createThenCollapse(user: UserEvent) {
+    const held = heldOnce(mockedPost);
+    renderSection();
+    await createNewToken(user);
+    await user.click(screen.getByText(ALICE));
+    await waitFor(() => {
+      expect(screen.queryByText(FULL_TOKEN)).toBeNull();
+    });
+    return held;
+  }
+
+  it("tells the operator the secret could not be shown, naming the token and never giving the secret, when it succeeds after the row was collapsed", async () => {
+    const held = await createThenCollapse(userEvent.setup());
+    held.resolve(minted(FULL_NEW_TOKEN));
+
+    await expectOneNotice(
+      `Created the API token ${FULL_NEW_TOKEN}, but its secret could not be shown because this view was closed. Proxmox shows a secret only once: regenerate the token to get a new one.`,
+    );
+    expectSecretInNoToast();
+  });
+
+  it("toasts a failure once, naming the token, when it comes after the row was collapsed", async () => {
+    const held = await createThenCollapse(userEvent.setup());
+    held.reject(denied());
+
+    await expectOneToast(failedToast(`Creating token ${FULL_NEW_TOKEN}`));
+  });
+
+  it("shows nothing, and never the secret, when it succeeds after a sign-out, with the row collapsed", async () => {
+    const held = await createThenCollapse(userEvent.setup());
+    SIGN_OUT[1]();
+    held.resolve(minted(FULL_NEW_TOKEN));
+
+    await expectSilence();
+    expectSecretInNoToast();
+  });
+
+  it("shows nothing, and never the secret, when it succeeds after someone else signed in, with the row still there", async () => {
     const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPost.mockReturnValueOnce(held.promise);
+    const held = heldOnce(mockedPost);
     renderSection();
 
     await createNewToken(user);
-    held.reject(denied());
+    TAKEN_OVER[1]();
+    held.resolve(minted(FULL_NEW_TOKEN));
 
-    expect(await screen.findByText(DENIED)).toBeInTheDocument();
-    await flushInAct();
-    expect(mockedToastError).not.toHaveBeenCalled();
+    await expectSilence();
+    expect(screen.queryByRole("dialog", SECRET_DIALOG)).toBeNull();
+    expectSecretInNoToast();
+    expect(document.body).not.toHaveTextContent(SECRET);
   });
-
-  const ROW_GONE: [name: string, leave: (user: UserEvent) => Promise<void>][] =
-    [
-      [
-        "the row being collapsed",
-        async (user) => {
-          await user.click(screen.getByText(ALICE));
-          await waitFor(() => {
-            expect(screen.queryByText(FULL_TOKEN)).toBeNull();
-          });
-        },
-      ],
-      [
-        "the page being left",
-        () => {
-          cleanup();
-          return Promise.resolve();
-        },
-      ],
-    ];
-
-  it.each(ROW_GONE)(
-    "tells the operator the secret could not be shown, naming the token and never giving the secret, and keeps saying so, when it succeeds after %s",
-    async (_, leave) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPost.mockReturnValueOnce(held.promise);
-      renderSection();
-
-      await createNewToken(user);
-      await leave(user);
-      held.resolve(minted(FULL_NEW_TOKEN));
-
-      await expectOneNotice(
-        `Created the API token ${FULL_NEW_TOKEN}, but its secret could not be shown because this view was closed. Proxmox shows a secret only once: regenerate the token to get a new one.`,
-      );
-      expectSecretInNoToast();
-    },
-  );
-
-  it.each(ROW_GONE)(
-    "toasts a failure that comes after %s, once, naming the token",
-    async (_, leave) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPost.mockReturnValueOnce(held.promise);
-      renderSection();
-
-      await createNewToken(user);
-      await leave(user);
-      held.reject(denied());
-
-      await expectOneToast(failedToast(`Creating token ${FULL_NEW_TOKEN}`));
-    },
-  );
-
-  it.each(SESSION_ENDINGS)(
-    "shows nothing, and never the secret, when it succeeds after %s, with the page left",
-    async (_, end) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPost.mockReturnValueOnce(held.promise);
-      renderSection();
-
-      await createNewToken(user);
-      cleanup();
-      end();
-      held.resolve(minted(FULL_NEW_TOKEN));
-      await flushInAct();
-      await flushInAct();
-
-      expect(mockedToastError).not.toHaveBeenCalled();
-      expectSecretInNoToast();
-    },
-  );
-
-  it.each(SESSION_ENDINGS)(
-    "shows nothing, and never the secret, when it succeeds after %s, with the page still there",
-    async (_, end) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPost.mockReturnValueOnce(held.promise);
-      renderSection();
-
-      await createNewToken(user);
-      end();
-      held.resolve(minted(FULL_NEW_TOKEN));
-      await flushInAct();
-      await flushInAct();
-
-      expect(mockedToastError).not.toHaveBeenCalled();
-      expect(
-        screen.queryByRole("dialog", { name: "API Token Created" }),
-      ).toBeNull();
-      expectSecretInNoToast();
-      expectSecretNotOnPage();
-    },
-  );
-
-  it.each(SESSION_ENDINGS)(
-    "toasts nothing for a failure that comes after %s, with the page left",
-    async (_, end) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPost.mockReturnValueOnce(held.promise);
-      renderSection();
-
-      await createNewToken(user);
-      cleanup();
-      end();
-      held.reject(denied());
-      await flushInAct();
-      await flushInAct();
-
-      expect(mockedToastError).not.toHaveBeenCalled();
-    },
-  );
 });
 
-/**
- * The two confirmations that act on an existing token, each with the request it
- * sends and what its failure is called. A token's row buttons are named for its
- * own id; its dialogs for the full one.
- */
-const TOKEN_ACTIONS = [
-  {
-    name: "revoke",
-    trigger: `Revoke ${TOKEN}`,
-    ask: `Revoke ${FULL_TOKEN}?`,
-    send: "Revoke Token",
-    sending: "Revoking...",
-    request: mockedDelete,
-    action: `Revoking token ${FULL_TOKEN}`,
-  },
-  {
-    name: "regenerate",
-    trigger: `Regenerate ${TOKEN}`,
-    ask: `Regenerate ${FULL_TOKEN}?`,
-    send: "Regenerate",
-    sending: "Regenerating...",
-    request: mockedPut,
-    action: `Regenerating token ${FULL_TOKEN}`,
-  },
-];
-type TokenAction = (typeof TOKEN_ACTIONS)[number];
+// ── The confirmations: user delete, token revoke, token regenerate ──────────
 
-/** Expands the row, confirms the action on the token, and waits for the request to be out. */
-async function sendTokenAction(
-  user: UserEvent,
-  a: TokenAction,
-): Promise<HTMLElement> {
-  await expandAlice(user);
-  await user.click(screen.getByRole("button", { name: a.trigger }));
-  const ask = await screen.findByRole("alertdialog", { name: a.ask });
-  await user.click(within(ask).getByRole("button", { name: a.send }));
+async function deleteAlice(user: UserEvent): Promise<HTMLElement> {
+  await user.click(
+    await screen.findByRole("button", { name: `Delete ${ALICE}` }),
+  );
+  const ask = await screen.findByRole("alertdialog", {
+    name: `Delete ${ALICE}?`,
+  });
+  await user.click(within(ask).getByRole("button", { name: "Delete User" }));
   expect(
-    await within(ask).findByRole("button", { name: a.sending }),
+    await within(ask).findByRole("button", { name: "Deleting..." }),
   ).toBeDisabled();
   return ask;
 }
 
-describe.each(TOKEN_ACTIONS)("a token $name that settles", (a) => {
-  it("control: shows a failure in the row while the row is there, with no toast", async () => {
+/** A token's row buttons are named for its own id; its dialogs for the full one. */
+function tokenAction(
+  verb: "Revoke" | "Regenerate",
+  send: string,
+  sending: string,
+) {
+  return async (user: UserEvent): Promise<HTMLElement> => {
+    await expandAlice(user);
+    await user.click(screen.getByRole("button", { name: `${verb} ${TOKEN}` }));
+    const ask = await screen.findByRole("alertdialog", {
+      name: `${verb} ${FULL_TOKEN}?`,
+    });
+    await user.click(within(ask).getByRole("button", { name: send }));
+    expect(
+      await within(ask).findByRole("button", { name: sending }),
+    ).toBeDisabled();
+    return ask;
+  };
+}
+
+const CONFIRMATIONS: {
+  name: string;
+  request: SaveRequest;
+  send: (user: UserEvent) => Promise<HTMLElement>;
+  action: string;
+  sent: unknown[][];
+  /** What a success that comes after the page was left does: nothing, or tells of a secret. */
+  late: "nothing" | "notice";
+  silentAfter?: SessionEnding;
+}[] = [
+  {
+    name: "user delete",
+    request: mockedDelete,
+    send: deleteAlice,
+    action: `Deleting user ${ALICE}`,
+    sent: [[ALICE_URL]],
+    late: "nothing",
+    silentAfter: TAKEN_OVER,
+  },
+  {
+    name: "token revoke",
+    request: mockedDelete,
+    send: tokenAction("Revoke", "Revoke Token", "Revoking..."),
+    action: `Revoking token ${FULL_TOKEN}`,
+    sent: [[TOKEN_URL]],
+    late: "nothing",
+  },
+  {
+    name: "token regenerate",
+    request: mockedPut,
+    send: tokenAction("Regenerate", "Regenerate", "Regenerating..."),
+    action: `Regenerating token ${FULL_TOKEN}`,
+    sent: [[TOKEN_URL, { regenerate: true }]],
+    late: "notice",
+  },
+];
+
+describe.each(CONFIRMATIONS)("a $name that settles", (c) => {
+  it("shows a failure on the page while the page is there, with no toast", async () => {
     const user = userEvent.setup();
-    const held = deferred<unknown>();
-    a.request.mockReturnValueOnce(held.promise);
+    const held = heldOnce(c.request);
     renderSection();
 
-    await sendTokenAction(user, a);
+    await c.send(user);
     held.reject(denied());
 
     expect(await screen.findByText(DENIED)).toBeInTheDocument();
     await flushInAct();
-    expect(mockedToastError).not.toHaveBeenCalled();
+    expectNoToast();
   });
 
-  it("toasts a failure that comes after the page was left, once, naming the token", async () => {
+  it("toasts a failure once, naming it, when it comes after the page was left", async () => {
     const user = userEvent.setup();
-    const held = deferred<unknown>();
-    a.request.mockReturnValueOnce(held.promise);
+    const held = heldOnce(c.request);
     renderSection();
 
-    await sendTokenAction(user, a);
+    await c.send(user);
     cleanup();
     held.reject(denied());
 
-    await expectOneToast(failedToast(a.action));
+    await expectOneToast(failedToast(c.action));
+    expect(c.request.mock.calls).toEqual(c.sent);
   });
 
   it("toasts the refusal that comes after the page was left as a refusal, saying what to do and not quoting the server", async () => {
     const user = userEvent.setup();
-    const held = deferred<unknown>();
-    a.request.mockReturnValueOnce(held.promise);
+    const held = heldOnce(c.request);
     renderSection();
 
-    await sendTokenAction(user, a);
+    await c.send(user);
     cleanup();
     held.reject(
       new ApiClientError(409, { error: "Conflict", message: REFUSAL }),
     );
 
-    await expectOneToast(refusedToast(a.action));
+    await expectOneToast(refusedToast(c.action));
     // Nothing forced it: there was no one to ask.
-    expect(a.request).toHaveBeenCalledTimes(1);
+    expect(c.request.mock.calls).toEqual(c.sent);
   });
 
-  it.each(SESSION_ENDINGS)(
-    "toasts nothing for a failure that comes after %s, with the page left",
-    async (_, end) => {
+  if (c.late === "notice") {
+    it("tells the operator the new secret could not be shown, and that the old one no longer works, when it succeeds after the page was left", async () => {
       const user = userEvent.setup();
-      const held = deferred<unknown>();
-      a.request.mockReturnValueOnce(held.promise);
+      const held = heldOnce(c.request);
       renderSection();
 
-      await sendTokenAction(user, a);
+      await c.send(user);
+      cleanup();
+      held.resolve(minted(FULL_TOKEN));
+
+      await expectOneNotice(
+        `Regenerated the API token ${FULL_TOKEN}, but its new secret could not be shown because this view was closed. The old secret no longer works, and Proxmox shows a secret only once: regenerate the token again to get a new one.`,
+      );
+      expectSecretInNoToast();
+    });
+
+    it("shows the new secret when it succeeds while the row is there", async () => {
+      const user = userEvent.setup();
+      const held = heldOnce(c.request);
+      renderSection();
+
+      await c.send(user);
+      held.resolve(minted(FULL_TOKEN));
+
+      const shown = await screen.findByRole("dialog", SECRET_DIALOG);
+      expect(within(shown).getByText(SECRET)).toBeInTheDocument();
+      expectNoToast();
+    });
+  } else {
+    it("says nothing when it succeeds after the page was left: it is gone, and the list behind it is refreshed", async () => {
+      const user = userEvent.setup();
+      const held = heldOnce(c.request);
+      const { qc } = renderSection();
+
+      await c.send(user);
+      cleanup();
+      held.resolve(undefined);
+      await waitForSuccess(qc);
+
+      expectNoToast();
+      expect(c.request.mock.calls).toEqual(c.sent);
+    });
+  }
+
+  if (c.silentAfter) {
+    const [after, end] = c.silentAfter;
+    it(`says nothing of a failure that comes after ${after}, with the page left`, async () => {
+      const user = userEvent.setup();
+      const held = heldOnce(c.request);
+      renderSection();
+
+      await c.send(user);
       cleanup();
       end();
       held.reject(denied());
-      await flushInAct();
-      await flushInAct();
 
-      expect(mockedToastError).not.toHaveBeenCalled();
-    },
-  );
-});
-
-describe("a token revoke that succeeds after the page was left", () => {
-  it("says nothing: the token is gone, and the list behind it is refreshed", async () => {
-    const [revoke] = TOKEN_ACTIONS;
-    if (!revoke) throw new Error("no revoke action");
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedDelete.mockReturnValueOnce(held.promise);
-    const { qc } = renderSection();
-
-    await sendTokenAction(user, revoke);
-    cleanup();
-    held.resolve(undefined);
-    await waitForSuccess(qc);
-
-    expect(mockedToastError).not.toHaveBeenCalled();
-    expect(mockedDelete.mock.calls).toEqual([[TOKEN_URL]]);
-  });
-});
-
-describe("a token regenerate that succeeds", () => {
-  const regenerate = TOKEN_ACTIONS[1];
-  if (!regenerate) throw new Error("no regenerate action");
-
-  it("control: shows the new secret while the row is there", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPut.mockReturnValueOnce(held.promise);
-    renderSection();
-
-    await sendTokenAction(user, regenerate);
-    held.resolve(minted(FULL_TOKEN));
-
-    const shown = await screen.findByRole("dialog", {
-      name: "API Token Created",
+      await expectSilence();
     });
-    expect(within(shown).getByText(SECRET)).toBeInTheDocument();
-    expect(mockedToastError).not.toHaveBeenCalled();
-  });
-
-  it("tells the operator the new secret could not be shown, and that the old one no longer works, after the page was left", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPut.mockReturnValueOnce(held.promise);
-    renderSection();
-
-    await sendTokenAction(user, regenerate);
-    cleanup();
-    held.resolve(minted(FULL_TOKEN));
-
-    await expectOneNotice(
-      `Regenerated the API token ${FULL_TOKEN}, but its new secret could not be shown because this view was closed. The old secret no longer works, and Proxmox shows a secret only once: regenerate the token again to get a new one.`,
-    );
-    expectSecretInNoToast();
-    expect(mockedPut.mock.calls).toEqual([[TOKEN_URL, { regenerate: true }]]);
-  });
-
-  it.each(SESSION_ENDINGS)(
-    "shows nothing, and never the secret, after %s, with the page left",
-    async (_, end) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPut.mockReturnValueOnce(held.promise);
-      renderSection();
-
-      await sendTokenAction(user, regenerate);
-      cleanup();
-      end();
-      held.resolve(minted(FULL_TOKEN));
-      await flushInAct();
-      await flushInAct();
-
-      expect(mockedToastError).not.toHaveBeenCalled();
-      expectSecretInNoToast();
-    },
-  );
+  }
 });
 
-// The edit dialog is not held while its request is out, and the button that sent
-// it is disabled by the request, so focus is lost and Tab walks out of the modal
-// to the Edit buttons behind it, which a pointer cannot reach. Enter on another
-// account's puts its dialog where the first was, with nothing closed between the
-// two. The section keys the dialog on the account, so the second is a new one
-// with a form and a pending save of its own; unkeyed, it would be the first with
+// ── Edit user: its dialog replaced by another account's from the keyboard ────
+
+// The section keys the dialog on the account, so the second is a new one with a
+// form and a pending save of its own; unkeyed, it would be the first with
 // another account's name over it.
-describe("an edit whose dialog is replaced by another account's from the keyboard", () => {
-  const BOB = "bob@pve";
-  const BOB_URL = `${USERS_URL}/bob%40pve`;
+const BOB = "bob@pve";
+const BOB_URL = `${USERS_URL}/bob%40pve`;
 
-  beforeEach(() => {
-    mockedList.mockImplementation((path: string) =>
-      Promise.resolve(
-        path === USERS_URL
-          ? [
-              { userid: ALICE, enable: true },
-              { userid: BOB, enable: true },
-            ]
-          : [],
-      ),
-    );
-    mockedGet.mockImplementation((path: string) => {
-      if (path === ALICE_URL) {
-        return Promise.resolve({
-          userid: ALICE,
-          enable: true,
-          comment: "service account",
-        });
-      }
-      if (path === BOB_URL) {
-        return Promise.resolve({
-          userid: BOB,
-          enable: true,
-          comment: "read only",
-        });
-      }
-      return Promise.reject(new Error(`unexpected GET ${path}`));
-    });
+function serveBob() {
+  mockedList.mockImplementation((path: string) =>
+    Promise.resolve(
+      path === USERS_URL
+        ? [
+            { userid: ALICE, enable: true },
+            { userid: BOB, enable: true },
+          ]
+        : [],
+    ),
+  );
+  mockedGet.mockImplementation((path: string) => {
+    if (path === ALICE_URL) {
+      return Promise.resolve({
+        userid: ALICE,
+        enable: true,
+        comment: "service account",
+      });
+    }
+    if (path === BOB_URL) {
+      return Promise.resolve({
+        userid: BOB,
+        enable: true,
+        comment: "read only",
+      });
+    }
+    return Promise.reject(new Error(`unexpected GET ${path}`));
   });
+}
 
-  /** Edits the first account's comment with the request held, and opens the other's dialog over it. */
-  async function replaceWithBob(user: UserEvent) {
+const EDIT_USER: Replacement = {
+  name: "user edit",
+  render: () => {
+    serveBob();
+    return renderSection();
+  },
+  request: mockedPut,
+  action: `Saving ${ALICE}`,
+  replace: async (user) => {
     await user.click(
       await screen.findByRole("button", { name: `Edit ${ALICE}` }),
     );
@@ -887,39 +560,11 @@ describe("an edit whose dialog is replaced by another account's from the keyboar
     // The other account's form, read from the other account.
     await within(second).findByLabelText("Comment");
     return second;
-  }
-
-  it("toasts the failure, once, naming the first account, and shows nothing of it in the other's dialog", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPut.mockReturnValueOnce(held.promise);
-    renderSection();
-
-    const second = await replaceWithBob(user);
-    held.reject(denied());
-
-    await expectOneToast(failedToast(`Saving ${ALICE}`));
-    expect(second).toBeInTheDocument();
-    expect(second).toHaveAttribute("data-state", "open");
-    expect(within(second).queryByText(DENIED)).toBeNull();
-    // The other account's own form, read from the other account: what an
-    // unkeyed dialog would not show, since the first's comment is typed in it.
+  },
+  // What an unkeyed dialog would not show, since the first's comment is typed in it.
+  own: (second) => {
     expect(within(second).getByLabelText("Comment")).toHaveValue("read only");
-  });
+  },
+};
 
-  it("does not close the other account's dialog when the first succeeds, and toasts nothing", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPut.mockReturnValueOnce(held.promise);
-    const { qc } = renderSection();
-
-    const second = await replaceWithBob(user);
-    held.resolve({});
-    await waitForSuccess(qc);
-
-    expect(second).toBeInTheDocument();
-    expect(second).toHaveAttribute("data-state", "open");
-    expect(within(second).getByLabelText("Comment")).toHaveValue("read only");
-    expect(mockedToastError).not.toHaveBeenCalled();
-  });
-});
+describeReplacements([EDIT_USER]);

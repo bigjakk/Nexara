@@ -24,13 +24,12 @@ import {
 import { useSaveOutcome, type SaveOutcome } from "./useSaveOutcome";
 
 /**
- * A dialog that opted out of the global error toast has to report a failure
- * itself, and one that settles after the dialog is gone has nowhere to: this is
- * the hook that decides who hears of it. These tests drive it through a real
- * mutation that carries the same opt-out the access, LDAP, OIDC and cluster
- * hooks do, on the app's own kind of client (test/app-query-client.ts), so that
- * "once" means once: the global net would otherwise toast beside it, and a
- * "nothing was toasted" assertion on a client without the net proves nothing.
+ * The outcome matrix of useSaveOutcome: where a save's answer goes, by what is on
+ * screen when it comes and what the session has done since the save went out.
+ * The dialogs and sections that use it prove only what they pass it. Driven
+ * through a real mutation with the opt-out the hooks it serves carry, on the
+ * app's own kind of client, whose global error net would otherwise toast beside
+ * it, and without which "toasts nothing" proves nothing.
  */
 
 vi.mock("sonner", () => ({
@@ -62,9 +61,9 @@ type Shown = string | number | boolean | null;
 
 /**
  * The hook the way a dialog uses it: `send` starts a save whose outcome stays
- * unsettled until the test settles `held`. `rerender` changes what is on
- * screen, `unmount` takes the dialog away. `extra` is whatever else a caller
- * hands `settle`.
+ * unsettled until the test settles `held`. `rerender` changes what is on screen,
+ * `unmount` takes the dialog away, `extra` is whatever else a caller hands
+ * `settle`.
  */
 function renderSave(
   shown: Shown = true,
@@ -98,93 +97,191 @@ function renderSave(
   return { ...view, handlers, held, send };
 }
 
+/** Everything a settled save did, by handler: the calls each got, and the toasts raised. */
+function didOf(h: ReturnType<typeof renderSave>) {
+  return {
+    onError: h.handlers.onError.mock.calls,
+    onSuccess: h.handlers.onSuccess.mock.calls,
+    onLateSuccess: h.handlers.onLateSuccess.mock.calls,
+    toasts: mockedToastError.mock.calls,
+  };
+}
+
+const NOTHING = { onError: [], onSuccess: [], onLateSuccess: [], toasts: [] };
+
 beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
+  signIn();
 });
 
 afterEach(() => {
   signOutForGood();
 });
 
-describe("a save that settles while what sent it is on screen", () => {
-  it("hands a failure to onError, and toasts nothing", async () => {
-    const h = renderSave();
-    await h.send();
+describe("the app's own client", () => {
+  it("control: toasts a failed mutation with no onError of its own, which the opt-out of the hooks here avoids", async () => {
+    const PROBE = "PROBE-NOT-A-REAL-FAILURE";
+    const { result } = renderHook(
+      () => useMutation({ mutationFn: () => Promise.reject(new Error(PROBE)) }),
+      { wrapper: withAppClient() },
+    );
 
+    await act(async () => {
+      await result.current.mutateAsync().catch(() => undefined);
+    });
+
+    expect(mockedToastError.mock.calls).toEqual([[PROBE]]);
+  });
+});
+
+/**
+ * Where the save's sender is when the answer comes. The component hosts one
+ * dialog after another and tells them apart by what it passes as `shown`: an
+ * open flag, or the identity of what is open (null for none), so a dialog closed
+ * under a save, one opened after it and one put in its place without a close
+ * between are all a different dialog from the one the save belongs to. `open` is
+ * what a late success is told about the dialogs of the component: its draft may
+ * be put away only when none is showing it, and a dialog opened since is.
+ */
+const WHERE: {
+  name: string;
+  start: Shown;
+  changes: Shown[] | "unmount";
+  onScreen: boolean;
+  open: boolean;
+}[] = [
+  {
+    name: "still on screen",
+    start: true,
+    changes: [],
+    onScreen: true,
+    open: true,
+  },
+  {
+    name: "still on screen after other renders",
+    start: true,
+    changes: [true, true],
+    onScreen: true,
+    open: true,
+  },
+  {
+    name: "gone",
+    start: true,
+    changes: "unmount",
+    onScreen: false,
+    open: false,
+  },
+  {
+    name: "closed",
+    start: true,
+    changes: [false],
+    onScreen: false,
+    open: false,
+  },
+  {
+    name: "closed and opened again",
+    start: true,
+    changes: [false, true],
+    onScreen: false,
+    open: true,
+  },
+  {
+    name: "closed (a form)",
+    start: "form-a",
+    changes: [null],
+    onScreen: false,
+    open: false,
+  },
+  {
+    name: "closed and another form opened",
+    start: "form-a",
+    changes: [null, "form-b"],
+    onScreen: false,
+    open: true,
+  },
+  {
+    name: "replaced by another form, with no close between",
+    start: "form-a",
+    changes: ["form-b"],
+    onScreen: false,
+    open: true,
+  },
+];
+
+describe.each(WHERE)("a save that settles with its sender $name", (where) => {
+  async function sentThenMoved() {
+    const h = renderSave(where.start);
+    await h.send();
+    if (where.changes === "unmount") {
+      h.unmount();
+    } else {
+      for (const shown of where.changes) h.rerender({ shown });
+    }
+    return h;
+  }
+
+  it("hands a failure to onError, or toasts it once, naming the object and giving the server's words", async () => {
+    const h = await sentThenMoved();
     const failure = denied();
     h.held.reject(failure);
     await flushInAct();
 
-    expect(h.handlers.onError).toHaveBeenCalledTimes(1);
-    expect(h.handlers.onError).toHaveBeenCalledWith(failure);
-    expect(h.handlers.onSuccess).not.toHaveBeenCalled();
-    expect(h.handlers.onLateSuccess).not.toHaveBeenCalled();
-    expect(mockedToastError).not.toHaveBeenCalled();
-  });
-
-  it("hands a success to onSuccess, with its result, and toasts nothing", async () => {
-    const h = renderSave();
-    await h.send();
-
-    h.held.resolve("saved");
-    await flushInAct();
-
-    expect(h.handlers.onSuccess).toHaveBeenCalledTimes(1);
-    expect(h.handlers.onSuccess).toHaveBeenCalledWith("saved");
-    expect(h.handlers.onError).not.toHaveBeenCalled();
-    expect(h.handlers.onLateSuccess).not.toHaveBeenCalled();
-    expect(mockedToastError).not.toHaveBeenCalled();
-  });
-});
-
-describe("a save that settles after the component is gone", () => {
-  it("toasts a failure once, naming the object and giving the server's words, and calls nothing", async () => {
-    const h = renderSave();
-    await h.send();
-    h.unmount();
-
-    h.held.reject(denied());
-    await flushInAct();
-
-    expect(mockedToastError).toHaveBeenCalledTimes(1);
-    expect(mockedToastError).toHaveBeenCalledWith(
-      `${SAVING} failed: ${DENIED}`,
-    );
-    expect(h.handlers.onError).not.toHaveBeenCalled();
-    expect(h.handlers.onSuccess).not.toHaveBeenCalled();
-  });
-
-  it("does not call onSuccess for a success, and toasts nothing", async () => {
-    const h = renderSave();
-    await h.send();
-    h.unmount();
-
-    h.held.resolve("saved");
-    await flushInAct();
-
-    expect(h.handlers.onSuccess).not.toHaveBeenCalled();
-    expect(h.handlers.onError).not.toHaveBeenCalled();
-    expect(mockedToastError).not.toHaveBeenCalled();
-  });
-
-  it("calls onLateSuccess, and not onSuccess, with the result of a success", async () => {
-    const h = renderSave();
-    await h.send();
-    h.unmount();
-
-    h.held.resolve("saved");
-    await flushInAct();
-
-    expect(h.handlers.onLateSuccess).toHaveBeenCalledTimes(1);
-    // With the component gone, there is no dialog of its open.
-    expect(h.handlers.onLateSuccess).toHaveBeenCalledWith("saved", {
-      open: false,
+    expect(didOf(h)).toEqual({
+      ...NOTHING,
+      ...(where.onScreen
+        ? { onError: [[failure]] }
+        : { toasts: [[`${SAVING} failed: ${DENIED}`]] }),
     });
-    expect(h.handlers.onSuccess).not.toHaveBeenCalled();
   });
 
-  it("does not call onLateSuccess for a failure: that is a toast", async () => {
+  it("hands a success to onSuccess, or to onLateSuccess, which is told whether a dialog is open", async () => {
+    const h = await sentThenMoved();
+    h.held.resolve("saved");
+    await flushInAct();
+
+    expect(didOf(h)).toEqual({
+      ...NOTHING,
+      ...(where.onScreen
+        ? { onSuccess: [["saved"]] }
+        : { onLateSuccess: [["saved", { open: where.open }]] }),
+    });
+  });
+});
+
+describe("a save that settles after its session ended", () => {
+  // The protected outlet is keyed by user, so a sign-out or a change of hands
+  // unmounts the dialog. Both cases are covered anyway: the component being gone
+  // is not what keeps a toast naming the previous user's objects out of the next
+  // user's Toaster. The same answers in a session that goes on are the rows
+  // above.
+  describe.each(SESSION_ENDINGS)("after %s", (_, end) => {
+    it.each([
+      ["gone", "fails"],
+      ["gone", "succeeds"],
+      ["still mounted", "fails"],
+      ["still mounted", "succeeds"],
+    ])(
+      "does nothing at all when its component is %s and it %s",
+      async (life, answer) => {
+        const h = renderSave();
+        await h.send();
+        if (life === "gone") h.unmount();
+
+        end();
+        if (answer === "fails") h.held.reject(denied());
+        else h.held.resolve("saved");
+        await flushInAct();
+
+        expect(didOf(h)).toEqual(NOTHING);
+      },
+    );
+  });
+
+  it("is the session the save was sent in that counts, not the one at the time of the failure", async () => {
+    // Sent in the second session, settled in it: the earlier sign-out is not this save's.
+    clearTokens();
+    storeTokens(authResponse(VIEWER));
     const h = renderSave();
     await h.send();
     h.unmount();
@@ -192,72 +289,11 @@ describe("a save that settles after the component is gone", () => {
     h.held.reject(denied());
     await flushInAct();
 
-    expect(h.handlers.onLateSuccess).not.toHaveBeenCalled();
     expect(mockedToastError).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("a save that settles after another dialog took the place of the one that sent it", () => {
-  // The component hosts one dialog after another and tells them apart by its
-  // open flag, so a dialog closed under a save, and one opened after it, are
-  // both a different dialog from the one the save belongs to.
-  const CHANGES: [name: string, changes: boolean[]][] = [
-    ["closed", [false]],
-    ["closed and opened again", [false, true]],
-  ];
-
-  it.each(CHANGES)(
-    "toasts a failure once when the dialog was %s, and does not show it in what is on screen",
-    async (_, changes) => {
-      const h = renderSave(true);
-      await h.send();
-
-      for (const shown of changes) {
-        h.rerender({ shown });
-      }
-      h.held.reject(denied());
-      await flushInAct();
-
-      expect(mockedToastError).toHaveBeenCalledTimes(1);
-      expect(mockedToastError).toHaveBeenCalledWith(
-        `${SAVING} failed: ${DENIED}`,
-      );
-      expect(h.handlers.onError).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each(CHANGES)(
-    "does not call onSuccess for a success when the dialog was %s",
-    async (_, changes) => {
-      const h = renderSave(true);
-      await h.send();
-
-      for (const shown of changes) {
-        h.rerender({ shown });
-      }
-      h.held.resolve("saved");
-      await flushInAct();
-
-      expect(h.handlers.onSuccess).not.toHaveBeenCalled();
-      expect(h.handlers.onLateSuccess).toHaveBeenCalledTimes(1);
-      expect(mockedToastError).not.toHaveBeenCalled();
-    },
-  );
-
-  it("keeps a save with the dialog it was sent from when something else re-renders", async () => {
-    // The control for the two above: the flag is compared, not the render.
-    const h = renderSave(true);
-    await h.send();
-
-    h.rerender({ shown: true });
-    h.rerender({ shown: true });
-    h.held.reject(denied());
-    await flushInAct();
-
-    expect(h.handlers.onError).toHaveBeenCalledTimes(1);
-    expect(mockedToastError).not.toHaveBeenCalled();
-  });
-
+describe("saves sent from different dialogs of one component", () => {
   it("belongs a save sent from the second dialog to the second, not the first", async () => {
     const h = renderSave(true);
     h.rerender({ shown: false });
@@ -270,63 +306,74 @@ describe("a save that settles after another dialog took the place of the one tha
     expect(h.handlers.onError).toHaveBeenCalledTimes(1);
     expect(mockedToastError).not.toHaveBeenCalled();
   });
-});
 
-describe("what a late success is told about the dialogs of its component", () => {
-  // A component that hosts one dialog after another keeps a draft for them
-  // (what was typed in a Create dialog stays when it is dismissed), and a late
-  // success may put the draft away only when no dialog is showing it: a dialog
-  // opened since is showing it as its own text.
-  const SHOWN: [name: string, start: Shown, changes: Shown[], open: boolean][] =
-    [
-      ["the dialog was closed", true, [false], false],
-      ["the dialog was closed and opened again", true, [false, true], true],
-      ["the form was closed", "form-a", [null], false],
-      [
-        "the form was closed and another opened",
-        "form-a",
-        [null, "form-b"],
-        true,
-      ],
-      ["the form was replaced by another", "form-a", ["form-b"], true],
-    ];
+  it("keeps each with its own dialog when both are out: the older one's failure is a toast, the newer one's the dialog's", async () => {
+    const h = renderSave(true);
+    await h.send();
+    h.rerender({ shown: false });
+    h.rerender({ shown: true });
+    const newer = deferred<string>();
+    const onError = vi.fn();
+    await act(async () => {
+      const { settle, mutateAsync } = h.result.current;
+      settle(mutateAsync(newer.promise), {
+        action: "Saving thing-02",
+        onError,
+      });
+      await sleep(0);
+    });
 
-  it.each(SHOWN)(
-    "says whether a dialog is open when %s",
-    async (_, start, changes, open) => {
-      const h = renderSave(start);
-      await h.send();
+    h.held.reject(denied());
+    await flushInAct();
+    expect(mockedToastError.mock.calls).toEqual([
+      [`${SAVING} failed: ${DENIED}`],
+    ]);
+    expect(onError).not.toHaveBeenCalled();
 
-      for (const shown of changes) {
-        h.rerender({ shown });
-      }
-      h.held.resolve("saved");
-      await flushInAct();
-
-      expect(h.handlers.onLateSuccess).toHaveBeenCalledTimes(1);
-      expect(h.handlers.onLateSuccess).toHaveBeenCalledWith("saved", { open });
-    },
-  );
+    const failure = new ApiClientError(403, {
+      error: "forbidden",
+      message: "Permission check failed",
+    });
+    newer.reject(failure);
+    await flushInAct();
+    expect(onError.mock.calls).toEqual([[failure]]);
+    expect(h.handlers.onError).not.toHaveBeenCalled();
+    expect(mockedToastError).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("what a failure nobody is looking at says when the caller words it", () => {
   const REFUSED = "Saving thing-01 was refused: do it again from its dialog.";
 
-  it("toasts the whole text lateFailure gives, in place of the default, and hands it the error", async () => {
-    const lateFailure = vi.fn(() => REFUSED);
-    const h = renderSave(true, { lateFailure });
-    await h.send();
-    h.unmount();
+  it.each([
+    [
+      "the dialog was unmounted",
+      (h: ReturnType<typeof renderSave>) => {
+        h.unmount();
+      },
+    ],
+    [
+      "the dialog was closed rather than unmounted",
+      (h: ReturnType<typeof renderSave>) => {
+        h.rerender({ shown: false });
+      },
+    ],
+  ])(
+    "toasts the whole text lateFailure gives, in place of the default, and hands it the error, when %s",
+    async (_, leave) => {
+      const lateFailure = vi.fn(() => REFUSED);
+      const h = renderSave(true, { lateFailure });
+      await h.send();
+      leave(h);
 
-    const failure = denied();
-    h.held.reject(failure);
-    await flushInAct();
+      const failure = denied();
+      h.held.reject(failure);
+      await flushInAct();
 
-    expect(mockedToastError).toHaveBeenCalledTimes(1);
-    expect(mockedToastError).toHaveBeenCalledWith(REFUSED);
-    expect(lateFailure).toHaveBeenCalledTimes(1);
-    expect(lateFailure).toHaveBeenCalledWith(failure);
-  });
+      expect(mockedToastError.mock.calls).toEqual([[REFUSED]]);
+      expect(lateFailure.mock.calls).toEqual([[failure]]);
+    },
+  );
 
   it("keeps the default text when lateFailure has nothing to say about the error", async () => {
     const lateFailure = vi.fn(() => undefined);
@@ -338,23 +385,9 @@ describe("what a failure nobody is looking at says when the caller words it", ()
     await flushInAct();
 
     expect(lateFailure).toHaveBeenCalledTimes(1);
-    expect(mockedToastError).toHaveBeenCalledTimes(1);
-    expect(mockedToastError).toHaveBeenCalledWith(
-      `${SAVING} failed: ${DENIED}`,
-    );
-  });
-
-  it("toasts the text lateFailure gives when the dialog was closed rather than unmounted", async () => {
-    const lateFailure = vi.fn(() => REFUSED);
-    const h = renderSave(true, { lateFailure });
-    await h.send();
-    h.rerender({ shown: false });
-
-    h.held.reject(denied());
-    await flushInAct();
-
-    expect(mockedToastError).toHaveBeenCalledTimes(1);
-    expect(mockedToastError).toHaveBeenCalledWith(REFUSED);
+    expect(mockedToastError.mock.calls).toEqual([
+      [`${SAVING} failed: ${DENIED}`],
+    ]);
   });
 
   it("does not ask about a failure that what sent the save is there to show", async () => {
@@ -373,7 +406,6 @@ describe("what a failure nobody is looking at says when the caller words it", ()
   it.each(SESSION_ENDINGS)(
     "does not ask, and toasts nothing, after %s",
     async (_, end) => {
-      signIn();
       const lateFailure = vi.fn(() => REFUSED);
       const h = renderSave(true, { lateFailure });
       await h.send();
@@ -387,130 +419,6 @@ describe("what a failure nobody is looking at says when the caller words it", ()
       expect(mockedToastError).not.toHaveBeenCalled();
     },
   );
-});
-
-describe("a save that settles after its session ended", () => {
-  // The protected outlet is keyed by user, so a sign-out or a change of hands
-  // unmounts the dialog. Both cases are covered anyway: the component being
-  // gone is not what keeps a toast naming the previous user's objects out of
-  // the next user's Toaster.
-
-  it("control: toasts a failure that settles in the same session, with the component gone", async () => {
-    signIn();
-    const h = renderSave();
-    await h.send();
-    h.unmount();
-
-    h.held.reject(denied());
-    await flushInAct();
-
-    expect(mockedToastError).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(SESSION_ENDINGS)(
-    "toasts nothing for a failure after %s, with the component gone",
-    async (_, end) => {
-      signIn();
-      const h = renderSave();
-      await h.send();
-      h.unmount();
-
-      end();
-      h.held.reject(denied());
-      await flushInAct();
-
-      expect(mockedToastError).not.toHaveBeenCalled();
-      expect(h.handlers.onError).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each(SESSION_ENDINGS)(
-    "does nothing at all for a failure after %s, with the component still mounted",
-    async (_, end) => {
-      signIn();
-      const h = renderSave();
-      await h.send();
-
-      end();
-      h.held.reject(denied());
-      await flushInAct();
-
-      expect(h.handlers.onError).not.toHaveBeenCalled();
-      expect(mockedToastError).not.toHaveBeenCalled();
-    },
-  );
-
-  it("control: calls onSuccess for a success in the same session, with the component mounted", async () => {
-    signIn();
-    const h = renderSave();
-    await h.send();
-
-    h.held.resolve("saved");
-    await flushInAct();
-
-    expect(h.handlers.onSuccess).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(SESSION_ENDINGS)(
-    "does nothing at all for a success after %s, with the component still mounted",
-    async (_, end) => {
-      signIn();
-      const h = renderSave();
-      await h.send();
-
-      end();
-      h.held.resolve("saved");
-      await flushInAct();
-
-      expect(h.handlers.onSuccess).not.toHaveBeenCalled();
-      expect(h.handlers.onLateSuccess).not.toHaveBeenCalled();
-    },
-  );
-
-  it("control: calls onLateSuccess for a success in the same session, with the component gone", async () => {
-    signIn();
-    const h = renderSave();
-    await h.send();
-    h.unmount();
-
-    h.held.resolve("saved");
-    await flushInAct();
-
-    expect(h.handlers.onLateSuccess).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(SESSION_ENDINGS)(
-    "does not call onLateSuccess for a success after %s: it would hand a result to a screen it was not made for",
-    async (_, end) => {
-      signIn();
-      const h = renderSave();
-      await h.send();
-      h.unmount();
-
-      end();
-      h.held.resolve("saved");
-      await flushInAct();
-
-      expect(h.handlers.onLateSuccess).not.toHaveBeenCalled();
-      expect(h.handlers.onSuccess).not.toHaveBeenCalled();
-    },
-  );
-
-  it("is the session the save was sent in that counts, not the one at the time of the failure", async () => {
-    // Sent in the second session, settled in it: the earlier sign-out is not
-    // this save's.
-    signIn();
-    clearTokens();
-    storeTokens(authResponse(VIEWER));
-    const h = renderSave();
-    await h.send();
-    h.unmount();
-
-    h.held.reject(denied());
-    await flushInAct();
-
-    expect(mockedToastError).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("what a late failure says", () => {
@@ -546,10 +454,9 @@ describe("what a late failure says", () => {
       h.held.reject(failure);
       await flushInAct();
 
-      expect(mockedToastError).toHaveBeenCalledTimes(1);
-      expect(mockedToastError).toHaveBeenCalledWith(
-        `${SAVING} failed: ${said}`,
-      );
+      expect(mockedToastError.mock.calls).toEqual([
+        [`${SAVING} failed: ${said}`],
+      ]);
     },
   );
 });
