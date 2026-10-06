@@ -25,115 +25,46 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// The `delete` list used to be pinned here as a Fiber-binder test: nothing else
-// proved that the list survived the bind, and a dropped one would have sent a
-// perfectly valid request that cleared nothing.
-//
-// SetNodeACMEConfig no longer binds a struct — the route is declared
-// (internal/api/registry_acme.go) and the list arrives through the parameter
-// schema — so that link has moved with it.
-// TestNodeACMEDeleteListReachesTheHandlerAsAList in
-// internal/api/registry_acme_test.go drives the REAL declaration end to end and
-// asserts the same thing about the same three fields, including that `digest`
-// round-trips from the GET into the PUT.
+// The `delete` list reaches the handler as a list through the parameter schema
+// (internal/api/registry_acme.go): TestNodeACMEDeleteListReachesTheHandlerAsAList in
+// internal/api/registry_acme_test.go drives the REAL declaration end to end.
 
-// mapNodeConfigError turns PVE's digest-mismatch die into a 409, and pveproxy's
-// refusal of a body over its post limit into a 413. Everything else has to keep
-// the status mapProxmoxError gave it — the phrase list is the only thing
-// separating "someone else edited this node" from every other way the write can
-// fail, and answering 409 to an unrelated failure would tell the operator to
-// reload when reloading will not help; and 501 is also how pveproxy says "no such
-// uri", which is not a request that is too large.
+// TestMapNodeConfigError: mapNodeConfigError turns PVE's digest-mismatch die into a
+// 409, and pveproxy's refusal of a body over its post limit into a 413. Everything else
+// keeps the status mapProxmoxError gave it — the phrase list is the only thing
+// separating "someone else edited this node" from every other way the write can fail,
+// and answering 409 to an unrelated failure would tell the operator to reload when
+// reloading will not help; and 501 is also how pveproxy says "no such uri", which is
+// not a request that is too large.
 func TestMapNodeConfigError(t *testing.T) {
-	tests := []struct {
+	apiErr := func(status int, message string) error { return &proxmox.APIError{StatusCode: status, Message: message} }
+	const stale = "detected modified configuration - file changed by other user? Try again."
+	for _, tt := range []struct {
 		name string
 		err  error
 		want int
 	}{
-		{
-			name: "digest mismatch is a conflict",
-			err: &proxmox.APIError{
-				StatusCode: 500,
-				Message:    "detected modified configuration - file changed by other user? Try again.",
-			},
-			want: fiber.StatusConflict,
-		},
-		{
-			// The client refused it; it never reached the node.
-			name: "an undeletable key stays a 400",
-			err:  proxmox.ErrInvalidInput,
-			want: fiber.StatusBadRequest,
-		},
-		{
-			name: "an unreachable node stays a 502",
-			err:  proxmox.ErrConnectionFailed,
-			want: fiber.StatusBadGateway,
-		},
-		{
-			name: "a permission failure stays a 403",
-			err:  proxmox.ErrForbidden,
-			want: fiber.StatusForbidden,
-		},
-		{
-			name: "an unrelated PVE die stays a 502",
-			err: &proxmox.APIError{
-				StatusCode: 500,
-				Message:    "unable to parse acme domain config",
-			},
-			want: fiber.StatusBadGateway,
-		},
-		{
-			// pve-http-server's authenticate_and_handle_request answers a body over
-			// $limit_max_post with `error($reqstate, 501, "for data too large")`, and
-			// error() writes the reason into the body. The client wraps it, as it
-			// does every Proxmox error.
-			name: "a body pveproxy refuses as too large is a 413",
-			err: fmt.Errorf("set node pve-01 options: %w",
-				&proxmox.APIError{StatusCode: 501, Message: "for data too large"}),
-			want: fiber.StatusRequestEntityTooLarge,
-		},
-		{
-			name: "the phrase is matched whatever its case",
-			err:  &proxmox.APIError{StatusCode: 501, Message: "For Data Too Large"},
-			want: fiber.StatusRequestEntityTooLarge,
-		},
-		{
-			name: "any other 501 stays a 502",
-			err:  &proxmox.APIError{StatusCode: 501, Message: "no such uri"},
-			want: fiber.StatusBadGateway,
-		},
-		{
-			name: "a 501 for an unimplemented method stays a 502",
-			err:  &proxmox.APIError{StatusCode: 501, Message: "method 'PATCH' not available"},
-			want: fiber.StatusBadGateway,
-		},
-		{
-			name: "the phrase on another status stays a 502",
-			err:  &proxmox.APIError{StatusCode: 500, Message: "for data too large"},
-			want: fiber.StatusBadGateway,
-		},
-		{
-			name: "a digest mismatch is still a conflict when the client wrapped it",
-			err: fmt.Errorf("set node pve-01 options: %w", &proxmox.APIError{
-				StatusCode: 500,
-				Message:    `{"data":null,"message":"detected modified configuration - file changed by other user? Try again.\n"}`,
-			}),
-			want: fiber.StatusConflict,
-		},
-	}
-	for _, tt := range tests {
+		{"digest mismatch is a conflict", apiErr(500, stale), fiber.StatusConflict},
+		{"a digest mismatch is still a conflict when the client wrapped it",
+			fmt.Errorf("set node pve-01 options: %w", apiErr(500, `{"data":null,"message":"`+stale+`\n"}`)), fiber.StatusConflict},
+		// The client refused it; it never reached the node.
+		{"an undeletable key stays a 400", proxmox.ErrInvalidInput, fiber.StatusBadRequest},
+		{"an unreachable node stays a 502", proxmox.ErrConnectionFailed, fiber.StatusBadGateway},
+		{"a permission failure stays a 403", proxmox.ErrForbidden, fiber.StatusForbidden},
+		{"an unrelated PVE die stays a 502", apiErr(500, "unable to parse acme domain config"), fiber.StatusBadGateway},
+		// pve-http-server answers a body over $limit_max_post with a 501 "for data too
+		// large" and writes the reason into the body; the client wraps it like any error.
+		{"a body pveproxy refuses as too large is a 413",
+			fmt.Errorf("set node pve-01 options: %w", apiErr(501, "for data too large")), fiber.StatusRequestEntityTooLarge},
+		{"the phrase is matched whatever its case", apiErr(501, "For Data Too Large"), fiber.StatusRequestEntityTooLarge},
+		{"any other 501 stays a 502", apiErr(501, "no such uri"), fiber.StatusBadGateway},
+		{"a 501 for an unimplemented method stays a 502", apiErr(501, "method 'PATCH' not available"), fiber.StatusBadGateway},
+		{"the phrase on another status stays a 502", apiErr(500, "for data too large"), fiber.StatusBadGateway},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			var fe *fiber.Error
-			err := mapNodeConfigError(tt.err)
-			if !errors.As(err, &fe) {
-				t.Fatalf("mapNodeConfigError(%v) = %v, want a *fiber.Error", tt.err, err)
-			}
-			if fe.Code != tt.want {
-				t.Errorf("status = %d (%q), want %d", fe.Code, fe.Message, tt.want)
-			}
+			wantStatus(t, mapNodeConfigError(tt.err), tt.want)
 		})
 	}
-
 	if err := mapNodeConfigError(nil); err != nil {
 		t.Errorf("mapNodeConfigError(nil) = %v, want nil", err)
 	}
@@ -141,14 +72,13 @@ func TestMapNodeConfigError(t *testing.T) {
 
 // TestMapNodeConfigErrorBodyTooLargeSaysTheLimit pins what the caller is told. The
 // declared bound on the notes is 65536 characters, which is not what decides the
-// refusal, so the message has to say what does: the limit in bytes, that it moved
-// at Proxmox VE 8.4, that it is counted after encoding, and what to do about it.
+// refusal, so the message has to say what does: the limit in bytes, that it moved at
+// Proxmox VE 8.4, that it is counted after encoding, and what to do about it.
 func TestMapNodeConfigErrorBodyTooLargeSaysTheLimit(t *testing.T) {
 	err := mapNodeConfigError(&proxmox.APIError{StatusCode: 501, Message: "for data too large"})
+	wantStatus(t, err, fiber.StatusRequestEntityTooLarge)
 	var fe *fiber.Error
-	if !errors.As(err, &fe) || fe.Code != fiber.StatusRequestEntityTooLarge {
-		t.Fatalf("mapNodeConfigError = %v, want a 413", err)
-	}
+	errors.As(err, &fe)
 	for _, want := range []string{"too large for Proxmox", "64 KiB", "512 KiB", "Proxmox VE 8.4", "after encoding", "shorten the notes"} {
 		if !strings.Contains(fe.Message, want) {
 			t.Errorf("the message %q does not say %q", fe.Message, want)
@@ -162,12 +92,10 @@ func TestMapNodeConfigErrorBodyTooLargeSaysTheLimit(t *testing.T) {
 // --- POST /clusters/:cluster_id/acme/accounts: what the audit trail names ---
 
 // acmeAccountCreateMirror mirrors createACMEAccountParams from
-// internal/api/registry_acme.go: cluster_id from the shared standard option and
-// the name's pattern from the shared catalogue, rather than either being
-// retyped. The route's real vocabulary is then what these cases are validated
-// against, and in particular "" stays acceptable for `name` because
-// pve-object-id-or-empty is what the declaration reaches for — the whole reason
-// an empty name can reach the handler at all.
+// internal/api/registry_acme.go: cluster_id from the shared standard option and the
+// name's pattern from the shared catalogue, rather than either being retyped, so "" stays
+// acceptable for `name` (pve-object-id-or-empty) — the whole reason an empty name can
+// reach the handler at all.
 func acmeAccountCreateMirror(t *testing.T) apischema.Properties {
 	t.Helper()
 	return compiledMirror(t, apischema.Properties{
@@ -183,33 +111,25 @@ func acmeAccountCreateMirror(t *testing.T) apischema.Properties {
 			MinLength: apischema.Ptr(1),
 			MaxLength: apischema.Ptr(1024),
 		},
-		// Declared because the handler READS them: p.String panics on an
-		// undeclared key, so a mirror missing either one never reaches the
-		// TrackTask call at all. Their pattern is emptyOrACMEURL, a constant
-		// in package api rather than a catalogue rule, and package api imports
-		// this package — so it is retyped here the way ipSetEntryMirror
-		// retypes the cidr pattern. registry_acme_test.go is what holds the
-		// declaration itself to that constant.
-		"directory": {Type: apischema.String, Optional: true,
-			Pattern: `^$|^https?://`, MaxLength: apischema.Ptr(2048)},
-		"tos_url": {Type: apischema.String, Optional: true,
-			Pattern: `^$|^https?://`, MaxLength: apischema.Ptr(2048)},
+		// Declared because the handler READS them: p.String panics on an undeclared key.
+		// Their pattern is emptyOrACMEURL, a constant in package api, which imports this
+		// package, so it is retyped here; registry_acme_test.go holds the declaration to it.
+		"directory": {Type: apischema.String, Optional: true, Pattern: `^$|^https?://`, MaxLength: apischema.Ptr(2048)},
+		"tos_url":   {Type: apischema.String, Optional: true, Pattern: `^$|^https?://`, MaxLength: apischema.Ptr(2048)},
 	})
 }
 
-// acmeCreateHarness is one wired-up POST .../acme/accounts pipeline: a real
-// Fiber app carrying the real ACMEHandler, a real proxmox.Client pointed at a
-// capture server that answers with a UPID, and a DBTX that records every
-// statement the handler sends.
+// acmeCreateHarness is one wired-up POST .../acme/accounts pipeline: a real Fiber app
+// carrying the real ACMEHandler, a real proxmox.Client pointed at a capture server that
+// answers with a UPID, and a DBTX that records every statement the handler sends.
 type acmeCreateHarness struct {
 	app       *fiber.App
 	clusterID uuid.UUID
 	dbtx      *captureDBTX
-	// pubsub carries everything the request publishes. A real Publisher over
-	// miniredis, not the nil one the sibling harnesses pass: ClusterEvent
-	// returns on a nil receiver (internal/events/publisher.go), so with nil
-	// the fourth sink is a no-op and reverting it to req.Name would leave
-	// this file green.
+	// pubsub carries everything the request publishes. A real Publisher over miniredis,
+	// not the nil one the sibling harnesses pass: ClusterEvent returns on a nil receiver,
+	// so with nil the fourth sink is a no-op and reverting it to req.Name would leave this
+	// file green.
 	pubsub *redis.PubSub
 }
 
@@ -232,9 +152,9 @@ func newACMECreateHarness(t *testing.T) *acmeCreateHarness {
 		IsActive:             true,
 	}}, pathParamEncKey, nil, nil)
 
-	// PSubscribe rather than a computed channel name: events.publishChannel
-	// splits audit entries onto their own room, and re-deriving that split
-	// here would be a second copy of the routing rule to keep in step.
+	// PSubscribe rather than a computed channel name: events.publishChannel splits audit
+	// entries onto their own room, and re-deriving that split here would be a second copy
+	// of the routing rule.
 	rdb := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	pubsub := rdb.PSubscribe(context.Background(), "nexara:*")
@@ -249,11 +169,10 @@ func newACMECreateHarness(t *testing.T) *acmeCreateHarness {
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error {
 		SetProxmoxCacheLocal(c, cache)
-		// Load-bearing, and the one thing newPathParamHarness deliberately
-		// does NOT do. AuditLog returns at its first line without a user_id
-		// local, and TrackTask returns before InsertTaskHistory for the same
-		// reason, so every assertion below would run against an empty slice
-		// and pass no matter what the handler recorded.
+		// Load-bearing, and what newPathParamHarness deliberately does NOT do: AuditLog
+		// returns at its first line without a user_id local, and TrackTask returns before
+		// InsertTaskHistory for the same reason, so every assertion below would run
+		// against an empty slice and pass no matter what the handler recorded.
 		c.Locals("user_id", uuid.New())
 		return c.Next()
 	})
@@ -299,18 +218,10 @@ func (h *acmeCreateHarness) auditRow(t *testing.T) (db.InsertAuditLogParams, map
 	return rows[0], details
 }
 
-// taskDescription reads the description off the task_history insert.
-//
-// auditInserts cannot see this row because it filters on the STATEMENT TEXT
-// ("INSERT INTO audit_log"), not on which driver method carried it —
-// captureDBTX.record is called from Exec, Query and QueryRow alike, so the
-// task insert is in calls either way. What InsertTaskHistory being a :one
-// does change is that it arrives via QueryRow, which hands back
-// failRow{err: errCaptured} while captureDBTX.row is nil; the handler
-// discards that with `_, _ =`, which is why the args are captured at all.
-//
-// Matched on the statement and read positionally: description is arg 3 of
-// (cluster_id, user_id, upid, description, status, node, task_type).
+// taskDescription reads the description off the task_history insert. auditInserts
+// cannot see this row (it filters on the statement text), but captureDBTX.record
+// carries every call, so the insert is in calls; description is arg 3 of (cluster_id,
+// user_id, upid, description, status, node, task_type).
 func (h *acmeCreateHarness) taskDescription(t *testing.T) string {
 	t.Helper()
 
@@ -331,15 +242,11 @@ func (h *acmeCreateHarness) taskDescription(t *testing.T) string {
 }
 
 // eventResourceID returns the resource id of the acme_change event the create
-// published — the fourth sink, and the one that sits outside the TrackTask
-// struct literal, so the one most easily edited on its own.
-//
-// The create publishes THREE events and the Kind is what tells them apart.
-// Filtering on resource_type and action alone is not enough and was wrong here
-// until a mutation caught it: AuditLog publishes its audit_entry with the same
-// "acme_account"/"created" pair, fed from TrackTaskParams.ResourceID, and it
-// goes out FIRST — so the read returned the sink it was not testing and
-// reverting the real one left this file green.
+// published — the fourth sink, outside the TrackTask struct literal, so the one most
+// easily edited on its own. The create publishes THREE events and the Kind tells them
+// apart: AuditLog publishes its audit_entry with the same "acme_account"/"created" pair,
+// and it goes out FIRST, so filtering on resource_type and action alone returned the sink
+// that was not under test and reverting the real one left this file green.
 func (h *acmeCreateHarness) eventResourceID(t *testing.T) string {
 	t.Helper()
 
@@ -354,78 +261,41 @@ func (h *acmeCreateHarness) eventResourceID(t *testing.T) string {
 			if err := json.Unmarshal([]byte(msg.Payload), &ev); err != nil {
 				t.Fatalf("event payload is not an events.Event: %v (%s)", err, msg.Payload)
 			}
-			if ev.Kind == events.KindACMEChange && ev.ResourceType == "acme_account" &&
-				ev.Action == "created" {
+			if ev.Kind == events.KindACMEChange && ev.ResourceType == "acme_account" && ev.Action == "created" {
 				return ev.ResourceID
 			}
 		case <-deadline:
-			t.Fatal("no acme_change/acme_account/created event was published — the WS sink " +
-				"assertion is vacuous")
+			t.Fatal("no acme_change/acme_account/created event was published — the WS sink assertion is vacuous")
 		}
 	}
 }
 
-// TestACMEAccountCreateRecordsTheNameTheAccountGetsNotTheOneSent is the proof
-// that the audit trail names an account that exists.
-//
-// An omitted or empty name is valid input: registry_acme.go declares `name`
-// optional under the pve-object-id-or-empty rule, and proxmox.CreateACMEAccount
-// sets the form key only `if params.Name != ""`, so an empty name genuinely
-// reaches Proxmox as no name at all and the account is registered under
-// "default" (PVE/API2/ACMEAccount.pm, register_account:
-// `extract_param($param, 'name') // 'default'`). Every sink here used to record
-// the caller's "", naming nothing, in a row view:audit shows to every Viewer.
-//
-// ALL FOUR sinks are asserted per case on purpose: the audit row's resource_id,
-// its details.name, the task_history description and the WS event's resource
-// id. They are separately mutable lines fed from one value, and a test that
-// checked a subset would let the rest regress silently — which is exactly what
-// happened to the WS event while the harness passed a nil Publisher.
+// TestACMEAccountCreateRecordsTheNameTheAccountGetsNotTheOneSent is the proof that the
+// audit trail names an account that exists. An omitted or empty name is valid input
+// (`name` is optional under pve-object-id-or-empty, and proxmox.CreateACMEAccount sets
+// the form key only `if params.Name != ""`), so an empty name genuinely reaches Proxmox
+// as no name at all and the account is registered under "default"
+// (`extract_param($param, 'name') // 'default'` in PVE's register_account). Every sink
+// here used to record the caller's "", naming nothing, in a row view:audit shows every
+// Viewer. ALL FOUR sinks are asserted per case — the audit row's resource_id, its
+// details.name, the task_history description and the WS event's resource id — because
+// they are separately mutable lines fed from one value.
 func TestACMEAccountCreateRecordsTheNameTheAccountGetsNotTheOneSent(t *testing.T) {
 	tests := []struct {
 		name          string
 		body          string
 		wantName      string
-		wantDesc      string
 		wantDefaulted bool
 	}{
-		{
-			name:          "name omitted",
-			body:          `{"contact":"admin@example.com"}`,
-			wantName:      "default",
-			wantDesc:      "Create ACME account default",
-			wantDefaulted: true,
-		},
-		{
-			// Distinct from the case above at the wire: "" is a value
-			// apischema does not fall back to a default for, so it reaches
-			// the handler as a supplied empty string.
-			name:          "name explicitly empty",
-			body:          `{"name":"","contact":"admin@example.com"}`,
-			wantName:      "default",
-			wantDesc:      "Create ACME account default",
-			wantDefaulted: true,
-		},
-		{
-			// The case the name_defaulted flag exists for, and the only input
-			// that separates `req.Name == ""` from `name == default`: the
-			// caller ASKED for the name Proxmox would have chosen anyway.
-			// registry_acme_test.go proves the real route accepts it.
-			name:          "name explicitly default",
-			body:          `{"name":"default","contact":"admin@example.com"}`,
-			wantName:      "default",
-			wantDesc:      "Create ACME account default",
-			wantDefaulted: false,
-		},
-		{
-			// The control that keeps the fix from becoming "always say
-			// default": a chosen name must survive untouched.
-			name:          "name populated",
-			body:          `{"name":"letsencrypt-prod","contact":"admin@example.com"}`,
-			wantName:      "letsencrypt-prod",
-			wantDesc:      "Create ACME account letsencrypt-prod",
-			wantDefaulted: false,
-		},
+		{"name omitted", `{"contact":"admin@example.com"}`, "default", true},
+		// Distinct from the case above at the wire: "" is a value apischema does not fall
+		// back to a default for, so it reaches the handler as a supplied empty string.
+		{"name explicitly empty", `{"name":"","contact":"admin@example.com"}`, "default", true},
+		// The only input that separates `req.Name == ""` from `name == default`: the caller
+		// ASKED for the name Proxmox would have chosen anyway.
+		{"name explicitly default", `{"name":"default","contact":"admin@example.com"}`, "default", false},
+		// The control that keeps the fix from becoming "always say default".
+		{"name populated", `{"name":"letsencrypt-prod","contact":"admin@example.com"}`, "letsencrypt-prod", false},
 	}
 
 	for _, tt := range tests {
@@ -435,23 +305,20 @@ func TestACMEAccountCreateRecordsTheNameTheAccountGetsNotTheOneSent(t *testing.T
 
 			row, details := h.auditRow(t)
 			if row.ResourceID != tt.wantName {
-				t.Errorf("audit resource_id = %q, want %q — the row names an account that does "+
-					"not exist", row.ResourceID, tt.wantName)
+				t.Errorf("audit resource_id = %q, want %q — the row names an account that does not exist", row.ResourceID, tt.wantName)
 			}
 			if got, _ := details["name"].(string); got != tt.wantName {
 				t.Errorf("audit details.name = %v, want %q", details["name"], tt.wantName)
 			}
 			if got, ok := details["name_defaulted"].(bool); !ok || got != tt.wantDefaulted {
-				t.Errorf("audit details.name_defaulted = %v, want %t — without it the row cannot "+
-					"say whether Proxmox chose the name or the caller did",
+				t.Errorf("audit details.name_defaulted = %v, want %t — without it the row cannot say whether Proxmox chose the name or the caller did",
 					details["name_defaulted"], tt.wantDefaulted)
 			}
-			if got := h.taskDescription(t); got != tt.wantDesc {
-				t.Errorf("task_history description = %q, want %q", got, tt.wantDesc)
+			if got, want := h.taskDescription(t), "Create ACME account "+tt.wantName; got != want {
+				t.Errorf("task_history description = %q, want %q", got, want)
 			}
 			if got := h.eventResourceID(t); got != tt.wantName {
-				t.Errorf("WS event resource id = %q, want %q — the live feed names an account "+
-					"that does not exist", got, tt.wantName)
+				t.Errorf("WS event resource id = %q, want %q — the live feed names an account that does not exist", got, tt.wantName)
 			}
 		})
 	}
