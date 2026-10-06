@@ -1,67 +1,51 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act, render, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { OIDCCallbackPage } from "@/features/auth/pages/OIDCCallbackPage";
-import {
-  apiClient,
-  clearTokens,
-  getStoredUser,
-  StaleSessionError,
-} from "@/lib/api-client";
+import { apiClient, getStoredUser, StaleSessionError } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { queryClient } from "@/lib/query-client";
 import {
   ADMIN,
+  VIEWER,
   authResponse,
   callerOf,
   deferred,
   flush,
-  installFakeServer,
   json,
-  VIEWER,
-  type FakeServer,
 } from "@/test/fake-server";
 import {
   emptyPerSessionStores,
   PER_SESSION_STORES,
 } from "@/test/per-session-stores";
+import {
+  LOGOUT,
+  REFRESH,
+  REGISTER,
+  TOTP,
+  nearExpiry,
+  server,
+  settle,
+  installAuthStoreHarness,
+} from "@/test/api-client-harness";
 import type { User } from "@/types/api";
 import { useAuthStore } from "./auth-store";
 import { usePBSKeyStore } from "./pbs-key-store";
 
 /**
- * A session that ended, or changed hands, while something of it was still on
- * its way: through the real auth store and api-client, with only fetch
- * replaced (test/fake-server.ts).
+ * A session that ended, or changed hands, while something of it was still on its
+ * way: through the real auth store and api-client, with only fetch replaced.
  */
 
-const LOGOUT = "POST /api/v1/auth/logout";
-const LOGIN = "POST /api/v1/auth/login";
-const REFRESH = "POST /api/v1/auth/refresh";
-
-let server: FakeServer;
-
-/** What a request settles as: the error it failed with, or "sent". */
-function settle(request: Promise<unknown>) {
-  return request.then(
-    () => "sent",
-    (err: unknown) => err,
-  );
-}
-
-async function signInAs(
-  user: User,
-  permissions: string[] = [],
-  expiresIn = 3600,
-) {
-  server.routes[LOGIN] = () =>
-    json(authResponse(user, { permissions, expiresIn }));
-  await act(async () => {
-    await useAuthStore
-      .getState()
-      .login({ email: user.email, password: "example-password" });
-  });
-}
+const { signInAs } = installAuthStoreHarness({
+  store: useAuthStore,
+  act,
+  reset: () => {
+    queryClient.clear();
+    emptyPerSessionStores();
+    usePBSKeyStore.setState({ pending: [] });
+  },
+});
 
 async function signsOut() {
   server.routes[LOGOUT] = () => new Response(null, { status: 204 });
@@ -70,49 +54,21 @@ async function signsOut() {
   });
 }
 
-beforeEach(async () => {
-  localStorage.clear();
-  clearTokens();
-  queryClient.clear();
-  emptyPerSessionStores();
-  usePBSKeyStore.setState({ pending: [] });
-  useAuthStore.setState({
-    user: null,
-    permissions: [],
-    isAuthenticated: false,
-    isLoading: false,
-    isInitialized: false,
-    totpPending: false,
-    totpPendingToken: null,
-    isLoggingOut: false,
-  });
-  server = installFakeServer();
-  // No session cookie: the refresh is refused, as it is once a session is gone.
-  server.routes[REFRESH] = () => json({}, 401);
-  // Registers the forced-logout and refresh callbacks, as main.tsx does at
-  // boot. No stored user, so it returns at once.
-  await useAuthStore.getState().initialize();
-});
+/** The stored user, which the shared cookie's tabs read. */
+const storedUserId = () =>
+  (JSON.parse(localStorage.getItem("nexara_user") ?? "{}") as User).id;
 
-afterEach(() => {
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  clearTokens();
-  queryClient.clear();
-  localStorage.clear();
-  emptyPerSessionStores();
-  usePBSKeyStore.setState({ pending: [] });
-});
-
-// --- a refresh in flight when the session ends --------------------------------
+/** A read as whoever holds the token, to show whose token is in use. */
+async function readerOwner() {
+  server.routes["GET /api/v1/reader"] = (init) =>
+    json({ owner: callerOf(init) });
+  return apiClient.get(apiPath`/api/v1/reader`);
+}
 
 describe("a token refresh still in flight when the session ends", () => {
-  /**
-   * The admin is signed in, and a read finds its token refused: that starts a
-   * refresh, which the test holds back.
-   */
+  /** The admin is signed in, and a read finds its token refused: that starts a refresh, held back. */
   async function aRefreshIsInFlight() {
-    await signInAs(ADMIN, ["manage:user"]);
+    await signInAs(ADMIN, { permissions: ["manage:user"] });
     const held = deferred<Response>();
     server.routes[REFRESH] = () => held.promise;
     server.routes["GET /api/v1/probe"] = () =>
@@ -129,7 +85,6 @@ describe("a token refresh still in flight when the session ends", () => {
     await signsOut();
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
 
-    // The server answers the refresh the ended session started.
     held.resolve(json(authResponse(ADMIN, { permissions: ["manage:user"] })));
     await act(async () => {
       await probe;
@@ -142,12 +97,33 @@ describe("a token refresh still in flight when the session ends", () => {
     expect(localStorage.getItem("nexara_user")).toBeNull();
   });
 
-  it("(b) cannot take over the session of the user who signed in since", async () => {
+  it.each<[string, (held: ReturnType<typeof deferred<Response>>) => void]>([
+    [
+      "(b) cannot take over the session of the user who signed in since",
+      (held) => {
+        held.resolve(
+          json(authResponse(ADMIN, { permissions: ["manage:user"] })),
+        );
+      },
+    ],
+    [
+      "(c) cannot end the session of the user who signed in since, by failing",
+      (held) => {
+        held.resolve(json({}, 401)); // the ended session's refresh token is refused
+      },
+    ],
+    [
+      "(c') nor by the network failing",
+      (held) => {
+        held.reject(new TypeError("Failed to fetch"));
+      },
+    ],
+  ])("%s", async (_name, answer) => {
     const { held, probe } = await aRefreshIsInFlight();
     await signsOut();
-    await signInAs(VIEWER, ["view:cluster"]);
+    await signInAs(VIEWER, { permissions: ["view:cluster"] });
 
-    held.resolve(json(authResponse(ADMIN, { permissions: ["manage:user"] })));
+    answer(held);
     await act(async () => {
       await probe;
     });
@@ -157,50 +133,8 @@ describe("a token refresh still in flight when the session ends", () => {
     expect(state.isAuthenticated).toBe(true);
     expect(state.user?.id).toBe(VIEWER.id);
     expect(state.permissions).toEqual(["view:cluster"]);
-    expect(
-      (JSON.parse(localStorage.getItem("nexara_user") ?? "{}") as User).id,
-    ).toBe(VIEWER.id);
-    // And the token in use is theirs, not the admin's.
-    server.routes["GET /api/v1/reader"] = (init) =>
-      json({ owner: callerOf(init) });
-    expect(await apiClient.get(apiPath`/api/v1/reader`)).toEqual({
-      owner: VIEWER.id,
-    });
-  });
-
-  it("(c) cannot end the session of the user who signed in since, by failing", async () => {
-    const { held, probe } = await aRefreshIsInFlight();
-    await signsOut();
-    await signInAs(VIEWER, ["view:cluster"]);
-
-    held.resolve(json({}, 401)); // the ended session's refresh token is refused
-    await act(async () => {
-      await probe;
-    });
-    await flush();
-
-    expect(useAuthStore.getState().isAuthenticated).toBe(true);
-    expect(useAuthStore.getState().user?.id).toBe(VIEWER.id);
-    server.routes["GET /api/v1/reader"] = (init) =>
-      json({ owner: callerOf(init) });
-    expect(await apiClient.get(apiPath`/api/v1/reader`)).toEqual({
-      owner: VIEWER.id,
-    });
-  });
-
-  it("(c') nor by the network failing", async () => {
-    const { held, probe } = await aRefreshIsInFlight();
-    await signsOut();
-    await signInAs(VIEWER, ["view:cluster"]);
-
-    held.reject(new TypeError("Failed to fetch"));
-    await act(async () => {
-      await probe;
-    });
-    await flush();
-
-    expect(useAuthStore.getState().isAuthenticated).toBe(true);
-    expect(useAuthStore.getState().user?.id).toBe(VIEWER.id);
+    expect(storedUserId()).toBe(VIEWER.id);
+    expect(await readerOwner()).toEqual({ owner: VIEWER.id });
   });
 
   it("control: answered while its session is current, it still rehydrates the user", async () => {
@@ -225,20 +159,17 @@ describe("a token refresh still in flight when the session ends", () => {
   });
 });
 
-// --- a request in flight when the session ends ---------------------------------
-
 describe("a request still in flight when the session ends", () => {
   it("is not replayed as the user who signed in since, when it is answered 401", async () => {
     await signInAs(ADMIN);
     const answer = deferred<Response>();
     server.routes["GET /api/v1/x"] = () => answer.promise;
-    // The next user's cookie would refresh fine.
     const request = settle(apiClient.get(apiPath`/api/v1/x`));
     await waitFor(() => {
       expect(server.times("GET /api/v1/x")).toBe(1);
     });
     await signsOut();
-    server.routes[REFRESH] = () => json(authResponse(VIEWER));
+    server.routes[REFRESH] = () => json(authResponse(VIEWER)); // the next user's cookie would refresh fine
     await signInAs(VIEWER);
 
     answer.resolve(json({ error: "unauthorized", message: "expired" }, 401));
@@ -254,7 +185,7 @@ describe("a request still in flight when the session ends", () => {
   });
 
   it("is not sent at all when it was waiting on a refresh of the session that ended", async () => {
-    await signInAs(ADMIN, [], 30); // about to expire: the next request refreshes first
+    await signInAs(ADMIN, nearExpiry); // the next request refreshes first
     const held = deferred<Response>();
     server.routes[REFRESH] = () => held.promise;
     server.routes["GET /api/v1/x"] = () => json({ ok: true });
@@ -262,9 +193,9 @@ describe("a request still in flight when the session ends", () => {
     await waitFor(() => {
       expect(server.times(REFRESH)).toBe(1);
     });
-    // Ended without a request of its own (Sign out's would join the very
-    // refresh that is being held): the session is revoked elsewhere, say, and
-    // another request's failure finds out.
+    // Ended without a request of its own (Sign out's would join the very refresh
+    // that is being held): the session is revoked elsewhere, say, and another
+    // request's failure finds out.
     act(() => {
       useAuthStore.getState().clearAuth();
     });
@@ -280,15 +211,10 @@ describe("a request still in flight when the session ends", () => {
   });
 });
 
-// --- a session that changes hands without ending --------------------------------
-
 describe("an auth response that names a different user than the one held", () => {
-  /**
-   * The admin is signed in, with something read and something open that is
-   * theirs: a cached read, and every store that belongs to the session.
-   */
+  /** The admin is signed in, with something read and something open that is theirs. */
   async function adminHoldsState() {
-    await signInAs(ADMIN, ["manage:user"]);
+    await signInAs(ADMIN, { permissions: ["manage:user"] });
     queryClient.setQueryData(["previous-user"], "cached-read");
     for (const probe of Object.values(PER_SESSION_STORES)) probe.dirty();
     expect(queryClient.getQueryData(["previous-user"])).toBe("cached-read");
@@ -313,15 +239,12 @@ describe("an auth response that names a different user than the one held", () =>
 
   describe("by a token refresh (another tab signed someone else in on the shared cookie)", () => {
     async function nextRequestRefreshesAndTheCookieIsNow(who: User) {
-      // About to expire, so the next request refreshes it first.
-      await signInAs(ADMIN, ["manage:user"], 30);
+      await signInAs(ADMIN, { permissions: ["manage:user"], ...nearExpiry });
       queryClient.setQueryData(["previous-user"], "cached-read");
       for (const probe of Object.values(PER_SESSION_STORES)) probe.dirty();
       server.routes[REFRESH] = () =>
         json(authResponse(who, { permissions: ["view:cluster"] }));
-      server.routes["GET /api/v1/reader"] = (init) =>
-        json({ owner: callerOf(init) });
-      return apiClient.get<{ owner: string }>(apiPath`/api/v1/reader`);
+      return readerOwner();
     }
 
     it("forgets the previous user's reads and open state before the new identity applies, and does not send the read that waited on it as them", async () => {
@@ -347,38 +270,89 @@ describe("an auth response that names a different user than the one held", () =>
     });
   });
 
-  describe("by setAuthFromResponse (what the SSO callback calls)", () => {
-    it("forgets the previous user's state first", async () => {
+  // Each applies the identity it is answered with through the same function as
+  // login, and each passes it the user it is to compare against. The SSO callback
+  // calls setAuthFromResponse; the others start a session by their own request.
+  const viaStore = (call: (who: User) => Promise<void> | void) => {
+    return async (who: User) => {
+      await act(async () => {
+        await call(who);
+      });
+    };
+  };
+  const sessionOf = (who: User) =>
+    authResponse(who, { permissions: ["view:cluster"] });
+  const awaitingTotp = () => {
+    useAuthStore.setState({
+      totpPending: true,
+      totpPendingToken: "pending-01",
+    });
+  };
+
+  const ACTIONS: [name: string, run: (who: User) => Promise<void>][] = [
+    [
+      "setAuthFromResponse (what the SSO callback calls)",
+      viaStore((who) => {
+        useAuthStore.getState().setAuthFromResponse(sessionOf(who));
+      }),
+    ],
+    [
+      "a sign-in action, called while someone is still held",
+      (who) => signInAs(who, { permissions: ["view:cluster"] }),
+    ],
+    [
+      "verifyTotp",
+      viaStore(async (who) => {
+        server.routes[TOTP] = () => json(sessionOf(who));
+        awaitingTotp();
+        await useAuthStore.getState().verifyTotp("123456");
+      }),
+    ],
+    [
+      "verifyTotpRecovery",
+      viaStore(async (who) => {
+        server.routes[TOTP] = () => json(sessionOf(who));
+        awaitingTotp();
+        await useAuthStore.getState().verifyTotpRecovery("recovery-code-01");
+      }),
+    ],
+    [
+      "register",
+      viaStore(async (who) => {
+        server.routes[REGISTER] = () => json(sessionOf(who));
+        await useAuthStore.getState().register({
+          email: who.email,
+          display_name: who.display_name,
+          password: "example-password",
+        });
+      }),
+    ],
+  ];
+
+  it.each(ACTIONS)(
+    "%s: forgets the previous user's state first",
+    async (_name, run) => {
       await adminHoldsState();
 
-      act(() => {
-        useAuthStore
-          .getState()
-          .setAuthFromResponse(
-            authResponse(VIEWER, { permissions: ["view:cluster"] }),
-          );
-      });
+      await run(VIEWER);
 
       expect(useAuthStore.getState().user?.id).toBe(VIEWER.id);
       expect(useAuthStore.getState().permissions).toEqual(["view:cluster"]);
       nothingOfTheAdminsIsLeft();
-    });
+    },
+  );
 
-    it("control: the same user keeps it", async () => {
+  it.each(ACTIONS)(
+    "%s, control: the same user keeps it",
+    async (_name, run) => {
       await adminHoldsState();
 
-      act(() => {
-        useAuthStore
-          .getState()
-          .setAuthFromResponse(
-            authResponse(ADMIN, { permissions: ["view:cluster"] }),
-          );
-      });
+      await run(ADMIN);
 
       expect(useAuthStore.getState().permissions).toEqual(["view:cluster"]);
       everythingOfTheAdminsIsKept();
-    });
-  });
+    },
+  );
 
   describe("by the SSO callback page, over a live session", () => {
     function renderCallback() {
@@ -405,156 +379,44 @@ describe("an auth response that names a different user than the one held", () =>
 
       expect(useAuthStore.getState().user?.id).toBe(VIEWER.id);
       nothingOfTheAdminsIsLeft();
-      // The token in use is theirs.
-      server.routes["GET /api/v1/reader"] = (init) =>
-        json({ owner: callerOf(init) });
-      expect(await apiClient.get(apiPath`/api/v1/reader`)).toEqual({
-        owner: VIEWER.id,
-      });
+      expect(await readerOwner()).toEqual({ owner: VIEWER.id }); // the token in use is theirs
     });
   });
 
   describe("by a resume at boot (the cookie is no longer the stored user's)", () => {
-    function persistedStateOfTheStoredUser() {
+    it.each([
+      ["forgets what was persisted for the stored user", VIEWER, false],
+      [
+        "control: keeps it when the cookie is still the stored user's",
+        ADMIN,
+        true,
+      ],
+    ])("%s", async (_name, cookieOf, kept) => {
       localStorage.setItem("nexara_user", JSON.stringify(ADMIN));
       PER_SESSION_STORES["console-store.ts"]?.dirty();
       PER_SESSION_STORES["health-dismiss-store.ts"]?.dirty();
       useAuthStore.setState({ isInitialized: false });
-    }
-
-    it("forgets what was persisted for the stored user", async () => {
-      persistedStateOfTheStoredUser();
       server.routes[REFRESH] = () =>
-        json(authResponse(VIEWER, { permissions: ["view:cluster"] }));
+        json(authResponse(cookieOf, { permissions: ["view:cluster"] }));
 
       await useAuthStore.getState().initialize();
 
-      expect(useAuthStore.getState().user?.id).toBe(VIEWER.id);
+      expect(useAuthStore.getState().user?.id).toBe(cookieOf.id);
       expect(useAuthStore.getState().isInitialized).toBe(true);
-      expect(PER_SESSION_STORES["console-store.ts"]?.holdsData()).toBe(false);
+      expect(PER_SESSION_STORES["console-store.ts"]?.holdsData()).toBe(kept);
       expect(PER_SESSION_STORES["health-dismiss-store.ts"]?.holdsData()).toBe(
-        false,
+        kept,
       );
     });
-
-    it("control: keeps it when the cookie is still the stored user's", async () => {
-      persistedStateOfTheStoredUser();
-      server.routes[REFRESH] = () => json(authResponse(ADMIN));
-
-      await useAuthStore.getState().initialize();
-
-      expect(useAuthStore.getState().user?.id).toBe(ADMIN.id);
-      expect(PER_SESSION_STORES["console-store.ts"]?.holdsData()).toBe(true);
-      expect(PER_SESSION_STORES["health-dismiss-store.ts"]?.holdsData()).toBe(
-        true,
-      );
-    });
-  });
-
-  describe("by a sign-in action, called while someone is still held", () => {
-    it("forgets the previous user's state first", async () => {
-      await adminHoldsState();
-
-      await signInAs(VIEWER, ["view:cluster"]);
-
-      expect(useAuthStore.getState().user?.id).toBe(VIEWER.id);
-      nothingOfTheAdminsIsLeft();
-    });
-
-    it("control: the same user signing in again keeps it", async () => {
-      await adminHoldsState();
-
-      await signInAs(ADMIN, ["view:cluster"]);
-
-      expect(useAuthStore.getState().permissions).toEqual(["view:cluster"]);
-      everythingOfTheAdminsIsKept();
-    });
-  });
-
-  describe("by the other actions that start a session", () => {
-    // Each applies the identity it is answered with through the same function as
-    // login, and each passes it the user it is to compare against.
-    const TOTP = "POST /api/v1/auth/totp/verify-login";
-    const REGISTER = "POST /api/v1/auth/register";
-
-    const ACTIONS: [string, (who: User) => Promise<void>][] = [
-      [
-        "verifyTotp",
-        async (who) => {
-          server.routes[TOTP] = () =>
-            json(authResponse(who, { permissions: ["view:cluster"] }));
-          useAuthStore.setState({
-            totpPending: true,
-            totpPendingToken: "pending-01",
-          });
-          await useAuthStore.getState().verifyTotp("123456");
-        },
-      ],
-      [
-        "verifyTotpRecovery",
-        async (who) => {
-          server.routes[TOTP] = () =>
-            json(authResponse(who, { permissions: ["view:cluster"] }));
-          useAuthStore.setState({
-            totpPending: true,
-            totpPendingToken: "pending-01",
-          });
-          await useAuthStore.getState().verifyTotpRecovery("recovery-code-01");
-        },
-      ],
-      [
-        "register",
-        async (who) => {
-          server.routes[REGISTER] = () =>
-            json(authResponse(who, { permissions: ["view:cluster"] }));
-          await useAuthStore.getState().register({
-            email: who.email,
-            display_name: who.display_name,
-            password: "example-password",
-          });
-        },
-      ],
-    ];
-
-    it.each(ACTIONS)(
-      "%s: forgets the previous user's state first",
-      async (_name, action) => {
-        await adminHoldsState();
-
-        await act(async () => {
-          await action(VIEWER);
-        });
-
-        expect(useAuthStore.getState().user?.id).toBe(VIEWER.id);
-        nothingOfTheAdminsIsLeft();
-      },
-    );
-
-    it.each(ACTIONS)(
-      "%s, control: the same user keeps it",
-      async (_name, action) => {
-        await adminHoldsState();
-
-        await act(async () => {
-          await action(ADMIN);
-        });
-
-        expect(useAuthStore.getState().permissions).toEqual(["view:cluster"]);
-        everythingOfTheAdminsIsKept();
-      },
-    );
   });
 });
 
-// --- a Sign out the server was not told of -----------------------------------------
-
 describe("a Sign out whose request to the server failed", () => {
-  // The refresh cookie is still good, since the server never revoked it. Nothing
-  // that runs after the local sign-out may use it to sign the user back in: a
-  // request that finds nobody signed in starts a refresh after the sign-out, so
-  // it is nobody's stale answer.
+  // The server never revoked the refresh cookie. Nothing after the local sign-out
+  // may use it to sign the user back in: a request that finds nobody signed in
+  // starts a refresh after the sign-out, so it is nobody's stale answer.
   async function signedOutWithAGoodCookie() {
-    await signInAs(ADMIN, ["manage:user"]);
+    await signInAs(ADMIN, { permissions: ["manage:user"] });
     server.routes[LOGOUT] = () =>
       json({ error: "internal", message: "unavailable" }, 500);
     await act(async () => {
@@ -582,7 +444,7 @@ describe("a Sign out whose request to the server failed", () => {
 
   it("control: the next sign-in is a session like any other, which refreshes", async () => {
     await signedOutWithAGoodCookie();
-    await signInAs(VIEWER, ["view:cluster"]);
+    await signInAs(VIEWER, { permissions: ["view:cluster"] });
     let reads = 0;
     server.routes["GET /api/v1/reader"] = (init) =>
       ++reads === 1
@@ -599,24 +461,18 @@ describe("a Sign out whose request to the server failed", () => {
   });
 });
 
-// --- a page that starts signed out ----------------------------------------------------
-
-/**
- * The modules as a page load finds them, which is what initialize() is first
- * called on: nobody signed in, and no session ended in it yet. clearTokens() in
- * beforeEach is not that state — it records a session that ended, which is what
- * latches the api-client — so these tests get a copy of the module graph of
- * their own.
- */
-async function aFreshPage() {
-  vi.resetModules();
-  const { useAuthStore: store } = await import("./auth-store");
-  const { apiClient: client } = await import("@/lib/api-client");
-  const { apiPath: path } = await import("@/lib/api-path");
-  return { store, client, path };
-}
-
 describe("a page that starts signed out", () => {
+  // The modules as a page load finds them, which initialize() is first called
+  // on: no session ended in them yet. The harness's clearTokens() latches the
+  // api-client signed out, so these tests get a copy of the module graph.
+  async function aFreshPage() {
+    vi.resetModules();
+    const { useAuthStore: store } = await import("./auth-store");
+    const { apiClient: client } = await import("@/lib/api-client");
+    const { apiPath: path } = await import("@/lib/api-path");
+    return { store, client, path };
+  }
+
   // The refresh cookie outlives a session the server could not be told about, so
   // it can still be good on a page with no stored user. Nothing that runs on that
   // page may use it to sign anyone in: only a sign-in begins a session there.
@@ -629,7 +485,6 @@ describe("a page that starts signed out", () => {
 
     await page.store.getState().initialize(); // no stored user
     expect(page.store.getState().isInitialized).toBe(true);
-    // Something on the login page that asks for an authenticated path.
     const err = await settle(page.client.get(page.path`/api/v1/version`));
     await flush();
 
@@ -643,10 +498,9 @@ describe("a page that starts signed out", () => {
   it("control: a stored user is still resumed by initialize(), and the session then rotates like any other", async () => {
     const page = await aFreshPage();
     localStorage.setItem("nexara_user", JSON.stringify(ADMIN));
-    // Resumed with a token about to expire, so the next request refreshes it first.
     server.routes[REFRESH] = () =>
       json(
-        authResponse(ADMIN, { permissions: ["manage:user"], expiresIn: 30 }),
+        authResponse(ADMIN, { permissions: ["manage:user"], ...nearExpiry }),
       );
     server.routes["GET /api/v1/reader"] = (init) =>
       json({ owner: callerOf(init) });
@@ -664,11 +518,9 @@ describe("a page that starts signed out", () => {
   });
 });
 
-// --- a resume at boot while storage refuses the cached user --------------------------
-
 describe("a resume at boot while localStorage refuses the cached user", () => {
-  // A full quota. The token and the epoch are written before it, so a throw
-  // there left a token in memory for a session the boot then called signed out.
+  // A full quota. The token and the epoch are written before it, so a throw there
+  // left a token in memory for a session the boot then called signed out.
   function refuseTheCachedUser() {
     const setItem = Storage.prototype.setItem.bind(localStorage);
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(
@@ -694,11 +546,7 @@ describe("a resume at boot while localStorage refuses the cached user", () => {
     expect(state.isAuthenticated).toBe(true);
     expect(state.user?.id).toBe(ADMIN.id);
     expect(state.isInitialized).toBe(true);
-    server.routes["GET /api/v1/reader"] = (init) =>
-      json({ owner: callerOf(init) });
-    expect(await apiClient.get(apiPath`/api/v1/reader`)).toEqual({
-      owner: ADMIN.id,
-    });
+    expect(await readerOwner()).toEqual({ owner: ADMIN.id });
   });
 
   it("signs a login in as well", async () => {
@@ -707,15 +555,9 @@ describe("a resume at boot while localStorage refuses the cached user", () => {
     await signInAs(ADMIN);
 
     expect(useAuthStore.getState().isAuthenticated).toBe(true);
-    server.routes["GET /api/v1/reader"] = (init) =>
-      json({ owner: callerOf(init) });
-    expect(await apiClient.get(apiPath`/api/v1/reader`)).toEqual({
-      owner: ADMIN.id,
-    });
+    expect(await readerOwner()).toEqual({ owner: ADMIN.id });
   });
 });
-
-// --- a burst of requests meeting the same expiry ---------------------------------
 
 describe("several requests that all meet an expired session at once", () => {
   it("end it once, not once per request", async () => {
@@ -735,31 +577,25 @@ describe("several requests that all meet an expired session at once", () => {
       );
     });
 
-    // All five really were sent, and answered 401 ...
     for (const n of burst) {
       expect(server.times(`GET /api/v1/burst/${n}`)).toBe(1);
     }
-    // ... and the session ended exactly once.
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(resets).toHaveBeenCalledTimes(1);
   });
 });
 
-// --- a session that ends by a refusal while another tab's record is stored -------------
-
 describe("a session that ends by a refresh the server refused, with another user's record stored", () => {
   // Another tab has signed the viewer in, so nexara_user names them, while this
-  // tab still holds the admin's token. The refresh is refused: the cookie in the
-  // jar is dead, whoever's it was. The api-client ends the session first
-  // (clearTokens), which holds a token of the admin's and so leaves the viewer's
-  // record alone; and then the store's failure callback — the real one, wired by
-  // initialize() — signs the store out (clearAuth, which calls clearTokens again),
-  // and this time no token is held, so the record goes. A refused cookie is dead,
-  // and so is the session the record names.
+  // tab still holds the admin's token. The refresh is refused: the cookie is dead,
+  // whoever's it was. api-client ends the session first (clearTokens), which holds
+  // the admin's token and so leaves the viewer's record alone; then the store's
+  // failure callback signs the store out (clearAuth, clearTokens again) with no
+  // token held, so the record goes.
   it.each([401, 403])(
     "removes the record when the refresh is refused with %i: the second clearTokens, from the store's own sign-out",
     async (status) => {
-      await signInAs(ADMIN, [], -600); // expired: the next request refreshes first
+      await signInAs(ADMIN, { expiresIn: -600 }); // expired: the next request refreshes first
       localStorage.setItem("nexara_user", JSON.stringify(VIEWER));
       server.routes[REFRESH] = () => json({}, status);
       server.routes["GET /api/v1/probe"] = () =>
@@ -770,16 +606,14 @@ describe("a session that ends by a refresh the server refused, with another user
       });
 
       expect(server.times(REFRESH)).toBe(1);
-      // The store's own callback ran: the session is over here as well ...
       expect(useAuthStore.getState().isAuthenticated).toBe(false);
       expect(useAuthStore.getState().user).toBeNull();
-      // ... and the record that the first clearTokens left is gone with it.
       expect(getStoredUser()).toBeNull();
     },
   );
 
   it("control: the same refusal, with the admin's own record stored, removes it as well", async () => {
-    await signInAs(ADMIN, [], -600);
+    await signInAs(ADMIN, { expiresIn: -600 });
     expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
     server.routes[REFRESH] = () => json({}, 401);
 
@@ -792,11 +626,9 @@ describe("a session that ends by a refresh the server refused, with another user
   });
 });
 
-// --- a resume at boot that is slow ---------------------------------------------------
-
 describe("a resume at boot whose refresh is slow", () => {
-  // The login page does not wait for isInitialized, so someone can sign in
-  // while the stored user's session is still being resumed.
+  // The login page does not wait for isInitialized, so someone can sign in while
+  // the stored user's session is still being resumed.
   async function bootingWhileSomeoneSignsIn() {
     localStorage.setItem("nexara_user", JSON.stringify(ADMIN));
     useAuthStore.setState({ isInitialized: false });
@@ -806,7 +638,7 @@ describe("a resume at boot whose refresh is slow", () => {
     await waitFor(() => {
       expect(server.times(REFRESH)).toBe(1);
     });
-    await signInAs(VIEWER, ["view:cluster"]);
+    await signInAs(VIEWER, { permissions: ["view:cluster"] });
     return { held, booting };
   }
 
@@ -823,9 +655,7 @@ describe("a resume at boot whose refresh is slow", () => {
     expect(state.permissions).toEqual(["view:cluster"]);
     expect(state.isInitialized).toBe(true);
     expect(state.isLoading).toBe(false);
-    expect(
-      (JSON.parse(localStorage.getItem("nexara_user") ?? "{}") as User).id,
-    ).toBe(VIEWER.id);
+    expect(storedUserId()).toBe(VIEWER.id);
   });
 
   it("does not end the session of the user who signed in meanwhile, when it fails", async () => {

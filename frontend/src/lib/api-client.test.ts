@@ -9,49 +9,40 @@ import {
 } from "vitest";
 
 import type { ApiPath } from "./api-path";
-import type { AuthResponse } from "@/types/api";
+import { ADMIN, authResponse } from "@/test/fake-server";
+import { freshClient, type Client } from "@/test/api-client-harness";
 
 /**
- * The runtime half of the ApiPath brand, at the three places a request
- * leaves the SPA: request() behind every apiClient method, apiFetch() for the
- * downloads and uploads apiClient does not make, and openApiRequest() for the
- * upload that needs an XMLHttpRequest. A cast gets any value past the
- * compile-time brand; these refuse it before anything is sent — the token
- * refresh that request() and apiFetch() would otherwise send first included.
+ * The runtime half of the ApiPath brand, at the three places a request leaves the
+ * SPA: request() behind every apiClient method, apiFetch(), and openApiRequest()
+ * for the upload that needs an XMLHttpRequest. A cast gets any value past the
+ * compile-time brand; these refuse it before anything is sent.
  */
 
-// A forged path: what `as ApiPath` lets through the type checker. No apiPath
-// template can produce it — the tag refuses a ".." value.
+// What `as ApiPath` lets through the type checker. No apiPath template can
+// produce it: the tag refuses a ".." value.
 const FORGED = "/api/v1/clusters/c/pools/.." as ApiPath;
 // Not even a string: what `as never` lets through.
 const NOT_A_STRING = 42 as never;
 
-const TOKEN = "access-token-01";
-const REFRESH = "/api/v1/auth/refresh";
+const TOKEN = `token-${ADMIN.id}`;
+const REFRESH_URL = "/api/v1/auth/refresh";
 
 let fetchSpy: MockInstance<typeof fetch>;
-// The modules as a page load finds them, a copy of each per test (below).
-let api: typeof import("./api-client");
+// The modules as a page load finds them, a fresh copy per test (freshClient):
+// no token held and no session ended, so request() and apiFetch() refresh one first.
+let api: Client;
 let apiPath: typeof import("./api-path").apiPath;
 let PathSegmentError: typeof import("./api-path").PathSegmentError;
 
 beforeEach(async () => {
-  // A page load, before auth-store's initialize() has run: no access token in
-  // memory and no session ended in it yet, so request() and apiFetch() would
-  // refresh one — a request of its own — before sending anything. clearTokens()
-  // is not that state: it records that a session ended, after which nothing is
-  // resumed off the refresh cookie.
-  vi.resetModules();
-  api = await import("./api-client");
+  api = await freshClient();
   ({ apiPath, PathSegmentError } = await import("./api-path"));
-  // Everything is answered with the version document, but the refresh: a page
-  // that has just loaded has no session cookie to resume, and the server says
-  // so with a 401. The version document is no answer to a refresh. The client
-  // reads it as a refresh that failed, and does not send the request that
-  // waited on it (lib/api-client.refresh.test.ts).
+  // Everything is answered with the version document but the refresh: a fresh
+  // page has no cookie to resume, and the server says so with a 401.
   fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
     Promise.resolve(
-      input === REFRESH
+      input === REFRESH_URL
         ? new Response("{}", { status: 401 })
         : new Response('{"version":"dev"}', {
             status: 200,
@@ -68,23 +59,56 @@ afterEach(() => {
 
 /** A signed-in session: an access token that is nowhere near expiry. */
 function signIn() {
-  api.storeTokens({
-    access_token: TOKEN,
-    refresh_token: "",
-    expires_at: Math.floor(Date.now() / 1000) + 3600,
-    permissions: [],
-    user: { id: "u1", email: "user01@example.com" },
-  } as unknown as AuthResponse);
+  api.storeTokens(authResponse(ADMIN));
 }
 
-describe("request()", () => {
-  it("refuses a forged path before sending anything, the token refresh included", async () => {
-    await expect(api.apiClient.get(FORGED)).rejects.toBeInstanceOf(
-      PathSegmentError,
-    );
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
+/** Watches every XMLHttpRequest's open(), without jsdom acting on it. */
+function spyOnOpen() {
+  return vi
+    .spyOn(XMLHttpRequest.prototype, "open")
+    .mockImplementation(() => undefined);
+}
 
+/** Watches every header set on an XMLHttpRequest. */
+function spyOnHeaders() {
+  return vi
+    .spyOn(XMLHttpRequest.prototype, "setRequestHeader")
+    .mockImplementation(() => undefined);
+}
+
+describe("a path the tag did not build", () => {
+  it.each<[string, () => Promise<unknown>]>([
+    ["request()", () => api.apiClient.get(FORGED)],
+    ["apiFetch()", () => api.apiFetch(FORGED)],
+    [
+      "apiFetch() with a path that is not a string",
+      () => api.apiFetch(NOT_A_STRING),
+    ],
+    [
+      // The branch the token refresh and the version probe take: it sends
+      // without resolving a token, but not without the check.
+      "apiFetch() with auth: false",
+      () => api.apiFetch(FORGED, {}, { auth: false }),
+    ],
+    ["openApiRequest()", () => api.openApiRequest("POST", FORGED)],
+    [
+      "openApiRequest() with a path that is not a string",
+      () => api.openApiRequest("POST", NOT_A_STRING),
+    ],
+  ])(
+    "is refused by %s before anything is sent, the token refresh included",
+    async (_name, send) => {
+      const openSpy = spyOnOpen();
+
+      await expect(send()).rejects.toBeInstanceOf(PathSegmentError);
+
+      expect(fetchSpy).not.toHaveBeenCalled(); // no session is held: a token would have meant a refresh
+      expect(openSpy).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("request()", () => {
   it("sends a path the tag built", async () => {
     await api.apiClient.getPublic(apiPath`/api/v1/version`);
     expect(fetchSpy.mock.calls.map((call) => call[0])).toEqual([
@@ -97,8 +121,8 @@ describe("request()", () => {
 
     await api.apiClient.postPublic(apiPath`/api/v1/pubp`, {});
     await api.apiClient.getPublic(apiPath`/api/v1/pub`);
-    // The control, so that the header being absent above is not the probe
-    // being blind to it: the same session's ordinary request carries it.
+    // The control: the same session's ordinary request carries the header, so
+    // its absence above is not the probe being blind to it.
     await api.apiClient.get(apiPath`/api/v1/priv`);
 
     expect(
@@ -128,10 +152,9 @@ describe("request(), when the answer is not OK", () => {
     );
   }
 
-  // A 500 whose body parses, but is no {error, message} envelope: what a proxy
-  // or a WAF in front of the server may send. Each has to come out as an
-  // ApiClientError of its own status — `null` used to throw a TypeError out of
-  // the error's own constructor, and the others to carry a body that is none.
+  // A 500 whose body parses, but is no {error, message} envelope: what a proxy or
+  // a WAF may send. Each has to come out as an ApiClientError of its own status;
+  // `null` used to throw a TypeError out of the error's own constructor.
   it.each([
     ["JSON null", "null"],
     ["a JSON string", '"oops"'],
@@ -194,47 +217,23 @@ describe("request(), when the answer is not OK", () => {
 });
 
 describe("apiFetch()", () => {
-  it("refuses a forged path before sending anything, the token refresh included", async () => {
-    await expect(api.apiFetch(FORGED)).rejects.toBeInstanceOf(PathSegmentError);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("refuses a path that is not a string with the same error", async () => {
-    await expect(api.apiFetch(NOT_A_STRING)).rejects.toBeInstanceOf(
-      PathSegmentError,
-    );
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("with auth: false, still refuses a forged path before sending it", async () => {
-    // The branch the token refresh and the version probe take. It sends
-    // without resolving a token, but not without the check.
-    await expect(
-      api.apiFetch(FORGED, {}, { auth: false }),
-    ).rejects.toBeInstanceOf(PathSegmentError);
-    expect(fetchSpy).not.toHaveBeenCalled();
+  const initOf = () => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin" as const,
+    body: "{}",
   });
 
   it("sends the init it is given, with the session's access token added", async () => {
     signIn();
-    const init = {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin" as const,
-      body: "{}",
-    };
+    const init = initOf();
     await api.apiFetch(apiPath`/api/v1/settings/branding/logo`, init);
     expect(fetchSpy.mock.calls).toEqual([
       [
         "/api/v1/settings/branding/logo",
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TOKEN}`,
-          },
-          credentials: "same-origin",
-          body: "{}",
+          ...init,
+          headers: { ...init.headers, Authorization: `Bearer ${TOKEN}` },
         },
       ],
     ]);
@@ -242,31 +241,19 @@ describe("apiFetch()", () => {
 
   it("with auth: false, sends the init exactly as given and resolves no token", async () => {
     // No token in memory: resolving one would send a refresh first.
-    const init = {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin" as const,
-      body: "{}",
-    };
+    const init = initOf();
     await api.apiFetch(apiPath`/api/v1/auth/refresh`, init, { auth: false });
-    expect(fetchSpy.mock.calls).toEqual([["/api/v1/auth/refresh", init]]);
+    expect(fetchSpy.mock.calls).toEqual([[REFRESH_URL, init]]);
   });
 
   it("on a fresh page, sends no Authorization header when no session can be had", async () => {
-    fetchSpy.mockImplementation((input) =>
-      Promise.resolve(
-        input === REFRESH
-          ? new Response("{}", { status: 401 })
-          : new Response("{}", { status: 200 }),
-      ),
-    );
     await api.apiFetch(apiPath`/api/v1/version`, {
       credentials: "same-origin",
     });
-    // The refresh came first — and after the path was checked — and failed;
-    // the request went out without a token rather than with "Bearer null".
+    // The refresh came first (after the path was checked) and failed; the request
+    // went out without a token rather than with "Bearer null".
     expect(fetchSpy.mock.calls.map((call) => call[0])).toEqual([
-      REFRESH,
+      REFRESH_URL,
       "/api/v1/version",
     ]);
     expect(fetchSpy.mock.calls[1]?.[1]).toEqual({
@@ -277,9 +264,6 @@ describe("apiFetch()", () => {
   it("once a session has ended, sends no refresh and no Authorization header", async () => {
     signIn();
     api.clearTokens();
-    fetchSpy.mockImplementation(() =>
-      Promise.resolve(new Response("{}", { status: 200 })),
-    );
     await api.apiFetch(apiPath`/api/v1/version`, {
       credentials: "same-origin",
     });
@@ -295,33 +279,6 @@ describe("apiFetch()", () => {
 });
 
 describe("openApiRequest()", () => {
-  /** Watches every XMLHttpRequest's open(), without jsdom acting on it. */
-  function spyOnOpen() {
-    return vi
-      .spyOn(XMLHttpRequest.prototype, "open")
-      .mockImplementation(() => undefined);
-  }
-
-  /** Watches every header set on an XMLHttpRequest. */
-  function spyOnHeaders() {
-    return vi
-      .spyOn(XMLHttpRequest.prototype, "setRequestHeader")
-      .mockImplementation(() => undefined);
-  }
-
-  it("refuses a forged path before opening a request or refreshing a token", async () => {
-    const openSpy = spyOnOpen();
-    await expect(api.openApiRequest("POST", FORGED)).rejects.toBeInstanceOf(
-      PathSegmentError,
-    );
-    await expect(
-      api.openApiRequest("POST", NOT_A_STRING),
-    ).rejects.toBeInstanceOf(PathSegmentError);
-    expect(openSpy).not.toHaveBeenCalled();
-    // No session is held, so a token would have meant a refresh request.
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   it("opens a path the tag built, on the request it returns", async () => {
     const openSpy = spyOnOpen();
     const xhr = await api.openApiRequest("POST", apiPath`/api/v1/version`);
@@ -355,9 +312,8 @@ describe("openApiRequest()", () => {
     spyOnOpen();
     const headerSpy = spyOnHeaders();
     await api.openApiRequest("POST", apiPath`/api/v1/version`);
-    // The refresh was tried, and failed; nothing was set rather than
-    // "Bearer null".
-    expect(fetchSpy.mock.calls.map((call) => call[0])).toEqual([REFRESH]);
+    // The refresh was tried, and failed; nothing was set rather than "Bearer null".
+    expect(fetchSpy.mock.calls.map((call) => call[0])).toEqual([REFRESH_URL]);
     expect(headerSpy).not.toHaveBeenCalled();
   });
 
@@ -382,8 +338,8 @@ describe("openApiRequest()", () => {
       (xhr as XMLHttpRequest).open("DELETE", "/api/v1/clusters/c1");
     }).toThrow(PathSegmentError);
     expect(openSpy.mock.calls).toEqual([["POST", "/api/v1/version"]]);
-    // And the refusal cannot itself be swapped out or removed: the request's
-    // own open() is neither writable nor configurable.
+    // And the refusal cannot itself be swapped out or removed: the request's own
+    // open() is neither writable nor configurable.
     const descriptor = Object.getOwnPropertyDescriptor(xhr, "open");
     expect(descriptor?.writable).toBe(false);
     expect(descriptor?.configurable).toBe(false);

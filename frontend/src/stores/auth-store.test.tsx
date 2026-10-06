@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import {
-  afterEach,
   beforeEach,
   describe,
   expect,
@@ -23,145 +22,107 @@ import {
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useCreateStorage } from "@/features/storage/api/storage-queries";
-import { apiClient, clearTokens } from "@/lib/api-client";
+import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { queryClient } from "@/lib/query-client";
 import {
   ADMIN,
+  VIEWER,
   authResponse,
   callerOf,
   deferred,
   flush,
-  installFakeServer,
   json,
   sleep,
-  VIEWER,
-  type FakeServer,
 } from "@/test/fake-server";
 import {
   emptyPerSessionStores,
   PER_SESSION_STORES,
 } from "@/test/per-session-stores";
-import type { User } from "@/types/api";
+import {
+  LOGOUT,
+  LOGOUT_ALL,
+  REFRESH,
+  server,
+  installAuthStoreHarness,
+} from "@/test/api-client-harness";
 import { useAuthStore } from "./auth-store";
 import { usePBSKeyStore } from "./pbs-key-store";
 
 /**
  * What ending a session does to what the SPA holds (stores/session-reset.ts),
- * through the real auth store, api-client and TanStack singleton the app runs
- * on: only fetch is replaced, by a small server that answers per caller.
- *
- * Not renderWithProviders' client, which has gcTime 0 and staleTime 0: the bug
- * this guards is the app's own five-minute staleTime serving the next user the
- * previous user's reads.
+ * through the real auth store, api-client and TanStack singleton the app runs on.
+ * Not renderWithProviders' client (gcTime 0, staleTime 0): the bug this guards is
+ * the app's own five-minute staleTime serving the next user the previous user's
+ * reads.
  */
 
 // Synthetic key file, as in PendingPBSKey.test.tsx.
 const PBS_KEY =
   '{"kdf":null,"data":"CANARY-auth-store-key","fingerprint":"aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"}';
 
-const LOGOUT = "POST /api/v1/auth/logout";
-const LOGOUT_ALL = "POST /api/v1/auth/logout-all";
-const LOGIN = "POST /api/v1/auth/login";
-const REFRESH = "POST /api/v1/auth/refresh";
+const { signInAs } = installAuthStoreHarness({
+  store: useAuthStore,
+  act,
+  reset: () => {
+    queryClient.clear();
+    emptyPerSessionStores();
+    usePBSKeyStore.setState({ pending: [] });
+  },
+});
 
-// --- a server that answers per caller ---------------------------------------
-
-let routes: FakeServer["routes"];
-let sent: string[];
-
-function stubServer() {
-  const server = installFakeServer();
-  routes = server.routes;
-  sent = server.sent;
-}
-
-/** How many times the SPA sent exactly this request. */
-function times(key: string): number {
-  return sent.filter((k) => k === key).length;
-}
-
-async function signInAs(user: User) {
-  routes[LOGIN] = () => json(authResponse(user));
-  await act(async () => {
-    await useAuthStore
-      .getState()
-      .login({ email: user.email, password: "example-password" });
-  });
-}
+const signedOut = () => new Response(null, { status: 204 });
 
 function withClient(ui: ReactNode) {
   return <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>;
 }
 
-beforeEach(async () => {
-  localStorage.clear();
-  clearTokens();
-  queryClient.clear();
-  emptyPerSessionStores();
-  usePBSKeyStore.setState({ pending: [] });
-  useAuthStore.setState({
-    user: null,
-    permissions: [],
-    isAuthenticated: false,
-    isLoading: false,
-    isInitialized: false,
-    totpPending: false,
-    totpPendingToken: null,
-    isLoggingOut: false,
-  });
-  stubServer();
-  // No session cookie: the refresh is refused, as it is once a session is gone.
-  routes[REFRESH] = () => json({}, 401);
-  // Registers the forced-logout and refresh callbacks, as main.tsx does at
-  // boot. No stored user, so it returns at once.
-  await useAuthStore.getState().initialize();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  clearTokens();
-  queryClient.clear();
-  localStorage.clear();
-  emptyPerSessionStores();
-  usePBSKeyStore.setState({ pending: [] });
-});
-
-// --- the paths that end a session --------------------------------------------
-
 describe("every path that ends a session", () => {
-  const PATHS: Record<string, () => Promise<void>> = {
-    logout: async () => {
-      routes[LOGOUT] = () => new Response(null, { status: 204 });
-      await useAuthStore.getState().logout();
-    },
-    "logout, with the server call failing": async () => {
-      routes[LOGOUT] = () =>
-        json({ error: "internal", message: "unavailable" }, 500);
-      await useAuthStore.getState().logout();
-    },
-    logoutAll: async () => {
-      routes[LOGOUT_ALL] = () => new Response(null, { status: 204 });
-      await useAuthStore.getState().logoutAll();
-    },
-    clearAuth: () => {
-      useAuthStore.getState().clearAuth();
-      return Promise.resolve();
-    },
+  it.each<[name: string, end: () => Promise<void>]>([
+    [
+      "logout",
+      async () => {
+        server.routes[LOGOUT] = signedOut;
+        await useAuthStore.getState().logout();
+      },
+    ],
+    [
+      "logout, with the server call failing",
+      async () => {
+        server.routes[LOGOUT] = () =>
+          json({ error: "internal", message: "unavailable" }, 500);
+        await useAuthStore.getState().logout();
+      },
+    ],
+    [
+      "logoutAll",
+      async () => {
+        server.routes[LOGOUT_ALL] = signedOut;
+        await useAuthStore.getState().logoutAll();
+      },
+    ],
+    [
+      "clearAuth",
+      () => {
+        useAuthStore.getState().clearAuth();
+        return Promise.resolve();
+      },
+    ],
     // The callback initialize() registers with api-client: a request is
     // answered 401 and the refresh that follows is refused too.
-    "the forced logout of a request whose refresh is refused": async () => {
-      routes["GET /api/v1/probe"] = () =>
-        json({ error: "unauthorized", message: "expired" }, 401);
-      await apiClient.get(apiPath`/api/v1/probe`).catch(() => undefined);
-    },
-  };
-
-  it.each(Object.entries(PATHS))(
+    [
+      "the forced logout of a request whose refresh is refused",
+      async () => {
+        server.routes["GET /api/v1/probe"] = () =>
+          json({ error: "unauthorized", message: "expired" }, 401);
+        await apiClient.get(apiPath`/api/v1/probe`).catch(() => undefined);
+      },
+    ],
+  ])(
     "%s empties the query cache and every store that belongs to the session, and leaves a waiting PBS key",
     async (_name, endTheSession) => {
-      routes["GET /api/v1/reader"] = (init) => json({ owner: callerOf(init) });
+      server.routes["GET /api/v1/reader"] = (init) =>
+        json({ owner: callerOf(init) });
       await signInAs(ADMIN);
       queryClient.setQueryData(["previous-user"], "cached-read");
       await queryClient.query({
@@ -177,8 +138,8 @@ describe("every path that ends a session", () => {
         storage: "store01",
         keyText: PBS_KEY,
       });
-      // The same setup holds all of it before — what is gone below is gone
-      // because the session ended, not because it was never there.
+      // All of it is there before, so that what is gone below is gone because
+      // the session ended, not because it was never there.
       expect(useAuthStore.getState().isAuthenticated).toBe(true);
       expect(queryClient.getQueryData(["previous-user"])).toBe("cached-read");
       expect(queryClient.getQueryData(["fetched-by-the-api-client"])).toEqual({
@@ -204,8 +165,6 @@ describe("every path that ends a session", () => {
   );
 });
 
-// --- a fetch in flight -------------------------------------------------------
-
 describe("a fetch in flight when the session ends", () => {
   function startFetch() {
     const answer = deferred<string>();
@@ -222,9 +181,8 @@ describe("a fetch in flight when the session ends", () => {
 
   it("does not land in the cache, or reach an observer, once the session is over", async () => {
     await signInAs(ADMIN);
-    routes[LOGOUT] = () => new Response(null, { status: 204 });
+    server.routes[LOGOUT] = signedOut;
     const { answer, observer, received, unsubscribe } = startFetch();
-    // The fetch started when the observer subscribed, and has not answered.
     expect(observer.getCurrentResult().fetchStatus).toBe("fetching");
 
     await act(async () => {
@@ -255,7 +213,7 @@ describe("a fetch in flight when the session ends", () => {
 
   it("leaves an observer that was refetching idle, not fetching for good", async () => {
     await signInAs(ADMIN);
-    routes[LOGOUT] = () => new Response(null, { status: 204 });
+    server.routes[LOGOUT] = signedOut;
     const first = deferred<string>();
     const second = deferred<string>();
     let calls = 0;
@@ -268,7 +226,6 @@ describe("a fetch in flight when the session ends", () => {
     await flush();
     void observer.refetch();
     await flush();
-    // Mid-refetch, with the first read still in hand.
     expect(observer.getCurrentResult().fetchStatus).toBe("fetching");
     expect(observer.getCurrentResult().data).toBe("first read");
 
@@ -284,8 +241,6 @@ describe("a fetch in flight when the session ends", () => {
     unsubscribe();
   });
 });
-
-// --- the next user -----------------------------------------------------------
 
 describe("the next user in the same tab", () => {
   function Reader({ staleTime }: { staleTime?: number }) {
@@ -303,14 +258,14 @@ describe("the next user in the same tab", () => {
   }
 
   async function firstUserReadsThenSignsOut() {
-    routes["GET /api/v1/reader"] = (init) => json({ owner: callerOf(init) });
-    routes[LOGOUT] = () => new Response(null, { status: 204 });
+    server.routes["GET /api/v1/reader"] = (init) =>
+      json({ owner: callerOf(init) });
+    server.routes[LOGOUT] = signedOut;
     await signInAs(ADMIN);
     const page = render(withClient(<Reader />));
     expect(await screen.findByText("reads user-admin")).toBeInTheDocument();
-    // What the route guard does when the session ends.
-    page.unmount();
-    expect(times("GET /api/v1/reader")).toBe(1);
+    page.unmount(); // what the route guard does when the session ends
+    expect(server.times("GET /api/v1/reader")).toBe(1);
     await act(async () => {
       await useAuthStore.getState().logout();
     });
@@ -322,21 +277,19 @@ describe("the next user in the same tab", () => {
 
     render(withClient(<Reader />));
 
-    // First paint: nothing of the previous user's.
     expect(screen.queryByText("reads user-admin")).toBeNull();
     expect(await screen.findByText("reads user-viewer")).toBeInTheDocument();
-    // The query function ran again.
-    expect(times("GET /api/v1/reader")).toBe(2);
+    expect(server.times("GET /api/v1/reader")).toBe(2); // the query function ran again
   });
 
   it("never sees the previous user's copy, even once their own read is refused", async () => {
     await firstUserReadsThenSignsOut();
     await signInAs(VIEWER);
-    routes["GET /api/v1/reader"] = () =>
+    server.routes["GET /api/v1/reader"] = () =>
       json({ error: "forbidden", message: "not permitted" }, 403);
 
     // staleTime 0: stale at once, so it refetches, as the app's own would once
-    // five minutes had passed — and a failed refetch keeps what it had.
+    // five minutes had passed, and a failed refetch keeps what it had.
     render(withClient(<Reader staleTime={0} />));
 
     expect(await screen.findByText("read failed")).toBeInTheDocument();
@@ -345,13 +298,10 @@ describe("the next user in the same tab", () => {
   });
 });
 
-// --- ordering against React ---------------------------------------------------
-
 describe("the render that follows a sign-out", () => {
-  // An observer that re-renders on every change of the auth store's
-  // permissions, which clearAuth sets to a fresh [] each time, and whenever its
-  // query starts or stops fetching, as a page with a refresh spinner does.
-  // (useQuery re-renders only for the result fields a component reads.)
+  // Re-renders on every change of the store's permissions (clearAuth sets a fresh
+  // [] each time) and whenever its query starts or stops fetching, as a page
+  // with a refresh spinner does.
   function Page() {
     useAuthStore((s) => s.permissions);
     const q = useQuery({
@@ -381,13 +331,13 @@ describe("the render that follows a sign-out", () => {
   }
 
   it("unmounts the page before its query could be rebuilt: no refetch, no token-less request", async () => {
-    // The second read is held back, so a refetch — a poll, a window that
-    // regained focus — is in flight when the user signs out.
+    // The second read is held back, so a refetch (a poll, a window that regained
+    // focus) is in flight when the user signs out.
     const refetch = deferred<Response>();
     let reads = 0;
-    routes["GET /api/v1/page"] = () =>
+    server.routes["GET /api/v1/page"] = () =>
       ++reads === 1 ? json({ ok: true }) : refetch.promise;
-    routes[LOGOUT] = () => new Response(null, { status: 204 });
+    server.routes[LOGOUT] = signedOut;
     await signInAs(ADMIN);
     renderGuarded();
     expect(await screen.findByText("page success")).toBeInTheDocument();
@@ -395,23 +345,23 @@ describe("the render that follows a sign-out", () => {
       void queryClient.invalidateQueries();
     });
     await waitFor(() => {
-      expect(times("GET /api/v1/page")).toBe(2);
+      expect(server.times("GET /api/v1/page")).toBe(2);
     });
 
     await act(async () => {
       await useAuthStore.getState().logout();
     });
     expect(await screen.findByText("login page")).toBeInTheDocument();
-    // cancelQueries() reverts the refetch, and TanStack tells the observer so
-    // a macrotask later. Were the page still mounted and authenticated then,
-    // it would re-render and rebuild its removed query: a third read, with the
-    // token already gone.
+    // cancelQueries() reverts the refetch, and TanStack tells the observer so a
+    // macrotask later. Were the page still mounted and authenticated then, it
+    // would re-render and rebuild its removed query: a third read, with the token
+    // already gone.
     await act(async () => {
       await sleep(100);
     });
 
-    expect(times("GET /api/v1/page")).toBe(2);
-    expect(times(REFRESH)).toBe(0);
+    expect(server.times("GET /api/v1/page")).toBe(2);
+    expect(server.times(REFRESH)).toBe(0);
     refetch.resolve(json({ ok: true }));
   });
 
@@ -419,19 +369,18 @@ describe("the render that follows a sign-out", () => {
     // Loop breaker: past 25 refresh attempts the server stops answering, so a
     // runaway loop ends and fails the bound below instead of hanging the run.
     let refreshes = 0;
-    routes[REFRESH] = () => {
+    server.routes[REFRESH] = () => {
       refreshes++;
       return refreshes > 25
         ? new Promise<Response>(() => undefined)
         : json({}, 401);
     };
-    routes["GET /api/v1/page"] = () => json({ ok: true });
+    server.routes["GET /api/v1/page"] = () => json({ ok: true });
     await signInAs(ADMIN);
     render(withClient(<Page />));
     expect(await screen.findByText("page success")).toBeInTheDocument();
 
-    // The session dies server-side; the next read finds out.
-    routes["GET /api/v1/page"] = () =>
+    server.routes["GET /api/v1/page"] = () =>
       json({ error: "unauthorized", message: "expired" }, 401);
     await act(async () => {
       void queryClient.invalidateQueries();
@@ -439,27 +388,26 @@ describe("the render that follows a sign-out", () => {
     });
     // The hazard is real in this setup: the removed query was rebuilt and read
     // again (the first read, the refetch, and the rebuild) ...
-    expect(times("GET /api/v1/page")).toBeGreaterThanOrEqual(3);
-    // ... and then nothing more: a request that fails with nobody signed in
-    // does not end the session again, so nothing clears the rebuilt query.
+    expect(server.times("GET /api/v1/page")).toBeGreaterThanOrEqual(3);
+    // ... and then nothing more: a request that fails with nobody signed in does
+    // not end the session again, so nothing clears the rebuilt query.
     expect(refreshes).toBeLessThanOrEqual(4);
-    const settledAt = times("GET /api/v1/page");
+    const settledAt = server.times("GET /api/v1/page");
     await act(async () => {
       await sleep(200);
     });
-    expect(times("GET /api/v1/page")).toBe(settledAt);
+    expect(server.times("GET /api/v1/page")).toBe(settledAt);
     expect(refreshes).toBeLessThanOrEqual(4);
   });
 });
 
-// --- a PBS key whose save is in flight ----------------------------------------
-
 describe("a PBS encryption key still on its way when the session ends", () => {
   it("is delivered when it lands, though the reset dropped its mutation, and only its owner is ever shown it", async () => {
-    routes[LOGOUT] = () => new Response(null, { status: 204 });
+    server.routes[LOGOUT] = signedOut;
     await signInAs(ADMIN);
     const answer = deferred<Response>();
-    routes["POST /api/v1/clusters/cluster01/storage"] = () => answer.promise;
+    server.routes["POST /api/v1/clusters/cluster01/storage"] = () =>
+      answer.promise;
     const { result } = renderHook(() => useCreateStorage(), {
       wrapper: ({ children }) => withClient(children),
     });
@@ -473,7 +421,6 @@ describe("a PBS encryption key still on its way when the session ends", () => {
         },
       });
     });
-    // The save is pending in TanStack's mutation cache.
     await waitFor(() => {
       expect(queryClient.getMutationCache().getAll()).toHaveLength(1);
     });
@@ -492,7 +439,6 @@ describe("a PBS encryption key still on its way when the session ends", () => {
         generated_encryption_key: PBS_KEY,
       }),
     );
-    // The hook's own onSuccess still ran, and queued the key for its owner.
     await waitFor(() => {
       expect(usePBSKeyStore.getState().pending).toHaveLength(1);
     });
@@ -508,12 +454,10 @@ describe("a PBS encryption key still on its way when the session ends", () => {
   });
 });
 
-// --- localStorage refusing a write -----------------------------------------------
-
 describe("localStorage refusing a write while the session ends", () => {
-  // zustand's persist writes console-store's copy after it has updated the
-  // store, and does not catch a full quota — so the reset can throw. Ending the
-  // session must still end it, and say what went wrong rather than lose it.
+  // zustand's persist writes console-store's copy after it has updated the store,
+  // and does not catch a full quota, so the reset can throw. Ending the session
+  // must still end it, and say what went wrong rather than lose it.
   let reported: MockInstance<typeof console.error>;
 
   beforeEach(() => {
@@ -560,7 +504,7 @@ describe("localStorage refusing a write while the session ends", () => {
   });
 
   it("does not leave the UI signed in after logout, and logout does not reject", async () => {
-    routes[LOGOUT] = () => new Response(null, { status: 204 });
+    server.routes[LOGOUT] = signedOut;
     await signedInWithStateToForget();
     fillUp();
 
@@ -608,53 +552,41 @@ describe("localStorage refusing a write while the session ends", () => {
   });
 });
 
-// --- boot ----------------------------------------------------------------------
-
 describe("initialize", () => {
-  function leaveSessionStateBehind() {
-    PER_SESSION_STORES["console-store.ts"]?.dirty();
-    PER_SESSION_STORES["health-dismiss-store.ts"]?.dirty();
-    expect(PER_SESSION_STORES["console-store.ts"]?.holdsData()).toBe(true);
-    expect(PER_SESSION_STORES["health-dismiss-store.ts"]?.holdsData()).toBe(
+  // The two stores whose persisted copy a page rehydrates for the stored user.
+  const rehydrated = [
+    PER_SESSION_STORES["console-store.ts"],
+    PER_SESSION_STORES["health-dismiss-store.ts"],
+  ];
+
+  it.each([
+    [
+      "drops what a dead session left persisted when the stored session cannot be resumed",
       true,
-    );
-  }
-
-  it("drops what a dead session left persisted when the stored session cannot be resumed", async () => {
-    localStorage.setItem("nexara_user", JSON.stringify(ADMIN));
-    leaveSessionStateBehind();
-
-    await useAuthStore.getState().initialize();
-
-    expect(useAuthStore.getState().isAuthenticated).toBe(false);
-    expect(PER_SESSION_STORES["console-store.ts"]?.holdsData()).toBe(false);
-    expect(PER_SESSION_STORES["health-dismiss-store.ts"]?.holdsData()).toBe(
       false,
-    );
-  });
-
-  it("drops it too when there is no stored user at all, as after a session that ended before this build", async () => {
-    leaveSessionStateBehind();
-
-    await useAuthStore.getState().initialize();
-
-    expect(PER_SESSION_STORES["console-store.ts"]?.holdsData()).toBe(false);
-    expect(PER_SESSION_STORES["health-dismiss-store.ts"]?.holdsData()).toBe(
+    ],
+    [
+      "drops it too when there is no stored user at all, as after a session that ended before this build",
       false,
-    );
-  });
-
-  it("control: keeps it when the stored session resumes, as a reload must", async () => {
-    localStorage.setItem("nexara_user", JSON.stringify(ADMIN));
-    routes[REFRESH] = () => json(authResponse(ADMIN));
-    leaveSessionStateBehind();
-
-    await useAuthStore.getState().initialize();
-
-    expect(useAuthStore.getState().isAuthenticated).toBe(true);
-    expect(PER_SESSION_STORES["console-store.ts"]?.holdsData()).toBe(true);
-    expect(PER_SESSION_STORES["health-dismiss-store.ts"]?.holdsData()).toBe(
+      false,
+    ],
+    [
+      "control: keeps it when the stored session resumes, as a reload must",
       true,
-    );
+      true,
+    ],
+  ])("%s", async (_name, hasStoredUser, resumes) => {
+    if (hasStoredUser)
+      localStorage.setItem("nexara_user", JSON.stringify(ADMIN));
+    if (resumes) server.routes[REFRESH] = () => json(authResponse(ADMIN));
+    for (const probe of rehydrated) {
+      probe?.dirty();
+      expect(probe?.holdsData()).toBe(true);
+    }
+
+    await useAuthStore.getState().initialize();
+
+    expect(useAuthStore.getState().isAuthenticated).toBe(resumes);
+    for (const probe of rehydrated) expect(probe?.holdsData()).toBe(resumes);
   });
 });

@@ -1,12 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  expectTypeOf,
-  it,
-  vi,
-} from "vitest";
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   ADMIN,
   VIEWER,
@@ -14,160 +6,113 @@ import {
   callerOf,
   deferred,
   flush,
-  installFakeServer,
   json,
-  type FakeServer,
 } from "@/test/fake-server";
-import { installFakeLocks, removeFakeLocks } from "@/test/fake-lock-manager";
+import { installFakeLocks } from "@/test/fake-lock-manager";
 import {
   emptyPerSessionStores,
   PER_SESSION_STORES,
 } from "@/test/per-session-stores";
 import {
+  LOCK,
+  LOGOUT,
+  LOGOUT_ALL,
+  REFRESH,
+  X,
+  down,
+  getX,
+  orStalled,
+  server,
+  installAuthStoreHarness,
+} from "@/test/api-client-harness";
+import {
   apiClient,
-  clearTokens,
   getStoredUser,
   signOutRequest,
   storeTokens,
 } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
-import type { User } from "@/types/api";
 import { useAuthStore } from "./auth-store";
 
 /**
- * Sign out has to reach the server. /auth/logout is authOptional
- * (internal/api/router.go): the credential it revokes with is the refresh
- * cookie, and the access token only lets the server check that the session is
- * the caller's — which it does for a token that is still valid and skips for
- * one that has expired. So logout() sends it with the token held, as it is, and
- * with no refresh: not started, not waited for, not after a 401. Sent the way a
- * request is, it had a token to resolve first, and when the token had long
- * expired and the refresh was failing it was never sent at all — the user was
- * signed out here, and the session and its cookie stayed alive on the server
- * until the refresh token's lifetime ran out.
- *
- * Whether it is sent at all is judged by whose cookie is in the jar: another
- * tab that signed someone else in has replaced it, nexara_user names them, and
- * a Sign out that sent would revoke THEIR session — the server cannot tell, for
- * a token that has expired.
- *
- * And what a sign-out ends is the session it was for. It ends it after a
- * request that takes time, and a session that began meanwhile — or ended, with
- * another's begun after it — is not its to end.
- *
- * Real store and api-client, only fetch replaced (test/fake-server.ts).
+ * Sign out has to reach the server. /auth/logout (authOptional, internal/api/
+ * router.go) revokes with the refresh cookie; the access token only lets the
+ * server check that the session is the caller's, which it skips for an expired
+ * one. So logout() sends it with the token held, as it is, and no refresh: sent
+ * as a request is, a long-expired token with a failing refresh meant it was never
+ * sent and the session stayed alive. Whether it is sent depends on whose cookie
+ * is in the jar, and what a sign-out ends is the session it was for.
  */
 
-const LOGIN = "POST /api/v1/auth/login";
-const LOGOUT = "POST /api/v1/auth/logout";
-const LOGOUT_ALL = "POST /api/v1/auth/logout-all";
-const REFRESH = "POST /api/v1/auth/refresh";
-const X = "GET /api/v1/x";
-const LOCK = "nexara:auth-refresh";
+const { signInAs } = installAuthStoreHarness({
+  store: useAuthStore,
+  reset: emptyPerSessionStores,
+});
 
-let server: FakeServer;
 /** What the logout request carried: whose token, or "" for none; undefined until it was sent. */
 let carried: string | undefined;
 
-const down = () => json({ error: "x", message: "down" }, 503);
-
-function signedOutState() {
-  useAuthStore.setState({
-    user: null,
-    permissions: [],
-    isAuthenticated: false,
-    isLoading: false,
-    isInitialized: false,
-    totpPending: false,
-    totpPendingToken: null,
-    isLoggingOut: false,
-    signedOutByUser: false,
-  });
-}
-
-/** Signs `user` in through the store, with a token that expires in `expiresIn` seconds. */
-async function signedInAs(user: User, expiresIn: number) {
-  server.routes[LOGIN] = () => json(authResponse(user, { expiresIn }));
-  await useAuthStore
-    .getState()
-    .login({ email: user.email, password: "example-password" });
-}
-
-beforeEach(async () => {
-  localStorage.clear();
-  clearTokens();
-  emptyPerSessionStores();
-  signedOutState();
-  server = installFakeServer();
+beforeEach(() => {
   carried = undefined;
   server.routes[LOGOUT] = (init) => {
     carried = callerOf(init);
     return new Response(null, { status: 204 });
   };
-  // Registers the forced-logout and refresh callbacks, as main.tsx does at
-  // boot. No stored user, so it returns at once.
-  server.routes[REFRESH] = () => json({}, 401);
-  await useAuthStore.getState().initialize();
 });
 
-afterEach(() => {
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  removeFakeLocks();
-  clearTokens();
-  localStorage.clear();
-  emptyPerSessionStores();
-  signedOutState();
-});
+/** The tab is signed out here, by the user, holding nothing: a request goes out as nobody. */
+async function thisTabIsSignedOut() {
+  const state = useAuthStore.getState();
+  expect(state.isAuthenticated).toBe(false);
+  expect(state.user).toBeNull();
+  expect(state.signedOutByUser).toBe(true);
+  expect(state.isLoggingOut).toBe(false);
+  server.routes[X] = (init) => json({ owner: callerOf(init) });
+  expect(await getX()).toEqual({ owner: "" });
+}
 
 describe("Sign out", () => {
-  it("reaches the server, once, with no refresh, when the token expired long ago and the refresh is failing", async () => {
-    await signedInAs(ADMIN, -600); // expired by more than the allowance a token is sent past
-    server.routes[REFRESH] = down;
+  it.each<[string, number, () => Response | Promise<Response>]>([
+    [
+      "when the token expired long ago and the refresh is failing",
+      -600, // by more than the allowance a token is sent past
+      down,
+    ],
+    [
+      "carrying a token that is still valid, so the server's check of the session's owner runs",
+      3_600,
+      () => json(authResponse(ADMIN)),
+    ],
+    [
+      "carrying a token about to expire, without refreshing it first",
+      30,
+      () => json(authResponse(ADMIN)),
+    ],
+  ])(
+    "reaches the server once, with the token held and no refresh, %s",
+    async (_name, expiresIn, refresh) => {
+      await signInAs(ADMIN, { expiresIn });
+      server.routes[REFRESH] = refresh;
 
-    await useAuthStore.getState().logout();
+      await useAuthStore.getState().logout();
 
-    expect(server.times(LOGOUT)).toBe(1);
-    expect(server.times(REFRESH)).toBe(0); // none was tried
-    // The token held, as it is: an expired one is not authenticated by the
-    // server, which then revokes by the cookie alone.
-    expect(carried).toBe(ADMIN.id);
-    // And the user is signed out here as well, by themselves.
-    const state = useAuthStore.getState();
-    expect(state.isAuthenticated).toBe(false);
-    expect(state.signedOutByUser).toBe(true);
-    expect(localStorage.getItem("nexara_user")).toBeNull();
-  });
-
-  it("carries the token held when it is still valid, so the server's check of the session's owner runs", async () => {
-    await signedInAs(ADMIN, 3_600);
-
-    await useAuthStore.getState().logout();
-
-    expect(server.times(LOGOUT)).toBe(1);
-    expect(carried).toBe(ADMIN.id);
-    expect(server.times(REFRESH)).toBe(0);
-  });
-
-  it("carries the token held when it is about to expire, and does not refresh it first", async () => {
-    await signedInAs(ADMIN, 30);
-    server.routes[REFRESH] = () => json(authResponse(ADMIN));
-
-    await useAuthStore.getState().logout();
-
-    expect(server.times(LOGOUT)).toBe(1);
-    expect(server.times(REFRESH)).toBe(0);
-    expect(carried).toBe(ADMIN.id);
-  });
+      expect(server.times(LOGOUT)).toBe(1);
+      expect(server.times(REFRESH)).toBe(0); // none was tried
+      // The token held, as it is: an expired one is not authenticated by the
+      // server, which then revokes by the cookie alone.
+      expect(carried).toBe(ADMIN.id);
+      const state = useAuthStore.getState();
+      expect(state.isAuthenticated).toBe(false);
+      expect(state.signedOutByUser).toBe(true);
+      expect(localStorage.getItem("nexara_user")).toBeNull();
+    },
+  );
 
   it("is sent during a back-off from a refresh that failed, and does not end it or ask again", async () => {
-    await signedInAs(ADMIN, -600);
+    await signInAs(ADMIN, { expiresIn: -600 });
     server.routes[REFRESH] = down;
     server.routes[X] = (init) => json({ owner: callerOf(init) });
-    // A read fails with the refresh's own failure, and the next refresh waits.
-    await expect(apiClient.get(apiPath`/api/v1/x`)).rejects.toMatchObject({
-      name: "RefreshFailedError",
-    });
+    await expect(getX()).rejects.toMatchObject({ name: "RefreshFailedError" });
     expect(server.times(REFRESH)).toBe(1);
 
     await useAuthStore.getState().logout();
@@ -179,14 +124,10 @@ describe("Sign out", () => {
 
   it("does not wait for the lock another tab holds, though the token has expired", async () => {
     const lock = installFakeLocks();
-    // Another tab's refresh hangs, holding the lock.
     void lock.request(LOCK, {}, () => deferred<undefined>().promise);
-    await signedInAs(ADMIN, -10); // a refresh that is needed would queue for it
+    await signInAs(ADMIN, { expiresIn: -10 }); // a refresh that is needed would queue for it
 
-    const outcome = await Promise.race([
-      useAuthStore.getState().logout(),
-      flush().then(() => "stalled"),
-    ]);
+    const outcome = await orStalled(useAuthStore.getState().logout());
 
     expect(outcome).toBeUndefined(); // logout() resolved: it did not stall
     expect(server.times(LOGOUT)).toBe(1);
@@ -211,7 +152,7 @@ describe("Sign out", () => {
   });
 
   it("still signs out here when the server cannot be reached", async () => {
-    await signedInAs(ADMIN, 3_600);
+    await signInAs(ADMIN);
     server.routes[LOGOUT] = () => Promise.reject(new TypeError("Failed"));
 
     await useAuthStore.getState().logout();
@@ -220,20 +161,17 @@ describe("Sign out", () => {
     expect(useAuthStore.getState().isLoggingOut).toBe(false);
   });
 
-  describe("sign out everywhere", () => {
-    it("is left on the normal path, which needs a token it can resolve: authRequired, it has nothing to revoke with otherwise", async () => {
-      await signedInAs(ADMIN, -600);
-      server.routes[REFRESH] = down;
-      server.routes[LOGOUT_ALL] = () => new Response(null, { status: 204 });
+  it("sign out everywhere is left on the normal path, which needs a token it can resolve: authRequired, it has nothing to revoke with otherwise", async () => {
+    await signInAs(ADMIN, { expiresIn: -600 });
+    server.routes[REFRESH] = down;
+    server.routes[LOGOUT_ALL] = () => new Response(null, { status: 204 });
 
-      await useAuthStore.getState().logoutAll();
+    await useAuthStore.getState().logoutAll();
 
-      // It tried to refresh, and went no further: as before, and not this
-      // change's to alter. The user is signed out here regardless.
-      expect(server.times(REFRESH)).toBe(1);
-      expect(server.times(LOGOUT_ALL)).toBe(0);
-      expect(useAuthStore.getState().isAuthenticated).toBe(false);
-    });
+    // It tried to refresh, and went no further; the user is signed out here anyway.
+    expect(server.times(REFRESH)).toBe(1);
+    expect(server.times(LOGOUT_ALL)).toBe(0);
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 });
 
@@ -273,9 +211,8 @@ describe("signOutRequest", () => {
   });
 
   it("is a function of its own, with nothing to choose: apiClient offers no way to send with the token held, and no method of it takes a mode", () => {
-    // The way to send with the token held and no refresh is safe for a request
-    // that the cookie authenticates and the token only corroborates, which is
-    // Sign out's and no other's.
+    // Sending with the token held and no refresh is safe for a request that the
+    // cookie authenticates and the token only corroborates: Sign out's, no other's.
     expect(apiClient).not.toHaveProperty("postWithHeldToken");
     for (const [name, method] of Object.entries(apiClient)) {
       // A path, and a body at most: a third argument would be a mode.
@@ -290,47 +227,65 @@ describe("signOutRequest", () => {
 describe("Sign out when another tab has signed someone else in", () => {
   // The cookie in the jar is theirs, and nexara_user, which every tab shares,
   // names them. This tab's own session was orphaned when theirs replaced the
-  // cookie. /auth/logout revokes with the cookie, and for a token that has
-  // expired the server cannot check whose it is: a request would end their
-  // session. So none is sent, and this tab is signed out here, and only here:
-  // their record, which a reload of their tab resumes off, is left as it is.
-  function anotherTabSignedIn(user: User) {
+  // cookie. /auth/logout revokes with the cookie, and for a token that has expired
+  // the server cannot check whose it is: a request would end their session. So
+  // none is sent, and this tab is signed out here, and only here: their record,
+  // which a reload of their tab resumes off, is left as it is.
+  const record = (user: object) => {
     localStorage.setItem("nexara_user", JSON.stringify(user));
-  }
+  };
 
-  async function thisTabIsSignedOut() {
-    const state = useAuthStore.getState();
-    expect(state.isAuthenticated).toBe(false);
-    expect(state.user).toBeNull();
-    expect(state.signedOutByUser).toBe(true);
-    expect(state.isLoggingOut).toBe(false);
-    // Nothing is held in the tab either: a request goes out as nobody.
-    server.routes[X] = (init) => json({ owner: callerOf(init) });
-    expect(await apiClient.get(apiPath`/api/v1/x`)).toEqual({ owner: "" });
-  }
+  it.each<[string, number, object, boolean]>([
+    ["though the token held expired long ago", -600, VIEWER, true],
+    [
+      "though the token held is still valid: the cookie is theirs all the same",
+      3_600,
+      VIEWER,
+      true,
+    ],
+    [
+      // It names no one: no session's record to leave.
+      "when what is stored cannot be told from this tab's user: a value with no id",
+      -600,
+      { email: "x" },
+      false,
+    ],
+  ])(
+    "sends nothing, %s, and signs this tab out",
+    async (_name, expiresIn, stored, theirsStays) => {
+      await signInAs(ADMIN, { expiresIn });
+      record(stored);
 
-  it("sends nothing, though the token held expired long ago, and signs this tab out", async () => {
-    await signedInAs(ADMIN, -600);
-    anotherTabSignedIn(VIEWER);
+      await useAuthStore.getState().logout();
+
+      expect(server.times(LOGOUT)).toBe(0);
+      expect(server.times(REFRESH)).toBe(0);
+      await thisTabIsSignedOut();
+      if (theirsStays) expect(getStoredUser()).toMatchObject({ id: VIEWER.id });
+      else expect(getStoredUser()).toBeNull();
+    },
+  );
+
+  it("sends nothing when this tab holds no user and one is stored: the cookie is not its own", async () => {
+    record(ADMIN);
+    expect(useAuthStore.getState().user).toBeNull();
 
     await useAuthStore.getState().logout();
 
     expect(server.times(LOGOUT)).toBe(0);
-    expect(server.times(REFRESH)).toBe(0);
-    await thisTabIsSignedOut();
-    expect(getStoredUser()).toMatchObject({ id: VIEWER.id }); // theirs, still
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 
   it("leaves their record where it is, so that a reload of their tab resumes off the cookie", async () => {
-    await signedInAs(ADMIN, -600);
-    anotherTabSignedIn(VIEWER);
+    await signInAs(ADMIN, { expiresIn: -600 });
+    record(VIEWER);
 
     await useAuthStore.getState().logout();
     expect(getStoredUser()).toMatchObject({ id: VIEWER.id });
 
     // A reload of their tab: a fresh module graph, which boots with whatever is
-    // stored. With no record it would send no refresh and land on the login
-    // page, though the cookie is good.
+    // stored. With no record it would send no refresh and land on the login page,
+    // though the cookie is good.
     vi.resetModules();
     server.routes[REFRESH] = () =>
       json(authResponse(VIEWER, { permissions: ["view:cluster"] }));
@@ -343,72 +298,40 @@ describe("Sign out when another tab has signed someone else in", () => {
     expect(state.user?.id).toBe(VIEWER.id);
   });
 
-  it("sends nothing either when the token held is still valid: the cookie is theirs all the same", async () => {
-    await signedInAs(ADMIN, 3_600);
-    anotherTabSignedIn(VIEWER);
-
-    await useAuthStore.getState().logout();
-
-    expect(server.times(LOGOUT)).toBe(0);
-    await thisTabIsSignedOut();
-    expect(getStoredUser()).toMatchObject({ id: VIEWER.id });
-  });
-
-  it("sends nothing when what is stored cannot be told from this tab's user: a value with no id", async () => {
-    await signedInAs(ADMIN, -600);
-    localStorage.setItem("nexara_user", JSON.stringify({ email: "x" }));
-
-    await useAuthStore.getState().logout();
-
-    expect(server.times(LOGOUT)).toBe(0);
-    await thisTabIsSignedOut();
-    expect(getStoredUser()).toBeNull(); // it names no one: no session's record to leave
-  });
-
-  it("sends nothing when this tab holds no user and one is stored: the cookie is not its own", async () => {
-    anotherTabSignedIn(ADMIN);
-    expect(useAuthStore.getState().user).toBeNull();
-
-    await useAuthStore.getState().logout();
-
-    expect(server.times(LOGOUT)).toBe(0);
-    expect(useAuthStore.getState().isAuthenticated).toBe(false);
-  });
-
-  it("control: with the stored user this tab's own, it is sent, as it is for a token that expired long ago", async () => {
-    await signedInAs(ADMIN, -600);
-    expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
+  it.each<[string, number, () => void]>([
+    [
+      "the stored user is this tab's own, as it is for a token that expired long ago",
+      -600,
+      () => {
+        expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
+      },
+    ],
+    [
+      "the stored user is this tab's own under another email: users are compared by id, and the record is rewritten at every refresh",
+      -600,
+      () => {
+        record({
+          ...ADMIN,
+          email: "renamed@example.com",
+          display_name: "Renamed",
+        });
+      },
+    ],
+    [
+      "no user is stored, because another tab's session ended: that cookie may still be this tab's",
+      3_600,
+      () => {
+        localStorage.removeItem("nexara_user");
+      },
+    ],
+  ])("control: it is sent when %s", async (_name, expiresIn, arrange) => {
+    await signInAs(ADMIN, { expiresIn });
+    arrange();
 
     await useAuthStore.getState().logout();
 
     expect(server.times(LOGOUT)).toBe(1);
     expect(carried).toBe(ADMIN.id);
-  });
-
-  it("control: with the stored user this tab's own under another email, it is sent: users are compared by id, and the record is rewritten at every refresh", async () => {
-    await signedInAs(ADMIN, -600);
-    localStorage.setItem(
-      "nexara_user",
-      JSON.stringify({
-        ...ADMIN,
-        email: "renamed@example.com",
-        display_name: "Renamed",
-      }),
-    );
-
-    await useAuthStore.getState().logout();
-
-    expect(server.times(LOGOUT)).toBe(1);
-    expect(carried).toBe(ADMIN.id);
-  });
-
-  it("control: with no user stored — another tab's session ended — it is sent: that cookie may still be this tab's", async () => {
-    await signedInAs(ADMIN, 3_600);
-    localStorage.removeItem("nexara_user");
-
-    await useAuthStore.getState().logout();
-
-    expect(server.times(LOGOUT)).toBe(1);
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 });
@@ -429,7 +352,7 @@ describe.each([
     let held: ReturnType<typeof deferred<Response>>;
 
     async function theRequestIsOut() {
-      await signedInAs(ADMIN, 3_600);
+      await signInAs(ADMIN);
       held = deferred<Response>();
       server.routes[route] = () => held.promise;
       const signingOut = start();
@@ -440,9 +363,9 @@ describe.each([
       return { signingOut };
     }
 
-    function theViewersOwnStateIsInTheStores() {
+    const theViewersOwnStateIsInTheStores = () => {
       for (const probe of Object.values(PER_SESSION_STORES)) probe.dirty();
-    }
+    };
 
     async function theViewersSessionIsStillTheirs() {
       const state = useAuthStore.getState();
@@ -458,15 +381,27 @@ describe.each([
       }
       // And the token held is still theirs.
       server.routes[X] = (init) => json({ owner: callerOf(init) });
-      expect(await apiClient.get(apiPath`/api/v1/x`)).toEqual({
-        owner: VIEWER.id,
-      });
+      expect(await getX()).toEqual({ owner: VIEWER.id });
     }
 
-    it("does not end the session of the user who signed in meanwhile", async () => {
+    it.each([
+      [
+        "signed in meanwhile",
+        async () => {
+          await signInAs(VIEWER);
+        },
+      ],
+      [
+        "signed in after the first had ended meanwhile, as a refresh the server refused ends one",
+        async () => {
+          useAuthStore.getState().clearAuth(); // the forced sign-out
+          await signInAs(VIEWER);
+        },
+      ],
+    ])("does not end the session of the user who %s", async (_name, change) => {
       const { signingOut } = await theRequestIsOut();
 
-      await signedInAs(VIEWER, 3_600);
+      await change();
       theViewersOwnStateIsInTheStores();
       held.resolve(new Response(null, { status: 204 }));
       await signingOut;
@@ -477,8 +412,8 @@ describe.each([
     it("does not end the session of the same user, who signed in again meanwhile: a new session, and the store holds a new user object", async () => {
       const { signingOut } = await theRequestIsOut();
 
-      await signedInAs(ADMIN, 3_600);
-      for (const probe of Object.values(PER_SESSION_STORES)) probe.dirty();
+      await signInAs(ADMIN);
+      theViewersOwnStateIsInTheStores();
       held.resolve(new Response(null, { status: 204 }));
       await signingOut;
 
@@ -489,18 +424,6 @@ describe.each([
       for (const [file, probe] of Object.entries(PER_SESSION_STORES)) {
         expect(probe.holdsData(), file).toBe(true);
       }
-    });
-
-    it("does not end a session that began after the first had ended meanwhile, as a refresh the server refused ends one", async () => {
-      const { signingOut } = await theRequestIsOut();
-
-      useAuthStore.getState().clearAuth(); // the forced sign-out
-      await signedInAs(VIEWER, 3_600);
-      theViewersOwnStateIsInTheStores();
-      held.resolve(new Response(null, { status: 204 }));
-      await signingOut;
-
-      await theViewersSessionIsStillTheirs();
     });
 
     it("leaves a session that ended meanwhile as it ended: signed out, and by the user", async () => {
@@ -517,7 +440,7 @@ describe.each([
       expect(state.isLoggingOut).toBe(false);
     });
 
-    it("control: still ends the session when the store's user is replaced by an equal object meanwhile — the same session, the same epoch: nothing changed hands", async () => {
+    it("control: still ends the session when the store's user is replaced by an equal object meanwhile: the same session, the same epoch, nothing changed hands", async () => {
       const { signingOut } = await theRequestIsOut();
 
       useAuthStore.setState({ user: { ...ADMIN } }); // a profile edit applied to the store, say
@@ -532,7 +455,7 @@ describe.each([
 
     it("control: with nothing changing hands, the session ends and what it left is forgotten", async () => {
       const { signingOut } = await theRequestIsOut();
-      for (const probe of Object.values(PER_SESSION_STORES)) probe.dirty();
+      theViewersOwnStateIsInTheStores();
 
       held.resolve(new Response(null, { status: 204 }));
       await signingOut;
@@ -550,15 +473,14 @@ describe.each([
 );
 
 describe("Sign out everywhere whose refresh is answered for another user", () => {
-  // The token has expired, so the request refreshes first — on the cookie the
-  // tabs share, which another tab has since signed someone else in on. The
-  // answer is the other user's: a session begins in this tab's client, and the
-  // store, which drops what a refresh brings while a sign-out is under way, does
-  // not follow. Left so, the tab would show the first user and act as the second.
-  // The request is not sent (it was the first user's, and it must not revoke the
+  // The token has expired, so the request refreshes first, on the shared cookie
+  // another tab has since signed someone else in on. The answer is theirs: a
+  // session begins in this tab's client, and the store, which drops what a refresh
+  // brings during a sign-out, does not follow: the tab would show the first user
+  // and act as the second. The request is not sent (it must not revoke the
   // second's sessions), and the sign-out is finished.
   it("is not sent as them, and ends the tab: nobody is left in it", async () => {
-    await signedInAs(ADMIN, -600);
+    await signInAs(ADMIN, { expiresIn: -600 });
     server.routes[REFRESH] = () => json(authResponse(VIEWER));
     server.routes[LOGOUT_ALL] = () => new Response(null, { status: 204 });
 
@@ -571,11 +493,10 @@ describe("Sign out everywhere whose refresh is answered for another user", () =>
     expect(state.user).toBeNull();
     expect(state.signedOutByUser).toBe(true);
     expect(state.isLoggingOut).toBe(false);
-    // Neither user's token is held: a request goes out as nobody.
     server.routes[X] = (init) => json({ owner: callerOf(init) });
-    expect(await apiClient.get(apiPath`/api/v1/x`)).toEqual({ owner: "" });
-    // The record the answer wrote is this tab's now — it holds that user's token
-    // — and goes with the session that ends.
+    expect(await getX()).toEqual({ owner: "" });
+    // The record the answer wrote is this tab's now (it holds that user's token)
+    // and goes with the session that ends.
     expect(getStoredUser()).toBeNull();
   });
 });

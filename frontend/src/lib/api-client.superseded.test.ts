@@ -1,177 +1,81 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-  type Mock,
-} from "vitest";
-import type { AuthResponse } from "@/types/api";
+import { describe, expect, it } from "vitest";
 import {
   ADMIN,
-  authResponse,
-  callerOf,
-  installFakeServer,
-  json,
   VIEWER,
-  type FakeServer,
+  authResponse,
+  json,
   type Route,
 } from "@/test/fake-server";
 import {
-  apiClient,
+  REFRESH,
+  X,
+  answers,
+  elapse,
+  expiresAfter,
+  go,
+  onFailure,
+  onRefresh,
+  pinRandom,
+  pump,
+  readX,
+  server,
+  session,
+  settle,
+  superseded,
+  tooMany,
+  installApiClientHarness,
+} from "@/test/api-client-harness";
+import {
   clearTokens,
   currentSessionEpoch,
   getStoredUser,
   resumeSession,
-  setAuthFailureCallback,
-  setAuthRefreshCallback,
   StaleSessionError,
   storeTokens,
 } from "./api-client";
-import { apiPath } from "./api-path";
 
 /**
- * A refresh the server answers 409 "refresh_superseded": another tab's refresh,
- * made moments earlier, won the race for the cookie, and the server left this
- * one's in place because the jar holds, or is about to hold, the winner's newer
- * one (lib/api-client.ts, postRefresh). It is asked again once, after a short
- * jittered wait — inside the same lock hold, with the same epoch checks and
- * the same rules for whatever the second answer is — and if that is superseded
- * too it is a failed refresh like any other, never a sign-out.
- *
- * The wait is a setTimeout, which these tests fake, and only that: the jitter
- * is Math.random, which they pin (0 is 250 ms, and each 0.001 more is a quarter
- * of a millisecond).
+ * A refresh answered 409 "refresh_superseded": another tab's refresh won the
+ * race for the cookie (lib/api-client.ts, postRefresh). It is asked once more
+ * after a jittered 250-500 ms, inside the same lock hold and under the same epoch
+ * checks; superseded again, it is a failed refresh like any other, never a
+ * sign-out. The wait is a faked setTimeout; its jitter is the pinned Math.random.
  */
 
-const REFRESH = "POST /api/v1/auth/refresh";
-const X = "GET /api/v1/x";
+installApiClientHarness({ clock: true, random: true, timers: true });
 
-let server: FakeServer;
-let onFailure: Mock<() => void>;
-let onRefresh: Mock<(res: AuthResponse) => void>;
-let clock = 0;
-let random = 0;
-
-beforeEach(() => {
-  localStorage.clear();
-  clearTokens();
-  server = installFakeServer();
-  onFailure = vi.fn<() => void>();
-  onRefresh = vi.fn<(res: AuthResponse) => void>();
-  setAuthFailureCallback(onFailure);
-  setAuthRefreshCallback(onRefresh);
-  clock = 0;
-  random = 0;
-  vi.spyOn(performance, "now").mockImplementation(() => clock);
-  vi.spyOn(Math, "random").mockImplementation(() => random);
-  // Only the timer: promises and the rest of the platform run as they are.
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-});
-
-afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  clearTokens();
-  localStorage.clear();
-});
-
-/** Lets the fake timers run for `ms`, and what is waiting on them and on the fake server with it. */
-async function go(ms: number) {
-  await vi.advanceTimersByTimeAsync(ms);
-}
-
-/** Lets everything that is ready run, without moving the clock. */
-async function pump() {
-  for (let i = 0; i < 5; i++) await go(0);
-}
-
-/** What a request settles as: the error it failed with, or "sent". */
-function settle(request: Promise<unknown>) {
-  return request.then(
-    () => "sent",
-    (err: unknown) => err,
-  );
-}
-
-const superseded = () =>
-  json(
-    {
-      error: "refresh_superseded",
-      message: "the refresh token was superseded by a newer one",
-    },
-    409,
-  );
-const expired = () => json({ error: "unauthorized", message: "expired" }, 401);
-const session = () => json(authResponse(ADMIN));
-
-/** The refresh answers, in order; the last one repeats. */
-function answers(...list: Route[]): Route {
-  let n = 0;
-  return (init) => {
-    const answer = list[Math.min(n, list.length - 1)];
-    n++;
-    if (answer === undefined) throw new Error("no answer to give");
-    return answer(init);
-  };
-}
-
-/** X refuses its first `refusals` requests as an expired token, then answers as the caller. */
-function expiresAfter(refusals: number): Route {
-  let reads = 0;
-  return (init) =>
-    ++reads <= refusals ? expired() : json({ owner: callerOf(init) });
-}
+const NETWORK = new TypeError("Failed to fetch");
 
 describe("a refresh answered 409 refresh_superseded", () => {
-  it("is asked once more, after the wait, and the request that needed it goes through", async () => {
-    storeTokens(authResponse(ADMIN));
-    const epoch = currentSessionEpoch();
-    server.routes[X] = expiresAfter(1);
-    server.routes[REFRESH] = answers(superseded, session);
-
-    const request = settle(apiClient.get(apiPath`/api/v1/x`));
-    await pump();
-    expect(server.times(REFRESH)).toBe(1); // the first answer is in: superseded
-
-    // Pinned at 0, the wait is 250 ms: not a moment before it ...
-    await go(249);
-    expect(server.times(REFRESH)).toBe(1);
-    await go(1);
-    expect(server.times(REFRESH)).toBe(2);
-
-    expect(await request).toBe("sent");
-    expect(server.times(X)).toBe(2); // refused once, replayed under the new token
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-    expect(onFailure).not.toHaveBeenCalled();
-    expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
-    expect(currentSessionEpoch()).toBe(epoch);
-  });
-
   // A timer takes whole milliseconds, so the draw that is nearly 1 waits 499.
   it.each([
     [0, 250],
     [0.5, 375],
     [0.999, 499],
   ])(
-    "waits 250 ms and up to 250 more: Math.random() = %d is %d ms",
+    "is asked once more after 250 ms and up to 250 more, and the request goes through: Math.random() = %d waits %d ms",
     async (draw, waits) => {
-      random = draw;
+      pinRandom(draw);
       storeTokens(authResponse(ADMIN));
+      const epoch = currentSessionEpoch();
       server.routes[X] = expiresAfter(1);
       server.routes[REFRESH] = answers(superseded, session);
 
-      const request = settle(apiClient.get(apiPath`/api/v1/x`));
+      const request = readX();
       await pump();
-      expect(server.times(REFRESH)).toBe(1);
+      expect(server.times(REFRESH)).toBe(1); // superseded
 
       await go(waits - 1);
       expect(server.times(REFRESH)).toBe(1);
       await go(1);
       expect(server.times(REFRESH)).toBe(2);
+
       expect(await request).toBe("sent");
+      expect(server.times(X)).toBe(2); // refused once, replayed under the new token
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      expect(onFailure).not.toHaveBeenCalled();
+      expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
+      expect(currentSessionEpoch()).toBe(epoch);
     },
   );
 
@@ -180,9 +84,7 @@ describe("a refresh answered 409 refresh_superseded", () => {
     server.routes[X] = expiresAfter(3);
     server.routes[REFRESH] = answers(superseded, session);
 
-    const requests = [1, 2, 3].map(() =>
-      settle(apiClient.get(apiPath`/api/v1/x`)),
-    );
+    const requests = [1, 2, 3].map(() => readX());
     await pump();
     await go(250);
 
@@ -194,15 +96,14 @@ describe("a refresh answered 409 refresh_superseded", () => {
     storeTokens(authResponse(ADMIN));
     const epoch = currentSessionEpoch();
     server.routes[X] = expiresAfter(Infinity);
-    server.routes[REFRESH] = answers(superseded); // every time
+    server.routes[REFRESH] = superseded; // every time
 
-    const request = settle(apiClient.get(apiPath`/api/v1/x`));
+    const request = readX();
     await pump();
     await go(250);
     const first = await request;
 
-    // A RefreshFailedError, not an ApiClientError, carrying the 409 and the
-    // server's own words; never a sign-out.
+    // A RefreshFailedError carrying the 409 and the server's words, not a sign-out.
     expect(first).toMatchObject({
       name: "RefreshFailedError",
       status: 409,
@@ -214,14 +115,13 @@ describe("a refresh answered 409 refresh_superseded", () => {
     expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
     expect(currentSessionEpoch()).toBe(epoch);
 
-    // The back-off was recorded from the second answer: the next request is
-    // turned away at once, sends nothing, and does not wait to be.
-    expect(await settle(apiClient.get(apiPath`/api/v1/x`))).toBe(first);
+    // The back-off was recorded from the second answer: nothing is sent.
+    expect(await readX()).toBe(first);
     expect(server.times(REFRESH)).toBe(2);
 
-    // Over, it asks again — and, superseded again, with the one retry again.
-    clock += 5_000;
-    const later = settle(apiClient.get(apiPath`/api/v1/x`));
+    // Over, it asks again, and with the one retry again.
+    elapse(5_000);
+    const later = readX();
     await pump();
     expect(server.times(REFRESH)).toBe(3);
     await go(250);
@@ -230,7 +130,7 @@ describe("a refresh answered 409 refresh_superseded", () => {
   });
 
   describe("whatever the second answer is, it is handled as any answer would be", () => {
-    const CASES: [string, Route, (err: unknown) => void][] = [
+    it.each<[string, Route, (err: unknown) => void]>([
       [
         "a 503",
         () => json({ error: "x", message: "down" }, 503),
@@ -254,42 +154,31 @@ describe("a refresh answered 409 refresh_superseded", () => {
           });
         },
       ],
-    ];
-
-    it.each(CASES)(
+      [
+        "the network failing",
+        () => Promise.reject(NETWORK),
+        (err) => {
+          expect(err).toBe(NETWORK);
+        },
+      ],
+    ])(
       "%s is a failed refresh, and begins the back-off",
       async (_name, second, check) => {
         storeTokens(authResponse(ADMIN));
         server.routes[X] = expiresAfter(Infinity);
         server.routes[REFRESH] = answers(superseded, second);
 
-        const request = settle(apiClient.get(apiPath`/api/v1/x`));
+        const request = readX();
         await pump();
         await go(250);
         const outcome = await request;
 
         check(outcome);
         expect(onFailure).not.toHaveBeenCalled();
-        expect(await settle(apiClient.get(apiPath`/api/v1/x`))).toBe(outcome);
+        expect(await readX()).toBe(outcome);
         expect(server.times(REFRESH)).toBe(2);
       },
     );
-
-    it("the network failing is the network's own error, and begins the back-off", async () => {
-      const down = new TypeError("Failed to fetch");
-      storeTokens(authResponse(ADMIN));
-      server.routes[X] = expiresAfter(Infinity);
-      server.routes[REFRESH] = answers(superseded, () => Promise.reject(down));
-
-      const request = settle(apiClient.get(apiPath`/api/v1/x`));
-      await pump();
-      await go(250);
-
-      expect(await request).toBe(down);
-      expect(onFailure).not.toHaveBeenCalled();
-      expect(await settle(apiClient.get(apiPath`/api/v1/x`))).toBe(down);
-      expect(server.times(REFRESH)).toBe(2);
-    });
 
     it("a refusal ends the session, once", async () => {
       storeTokens(authResponse(ADMIN));
@@ -298,7 +187,7 @@ describe("a refresh answered 409 refresh_superseded", () => {
         json({ error: "unauthorized", message: "Invalid or expired" }, 401),
       );
 
-      const request = settle(apiClient.get(apiPath`/api/v1/x`));
+      const request = readX();
       await pump();
       await go(250);
 
@@ -317,12 +206,12 @@ describe("a refresh answered 409 refresh_superseded", () => {
     storeTokens(authResponse(ADMIN));
     server.routes[X] = expiresAfter(Infinity);
     server.routes[REFRESH] = answers(superseded, session);
-    const request = settle(apiClient.get(apiPath`/api/v1/x`));
+    const request = readX();
     await pump();
     expect(server.times(REFRESH)).toBe(1);
 
-    clearTokens(); // signed out while the wait runs
-    storeTokens(authResponse(VIEWER)); // and the next user is in
+    clearTokens();
+    storeTokens(authResponse(VIEWER)); // signed out during the wait, and the next user is in
     await go(250);
 
     expect(await request).toBeInstanceOf(StaleSessionError);
@@ -369,12 +258,11 @@ describe("a 409 that is not a refresh_superseded", () => {
       server.routes[X] = expiresAfter(Infinity);
       server.routes[REFRESH] = answer;
 
-      const request = settle(apiClient.get(apiPath`/api/v1/x`));
+      const request = readX();
       await pump();
       await go(1_000); // far longer than any wait there is
-      const outcome = await request;
 
-      expect(outcome).toMatchObject({
+      expect(await request).toMatchObject({
         name: "RefreshFailedError",
         message: `The session could not be renewed (${reason})`,
       });
@@ -385,6 +273,8 @@ describe("a 409 that is not a refresh_superseded", () => {
 });
 
 describe("the boot resume's refresh (resumeSession)", () => {
+  const resume = () => settle(resumeSession(currentSessionEpoch()));
+
   it("asks once more when the server says another tab won, and resolves with the session", async () => {
     server.routes[REFRESH] = answers(superseded, session);
 
@@ -399,79 +289,74 @@ describe("the boot resume's refresh (resumeSession)", () => {
     expect(server.times(REFRESH)).toBe(2);
   });
 
-  it("does not ask again for a 409 that is another's, and could not look: a RefreshFailedError", async () => {
-    server.routes[REFRESH] = () =>
-      json({ error: "conflict", message: "state has changed" }, 409);
+  const refusal = (status: number) => () =>
+    json({ error: "unauthorized", message: "Invalid or expired" }, status);
 
-    const resumed = settle(resumeSession(currentSessionEpoch()));
-    await pump();
-    await go(1_000);
+  it.each<[string, Route, number, object, number]>([
+    [
+      "a 409 that is another's: not asked a second time",
+      () => json({ error: "conflict", message: "state has changed" }, 409),
+      1_000,
+      {
+        name: "RefreshFailedError",
+        status: 409,
+        message:
+          "The session could not be renewed (HTTP 409: state has changed)",
+      },
+      1,
+    ],
+    [
+      "a second superseded answer: could not look",
+      superseded,
+      250,
+      { name: "RefreshFailedError", status: 409 },
+      2,
+    ],
+    [
+      "a 401, a refusal",
+      refusal(401),
+      0,
+      { name: "ApiClientError", status: 401 },
+      1,
+    ],
+    [
+      "a 403, a refusal",
+      refusal(403),
+      0,
+      { name: "ApiClientError", status: 403 },
+      1,
+    ],
+    [
+      "a failure that asked it to wait",
+      tooMany("3"),
+      0,
+      { name: "RefreshFailedError", status: 429, retryAfterMs: 3_000 },
+      1,
+    ],
+    [
+      "an answer that is no session",
+      () => json({ user: { id: "x" } }),
+      0,
+      { name: "RefreshFailedError", status: 200 },
+      1,
+    ],
+  ])(
+    "rejects, for %s",
+    async (_name, answer, advance, rejection, refreshes) => {
+      server.routes[REFRESH] = answer;
 
-    expect(await resumed).toMatchObject({
-      name: "RefreshFailedError",
-      status: 409,
-      message: "The session could not be renewed (HTTP 409: state has changed)",
-    });
-    expect(server.times(REFRESH)).toBe(1);
-  });
-
-  it("rejects with the second answer when that is superseded too: could not look", async () => {
-    server.routes[REFRESH] = answers(superseded);
-
-    const resumed = settle(resumeSession(currentSessionEpoch()));
-    await pump();
-    await go(250);
-
-    expect(await resumed).toMatchObject({
-      name: "RefreshFailedError",
-      status: 409,
-    });
-    expect(server.times(REFRESH)).toBe(2);
-  });
-
-  it.each([401, 403])(
-    "rejects a %i, a refusal, with an ApiClientError of its status",
-    async (status) => {
-      server.routes[REFRESH] = () =>
-        json({ error: "unauthorized", message: "Invalid or expired" }, status);
-
-      const resumed = settle(resumeSession(currentSessionEpoch()));
+      const resumed = resume();
       await pump();
+      await go(advance);
 
-      expect(await resumed).toMatchObject({ name: "ApiClientError", status });
-      expect(server.times(REFRESH)).toBe(1);
+      expect(await resumed).toMatchObject(rejection);
+      expect(server.times(REFRESH)).toBe(refreshes);
     },
   );
 
-  it("carries what a failure asked it to wait", async () => {
-    server.routes[REFRESH] = () =>
-      new Response("{}", { status: 429, headers: { "Retry-After": "3" } });
-
-    const resumed = settle(resumeSession(currentSessionEpoch()));
-    await pump();
-
-    expect(await resumed).toMatchObject({
-      name: "RefreshFailedError",
-      status: 429,
-      retryAfterMs: 3_000,
-    });
-  });
-
-  it("rejects, as an answer that is no session, when it is none", async () => {
-    server.routes[REFRESH] = () => json({ user: { id: "x" } });
-
-    const resumed = settle(resumeSession(currentSessionEpoch()));
-    await pump();
-
-    expect(await resumed).toMatchObject({
-      name: "RefreshFailedError",
-      status: 200,
-    });
-  });
-
   it("is not asked again for a session that ended during the wait", async () => {
     server.routes[REFRESH] = answers(superseded, session);
-    const resumed = settle(resumeSession(currentSessionEpoch()));
+    const resumed = resume();
     await pump();
     expect(server.times(REFRESH)).toBe(1);
 
