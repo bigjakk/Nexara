@@ -11,22 +11,14 @@ import (
 	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
-// TestCompressionExclusion_TracksTheRefreshCookiePath pins that the compression
-// and rate-limit exclusions and the refresh cookie's Path are ONE value.
-//
-// They used to be two literals kept in step by a comment in each file. That is
-// the arrangement this repo keeps getting bitten by: nothing fails when one
-// moves, and the failure is silent in the direction that matters — widening the
-// cookie's Path without widening the exclusion leaves a credential-bearing
-// subtree compressible, and widening it the other way hands an attacker a
-// rate-limit-exempt path that is not auth at all.
-//
-// The probes below are DERIVED from handlers.RefreshCookiePath rather than
-// written out, which is what keeps this from being a tautology dressed as a
-// test: re-introducing a hand-copied literal in middleware.go makes the derived
-// child stop being excluded, and the identity assertion names it outright.
-// TestRefreshCookie_PathIsTheExportedScope holds the other end, proving that
-// constant is the Path the cookie is actually issued with.
+// TestCompressionExclusion_TracksTheRefreshCookiePath pins that the compression and rate-limit
+// exclusions and the refresh cookie's Path are ONE value. They used to be two literals kept in step by a
+// comment in each file, the arrangement this repo keeps being bitten by: nothing fails when one moves, and
+// the failure is silent in the direction that matters (widening the cookie's Path without widening the
+// exclusion leaves a credential-bearing subtree compressible; widening the other way hands an attacker a
+// rate-limit-exempt path that is not auth). The probes are DERIVED from handlers.RefreshCookiePath, not
+// written out, which keeps this from being a tautology: a hand-copied literal in middleware.go makes the
+// derived child stop being excluded. TestRefreshCookie_PathIsTheExportedScope holds the other end.
 func TestCompressionExclusion_TracksTheRefreshCookiePath(t *testing.T) {
 	if authCookieScopePrefix != handlers.RefreshCookiePath {
 		t.Fatalf("authCookieScopePrefix = %q but the refresh cookie's Path is %q — these must be the "+
@@ -81,17 +73,12 @@ func TestCompressionExclusion_TracksTheRefreshCookiePath(t *testing.T) {
 	}
 }
 
-// TestRateLimitedAuthPaths_LieUnderTheCookieScope ties the other consumer of
-// the prefix to the same constant.
-//
-// The general rate limiter skips everything under authCookieScopePrefix, so
-// ordinary traffic from an address cannot spend the budget a token refresh
-// needs and have it refused (a refused refresh no longer signs the user out,
-// but it still fails the request that waited on it). These paths carry their
-// own brute-force caps precisely because they are exempt from the general one,
-// so a prefix that stopped covering them would silently move them onto the
-// general limiter — and a prefix that grew to cover more would exempt
-// endpoints that were never meant to be.
+// TestRateLimitedAuthPaths_LieUnderTheCookieScope ties the other consumer of the prefix to the same
+// constant. The general rate limiter skips everything under authCookieScopePrefix, so ordinary traffic from
+// an address cannot spend the budget a token refresh needs. These paths carry their own brute-force caps
+// precisely because they are exempt from the general one, so a prefix that stopped covering them would
+// silently move them onto the general limiter, and a prefix that grew to cover more would exempt endpoints
+// that were never meant to be.
 func TestRateLimitedAuthPaths_LieUnderTheCookieScope(t *testing.T) {
 	paths := make([]string, 0, 2+len(authLimitedPaths))
 	paths = append(paths, refreshLimitedPath, wsTokenLimitedPath)

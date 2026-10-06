@@ -2,7 +2,6 @@ package api
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"path/filepath"
 	"reflect"
@@ -10,35 +9,22 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
-// This file is the RBAC counterpart to
-// internal/api/handlers/tracktask_guard_test.go: it turns "every endpoint
-// checks permissions" from a convention maintained by review into an
-// invariant the build enforces.
-//
-// Authorization here is 438 hand-placed require*Perm calls in handler bodies;
-// the router applies only authRequired. A route whose handler forgets the call
-// ships as authenticated-but-unauthorized-accessible, and nothing fails. That
-// is not hypothetical — console-token minting shipped gated on `view`, which
-// every default Viewer holds, so a read-only account could open a hypervisor's
-// shell, at its login prompt, and every guest console (fixed in 17a7cc0).
-//
-// The guard resolves each registered route to the function that serves it,
-// then walks the handlers package's call graph to decide whether that function
-// can reach a permission check at all.
-//
-// LIMITATION, stated plainly: this proves a permission check is REACHABLE from
-// the handler, not that it executes on every path. A check behind a condition
-// counts as reached — settingScopeID (handlers/settings.go) calls requirePerm
-// only when write is true, so the settings READ routes pass this guard while
-// performing no check on the read path. Catching that class needs type-aware
-// dataflow (golang.org/x/tools/go/packages + types.Info), which is a much
-// larger dependency. What this catches is the class that actually shipped a
-// vulnerability: a handler with no check at all.
+// The RBAC counterpart to internal/api/handlers/tracktask_guard_test.go: it turns "every endpoint checks
+// permissions" from a convention kept by review into an invariant the build enforces. Authorization is
+// hand-placed require*Perm calls in handler bodies (the router applies only authRequired), and a route
+// whose handler forgets the call ships authenticated-but-unauthorized-accessible with nothing failing:
+// console-token minting shipped gated on `view`, which every default Viewer holds, so a read-only account
+// could open a hypervisor's shell and every guest console (fixed in 17a7cc0). The guard resolves each
+// registered route to the function that serves it and walks the handlers package's call graph to decide
+// whether it can reach a permission check at all. LIMITATION: that proves a check is REACHABLE, not that it
+// executes on every path (settingScopeID calls requirePerm only when write is true, so the settings READ
+// routes pass while performing no check); catching that needs type-aware dataflow, a much larger dependency.
 
 // permissionLeaves are the package-level functions that actually consult the
 // RBAC engine. Reaching any of them counts as enforcing.
@@ -100,21 +86,13 @@ var instanceSharedRoutes = map[string]string{
 	"GET /api/v1/settings/branding/favicon-file": "serves the instance branding asset; the filename is server-chosen, never caller-supplied",
 }
 
-// selfServiceRoutes are authenticated routes that act solely on the caller's
-// own identity, taken from the session rather than from user input. A
-// permission check would be meaningless — a user cannot be denied access to
-// their own profile — but each must be listed with a reason so the set stays
-// small and reviewed, and so an IDOR (acting on a subject named in the path)
-// cannot hide here.
-//
-// The four /api/v1/api-keys routes were listed here until Phase 6i and should
-// not have been: every one of them opened with requirePerm(c, "manage",
-// "api_key"), so the exemption made this file's guards skip routes that were
-// never exempt — including the docs-drift check that was supposed to compare
-// endpointMeta's "manage:api_key" against what they enforce. They are scoped to
-// the caller as well, but that is a property of the handler, not the absence of
-// a gate. They now declare the Check (internal/api/registry_api_keys.go) and
-// both guards run on them again.
+// selfServiceRoutes are authenticated routes that act solely on the caller's own identity, taken from the
+// session. A permission check would be meaningless (a user cannot be denied their own profile), but each
+// is listed with a reason so the set stays small and reviewed and an IDOR (acting on a subject named in
+// the path) cannot hide here. The four /api/v1/api-keys routes were listed until Phase 6i and should not
+// have been: each opened with requirePerm(c, "manage", "api_key"), so the exemption made this file's
+// guards skip routes that were never exempt, including the docs-drift check. They now declare the Check
+// (registry_api_keys.go) and both guards run on them again.
 var selfServiceRoutes = map[string]string{
 	"GET /api/v1/auth/me":                              "returns the caller's own profile",
 	"PUT /api/v1/auth/profile":                         "updates the caller's own profile",
@@ -132,22 +110,16 @@ var selfServiceRoutes = map[string]string{
 	"DELETE /api/v1/favorites":                         "removes one of the caller's own favorites; the DELETE is keyed by the authenticated user id, and gating it on view access would strand rows a user can no longer see",
 }
 
-// publicRouteKeys parses router.go and returns the "METHOD path" keys of every
-// route registered WITHOUT authRequired.
-//
-// This is read from the source rather than the runtime route table because
-// Fiber v3 applies group-level middleware at match time — `v1.Group("/clusters",
-// s.authRequired())` never appears in the child routes' Handlers slice, so
-// runtime introspection reports every cluster route as unauthenticated.
-//
-// Groups are resolved transitively (totpGroup inherits authGroup's middleware),
-// and a route counts as authenticated if its own registration passes
-// s.authRequired() even when its group does not.
+// publicRouteKeys parses router.go and returns the "METHOD path" keys of every route registered WITHOUT
+// authRequired. It reads source rather than the runtime route table because Fiber v3 applies group-level
+// middleware at match time (`v1.Group("/clusters", s.authRequired())` never appears in the child routes'
+// Handlers), so runtime introspection reports every cluster route as unauthenticated. Groups are resolved
+// transitively (totpGroup inherits authGroup's middleware), and a route counts as authenticated if its
+// own registration passes s.authRequired() even when its group does not.
 func publicRouteKeys(t *testing.T) map[string]bool {
 	t.Helper()
 
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "router.go", nil, 0)
+	file, err := parsedSource("router.go")
 	if err != nil {
 		t.Fatalf("parse router.go: %v", err)
 	}
@@ -264,12 +236,26 @@ type callGraph struct {
 	literalActions map[string]map[string]bool
 }
 
-// buildCallGraph parses the handlers package and records, per function, both
-// the functions it calls and the literal action strings it gates on.
+var (
+	callGraphOnce  sync.Once
+	callGraphBuilt *callGraph
+)
+
+// buildCallGraph is the call graph of the handlers package, built once per test
+// binary; the guards only read it.
 func buildCallGraph(t *testing.T) *callGraph {
 	t.Helper()
+	callGraphOnce.Do(func() { callGraphBuilt = buildCallGraphOnce(t) })
+	if callGraphBuilt == nil {
+		t.Fatal("the handlers call graph failed to build in an earlier test")
+	}
+	return callGraphBuilt
+}
 
-	fset := token.NewFileSet()
+// buildCallGraphOnce parses the handlers package and records, per function, both
+// the functions it calls and the literal action strings it gates on.
+func buildCallGraphOnce(t *testing.T) *callGraph {
+	t.Helper()
 
 	// Explicit glob rather than parser.ParseDir (deprecated in Go 1.25): this
 	// package has no build-tagged files, so the file set is simply every
@@ -284,7 +270,7 @@ func buildCallGraph(t *testing.T) *callGraph {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
 		}
-		parsed, parseErr := parser.ParseFile(fset, path, nil, 0)
+		parsed, parseErr := parsedSource(path)
 		if parseErr != nil {
 			t.Fatalf("parse %s: %v", path, parseErr)
 		}
@@ -374,17 +360,12 @@ func funcKey(fn *ast.FuncDecl) string {
 	return fn.Name.Name
 }
 
-// calleeKey names a call target the same way funcKey names a declaration.
-//
-// Resolution is receiver-aware: inside a method on VMHandler, `h.resolveVM`
-// resolves to "VMHandler.resolveVM" specifically, not to any method named
-// resolveVM on any type. Being loose here silently defeated the guard — a
-// handler whose own check was deleted still passed because some unrelated
-// same-named method elsewhere reached a leaf.
-//
-// Selectors whose base is not the receiver (h.queries.GetVM, c.Params) are
-// calls into other packages and cannot reach a permission leaf, so they
-// resolve to "" and are ignored.
+// calleeKey names a call target the same way funcKey names a declaration. Resolution is receiver-aware:
+// inside a method on VMHandler, `h.resolveVM` is "VMHandler.resolveVM", not any method named resolveVM on
+// any type; being loose silently defeated the guard (a handler whose own check was deleted still passed
+// because an unrelated same-named method reached a leaf). Selectors whose base is not the receiver
+// (h.queries.GetVM, c.Params) are calls into other packages, cannot reach a permission leaf, and resolve
+// to "".
 func calleeKey(fun ast.Expr, recvType string) string {
 	switch f := fun.(type) {
 	case *ast.Ident:
@@ -504,7 +485,7 @@ func normalizeRoutePath(path string) string {
 // handler — do not add the route to an exemption list unless it is genuinely
 // unauthenticated or acts solely on the caller's own identity.
 func TestGuard_EveryRouteEnforcesPermission(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	graph := buildCallGraph(t)
 
@@ -567,7 +548,7 @@ func TestGuard_EveryRouteEnforcesPermission(t *testing.T) {
 // nothing would notice. This makes that a build failure, and makes going
 // public a deliberate edit to publicRoutes with a stated reason.
 func TestGuard_PublicRoutesAreExpected(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	registered := map[string]bool{}
 	for _, r := range s.app.GetRoutes(true) {
@@ -616,7 +597,7 @@ func TestGuard_PublicRoutesAreExpected(t *testing.T) {
 // unguarded route is passing for an unrelated reason. Same guarantee
 // TestEndpointMetaMatchesRegisteredRoutes gives the docs overlay.
 func TestGuard_ExemptionKeysMatchRegisteredRoutes(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	registered := map[string]bool{}
 	for _, r := range s.app.GetRoutes(true) {
@@ -646,51 +627,18 @@ func TestGuard_ExemptionKeysMatchRegisteredRoutes(t *testing.T) {
 	}
 }
 
-// TestGuard_DocumentedPermissionMatchesEnforcement catches the other half of
-// the problem: a route that checks *something* but not what the API docs
-// promise. endpointMeta's Permission field is what operators read when
-// building roles, so drift there is a security-relevant lie — the console
-// token endpoint documented view:vm long after it moved to console:vm.
-//
-// Only the action is compared. Resources are frequently computed (the console
-// endpoint picks node/vm/container from the request), whereas the action is
-// almost always a literal.
-//
-// This USED to also branch on whether key was a registry-declared route
-// (registryDocumentedPermissionViolation / registryEnforcedActions,
-// registry_rbac_guard_test.go), comparing endpointMeta's entry against the
-// DECLARATION for the routes migrated with a "shadow copy" overlay entry
-// kept in step deliberately. The endpointMeta cleanup that removed every
-// such overlapping entry (see the endpointMeta doc comment,
-// internal/api/handlers/api_docs.go) also removed that branch's only
-// production inputs: endpointMeta ∩ {registry-declared routes} is now
-// provably empty (TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet
-// above pins endpointMeta to an exact key set — 9 when that guard was
-// written, 13 since four mis-grouped legacy routes gained entries to put
-// them in the right docs section — none of which the registry declares),
-// so `declared, ok := meta[key]` below already
-// `continue`s past every registry route before any registry-specific
-// branch could run — the branch was dead code, not merely rarely
-// exercised, and excising it changes nothing for any key reachable today.
-//
-// This does leave one theoretical gap: if a currently-legacy route in
-// endpointMetaSurvivingKeys is migrated to the registry in the future
-// AND its stale overlay entry is not deleted in the same change (against
-// the convention the endpointMeta doc comment states), nothing here would
-// flag the leftover entry. That was true of the excised branch too in
-// spirit — GetDocs never renders such an entry either way, so a stale
-// leftover is inert production clutter, not a docs lie an operator could
-// act on; catching the clutter itself is TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet's
-// job (delete the migrated route's key from endpointMetaSurvivingKeys in
-// that same future change), not this guard's.
-//
-// registryDocumentedPermissionViolation and registryEnforcedActions are
-// unchanged and still exercised directly by their own unit tests
-// (TestRegistryDocumentedPermissionViolation, TestRegistryEnforcedActions,
-// registry_rbac_guard_test.go) against synthetic data — only their one
-// production call site, here, was removed.
+// TestGuard_DocumentedPermissionMatchesEnforcement catches the other half: a route that checks
+// *something* but not what the API docs promise. endpointMeta's Permission is what operators read when
+// building roles, so drift is a security-relevant lie (the console token endpoint documented view:vm long
+// after it moved to console:vm). Only the action is compared: resources are frequently computed (the
+// console endpoint picks node/vm/container from the request), the action almost always a literal. It once
+// also compared registry-declared routes against their declarations; the endpointMeta cleanup removed every
+// overlapping entry (endpointMeta ∩ the registry is empty, pinned by
+// TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet), so that branch was dead and is gone. One
+// theoretical gap: a legacy route in that key set migrated without deleting its overlay entry would leave
+// an inert leftover, which GetDocs never renders and that same key-set guard catches.
 func TestGuard_DocumentedPermissionMatchesEnforcement(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	graph := buildCallGraph(t)
 	meta := handlers.EndpointMetaPermissions()

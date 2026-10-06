@@ -2,33 +2,20 @@ package handlers
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"testing"
 )
 
-// TestGuard_MetricsHistoricalCheckClusterMembership enforces the half of the
-// cross-cluster IDOR defence that lives in this package.
-//
-// The GATE moved out of it. All three routes are declared with a cluster-scoped
-// Check in internal/api/registry_metrics.go, and
-// TestMetricsRoutesDeclareTheSamePermissionTheyEnforced compares the ACTION AND
-// THE RESOURCE of each one against what the handler enforced before the
-// migration. That is strictly stronger than what this file used to do: the
-// previous version searched for a requireClusterPerm call and could not see
-// which permission it named, so all three could have collapsed onto
-// view:cluster and still passed — and, being a reachability check, it could not
-// tell a call that runs from one behind a condition.
-//
-// What a declaration cannot express is the second half, and it is the half the
-// IDOR actually turns on: GetVMHistorical and GetNodeHistorical query the
-// time-series tables by the GUEST's or NODE's row id alone, so a caller
-// authorized on cluster A can name a row that lives in cluster B and the gate
-// would never notice. Each has to re-read the row and compare its ClusterID
-// against the one the gate authorized. This is that comparison.
+// TestGuard_MetricsHistoricalCheckClusterMembership enforces the half of the cross-cluster IDOR defence
+// that lives in this package. The GATE moved out: all three routes declare a cluster-scoped Check in
+// registry_metrics.go, and TestMetricsRoutesDeclareTheSamePermissionTheyEnforced compares the action
+// AND resource of each (the earlier version searched for a requireClusterPerm call and could not see
+// which permission it named). What a declaration cannot express is the half the IDOR turns on:
+// GetVMHistorical and GetNodeHistorical query the time-series tables by the guest's or node's row id
+// alone, so a caller authorized on cluster A can name a row in cluster B. Each has to re-read the row and
+// compare its ClusterID against the one the gate authorized. This is that comparison.
 func TestGuard_MetricsHistoricalCheckClusterMembership(t *testing.T) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "metrics.go", nil, 0)
+	f, err := guardParsed("metrics.go")
 	if err != nil {
 		t.Fatalf("parse metrics.go: %v", err)
 	}

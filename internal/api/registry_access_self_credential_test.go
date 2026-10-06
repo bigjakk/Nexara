@@ -321,7 +321,7 @@ func TestAccessGuardRefusalMirrorsBuildingTheClient(t *testing.T) {
 // pins a decision rather than a reachable state. The guard once let the request
 // through; it refuses, without dereferencing the missing database.
 func TestAccessGuardRefusesWithoutADatabase(t *testing.T) {
-	e := sharedEndpoint(t, fiber.MethodDelete, accessScope+"/users/:userid/tokens/:tokenid")
+	e := declaredEndpoint(t, fiber.MethodDelete, accessScope+"/users/:userid/tokens/:tokenid")
 	e.Handler = handlers.NewAccessHandler(nil, accessUpdateEncKey, nil).DeleteToken
 	// A guard that let this request through would dereference the missing database;
 	// recover makes that a failed assertion below, where the registry's own re-panic

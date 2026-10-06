@@ -51,14 +51,7 @@ var clusterLegacyPermissions = map[string]string{
 
 func declaredClusterEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if _, want := clusterLegacyPermissions[e.Method+" "+e.Path]; want {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(clusterLegacyPermissions))
 }
 
 // TestClusterRoutesDeclareTheSamePermissionTheyEnforced is the tally that makes
@@ -213,11 +206,10 @@ func clusterProbeBody(method, path string) string {
 func TestFingerprintLimitersAreSeparateInstances(t *testing.T) {
 	const budget = 30 // fingerprintFetchLimiter's Max; see middleware.go.
 
-	// BOTH endpoints come from ONE registry build. declaredEndpoint builds a
-	// fresh stub server per call, which calls buildRegistry again and hands back
-	// freshly constructed limiters — so taking them one at a time would compare
-	// two instances that are separate no matter what buildRegistry does, and the
-	// test would pass vacuously.
+	// A stub of its own — the test spends fetch-fingerprint's budget, and the shared
+	// stub's limiters live for the whole binary — and BOTH endpoints come from its one
+	// registry build: from two builds they would be separate instances whatever
+	// buildRegistry does, and the test would pass vacuously.
 	byKey := registryEndpointsByKey(newRouteStubServer(t).registry.Endpoints())
 	fetch, ok := byKey["POST "+clustersScope+"/fetch-fingerprint"]
 	if !ok {

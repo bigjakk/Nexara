@@ -2,34 +2,20 @@ package handlers
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"strings"
 	"testing"
 )
 
-// The identity handlers carry more distinct credentials than anywhere else in
-// the tree: account passwords, LDAP bind passwords, OIDC client secrets, TOTP
-// secrets, single-use recovery codes, refresh tokens, scoped console tokens and
-// API keys. Every one of them passes through a function in this list, and every
-// one of these files writes audit rows.
-//
-// audit_log.details is readable by anyone holding view:audit, which every
-// built-in Viewer holds by default (see the project's own note on that). So a
-// credential reaching an audit row is readable by accounts that cannot see the
-// object it belongs to — an API key's owner list, say, or the LDAP config.
-//
-// This is the access.go pair of guards widened to the domains Phase 6i
-// migrated, and it is worth having precisely BECAUSE of that migration: moving
-// a handler to declared parameters replaces a hand-written request struct with
-// an apischema.Params, which has a Raw() accessor that returns EVERY declared
-// parameter at once. `json.Marshal(p.Raw())` is one short line, reads as
-// reasonable, and would publish a password.
-//
-// Limitation, stated plainly: this checks the marshal site only. Assigning a
-// secret to a local first and marshalling that would pass. It is aimed at the
-// realistic mistake — adding `"password": …` while wiring up a new endpoint —
-// not at deliberate laundering.
+// The identity handlers carry the most distinct credentials in the tree (passwords, LDAP bind
+// passwords, OIDC client secrets, TOTP secrets, recovery codes, refresh tokens, console tokens, API
+// keys), every one passes through a function listed here, and every file writes audit rows.
+// audit_log.details is readable by anyone with view:audit, which every built-in Viewer holds, so a
+// credential reaching a row is readable by accounts that cannot see its object. This is the access.go
+// pair of guards widened to the domains Phase 6i migrated, and worth having because of it: Params has a
+// Raw() accessor returning EVERY declared parameter, and `json.Marshal(p.Raw())` is one reasonable-looking
+// line that would publish a password. Limitation: it checks the marshal site only (assigning a secret to
+// a local first would pass); it is aimed at adding `"password": ...` while wiring a new endpoint.
 
 // identitySecretFiles are the handler files this pair of guards covers.
 var identitySecretFiles = []string{
@@ -64,8 +50,8 @@ var identitySecretishField = []string{
 
 func parseIdentityFile(t *testing.T, name string) (*token.FileSet, *ast.File) {
 	t.Helper()
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, name, nil, 0)
+	fset := guardFset
+	file, err := guardParsed(name)
 	if err != nil {
 		t.Fatalf("parse %s: %v", name, err)
 	}
@@ -139,19 +125,12 @@ func TestGuard_IdentityAuditDetailsCarryNoSecrets(t *testing.T) {
 	}
 }
 
-// TestGuard_IdentityHandlersNeverReadTheRawParams is the half the registry
-// migration created the need for.
-//
-// apischema.Params.Raw() returns every declared parameter at once — the login
-// password, the LDAP bind password, the OIDC client secret, the TOTP code, the
-// API key's requested name and lifetime. Handing it to json.Marshal is one
-// short line that reads as reasonable and would write a credential into a row
-// every Viewer can read, which is exactly what Raw's own doc comment warns
-// against. No call site does this today; the guard is here so none appears.
-//
-// The rule is absolute — never call Raw() in these files at all — rather than
-// "never marshal it", because the laundering version (assign, then marshal the
-// local) is the one a static check cannot see.
+// TestGuard_IdentityHandlersNeverReadTheRawParams is the half the registry migration created the need
+// for: Params.Raw() returns every declared parameter at once (the login password, the LDAP bind password,
+// the OIDC client secret, the TOTP code, the API key's name and lifetime), and handing it to json.Marshal
+// would write a credential into a row every Viewer can read. No call site does today. The rule is
+// absolute (never call Raw() in these files) rather than "never marshal it", because the laundering
+// version (assign, then marshal the local) is the one a static check cannot see.
 func TestGuard_IdentityHandlersNeverReadTheRawParams(t *testing.T) {
 	for _, name := range identitySecretFiles {
 		fset, file := parseIdentityFile(t, name)

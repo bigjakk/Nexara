@@ -2,29 +2,20 @@ package handlers
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"testing"
 )
 
-// The detach audit row records what a slot held, and it can only do that if
-// the lookup runs BEFORE the detach: afterwards the key is gone from the
-// config and every row silently reverts to "no such key in the VM config" —
-// the exact empty-row defect this was written to fix, restored, with both unit
-// tests still green.
-//
-// That reordering is a one-line edit with no other symptom, so it needs a
-// guard rather than a comment. There is no seam to test it through: DetachDisk
-// builds a real *proxmox.Client out of DB rows via resolveVM, so the only
-// alternative is a live hypervisor, which is not a thing a test may require.
-//
-// LIMITATION, stated plainly: this reads the source, so it proves the calls
-// appear in that order in the text of the function, not that they execute in
-// it. A resolution moved inside a conditional that never runs would still pass.
-// It catches the edit that would actually be made.
+// The detach audit row records what a slot held, which it can do only if the lookup runs BEFORE the
+// detach: afterwards the key is gone and every row reverts to "no such key in the VM config", the
+// empty-row defect this was written to fix, with both unit tests still green. That reordering is a
+// one-line edit with no other symptom, and there is no seam to test it through (DetachDisk builds a real
+// *proxmox.Client out of DB rows via resolveVM), so this reads the source: it proves the calls appear in
+// that order in the function's text, not that they execute in it (a resolution inside a conditional that
+// never runs would pass). It catches the edit that would actually be made.
 func TestGuard_DetachResolvesTheVolumeBeforeDetaching(t *testing.T) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "vms.go", nil, 0)
+	fset := guardFset
+	file, err := guardParsed("vms.go")
 	if err != nil {
 		t.Fatalf("parse vms.go: %v", err)
 	}

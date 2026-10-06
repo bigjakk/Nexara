@@ -764,21 +764,13 @@ func TestListSettingsExcludesReservedGlobalKeys(t *testing.T) {
 	}
 }
 
-// TestSettingsMutationsAudit covers the audit trail on the settings writes.
-// A manage:settings holder changes application-wide config through these
-// endpoints — branding, and every global key not reserved to a dedicated
-// handler — so a shared-scope mutation has to leave a row naming who touched
-// which key, per the project's audit-everything requirement.
-//
-// The user scope is deliberately silent, and that is asserted here rather than
-// left to inference: those rows are keyed on the caller's own user_id, invisible
-// to everyone else, and written on every dashboard drag. Auditing them would
-// bury the entries that matter. If that call is ever revisited, these cases are
-// what has to change.
-//
-// The refused cases pin the other half: the audit row is written after the
-// settings write returns, so a rejected request records nothing and the log
-// says what happened rather than what was attempted.
+// TestSettingsMutationsAudit covers the audit trail on the settings writes. A manage:settings holder
+// changes application-wide config through these endpoints (branding, and every global key not reserved
+// to a dedicated handler), so a shared-scope mutation must leave a row naming who touched which key. The
+// user scope is deliberately silent, asserted here: those rows are keyed on the caller's own user_id,
+// invisible to everyone else, and written on every dashboard drag, so auditing them would bury the
+// entries that matter. The refused cases pin the other half: the row is written after the write returns,
+// so a rejected request records nothing.
 func TestSettingsMutationsAudit(t *testing.T) {
 	// Distinctive enough to spot anywhere in the recorded row. Values run to
 	// 64KB and hold config like the syslog destination, so the audit detail
@@ -1165,24 +1157,15 @@ var settingParamsTypes = map[string]bool{
 	"DeleteSettingParams": true,
 }
 
-// TestGuard_GlobalSettingKeysClassified is the drift guard behind the reserved
-// list, in the same static-analysis style as tracktask_guard_test.go. It parses
-// internal/api and internal/api/handlers and fails on any global setting key
-// that is in neither reservedGlobalSettings nor unreservedGlobalSettings.
-//
-// Without it the reservation only covers keys someone remembered to add. The
-// disclosure the list was written for is structural: shared-scope reads on the
-// generic endpoints are ungated, so the next global key holding a secret is
-// world-readable the day it lands. This forces its author to classify it.
-//
-// Only statically resolvable keys are checked — a string literal, or an
-// identifier bound to a package-level string const. A global write whose key it
-// cannot resolve is itself a failure, since that key would slip the guard.
-//
-// Two limits worth knowing. It reads the two Go packages that write settings
-// today; a third would need adding here. And it cannot see keys the SPA writes
-// through the generic PUT (branding.app_title is one) — those are classified by
-// hand in unreservedGlobalSettings.
+// TestGuard_GlobalSettingKeysClassified is the drift guard behind the reserved list: it parses
+// internal/api and internal/api/handlers and fails on any global setting key in neither
+// reservedGlobalSettings nor unreservedGlobalSettings. Without it the reservation covers only keys
+// someone remembered: shared-scope reads on the generic endpoints are ungated, so the next global key
+// holding a secret is world-readable the day it lands. Only statically resolvable keys are checked (a
+// string literal, or an identifier bound to a package-level string const); a global write whose key it
+// cannot resolve is itself a failure. Limits: it reads the two packages that write settings today, and
+// cannot see keys the SPA writes through the generic PUT (branding.app_title is one), classified by hand
+// in unreservedGlobalSettings.
 func TestGuard_GlobalSettingKeysClassified(t *testing.T) {
 	for _, dir := range []string{".", ".."} {
 		fset, files := parseGoFiles(t, dir)

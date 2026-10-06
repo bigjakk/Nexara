@@ -377,7 +377,7 @@ func TestNodeNameFormatIsNoLooserThanTheShellGuard(t *testing.T) {
 	// The maintenance route is the one that reaches the shell, so it is the
 	// one driven here.
 	const path = clusterScope + "/nodes/:node_name/maintenance"
-	e := sharedEndpoint(t, fiber.MethodPost, path)
+	e := declaredEndpoint(t, fiber.MethodPost, path)
 	if got := e.Parameters["node_name"].Format; got != "node-name" {
 		t.Fatalf("node_name declares format %q, want node-name", got)
 	}
@@ -426,7 +426,7 @@ func TestNodeNameFormatIsNoLooserThanTheShellGuard(t *testing.T) {
 // for a capture.
 func probeNodeEndpoint(t *testing.T, method, path string, cap *capture) Endpoint {
 	t.Helper()
-	e := sharedEndpoint(t, method, path)
+	e := declaredEndpoint(t, method, path)
 	e.Handler = cap.handler()
 	e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
 	return e
@@ -542,7 +542,7 @@ func TestNodeDeleteRoutesRefuseATraversalSegment(t *testing.T) {
 		{"service", fiber.MethodPost, clusterScope + "/nodes/:node_name/services/:service/:action", "service"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			e := sharedEndpoint(t, tt.method, tt.path)
+			e := declaredEndpoint(t, tt.method, tt.path)
 			prop, ok := e.Parameters[tt.param]
 			if !ok {
 				t.Fatalf("%s declares no %q parameter", tt.path, tt.param)
@@ -597,7 +597,7 @@ func TestNodeDeviceParametersAreAnchoredAtDev(t *testing.T) {
 		{fiber.MethodPost, clusterScope + "/nodes/:node_name/disks/zfs", "devices"},
 	} {
 		t.Run(tt.path+" "+tt.param, func(t *testing.T) {
-			e := sharedEndpoint(t, tt.method, tt.path)
+			e := declaredEndpoint(t, tt.method, tt.path)
 			if e.Parameters[tt.param].Optional {
 				t.Errorf("%s: %q is optional, but the handler refused an empty one", tt.path, tt.param)
 			}
@@ -629,7 +629,7 @@ func TestNodeDeviceParametersAreAnchoredAtDev(t *testing.T) {
 		})
 	}
 	// Only the ZFS create takes a LIST, and it has to keep taking one.
-	e := sharedEndpoint(t, fiber.MethodPost, clusterScope+"/nodes/:node_name/disks/zfs")
+	e := declaredEndpoint(t, fiber.MethodPost, clusterScope+"/nodes/:node_name/disks/zfs")
 	if _, err := e.Parameters.Validate(nodeParamsWith(t, e, map[string]any{
 		"devices": "/dev/sda,/dev/sdb",
 	})); err != nil {
@@ -660,7 +660,7 @@ func TestNodeCreateBodiesRequireOnlyWhatTheHandlersDid(t *testing.T) {
 		{clusterScope + "/nodes/:node_name/disks/initgpt", []string{"disk"}},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
-			e := sharedEndpoint(t, fiber.MethodPost, tt.path)
+			e := declaredEndpoint(t, fiber.MethodPost, tt.path)
 			var got []string
 			for name, prop := range e.Parameters {
 				// The path parameters are required by construction and are not
@@ -681,7 +681,7 @@ func TestNodeCreateBodiesRequireOnlyWhatTheHandlersDid(t *testing.T) {
 
 	// The wipe route is a PUT rather than a POST and carries the same one
 	// required field as initgpt.
-	e := sharedEndpoint(t, fiber.MethodPut, clusterScope+"/nodes/:node_name/disks/wipe")
+	e := declaredEndpoint(t, fiber.MethodPut, clusterScope+"/nodes/:node_name/disks/wipe")
 	if e.Parameters["disk"].Optional {
 		t.Error("the wipe route's disk is optional, but the handler refused an empty one")
 	}
@@ -696,13 +696,13 @@ func TestNodeCreateBodiesRequireOnlyWhatTheHandlersDid(t *testing.T) {
 // required on both would look tidier and would reject a request that has
 // always worked.
 func TestNodeFirewallRuleRequiredSetDiffersByVerb(t *testing.T) {
-	create := sharedEndpoint(t, fiber.MethodPost, clusterScope+"/nodes/:node_name/firewall/rules")
+	create := declaredEndpoint(t, fiber.MethodPost, clusterScope+"/nodes/:node_name/firewall/rules")
 	for _, name := range []string{"type", "action"} {
 		if create.Parameters[name].Optional {
 			t.Errorf("create: %q is optional, but the handler refused an empty one", name)
 		}
 	}
-	update := sharedEndpoint(t, fiber.MethodPut, clusterScope+"/nodes/:node_name/firewall/rules/:pos")
+	update := declaredEndpoint(t, fiber.MethodPut, clusterScope+"/nodes/:node_name/firewall/rules/:pos")
 	for _, name := range []string{"type", "action"} {
 		if !update.Parameters[name].Optional {
 			t.Errorf("update: %q is required, but the handler accepted a body without it", name)
@@ -731,7 +731,7 @@ func TestNodeFirewallRuleRequiredSetDiffersByVerb(t *testing.T) {
 // declaration bounds them instead.
 func TestNodeSyslogPagingIsBoundedRatherThanClamped(t *testing.T) {
 	const path = clusterScope + "/nodes/:node_name/syslog"
-	e := sharedEndpoint(t, fiber.MethodGet, path)
+	e := declaredEndpoint(t, fiber.MethodGet, path)
 	if got := e.Parameters["start"].Default; got != -1 {
 		t.Errorf("start default = %#v, want -1 — the value the handler substituted", got)
 	}
@@ -783,7 +783,7 @@ func TestNodeSyslogPagingIsBoundedRatherThanClamped(t *testing.T) {
 // request.
 func TestNodeJournalLastEntriesStaysDefaultless(t *testing.T) {
 	const path = clusterScope + "/nodes/:node_name/journal"
-	e := sharedEndpoint(t, fiber.MethodGet, path)
+	e := declaredEndpoint(t, fiber.MethodGet, path)
 	last := e.Parameters["lastentries"]
 	if !last.Optional {
 		t.Error("lastentries is required; a caller must be able to page by cursor instead")
@@ -827,7 +827,7 @@ func TestNodeSyslogTimesKeepTheirEmptySentinel(t *testing.T) {
 		clusterScope + "/nodes/:node_name/journal",
 	} {
 		t.Run(path, func(t *testing.T) {
-			e := sharedEndpoint(t, fiber.MethodGet, path)
+			e := declaredEndpoint(t, fiber.MethodGet, path)
 			for _, name := range []string{"since", "until"} {
 				if got := e.Parameters[name].Format; got != "" {
 					t.Errorf("%s declares format %q; the empty string is a meaningful value here", name, got)
@@ -853,7 +853,7 @@ func TestNodeSyslogTimesKeepTheirEmptySentinel(t *testing.T) {
 // the handler branches on twice.
 func TestNodeEvacuateTargetKeepsItsEmptySentinel(t *testing.T) {
 	const path = clusterScope + "/nodes/:node_name/evacuate"
-	e := sharedEndpoint(t, fiber.MethodPost, path)
+	e := declaredEndpoint(t, fiber.MethodPost, path)
 	if got := e.Parameters["target_node"].Format; got != "" {
 		t.Errorf("target_node declares format %q; the empty string is a meaningful value here", got)
 	}
@@ -884,7 +884,7 @@ func TestNodeEvacuateTargetKeepsItsEmptySentinel(t *testing.T) {
 // caller, not a call the handler still makes.
 func TestNodeRowIDRoutesAreGatedByTheirDeclaration(t *testing.T) {
 	const path = clusterScope + "/nodes/:node_id/disks"
-	e := sharedEndpoint(t, fiber.MethodGet, path)
+	e := declaredEndpoint(t, fiber.MethodGet, path)
 	if e.Permissions.Describe() != "view:node" {
 		t.Fatalf("the disk listing declares %q, want view:node", e.Permissions.Describe())
 	}

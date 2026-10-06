@@ -17,28 +17,16 @@ var auditClusterArgIndex = map[string]int{
 	"AuditLogAs": 4,
 }
 
-// auditClusterExempt names every audit call site that deliberately records a
-// NULL cluster, and why that is right. Keys are "file.go.EnclosingFunc".
-//
-// This map exists because a NULL cluster_id is not "unknown" — it is load
-// bearing. It marks a GLOBAL audit entry, and the scoped audit reads added in
-// 33d68f2 hand those only to a holder of global view:audit (`cluster_id =
-// ANY(array)` yields NULL, not true, for a NULL column, so the clause excludes
-// them from every cluster-scoped caller). That is exactly right for a login or
-// a settings change. For an action on a resource that belongs to one cluster it
-// is a disappearing act: the operator who can see and manage the resource
-// cannot find their own action in the audit page, the filters, the CSV/JSON
-// export or the dashboard feed.
-//
-// So the rule is: audit with the resource's cluster. Passing NULL is still
-// available, but it stops being something a new handler can do by inattention —
-// it becomes a line someone has to write down and justify here.
-//
-// Every entry below is a resource that belongs to the install rather than to a
-// cluster, and each is gated on a GLOBAL permission — so the global-only
-// readership of a NULL-cluster row matches exactly who is allowed to perform
-// the action. That pairing is the test to apply when adding an entry: if a
-// cluster-scoped operator can do it, the row must name their cluster.
+// auditClusterExempt names every audit call site that deliberately records a NULL cluster, keyed
+// "file.go.EnclosingFunc". A NULL cluster_id is load bearing, not "unknown": it marks a GLOBAL entry,
+// which the scoped audit reads added in 33d68f2 hand only to a holder of global view:audit
+// (`cluster_id = ANY(array)` is NULL for a NULL column, so every cluster-scoped caller is excluded).
+// Right for a login or a settings change; for an action on one cluster's resource it is a disappearing
+// act: the operator who manages it cannot find their action in the audit page, filters, export or
+// dashboard feed. So audit with the resource's cluster; NULL stays possible but becomes a line someone
+// justifies here. Every entry is a resource that belongs to the install, gated on a GLOBAL permission,
+// so the readership of a NULL row matches who may act. If a cluster-scoped operator can do it, the row
+// must name their cluster.
 var auditClusterExempt = map[string]string{
 	// Session and credential events for one user. There is no cluster in scope
 	// at any of these points — several run before or after the session exists.
@@ -203,42 +191,27 @@ func nullClusterArg(expr ast.Expr) bool {
 	return true
 }
 
-// TestNullClusterArg pins the guard's own detector. A guard that silently stops
-// recognising the shape it hunts is worse than no guard: it reports success
-// over a repo full of the defect. The false cases matter as much as the true
-// ones — flagging `alert.ClusterID` or `ClusterUUID(x)` would push authors to
-// paper over the guard rather than fix anything.
+// TestNullClusterArg covers what the guard's real input never reaches, because no call site spells a
+// NULL out: a literal that forgets Valid (the realistic mistake) or says Valid: false is still NULL, and
+// only another package's UUID or another pgtype zero value is not a cluster argument at all.
 func TestNullClusterArg(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-		expr string
-		want bool
-	}{
-		{"empty literal is NULL", "pgtype.UUID{}", true},
-		{"explicit Valid false is NULL", "pgtype.UUID{Valid: false}", true},
-		{"Bytes without Valid is NULL", "pgtype.UUID{Bytes: b}", true},
-		{"Valid true is not NULL", "pgtype.UUID{Bytes: b, Valid: true}", false},
-		{"Valid true first is not NULL", "pgtype.UUID{Valid: true, Bytes: b}", false},
-		{"helper call is not a literal", "ClusterUUID(x.ClusterID)", false},
-		{"field access is not a literal", "alert.ClusterID", false},
-		{"plain identifier is not a literal", "cluster", false},
-		{"a different pgtype zero value is not a cluster UUID", "pgtype.Text{}", false},
-		{"a same-named type from another package is not ours", "other.UUID{}", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			expr, err := parser.ParseExpr(tt.expr)
-			if err != nil {
-				t.Fatalf("parse %q: %v", tt.expr, err)
-			}
-			if got := nullClusterArg(expr); got != tt.want {
-				t.Errorf("nullClusterArg(%s) = %v, want %v", tt.expr, got, tt.want)
-			}
-		})
+	for expr, want := range map[string]bool{
+		"pgtype.UUID{}":                      true,
+		"pgtype.UUID{Bytes: b}":              true,
+		"pgtype.UUID{Valid: false}":          true,
+		"pgtype.UUID{Bytes: b, Valid: true}": false,
+		"other.UUID{}":                       false,
+		"pgtype.Text{}":                      false,
+	} {
+		parsed, err := parser.ParseExpr(expr)
+		if err != nil {
+			t.Fatalf("parse %q: %v", expr, err)
+		}
+		if got := nullClusterArg(parsed); got != want {
+			t.Errorf("nullClusterArg(%s) = %v, want %v", expr, got, want)
+		}
 	}
 }
 
@@ -251,12 +224,12 @@ func TestNullClusterArg(t *testing.T) {
 func TestGuard_AuditCallsCarryResourceCluster(t *testing.T) {
 	t.Parallel()
 
-	fset := token.NewFileSet()
+	fset := guardFset
 	var findings []string
 	seen := map[string]bool{}
 
 	for _, path := range goSourceFiles(t) {
-		parsed, err := parser.ParseFile(fset, path, nil, 0)
+		parsed, err := guardParsed(path)
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}

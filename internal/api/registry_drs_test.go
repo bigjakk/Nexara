@@ -60,14 +60,7 @@ var drsLegacyPermissions = map[string]string{
 // /drs prefix, keyed "METHOD path".
 func declaredDRSEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, drsScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(drsScope))
 }
 
 // TestDRSRoutesDeclareTheSamePermissionTheyEnforced is the tally that

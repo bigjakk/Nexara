@@ -68,34 +68,20 @@ var acmeLegacyPermissions = map[string]string{
 	"DELETE /api/v1/clusters/:cluster_id/nodes/:node/certificates/revoke": "manage",
 }
 
-// declaredACMEEndpoints returns every declaration in this domain, keyed
-// "METHOD path".
-//
-// The membership test is STRUCTURAL — the path prefix, or the resource the
-// declaration names — and deliberately not "is it in acmeLegacyPermissions".
-// Filtering on the tally's own keys is how the reverse check at the bottom of
-// TestACMERoutesDeclareTheSamePermissionTheyEnforced becomes vacuous: every key
-// would be in the table by construction, so a nineteenth ACME route added
-// alongside a bumped acmeRouteCount would drop out of the tally with nothing
-// failing. That is the shape this repo has been bitten by before — a check whose
-// input cannot express failure.
-//
-// Two clauses rather than one, because the domain spans two prefixes: twelve
-// routes hang off /acme, and the six per-node certificate and acme-config routes
-// hang off /nodes/:node, which is shared with NodeHandler's 38 and the
-// rolling-update package preview. The resource clause is what catches those six,
-// and it catches a future route wherever it is mounted.
+// declaredACMEEndpoints returns every declaration in this domain, keyed "METHOD path". The membership
+// test is STRUCTURAL (the path prefix, or the resource the declaration names) and deliberately not "is it
+// in acmeLegacyPermissions": filtering on the tally's own keys makes the reverse check of
+// TestACMERoutesDeclareTheSamePermissionTheyEnforced vacuous, so a nineteenth route added with a bumped
+// acmeRouteCount would drop out of the tally with nothing failing. Two clauses because the domain spans two
+// prefixes: twelve routes hang off /acme and six per-node certificate and acme-config routes off
+// /nodes/:node (shared with NodeHandler's 38 and the rolling-update preview); the resource clause catches
+// those six and a future route wherever it is mounted.
 func declaredACMEEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, acmeScope+"/") ||
-			strings.Contains(e.Permissions.Describe(), acmeCertificateResource) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, func(e Endpoint) bool {
+		return strings.HasPrefix(e.Path, acmeScope+"/") ||
+			strings.Contains(e.Permissions.Describe(), acmeCertificateResource)
+	})
 }
 
 // TestACMERoutesDeclareTheSamePermissionTheyEnforced is the tally that makes
@@ -210,21 +196,13 @@ func probeACMEEndpoint(t *testing.T, method, path string, cap *capture) Endpoint
 	return e
 }
 
-// TestACMEPathSegmentsAreAnchored is the traversal guard for this domain, and
-// here the declaration is the only layer.
-//
-// internal/proxmox/client_acme.go builds /cluster/acme/account/<name> and
-// /cluster/acme/plugins/<id> by concatenation with url.PathEscape, which escapes
-// "/" but leaves "." and ".." alone — and there is NO second validator behind
-// it. The access domain has validateUserID and its kin, and the PBS task reads
-// have validatePBSTaskUPID; ACME has nothing, like the backup domain's store
-// and job ids, which get only a non-empty check
-// (TestBackupPathSegmentsAreAnchored). The declaration is the only anchor, so
-// it is the only thing this test can check and the only thing that stops a
-// normalising proxy in front of pveproxy from resolving DELETE
-// /cluster/acme/account/. onto the account collection, or ".." onto
-// /cluster/acme above it. (pveproxy itself would read either as an account
-// name; see proxmox.validatePathSegment.)
+// TestACMEPathSegmentsAreAnchored is the traversal guard for this domain, where the declaration is the
+// ONLY layer: client_acme.go builds /cluster/acme/account/<name> and /plugins/<id> with url.PathEscape,
+// which leaves "." and ".." alone, and unlike the access domain (validateUserID) or PBS task reads
+// (validatePBSTaskUPID) there is no second validator behind it (the backup domain's store and job ids get only
+// a non-empty check, TestBackupPathSegmentsAreAnchored). So it is the only thing stopping a normalising proxy
+// in front of pveproxy from resolving DELETE /cluster/acme/account/. onto the collection, or ".." onto
+// /cluster/acme above it (pveproxy itself reads either as an account name; see proxmox.validatePathSegment).
 func TestACMEPathSegmentsAreAnchored(t *testing.T) {
 	traversals := []string{".", ".."}
 
@@ -392,31 +370,16 @@ func TestACMEURLParametersKeepTheirEmptySentinel(t *testing.T) {
 	}
 }
 
-// TestACMEAccountNameKeepsItsEmptySentinel is the same compatibility assertion
-// for the third sentinel on this body, and the one that has to be made HERE.
-//
-// directory and tos_url reach their rule through emptyOrACMEURL, a constant in
-// registry_acme.go, so the test above pins them by comparing against it. `name`
-// reaches the CATALOGUE — apischema.Rule("pve-object-id-or-empty") — through
-// pveObjectNameOrEmptyParam (registry_networks.go), and no test in apischema
-// can see this site: those hold the RULE to its witnesses, never a
-// declaration to the rule. registry_rule_reference_ratchet_test.go does not
-// see it either: it keys on the container that spells the Rule call, which is
-// the helper, and does not follow a call into it — so a Pattern reassigned to
-// a literal here in createACMEAccountParams, after the helper returns,
-// escapes every source-reading guard. This test is what holds the site, as
-// TestFirewallAliasRenameKeepsTheEmptySentinel and
-// TestSDNVNetUpdateZoneKeepsTheEmptySentinel hold the helper's other two
-// callers: it reads the BUILT declaration — the pattern must be the
-// catalogued rule, the MaxLength must survive, and the values it admits are
-// driven through Validate — so a narrowed pattern, a dropped MaxLength, or an
-// empty string some other facet turns away each fail here.
-//
-// "" is not a third state. proxmox.CreateACMEAccount sets the form key only
-// `if params.Name != ""`, identically to directory and tos_url, so an empty name
-// reaches Proxmox as no name at all and the account is created under the name
-// Proxmox defaults to, which is "default". Before this route was declarative it
-// validated nothing, so "" has always been accepted here.
+// TestACMEAccountNameKeepsItsEmptySentinel is the same compatibility assertion for the third sentinel on
+// this body, and it has to be made HERE: directory and tos_url reach their rule through the constant
+// emptyOrACMEURL, so the test above compares against it, but `name` reaches the CATALOGUE through
+// pveObjectNameOrEmptyParam (registry_networks.go), a site no apischema test sees (they hold the RULE to its
+// witnesses, never a declaration to the rule) and the ratchet does not follow a call into the helper, so a
+// Pattern reassigned to a literal in createACMEAccountParams escapes every source-reading guard. This test
+// reads the BUILT declaration, like TestFirewallAliasRenameKeepsTheEmptySentinel and
+// TestSDNVNetUpdateZoneKeepsTheEmptySentinel for the helper's other callers. "" is not a third state:
+// CreateACMEAccount sets the form key only `if params.Name != ""`, so an empty name reaches Proxmox as no
+// name and the account is created as "default"; the route validated nothing before, so "" was always accepted.
 func TestACMEAccountNameKeepsItsEmptySentinel(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPost, acmeScope+"/accounts")
 

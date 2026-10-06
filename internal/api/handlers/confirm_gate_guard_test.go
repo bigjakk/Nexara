@@ -6,24 +6,13 @@ import (
 	"testing"
 )
 
-// A confirm gate that writes its own response does not gate anything.
-//
-// fiber's c.Status(...).JSON(...) returns nil on success, so a function shaped
-//
-//	func requireThing(c fiber.Ctx, ...) error {
-//	    ...
-//	    return c.Status(422).JSON(...)   // returns nil!
-//	}
-//
-// leaves its caller's `if err != nil` false. The handler runs on and performs
-// the action the gate just "refused", and the 422 status makes the response
-// look like a refusal while carrying the result of the thing it did. That
-// shipped in the first draft of requireLDAPTransportAck and was reproduced
-// immediately afterwards in requireSSHTrustResetAck, which is two for two.
-//
-// The rule this pins: functions named require* decide, they do not respond.
-// Rendering belongs in render*, whose whole job is to turn the returned error
-// into a response — see renderConfirmRequired and renderAddressPolicyError.
+// A confirm gate that writes its own response does not gate anything: fiber's c.Status(...).JSON(...)
+// returns nil on success, so a `func requireThing(c fiber.Ctx, ...) error` ending `return c.Status(422).
+// JSON(...)` leaves its caller's `if err != nil` false, and the handler runs on and performs the action
+// the gate just "refused" while its 422 looks like a refusal. That shipped in the first draft of
+// requireLDAPTransportAck and was reproduced in requireSSHTrustResetAck. The rule: functions named
+// require* decide, they do not respond; rendering belongs in render* (renderConfirmRequired,
+// renderAddressPolicyError).
 func TestGuard_RequireGatesDoNotWriteResponses(t *testing.T) {
 	fset, files := parseGoFiles(t, ".")
 
@@ -60,25 +49,14 @@ func TestGuard_RequireGatesDoNotWriteResponses(t *testing.T) {
 	}
 }
 
-// isRequireGateName reports whether a function name is a require* gate.
-//
-// The match is case-INSENSITIVE on the prefix, because this package now
-// has both spellings: the unexported requireClusterPerm and friends, and
-// the exported RequirePermission / RequireClusterPermission /
-// RequireAnyPermission that the declarative registry attaches as route
-// middleware. A case-sensitive "require" prefix saw only the first set,
-// so the three functions that decide authorization for every registry
-// route sat outside the guard that exists to catch a gate writing its own
-// response and returning nil.
-//
-// They are, if anything, the ones that matter most. In Fiber the next
-// handler runs only if a middleware calls c.Next(), so one that writes its
-// 403 and returns nil does end the chain — the hazard is the gate that
-// writes a refusal and then reaches c.Next() anyway, running the handler with
-// the caller already looking at a 403. Banning response writes in every
-// require* keeps that shape out of all of them, inline gates and middleware
-// alike; for an inline gate, whose caller checks `if err != nil`, the
-// write-and-return-nil shape is the bypass itself.
+// isRequireGateName reports whether a function name is a require* gate, case-INSENSITIVELY on the
+// prefix: this package has both the unexported requireClusterPerm family and the exported
+// RequirePermission / RequireClusterPermission / RequireAnyPermission the registry attaches as route
+// middleware, and a case-sensitive prefix saw only the first, leaving the functions that decide
+// authorization for every registry route outside the guard. In Fiber the next handler runs only if a
+// middleware calls c.Next(), so the hazard is a gate that writes its refusal and then reaches c.Next()
+// anyway; banning response writes in every require* keeps that shape out of middleware and inline gates
+// alike (for an inline gate, write-and-return-nil is the bypass itself).
 func isRequireGateName(name string) bool {
 	return len(name) >= len("require") && strings.EqualFold(name[:len("require")], "require")
 }

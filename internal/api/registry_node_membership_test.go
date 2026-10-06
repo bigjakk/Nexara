@@ -452,7 +452,7 @@ func TestTaskRoutesRefuseAUPIDNamingANodeTheClusterDoesNotHold(t *testing.T) {
 			t.Run(route.path+" "+tc.name, func(t *testing.T) {
 				fake := &handlerNodeDB{t: t, members: map[uuid.UUID]string{uuid.MustParse(testClusterID): memberNode},
 					errs: map[string]error{"GetCluster": pgx.ErrNoRows}}
-				e := sharedEndpoint(t, fiber.MethodGet, route.path)
+				e := declaredEndpoint(t, fiber.MethodGet, route.path)
 				e.Handler = route.handler(handlers.NewVMHandler(db.New(fake), "", nil))
 				app := newRegistryApp(t, stubAuth(grantsOf("view:task")), e)
 
@@ -485,7 +485,7 @@ func TestTaskRoutesRefuseAUPIDNamingANodeTheClusterDoesNotHold(t *testing.T) {
 // in production — a VMHandler is built only when the queries exist — which is exactly
 // why nothing else would notice.
 func TestTaskRoutesFailClosedWithNoDatabase(t *testing.T) {
-	e := sharedEndpoint(t, fiber.MethodGet, clusterScope+"/tasks/:upid")
+	e := declaredEndpoint(t, fiber.MethodGet, clusterScope+"/tasks/:upid")
 	e.Handler = handlers.NewVMHandler(nil, "", nil).GetTaskStatus
 	// A panic has to come back as a response this test can read rather than take the
 	// test binary down with it.

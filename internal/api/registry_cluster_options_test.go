@@ -82,14 +82,7 @@ var clusterOptionsLegacyPermissions = map[string]string{
 // domain, keyed "METHOD path".
 func declaredClusterOptionsEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if clusterOptionsPaths[e.Path] {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, func(e Endpoint) bool { return clusterOptionsPaths[e.Path] })
 }
 
 // TestClusterOptionsRoutesDeclareTheSamePermissionTheyEnforced is the
@@ -157,18 +150,13 @@ func clusterOptionsRoute(path string) string {
 	return strings.Replace(path, ":cluster_id", testClusterID, 1)
 }
 
-// TestClusterOptionsBodyCoversEveryProxmoxProperty is the assertion that
-// makes this endpoint's declaration worth having.
-//
-// The handler bound proxmox.UpdateClusterOptionsParams directly, so a key
-// the struct did not name was silently dropped and the caller got a 200
-// for a save that changed nothing. The schema closes the set, which only
-// helps if it declares EVERY field the struct forwards — a missing one
-// turns a working save into "unknown parameter".
-//
-// The want list is derived from the struct's own json tags, so adding a
-// field to proxmox.UpdateClusterOptionsParams without declaring it here
-// fails the build rather than shipping a silently-dropped parameter.
+// TestClusterOptionsBodyCoversEveryProxmoxProperty is the assertion that makes this endpoint's
+// declaration worth having. The handler bound proxmox.UpdateClusterOptionsParams directly, so a key the
+// struct did not name was silently dropped and the caller got a 200 for a save that changed nothing. The
+// schema closes the set, which only helps if it declares EVERY field the struct forwards (a missing one
+// turns a working save into "unknown parameter"). The want list is derived from the struct's own json tags,
+// so adding a field to the struct without declaring it fails the build rather than shipping a
+// silently-dropped parameter.
 func TestClusterOptionsBodyCoversEveryProxmoxProperty(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPut, clusterScope+"/options")
 

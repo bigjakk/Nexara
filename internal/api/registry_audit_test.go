@@ -29,19 +29,14 @@ var auditRoutesOutsideTheClusterCheckShape = map[string]string{
 	"POST /api/v1/audit-log/syslog-test":  "global: the probe dials a host the caller names, on the install's behalf",
 }
 
-// auditLegacyPermissions is what each handler checked BEFORE Phase 6j,
-// transcribed from `git show HEAD:internal/api/handlers/audit.go` at commit
-// eaeafa7 — nine handlers, nine checks, in three shapes:
-//
-//	List/ListRecent/Export   accessibleClusters(view, audit), no gate.
-//	ListActions/ListUsers    requirePerm(view, audit) — global.
-//	Get/Update/TestSyslog    requirePerm(manage, audit) — global.
-//	ListByCluster            requireClusterPerm(view, audit, <:cluster_id>).
-//
-// ListByCluster ALSO calls accessibleClusters, and that is not a second gate:
-// its own comment says so — the stamp is a no-op against a caller who just
-// passed requireClusterPerm, and it is there so this endpoint is not the one
-// audit read whose safety rests on a lock the other three share.
+// auditLegacyPermissions is what each handler checked BEFORE Phase 6j, transcribed from
+// `git show HEAD:internal/api/handlers/audit.go` at commit eaeafa7: nine handlers, nine checks. List,
+// ListRecent and Export made accessibleClusters(view, audit) reads and no gate; ListActions and ListUsers
+// requirePerm(view, audit), global; Get, Update and TestSyslog requirePerm(manage, audit), global;
+// ListByCluster requireClusterPerm(view, audit, <:cluster_id>). ListByCluster ALSO calls
+// accessibleClusters, which is not a second gate: its own comment says the stamp is a no-op against a
+// caller who just passed requireClusterPerm, there so this endpoint is not the one audit read whose safety
+// rests on a lock the other three share.
 var auditLegacyPermissions = map[string]string{
 	"GET /api/v1/audit-log":                      "view:audit (filtered)",
 	"GET /api/v1/audit-log/recent":               "view:audit (filtered)",
@@ -56,14 +51,7 @@ var auditLegacyPermissions = map[string]string{
 
 func declaredAuditEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if _, want := auditLegacyPermissions[e.Method+" "+e.Path]; want {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(auditLegacyPermissions))
 }
 
 // TestAuditRoutesDeclareWhatTheyEnforced is the tally that makes this domain's

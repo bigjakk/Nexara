@@ -39,14 +39,7 @@ var metricsLegacyPermissions = map[string]string{
 // declaredMetricsEndpoints returns the three declarations by "METHOD path".
 func declaredMetricsEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if _, want := metricsLegacyPermissions[e.Method+" "+e.Path]; want {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(metricsLegacyPermissions))
 }
 
 // TestMetricsRoutesDeclareTheSamePermissionTheyEnforced is the tally that makes

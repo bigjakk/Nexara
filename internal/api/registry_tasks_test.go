@@ -45,14 +45,7 @@ var taskLegacyPermissions = map[string]string{
 
 func declaredTaskEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, taskHistoryScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(taskHistoryScope))
 }
 
 // TestTaskRoutesDeclareWhatTheyEnforced is the tally that makes this domain's
@@ -318,31 +311,16 @@ func TestEveryTaskEndpointIsDocumented(t *testing.T) {
 	}
 }
 
-// TestTaskCreateNodeIsHeldToTheNodeNameRule pins the one node parameter in the
-// registry that used to carry no rule at all.
-//
-// `node` was a bare optString(63) here while every other node parameter in the
-// registry carried node-name or its sentinel twin, and this is the worst place
-// for that exception: the value does not stay in the row it is filed on.
-// reconcileRunningTasks (internal/collector/task_reconcile.go) reads it back
-// off every row still marked running and replays it through GetTaskStatus on
-// each sync tick, with the server's own credentials and nobody watching, and
-// the task listing hands it to any view:task holder.
-//
-// The traversal half is closed at the client — proxmox.validateNodeName
-// refuses a value that could leave its path segment, and refuses it there
-// rather than here so that the collector and the scheduler inherit it too.
-// What this declaration stops is the ROW. Without it the write succeeds, the
-// collector then calls GetTaskStatus once per tick and discards the error
-// silently — task_reconcile.go's error branch has no log line — and at
-// staleTaskGrace (24h) the row is flipped to failed/"vanished". So the cost is
-// a day of futile calls and a bogus failure left in the activity feed, not an
-// unbounded loop.
-//
-// The empty string has to stay acceptable, which is why this is the sentinel
-// twin and not the format: task_history.node is NOT NULL DEFAULT ”
-// (migrations/000008_task_history.up.sql) and apischema counts "" as a value
-// the caller supplied, which every format rejects.
+// TestTaskCreateNodeIsHeldToTheNodeNameRule pins the one node parameter that used to carry no rule: `node`
+// was a bare optString(63), the worst place for that exception because the value does not stay in its row:
+// reconcileRunningTasks (internal/collector/task_reconcile.go) replays it through GetTaskStatus on every
+// sync tick with the server's own credentials, and the task listing hands it to any view:task holder.
+// Traversal is closed at the client (proxmox.validateNodeName, so the collector and scheduler inherit it);
+// this declaration stops the ROW: without it the write succeeds, the collector calls once per tick and
+// swallows the error silently (no log line), and at staleTaskGrace (24h) flips it to failed/"vanished", a
+// day of futile calls and a bogus failure in the feed. The empty string must stay acceptable, which is why
+// this is the sentinel twin and not the format: task_history.node is NOT NULL with an empty default (migration 8) and
+// apischema counts "" as supplied, which every format rejects.
 func TestTaskCreateNodeIsHeldToTheNodeNameRule(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPost, taskHistoryScope)
 
@@ -413,40 +391,16 @@ func TestTaskCreateNodeIsHeldToTheNodeNameRule(t *testing.T) {
 	}
 }
 
-// TestTaskCreateUPIDIsAnchoredToTheProxmoxPrefix pins the body parameter that
-// used to carry a length cap and nothing else.
-//
-// The cost of no rule is the same one the `node` beside it had, and for the
-// same reason: the value does not stay in the row. reconcileRunningTasks
-// (internal/collector/task_reconcile.go) reads it back off every row still
-// marked running and replays it through GetTaskStatus on each sync tick, with
-// the server's own credentials and nobody watching, and the task listing hands
-// it to any view:task holder.
-//
-// The traversal half is closed at the client — proxmox.validateTaskUPID
-// refuses a value that could leave its path segment, and refuses it there so
-// that the collector and the scheduler inherit it. What this declaration stops
-// is the ROW: a value Proxmox never minted is a task_history entry the
-// collector calls for once a tick until staleTaskGrace and then flips to
-// failed/"vanished", leaving a bogus failure in the activity feed for good.
-//
-// # Why this parameter can carry a pattern when :upid cannot
-//
-// The rows below are the evidence for that, not decoration. On the PATH the
-// UPID arrives percent-encoded — the frontend encodes the colons and Fiber
-// does not decode path parameters — so a pattern would have to match one
-// encoding or the other and would reject the real requests in the other form.
-// Here it is a body value and arrives as itself.
-//
-// # Why the rule is this loose
-//
-// Every accepted row is a real UPID shape taken from this repo or from the
-// development task_history: a container start, a worker id that is empty, one
-// that is dotted, one that carries an "@", a PBS nine-field id, an
-// API-token user with a "!", and the six-field value this route's own tests
-// have always posted. A field count or a per-field charset would refuse some
-// of them, and would refuse them in the direction that hides — a task Nexara
-// dispatched and then did not record is reported nowhere.
+// TestTaskCreateUPIDIsAnchoredToTheProxmoxPrefix pins the body parameter that used to carry a length cap
+// and nothing else, at the same cost as `node` beside it: the value does not stay in the row, and
+// reconcileRunningTasks replays it every tick. Traversal is closed at the client
+// (proxmox.validateTaskUPID); this declaration stops the ROW, a value Proxmox never minted that the
+// collector calls for once a tick until staleTaskGrace and then flips to failed/"vanished". A body
+// parameter can carry a pattern where the PATH :upid cannot: on the path the UPID arrives percent-encoded
+// (the frontend encodes the colons, Fiber does not decode), so a pattern would reject real requests in
+// one encoding or the other. The rule is this loose because every accepted row is a real UPID shape (a
+// container start, an empty or dotted worker id, an "@", a PBS nine-field id, a "!" API-token user, the
+// six-field value this route's tests post): a field count or charset would refuse some, silently.
 func TestTaskCreateUPIDIsAnchoredToTheProxmoxPrefix(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPost, taskHistoryScope)
 

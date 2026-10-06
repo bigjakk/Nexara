@@ -2,56 +2,22 @@ package handlers
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 )
 
-// Static-analysis guard, in the spirit of tracktask_guard_test.go: no
-// database, no running server.
-//
-// A guest is looked up by its Nexara uuid, and a uuid says nothing about
-// which cluster the guest is in. The permission gate authorizes the
-// cluster named in the PATH — that is what RequireClusterPermission and
-// every requireClusterPerm call resolve — so a handler that loads a guest
-// by uuid and then acts on it WITHOUT checking that the row belongs to
-// the path's cluster serves cross-cluster: a caller holding a grant on
-// cluster A puts A in the path and B's guest id in it.
-//
-// resolveVM has always made that check. Two handlers that looked a guest
-// up directly did not: GetVM served another cluster's inventory row, and
-// SetVMPool sent that row's VMID to the PATH cluster's Proxmox, so the
-// pool update landed on whatever guest happened to carry that number
-// there. Both now go through guestInCluster; this guard is what stops the
-// next direct lookup reopening it.
-//
-// BE CLEAR ABOUT WHAT THIS DOES NOT CATCH. Three limits, and they are
-// the reason this is a tripwire rather than a proof:
-//
-//  1. It checks that a ClusterID comparison APPEARS somewhere in the same
-//     function — not that it compares the right two values, not that it
-//     is reached, and not that the function returns on mismatch. An
-//     `if vm.ClusterID != clusterID { log.Warn(...) }` satisfies it
-//     completely while enforcing nothing.
-//  2. It matches only the literal `x.queries.GetVM(…)` shape. Hoisting
-//     the receiver — `q := h.queries; q.GetVM(…)` — walks straight past
-//     it, as does a lookup that reaches the database through any other
-//     indirection.
-//  3. guestLookupCallees is hand-maintained. A RENAME of one of its
-//     lookups is caught — the choke points stop making the call they are
-//     required to make — but a new, additional by-uuid query under another
-//     name (GetGuest, GetVMByID) is invisible until someone adds it here,
-//     and nothing reminds them to.
-//
-// Doing better needs type-aware dataflow — resolving `h.queries` to its
-// type, following the returned row to the comparison, and proving the
-// mismatch branch returns — which is a different tool than this package's
-// AST guards use. The honest summary is that this catches the shape that
-// actually occurred twice (a direct lookup with no comparison at all) and
-// should not be trusted further than that.
+// Static-analysis guard: no database, no running server. A guest is looked up by its Nexara uuid,
+// which says nothing about its cluster, while the permission gate authorizes the cluster in the
+// PATH, so a handler that loads a guest by uuid and acts on it WITHOUT checking the row belongs to
+// the path's cluster serves cross-cluster. resolveVM always checked; GetVM and SetVMPool did not
+// (SetVMPool sent another cluster's VMID to the path cluster's Proxmox). Both now go through
+// guestInCluster, and this guard stops the next direct lookup reopening it. A tripwire, not a proof,
+// with three limits. Limit 1: it checks that a ClusterID comparison APPEARS in the same function (not
+// that it compares the right values, is reached, or returns on mismatch). Limit 2: it matches only the
+// literal `x.queries.GetVM(...)` shape (hoisting the receiver walks past it). Limit 3: guestLookupCallees
+// is hand-maintained (a rename is caught, a new by-uuid query under another name is not).
 var guestLookupCallees = map[string]bool{
 	"GetVM":        true,
 	"GetContainer": true,
@@ -74,7 +40,6 @@ func TestGuard_GuestLookupsAreClusterScoped(t *testing.T) {
 		t.Fatalf("glob: %v", err)
 	}
 
-	fset := token.NewFileSet()
 	var findings []string
 	// lookupCallers counts functions that CALL a guest lookup, and only those.
 	// The choke points count when they make the lookup themselves — which each
@@ -87,7 +52,7 @@ func TestGuard_GuestLookupsAreClusterScoped(t *testing.T) {
 	chokePointsSeen := map[string]bool{}
 
 	for _, path := range paths {
-		astFile, parseErr := parser.ParseFile(fset, path, nil, 0)
+		astFile, parseErr := guardParsed(path)
 		if parseErr != nil {
 			t.Fatalf("parse %s: %v", path, parseErr)
 		}
@@ -186,31 +151,22 @@ var guestKindCrossoverExemptions = map[string]string{
 		"and demanding manage:container would make evacuation fail on any node hosting one",
 }
 
-// TestGuard_GuestKindCrossoversRecheckThePermission is the call-site half
-// of requireGuestKindPerm.
-//
-// TestRequireGuestKindPerm proves the helper refuses a container to a
-// caller without manage:container. It cannot prove that the two handlers
-// which need it actually call it — deleting the call leaves every other
-// test green, which is the opt-in guard shape this codebase keeps
-// finding: a check that lives in the caller is a check the next caller
-// skips.
-//
-// A handler-level test would need a database and a Proxmox client, so
-// this walks the source instead: any function that calls both halves of a
-// guestKindCrossoverPairs entry must also call requireGuestKindPerm.
+// TestGuard_GuestKindCrossoversRecheckThePermission is the call-site half of requireGuestKindPerm:
+// TestRequireGuestKindPerm proves the helper refuses a container to a caller without
+// manage:container, not that the two handlers that need it call it (deleting the call leaves every
+// other test green: a check in the caller is a check the next caller skips). Walks the source: any
+// function that calls both halves of a guestKindCrossoverPairs entry must call requireGuestKindPerm.
 func TestGuard_GuestKindCrossoversRecheckThePermission(t *testing.T) {
 	paths, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
 
-	fset := token.NewFileSet()
 	var crossovers int
 	seenExempt := map[string]bool{}
 
 	for _, path := range paths {
-		astFile, parseErr := parser.ParseFile(fset, path, nil, 0)
+		astFile, parseErr := guardParsed(path)
 		if parseErr != nil {
 			t.Fatalf("parse %s: %v", path, parseErr)
 		}

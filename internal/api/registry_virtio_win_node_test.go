@@ -20,7 +20,7 @@ import (
 // the API checked it): it answers 409 with the reason, or 500 when the lookup fails,
 // and stops before anything reaches for a Proxmox client — the cluster row is never read.
 func TestVirtioWinDownload_RefusesAConfiguredNodeTheClusterDoesNotHold(t *testing.T) {
-	e := sharedEndpoint(t, fiber.MethodPost, virtioWinClusterScope+"/download")
+	e := declaredEndpoint(t, fiber.MethodPost, virtioWinClusterScope+"/download")
 	cluster := uuid.MustParse(testClusterID)
 	for _, tt := range []struct {
 		name       string

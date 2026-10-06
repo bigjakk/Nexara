@@ -47,14 +47,7 @@ var settingsLegacyPermissions = map[string]string{
 
 func declaredSettingsEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, settingsScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(settingsScope))
 }
 
 // TestSettingsRoutesDeclareWhatTheyEnforced is the tally for the three routes
@@ -98,33 +91,16 @@ func TestSettingsRoutesDeclareWhatTheyEnforced(t *testing.T) {
 	}
 }
 
-// TestSettingsReadsAreStillLegacy records the decision this tranche's hardest
-// domain produced, so every one of the six stays a decision rather than
-// becoming a gap.
-//
-// SIX of SettingsHandler's nine routes are NOT declared, for THREE distinct
-// reasons:
-//
-//   - GET /settings and GET /settings/:key perform no permission check on any
-//     path. settingScopeID gates only when `write && adminOnly`, and both pass
-//     write=false — which is the live instance rbac_route_guard_test.go's
-//     LIMITATION note names: the check is REACHABLE from them and never runs.
-//     They are instanceSharedRoutes-shaped for ?scope=global and self-service
-//     for ?scope=user, selected per request, and Permissions has no shape for
-//     either half. Declaring them Deferred would render as "deferred" to an
-//     operator reading the docs, which claims a runtime check that does not
-//     exist — a declaration saying MORE than the code enforces.
-//   - PUT /settings/:key has the same conditional check as the delete and would
-//     declare the same Deferred, but its `value` is arbitrary JSON: the
-//     branding page stores a string, the appearance page an object, and
-//     json.Valid is the only rule. apischema's Type vocabulary has no "any JSON
-//     value" member, so no declaration can accept both.
-//   - GET /settings/branding and the two branding file routes are
-//     instanceSharedRoutes-shaped outright.
-//
-// Pinned from both sides: each must still be registered, and none may be in the
-// registry — a well-meaning later declaration of any of them is a silent
-// behaviour change, not a compile error.
+// TestSettingsReadsAreStillLegacy records the decision this tranche's hardest domain produced, so the
+// six stay a decision and not a gap. SIX of SettingsHandler's nine routes are NOT declared, for THREE
+// reasons. (1) GET /settings and GET /settings/:key perform no permission check on any path:
+// settingScopeID gates only when `write && adminOnly` and both pass write=false (the live instance
+// rbac_route_guard_test.go's LIMITATION note names). They are instanceSharedRoutes-shaped for ?scope=global
+// and self-service for ?scope=user, selected per request, and Permissions has no shape for either half;
+// declaring them Deferred would claim a runtime check that does not exist. (2) PUT /settings/:key has the
+// same conditional check, but its `value` is arbitrary JSON and apischema has no "any JSON value" type.
+// (3) GET /settings/branding and the two branding file routes are instanceSharedRoutes-shaped outright.
+// Pinned both ways: each must still be registered and none may be in the registry.
 func TestSettingsReadsAreStillLegacy(t *testing.T) {
 	keys := []string{
 		"GET /api/v1/settings",
@@ -135,7 +111,7 @@ func TestSettingsReadsAreStillLegacy(t *testing.T) {
 		"GET /api/v1/settings/branding/favicon-file",
 	}
 
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	inRegistry := registryRouteKeySet(s.registry.Endpoints())
 	registered := map[string]bool{}
 	for _, r := range s.app.GetRoutes(true) {

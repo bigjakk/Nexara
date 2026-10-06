@@ -52,14 +52,7 @@ var replicationLegacyPermissions = map[string]string{
 // under the /replication prefix, keyed "METHOD path".
 func declaredReplicationEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, replicationScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(replicationScope))
 }
 
 // TestReplicationRoutesDeclareTheSamePermissionTheyEnforced is the tally
@@ -155,18 +148,13 @@ func probeReplicationEndpoint(t *testing.T, method, path string, cap *capture) E
 	return e
 }
 
-// TestReplicationCreateTakesIDUnderItsAlias is the assertion behind the
-// one declaration in this phase that could not use the wire name it was
-// given.
-//
-// checkPathParams refuses a body parameter named "id" on a cluster-scoped
-// route, because clusterIDFromParam reads TWO names — cluster_id, falling
-// back to id — so "id" is a name the permission gate also reads. On this
-// path the fallback cannot fire, but the guard is about the name rather
-// than about today's path, and routing around it would reopen the hole on
-// the next path edit. The parameter is therefore declared as job_id with
-// "id" as its alias, and BOTH spellings have to keep working: the create
-// dialog sends "id", and the docs now name "job_id".
+// TestReplicationCreateTakesIDUnderItsAlias is the assertion behind the one declaration in this phase
+// that could not use the wire name it was given. checkPathParams refuses a body parameter named "id" on a
+// cluster-scoped route, because clusterIDFromParam reads TWO names (cluster_id, falling back to id), so
+// "id" is a name the permission gate also reads. On this path the fallback cannot fire, but the guard is
+// about the name rather than today's path, and routing around it would reopen the hole on the next path
+// edit. The parameter is declared as job_id with "id" as its alias, and BOTH spellings have to keep
+// working: the create dialog sends "id", and the docs now name "job_id".
 func TestReplicationCreateTakesIDUnderItsAlias(t *testing.T) {
 	const path = replicationScope
 	e := declaredEndpoint(t, fiber.MethodPost, path)

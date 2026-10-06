@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -88,10 +91,10 @@ var nonUPIDStringMethods = map[string]bool{
 
 // parseGoFiles parses every non-test .go file in dir into *ast.File. It uses
 // Glob + ParseFile (not the deprecated parser.ParseDir/ast.Package) so it stays
-// clean under staticcheck SA1019.
+// clean under staticcheck SA1019. Each file is parsed once per test binary, with
+// positions in the one shared FileSet; callers only read the trees.
 func parseGoFiles(t *testing.T, dir string) (*token.FileSet, []*ast.File) {
 	t.Helper()
-	fset := token.NewFileSet()
 	matches, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		t.Fatalf("glob %s: %v", dir, err)
@@ -101,7 +104,7 @@ func parseGoFiles(t *testing.T, dir string) (*token.FileSet, []*ast.File) {
 		if strings.HasSuffix(m, "_test.go") {
 			continue
 		}
-		f, err := parser.ParseFile(fset, m, nil, 0)
+		f, err := guardParsed(m)
 		if err != nil {
 			t.Fatalf("parse %s: %v", m, err)
 		}
@@ -110,8 +113,47 @@ func parseGoFiles(t *testing.T, dir string) (*token.FileSet, []*ast.File) {
 	if len(files) == 0 {
 		t.Fatalf("no source files parsed in %s", dir)
 	}
-	return fset, files
+	return guardFset, files
 }
+
+// guardParsed is path parsed once per test binary, positions in guardFset. About
+// thirty guards read this package's source, test files included; each used to parse
+// all of it again.
+func guardParsed(path string) (*ast.File, error) {
+	v, _ := guardParsedFiles.LoadOrStore(path, &guardParsedFile{})
+	e := v.(*guardParsedFile)
+	e.once.Do(func() { e.file, e.err = parser.ParseFile(guardFset, path, nil, parser.SkipObjectResolution) })
+	return e.file, e.err
+}
+
+// guardEach runs fn over paths, a few at a time, and returns the first error in path
+// order: the whole-tree scans parse hundreds of files and are most of their own time.
+func guardEach(paths []string, fn func(i int, path string) error) error {
+	errs := make([]error, len(paths))
+	var wg sync.WaitGroup
+	workers := make(chan struct{}, min(runtime.GOMAXPROCS(0), 8))
+	for i, path := range paths {
+		wg.Add(1)
+		workers <- struct{}{}
+		go func() {
+			defer func() { <-workers; wg.Done() }()
+			errs[i] = fn(i, path)
+		}()
+	}
+	wg.Wait()
+	return errors.Join(errs...)
+}
+
+type guardParsedFile struct {
+	once sync.Once
+	file *ast.File
+	err  error
+}
+
+var (
+	guardFset        = token.NewFileSet()
+	guardParsedFiles sync.Map // path → *guardParsedFile
+)
 
 // callName returns the bare identifier of a call's function, handling both
 // `Foo(...)` (ast.Ident) and `pkg.Foo(...)` / `x.Foo(...)` (ast.SelectorExpr).
@@ -125,20 +167,13 @@ func callName(call *ast.CallExpr) string {
 	return ""
 }
 
-// TestGuard_AllUPIDDispatchersTrackTask enforces the core rule: any function in
-// package handlers that dispatches a Proxmox task (calls a known UPID-returning
-// client method) must also call TrackTask somewhere in the same function (the
-// RFC's per-function rule).
-//
-// "Dispatches" deliberately means ANY call to a upidMethod — captured into a
-// variable, passed as an argument, returned, OR discarded with `_, _ =`. Merely
-// discarding the UPID is NOT a way out: that would let a destructive op
-// (DestroyVM, WipeDisk, …) skip both the audit log and task_history while still
-// passing CI. The only sanctioned escape is the explicit, documented exempt list
-// below, so a new untracked dispatch fails CI until someone justifies it here.
-//
-// Limitation (by design): the check is per-function, not per-UPID — a function
-// that dispatches several tasks satisfies the rule with a single TrackTask.
+// TestGuard_AllUPIDDispatchersTrackTask enforces the core rule: any function in package handlers that
+// dispatches a Proxmox task (calls a known UPID-returning client method) must also call TrackTask in
+// the same function. "Dispatches" means ANY call to a upidMethod, captured, passed, returned or
+// discarded with `_, _ =`: discarding the UPID is not a way out, since a destructive op (DestroyVM,
+// WipeDisk, ...) could then skip both the audit log and task_history and pass CI. The only escape is the
+// documented exempt list below. By design the check is per-function, not per-UPID: a function that
+// dispatches several tasks is satisfied by one TrackTask.
 func TestGuard_AllUPIDDispatchersTrackTask(t *testing.T) {
 	fset, files := parseGoFiles(t, ".")
 
@@ -196,20 +231,13 @@ var sanctionedAuditEntryPoints = map[string]bool{
 	"AuditLogAs": true,
 }
 
-// TestGuard_NoHandlerAuditLogWrappers enforces the "empty allowlist": there must
-// be exactly one audit path, the shared helpers in common.go. Per-handler
-// wrappers are banned — they historically diverged in signature and forked the
-// audit path.
-//
-// The match is on the name containing "auditlog" anywhere, case-insensitively,
-// rather than the "auditLog" prefix it used to check. The prefix rule let
-// `authAuditLog` through for the entire life of the syslog feature: it wrote its
-// audit row with a direct InsertAuditLog, so it never reached the WS event or
-// the syslog forwarder, and `login`, `logout` and `password_changed` — the
-// events a SIEM is deployed to collect — were never forwarded at all. A
-// substring rule catches that shape and any other prefixed variant.
-//
-// parseGoFiles skips _test.go, so this test's own name does not match itself.
+// TestGuard_NoHandlerAuditLogWrappers enforces the "empty allowlist": exactly one audit path, the shared
+// helpers in common.go; per-handler wrappers diverged in signature and forked it. The match is on the
+// name containing "auditlog" anywhere, case-insensitively: the old "auditLog" prefix rule let
+// `authAuditLog` through for the life of the syslog feature, writing its row with a direct
+// InsertAuditLog that never reached the WS event or the syslog forwarder, so `login`, `logout` and
+// `password_changed`, the events a SIEM is deployed to collect, were never forwarded. parseGoFiles
+// skips _test.go, so this test's own name does not match itself.
 func TestGuard_NoHandlerAuditLogWrappers(t *testing.T) {
 	fset, files := parseGoFiles(t, ".")
 	for _, file := range files {

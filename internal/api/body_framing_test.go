@@ -272,6 +272,9 @@ type unreadBodyCase struct {
 // to be served — the precondition, which shows the fixture is one fasthttp
 // really parses — and then to the server as New builds it, where the answer
 // has to close the connection with the hidden request unserved.
+//
+// Both servers are built before t.Parallel: New writes the handlers package's
+// cookie mode, which a handler in another test may be reading.
 func (tc unreadBodyCase) run(t *testing.T) {
 	check := func(t *testing.T, ans wireAnswer) {
 		t.Helper()
@@ -296,6 +299,8 @@ func (tc unreadBodyCase) run(t *testing.T) {
 		mount = append(mount, tc.mount)
 	}
 	twin := newProbedServer(t, false, mount...)
+	guarded := newProbedServer(t, true, mount...)
+	t.Parallel()
 	if tc.prime != nil {
 		tc.prime(t, twin.addr)
 	}
@@ -307,7 +312,6 @@ func (tc unreadBodyCase) run(t *testing.T) {
 			"parse cannot show the close preventing anything", ans.next, ans.closed, twin.hits.Load())
 	}
 
-	guarded := newProbedServer(t, true, mount...)
 	if tc.prime != nil {
 		tc.prime(t, guarded.addr)
 	}
@@ -349,22 +353,16 @@ func exhaustLoginLimiter(t *testing.T, addr string) {
 var uploadTarget = strings.NewReplacer(":cluster_id", testClusterID, ":storage_id", testClusterID).
 	Replace(storageUploadPath)
 
-// TestUnreadBodyClosesTheConnection sends, for each way the server answers a
-// request without reading its body, one kept-alive connection a request whose
-// body hides a second request past the part fasthttp reads ahead — and holds
-// the answer to closing the connection with the hidden request unserved. Every
-// case first shows, against the same server without
-// closeConnectionsLeftMidBody, that the hidden request is served there.
-//
-// The 501s are the cases a middleware in Fiber's chain could not cover: Fiber
-// answers a method it does not know before the chain runs, which the missing
-// security headers show. The trailing-slash rows are refuseTrailingSlashWrites'
-// 400, which reads nothing of a body and leaves the close to
-// closeConnectionsLeftMidBody like every other early refusal. The obs-fold and Transfer-Encoding: identity rows
-// frame the body so that fasthttp reads none of it — the hidden request is
-// what a lenient proxy would have sent as the body — and the answer closes
-// the connection although no body is left unread; for the obs-fold under an
-// unknown method, only the close stands between it and the next request.
+// TestUnreadBodyClosesTheConnection sends, for each way the server answers a request without reading
+// its body, one kept-alive connection a request whose body hides a second request past the part
+// fasthttp reads ahead, and holds the answer to closing the connection with the hidden request unserved.
+// Every case first shows, against the same server without closeConnectionsLeftMidBody, that the hidden
+// request IS served there. The 501s are the cases no middleware in Fiber's chain could cover (Fiber
+// answers an unknown method before the chain runs, which the missing security headers show). The
+// trailing-slash rows are refuseTrailingSlashWrites' 400, which reads no body. The obs-fold and
+// Transfer-Encoding: identity rows frame the body so fasthttp reads none of it (the hidden request is
+// what a lenient proxy would have sent as the body), and the answer closes although no body is left
+// unread; under an unknown method, only the close stands between the obs-fold and the next request.
 func TestUnreadBodyClosesTheConnection(t *testing.T) {
 	const jsonType = "Content-Type: application/json"
 	for _, tc := range []unreadBodyCase{
@@ -563,18 +561,14 @@ func TestBodyReadToItsEndKeepsTheConnection(t *testing.T) {
 	}
 }
 
-// TestChunkedBodyIsRefusedOffTheStreamedUploadRoute pins the 411 and the one
-// body exempt from it — a streamed multipart upload (isStreamedUpload) — against
-// spellings the router sends to that route but the exemption does not accept:
-// TestStreamedUploadExemptionIsNoLooserThanItsRoute shows, from the route
-// table, that the capitals and the trailing slash do route to it. Refusing
-// them chunked is the exemption being stricter than the router, the direction
-// it is meant to err in; so is refusing a chunked JSON body sent to the upload
-// as declared, which its declaration would read before any grant is checked.
-// The rows with a Content-Length show the refusal is the chunked framing's
-// alone: the same spellings with a Content-Length get past it — to
-// authentication, or, for the trailing slash, to refuseTrailingSlashWrites,
-// which answers a write whose path ends in "/" after the limiters.
+// TestChunkedBodyIsRefusedOffTheStreamedUploadRoute pins the 411 and the one body exempt from it, a
+// streamed multipart upload (isStreamedUpload), against spellings the router sends to that route but
+// the exemption does not accept (TestStreamedUploadExemptionIsNoLooserThanItsRoute shows the capitals
+// and the trailing slash route to it). Refusing them chunked is the exemption being stricter than the
+// router, the direction it should err in; so is refusing a chunked JSON body at the upload, which its
+// declaration would read before any grant is checked. The rows with a Content-Length show the refusal is
+// the chunked framing's alone: they get past it, to authentication or, for the trailing slash, to
+// refuseTrailingSlashWrites, which answers after the limiters.
 func TestChunkedBodyIsRefusedOffTheStreamedUploadRoute(t *testing.T) {
 	srv := newProbedServer(t, true)
 	const multipart = "Content-Type: multipart/form-data; boundary=x"
@@ -629,17 +623,12 @@ func TestChunkedBodyIsRefusedOffTheStreamedUploadRoute(t *testing.T) {
 	}
 }
 
-// TestBodySizeGuardExemptsOnlyTheUploadRouteAsDeclared pins the 10 MiB guard's
-// limit and its one exemption: a streamed multipart upload (isStreamedUpload).
-// Each request sends only the part of its body fasthttp reads before any
-// handler runs — it answers nothing until it has that much — and each answer
-// comes without the rest being read.
-//
-// The JSON row is a body the upload's own declaration would read (bodyValues)
-// before its handler checks any grant; it is refused like one sent anywhere
-// else. The last row is a path the guard's earlier exemption — any path
-// holding "/storage/" and ending in "/upload" — let through, although no route
-// serves it.
+// TestBodySizeGuardExemptsOnlyTheUploadRouteAsDeclared pins the 10 MiB guard's limit and its one
+// exemption, a streamed multipart upload (isStreamedUpload). Each request sends only the part of its
+// body fasthttp reads before any handler runs, and each answer comes without the rest being read. The
+// JSON row is a body the upload's own declaration would read (bodyValues) before its handler checks any
+// grant, refused like one sent anywhere else; the last row is a path the guard's earlier exemption (any
+// path holding "/storage/" and ending in "/upload") let through, though no route serves it.
 func TestBodySizeGuardExemptsOnlyTheUploadRouteAsDeclared(t *testing.T) {
 	srv := newProbedServer(t, true)
 	const limit = 10 << 20
@@ -674,32 +663,18 @@ func TestBodySizeGuardExemptsOnlyTheUploadRouteAsDeclared(t *testing.T) {
 	}
 }
 
-// TestStreamedUploadExemptionIsNoLooserThanItsRoute holds
-// isStreamedUploadRequest to the router, over the assembled route table.
-//
-// Every path it accepts has to be one the router sends to the upload route: of
-// the POST routes, in the order the router tries them, the first whose pattern
-// matches it (fiber.RoutePatternMatch, under the app's own config) has to be
-// storageUploadPath. The paths tried put, in each parameter position, a uuid,
-// a number (for a route whose parameter carries a constraint such as <int>),
-// a few shapes Fiber's pattern syntax treats specially, and every literal any
-// POST route has in that position — a route with a literal where the upload
-// has a parameter is found by the probe that puts that literal there — in
-// every combination. Use-mounted middleware is not a route and is not in the
-// table; a middleware that answered such a path itself would be a gate, not
-// a different route.
-//
-// And every path it refuses has to stay refused when only one literal segment
-// differs: each literal position is tried with every literal the POST routes
-// have there, and must not be exempt — an exemption that compared fewer
-// segments than it should would take one of them. Where no route varies a
-// position (api, v1), a row below does.
-//
-// The spellings it refuses are listed with where the router sends them, so
-// that the ones it refuses although the router would serve them are
-// deliberate: the capitals and the trailing slash.
+// TestStreamedUploadExemptionIsNoLooserThanItsRoute holds isStreamedUploadRequest to the router, over the
+// assembled route table. Every path it accepts must be one the router sends to the upload route: of the
+// POST routes, in the order the router tries them, the first whose pattern matches (fiber.
+// RoutePatternMatch, under the app's config) must be storageUploadPath. The probes put in each parameter
+// position a uuid, a number (for a constrained parameter such as <int>), shapes Fiber's pattern syntax
+// treats specially, and every literal any POST route has there, in every combination; use-mounted
+// middleware is not a route. Every path it refuses must stay refused when only one literal segment
+// differs. The refused spellings list where the router sends them, so the ones refused although the
+// router would serve them (capitals, the trailing slash) are deliberate.
 func TestStreamedUploadExemptionIsNoLooserThanItsRoute(t *testing.T) {
 	s := newAssembledServer(t)
+	t.Parallel() // after New, which writes a package-level cookie mode
 	cfg := s.app.Config()
 
 	var post []fiber.Route
@@ -841,21 +816,14 @@ func TestStreamedUploadExemptionIsNoLooserThanItsRoute(t *testing.T) {
 	}
 }
 
-// TestChunkedBodyClosesTheConnectionAfterItsStreamIsReleased is why a chunked
-// body closes the connection whether or not its stream is still attached.
-//
-// A chunk-size line that is not hex makes the stream's read fail — readHexInt
-// consumes the byte it rejects — and c.Body() then releases the stream as it
-// does at the last chunk, with the rest of the body still on the connection.
-// The precondition twin, an app without closeConnectionsLeftMidBody, shows
-// both halves: the stream is no longer attached once the handler has read, so
-// a check of the stream alone would have kept the connection, and the request
-// behind the bad chunk is then served.
-//
-// It runs on a bare app with the server's Fiber config, not the assembled
-// server: there, refuseChunkedRequestBodies lets a chunked body reach the
-// storage upload alone, whose handler reads the stream itself and never calls
-// c.Body() on it.
+// TestChunkedBodyClosesTheConnectionAfterItsStreamIsReleased is why a chunked body closes the connection
+// whether or not its stream is still attached. A chunk-size line that is not hex makes the stream's read
+// fail (readHexInt consumes the byte it rejects) and c.Body() then releases the stream as at the last
+// chunk, with the rest of the body still on the connection; the precondition twin, an app without
+// closeConnectionsLeftMidBody, shows the stream is no longer attached once the handler has read (a check
+// of the stream alone would have kept the connection) and the request behind the bad chunk is served. It
+// runs on a bare app with the server's Fiber config: on the assembled server a chunked body reaches only
+// the storage upload, whose handler reads the stream itself and never calls c.Body().
 func TestChunkedBodyClosesTheConnectionAfterItsStreamIsReleased(t *testing.T) {
 	serve := func(t *testing.T, guarded bool) (string, *atomic.Int32, *atomic.Bool) {
 		t.Helper()
@@ -910,19 +878,14 @@ func TestChunkedBodyClosesTheConnectionAfterItsStreamIsReleased(t *testing.T) {
 	}
 }
 
-// TestServerConfigKeepsTheBodyFramingInvariants pins the fasthttp server New
-// builds to the configuration closeConnectionsLeftMidBody and
-// bodyMayBeLeftUnread are written for. Each row says what breaks without it.
-// The timeouts are held to their own reasons as well: the idle timeout has to
-// outlast the longest upstream idle timeout of the proxies the README
-// configures (Caddy's two minutes), the read timeout has to be shorter than
-// the idle one — it bounds what comes after the idle wait, never the wait —
-// and the body timeout is the operator's five minutes, which the wrapper New
-// installs has to arm before a handler runs: from then, on every request but a
-// multipart one for the storage upload — a JSON one for the upload included —
-// and not at all on that one.
-// TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests shows what
-// the timeouts do, on this same server, with shorter values.
+// TestServerConfigKeepsTheBodyFramingInvariants pins the fasthttp server New builds to the configuration
+// closeConnectionsLeftMidBody and bodyMayBeLeftUnread are written for; each row says what breaks without
+// it. The timeouts are held to their reasons: the idle timeout must outlast the longest upstream idle
+// timeout of the proxies the README configures (Caddy's two minutes), the read timeout must be shorter
+// than the idle one (it bounds what comes after the idle wait, never the wait), and the body timeout is
+// the operator's five minutes, which the wrapper New installs must arm before a handler runs, on every
+// request but a multipart one for the storage upload (a JSON one included) and not at all on that one.
+// TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests shows what they do with shorter values.
 func TestServerConfigKeepsTheBodyFramingInvariants(t *testing.T) {
 	s := newAssembledServer(t)
 	srv := s.app.Server()
@@ -1014,19 +977,13 @@ func TestServerConfigKeepsTheBodyFramingInvariants(t *testing.T) {
 	}
 }
 
-// TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests runs the
-// assembled server with its three read timeouts shortened — the one thing
-// changed, so the test waits seconds rather than minutes — and holds them to
-// what headReadTimeout's, bodyReadTimeout's and keepAliveIdleTimeout's
-// comments say they bound: the head of a request and fasthttp's read-ahead of
-// its body; a handler's reads of the rest of the body, from when the handler
-// starts; and the wait between requests. Not a WebSocket. The cases before the
-// last are also what make it mean anything: they show every timeout is live
-// on this server.
-//
-// Every lower bound is timed from before the client sends or dials, and the
-// server arms a deadline only after that, so a close sooner than the timeout
-// is a close from something else.
+// TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests runs the assembled server with its three
+// read timeouts shortened, the one thing changed, and holds them to what headReadTimeout's,
+// bodyReadTimeout's and keepAliveIdleTimeout's comments say they bound: a request's head and fasthttp's
+// read-ahead of its body; a handler's reads of the rest of the body, from when the handler starts; and the
+// wait between requests. Not a WebSocket. The cases before the last show every timeout is live on this
+// server. Every lower bound is timed from before the client sends or dials, and the server arms a deadline
+// only after that, so a close sooner than the timeout is a close from something else.
 func TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests(t *testing.T) {
 	const readTimeout, idleTimeout, bodyTimeout = 400 * time.Millisecond, 700 * time.Millisecond, 1200 * time.Millisecond
 	const slack = 2 * time.Second
@@ -1053,6 +1010,7 @@ func TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests(t *testing.T
 	s.app.Server().IdleTimeout = idleTimeout
 	rewrapped(readTimeout, withBodyTimeout(bodyTimeout))(s.app)
 	addr := serveOnLoopback(t, s)
+	t.Parallel() // after New, which writes a package-level cookie mode
 
 	// keptAlive opens a connection and has one request served on it, so that
 	// what a case sends next is the connection's second request: the kind
@@ -1087,6 +1045,7 @@ func TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests(t *testing.T
 	}
 
 	t.Run("an idle kept-alive connection is closed after the idle timeout, silently, not before", func(t *testing.T) {
+		t.Parallel()
 		sent := time.Now()
 		conn, br := keptAlive(t)
 		if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
@@ -1108,6 +1067,7 @@ func TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests(t *testing.T
 	})
 
 	t.Run("a first request that never comes is answered 408 after the read timeout, not before", func(t *testing.T) {
+		t.Parallel()
 		dialed := time.Now()
 		conn, err := net.Dial("tcp", addr)
 		if err != nil {
@@ -1118,6 +1078,7 @@ func TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests(t *testing.T
 	})
 
 	t.Run("a head trickled past the read timeout is answered 408, not before", func(t *testing.T) {
+		t.Parallel()
 		conn, br := keptAlive(t)
 		sent := time.Now()
 		writeRaw(t, conn, "GET /api/v1/version HTTP/1.1\r\nHost: exa")
@@ -1125,6 +1086,7 @@ func TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests(t *testing.T
 	})
 
 	t.Run("a head trickled within the read timeout is served", func(t *testing.T) {
+		t.Parallel()
 		conn, br := keptAlive(t)
 		writeRaw(t, conn, "GET /api/v1/version HTTP/1.1\r\nHo")
 		time.Sleep(readTimeout / 4)
@@ -1135,6 +1097,7 @@ func TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests(t *testing.T
 	})
 
 	t.Run("a body whose first 8 KiB trickle past the read timeout is answered 408, not before", func(t *testing.T) {
+		t.Parallel()
 		conn, br := keptAlive(t)
 		sent := time.Now()
 		writeRaw(t, conn, requestHead(fiber.MethodPost, "/api/v1/stalled-body-probe", "Content-Type: application/octet-stream")+
@@ -1147,6 +1110,7 @@ func TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests(t *testing.T
 		fmt.Sprintf("Content-Length: %d\r\n\r\n", size) + strings.Repeat("a", first)
 
 	t.Run("a body stalled past the read timeout, within the body timeout, is read in full", func(t *testing.T) {
+		t.Parallel()
 		const stall = (readTimeout + bodyTimeout) / 2
 		conn, br := keptAlive(t)
 		writeRaw(t, conn, stalledBody)
@@ -1159,6 +1123,7 @@ func TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests(t *testing.T
 	})
 
 	t.Run("a body stalled past the body timeout is cut at it, not before, and the connection closed", func(t *testing.T) {
+		t.Parallel()
 		conn, br := keptAlive(t)
 		sent := time.Now()
 		writeRaw(t, conn, stalledBody)
@@ -1177,6 +1142,7 @@ func TestServerTimeoutsBoundTheHeadTheBodyAndTheWaitBetweenRequests(t *testing.T
 	})
 
 	t.Run("a WebSocket idle longer than every timeout stays open", func(t *testing.T) {
+		t.Parallel()
 		const stall = 3 * bodyTimeout // the longest of the three
 		conn, br := keptAlive(t)
 		if br.Buffered() != 0 {

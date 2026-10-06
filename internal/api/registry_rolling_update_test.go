@@ -37,21 +37,14 @@ func rollingRoute(path string) string {
 	).Replace(path)
 }
 
-// rollingLegacyPermissions is what each handler checked with a hand-placed
-// requireClusterPerm call BEFORE Phase 6h, transcribed from
-// `git show HEAD:internal/api/handlers/rolling_update.go` at commit 3ca85e9.
-//
-// The value is the full "action:resource", because this domain is the only one
-// in the batch that uses TWO resources. That split is the thing worth reviewing:
-// ssh_credentials gates the material a job upgrades WITH, and all seven of its
-// routes are manage — including the reads, because GetSSHCredentials reports a
-// stored root credential's username, port and auth type and ListSSHKnownHosts
-// reports every node Nexara can reach over SSH. There is no
-// view:ssh_credentials at all.
-//
-// Every entry is one call, and every call hoists: each handler resolved the
-// cluster from its own path with clusterIDFromParam and then made exactly one
-// static requireClusterPerm call.
+// rollingLegacyPermissions is what each handler checked with a hand-placed requireClusterPerm call
+// BEFORE Phase 6h, transcribed from `git show HEAD:internal/api/handlers/rolling_update.go` at commit
+// 3ca85e9. The value is the full "action:resource" because this domain is the only one in the batch using
+// TWO resources, and the split is worth reviewing: ssh_credentials gates the material a job upgrades WITH
+// and all seven of its routes are manage, reads included (GetSSHCredentials reports a stored root
+// credential's username, port and auth type; ListSSHKnownHosts every node Nexara can reach over SSH), so
+// there is no view:ssh_credentials at all. Every entry is one call and every call hoists: each handler
+// resolved the cluster from its path with clusterIDFromParam, then made one static requireClusterPerm call.
 var rollingLegacyPermissions = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/rolling-updates":                                     "view:rolling_update",
 	"POST /api/v1/clusters/:cluster_id/rolling-updates":                                    "manage:rolling_update",
@@ -75,37 +68,23 @@ var rollingLegacyPermissions = map[string]string{
 	"DELETE /api/v1/clusters/:cluster_id/ssh-known-hosts/:id": "manage:ssh_credentials",
 }
 
-// declaredRollingEndpoints returns every declaration in this domain, keyed
-// "METHOD path".
-//
-// The membership test is STRUCTURAL — one of the domain's three prefixes, or one
-// of the two resources its declarations name — and deliberately not "is it in
-// rollingLegacyPermissions". Filtering on the tally's own keys is how the reverse
-// check at the bottom of TestRollingUpdateRoutesDeclareTheSamePermissionTheyEnforced
-// becomes vacuous: every key would be in the table by construction, so a
-// twentieth route added alongside a bumped rollingRouteCount would drop out of
-// the tally with nothing failing. See declaredACMEEndpoints, which carries the
-// same fix for the same reason.
-//
-// The resource clause is what catches the package preview, which hangs off
-// /nodes/:node — a prefix shared with NodeHandler's 38 routes and ACME's six —
-// and it catches a future route wherever it is mounted.
+// declaredRollingEndpoints returns every declaration in this domain, keyed "METHOD path". The
+// membership test is STRUCTURAL (one of the domain's three prefixes, or one of the two resources its
+// declarations name) and deliberately not "is it in rollingLegacyPermissions": filtering on the tally's own
+// keys makes the reverse check of TestRollingUpdateRoutesDeclareTheSamePermissionTheyEnforced vacuous, so a
+// twentieth route added beside a bumped rollingRouteCount would drop out of the tally unnoticed (see
+// declaredACMEEndpoints, the same fix). The resource clause catches the package preview, which hangs off
+// /nodes/:node (shared with NodeHandler's 38 routes and ACME's six), and a future route wherever mounted.
 func declaredRollingEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
+	return declaredEndpointsWhere(t, func(e Endpoint) bool {
 		permission := e.Permissions.Describe()
-		inDomain := strings.HasPrefix(e.Path, rollingScope) ||
+		return strings.HasPrefix(e.Path, rollingScope) ||
 			strings.HasPrefix(e.Path, sshCredentialScope) ||
 			strings.HasPrefix(e.Path, sshKnownHostScope) ||
 			strings.Contains(permission, rollingUpdateResource) ||
 			strings.Contains(permission, sshCredentialResource)
-		if inDomain {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	})
 }
 
 // TestRollingUpdateRoutesDeclareTheSamePermissionTheyEnforced is the tally that
@@ -238,7 +217,7 @@ func probeRollingEndpoint(t *testing.T, method, path string, cap *capture) Endpo
 // keeps it true after the next route is added. The alert summary carries the
 // same note for the same reason.
 func TestPreflightIsRegisteredBeforeTheJobIDRoute(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	preflight, byID := -1, -1
 	for i, e := range s.registry.Endpoints() {
 		switch e.Path {

@@ -413,7 +413,7 @@ func TestMountRegistryRefusesToMountWithoutAuthentication(t *testing.T) {
 func TestSetupRoutesMountsTheRegistry(t *testing.T) {
 	const attachPath = "/api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach"
 
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	got := chainNames(t, s.app, fiber.MethodPost, attachPath)
 	want := []string{
@@ -435,22 +435,15 @@ func TestSetupRoutesMountsTheRegistry(t *testing.T) {
 	}
 }
 
-// TestGuard_EveryDeclaredGateIsMountedAsMiddleware closes the gap
-// between "declared" and "actually gated".
-//
-// registryEnforcementGaps treats Check and Alternatives as structurally
-// satisfied — Permissions.middleware is a pure function of the
-// declaration, so there is nothing to statically infer — and every other
-// guard in this package reads the declaration too. That leaves ONE thing
-// nobody checks: whether mountRegistry put the gate on the route. A
-// method-conditional, an early `continue`, a reordering that dropped the
-// permission link, and all 33 routes would still declare manage:vm while
-// serving every authenticated caller, with every guard green.
-//
-// TestRegistryChainOrder and TestSetupRoutesMountsTheRegistry each pin
-// ONE chain end to end. This walks all of them.
+// TestGuard_EveryDeclaredGateIsMountedAsMiddleware closes the gap between "declared" and "actually
+// gated". registryEnforcementGaps treats Check and Alternatives as structurally satisfied
+// (Permissions.middleware is a pure function of the declaration) and every other guard here reads the
+// declaration too, leaving ONE thing unchecked: whether mountRegistry put the gate on the route. A
+// method-conditional, an early `continue`, or a reordering that dropped the permission link would leave all
+// 33 routes declaring manage:vm while serving every authenticated caller, every guard green.
+// TestRegistryChainOrder and TestSetupRoutesMountsTheRegistry each pin ONE chain end to end; this walks all.
 func TestGuard_EveryDeclaredGateIsMountedAsMiddleware(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	declared := s.registry.Endpoints()
 	if len(declared) == 0 {
@@ -535,27 +528,16 @@ func containsFragment(names []string, fragment string) bool {
 	return false
 }
 
-// TestGuard_EveryDeclaredEndpointIsMountedExactlyOnce replaces
-// TestPackageRegistryIsStillEmpty, the Phase 4 tripwire that asserted the
-// registry held nothing and said in its own failure message that it "must
-// be taught to check them once Phase 4 starts migrating routes". This is
-// that check.
-//
-// It keeps the half of the old test that never depended on emptiness — no
-// "METHOD path" may appear twice in the mounted route table — and that
-// half is NOT subsumed by registryLegacyRouteConflicts, which only ever
-// compares registry declarations against legacy routes: two LEGACY blocks
-// claiming one path, or one endpoint mounted twice, are invisible to it
-// and visible here.
-//
-// What it adds is the coverage the old test could not have: every
-// endpoint the registry declares must actually appear in the route table.
-// A declaration that never mounts is a route nobody serves and every
-// declaration-reading guard in this package still passes on — the exact
-// shape of failure a registry makes possible and an imperative
-// registration cannot.
+// TestGuard_EveryDeclaredEndpointIsMountedExactlyOnce replaces TestPackageRegistryIsStillEmpty, the
+// Phase 4 tripwire that asserted the registry held nothing. It keeps the half that never depended on
+// emptiness: no "METHOD path" may appear twice in the mounted route table, which registryLegacyRouteConflicts
+// does NOT subsume (it compares registry declarations against legacy routes only; two LEGACY blocks claiming
+// one path, or one endpoint mounted twice, are invisible to it). What it adds is the coverage the old test
+// could not have: every endpoint the registry declares must appear in the route table. A declaration that
+// never mounts is a route nobody serves that every declaration-reading guard still passes on, the exact
+// failure a registry makes possible and an imperative registration cannot.
 func TestGuard_EveryDeclaredEndpointIsMountedExactlyOnce(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	declared := s.registry.Endpoints()
 	if len(declared) == 0 {

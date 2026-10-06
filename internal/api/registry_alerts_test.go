@@ -41,19 +41,13 @@ func alertRoute(path string) string {
 	).Replace(path)
 }
 
-// alertRoutesOutsideTheClusterCheckShape is this domain's half of the
-// registry-wide exception list in registry_vms_test.go.
-//
-// FOURTEEN of the 20 are here. An alert and an alert rule each carry the
-// cluster they belong to as a NULLABLE column rather than as a path segment —
-// and a NULL is meaningful, not missing data: it is a GLOBAL rule, one watching
-// infrastructure no single cluster owns (a Veeam repository holds every
-// cluster's backups). So the two listings filter and the five per-row routes
-// branch, and neither shape can be a gate. The seven channel and summary routes
-// are global outright.
-//
-// The six that are NOT here are the cluster-scoped alert and maintenance-window
-// routes, whose cluster IS the first parameter of their own path.
+// alertRoutesOutsideTheClusterCheckShape is this domain's half of the registry-wide exception list in
+// registry_vms_test.go. FOURTEEN of the 20 are here: an alert and an alert rule carry their cluster as a
+// NULLABLE column, not a path segment, and a NULL is meaningful, a GLOBAL rule watching infrastructure no
+// single cluster owns (a Veeam repository holds every cluster's backups). So the two listings filter and the
+// five per-row routes branch, and neither shape can be a gate; the seven channel and summary routes are
+// global outright. The six NOT here are the cluster-scoped alert and maintenance-window routes, whose
+// cluster IS the first parameter of their own path.
 var alertRoutesOutsideTheClusterCheckShape = func() map[string]string {
 	const global = "global: a notification channel belongs to the install rather than to a cluster, and " +
 		"the summary counts every cluster's alerts at once; neither path names one"
@@ -92,23 +86,14 @@ var alertRoutesOutsideTheClusterCheckShape = func() map[string]string {
 	return out
 }()
 
-// alertLegacyPermissions is what each handler checked with hand-placed calls
-// BEFORE Phase 6g, transcribed from `git show HEAD:internal/api/handlers/alerts.go`
-// at commit facdf56.
-//
-// calls counts the permission calls each handler made, per ROUTE rather than
-// per source line. The five Deferred routes are 2 apiece because each has a
-// per-branch pair — requireClusterPerm on the row's stored cluster OR
-// requirePerm instance-wide when that column is NULL. The two maintenance-window
-// writes are also 2, for a different reason: the route's own
-// requireClusterPerm hoists, and resolveNodeCluster's check against the cluster
-// that OWNS a node named in the body cannot, because middleware resolves the
-// path's cluster and nothing else.
-//
-// It covers only the TWENTY migrated routes. POST /api/v1/alert-rules and
-// PUT /api/v1/alert-rules/:id stay legacy and keep their calls; a tally entry
-// for a route that is still legacy would read as a migration that did not
-// happen.
+// alertLegacyPermissions is what each handler checked with hand-placed calls BEFORE Phase 6g,
+// transcribed from `git show HEAD:internal/api/handlers/alerts.go` at commit facdf56. calls counts the
+// permission calls each handler made, per ROUTE rather than per source line. The five Deferred routes are 2
+// apiece (a per-branch pair: requireClusterPerm on the row's stored cluster OR requirePerm instance-wide
+// when that column is NULL); the two maintenance-window writes are 2 because the route's own
+// requireClusterPerm hoists and resolveNodeCluster's check against the cluster that OWNS a node named in the
+// body cannot. It covers only the TWENTY migrated routes: POST /api/v1/alert-rules and PUT
+// /api/v1/alert-rules/:id stay legacy, and a tally entry for one would read as a migration that did not happen.
 var alertLegacyPermissions = map[string]struct {
 	permission string
 	shape      string
@@ -151,15 +136,7 @@ var alertLegacyPermissions = map[string]struct {
 // other cluster route or the two writes that are still legacy.
 func declaredAlertEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		key := e.Method + " " + e.Path
-		if _, listed := alertLegacyPermissions[key]; listed {
-			out[key] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(alertLegacyPermissions))
 }
 
 // TestAlertRoutesDeclareTheSamePermissionTheyEnforced is the tally that makes
@@ -261,21 +238,15 @@ func TestAlertRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	}
 }
 
-// TestAlertRuleWritesAreStillLegacy pins the two routes this migration
-// deliberately left behind, so that "20 of 22" is an assertion rather than a
-// thing a reader has to notice.
-//
-// Their body carries `escalation_chain`, a JSON ARRAY OF OBJECTS, and
-// apischema's Property.Items is restricted to scalar element types —
-// compileItems refuses an Object element outright. Three halves are asserted:
-// the routes are NOT in the registry, they ARE still mounted (a route that
-// vanished would be an outage rather than a deferral), and the registry would
-// still refuse the declaration they need. The third is what keeps this from
-// rotting into a note nobody re-reads: the day apischema grows object items,
-// this test fails and the carve-out gets revisited. It is the same shape
-// TestFirewallTemplateWritesAreStillLegacy holds for the same reason.
+// TestAlertRuleWritesAreStillLegacy pins the two routes this migration left behind, so "20 of 22" is
+// an assertion and not a thing a reader has to notice. Their body carries `escalation_chain`, a JSON ARRAY OF
+// OBJECTS, and apischema's Property.Items is restricted to scalar elements (compileItems refuses an Object
+// element outright). Three halves: the routes are NOT in the registry, they ARE still mounted (a vanished
+// route would be an outage, not a deferral), and the registry would still refuse the declaration they need.
+// The third keeps this from rotting into a note: the day apischema grows object items this fails and the
+// carve-out is revisited, the shape TestFirewallTemplateWritesAreStillLegacy holds for the same reason.
 func TestAlertRuleWritesAreStillLegacy(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	legacy := []struct {
 		method string
@@ -386,7 +357,7 @@ func TestAlertRoutesAreGatedByTheirDeclaration(t *testing.T) {
 // is the literal "summary", which the uuid format then refuses with a 400. The
 // summary card on the dashboard polls this route every 30 seconds.
 func TestAlertSummaryIsRegisteredBeforeTheAlertIDRoute(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	summary, byID := -1, -1
 	for i, e := range s.registry.Endpoints() {
 		if e.Method != fiber.MethodGet {

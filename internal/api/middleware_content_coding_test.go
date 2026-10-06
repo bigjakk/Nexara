@@ -169,32 +169,16 @@ func refusedByTheGate(res servedResponse) []string {
 	return wrong
 }
 
-// TestContentCodedRequestIsRefusedBeforeItsBodyIsRead drives the assembled
-// server — every app-level middleware (compression aside, see
-// newAssembledServer), then the real login route — with a body stream that
-// records reads, for each way a request can put a content coding where a
-// decoder finds it.
-//
-// "Refused" and "refused unread" are different claims, and only the second
-// denies the buffer: a gate that drained the stream first, or a middleware
-// that read it — before the gate, or after it, as the logger renders its line
-// once the chain returns — would answer the same 415 with the damage done.
-//
-// Every refused case but one is first shown to be dangerous. The same request,
-// handed straight to c.Body() with nothing in front of it, has to come back as
-// the full plaintext from at most a hundredth of its size on the wire — so
-// each is a real amplification today, and one that stopped being one fails at
-// the precondition instead of passing as a refusal nobody needed. The
-// exception is a coding nothing here decodes, which pins that the gate refuses
-// every coding but identity rather than a list of known ones. The accepted
-// cases are the other half: without them a stack that never read any stream
-// would make "unread" vacuous, and a check that refused too much — identity,
-// or an empty list element, which RFC 9110 §5.6.1.2 says a recipient MUST
-// accept — would pass.
-//
-// POST /api/v1/auth/login is the route because it is the one the attack
-// was measured on: it needs no session, and it declares a JSON body, so
-// extraction reads it with c.Body().
+// TestContentCodedRequestIsRefusedBeforeItsBodyIsRead drives the assembled server (every app-level
+// middleware, compression aside, then the real login route) with a body stream that records reads, for
+// each way a request can put a content coding where a decoder finds it. "Refused" and "refused unread"
+// differ: a gate that drained the stream, or a middleware that read it before or after the gate, would
+// answer the same 415 with the damage done. Every refused case but one is first shown dangerous: handed
+// to c.Body() it must return the full plaintext from at most a hundredth of its size on the wire, so a
+// case that stopped being an amplification fails the precondition. The exception, a coding nothing here
+// decodes, pins that the gate refuses every coding but identity, not a list. The accepted cases (identity,
+// an empty list element, which RFC 9110 §5.6.1.2 says a recipient MUST accept) keep "unread" from being
+// vacuous. Login is where the attack was measured: no session, a declared JSON body read with c.Body().
 func TestContentCodedRequestIsRefusedBeforeItsBodyIsRead(t *testing.T) {
 	s := newAssembledServer(t)
 	const target = "/api/v1/auth/login"
@@ -322,24 +306,14 @@ func TestContentCodedRequestIsRefusedBeforeItsBodyIsRead(t *testing.T) {
 	}
 }
 
-// TestContentCodedRequestIsRefusedOnEveryKindOfRoute sends an encoded body
-// over the wire — app.Test serialises the request and fasthttp's server
-// parses it — to one route of each kind that reads a body: a legacy route in
-// router.go that binds its own (register, which needs no session), a
-// registry route whose extraction reads a declared JSON body (login), and the
-// upload route, which reads its multipart stream itself and falls back to
-// c.Body() when the body was not streamed.
-//
-// Each route is first shown to be there and to answer for itself: its path is
-// in the route table, and the same request without the coding gets that
-// route's own answer. Register's handler refuses the missing password; login's
-// declared schema refuses the e-mail's length in Endpoint.serve, before its
-// handler runs; the upload route's authRequired answers 401 — a Deferred
-// declaration is still authenticated, so mountRegistry attaches authRequired
-// to the route itself, and without a session neither its handler nor its body
-// is reached. So the
-// 415 that follows is the gate standing in front of a route that would
-// otherwise have answered the request, not a request that went nowhere.
+// TestContentCodedRequestIsRefusedOnEveryKindOfRoute sends an encoded body over the wire to one route of
+// each kind that reads a body: a legacy route that binds its own (register, no session), a registry
+// route whose extraction reads a declared JSON body (login), and the upload route, which reads its
+// multipart stream itself and falls back to c.Body() when it was not streamed. Each route is first shown
+// to be there and to answer for itself: the same request without the coding gets its own answer
+// (register's handler refuses the missing password; login's schema refuses the e-mail's length in
+// Endpoint.serve; the upload route's authRequired answers 401, since a Deferred declaration is still
+// authenticated). So the 415 is the gate standing in front of a route that would otherwise have answered.
 func TestContentCodedRequestIsRefusedOnEveryKindOfRoute(t *testing.T) {
 	s := newAssembledServer(t)
 
@@ -433,19 +407,14 @@ func TestContentCodedRequestIsRefusedOnEveryKindOfRoute(t *testing.T) {
 // path.
 var fiberRouteParamRe = regexp.MustCompile(`:[A-Za-z0-9_]+\??|\*|\+`)
 
-// TestContentCodingGatePrecedesEveryRoute is the structural half of the
-// coverage claim: every route the assembled server mounts — the registry's,
-// the legacy ones in router.go, the WebSocket upgrades — every prefix an
-// app-level Use mounts a handler on, and the SPA handler answer an encoded
-// request with the gate's 415, its body unread. A route or path-scoped
-// handler registered ahead of refuseContentCodedRequests would answer first
-// and fail here, whichever it is, including one no other test names.
-//
-// It cannot tell a route from a path that routes nowhere, since the gate
-// answers both. That is why it also requires the route table to hold the
-// kinds of route it claims to cover, and the SPA handler — which sits on the
-// root prefix, where the gate would answer anyway — to answer a deep link
-// itself when no coding is named.
+// TestContentCodingGatePrecedesEveryRoute is the structural half of the coverage claim: every route the
+// assembled server mounts (the registry's, router.go's, the WebSocket upgrades), every prefix an app-level
+// Use mounts a handler on, and the SPA handler answer an encoded request with the gate's 415, body
+// unread. A route or path-scoped handler registered ahead of refuseContentCodedRequests would answer
+// first and fail here, including one no other test names. It cannot tell a route from a path that routes
+// nowhere (the gate answers both), so it also requires the table to hold the kinds of route it claims to
+// cover, and the SPA handler (on the root prefix, where the gate would answer anyway) to answer a deep
+// link itself when no coding is named.
 func TestContentCodingGatePrecedesEveryRoute(t *testing.T) {
 	s := newAssembledServer(t)
 	gz := fasthttp.AppendGzipBytes(nil, contentCodingPayload)
@@ -531,22 +500,14 @@ func serveOnLoopback(t *testing.T, s *Server) string {
 	return ln.Addr().String()
 }
 
-// TestContentCodingRefusalClosesTheConnection holds the 415 to closing the
-// connection it answers on, over a real TCP connection.
-//
-// The gate leaves the body unread, and fasthttp does not drain what a
-// handler leaves: it copies the first 8 KiB of a body with a Content-Length
-// into the request (readBodyWithStreaming) and, on a kept-alive connection,
-// parses what follows as the next request. The fixture hides a request at
-// that offset in the refused body (paddedRequest).
-//
-// The gate does not close the connection itself; closeConnectionsLeftMidBody
-// does, after every answer that leaves a body unread. So the precondition
-// sends the same request to the same server with closeConnectionsLeftMidBody
-// taken out, where the hidden request has to be served after the 415. That
-// shows the fixture reaches fasthttp's parser — and it fails if the gate ever
-// closes the connection itself again, a second copy of the decision that
-// would leave neither copy testable.
+// TestContentCodingRefusalClosesTheConnection holds the 415 to closing the connection it answers on, over
+// real TCP. The gate leaves the body unread, and fasthttp does not drain what a handler leaves: it copies
+// the first 8 KiB of a Content-Length body into the request (readBodyWithStreaming) and parses what
+// follows as the next request on a kept-alive connection; the fixture hides a request at that offset
+// (paddedRequest). The gate does not close the connection itself; closeConnectionsLeftMidBody does,
+// after every answer that leaves a body unread. So the precondition sends the same request without it,
+// where the hidden request must be served after the 415, which shows the fixture reaches fasthttp's
+// parser and fails if the gate ever closes the connection itself again (a second copy of the decision).
 func TestContentCodingRefusalClosesTheConnection(t *testing.T) {
 	unreadBodyCase{
 		raw: paddedRequest(fiber.MethodPost, "/api/v1/auth/login", 0,
@@ -561,22 +522,14 @@ func TestContentCodingRefusalClosesTheConnection(t *testing.T) {
 // TestContentCodingRefusalIsAccessLogged.
 const accessLogChildEnv = "NEXARA_TEST_ACCESS_LOG_CHILD"
 
-// TestContentCodingRefusalIsAccessLogged pins the gate inside the access
-// logger, which middleware.go gives as a reason for where it sits: a refused
-// request is logged, with its request id, like every other rejection. Moved
-// ahead of the logger, the gate would still refuse, and only the log would
-// show the difference.
-//
-// The logger writes to the standard output its package captured when it
-// initialised (logger.ConfigDefault.Stream), so pointing os.Stdout elsewhere
-// does not reach it. Swapping ConfigDefault.Stream would, but that is package
-// state every server in the process reads, and it would change the output as
-// well: the logger strips its colour codes only when it writes to a stdout
-// that is not a terminal. So the test runs its own binary again as a child,
-// sends a plain request and a refused one through the assembled server there,
-// and reads the child's output — the production logger, unmodified. The plain request is the positive control: a
-// missing line for the refusal means something only if the plain request's
-// line is there.
+// TestContentCodingRefusalIsAccessLogged pins the gate inside the access logger, which middleware.go
+// gives as a reason for where it sits: a refused request is logged, with its request id, like every other
+// rejection (moved ahead of the logger it would still refuse, and only the log would differ). The logger
+// writes to the stdout its package captured at init, so pointing os.Stdout elsewhere does not reach it,
+// and swapping ConfigDefault.Stream is package state every server in the process reads and would change
+// the output (colour codes are stripped only for a non-terminal stdout). So the test runs its own binary
+// as a child, sends a plain request and a refused one through the assembled server there, and reads the
+// child's output: the production logger, unmodified. The plain request is the positive control.
 func TestContentCodingRefusalIsAccessLogged(t *testing.T) {
 	const plainID, refusedID = "access-log-plain-0001", "access-log-refused-0001"
 	if os.Getenv(accessLogChildEnv) == "1" {
@@ -591,6 +544,7 @@ func TestContentCodingRefusalIsAccessLogged(t *testing.T) {
 		return
 	}
 
+	t.Parallel() // the parent only waits for the child process
 	child := exec.Command(os.Args[0], "-test.run=^TestContentCodingRefusalIsAccessLogged$", "-test.count=1")
 	child.Env = append(os.Environ(), accessLogChildEnv+"=1")
 	var stdout, stderr bytes.Buffer

@@ -95,18 +95,12 @@ var authRoutesOutsideTheClusterCheckShape = map[string]string{
 // registry_oidc.go's.
 func declaredAuthEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
+	return declaredEndpointsWhere(t, func(e Endpoint) bool {
 		if !strings.HasPrefix(e.Path, authScope+"/") && e.Path != authScope {
-			continue
+			return false
 		}
-		if strings.HasPrefix(e.Path, totpScope) || e.Path == oidcAuthorizePath {
-			continue
-		}
-		out[e.Method+" "+e.Path] = e
-	}
-	return out
+		return !strings.HasPrefix(e.Path, totpScope) && e.Path != oidcAuthorizePath
+	})
 }
 
 // TestAuthRoutesDeclareTheSamePermissionTheyEnforced is the tally: 1 permission
@@ -250,6 +244,7 @@ func TestAuthSelfServiceRoutesTakeNoSubject(t *testing.T) {
 			cap := &capture{}
 			gated := e
 			gated.Handler = cap.handler()
+			gated.RateLimiter = nil // a shared declaration's limiter is shared state
 			target := strings.ReplaceAll(path, ":id", testSessionID)
 
 			// No grant is needed …
@@ -315,24 +310,18 @@ func TestAuthExemptionReasonsMatchTheReviewedLists(t *testing.T) {
 	}
 }
 
-// TestAuthOptionalRoutesAreStillLegacy records the one vocabulary gap this
-// tranche hit, so it stays a decision rather than becoming a gap.
-//
-// Register and Logout are mounted with authOptional: the session is parsed IF
-// one is presented, and the request proceeds either way. Permissions has no
-// shape for that. Public installs NO authentication middleware, so
-// c.Locals("role") would never be set and Register would refuse every
-// admin-created account after the first; every other shape requires a session,
-// which would 401 the logout a valid refresh cookie must still be able to
-// perform after the access token has expired.
-//
-// Pinned from both sides: the routes must still be registered and public, and
-// they must NOT be in the registry — a well-meaning later declaration of either
-// is a silent behaviour change, not a compile error.
+// TestAuthOptionalRoutesAreStillLegacy records the one vocabulary gap this tranche hit, so it stays a
+// decision rather than a gap. Register and Logout are mounted with authOptional: the session is parsed IF
+// one is presented, and the request proceeds either way, a shape Permissions lacks. Public installs NO
+// authentication middleware, so c.Locals("role") would never be set and Register would refuse every
+// admin-created account after the first; every other shape requires a session, which would 401 the logout
+// a valid refresh cookie must still be able to perform after the access token expired. Pinned from both
+// sides: still registered and public, and NOT in the registry (a later declaration of either is a silent
+// behaviour change, not a compile error).
 func TestAuthOptionalRoutesAreStillLegacy(t *testing.T) {
 	keys := []string{"POST /api/v1/auth/register", "POST /api/v1/auth/logout"}
 
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	inRegistry := registryRouteKeySet(s.registry.Endpoints())
 	registered := map[string]bool{}
 	for _, r := range s.app.GetRoutes(true) {

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"io/fs"
 	"os"
@@ -33,21 +32,14 @@ var scopeStampers = map[string]bool{
 	"parseAuditFilters":   true,
 }
 
-// TestGuard_ScopedParamsCarryClusterScope fails when code builds a query params
-// struct that has an AccessibleClusterIds field without ever setting it to
-// something real.
-//
-// This is the mistake that produced the original cross-cluster leak and then
-// tried to recur twice while it was being fixed: the SQL grows a scope
-// parameter, and a call site that does not pass it silently reverts to reading
-// every cluster. Neither a unit test nor a per-row guard catches it — handlers
-// hold a concrete *db.Queries, so no test can observe the params they actually
-// send, and a per-row guard cannot repair a Total or an over-broad LIMIT.
-// Static structure is what is left.
-//
-// A struct is satisfied by carrying the field with a non-nil value in its
-// literal, by a later assignment to <var>.AccessibleClusterIds, or by being
-// handed to a scopeStamper as &<var>.
+// TestGuard_ScopedParamsCarryClusterScope fails when code builds a query params struct that has an
+// AccessibleClusterIds field without ever setting it to something real: the mistake that produced the
+// original cross-cluster leak and tried to recur twice while it was being fixed (the SQL grows a scope
+// parameter and a call site that does not pass it silently reverts to reading every cluster). No unit
+// test sees it (handlers hold a concrete *db.Queries, so no test observes the params they send) and a
+// per-row guard cannot repair a Total or an over-broad LIMIT. A struct is satisfied by a non-nil value
+// in its literal, a later assignment to <var>.AccessibleClusterIds, or being handed to a scopeStamper as
+// &<var>.
 func TestGuard_ScopedParamsCarryClusterScope(t *testing.T) {
 	t.Parallel()
 
@@ -62,9 +54,9 @@ func TestGuard_ScopedParamsCarryClusterScope(t *testing.T) {
 		t.Fatal("found no Go source files to scan — the guard would pass vacuously")
 	}
 
-	fset := token.NewFileSet()
+	fset := guardFset
 	for _, file := range files {
-		parsed, err := parser.ParseFile(fset, file, nil, 0)
+		parsed, err := guardParsed(file)
 		if err != nil {
 			t.Fatalf("parse %s: %v", file, err)
 		}
@@ -291,9 +283,8 @@ func scopedParamsTypes(t *testing.T) map[string]bool {
 	}
 
 	scoped := make(map[string]bool)
-	fset := token.NewFileSet()
 	for _, file := range files {
-		parsed, err := parser.ParseFile(fset, file, nil, 0)
+		parsed, err := guardParsed(file)
 		if err != nil {
 			t.Fatalf("parse %s: %v", file, err)
 		}

@@ -16,17 +16,13 @@ import (
 // declares.
 const dlqRouteCount = 5
 
-// dlqRoutesOutsideTheClusterCheckShape records why all five are GLOBAL rather
-// than cluster-scoped Checks. It is folded into
-// routesOutsideTheClusterCheckShape in registry_vms_test.go.
-//
-// This is the one domain where "global" is the finding rather than the default:
-// the rows carry a denormalised cluster_id and the handler already applies a
-// per-row guard, so it LOOKS cluster-scopable — but ListNotificationDLQ applies
-// LIMIT/OFFSET across every cluster's rows and trims afterwards, so opening it
-// to a scoped caller would page through the global rowset and hand back short
-// pages with holes. Widening the gate is a query change, not a declaration
-// change.
+// dlqRoutesOutsideTheClusterCheckShape records why all five are GLOBAL rather than cluster-scoped
+// Checks (folded into routesOutsideTheClusterCheckShape in registry_vms_test.go). This is the one domain
+// where "global" is the finding rather than the default: the rows carry a denormalised cluster_id and the
+// handler applies a per-row guard, so it LOOKS cluster-scopable, but ListNotificationDLQ applies
+// LIMIT/OFFSET across every cluster's rows and trims afterwards, so opening it to a scoped caller would
+// page through the global rowset and hand back short pages with holes. Widening the gate is a query
+// change, not a declaration change.
 var dlqRoutesOutsideTheClusterCheckShape = map[string]string{
 	"GET /api/v1/notification-dlq":              "global: a cluster-scoped grant satisfies no global check, and the listing pages across every cluster's rows",
 	"GET /api/v1/notification-dlq/summary":      "global: the counts are instance-wide",
@@ -60,14 +56,7 @@ var dlqExtraPermissions = map[string][]string{
 
 func declaredDLQEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, dlqScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(dlqScope))
 }
 
 // TestNotificationDLQRoutesDeclareTheSamePermissionTheyEnforced is the tally

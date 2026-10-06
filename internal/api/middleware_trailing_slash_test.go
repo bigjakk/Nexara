@@ -52,18 +52,13 @@ func newClusterDeleteProbe(t *testing.T, stack bool) (*fiber.App, *capture) {
 	return s.app, cap
 }
 
-// TestTrailingSlashDeleteNeverReachesTheClusterDelete is the bug the gate
-// exists for, each case with its precondition twin.
-//
-// The twin sends the request to the cluster delete's declaration with
-// nothing but the production router config in front of it, and requires
-// the handler to RUN, with the cluster's id: Fiber ignoring the trailing
-// slash is what let a pool named ".." delete a cluster, and a fixture that
-// did not reach the handler could not show the gate preventing anything.
-// The query string rides along untouched — the revoke spelling is the
-// variant that also deletes the Proxmox-side user and token — which is also
-// the measurement that c.Path() leaves the query out of what the gate
-// reads: the gate refuses that spelling too.
+// TestTrailingSlashDeleteNeverReachesTheClusterDelete is the bug the gate exists for, each case with its
+// precondition twin. The twin sends the request to the cluster delete's declaration with only the
+// production router config in front of it and requires the handler to RUN, with the cluster's id: Fiber
+// ignoring the trailing slash is what let a pool named ".." delete a cluster, and a fixture that did not
+// reach the handler could not show the gate preventing anything. The query string rides along untouched
+// (the revoke spelling also deletes the Proxmox-side user and token), which measures that c.Path() leaves
+// the query out of what the gate reads: the gate refuses that spelling too.
 func TestTrailingSlashDeleteNeverReachesTheClusterDelete(t *testing.T) {
 	base := pathPrefix + "clusters/" + testClusterID
 	// The cluster delete also requires confirm=<the cluster's name>
@@ -198,19 +193,13 @@ func TestTrailingSlashGateRefusesEveryMethodButGetHeadAndOptions(t *testing.T) {
 	}
 }
 
-// TestTrailingSlashGatePrecedesEveryRoute is the structural half of the
-// coverage claim: every route the assembled server mounts under a method
-// the gate refuses — the registry's, the legacy ones in router.go and the
-// two of those registered on a group root — every prefix an app-level Use
-// mounts a handler on, and the SPA handler answer that method with a
-// trailing slash with the gate's refusal. A route or path-scoped handler
-// registered ahead of refuseTrailingSlashWrites would answer first and fail
-// here, whichever it is.
-//
-// It cannot tell a route from a path that routes nowhere, since the gate
-// answers both — that is TestTrailingSlashDeleteNeverReachesTheClusterDelete's
-// job. What it adds is that the route table holds the kinds of route it
-// claims to cover, so the sweep cannot be vacuous.
+// TestTrailingSlashGatePrecedesEveryRoute is the structural half of the coverage claim: every route
+// the assembled server mounts under a method the gate refuses (the registry's, the legacy ones in router.go
+// and the two registered on a group root), every prefix an app-level Use mounts a handler on, and the SPA
+// handler answer that method with a trailing slash with the gate's refusal. A route or path-scoped handler
+// registered ahead of refuseTrailingSlashWrites would answer first and fail here. It cannot tell a route from
+// a path that routes nowhere (the gate answers both; that is the test above); what it adds is that the route
+// table holds the kinds of route it claims to cover, so the sweep cannot be vacuous.
 func TestTrailingSlashGatePrecedesEveryRoute(t *testing.T) {
 	s := newAssembledServer(t)
 
@@ -311,18 +300,13 @@ func TestTrailingSlashRefusalReachesACrossOriginCaller(t *testing.T) {
 	}
 }
 
-// TestTrailingSlashRefusalIsAccessLogged pins the gate inside the access
-// logger, the other reason middleware.go gives for its position: a refused
-// request is logged, with its request id and the path as sent, like every
-// other rejection. Moved ahead of the logger, the gate would still refuse,
-// and only the log would show the difference.
-//
-// The logger writes to the standard output its package captured when it
-// initialised, so this runs the test binary again as a child and reads the
-// child's output — the production logger, unmodified — the way
-// TestContentCodingRefusalIsAccessLogged does, for the same reasons. The
-// plain request is the positive control: a missing line for the refusal
-// means something only if the plain request's line is there.
+// TestTrailingSlashRefusalIsAccessLogged pins the gate inside the access logger, the other reason
+// middleware.go gives for its position: a refused request is logged, with its request id and the path as
+// sent. Moved ahead of the logger the gate would still refuse, and only the log would show the difference.
+// The logger writes to the standard output its package captured at init, so this runs the test binary again
+// as a child and reads the child's output (the production logger, unmodified), as
+// TestContentCodingRefusalIsAccessLogged does. The plain request is the positive control: a missing line
+// for the refusal means something only if the plain request's line is there.
 func TestTrailingSlashRefusalIsAccessLogged(t *testing.T) {
 	const plainID, refusedID = "slash-log-plain-0001", "slash-log-refused-0001"
 	target := pathPrefix + "clusters/" + testClusterID + "/"
@@ -337,6 +321,7 @@ func TestTrailingSlashRefusalIsAccessLogged(t *testing.T) {
 		return
 	}
 
+	t.Parallel() // the parent only waits for the child process
 	child := exec.Command(os.Args[0], "-test.run=^TestTrailingSlashRefusalIsAccessLogged$", "-test.count=1")
 	child.Env = append(os.Environ(), accessLogChildEnv+"=1")
 	var stdout, stderr bytes.Buffer

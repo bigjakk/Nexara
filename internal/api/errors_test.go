@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"io"
 	"io/fs"
@@ -92,19 +91,14 @@ var statusNamesTheAPISends = map[string]int{
 	"StatusNotImplemented":        fiber.StatusNotImplemented,
 }
 
-// statusesFiberSendsThroughErrorHandler are the error statuses Fiber hands
-// errorHandler on its own, which no Nexara source names. Read off Fiber
-// v3.5.0 — the router in router.go (App.next) and serverErrorHandler in
-// app.go, which turns a request fasthttp could not read into a *fiber.Error.
-// TestFiberSentErrorStatusesCarryTheirSlug sends each one it can for real.
-//
-// One of serverErrorHandler's is left out because this server cannot send it:
-// the 413 it makes of fasthttp.ErrBodyTooLarge never comes, since
-// StreamRequestBody streams an oversized body instead of refusing it. Its 408
-// is in: buildFiberConfig's ReadTimeout (headReadTimeout) expires on a head, or
-// on fasthttp's read-ahead of a body, that does not arrive in time. The wait
-// between requests is bounded by IdleTimeout instead, and Server.serveConn
-// closes a connection that times out there without a response.
+// statusesFiberSendsThroughErrorHandler are the error statuses Fiber hands errorHandler on its own,
+// which no Nexara source names, read off Fiber v3.5.0 (the router in router.go, App.next, and
+// serverErrorHandler in app.go, which turns a request fasthttp could not read into a *fiber.Error).
+// TestFiberSentErrorStatusesCarryTheirSlug sends each one it can for real. One of serverErrorHandler's is
+// left out because this server cannot send it: the 413 it makes of fasthttp.ErrBodyTooLarge never comes,
+// since StreamRequestBody streams an oversized body instead of refusing it. Its 408 is in:
+// buildFiberConfig's ReadTimeout (headReadTimeout) expires on a head, or on fasthttp's read-ahead of a
+// body, that does not arrive in time; the wait between requests is bounded by IdleTimeout instead.
 var statusesFiberSendsThroughErrorHandler = map[int]string{
 	fiber.StatusBadRequest:                  "serverErrorHandler: a request fasthttp cannot parse",
 	fiber.StatusNotFound:                    "the router: no route matches the path",
@@ -147,7 +141,6 @@ var (
 func scanStatusSources(t *testing.T, dirs ...string) statusSource {
 	t.Helper()
 	var src statusSource
-	fset := token.NewFileSet()
 	for _, dir := range dirs {
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -156,12 +149,12 @@ func scanStatusSources(t *testing.T, dirs ...string) statusSource {
 			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
-			f, err := parser.ParseFile(fset, path, nil, 0)
+			f, err := parsedSource(path)
 			if err != nil {
 				return err
 			}
 			src.files++
-			scanStatusFile(fset, f, &src)
+			scanStatusFile(parsedSourceFset, f, &src)
 			return nil
 		})
 		if err != nil {
@@ -232,26 +225,15 @@ func scanStatusFile(fset *token.FileSet, f *ast.File, src *statusSource) {
 	}
 }
 
-// TestGuard_EveryErrorStatusTheAPISendsHasASlug is what keeps a status from
-// going out as internal_server_error again. It reads the API's source —
-// internal/api, its handlers, and internal/ws, whose routes share the app and
-// its errorHandler — for every status the code names, and requires:
-//
-//   - every name to be in statusNamesTheAPISends, so a status nobody has
-//     looked at cannot slip in, and every entry there to still be named
-//     somewhere, so the table cannot go stale; together they also make the
-//     scan fail loudly if it stops finding anything;
-//   - no integer literal to be passed as a status, which the scan could not
-//     tell apart from any other number;
-//   - every fiber.NewError with a computed status to be one of
-//     dynamicStatusSites, whose statuses come from the named ones; and
-//   - every error status in the table, and every one Fiber sends through
-//     errorHandler by itself, to have a slug of its own.
-//
-// A status written with c.Status(…).JSON(…) carries the handler's own body
-// rather than statusText's slug; it is held to the same rule anyway, because
-// "a status the API sends has a slug" is simpler to keep than an exception
-// for the ones that do not need it today.
+// TestGuard_EveryErrorStatusTheAPISendsHasASlug keeps a status from going out as
+// internal_server_error again. It reads the API's source (internal/api, its handlers, and internal/ws) for
+// every status the code names and requires: every name to be in statusNamesTheAPISends and every entry
+// there to still be named somewhere (so the table cannot go stale and the scan fails loudly if it finds
+// nothing); no integer literal passed as a status; every fiber.NewError with a computed status to be one of
+// dynamicStatusSites; and every error status in the table, and every one Fiber sends through errorHandler by
+// itself, to have a slug of its own. A status written with c.Status(...).JSON(...) carries the handler's
+// own body rather than statusText's slug, and is held to the same rule anyway, simpler to keep than an
+// exception for the ones that do not need it today.
 func TestGuard_EveryErrorStatusTheAPISendsHasASlug(t *testing.T) {
 	src := scanStatusSources(t, ".", filepath.Join("..", "ws"))
 	if src.files < 100 {
@@ -341,6 +323,7 @@ func TestFiberSentErrorStatusesCarryTheirSlug(t *testing.T) {
 	s := newAssembledServer(t)
 	s.app.Server().ReadTimeout = time.Second
 	addr := serveOnLoopback(t, s)
+	t.Parallel() // after New, which writes a package-level cookie mode
 
 	for _, tt := range []struct {
 		name string
@@ -358,6 +341,7 @@ func TestFiberSentErrorStatusesCarryTheirSlug(t *testing.T) {
 		{"a head the client stops sending", "GET /api/v1/version HTTP/1.1\r\nHost: exa", fiber.StatusRequestTimeout},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			conn, err := net.Dial("tcp", addr)
 			if err != nil {
 				t.Fatalf("dial: %v", err)

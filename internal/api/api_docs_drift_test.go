@@ -116,19 +116,14 @@ func requireAllHandlersStubbed(t *testing.T, s *Server) {
 	}
 }
 
-// TestEndpointMetaMatchesRegisteredRoutes asserts every curated
-// endpointMeta key ("METHOD path") matches a route actually registered
-// by setupRoutes. GetDocs looks entries up with the registered path
-// verbatim, so a key with a stale path or param name (":id" vs
-// ":cluster_id") is dead weight: the endpoint renders with blank
-// description/permission and nothing else notices. This test makes
-// that drift a build failure instead.
-//
-// The reverse direction — every route having a curated entry — is
-// intentionally NOT enforced: routes without an entry get auto-derived
-// metadata by design (see the endpointMeta doc comment).
+// TestEndpointMetaMatchesRegisteredRoutes asserts every curated endpointMeta key ("METHOD path")
+// matches a route actually registered by setupRoutes. GetDocs looks entries up with the registered path
+// verbatim, so a key with a stale path or param name (":id" vs ":cluster_id") is dead weight: the endpoint
+// renders with blank description/permission and nothing else notices. The reverse direction (every route
+// having a curated entry) is intentionally NOT enforced: routes without one get auto-derived metadata by
+// design (see the endpointMeta doc comment).
 func TestEndpointMetaMatchesRegisteredRoutes(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	registered := make(map[string]bool)
 	for _, r := range s.app.GetRoutes(true) {
@@ -148,34 +143,13 @@ func TestEndpointMetaMatchesRegisteredRoutes(t *testing.T) {
 	}
 }
 
-// endpointMetaSurvivingKeys is the exact, closed set of keys endpointMeta
-// is supposed to carry: the 13 legacy routes (of the 17 in router.go) that
-// have a curated entry — see the doc comment on endpointMeta itself
-// (internal/api/handlers/api_docs.go) for which 13 and why.
-//
-// This exists because TestEndpointMetaMatchesRegisteredRoutes only checks
-// the direction "every key that exists points at a real route" — it has
-// no floor on HOW MANY keys should exist, so it passes just as cleanly
-// over 13 keys, 3 keys, or zero. That gap is not hypothetical: it is what
-// let a real regression through in an earlier draft of the cleanup that
-// produced this list — deleting any of these (which GetDocs DOES render
-// for these legacy routes, unlike the ~223 removed entries for
-// registry-declared ones) silently blanks that route's description and
-// permission in the live /api/v1/api-docs payload, and nothing in this
-// package's test suite noticed. TestGuard_DocumentedPermissionMatchesEnforcement's
-// own anti-vacuity floor (rbac_route_guard_test.go) checks that SOMETHING
-// was compared, not that these specific keys survived, so it does not
-// substitute for this.
-//
-// It grew from 9 to 13 when the four routes whose section groupFromPath
-// derived WRONG earned an entry — the storage-content delete and the
-// vm-folders reparent (both rendered under "Clusters") and the two
-// firewall-template writes (which had a two-route "Firewall Templates"
-// section to themselves, beside the "Firewall" one holding their siblings).
-// None of the four can be declared instead; the endpointMeta doc comment
-// names the limitation holding each, and
-// TestGuard_NoRouteFallsThroughToADerivedGroup below is what would have
-// found them.
+// endpointMetaSurvivingKeys is the exact, closed set of keys endpointMeta carries: the 13
+// legacy routes (of the 17 in router.go) that have a curated entry (see endpointMeta in
+// internal/api/handlers/api_docs.go). TestEndpointMetaMatchesRegisteredRoutes only
+// checks that every key points at a real route, so it passes over 13 keys or none; an
+// entry deleted without this list changing silently blanks that route's description and
+// permission in the live payload. It grew from 9 to 13 when four routes whose Group
+// groupFromPath derived WRONG earned one; none can be declared instead.
 var endpointMetaSurvivingKeys = []string{
 	"DELETE /api/v1/clusters/:cluster_id/storage/:storage_id/content/*",
 	"GET /api/v1/api-docs",
@@ -192,14 +166,10 @@ var endpointMetaSurvivingKeys = []string{
 	"PUT /api/v1/settings/:key",
 }
 
-// TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet is the floor
-// TestEndpointMetaMatchesRegisteredRoutes does not provide: it fails,
-// naming the key, if endpointMeta ever loses one of the 13 surviving
-// entries OR gains a new one that was not deliberately added to
-// endpointMetaSurvivingKeys above. A genuinely new legacy route earning a
-// curated entry is expected to update this list in the same change; an
-// entry disappearing without this list changing is the regression this
-// guard exists to catch.
+// TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet fails, naming the key, when
+// endpointMeta loses one of the surviving entries or gains one that was not added to
+// endpointMetaSurvivingKeys: a new legacy route earning an entry updates the list in the
+// same change.
 func TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet(t *testing.T) {
 	got := handlers.EndpointMetaKeys()
 
@@ -231,86 +201,32 @@ func TestGuard_EndpointMetaKeysAreExactlyTheSurvivingSet(t *testing.T) {
 
 // ── Derived docs sections ─────────────────────────────────────────────
 //
-// Group is the section structure of /api/v1/api-docs and of the in-app
-// catalog at /settings/api-docs: the handler sorts by it and the SPA renders
-// one collapsible card per distinct value. A declared route states its Group;
-// a LEGACY route states one only if somebody wrote an endpointMeta entry for
-// it; otherwise handlers.groupFromPath derives one from the second path
-// segment and the route renders under whatever that produces.
-// registry_group_guard_test.go pins the vocabulary a STATED section may use,
-// from either of those two sources. The two guards meet on that word: this
-// one says which routes are allowed to state nothing, and that one says what
-// the ones that do state something are allowed to say.
-//
-// Derivation is right often enough to hide how often it is not, and it fails
-// silently in both of its shapes. A nested route lands in its PARENT's
-// section — the storage-content delete and the vm-folders reparent both
-// derived "Clusters", away from the 12 and 4 declared siblings they belong
-// with — and a collection of its own invents a SECTION of its own, which is
-// how the two firewall-template writes came to sit in a two-route "Firewall
-// Templates" card beside the "Firewall" section that already held their four
-// declared siblings. Nothing 500s,
-// nothing logs, and the docs look healthy from the inside; an operator
-// hunting for an endpoint opens the wrong card and concludes it does not
-// exist.
-//
-// Nothing caught any of that, and the reason is worth naming: every existing
-// docs guard checks a value that IS stated (does the key match a route, does
-// the permission match enforcement, is the Group canonical). None of them
-// can see a route that states nothing, because there is no value to check.
-// The guard below is the other direction — it reports the ABSENCE.
+// A declared route states its Group; a LEGACY route states one only through an
+// endpointMeta entry; otherwise handlers.groupFromPath derives it from the second path
+// segment, which fails silently: a nested route lands in its parent's section (the
+// storage-content delete and the vm-folders reparent both derived "Clusters") and a
+// collection of its own invents a section (the firewall-template writes). Every other
+// docs guard checks a value that IS stated; the guard below reports the ABSENCE.
+// registry_group_guard_test.go holds what a stated section may say.
 
-// derivedGroupAllowList is the reviewed set of routes whose docs section is
-// derived rather than stated, mapped to the section each one derives to.
-//
-// The value is not decoration. Being on this list says "the derived section
-// is the right one", which is a claim about a specific string — and the
-// three entries here are true only by coincidence: /api/v1/settings/branding
-// derives "Settings" because branding happens to live under the settings
-// collection, not because anybody filed it there.
-//
-// The value column catches the way that coincidence can break WITHOUT the
-// route changing: groupFromPath's own algorithm moving under it — a
-// title-casing rule, a different segment, a new special case — so that the
-// same method and path start deriving something else. The key columns catch
-// the other way, a route that moves: relocate the branding reads to
-// /api/v1/branding and all three keys go missing at once, which the forward
-// and reverse loops both report. Either way the SPA does not quietly grow a
-// card. Keep both, because neither sees the other's case.
-//
-// TO ADD AN ENTRY: only when the derived value genuinely is the section the
-// route belongs in. Otherwise the fix is a declaration, or — if a real
-// limitation blocks one, as it does for the four routes whose derived
-// section was wrong and which would otherwise have doubled this list — an
-// endpointMeta entry naming the section outright.
+// derivedGroupAllowList is the reviewed set of routes whose docs section is derived
+// rather than stated, each with the section it derives to. The value is a claim about a
+// specific string, true here by coincidence (branding lives under /settings): it catches
+// groupFromPath's own algorithm moving under the route, and the keys catch a route that
+// moves. To add an entry only when the derived value genuinely is the section the route
+// belongs in; otherwise declare the route or give it an endpointMeta entry.
 var derivedGroupAllowList = map[string]string{
 	"GET /api/v1/settings/branding":              "Settings",
 	"GET /api/v1/settings/branding/favicon-file": "Settings",
 	"GET /api/v1/settings/branding/logo-file":    "Settings",
 }
 
-// TestGuard_DerivedGroupAllowListNamesRealSections holds the value column to
-// the Group vocabulary, which the comparison above cannot do.
-//
-// That comparison asks "does the route still derive what we recorded?", so a
-// TYPO in the value fails it immediately. What it cannot see is a value that
-// faithfully records the derivation AND names a section nothing else uses:
-// let the derivation start producing "Branding", record "Branding" here, and
-// derived == recorded holds while the docs grow a card for a section no
-// declared route can join.
-//
-// # Only one of the two remedies is reachable, and the message says so
-//
-// canonicalGroups is BIDIRECTIONAL. groupVocabularyFindings
-// (registry_group_guard_test.go) also requires every canonical entry to be
-// NAMED by a declaration or an overlay entry, and the groupUses it walks reads
-// only those two sources — never a derivation. So "add the new section to
-// canonicalGroups" is not an available fix: it trades this failure for
-// `canonicalGroups lists "X", but no declaration and no overlay entry names
-// it`. The fix is always to give the route a declared Group or an endpointMeta
-// entry. Teaching groupUses about derivation as a third source would change
-// that, and would be the thing to do if derived sections ever stop being a
-// closed set of three.
+// TestGuard_DerivedGroupAllowListNamesRealSections holds the value column to the Group
+// vocabulary, which the derived-vs-recorded comparison cannot: a value that faithfully
+// records the derivation AND names a section nothing else uses. The fix is always a
+// declared Group or an endpointMeta entry, never a canonicalGroups line, because
+// groupVocabularyFindings also requires every canonical entry to be named by a
+// declaration or overlay and never reads a derivation.
 func TestGuard_DerivedGroupAllowListNamesRealSections(t *testing.T) {
 	// Already route-sorted by the detector; no second sort here, which would
 	// imply the order is unspecified when it is pinned.
@@ -322,32 +238,6 @@ func TestGuard_DerivedGroupAllowListNamesRealSections(t *testing.T) {
 	}
 	for _, f := range findings {
 		t.Error(f)
-	}
-}
-
-// TestDerivedSectionVocabularyFindingsDetects is why the detector above takes
-// its vocabulary as a parameter.
-//
-// All three allow-listed routes derive "Settings", which IS canonical, so no
-// edit to the real data can make the guard fail without also failing the
-// derived-vs-recorded comparison beside it — the guard is real but not
-// individually killable against the shipped maps. Both neighbouring detectors
-// (derivedGroupFindings, groupVocabularyFindings) are parameterized for the
-// same reason; this proves the detector fires when it should, on data the
-// repo does not have to contain.
-func TestDerivedSectionVocabularyFindingsDetects(t *testing.T) {
-	canonical := map[string]string{"Settings": "real section"}
-
-	if got := derivedSectionVocabularyFindings(map[string]string{"GET /x": "Settings"}, canonical); len(got) != 0 {
-		t.Errorf("a canonical section produced findings %v, want none — the detector reports an "+
-			"section that exists, so every finding below would be noise", got)
-	}
-	got := derivedSectionVocabularyFindings(map[string]string{"GET /x": "Branding"}, canonical)
-	if len(got) != 1 {
-		t.Fatalf("a non-canonical section produced %d findings, want 1: %v", len(got), got)
-	}
-	if !strings.Contains(got[0], "Branding") || !strings.Contains(got[0], "GET /x") {
-		t.Errorf("finding = %q, want it to name both the route and the section", got[0])
 	}
 }
 
@@ -369,28 +259,19 @@ func derivedSectionVocabularyFindings(allow, canonical map[string]string) (findi
 	return findings
 }
 
-// liveDocsPayload renders the REAL /api/v1/api-docs payload: the production
-// handler, holding the declarations setupRoutes pushed into it, reading the
-// route table setupRoutes built, marshalled and decoded the way a caller
-// receives it.
-//
-// Reading the payload rather than the inputs is the point. Group reaches a
-// reader through three merging steps — declaration, then overlay, then
-// derivation — and a guard that re-implemented the merge would be checking
-// its own copy of the rule rather than the rule.
-//
-// It is mounted on a throwaway app rather than called through s.app because
-// the real route sits behind authRequired and a stub Server has no signing
-// key to mint a session with. Same handler, same route table; only the gate
-// in front of it is absent. SetApp is New()'s half of the wiring (see
-// server.go) and has to happen here, since a stub Server never goes through
-// New.
+// liveDocsPayload renders the REAL /api/v1/api-docs payload — the production handler over
+// the declarations and route table setupRoutes built — decoded as a caller receives it.
+// Group reaches a reader through three merging steps, and a guard that re-implemented
+// the merge would check its own copy of the rule. The handler is mounted on a throwaway
+// app because the real route sits behind authRequired; SetApp is New()'s half of the
+// wiring, which a stub never goes through.
 func liveDocsPayload(t *testing.T, s *Server) []handlers.APIEndpoint {
 	t.Helper()
-	s.apiDocsHandler.SetApp(s.app)
+	docs := *s.apiDocsHandler // a copy, so the shared stub is not written to
+	docs.SetApp(s.app)
 
 	probe := fiber.New()
-	probe.Get("/docs", s.apiDocsHandler.GetDocs)
+	probe.Get("/docs", docs.GetDocs)
 
 	resp, err := probe.Test(httptest.NewRequest(fiber.MethodGet, "/docs", nil))
 	if err != nil {
@@ -408,27 +289,16 @@ func liveDocsPayload(t *testing.T, s *Server) []handlers.APIEndpoint {
 	return out.Items
 }
 
-// statedDocGroups is every route whose docs section somebody DECIDED, keyed
-// the way the payload keys it, mapped to what they decided.
-//
-// It exists because the payload alone cannot tell a stated section from a
-// derived one: the two are frequently the same string. "GET /api/v1/settings"
-// renders "Settings" whether the overlay says so or groupFromPath works it
-// out, and the difference — whether anybody looked — is exactly what the
-// guard is about.
+// statedDocGroups is every route whose docs section somebody DECIDED, keyed as the
+// payload keys it: the payload alone cannot tell a stated section from a derived one, the
+// two being frequently the same string. The overlay counts only where nothing is
+// declared, since GetDocs takes a declaration whole.
 func statedDocGroups(s *Server) map[string]string {
 	out := make(map[string]string, s.registry.Len())
 	for _, e := range docEndpoints(s.registry) {
-		// Normalised through the function the docs lookup uses, so a
-		// declaration mounted at ".../foo/" keys the way the payload will
-		// render it. Register requires a non-blank Group, so there is no
-		// empty value to filter here.
+		// Normalised as the docs lookup does, so ".../foo/" keys as it renders.
 		out[e.Method+" "+handlers.NormalizeDocPath(e.Path)] = e.Group
 	}
-	// The overlay second, and only where nothing is declared: GetDocs takes a
-	// declaration WHOLE and never consults the overlay for a declared route,
-	// so letting an overlay entry shadow one here would make this map
-	// disagree with the payload it is compared against.
 	for key, group := range handlers.EndpointMetaGroups() {
 		if group == "" {
 			continue
@@ -441,22 +311,12 @@ func statedDocGroups(s *Server) map[string]string {
 	return out
 }
 
-// derivedGroupFindings checks both directions and reports what it finds,
-// plus how many payload entries it looked at.
-//
-// Forward: a payload entry whose section nothing states, and which the
-// reviewed list does not cover — or covers with a different value than it
-// now derives to.
-//
-// Reverse: a reviewed entry that is no longer earning its place, because the
-// route is gone or because its section became stated. That half has no
-// natural pressure on it and decays quietly: a leftover exemption reads as
-// review and is none, and the next route to land on that key inherits a
-// blessing nobody gave it.
-//
-// stated and allowed are parameters rather than package references so a
-// synthetic input can prove the comparison fires; examined is returned for
-// the anti-vacuity assertion the callers make.
+// derivedGroupFindings checks both directions and reports how many payload entries it
+// looked at. Forward: an entry whose section nothing states and the reviewed list does
+// not cover, or covers with a value it no longer derives to. Reverse: a reviewed entry
+// whose route is gone or whose section is now stated; that half decays quietly, since a
+// leftover exemption reads as review and the next route on that key inherits it.
+// stated and allowed are parameters so a synthetic input can prove the comparison fires.
 func derivedGroupFindings(payload []handlers.APIEndpoint, stated, allowed map[string]string) (findings []string, examined int) {
 	inPayload := make(map[string]bool, len(payload))
 
@@ -513,20 +373,16 @@ func derivedGroupFindings(payload []handlers.APIEndpoint, stated, allowed map[st
 // TestGuard_NoRouteFallsThroughToADerivedGroup is the production guard, over
 // the real payload a caller receives.
 func TestGuard_NoRouteFallsThroughToADerivedGroup(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	payload := liveDocsPayload(t, s)
 	stated := statedDocGroups(s)
 
 	findings, examined := derivedGroupFindings(payload, stated, derivedGroupAllowList)
 
-	// Anti-vacuity, on the input rather than on the findings. A payload that
-	// came back empty — a handler that lost its app, a route table built
-	// before the registry mounted — produces zero findings and reports PASS,
-	// which is what a healthy payload reports too. The registry's own size is
-	// the floor because every declaration must appear in the payload
-	// (TestGuard_DeclaredDocsReachTheDocsHandler proves that separately), so
-	// anything smaller means the payload is not the one callers get.
+	// Anti-vacuity, on the input: an empty payload reports zero findings, as a healthy one
+	// does. Every declaration must appear in it (TestGuard_DeclaredDocsReachTheDocsHandler),
+	// so the registry's size is the floor.
 	if examined < s.registry.Len() {
 		t.Fatalf("the docs payload carries %d endpoints but the registry declares %d; this guard would be "+
 			"checking something other than what /api/v1/api-docs serves", examined, s.registry.Len())
@@ -535,19 +391,10 @@ func TestGuard_NoRouteFallsThroughToADerivedGroup(t *testing.T) {
 		t.Fatal("no route states a docs section at all; every route would read as derived and the guard " +
 			"would be reporting the wrong thing")
 	}
-	// The other direction of the same worry, and the one that would not
-	// announce itself. An over-broad `stated` — statedDocGroups reading the
-	// ROUTE TABLE rather than the declarations, say — marks every route
-	// decided, the forward loop `continue`s past all of them, and the guard
-	// reports a clean payload while comparing nothing. Neither assertion above
-	// notices: the payload is full and `stated` is non-empty.
-	//
-	// It is checked structurally rather than by asserting that some route is
-	// still derived, because derivedGroupAllowList emptying is the STATED GOAL
-	// of this work — entries are meant to leave it — and a floor that fails
-	// when the last one does is a floor somebody deletes. What cannot
-	// legitimately change is where a stated section may come from: a
-	// declaration or an overlay entry, and nothing else.
+	// An over-broad `stated` (statedDocGroups reading the route table) marks every route
+	// decided and the guard compares nothing, with the payload full and `stated`
+	// non-empty. Checked by where a stated section may come from, a declaration or an
+	// overlay entry, not by requiring a derived route: the allow-list is meant to empty.
 	mayState := make(map[string]bool, len(stated))
 	for _, e := range docEndpoints(s.registry) {
 		mayState[e.Method+" "+handlers.NormalizeDocPath(e.Path)] = true
@@ -570,144 +417,77 @@ func TestGuard_NoRouteFallsThroughToADerivedGroup(t *testing.T) {
 	}
 }
 
-// TestGuard_NoRouteFallsThroughToADerivedGroup_CatchesAStatedGroupGoingMissing
-// runs the production detector over the REAL payload with one real stated
-// section removed — the exact regression the guard exists for, since an
-// endpointMeta entry deleted (or a declaration migrated away) is how a route
-// starts falling through.
-//
-// It exists because the payload is clean, and a clean guard is where vacuity
-// hides: a detector that had stopped comparing anything reports zero findings
-// over 551 endpoints and looks identical to the test above. The reparent is
-// the case chosen because its derived section is WRONG in the quiet way —
-// "Clusters" is a real section full of real routes, so the route does not
-// vanish, it just files itself with strangers.
+// TestGuard_NoRouteFallsThroughToADerivedGroup_CatchesAStatedGroupGoingMissing plants
+// one fault of each kind derivedGroupFindings reports. The real payload is clean, so it
+// cannot tell a working detector from one that stopped comparing: the first row removes a
+// real stated section (the vm-folders reparent, whose derived "Clusters" files it with
+// strangers) from the real payload and the stated map together, as deleting its
+// endpointMeta entry would; the others are synthetic. The last row is the vocabulary
+// detector, which no edit to the shipped maps can make fire.
 func TestGuard_NoRouteFallsThroughToADerivedGroup_CatchesAStatedGroupGoingMissing(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	payload := liveDocsPayload(t, s)
 	stated := statedDocGroups(s)
 
 	baseline, examined := derivedGroupFindings(payload, stated, derivedGroupAllowList)
-	if examined == 0 {
-		t.Fatal("examined 0 endpoints over the real payload")
+	if examined == 0 || len(baseline) != 0 {
+		t.Fatalf("the real payload must be clean and non-empty: examined %d, findings %v", examined, baseline)
 	}
-	if len(baseline) != 0 {
-		t.Fatalf("the real payload already has %d finding(s) (%v); this test measures the delta from a "+
-			"clean baseline, so fix those first", len(baseline), baseline)
-	}
-
 	const key = "PATCH /api/v1/clusters/:cluster_id/vm-folders/:folder_id"
 	if _, ok := stated[key]; !ok {
 		t.Fatalf("%s does not state a docs section, so removing it proves nothing", key)
 	}
-
-	// The regression moves BOTH sides at once, so the mutation has to as
-	// well. The endpointMeta entry is the only thing standing between this
-	// route and groupFromPath: deleting it removes the stated section AND
-	// changes what GetDocs renders. Moving only the first would hand the
-	// detector a payload still reading "Virtual Machines" and prove nothing
-	// about what an operator would see. "Clusters" is what the second segment
-	// of /api/v1/clusters/… derives to, and it is what deleting the real
-	// entry and re-rendering the real payload produces.
-	const derived = "Clusters"
-	delete(stated, key)
 	mutated := slices.Clone(payload)
-	var mutatedOne bool
 	for i := range mutated {
 		if mutated[i].Method+" "+mutated[i].Path == key {
-			mutated[i].Group = derived
-			mutatedOne = true
+			mutated[i].Group = "Clusters"
 		}
 	}
-	if !mutatedOne {
-		t.Fatalf("%s is not in the docs payload; the mutation changed nothing", key)
+	removed := maps.Clone(stated)
+	delete(removed, key)
+
+	branding := handlers.APIEndpoint{Method: "GET", Path: "/api/v1/settings/branding", Group: "Settings"}
+	for _, tt := range []struct {
+		name           string
+		payload        []handlers.APIEndpoint
+		stated         map[string]string
+		allowed        map[string]string
+		wantExamined   int
+		wantFindings   int
+		wantInFindings []string
+	}{
+		{"a stated section removed from the real payload", mutated, removed, derivedGroupAllowList, len(payload), 1,
+			[]string{key, `"Clusters"`, "DERIVED from its path"}},
+		{"a derived value that moved under its exemption",
+			[]handlers.APIEndpoint{{Method: "GET", Path: "/api/v1/settings/branding", Group: "Branding"}},
+			map[string]string{}, map[string]string{"GET /api/v1/settings/branding": "Settings"}, 1, 1,
+			[]string{`"Branding"`, `"Settings"`, "now derives docs section"}},
+		{"exemptions gone stale: now stated, and a vanished route",
+			[]handlers.APIEndpoint{branding}, map[string]string{"GET /api/v1/settings/branding": "Settings"},
+			map[string]string{"GET /api/v1/settings/branding": "Settings", "GET /api/v1/vanished-thing": "Vanished Thing"},
+			1, 2, []string{"is now STATED", "no route in the docs payload has that key"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			findings, got := derivedGroupFindings(tt.payload, tt.stated, tt.allowed)
+			if got != tt.wantExamined || len(findings) != tt.wantFindings {
+				t.Fatalf("examined %d with %d findings, want %d and %d: %v", got, len(findings),
+					tt.wantExamined, tt.wantFindings, findings)
+			}
+			joined := strings.Join(findings, "\n")
+			for _, want := range tt.wantInFindings {
+				if !strings.Contains(joined, want) {
+					t.Errorf("no finding carries %q: %s", want, joined)
+				}
+			}
+		})
 	}
 
-	findings, examined := derivedGroupFindings(mutated, stated, derivedGroupAllowList)
-	if examined != len(payload) {
-		t.Fatalf("examined %d endpoints, want %d", examined, len(payload))
+	canonical := map[string]string{"Settings": "real section"}
+	if got := derivedSectionVocabularyFindings(map[string]string{"GET /x": "Settings"}, canonical); len(got) != 0 {
+		t.Errorf("a canonical section produced findings %v, want none", got)
 	}
-	if len(findings) != 1 {
-		t.Fatalf("got %d findings, want exactly 1: %v", len(findings), findings)
-	}
-	// Actionable on its own: the route, and the section it would silently
-	// render in. Without the second the reader has to go and derive it.
-	if !strings.Contains(findings[0], key) {
-		t.Errorf("the finding does not name the route: %s", findings[0])
-	}
-	if !strings.Contains(findings[0], `"Clusters"`) {
-		t.Errorf("the finding does not name the section the route would fall through to: %s", findings[0])
-	}
-}
-
-// TestDerivedGroupFindings_PinsTheDerivedValue proves the reviewed list is a
-// claim about a VALUE rather than a blanket pass for the key.
-//
-// This is the half that makes listing /settings/branding honest: the entry
-// says the derived section is "Settings", and if it stops being "Settings"
-// the exemption stops applying. A list that only carried keys would keep
-// excusing the route after the thing it excused had changed.
-func TestDerivedGroupFindings_PinsTheDerivedValue(t *testing.T) {
-	payload := []handlers.APIEndpoint{
-		{Method: "GET", Path: "/api/v1/settings/branding", Group: "Branding"},
-	}
-	allowed := map[string]string{"GET /api/v1/settings/branding": "Settings"}
-
-	findings, examined := derivedGroupFindings(payload, map[string]string{"GET /api/v1/other": "Settings"}, allowed)
-	if examined != 1 {
-		t.Fatalf("examined %d, want 1", examined)
-	}
-	if len(findings) != 1 {
-		t.Fatalf("got %d findings, want exactly 1: %v", len(findings), findings)
-	}
-	if !strings.Contains(findings[0], `"Branding"`) || !strings.Contains(findings[0], `"Settings"`) {
-		t.Errorf("the finding does not name both the derived and the recorded section: %s", findings[0])
-	}
-}
-
-// TestDerivedGroupFindings_ReportsAStaleExemption covers the reverse
-// direction, which nothing else would notice: a listed route that no longer
-// derives its section, either because the route is gone or because somebody
-// stated one.
-func TestDerivedGroupFindings_ReportsAStaleExemption(t *testing.T) {
-	allowed := map[string]string{
-		"GET /api/v1/settings/branding": "Settings",
-		"GET /api/v1/vanished-thing":    "Vanished Thing",
-	}
-	payload := []handlers.APIEndpoint{
-		{Method: "GET", Path: "/api/v1/settings/branding", Group: "Settings"},
-	}
-	stated := map[string]string{"GET /api/v1/settings/branding": "Settings"}
-
-	findings, examined := derivedGroupFindings(payload, stated, allowed)
-	if examined != 1 {
-		t.Fatalf("examined %d, want 1", examined)
-	}
-	if len(findings) != 2 {
-		t.Fatalf("got %d findings, want exactly 2: %v", len(findings), findings)
-	}
-	joined := strings.Join(findings, "\n")
-	if !strings.Contains(joined, "is now STATED") {
-		t.Errorf("no finding reports the exemption that became redundant: %s", joined)
-	}
-	if !strings.Contains(joined, "no route in the docs payload has that key") {
-		t.Errorf("no finding reports the exemption whose route is gone: %s", joined)
-	}
-}
-
-// TestGuard_DerivedGroupAntiVacuityTriggerIsReachable pins the input that
-// makes the production test's t.Fatal fire, so the assertion is known to be
-// reachable rather than reading like a safeguard while being dead.
-func TestGuard_DerivedGroupAntiVacuityTriggerIsReachable(t *testing.T) {
-	findings, examined := derivedGroupFindings(nil, statedDocGroups(newRouteStubServer(t)), derivedGroupAllowList)
-	if examined != 0 {
-		t.Fatalf("examined = %d over an empty payload, want 0; the production test's floor can never fire", examined)
-	}
-	// Every reviewed entry looks stale over an empty payload, which is what
-	// makes the empty case indistinguishable from a real failure without the
-	// examined count — and therefore why the production test checks the count
-	// rather than trusting len(findings).
-	if len(findings) != len(derivedGroupAllowList) {
-		t.Fatalf("got %d findings over an empty payload, want %d", len(findings), len(derivedGroupAllowList))
+	got := derivedSectionVocabularyFindings(map[string]string{"GET /x": "Branding"}, canonical)
+	if len(got) != 1 || !strings.Contains(got[0], "Branding") || !strings.Contains(got[0], "GET /x") {
+		t.Errorf("a non-canonical section produced %v, want one finding naming the route and the section", got)
 	}
 }

@@ -11,31 +11,16 @@ import (
 	"testing"
 )
 
-// Static-analysis guard, same shape as missing_object_guard_test.go: no
-// database, no cluster, no request.
-//
-// It exists because ha_test.go tests findHARule, classifyHARuleDelete and
-// haRuleDeleteDetails directly, and that proves the decision, not the wiring.
-// Changing a handler's AuditLog call back to a literal "deleted" leaves every
-// one of those tests green — the helpers stay referenced from the test file, so
-// `unused` does not fire on them either — while quietly restoring the row that
-// claims a deletion PVE never performed.
-//
-// It covers EVERY handler that reaches PVE's DELETE /cluster/ha/rules, not one
-// named handler. That generality is the point: the DRS page shipped its own
-// delete for months with an unconditional "ha_rule_deleted" row, and a guard
-// pinned to HAHandler.DeleteRule said nothing about it. A third door onto the
-// same endpoint is caught the day it is written.
-//
-// WHAT IT DOES NOT CATCH: that the action is *correct*, only that it is
-// computed rather than hardcoded; and it keys on the client method name, so a
-// handler reaching the endpoint some other way is invisible to it.
-//
-// Each handler maps to the path parameter that carries its rule name, which
-// TestGuard_HARuleDeletesDecodeTheRuleName traces into the two calls that use
-// it. The registry declares those parameters (registry_ha.go, registry_drs.go);
-// a handler test cannot import package api to read them, so a renamed
-// parameter fails that guard until the name here follows it.
+// Static-analysis guard, same shape as missing_object_guard_test.go. ha_test.go tests findHARule,
+// classifyHARuleDelete and haRuleDeleteDetails directly, which proves the decision, not the wiring:
+// changing a handler's AuditLog call back to a literal "deleted" leaves every one of those green while
+// restoring the row that claims a deletion PVE never performed. It covers EVERY handler that reaches
+// PVE's DELETE /cluster/ha/rules, because the DRS page shipped its own delete for months with an
+// unconditional "ha_rule_deleted" row that a guard pinned to HAHandler.DeleteRule never saw. It proves
+// the action is computed rather than hardcoded, not that it is correct, and keys on the client method
+// name. Each handler maps to the path parameter carrying its rule name, which
+// TestGuard_HARuleDeletesDecodeTheRuleName traces; a handler test cannot import package api to read the
+// registry's declarations, so a renamed parameter fails that guard until the name here follows it.
 var haRuleDeleteHandlers = map[string]string{
 	"HAHandler.DeleteRule":    "rule",      // the HA tab
 	"DRSHandler.DeleteHARule": "rule_name", // the DRS page
@@ -125,17 +110,11 @@ func TestGuard_HARuleDeletesAuditAComputedAction(t *testing.T) {
 						"is logged as a deletion again")
 				}
 			}
-			// The detail argument needs its own assertion. Checking only the
-			// action left `AuditLog(..., action, nil)` passing, which silently
-			// drops prior_state_unknown — the single field separating "we could
-			// not check" from "the rule held nothing" — along with every field
-			// describing the rule that was removed.
-			//
-			// Two halves rather than one, because the handlers assign the
-			// builder's result to a local before passing it, and a check that
-			// demanded the call inline at the AuditLog site would be dictating
-			// style rather than catching the bug: the body must call the shared
-			// builder, and the argument must not be nil or a literal.
+			// The detail argument needs its own assertion: checking only the action left `AuditLog(..., action,
+			// nil)` passing, which drops prior_state_unknown (the field separating "we could not check" from "the
+			// rule held nothing") and every field describing the removed rule. Two halves, because handlers assign
+			// the builder's result to a local first: the body must call the shared builder, and the argument must
+			// be neither nil nor a literal.
 			if !buildsDetails {
 				problems = append(problems, name+" does not build its audit detail with haRuleDeleteDetails; "+
 					"a hand-rolled map lets the two delete endpoints describe the same event differently")
@@ -176,29 +155,15 @@ func TestGuard_HARuleDeletesAuditAComputedAction(t *testing.T) {
 	}
 }
 
-// TestGuard_HARuleDeletesDecodeTheRuleName requires every handler in
-// haRuleDeleteHandlers to hand findHARule and the client's DeleteHARule the
-// rule name as decodeParamValue(p.String("<its parameter>")) returns it —
-// passed inline, or through a local that is assigned from nothing else.
-//
-// The SPA builds these paths with apiPath (frontend/src/lib/api-path.ts),
-// which percent-encodes every segment, and Fiber hands the handler the
-// segment undecoded. The declared rule admits no character the SPA would
-// encode today, so a handler reading the value raw behaves identically — and
-// that is exactly why nothing else would catch one that stopped decoding: the
-// day the rule widens, the name would reach Proxmox still encoded, with every
-// behavioural test still green.
-//
-// It traces the VALUE rather than looking for a decodeParamValue call
-// anywhere in the body, because a body that decodes only for a log line —
-// ruleName := p.String("rule_name") passed to both calls, decoded inside
-// slog.Warn — has a decodeParamValue call and sends the raw name.
-//
-// WHAT IT DOES NOT CATCH: it matches a local by name, not by object, so a
-// write through a pointer (&ruleName) is invisible to it. Every other binding
-// of that name in the body — a second assignment, a closure's included, a
-// range variable, a function-literal parameter, a var with no value — is
-// refused rather than reasoned about.
+// TestGuard_HARuleDeletesDecodeTheRuleName requires every handler in haRuleDeleteHandlers to hand
+// findHARule and DeleteHARule the name as decodeParamValue(p.String("<its parameter>")) returns it,
+// inline or through a local assigned from nothing else. The SPA builds paths with apiPath, which
+// percent-encodes every segment, and Fiber hands the handler the segment undecoded; the declared rule
+// admits nothing the SPA would encode today, so a handler reading it raw behaves identically, and the
+// day the rule widens the name would reach Proxmox still encoded with every behavioural test green. It
+// traces the VALUE: a body that decodes only for a log line has the call and sends the raw name. A
+// local is matched by name, not object, so a write through a pointer is invisible; any other binding
+// of that name (a second assignment, closure, range variable, parameter, bare var) is refused.
 func TestGuard_HARuleDeletesDecodeTheRuleName(t *testing.T) {
 	_, files := parseGoFiles(t, ".")
 

@@ -51,14 +51,7 @@ var apiKeyRoutesOutsideTheClusterCheckShape = map[string]string{
 // "METHOD path".
 func declaredAPIKeyEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, apiKeyScope) || strings.HasPrefix(e.Path, adminAPIKeyScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(apiKeyScope, adminAPIKeyScope))
 }
 
 // TestAPIKeyRoutesDeclareTheSamePermissionTheyEnforced is the tally: 6
@@ -207,32 +200,14 @@ func TestAPIKeyRoutesLeftTheSelfServiceExemption(t *testing.T) {
 	}
 }
 
-// TestAPIKeyDocsPromiseWhatTheRoutesEnforce (RETIRED) used to compare
-// endpointMeta's curated permission for each of these 6 routes against
-// apiKeyLegacyPermissions, with an explicit "compared != apiKeyRouteCount"
-// check specifically so it would fail loudly — rather than pass vacuously —
-// the moment those curated entries went away.
-//
-// They did go away, deliberately: internal/api/handlers/api_docs.go's
-// GetDocs renders a registry-declared route from its DECLARATION and never
-// reads endpointMeta for it at all, so this test's own premise ("endpointMeta's
-// curated permission is what an operator reads when building a role") had
-// already stopped being true for these 6 routes specifically — the overlay
-// text for them was dead weight nobody could see, same as the ~217 other
-// migrated-route entries the same cleanup removed. Keeping this test alive
-// by keeping those 6 entries alive would have meant preserving dead
-// production data — confirmed dead by a one-off manual check at the time
-// of that cleanup (not a test in this repo a reader can re-run): the
-// rendered /api/v1/api-docs payload was byte-identical, same SHA-256,
-// with and without all 223 removed entries — purely to keep this guard's
-// input non-empty.
-//
-// The coverage did not evaporate: TestAPIKeyRoutesDeclareTheSamePermissionTheyEnforced
-// above makes the SAME comparison against apiKeyLegacyPermissions, except
-// through e.Permissions.Describe() on the live DECLARATION — the thing GetDocs
-// actually renders — rather than through the dead overlay. Its own
-// `hoisted != apiKeyRouteCount` check at the end is that test's equivalent
-// anti-vacuity guard, over the value that matters now.
+// TestAPIKeyDocsPromiseWhatTheRoutesEnforce (RETIRED) compared endpointMeta's curated permission for
+// these 6 routes against apiKeyLegacyPermissions. That overlay went away on purpose: GetDocs renders a
+// registry-declared route from its DECLARATION and never reads endpointMeta for it, so the premise was
+// already false, and keeping the test would have meant preserving dead production data (the rendered
+// /api/v1/api-docs payload was byte-identical with and without the 223 removed entries, by a one-off check
+// at the time). The coverage did not evaporate: TestAPIKeyRoutesDeclareTheSamePermissionTheyEnforced above
+// makes the SAME comparison through e.Permissions.Describe() on the live DECLARATION, and its
+// `hoisted != apiKeyRouteCount` check is the equivalent anti-vacuity guard.
 
 // probeAPIKeyEndpoint is a declared API key endpoint with its handler swapped
 // for a capture and its gate removed, so a parameter test needs neither a
@@ -245,18 +220,12 @@ func probeAPIKeyEndpoint(t *testing.T, method, path string, cap *capture) Endpoi
 	return e
 }
 
-// TestAPIKeyExpiryBounds pins the three things about expires_in that the old
-// *int64 encoded, plus the one that it got wrong.
-//
-//   - Absent means "never expires", so there must be no Default. The handler's
-//     p.OptInt read would ignore one (apischema.Property.Default), but the docs
-//     would promise every key a fixed lifetime it never gets.
-//   - Below an hour is refused, which is the handler's own rule moved out.
-//   - Above the cap is refused, which is NEW. The value is multiplied into a
-//     time.Duration — int64 nanoseconds — and a caller asking for 1e18 seconds
-//     overflowed it into a NEGATIVE duration, producing a key whose expiry was
-//     already in the past the moment it was handed over. That is a key that
-//     silently does not work, not a rejected request.
+// TestAPIKeyExpiryBounds pins the three things about expires_in the old *int64 encoded, plus the one
+// it got wrong. Absent means "never expires", so there must be no Default (the handler's p.OptInt read would
+// ignore one, but the docs would promise every key a lifetime it never gets). Below an hour is refused, the
+// handler's own rule moved out. Above the cap is refused, which is NEW: the value is multiplied into a
+// time.Duration (int64 nanoseconds) and 1e18 seconds overflowed it into a NEGATIVE duration, a key whose
+// expiry was already past when handed over: a key that silently does not work, not a rejected request.
 func TestAPIKeyExpiryBounds(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPost, apiKeyScope)
 	prop := e.Parameters["expires_in"]

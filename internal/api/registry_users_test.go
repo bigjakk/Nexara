@@ -62,14 +62,7 @@ var userRoutesOutsideTheClusterCheckShape = map[string]string{
 // belongs to a different tally.
 func declaredUserEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if e.Path == userScope || e.Path == userScope+"/:id" {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, func(e Endpoint) bool { return e.Path == userScope || e.Path == userScope+"/:id" })
 }
 
 // TestUserRoutesDeclareTheSamePermissionTheyEnforced is the tally: 5
@@ -180,21 +173,15 @@ func TestUserRoutesAreGatedByTheirDeclaration(t *testing.T) {
 	}
 }
 
-// TestUserUpdateIsDeferredAndChecksBeforeTheDatabase is the one route in this
-// tranche whose shape had to be DECIDED rather than ported, so it is pinned
-// from three sides.
-//
-// A Deferred declaration installs no middleware, which means the handler is the
-// gate — and the whole hazard of the shape is a handler that then checks
-// nothing. registryEnforcementGaps already proves a permission leaf is
-// REACHABLE from UserHandler.Update; what it cannot prove is that the check
-// runs before anything happens. This drives a real request with the REAL
-// handler, whose queries are nil: a caller holding no grant must come back 403,
-// which is only possible if the refusal happened before the first DB call.
-//
-// The reason string is asserted too, because for a Deferred route it is the
-// only record of what the handler checks — Describe() renders the bare word
-// "deferred" — and the second, conditional grant exists nowhere else.
+// TestUserUpdateIsDeferredAndChecksBeforeTheDatabase is the one route in this tranche whose shape had
+// to be DECIDED rather than ported, so it is pinned from three sides. A Deferred declaration installs no
+// middleware, so the handler is the gate, and the hazard of the shape is a handler that then checks
+// nothing. registryEnforcementGaps proves a permission leaf is REACHABLE from UserHandler.Update, not that
+// the check runs before anything happens. This drives a real request through the REAL handler, whose
+// queries are nil: a caller holding no grant must come back 403, possible only if the refusal happened
+// before the first DB call. The reason string is asserted too: for a Deferred route it is the only record
+// of what the handler checks (Describe() renders the bare word "deferred"), and the second, conditional
+// grant exists nowhere else.
 func TestUserUpdateIsDeferredAndChecksBeforeTheDatabase(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPut, userScope+"/:id")
 

@@ -66,7 +66,7 @@ func TestSDNRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 // TestEveryDeclaredSDNRouteIsInTheTally is the other direction, and a
 // SEPARATE test for the reason its node counterpart spells out.
 func TestEveryDeclaredSDNRouteIsInTheTally(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	seen := 0
 	for _, e := range s.registry.Endpoints() {
 		if !strings.HasPrefix(e.Path, sdnScope+"/") {
@@ -315,18 +315,13 @@ func TestSDNSubnetTypeDefaultMovedIntoTheDeclaration(t *testing.T) {
 	}
 }
 
-// TestSDNVNetUpdateZoneKeepsTheEmptySentinel pins that the VNet update's
-// schema admits the empty zone it always took: sdnVNetUpdateToForm drops an
-// empty zone, so "" has always kept the VNet where it is. The bare object-name
-// rule refuses "", which turned that request into a 400; the declaration
-// carries the -or-empty variant, and still refuses a traversal. The meaning
-// half — that "" really leaves the zone alone — is the client's, and
-// TestUpdateSDNVNetOmitsAnEmptyZone in internal/proxmox pins it.
-//
-// It also holds this call site of pveObjectNameOrEmptyParam: the pattern must
-// be the catalogued rule and the MaxLength must survive, because a Pattern
-// reassigned to a literal after the helper returns is invisible to the guards
-// that read the source (see registry_rule_reference_ratchet_test.go).
+// TestSDNVNetUpdateZoneKeepsTheEmptySentinel pins that the VNet update's schema admits the empty zone
+// it always took: sdnVNetUpdateToForm drops an empty zone, so "" has always kept the VNet where it is. The
+// bare object-name rule refuses "" (a 400); the declaration carries the -or-empty variant and still refuses
+// a traversal. That "" really leaves the zone alone is the client's, TestUpdateSDNVNetOmitsAnEmptyZone in
+// internal/proxmox. It also holds this call site of pveObjectNameOrEmptyParam: the pattern must be the
+// catalogued rule and the MaxLength must survive, because a Pattern reassigned to a literal after the
+// helper returns is invisible to the source-reading guards (registry_rule_reference_ratchet_test.go).
 func TestSDNVNetUpdateZoneKeepsTheEmptySentinel(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPut, sdnScope+"/vnets/:vnet")
 	prop := e.Parameters["zone"]
@@ -353,19 +348,13 @@ func TestSDNVNetUpdateZoneKeepsTheEmptySentinel(t *testing.T) {
 	}
 }
 
-// TestSDNPathIDsRefuseATraversalSegment is the reason pveObjectNameParam
-// exists.
-//
-// None of the SDN client methods runs proxmox.validatePathSegment, and
-// url.PathEscape leaves "." and ".." alone — so the request resolves onto
-// the PARENT collection wherever a proxy in front of pveproxy normalises it
-// (pveproxy itself takes the segment literally; see
-// proxmox.validatePathSegment). The worst of them is PUT
-// /cluster/sdn/zones/.., which normalises to PUT /cluster/sdn: the SDN APPLY
-// endpoint, which refuses a zone field but applies the whole pending
-// configuration for an update that carries none (registry_sdn.go has the
-// schema). Same permission, so not an escalation, but "change this zone"
-// landing there is not a thing to leave declarable.
+// TestSDNPathIDsRefuseATraversalSegment is the reason pveObjectNameParam exists. None of the SDN client
+// methods runs proxmox.validatePathSegment and url.PathEscape leaves "." and ".." alone, so the request
+// resolves onto the PARENT collection wherever a proxy in front of pveproxy normalises it (pveproxy itself
+// takes the segment literally). The worst is PUT /cluster/sdn/zones/.., which normalises to PUT
+// /cluster/sdn: the SDN APPLY endpoint, which refuses a zone field but applies the whole pending
+// configuration for an update that carries none. Same permission, so not an escalation, but "change this
+// zone" landing there is not a thing to leave declarable.
 func TestSDNPathIDsRefuseATraversalSegment(t *testing.T) {
 	for _, tt := range []struct {
 		method string

@@ -78,14 +78,9 @@ var migrationLegacyPermissions = map[string]struct {
 // keyed "METHOD path".
 func declaredMigrationEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, migrationScope) || e.Path == clusterScope+"/migrations" {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, func(e Endpoint) bool {
+		return strings.HasPrefix(e.Path, migrationScope) || e.Path == clusterScope+"/migrations"
+	})
 }
 
 // TestMigrationRoutesDeclareTheSamePermissionTheyEnforced is the tally that

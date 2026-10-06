@@ -57,20 +57,14 @@ var rbacLegacyPermissions = map[string]string{
 	"GET /api/v1/rbac/me/permissions":              "",
 }
 
-// rbacRoutesOutsideTheClusterCheckShape is every route in this domain, and that
-// is the domain's own shape rather than a widened exception surface.
-//
-// A Nexara ROLE is an instance-wide object: it is defined once, it names
-// permissions from one instance-wide catalogue, and a path here never carries a
-// cluster for a cluster-scoped gate to resolve. (A role ASSIGNMENT can be
-// scoped to a cluster, but the cluster is a value in the body, not the subject
-// of the route — the thing being written is the assignment row.) So all nine
-// gated routes are global Checks, and the tenth is SelfService.
-//
-// registry_access.go is the deliberate contrast, and the reason this comment
-// spells the difference out: those 25 routes are the PROXMOX access model, one
-// cluster's own users and tokens, reached through that cluster's credential,
-// and every one of them is a cluster-scoped Check.
+// rbacRoutesOutsideTheClusterCheckShape is every route in this domain, which is the domain's own shape
+// and not a widened exception surface. A Nexara ROLE is an instance-wide object: defined once, naming
+// permissions from one instance-wide catalogue, and no path here carries a cluster for a cluster-scoped
+// gate to resolve (a role ASSIGNMENT can be scoped to a cluster, but the cluster is a value in the body,
+// not the subject of the route). So all nine gated routes are global Checks and the tenth is SelfService.
+// registry_access.go is the deliberate contrast: those 25 routes are the PROXMOX access model, one
+// cluster's own users and tokens, reached through that cluster's credential, every one a cluster-scoped
+// Check.
 var rbacRoutesOutsideTheClusterCheckShape = map[string]string{
 	"GET /api/v1/rbac/roles":                       "Nexara's own roles are instance-wide; the path names no cluster",
 	"POST /api/v1/rbac/roles":                      "Nexara's own roles are instance-wide; the path names no cluster",
@@ -89,14 +83,7 @@ var rbacRoutesOutsideTheClusterCheckShape = map[string]string{
 // nothing else is mounted under it.
 func declaredRBACEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, rbacScope+"/") {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(rbacScope+"/"))
 }
 
 // TestRBACRoutesDeclareTheSamePermissionTheyEnforced is the tally that makes

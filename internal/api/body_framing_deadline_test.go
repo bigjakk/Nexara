@@ -83,24 +83,16 @@ func serveAppOnLoopback(t *testing.T, app *fiber.App) string {
 	return ln.Addr().String()
 }
 
-// TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed sends two routes
-// that read a body before any session is checked or any rate limiter counts
-// the head of a request declaring a 10 MiB body — the most the body-size guard
-// lets through — and the first 8 KiB of it, and then nothing. The route's read
-// of the rest has to be cut at the body deadline, not before it and not long
-// after, and the connection closed after the answer, so that what the client
-// sends next — once the answer is in, as the body bytes it still owed — is
-// never read as a request. What it sends is a request.
-//
-// The precondition twin is the same server with the body deadline armed and
-// no close on its expiry, the unread-body rule alone: the cut read released
-// the body's stream as a read to the end would have, so that rule keeps the
-// connection, and the request sent next is served.
-//
-// ReadTimeout is shortened too, below the body timeout: left armed through
-// the handler, it would cut the read sooner, which the lower bound catches.
-// The upper bound is what shows the deadline did the cutting: nothing else
-// ends that read before the test stops waiting.
+// TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed sends two routes that read a body before any
+// session is checked or any limiter counts (the head of a request declaring a 10 MiB body, the most the
+// size guard allows, and the first 8 KiB of it, then nothing). The read of the rest must be cut at the
+// body deadline, not before and not long after, and the connection closed after the answer so what the
+// client sends next, as the body bytes it still owed, is never read as a request (what it sends IS a
+// request). The precondition twin is the same server with the deadline armed and no close on expiry, the
+// unread-body rule alone: the cut read released the stream as a read to the end would, so that rule keeps
+// the connection and the next request is served. ReadTimeout is shortened below the body timeout: left
+// armed through the handler it would cut sooner, which the lower bound catches; the upper bound shows
+// the deadline did the cutting, since nothing else ends the read before the test stops waiting.
 func TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed(t *testing.T) {
 	const readTimeout, bodyTimeout, slack = 300 * time.Millisecond, time.Second, 2 * time.Second
 	for _, tt := range []struct {
@@ -137,14 +129,16 @@ func TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed(t *testing.T) {
 				return ans
 			}
 
+			// Both servers first, then in parallel: New writes a package-level cookie mode.
 			twin := newProbedServer(t, true, rewrapped(readTimeout, withoutTheCloseOnExpiry(bodyTimeout)))
+			guarded := newProbedServer(t, true, rewrapped(readTimeout, withBodyTimeout(bodyTimeout)))
+			t.Parallel()
 			ans := send(t, twin)
 			if ans.next == nil || ans.next.StatusCode != fiber.StatusNoContent || twin.hits.Load() != 1 {
 				t.Fatalf("precondition: without the close on expiry the request sent after the cut should have been "+
 					"served (next answer %v, closed %v, probe reached %d time(s))", ans.next, ans.closed, twin.hits.Load())
 			}
 
-			guarded := newProbedServer(t, true, rewrapped(readTimeout, withBodyTimeout(bodyTimeout)))
 			ans = send(t, guarded)
 			if !ans.connClose {
 				t.Error("the answer does not carry Connection: close")
@@ -168,6 +162,7 @@ func TestBodyReadBeforeTheBodyDeadlineKeepsTheConnection(t *testing.T) {
 	const bodyTimeout = 2 * time.Second
 	const rest = bodyTimeout * 3 / 5
 	srv := newProbedServer(t, true, rewrapped(0, withBodyTimeout(bodyTimeout)))
+	t.Parallel() // after New, which writes a package-level cookie mode
 	body := `{"refresh_token":""}` + strings.Repeat(" ", 12<<10)
 	head := requestHead(fiber.MethodPost, "/api/v1/auth/logout", "Content-Type: application/json") +
 		fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
@@ -198,21 +193,16 @@ func TestBodyReadBeforeTheBodyDeadlineKeepsTheConnection(t *testing.T) {
 	}
 }
 
-// TestStreamedUploadBodyIsNotCutByTheBodyDeadline holds the body deadline's one
-// exemption to the body it is for. A multipart body sent to a route at
-// storageUploadPath, read as UploadFile reads — the stream itself, not
-// c.Body() — stalls for three times the deadline and is read in full; a body
-// of another type sent to the same route, the same route under another
-// method, spellings of that path isStreamedUpload does not accept, and another
-// path, have the read cut at the deadline.
-//
-// It runs on a bare app with the server's Fiber config and nothing but
-// closeConnectionsLeftMidBody, so that the handler reads whatever reaches it:
-// the assembled server answers the upload route's own 401 first. The encoded
-// slash is a spelling the router sends to the upload route and
-// isStreamedUpload accepts in the path as it arrived — decoded, it is a
-// segment more.
+// TestStreamedUploadBodyIsNotCutByTheBodyDeadline holds the body deadline's one exemption to the body it
+// is for. A multipart body to a route at storageUploadPath, read as UploadFile reads (the stream, not
+// c.Body()), stalls for three times the deadline and is read in full; a body of another type to the same
+// route, the same route under another method, spellings isStreamedUpload does not accept, and another
+// path have the read cut at the deadline. It runs on a bare app with the server's Fiber config and only
+// closeConnectionsLeftMidBody, since the assembled server answers the upload route's own 401 first. The
+// encoded slash is a spelling the router sends to the upload route and isStreamedUpload accepts as it
+// arrived (decoded, it is a segment more).
 func TestStreamedUploadBodyIsNotCutByTheBodyDeadline(t *testing.T) {
+	t.Parallel()
 	const bodyTimeout, slack = 500 * time.Millisecond, 2 * time.Second
 	const stall = 3 * bodyTimeout
 	const size, first = 16 << 10, 12 << 10 // the stall comes after the read-ahead, with the handler reading
@@ -248,6 +238,7 @@ func TestStreamedUploadBodyIsNotCutByTheBodyDeadline(t *testing.T) {
 		{"another route", fiber.MethodPost, "/api/v1/stalled-body-probe", multipart, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			sent := time.Now()
 			conn, br := dialAndSend(t, addr, requestHead(tt.method, tt.target, "Content-Type: "+tt.contentType)+
 				fmt.Sprintf("Content-Length: %d\r\n\r\n", size)+strings.Repeat("a", first))
@@ -277,21 +268,14 @@ func TestStreamedUploadBodyIsNotCutByTheBodyDeadline(t *testing.T) {
 	}
 }
 
-// TestStreamedUploadPredicateSeesThePathTheRouterSees holds what lets
-// isStreamedUpload be one predicate for the wrapper and for the middleware:
-// closeConnectionsLeftMidBody asks it of the request's method,
-// URI().PathOriginal() and RequestHeader.ContentType before Fiber has a Ctx,
-// and isStreamedUploadRequest of c.Method(), c.Path() and
-// c.Get("Content-Type") — and on every request here those are the same
-// strings, so the two answers are the same. Each request is parsed from its
-// head as the server parses it, two Content-Type lines included. c.Path() is
-// PathOriginal only while UnescapePath is off; the twin shows that on, it is
-// not, so the check here would notice the day it is turned on.
-//
-// The content-type rows hold the predicate to what it is for, written out as
-// the answers it has to give: a body UploadFile streams — its own test,
-// handlers.ParseMultipartContentType, a multipart media type — and that
-// bodyValues does not read first, as it does a +json type whatever its prefix.
+// TestStreamedUploadPredicateSeesThePathTheRouterSees holds what lets isStreamedUpload be one predicate
+// for the wrapper and the middleware: closeConnectionsLeftMidBody asks it of the method, URI().PathOriginal()
+// and ContentType before Fiber has a Ctx, isStreamedUploadRequest of c.Method(), c.Path() and
+// c.Get("Content-Type"), and on every request here those are the same strings. Each request is parsed from
+// its head as the server parses it, two Content-Type lines included. c.Path() is PathOriginal only while
+// UnescapePath is off; the twin shows that on it is not, so the check would notice the day it is turned on.
+// The content-type rows give the answers the predicate must: a body UploadFile streams
+// (handlers.ParseMultipartContentType), and that bodyValues does not read first, as it does a +json type.
 func TestStreamedUploadPredicateSeesThePathTheRouterSees(t *testing.T) {
 	s := newAssembledServer(t)
 	if s.app.Config().UnescapePath {

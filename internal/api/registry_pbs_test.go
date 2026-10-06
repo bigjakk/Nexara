@@ -80,14 +80,9 @@ var pbsLegacyPermissions = map[string]struct {
 // routes that gate through BackupHandler.requirePBSPerm.
 func declaredPBSEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if e.Path == pbsScope || e.Path == pbsScope+"/:id" || e.Path == clusterScope+"/pbs-servers" {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, func(e Endpoint) bool {
+		return e.Path == pbsScope || e.Path == pbsScope+"/:id" || e.Path == clusterScope+"/pbs-servers"
+	})
 }
 
 // TestPBSRoutesDeclareTheSamePermissionTheyEnforced is the tally that
@@ -209,17 +204,12 @@ func TestPBSServerIDIsAPathParameterOnly(t *testing.T) {
 	}
 }
 
-// TestPBSClusterIDTakesItsWireNameUnderAnAlias is the assertion behind the
-// one declaration in this domain that could not use the name its callers
-// send.
-//
-// checkPathParams refuses a body parameter named "cluster_id", because
-// clusterIDFromParam reads that name to decide which cluster the gate
-// authorizes. On these two paths no gate runs at all, but the guard is
-// about the name rather than about today's path, and routing around it
-// would reopen the hole on the next path edit. The parameter is therefore
-// declared as attached_cluster_id with "cluster_id" as its alias, and BOTH
-// spellings have to keep working: both dialogs send "cluster_id".
+// TestPBSClusterIDTakesItsWireNameUnderAnAlias is the assertion behind the one declaration in this
+// domain that could not use the name its callers send. checkPathParams refuses a body parameter named
+// "cluster_id", because clusterIDFromParam reads that name to decide which cluster the gate authorizes. On
+// these two paths no gate runs, but the guard is about the name and not today's path, and routing around it
+// would reopen the hole on the next path edit. The parameter is declared as attached_cluster_id with
+// "cluster_id" as its alias, and BOTH spellings have to keep working: both dialogs send "cluster_id".
 func TestPBSClusterIDTakesItsWireNameUnderAnAlias(t *testing.T) {
 	for _, tt := range []struct {
 		method string
@@ -410,20 +400,13 @@ func TestPBSCreateAcceptsWhatTheDialogSends(t *testing.T) {
 	}
 }
 
-// TestPBSUpdateRefusesAnEmptyClusterID records a PRE-EXISTING bug rather
-// than a rule worth having.
-//
-// UpdatePBSServer has always parsed cluster_id with uuid.Parse and
-// answered 400 for anything that failed, so there is no way to DETACH a
-// PBS server from its cluster through this endpoint — and
-// EditPBSServerDialog's "None" option sends exactly the empty string this
-// refuses. The declaration states that rule rather than changing it: this
-// migration is meant to be a refactor, and making detach work is a
-// behaviour change scoped separately.
-//
-// The test is here so the bug is recorded at the boundary where it lives,
-// and so that fixing it later is a deliberate edit to BOTH the declaration
-// and this expectation.
+// TestPBSUpdateRefusesAnEmptyClusterID records a PRE-EXISTING bug rather than a rule worth having.
+// UpdatePBSServer has always parsed cluster_id with uuid.Parse and answered 400 for anything that failed,
+// so a PBS server cannot be DETACHED from its cluster through this endpoint, and EditPBSServerDialog's
+// "None" option sends exactly the empty string this refuses. The declaration states that rule rather than
+// changing it (this migration is a refactor; making detach work is a scoped behaviour change). The test
+// records the bug where it lives, so fixing it later is a deliberate edit to BOTH the declaration and this
+// expectation.
 func TestPBSUpdateRefusesAnEmptyClusterID(t *testing.T) {
 	const path = pbsScope + "/:id"
 	if got := declaredEndpoint(t, fiber.MethodPut, path).Parameters["attached_cluster_id"].Format; got != "uuid" {

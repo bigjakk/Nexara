@@ -2,26 +2,18 @@ package handlers
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"strconv"
 	"testing"
 )
 
-// TestGuard_MetricServerAuditOmitsTheToken is the secret-handling half of the
-// metric-server migration, and it exists because the registry made a new way to
-// get it wrong.
-//
-// A migrated handler receives an *apischema.Params, and Params.Raw() hands back
-// every declared parameter in one map — which on these writes includes the
-// InfluxDB API token. Marshalling that into an audit row would publish the
-// credential to every Viewer on the instance: view:audit is a default Viewer
-// grant, which is the same reason audit.go carries reservedSettingVisibility
-// for the syslog destination.
-//
-// So the rule is not "do not log the token": it is that an audit payload here
-// is built from a NAMED set of fields, because the token is only the field that
-// happens to be sensitive today. Static analysis only, no DB.
+// TestGuard_MetricServerAuditOmitsTheToken is the secret-handling half of the metric-server migration:
+// a migrated handler receives an *apischema.Params, and Params.Raw() hands back every declared
+// parameter in one map, which on these writes includes the InfluxDB API token. Marshalling that into an
+// audit row would publish the credential to every Viewer (view:audit is a default Viewer grant, the same
+// reason audit.go carries reservedSettingVisibility for the syslog destination). So the rule is not "do
+// not log the token" but that an audit payload here is built from a NAMED set of fields, since the token
+// is only the field that happens to be sensitive today. Static analysis only.
 func TestGuard_MetricServerAuditOmitsTheToken(t *testing.T) {
 	const file = "metric_servers.go"
 
@@ -29,8 +21,7 @@ func TestGuard_MetricServerAuditOmitsTheToken(t *testing.T) {
 	// deliberate edit here, which is the point.
 	allowed := map[string]bool{"id": true, "type": true}
 
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, file, nil, 0)
+	f, err := guardParsed(file)
 	if err != nil {
 		t.Fatalf("parse %s: %v", file, err)
 	}

@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -33,12 +34,15 @@ import (
 // database, so a value can be followed from the request to the form Proxmox
 // receives and the audit row every Viewer can read.
 
-// The route stub (~550 declarations mounted on a Fiber app) takes 50-100 ms to build
-// under -race, and these tests only read it: declarations are copied out (Parameters
-// cloned) and registered in registries of their own. A test that mutates the Server or
-// its registry builds its own with newRouteStubServer. Route limiters are shared with
-// the declarations, so a test that spends one uses users nobody else does, or clears it
-// (mappingProbe).
+// The route stub (~550 declarations mounted on a Fiber app) takes 40-100 ms to build
+// under -race, and a run that built one per use paid for 1,673 of them (65 s). Tests
+// that read the registry, the route table or one declaration take this one; its
+// declarations are copied out (Parameters cloned) and registered in registries of
+// their own. A test that changes the Server or its registry, or sends requests
+// through its app, builds its own with newRouteStubServer. Route limiters are shared
+// with the declarations and live as long as the test binary, so a test that sends
+// through one clears it (mappingProbe) or builds its own stub when the limiter is
+// what it spends.
 var (
 	routeStubOnce      sync.Once
 	routeStub          *Server
@@ -68,8 +72,9 @@ func sharedEndpoints(t *testing.T) map[string]Endpoint {
 	return routeStubEndpoints
 }
 
-// sharedEndpoint is declaredEndpoint over the shared stub.
-func sharedEndpoint(t *testing.T, method, path string) Endpoint {
+// declaredEndpoint is the production declaration for one route, and fails the test
+// when the registry does not have it.
+func declaredEndpoint(t *testing.T, method, path string) Endpoint {
 	t.Helper()
 	e, ok := sharedEndpoints(t)[method+" "+path]
 	if !ok {
@@ -77,6 +82,34 @@ func sharedEndpoint(t *testing.T, method, path string) Endpoint {
 	}
 	e.Parameters = maps.Clone(e.Parameters)
 	return e
+}
+
+// declaredEndpointsWhere is the declarations keep accepts, keyed "METHOD path".
+func declaredEndpointsWhere(t *testing.T, keep func(Endpoint) bool) map[string]Endpoint {
+	t.Helper()
+	out := map[string]Endpoint{}
+	for key, e := range sharedEndpoints(t) {
+		if keep(e) {
+			e.Parameters = maps.Clone(e.Parameters)
+			out[key] = e
+		}
+	}
+	return out
+}
+
+// underPath keeps the endpoints whose path starts with any of prefixes.
+func underPath(prefixes ...string) func(Endpoint) bool {
+	return func(e Endpoint) bool {
+		return slices.ContainsFunc(prefixes, func(p string) bool { return strings.HasPrefix(e.Path, p) })
+	}
+}
+
+// keyedIn keeps the endpoints whose "METHOD path" is a key of table.
+func keyedIn[V any](table map[string]V) func(Endpoint) bool {
+	return func(e Endpoint) bool {
+		_, ok := table[e.Method+" "+e.Path]
+		return ok
+	}
 }
 
 // realRoute is a declared route and the real handler to mount in its place.
@@ -90,7 +123,7 @@ func mountReal(t *testing.T, auth fiber.Handler, routes ...realRoute) *fiber.App
 	t.Helper()
 	es := make([]Endpoint, len(routes))
 	for i, r := range routes {
-		es[i] = sharedEndpoint(t, r.method, r.path)
+		es[i] = declaredEndpoint(t, r.method, r.path)
 		es[i].Handler = r.handler
 	}
 	return newRegistryApp(t, auth, es...)

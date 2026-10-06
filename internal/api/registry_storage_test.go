@@ -49,17 +49,13 @@ var storageRoutesOutsideTheClusterCheckShape = map[string]string{
 		"content type, which does not exist until the multipart body is being read",
 }
 
-// storageLegacyPermissions is what each handler checked with hand-placed
-// calls BEFORE Phase 6d, transcribed from `git show HEAD:` over
-// internal/api/handlers/storage.go and storage_templates.go at commit
-// be1379f: 12 requireClusterPerm calls and 2 hasClusterPerm calls across
-// the 13 routes.
-//
-// shape says what the declaration must be, and calls is how many
-// permission calls the handler made. Eleven of the twelve migrated routes
-// hoist their single call into middleware; the upload keeps BOTH of its
-// own, which is what Deferred means. The thirteenth route's call is not in
-// this table at all — see TestStorageDeleteContentIsStillLegacy.
+// storageLegacyPermissions is what each handler checked with hand-placed calls BEFORE Phase 6d,
+// transcribed from `git show HEAD:` over handlers/storage.go and storage_templates.go at be1379f: 12
+// requireClusterPerm calls and 2 hasClusterPerm calls across the 13 routes. shape says what the
+// declaration must be and calls how many permission calls the handler made: eleven of the twelve migrated
+// routes hoist their single call into middleware, the upload keeps BOTH of its own (which is what
+// Deferred means), and the thirteenth route's call is not in this table (see
+// TestStorageDeleteContentIsStillLegacy).
 var storageLegacyPermissions = map[string]struct {
 	permission string
 	shape      string
@@ -83,15 +79,7 @@ var storageLegacyPermissions = map[string]struct {
 // "METHOD path".
 func declaredStorageEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		key := e.Method + " " + e.Path
-		if _, ours := storageLegacyPermissions[key]; ours {
-			out[key] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(storageLegacyPermissions))
 }
 
 // TestStorageRoutesDeclareTheSamePermissionTheyEnforced is the tally that
@@ -179,27 +167,19 @@ func TestStorageRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 
 }
 
-// TestEveryDeclaredStorageRouteIsInTheTally is the other direction of the
-// tally, and it is a SEPARATE test on purpose.
-//
-// Two things would make it vacuous if it lived inside the tally above.
-// Reading `declared` rather than the registry is the first:
-// declaredStorageEndpoints builds that map by filtering on membership in
-// storageLegacyPermissions, so every key in it is listed by construction
-// and the branch could never fire. Sharing the tally's body is the second:
-// the tally opens with two t.Fatalf count checks, and a newly declared
-// route trips the first of them — so the loop would never be reached in
-// the one situation it exists for, and would report the count instead of
-// naming the route.
-//
-// Two of this domain's routes hang off the cluster rather than off
-// storageScope, so they are named rather than swept by a prefix.
+// TestEveryDeclaredStorageRouteIsInTheTally is the other direction of the tally, a SEPARATE test on
+// purpose: reading `declared` rather than the registry would make it vacuous (declaredStorageEndpoints
+// filters on membership in storageLegacyPermissions, so every key is listed by construction), and
+// sharing the tally's body would never reach the loop in the one situation it exists for (the tally opens
+// with two t.Fatalf count checks, which a newly declared route trips first, reporting the count instead of
+// naming the route). Two of this domain's routes hang off the cluster rather than storageScope, so they are
+// named rather than swept by a prefix.
 func TestEveryDeclaredStorageRouteIsInTheTally(t *testing.T) {
 	clusterRooted := map[string]bool{
 		"GET " + clusterScope + "/appliances": true,
 		"GET " + clusterScope + "/scan/iscsi": true,
 	}
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	seen := 0
 	for _, e := range s.registry.Endpoints() {
 		key := e.Method + " " + e.Path
@@ -218,23 +198,16 @@ func TestEveryDeclaredStorageRouteIsInTheTally(t *testing.T) {
 	}
 }
 
-// TestStorageDeleteContentIsStillLegacy pins the one route this migration
-// deliberately left behind, so that "12 of 13" is an assertion rather than
-// a thing a reader has to notice.
-//
-// Its volume id is a greedy wildcard segment, and checkPathParams refuses
-// one outright — a wildcard is the single piece of a path that reaches a
-// handler unvalidated and un-normalized. Making it declarable means
-// reshaping the route, which every caller's percent-encoding would have to
-// agree on.
-//
-// Both halves are asserted: the route is NOT in the registry, and the
-// registry would refuse it if someone declared it as-is. The second half is
-// what keeps this from being a note nobody re-reads.
+// TestStorageDeleteContentIsStillLegacy pins the one route this migration deliberately left behind, so
+// "12 of 13" is an assertion rather than something a reader has to notice. Its volume id is a greedy
+// wildcard segment, which checkPathParams refuses outright (the single piece of a path that reaches a
+// handler unvalidated and un-normalized); declaring it means reshaping the route, which every caller's
+// percent-encoding would have to agree on. Both halves are asserted: the route is NOT in the registry, and
+// the registry would refuse it if declared as-is, which keeps this from being a note nobody re-reads.
 func TestStorageDeleteContentIsStillLegacy(t *testing.T) {
 	const path = clusterScope + "/storage/:storage_id/content/*"
 
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	for _, e := range s.registry.Endpoints() {
 		if e.Path == path {
 			t.Fatalf("%s %s is declared, but a wildcard path cannot carry a parameter schema", e.Method, e.Path)
@@ -283,19 +256,12 @@ func probeStorageEndpoint(t *testing.T, method, path string, cap *capture) Endpo
 	return e
 }
 
-// TestStorageUploadDeclaresNoBodyParameter is the assertion that keeps the
-// streamed upload streaming.
-//
-// Nexara runs Fiber with StreamRequestBody and DisablePreParseMultipartForm
-// so an ISO is never buffered. c.Body() defeats both — fasthttp drains the
-// whole stream into one buffer, however large, AND closes it — and
-// Endpoint.extract calls bodyValues on every mutating verb. bodyValues
-// gates on the Content-Type header BEFORE asking for the body, so a
-// multipart request never reaches c.Body(); declaring a body parameter
-// here would ALSO make the body "required", turning that gate into a 400
-// for every upload.
-//
-// The declaration is therefore path-parameters-only, and this pins it.
+// TestStorageUploadDeclaresNoBodyParameter keeps the streamed upload streaming. Nexara runs Fiber with
+// StreamRequestBody and DisablePreParseMultipartForm so an ISO is never buffered; c.Body() defeats both
+// (fasthttp drains the whole stream into one buffer and closes it) and Endpoint.extract calls bodyValues
+// on every mutating verb. bodyValues gates on the Content-Type BEFORE asking for the body, so a multipart
+// request never reaches c.Body(); declaring a body parameter would ALSO make the body "required",
+// turning that gate into a 400 for every upload. The declaration is path-parameters-only, and this pins it.
 func TestStorageUploadDeclaresNoBodyParameter(t *testing.T) {
 	const path = clusterScope + "/storage/:storage_id/upload"
 	e := declaredEndpoint(t, fiber.MethodPost, path)
@@ -481,21 +447,13 @@ func TestStorageWriteRoutesDocumentTheGeneratedKeyAndTheDeleteList(t *testing.T)
 	}
 }
 
-// TestStorageDownloadURLRequiredSetAndChecksumIsNotPaired pins the
-// download body against what the handler AND the Proxmox client enforced
-// between them.
-//
-// url was never checked by the handler but IS refused empty by
-// DownloadURLToStorage, so it is required. filename is NOT, because an OVA
-// import may omit it and deriveURLFilename fills it in — which is the whole
-// reason that function exists.
-//
-// And checksum deliberately carries NO Requires, tempting as the pairing
-// is: apischema counts "" as supplied, while the client's rule is
-// `if params.Checksum != ""`. A Requires would therefore 400 a caller
-// sending checksum:"" as a placeholder — a request this API has always
-// accepted and ignored. The pairing stays in DownloadURLToStorage, whose
-// message already names both halves.
+// TestStorageDownloadURLRequiredSetAndChecksumIsNotPaired pins the download body against what the handler
+// AND the Proxmox client enforced between them. url was never checked by the handler but IS refused empty
+// by DownloadURLToStorage, so it is required; filename is NOT, because an OVA import may omit it and
+// deriveURLFilename fills it in. checksum deliberately carries NO Requires: apischema counts "" as supplied
+// while the client's rule is `if params.Checksum != ""`, so a Requires would 400 a caller sending
+// checksum:"" as a placeholder, a request this API has always accepted and ignored. The pairing stays in
+// DownloadURLToStorage, whose message names both halves.
 func TestStorageDownloadURLRequiredSetAndChecksumIsNotPaired(t *testing.T) {
 	const path = storageScope + "/:storage_id/download-url"
 	e := declaredEndpoint(t, fiber.MethodPost, path)

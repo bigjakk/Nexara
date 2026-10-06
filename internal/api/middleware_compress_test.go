@@ -512,18 +512,13 @@ func TestCompression_DisabledByConfig(t *testing.T) {
 	}
 }
 
-// TestCompression_ErrorEnvelopesAreNeverCompressed pins the claim made on the
-// registration in setupMiddleware: no response rendered by the app-level
-// ErrorHandler is ever compressed, wherever compress sits in the chain.
-//
-// The mechanism is that Fiber's compress middleware does
-// `if err := c.Next(); err != nil { return err }` and skips its
-// post-processing, while buildFiberConfig's ErrorHandler runs above the whole
-// Use chain — so the body does not exist yet when compress has already bailed.
-//
-// The error message is deliberately long. A real 404 envelope is ~60 bytes,
-// which fasthttp would decline to compress anyway; asserting on one would pass
-// for the floor's reason rather than the error path's, and prove nothing.
+// TestCompression_ErrorEnvelopesAreNeverCompressed pins the claim made on the registration in
+// setupMiddleware: no response rendered by the app-level ErrorHandler is ever compressed, wherever compress
+// sits in the chain. The mechanism is that Fiber's compress middleware does
+// `if err := c.Next(); err != nil { return err }` and skips its post-processing, while buildFiberConfig's
+// ErrorHandler runs above the whole Use chain, so the body does not exist yet when compress has bailed. The
+// error message is deliberately long: a real 404 envelope is ~60 bytes, which fasthttp would decline to
+// compress anyway, and asserting on one would pass for the floor's reason rather than the error path's.
 func TestCompression_ErrorEnvelopesAreNeverCompressed(t *testing.T) {
 	s, token := newCompressTestServer(t, true)
 

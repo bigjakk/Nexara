@@ -115,7 +115,7 @@ func TestVersionAndChangelogTakeNoParameters(t *testing.T) {
 func TestHealthzIsStillLegacy(t *testing.T) {
 	const key = "GET /healthz"
 
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	if registryRouteKeySet(s.registry.Endpoints())[key] {
 		t.Error("/healthz is declared in the registry, but Register refuses a path outside /api/v1/")
 	}

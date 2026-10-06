@@ -146,7 +146,7 @@ func newClusterDeleteApp(t *testing.T, f clusterDeleteFixture) (*fiber.App, *clu
 		BootstrapCreatedUser: true,
 	}, busy: f.busy}
 
-	e := sharedEndpoint(t, fiber.MethodDelete, clusterByID)
+	e := declaredEndpoint(t, fiber.MethodDelete, clusterByID)
 	e.Handler = handlers.NewClusterHandler(db.New(store), clusterDeleteEncKey, nil).Delete
 
 	cfg := &config.Config{RateLimitMax: 1_000_000, RateLimitExpiration: time.Minute}
@@ -303,7 +303,7 @@ func TestAnUnresolvedDotSegmentReachesThePoolRoute(t *testing.T) {
 	} {
 		t.Run(tt.id, func(t *testing.T) {
 			pool := &capture{}
-			pe := sharedEndpoint(t, fiber.MethodDelete, clusterScope+"/pools/:pool_id")
+			pe := declaredEndpoint(t, fiber.MethodDelete, clusterScope+"/pools/:pool_id")
 			pe.Handler = pool.handler()
 			app, store, pve := newClusterDeleteApp(t, clusterDeleteFixture{name: "cluster01", extra: []Endpoint{pe}})
 
@@ -339,7 +339,7 @@ func TestAnUnresolvedDotSegmentReachesThePoolRoute(t *testing.T) {
 // cluster comment, say) fails here, rather than quietly letting a rewritten
 // pool edit through as a cluster edit.
 func TestARewrittenPoolEditCannotEditTheCluster(t *testing.T) {
-	pool := sharedEndpoint(t, fiber.MethodPut, clusterScope+"/pools/:pool_id")
+	pool := declaredEndpoint(t, fiber.MethodPut, clusterScope+"/pools/:pool_id")
 	var keys []string
 	for name, prop := range pool.Parameters {
 		if apischema.ResolveSource(name, prop, pool.Method, pool.pathParams) == apischema.SourceBody {
@@ -352,7 +352,7 @@ func TestARewrittenPoolEditCannotEditTheCluster(t *testing.T) {
 	}
 
 	cap := &capture{}
-	e := sharedEndpoint(t, fiber.MethodPut, clusterByID)
+	e := declaredEndpoint(t, fiber.MethodPut, clusterByID)
 	e.Handler = cap.handler()
 	e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
 	app := newRegistryApp(t, noAuth(), e)
@@ -425,7 +425,7 @@ func TestClusterDeleteConfirmIsReadAsTheSPASendsIt(t *testing.T) {
 // API client rely on: confirm is required, read from the query of a DELETE,
 // and bounded like the name it must equal.
 func TestClusterDeleteConfirmIsDeclared(t *testing.T) {
-	e := sharedEndpoint(t, fiber.MethodDelete, clusterByID)
+	e := declaredEndpoint(t, fiber.MethodDelete, clusterByID)
 	prop, ok := e.Parameters["confirm"]
 	if !ok {
 		t.Fatal("DELETE /api/v1/clusters/:id declares no confirm parameter")

@@ -487,7 +487,7 @@ func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 	for _, key := range slices.Sorted(maps.Keys(handlerNodeChecks)) {
 		check := handlerNodeChecks[key]
 		method, path, _ := strings.Cut(key, " ")
-		e := sharedEndpoint(t, method, path)
+		e := declaredEndpoint(t, method, path)
 		if got, want := slices.Sorted(maps.Keys(check.clusterOf)), slices.Sorted(maps.Keys(e.NodesCheckedByHandler)); !slices.Equal(got, want) {
 			t.Errorf("%s: handlerNodeChecks probes %v, but the route leaves %v to its handler", key, got, want)
 			continue
@@ -635,7 +635,7 @@ func TestNodesCheckedByHandler_RefuseANodeTheClusterDoesNotHold(t *testing.T) {
 // at its row's node, so the node must be the one the UPID itself says the task runs on.
 func TestTaskCreate_RefusesANodeTheUPIDDoesNotName(t *testing.T) {
 	check := handlerNodeChecks["POST "+taskHistoryScope]
-	e := sharedEndpoint(t, fiber.MethodPost, taskHistoryScope)
+	e := declaredEndpoint(t, fiber.MethodPost, taskHistoryScope)
 	fake := &handlerNodeDB{t: t, members: map[uuid.UUID]string{uuid.MustParse(testClusterID): "pve-01"}}
 	req := synthesizeSweepRequestWith(e, false, sweepEndpointOverride{
 		values:        map[string]any{"task_cluster_id": testClusterID, "node": "pve-01", "upid": upidOn("pve-02")},
@@ -710,7 +710,7 @@ func TestRegisterHoldsBodyNodesToAClusterOrAHandler(t *testing.T) {
 // the node is only checked after the account is.
 func TestConsoleToken_ADisabledAccountIsRefusedBeforeItsNodeIsChecked(t *testing.T) {
 	check := handlerNodeChecks["POST "+authScope+"/console-token"]
-	e := sharedEndpoint(t, fiber.MethodPost, authScope+"/console-token")
+	e := declaredEndpoint(t, fiber.MethodPost, authScope+"/console-token")
 	fake := &handlerNodeDB{t: t, members: map[uuid.UUID]string{uuid.MustParse(testClusterID): "pve-01"},
 		rows: map[string]any{"GetUserByID": db.User{ID: uuid.MustParse(testUserID), Email: "user@example.com", IsActive: false}}}
 	e.Handler = check.handler(db.New(fake))
@@ -735,7 +735,7 @@ func TestConsoleToken_ADisabledAccountIsRefusedBeforeItsNodeIsChecked(t *testing
 // the cluster row is never read. The stranger's node is failed ("UPDATE 0" here, so
 // failNode stops before failing the job, which is not what this test is about).
 func TestConfirmUpgrade_RefusesANodeTheClusterDoesNotHold(t *testing.T) {
-	e := sharedEndpoint(t, fiber.MethodPost, rollingScope+"/:id/nodes/:node_id/confirm-upgrade")
+	e := declaredEndpoint(t, fiber.MethodPost, rollingScope+"/:id/nodes/:node_id/confirm-upgrade")
 	jobID, nodeID := uuid.New(), uuid.New()
 	for _, tt := range []struct {
 		name       string

@@ -29,14 +29,7 @@ var poolLegacyPermissions = map[string]string{
 
 func declaredPoolEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if _, want := poolLegacyPermissions[e.Method+" "+e.Path]; want {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(poolLegacyPermissions))
 }
 
 // TestPoolRoutesDeclareTheSamePermissionTheyEnforced is the tally that makes
@@ -79,35 +72,16 @@ func TestPoolRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	}
 }
 
-// TestPoolIDIsLooserThanConfigID is the compatibility assertion this domain
-// needed a decision about.
-//
-// A pool created outside Nexara can be named in ways PVE's own pve-configid
-// format refuses — a leading digit, a dot — and the format is what the PATH
-// parameter would have to satisfy on a get, an edit or a delete. Tightening it
-// would therefore make an existing pool unmanageable through this API, which is
-// the same trap snapshotNameParam documents. This pins that the looser pattern
-// stays looser.
-//
-// The accepted set is pve-poolid's own segment charset, [A-Za-z0-9._-]+,
-// read off verify_poolname in pve-access-control rather than guessed. That
-// matters: a leading DASH was pinned here as a 400 until the rule was
-// actually looked up, and it is valid — the same invented strictness this
-// test exists to prevent, reproduced inside the test itself.
-//
-// Three things are refused. A character outside the charset. NESTING:
-// pve-poolid allows "infra/prod", but a slash cannot survive a path segment
-// — see poolIDParam for why that gap is not closed by loosening this
-// pattern. And, since this parameter moved onto the shared
-// path-safe-dotted-name rule, a name that is EXACTLY "." or ".." — which is
-// TestPoolTraversalIsRefusedAtTheRoute below, because those two want the
-// extra assertion that the handler never ran.
-//
-// The dotted rows here are the other half of that carve-out and the reason
-// it is three regex branches rather than one: a dot INSIDE a name, or two
-// leading dots, is an ordinary pool name and must still address. The
-// tempting one-branch simplification accepts ".hidden" and refuses
-// "..archive".
+// TestPoolIDIsLooserThanConfigID is the compatibility assertion this domain needed a decision about. A
+// pool created outside Nexara can be named in ways pve-configid refuses (a leading digit, a dot), and
+// tightening the PATH parameter would make an existing pool unmanageable through this API (the trap
+// snapshotNameParam documents). The accepted set is pve-poolid's segment charset, [A-Za-z0-9._-]+, read
+// off verify_poolname in pve-access-control, not guessed: a leading DASH was once pinned here as a 400 and
+// is valid, the invented strictness this test exists to prevent. Refused: a character outside the charset;
+// NESTING ("infra/prod" is valid upstream but a slash cannot survive a path segment, see poolIDParam); and
+// a name that is EXACTLY "." or "..", which TestPoolTraversalIsRefusedAtTheRoute asserts the handler never
+// ran for. The dotted rows are the other half of that carve-out: a dot INSIDE a name, or two leading
+// dots, is an ordinary pool name, and the tempting one-branch rule accepts ".hidden" and refuses "..archive".
 func TestPoolIDIsLooserThanConfigID(t *testing.T) {
 	const path = clusterScope + "/pools/:pool_id"
 	prop := declaredEndpoint(t, fiber.MethodDelete, path).Parameters["pool_id"]
@@ -151,32 +125,15 @@ func TestPoolIDIsLooserThanConfigID(t *testing.T) {
 	}
 }
 
-// TestPoolTraversalIsRefusedAtTheRoute proves the dot carve-out bites on a
-// real request rather than only in a schema unit test, and — the assertion
-// TestPoolIDIsLooserThanConfigID does not make — that the refusal happens
-// BEFORE the handler runs. A 400 that arrived after the handler had already
-// sent the request — which a normalising proxy would land on the pool
-// COLLECTION — would be the bug, not the fix.
-//
-// Both spellings are checked, and BOTH are refused by the parameter rule
-// rather than by the router. That is measured, not assumed: Fiber does not
-// strip a "." or ".." segment out of the path here, so the raw value reaches
-// the declaration exactly as "%2e%2e" does. It is worth stating because the
-// opposite is easy to believe — a path normaliser resolving the segment away
-// is the reason these two values are dangerous DOWNSTREAM, in front of
-// pveproxy (which takes them literally; see proxmox.validatePathSegment), and
-// it does not follow that anything on this side removes them first.
-//
-// The two spellings are NOT redundant, and which one carries the guard is the
-// reason both are here. Widen the rule back to the plain [A-Za-z0-9._-]+
-// charset and the two RAW rows answer 204 with the handler running, while the
-// two escaped rows still answer 400 — "%" is outside that charset either way.
-// So the escaped rows would keep this test green through exactly the
-// regression it exists to catch, and the raw rows are what actually bite.
-//
-// proxmox.validatePathSegment refuses the same pair on all three addressing
-// methods and is the choke point; this asserts the OTHER layer, so a mutation
-// to the rule fails here while that client guard stays green, and the reverse.
+// TestPoolTraversalIsRefusedAtTheRoute proves the dot carve-out bites on a real request, and (what
+// TestPoolIDIsLooserThanConfigID does not assert) that the refusal happens BEFORE the handler runs: a 400
+// after the handler had sent the request, which a normalising proxy would land on the pool COLLECTION,
+// would be the bug. Both spellings are refused by the parameter rule, not the router, measured: Fiber
+// does not strip "." or ".." here, so the raw value reaches the declaration as "%2e%2e" does. Neither is
+// redundant: widen the rule to the plain [A-Za-z0-9._-]+ charset and the two RAW rows answer 204 with the
+// handler running while the escaped rows still answer 400 ("%" is outside it either way), so the escaped
+// rows would stay green through the very regression this exists to catch. proxmox.validatePathSegment
+// refuses the same pair at the choke point; this asserts the OTHER layer.
 func TestPoolTraversalIsRefusedAtTheRoute(t *testing.T) {
 	const path = clusterScope + "/pools/:pool_id"
 
@@ -241,17 +198,12 @@ func TestPoolCreateAcceptsANestedID(t *testing.T) {
 	}
 }
 
-// TestPoolCreateRefusesADotSegmentID pins the create side's refusal of the
-// two ids no browser can address — on a real request, before the handler
-// runs, as a 400 that names the parameter — and that everything else a
-// pool id may be still reaches the handler untouched: a nested id, a
-// leading dot or dash, dots inside a name, and a nested id whose segments
-// are dots, which pve-poolid-new admits on purpose.
-//
-// The precondition is what makes the refusal Nexara's rather than a
-// restatement of Proxmox's: pve-poolid, verify_poolname transcribed, admits
-// both ids, so this route accepted them before and a Proxmox whose create
-// predates pve-manager 7eadbed6 would too.
+// TestPoolCreateRefusesADotSegmentID pins the create side's refusal of the two ids no browser can address,
+// on a real request, before the handler runs, as a 400 naming the parameter, and that everything else a
+// pool id may be still reaches the handler untouched: a nested id, a leading dot or dash, dots inside a
+// name, and a nested id whose segments are dots (which pve-poolid-new admits on purpose). The precondition
+// makes the refusal Nexara's rather than a restatement of Proxmox's: pve-poolid admits both ids, so this
+// route accepted them before, and a Proxmox predating pve-manager 7eadbed6 would too.
 func TestPoolCreateRefusesADotSegmentID(t *testing.T) {
 	const path = clusterScope + "/pools"
 	target := strings.NewReplacer(":cluster_id", testClusterID).Replace(path)

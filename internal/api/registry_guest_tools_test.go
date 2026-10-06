@@ -57,14 +57,7 @@ var guestToolsLegacyPermissions = map[string]string{
 // under the /guest-tools prefix, keyed "METHOD path".
 func declaredGuestToolsEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, guestToolsScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(guestToolsScope))
 }
 
 // TestGuestToolsRoutesDeclareTheSamePermissionTheyEnforced is the tally
@@ -249,17 +242,12 @@ func TestGuestToolsPolicyRequiresNothingButItsPath(t *testing.T) {
 	}
 }
 
-// TestGuestToolsPointerFieldsStayTriState is the compatibility assertion
-// that matters most in this domain.
-//
-// snapshot_before is the rollback for a driver swap that can leave a guest
-// unbootable, and excluded is the operator saying "never touch this
-// guest". Both were *bool precisely so that a client which does not know
-// about the field cannot clear them, and the handler keeps that with
-// p.OptBool, which a declared default cannot fool (apischema.Property.Default);
-// the reads below pin that an omitted key reaches it as not supplied. A
-// Default would still be wrong: it would document every such save as setting
-// the field.
+// TestGuestToolsPointerFieldsStayTriState is the compatibility assertion that matters most in this
+// domain. snapshot_before is the rollback for a driver swap that can leave a guest unbootable, and excluded
+// is the operator saying "never touch this guest". Both were *bool so that a client which does not know
+// about the field cannot clear them, and the handler keeps that with p.OptBool, which a declared default
+// cannot fool (apischema.Property.Default); the reads below pin that an omitted key reaches it as not
+// supplied. A Default would still be wrong: it would document every such save as setting the field.
 func TestGuestToolsPointerFieldsStayTriState(t *testing.T) {
 	for _, tt := range []struct {
 		path string

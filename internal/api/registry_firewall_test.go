@@ -17,21 +17,13 @@ import (
 // total is a sum of per-domain constants rather than one number.
 const firewallRouteCount = 28
 
-// firewallLegacyPermissions is what each handler checked with a hand-placed
-// call BEFORE Phase 6e, transcribed from
-// `git show HEAD:internal/api/handlers/networks.go` at commit eb888b6: one
-// requireClusterPerm per handler, nothing else.
-//
-// Two shapes in here are the reason it is written out in full rather than
-// summarised:
-//
-//   - The resource is :network on all twenty-eight, even though the node
-//     firewall routes next door use :firewall for the same verbs on the same
-//     kind of object. That split is preserved, not resolved.
-//   - Only TWO of the twenty-eight are delete:network — removing a cluster
-//     rule and removing a guest rule. Deleting an alias, an IP set, an IP set
-//     entry, a security group or a security-group rule is manage:network.
-//     There is no rule behind that, so the table is the record of it.
+// firewallLegacyPermissions is what each handler checked with a hand-placed call BEFORE Phase 6e,
+// transcribed from `git show HEAD:internal/api/handlers/networks.go` at eb888b6: one requireClusterPerm per
+// handler. Two shapes are why it is written out in full: the resource is :network on all twenty-eight even
+// though the node firewall routes next door use :firewall for the same verbs on the same kind of object
+// (preserved, not resolved); and only TWO of the twenty-eight are delete:network (removing a cluster rule
+// and a guest rule), while deleting an alias, IP set, IP set entry, security group or group rule is
+// manage:network, with no rule behind it, so the table is the record.
 var firewallLegacyPermissions = map[string]string{
 	// Cluster rules and options.
 	"GET /api/v1/clusters/:cluster_id/firewall/rules":         "view:network",
@@ -90,7 +82,7 @@ func TestFirewallRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 // It sweeps BOTH prefixes this slice owns, because the per-guest rules hang
 // off /vms/:vm_id rather than off /firewall.
 func TestEveryDeclaredFirewallRouteIsInTheTally(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	seen := 0
 	for _, e := range s.registry.Endpoints() {
 		underFirewall := strings.HasPrefix(e.Path, firewallScope+"/")
@@ -176,19 +168,13 @@ func TestFirewallRuleRequiredSetMatchesEachHandler(t *testing.T) {
 	}
 }
 
-// TestFirewallAliasRenameKeepsTheEmptySentinel pins that the alias update's
-// schema admits the empty rename it always took: proxmox.UpdateFirewallAlias
-// sends rename only when it is non-empty, so an empty one has always kept the
-// alias's name. The bare object-name rule refuses "", which turned that
-// request into a 400; the declaration carries the -or-empty variant instead,
-// and still refuses a traversal. The meaning half — that "" really leaves the
-// name alone — is the client's, and TestUpdateFirewallAliasOmitsAnEmptyRename
-// in internal/proxmox pins it.
-//
-// It also holds this call site of pveObjectNameOrEmptyParam: the pattern must
-// be the catalogued rule and the MaxLength must survive, because a Pattern
-// reassigned to a literal after the helper returns is invisible to the guards
-// that read the source (see registry_rule_reference_ratchet_test.go).
+// TestFirewallAliasRenameKeepsTheEmptySentinel pins that the alias update's schema admits the empty
+// rename it always took: proxmox.UpdateFirewallAlias sends rename only when non-empty, so "" has always
+// kept the name. The bare object-name rule refuses "" (a 400); the declaration carries the -or-empty
+// variant instead and still refuses a traversal. That "" really leaves the name alone is the client's
+// (TestUpdateFirewallAliasOmitsAnEmptyRename in internal/proxmox). It also holds this call site of
+// pveObjectNameOrEmptyParam: the pattern must be the catalogued rule and the MaxLength must survive, since a
+// Pattern reassigned to a literal after the helper returns is invisible to the source-reading guards.
 func TestFirewallAliasRenameKeepsTheEmptySentinel(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPut, firewallScope+"/aliases/:name")
 	prop := e.Parameters["rename"]
@@ -282,25 +268,16 @@ func TestIPSetEntryNoMatchKeepsItsTriState(t *testing.T) {
 	}
 }
 
-// TestFirewallPathNamesRefuseATraversalSegment covers every caller-supplied
-// value in this slice that becomes a Proxmox PATH segment.
-//
-// Only DeleteFirewallIPSetEntry — and UpdateFirewallIPSetEntry, which no route
-// reaches — is guarded at the client as well: each checks the set name with
-// proxmox.validatePathSegment and the entry's cidr with
-// validatePathSegmentAllowingSlash (client_firewall.go). For the rest,
-// url.PathEscape leaves "." and ".." alone. pveproxy takes such a segment
-// literally (see proxmox.validatePathSegment), but a normalising proxy in
-// front of it resolves the request upward: a "." segment drops out and a ".."
-// takes the segment before it along. As the last segment that lands on the
-// PARENT collection or on /cluster/firewall above it — POST .../ipset/.
-// reaches the endpoint that creates IP sets rather than the one that adds an
-// entry, and GET .../groups/. lists the groups instead of one group's rules —
-// and where the client appends a rule position, PUT or DELETE
-// .../groups/./{pos} addresses the group NAMED by the position. Same
-// permission either way, so this is a correctness anchor rather than an
-// escalation fix — but an operation that silently does something else is not
-// a thing to leave declarable.
+// TestFirewallPathNamesRefuseATraversalSegment covers every caller-supplied value in this slice that
+// becomes a Proxmox PATH segment. Only DeleteFirewallIPSetEntry (and UpdateFirewallIPSetEntry, which no
+// route reaches) is guarded at the client too (validatePathSegment for the set name,
+// validatePathSegmentAllowingSlash for the cidr); for the rest url.PathEscape leaves "." and ".." alone.
+// pveproxy takes them literally, but behind a normalising proxy a "." drops out and a ".." takes the segment
+// before it along: as the last segment that lands on the PARENT collection (POST .../ipset/. reaches the
+// endpoint that creates IP sets, GET .../groups/. lists the groups), and where the client appends a rule
+// position, PUT or DELETE .../groups/./{pos} addresses the group NAMED by the position. Same permission
+// either way, so a correctness anchor rather than an escalation fix, but an operation that silently does
+// something else should not be declarable.
 func TestFirewallPathNamesRefuseATraversalSegment(t *testing.T) {
 	for _, tt := range []struct {
 		method string

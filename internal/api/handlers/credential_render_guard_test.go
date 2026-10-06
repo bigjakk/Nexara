@@ -13,143 +13,36 @@ import (
 	"testing"
 )
 
-// This file guards one bug class, found and fixed type by type in one human
-// sweep:
-//
-//	a type holds a credential in a field AND declares a method that renders
-//	itself, so %v, %#v, a slog attribute or json.Marshal prints the secret.
-//
-// proxmox.TargetEndpoint, proxmox.ClientConfig, ssh.Config, veeam.tokenResponse,
-// handlers.clusterCredential, handlers.bootstrapRequest and
-// handlers.authResponse/logoutRequest were each found by a human reading code.
-// Each could have been found the day its rendering method was written: the
-// method and the credential field are in the same type declaration, and a
-// parser can see both. That is all this guard does.
-//
-// Every type declared in a non-test file under internal/ that has a
-// credential-shaped field and declares any of String, GoString, Error,
-// LogValue, MarshalJSON, MarshalText or Format must appear in
-// credentialRenderers with the set of renderings that were reviewed and a
-// one-line reason. A type that renders itself while holding a credential and is
-// not listed is a finding; so is a listed type that grows a rendering nobody
-// reviewed. Test files are not walked: a fixture that prints its own fake
-// secret is not a leak.
-//
-// WHY THIS LIVES IN package handlers, when it reasons about all of internal/:
-//
-//  1. It reuses credentialish/isCredentialish from
-//     proxmox_read_credentials_test.go. Those are package-scoped symbols in a
-//     _test.go file, so only a file in this package's test binary can reach
-//     them. The alternatives were a second copy of the substring list — the
-//     duplication trap this repo keeps paying for — or promoting the vocabulary
-//     into production code for the sake of two tests.
-//  2. scope_params_guard_test.go is already a repository-wide AST guard living
-//     here, and already carries isNestedCheckout with the reasoning about
-//     worktrees. This reuses it rather than re-deriving it.
-//  3. The header of proxmox_read_credentials_test.go already discusses the two
-//     blind spots restated below. A reader who finds one file finds the other.
-//
-// FIVE LIMITATIONS, none of them closed by this guard existing:
-//
-//  1. It keys on the field NAME, so it inherits verbatim the blind spot named
-//     in the credentialish comment: proxmox.ACMEPlugin.Data holds the DNS
-//     provider's API credentials and is blanked by hand in acme.go, because no
-//     list of name substrings would ever have found it. A field named for its
-//     role rather than its content still needs a human to notice, and this
-//     guard passing says nothing about that shape.
-//
-//  2. It requires the type to declare a rendering method, and that is a
-//     tractability constraint, not a safety argument. 183 types under internal/
-//     have a credential-shaped field and declare no rendering method; %v of any
-//     of them prints the field too. They are out of scope because a finding set
-//     of 183 is a finding set nobody reads. What the rendering method buys is a
-//     moment to check — somebody was already writing a method about how this
-//     type prints.
-//
-//  3. Transitive holding is covered exactly one level, and only for a type
-//     stored BY VALUE in a NAMED unexported field. That combination is not
-//     arbitrary; it is the only one that leaks. Verified by running each shape,
-//     not assumed:
-//
-//     unexported, named, by value   %v of the outer prints the inner's raw
-//     fields. LEAKS — fmt cannot call a method through an unexported field,
-//     because reflect.Value.CanInterface is false. This is the
-//     internal/rolling.failoverTarget shape and the reason the propagation
-//     exists.
-//     unexported, named, slice/map of values   leaks the same way, element by
-//     element, so those are unwrapped too.
-//     unexported, named, by POINTER   does not leak. Below the top level fmt
-//     prints a pointer as its hex address: {0xc0000aa040}, and %#v as
-//     (*pkg.Cred)(0xc0000aa040). A pointer therefore stops the walk rather
-//     than being unwrapped; flagging one would state a leak that does not
-//     happen.
-//     unexported, EMBEDDED   does not leak. Method promotion puts the inner's
-//     renderings in the OUTER type's method set, so fmt dispatches at depth 0
-//     and never has to reach through the field at all: %v, %+v, %#v, json and
-//     slog all come back redacted — PROVIDED, as in the exported case below,
-//     that the inner's renderings are on value receivers; measured, an
-//     embedded *pointer*-receiver inner leaks through all four. That is
-//     unreachable in practice because such an inner is itself a direct entry
-//     and fails the receiver check at its own site. Embedded fields are
-//     therefore skipped.
-//     EXPORTED, any shape   does not leak, PROVIDED the inner's renderings are
-//     on value receivers. All eight redacting types in this tree are; see the
-//     receiver check below for why that qualifier is load-bearing rather than
-//     pedantic.
-//
-//     What one level does not reach: a credential two hops down, held through
-//     an intermediate type that neither renders itself nor holds a credential
-//     of its own. There are none today. Nor anything reached through an
-//     interface, a function value or a map KEY. Nor the one case where
-//     promotion is DEFEATED: two types embedded at the same depth both
-//     declaring the same rendering make the selector ambiguous, the outer's
-//     method set loses it, and %v prints both inner structs raw. Measured,
-//     real, and not covered — there is no instance in this tree.
-//
-//  4. It walks internal/ only. cmd/ and pkg/ are not examined; neither declares
-//     any of these methods today, and internal/ is where the credentials live.
-//
-//  5. A DEFINED type whose underlying type is a struct — `type Foo Bar`, as
-//     opposed to `type Foo struct{…}` — is invisible to it. The spec node is an
-//     *ast.Ident, not an *ast.StructType, so Foo never enters the scan even
-//     though it has Bar's fields and can declare its own renderings. Closing
-//     this means resolving definitions across packages. No instance today: all
-//     19 non-struct named types under internal/ resolve to scalars.
+// Guards one bug class: a type holds a credential in a field AND declares a method that renders itself, so
+// %v, %#v, a slog attribute or json.Marshal prints the secret (each found by a human, e.g. proxmox.
+// TargetEndpoint, ClientConfig, ssh.Config). Every type in a non-test file under internal/ with a
+// credential-shaped field and any of String, GoString, Error, LogValue, MarshalJSON, MarshalText or Format
+// must be in credentialRenderers with the reviewed renderings and a reason. It lives in package handlers to
+// reuse credentialish and isNestedCheckout. Limits, none closed: it keys on the field NAME (ACMEPlugin.Data
+// and AccessDomain.TFA need a human); it needs a rendering method (183 other types hold such a field, a
+// finding set nobody reads); holding is followed one level, by VALUE in a NAMED unexported field, the only
+// shape that leaks (verified: pointers print as addresses, embedded inners are promoted and redact); it
+// walks internal/ only; and `type Foo Bar` is invisible.
 var credentialRenderMethods = []string{
 	"String", "GoString", "Error", "LogValue", "MarshalJSON", "MarshalText", "Format",
 }
 
 // credentialRendererNote is the record of somebody having looked at one type.
 type credentialRendererNote struct {
-	// redacts says this entry's claim is "the renderings hide the credential",
-	// as opposed to "the field is not a credential at all".
-	//
-	// It is not decoration: a redacting rendering MUST be on a value receiver,
-	// and this flag is what says the receiver check applies. fmt and
-	// encoding/json skip a pointer-receiver method on a value they cannot
-	// address, and every one of these types is passed around by value — so
-	// `func (c *Config) String()` compiles, lints clean, satisfies the
-	// method-set check above, and redacts nothing. That exact mistake was made
-	// three times in the work this guard came out of (authResponse,
-	// TargetEndpoint, ClientConfig), each time as a fix that looked finished.
-	//
-	// A "not a secret" entry sets this false and may use any receiver:
-	// TokenExistsError and HostKeyMismatchError both declare Error on a
-	// pointer, which is idiomatic for an error type and harmless when there is
-	// nothing to hide.
+	// redacts says this entry's claim is "the renderings hide the credential", as opposed to "the field is not
+	// a credential at all". A redacting rendering MUST be on a value receiver: fmt and encoding/json skip a
+	// pointer-receiver method on a value they cannot address, and these types are passed by value, so
+	// `func (c *Config) String()` compiles, lints clean and redacts nothing (made three times:
+	// authResponse, TargetEndpoint, ClientConfig). A "not a secret" entry sets this false and may use any
+	// receiver (TokenExistsError and HostKeyMismatchError declare Error on a pointer, idiomatic for an error
+	// type and harmless when there is nothing to hide).
 	redacts bool
-	// renderings are the credentialRenderMethods that were reviewed, and the
-	// guard requires the type to declare exactly these.
-	//
-	// Pinning the SET, not just the type, is what makes an entry keep earning
-	// itself. Adding MarshalText or Format to an already-listed type is the bug
-	// class all over again — a new way for the value to print, written by
-	// somebody who did not necessarily read the other four — and with
-	// membership alone the guard would wave it through while the reason string
-	// went quietly false.
-	//
-	// Empty means the type declares none, which is only valid for an entry
-	// listed for the transitive reason.
+	// renderings are the credentialRenderMethods that were reviewed, and the guard requires the type to
+	// declare exactly these. Pinning the SET, not just the type, is what makes an entry keep earning itself:
+	// adding MarshalText or Format to a listed type is the bug class again, written by somebody who did not
+	// necessarily read the other four, and with membership alone the guard would wave it through while the
+	// reason string went quietly false. Empty means the type declares none, valid only for an entry listed
+	// for the transitive reason.
 	renderings []string
 	// reason is why this type is allowed to render itself while holding a
 	// credential-shaped field. Either it redacts — name the test that pins
@@ -297,33 +190,22 @@ type credentialRenderScan struct {
 	guardTests map[string]bool
 }
 
-// TestGuard_CredentialBearingTypesRedactTheirRenderings fails when a type under
-// internal/ holds a credential-shaped field, renders itself, and nobody has said
-// which of those two facts is wrong.
-//
-// It also fails on an allow-list entry that has stopped being true — the type
-// was deleted, the type stopped rendering itself (which is the redaction having
-// been removed), the credential field is gone, the type grew a rendering nobody
-// reviewed, a redacting rendering moved to a pointer receiver (where fmt will
-// not call it), the reason is blank, or the test it cites does not exist. An
-// entry nobody has to keep true is an entry that silently excuses whatever
-// takes the name next.
+// TestGuard_CredentialBearingTypesRedactTheirRenderings fails when a type under internal/ holds a
+// credential-shaped field, renders itself, and nobody has said which of those two facts is wrong. It
+// also fails on an allow-list entry that has stopped being true: the type was deleted or stopped
+// rendering itself (the redaction removed), the credential field is gone, it grew an unreviewed
+// rendering, a redacting rendering moved to a pointer receiver, the reason is blank, or the test it
+// cites does not exist. An entry nobody has to keep true silently excuses whatever takes the name next.
 func TestGuard_CredentialBearingTypesRedactTheirRenderings(t *testing.T) {
 	t.Parallel()
 
 	scan := scanInternalForCredentialRenderers(t)
 
-	// Non-vacuity. Each of these has failed silently in this repo before: a
-	// walk that finds no files, a classifier that matches nothing, a name
-	// resolver that resolves nothing. None of them can be allowed to read as
-	// "no findings".
-	//
-	// There is deliberately no "parsed no files" floor here: it would be
-	// dominated. filesParsed and pkgNameByDir advance in lockstep over the same
-	// slice, and the scanner already fatals when pkgNameByDir is empty, so the
-	// inner check always wins and an outer one could never fire. In a file
-	// whose whole thesis is that a check which cannot fail reads as coverage,
-	// an advertised floor that cannot fire is the one defect it cannot afford.
+	// Non-vacuity: each of these has failed silently in this repo before (a walk that finds no files, a
+	// classifier that matches nothing, a name resolver that resolves nothing). There is deliberately no
+	// "parsed no files" floor: it would be dominated, since filesParsed and pkgNameByDir advance in lockstep
+	// and the scanner already fatals when pkgNameByDir is empty; an advertised floor that cannot fire is
+	// the one defect this file cannot afford.
 	if scan.typesExamined == 0 {
 		t.Fatal("examined 0 struct types under internal/ — the parse or the walk is broken, " +
 			"and this guard would report no findings for that reason alone")
@@ -572,7 +454,7 @@ func scanInternalForCredentialRenderers(t *testing.T) credentialRenderScan {
 		types:      map[string]*credentialRenderType{},
 		guardTests: map[string]bool{},
 	}
-	fset := token.NewFileSet()
+	fset := guardFset
 
 	// Pass one: parse, and learn what each directory's package is CALLED. A
 	// Go package's name need not match its directory — internal/db/generated
@@ -584,16 +466,19 @@ func scanInternalForCredentialRenderers(t *testing.T) credentialRenderScan {
 		dir  string
 		file *ast.File
 	}
+	files := make([]*ast.File, len(sources))
+	if err := guardEach(sources, func(i int, path string) (err error) {
+		files[i], err = guardParsed(path)
+		return err
+	}); err != nil {
+		t.Fatalf("parse internal/: %v", err)
+	}
 	parsed := make([]parsedFile, 0, len(sources))
 	pkgNameByDir := map[string]string{}
-	for _, path := range sources {
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
+	for i, path := range sources {
 		dir := credentialRenderDir(t, path)
-		pkgNameByDir[dir] = file.Name.Name
-		parsed = append(parsed, parsedFile{dir: dir, file: file})
+		pkgNameByDir[dir] = files[i].Name.Name
+		parsed = append(parsed, parsedFile{dir: dir, file: files[i]})
 		scan.filesParsed++
 	}
 	if len(pkgNameByDir) == 0 {
@@ -699,17 +584,26 @@ func scanInternalForCredentialRenderers(t *testing.T) credentialRenderScan {
 
 	// Test files, for their Test function names only. Nothing declared in one
 	// is in scope; a fixture that prints its own fake secret is not a leak.
-	for _, path := range tests {
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+	// Parsed here and not kept: nothing else reads them.
+	testFset := token.NewFileSet()
+	testNames := make([][]string, len(tests))
+	if err := guardEach(tests, func(i int, path string) error {
+		file, err := parser.ParseFile(testFset, path, nil, parser.SkipObjectResolution)
 		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
+			return err
 		}
 		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || !strings.HasPrefix(fn.Name.Name, "Test") {
-				continue
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && strings.HasPrefix(fn.Name.Name, "Test") {
+				testNames[i] = append(testNames[i], fn.Name.Name)
 			}
-			scan.guardTests[fn.Name.Name] = true
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("parse internal/ tests: %v", err)
+	}
+	for _, names := range testNames {
+		for _, name := range names {
+			scan.guardTests[name] = true
 		}
 	}
 
@@ -747,28 +641,14 @@ func credentialRenderModulePath(t *testing.T) string {
 	return ""
 }
 
-// credentialRenderSourceFiles returns the Go files under internal/, split into
-// non-test sources (which are classified) and test files (which contribute only
-// their Test function names).
-//
-// The walk is rooted at internal/ rather than at repoRoot, and that is what
-// keeps stale agent worktrees out. They live at .claude/worktrees/<name>/ with
-// a full copy of this tree inside, so a repoRoot walk descends into their
-// internal/ too and reports findings against a checkout that is not this one —
-// at an older commit, possibly already fixed here. Rooting the walk makes the
-// exclusion structural rather than a filter someone can drop.
-//
-// The two skips inside are belt and braces on top of that, and neither matches
-// anything today: isNestedCheckout (from scope_params_guard_test.go) catches a
-// worktree or submodule placed under internal/ itself, which carries a .git
-// FILE rather than a directory and so is invisible to a name-based skip, and
-// the name switch catches a vendored or copied tree placed there.
-//
-// This is deliberately not goSourceFiles. That one walks the whole repository
-// and skips internal/db/generated; the generated models are IN scope here. sqlc
-// emits none of these methods today, so they add nothing to the finding set,
-// but they are real types with credential columns, and a generator that starts
-// emitting a String() is exactly what this guard should notice.
+// credentialRenderSourceFiles returns the Go files under internal/, split into non-test sources (which
+// are classified) and test files (which contribute only their Test function names). The walk is rooted
+// at internal/ rather than repoRoot, which keeps stale agent worktrees (.claude/worktrees/<name>/, each
+// with a full copy of the tree) out structurally, not by a filter someone can drop. The skips inside are
+// belt and braces: isNestedCheckout (scope_params_guard_test.go) catches a worktree or submodule placed
+// under internal/ itself (a .git FILE, invisible to a name-based skip), and the name switch a vendored
+// copy. This is deliberately not goSourceFiles, which skips internal/db/generated; the generated models
+// are IN scope here, since a generator that starts emitting a String() is what this guard should notice.
 func credentialRenderSourceFiles(t *testing.T) (sources, tests []string) {
 	t.Helper()
 

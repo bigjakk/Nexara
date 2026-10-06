@@ -2,7 +2,6 @@ package api
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"net/http"
 	"net/http/httptest"
@@ -73,15 +72,9 @@ var totpRoutesOutsideTheClusterCheckShape = map[string]string{
 // which lives under /users.
 func declaredTOTPEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		key := e.Method + " " + e.Path
-		if strings.HasPrefix(e.Path, totpScope) || key == totpAdminResetKey {
-			out[key] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, func(e Endpoint) bool {
+		return strings.HasPrefix(e.Path, totpScope) || e.Method+" "+e.Path == totpAdminResetKey
+	})
 }
 
 // TestTOTPRoutesDeclareTheSamePermissionTheyEnforced is the tally: 1
@@ -434,25 +427,15 @@ func TestTOTPVerifyLoginRequiresThePendingToken(t *testing.T) {
 	}
 }
 
-// TestTOTPCodePatternMatchesTheHandler is the pin the declaration's comment on
-// totpCodePatternRE promises.
-//
-// The six-digit rule now lives in TWO packages: totpCodePatternRE
-// (`^[0-9]{6}$`, registry_totp.go) is the schema's, and totpCodePattern
-// (`^\d{6}$`, handlers/totp.go) is the one the Disable and VerifyLogin handlers
-// still apply conditionally — those two cannot use the schema's copy, because
-// an explicitly empty code is legal there and a Pattern would refuse it. Two
-// copies of one rule with nothing comparing them is how they diverge.
-//
-// The handler's copy is read out of its SOURCE rather than exported, because a
-// regexp.Regexp and a schema Pattern are different types and exporting one to
-// satisfy a test would put a symbol in the handlers package that nothing else
-// wants. Package api already walks handlers/*.go this way — see buildCallGraph.
-//
-// The candidate table deliberately includes non-ASCII digits: Go's `\d` is
-// ASCII-only unless the Unicode flag is set, so the two agree today, and a
-// future `(?U)` or a swap to `\p{Nd}` on either side would make them disagree
-// on exactly those rows.
+// TestTOTPCodePatternMatchesTheHandler is the pin the declaration's comment on totpCodePatternRE
+// promises. The six-digit rule lives in TWO packages: totpCodePatternRE (`^[0-9]{6}$`, registry_totp.go) is
+// the schema's, and totpCodePattern (`^\d{6}$`, handlers/totp.go) is the one the Disable and VerifyLogin
+// handlers apply conditionally (an explicitly empty code is legal there, which a Pattern would refuse). Two
+// copies with nothing comparing them is how they diverge. The handler's copy is read out of its SOURCE
+// rather than exported (a regexp.Regexp and a schema Pattern are different types, and a symbol only a test
+// wants does not belong in handlers), as buildCallGraph walks handlers/*.go. The candidate table includes
+// non-ASCII digits: Go's `\d` is ASCII-only unless the Unicode flag is set, so the two agree today, and a
+// future `(?U)` or `\p{Nd}` on either side would make them disagree on exactly those rows.
 func TestTOTPCodePatternMatchesTheHandler(t *testing.T) {
 	handlerPattern := handlerTOTPCodePattern(t)
 	if handlerPattern == totpCodePatternRE {
@@ -486,8 +469,7 @@ func TestTOTPCodePatternMatchesTheHandler(t *testing.T) {
 func handlerTOTPCodePattern(t *testing.T) string {
 	t.Helper()
 
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, filepath.Join("handlers", "totp.go"), nil, 0)
+	file, err := parsedSource(filepath.Join("handlers", "totp.go"))
 	if err != nil {
 		t.Fatalf("parse handlers/totp.go: %v", err)
 	}

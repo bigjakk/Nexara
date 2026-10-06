@@ -92,24 +92,16 @@ type failedRow struct{ err error }
 
 func (r failedRow) Scan(...any) error { return r.err }
 
-// TestRefusedUploadClosesItsConnectionMidStream drives the real UploadFile —
-// the one handler that reads the body's stream itself — through the real
-// upload declaration, as a caller holding manage:vm_import and not
-// manage:storage, uploading an ISO. The handler reads the multipart stream
-// part by part and refuses the file part with 403 when it reaches it, with
-// the rest of the body unread: the refusal has to close the connection, and
-// the request hidden past the part fasthttp read ahead must not be served.
-//
-// It is what a later change to UploadFile — releasing the stream on the way
-// out, say — would break without failing anything else: a released stream
-// reads as a body read to its end. The precondition is the same app without
-// closeConnectionsLeftMidBody, where the hidden request is served.
-//
-// Authentication is a stand-in that leaves in c.Locals what authRequired
-// would — a user, and a permission engine — and the three rows UploadFile
-// looks up come from a stand-in database; everything from the declaration's
-// extraction to the handler's refusal is the production code. The 403 comes
-// before any call to Proxmox.
+// TestRefusedUploadClosesItsConnectionMidStream drives the real UploadFile (the one handler that reads
+// the body's stream itself) through the real upload declaration, as a caller holding manage:vm_import and
+// not manage:storage, uploading an ISO. The handler reads the multipart stream part by part and refuses the
+// file part with 403 when it reaches it, the rest of the body unread: the refusal has to close the
+// connection, and the request hidden past the part fasthttp read ahead must not be served. A later change
+// that released the stream on the way out would break this without failing anything else (a released stream
+// reads as a body read to its end). The precondition is the same app without closeConnectionsLeftMidBody,
+// where the hidden request is served. Authentication is a stand-in that leaves in c.Locals a user and a
+// permission engine, the three rows UploadFile looks up come from a stand-in database, and the rest is
+// production code; the 403 comes before any call to Proxmox.
 func TestRefusedUploadClosesItsConnectionMidStream(t *testing.T) {
 	clusterID, nodeID, poolID := uuid.New(), uuid.New(), uuid.New()
 	secret, err := crypto.Encrypt("token-secret-value", sweepEncryptionKey)
@@ -207,20 +199,16 @@ func serveUploadDeclaration(t *testing.T, rows uploadRows, grants uploadGrants, 
 	return serveAppOnLoopback(t, app), hits
 }
 
-// TestSlowJSONBodyToTheUploadRouteIsCutAtTheBodyDeadline holds the upload
-// route to the body deadline for every body its declaration reads before
-// UploadFile checks a single grant. The route is Deferred, so bodyValues reads
-// a body of any type isJSONContentType accepts, up to 64 KiB, first — a +json
-// type such as multipart/form-data+json among them, although UploadFile would
-// take it for multipart. Here a caller holding no grant declares one, sends
-// the first 8 KiB and stops. The read has to be cut at the deadline — not
-// before, not long after — and the connection closed.
-//
-// The precondition twin of each row arms no deadline, as the upload's
-// exemption did for these bodies before it was held to what it is for, and
-// there the read is still waiting three deadlines on: the request reaches a
-// read of its body, not a refusal.
+// TestSlowJSONBodyToTheUploadRouteIsCutAtTheBodyDeadline holds the upload route to the body deadline
+// for every body its declaration reads before UploadFile checks a single grant. The route is Deferred, so
+// bodyValues reads a body of any type isJSONContentType accepts, up to 64 KiB, first (a +json type such as
+// multipart/form-data+json among them, although UploadFile would take it for multipart). A caller holding no
+// grant declares one, sends the first 8 KiB and stops: the read has to be cut at the deadline, not before,
+// not long after, and the connection closed. Each row's precondition twin arms no deadline, as the upload's
+// exemption did for these bodies before it was held to what it is for, and there the read is still waiting
+// three deadlines on.
 func TestSlowJSONBodyToTheUploadRouteIsCutAtTheBodyDeadline(t *testing.T) {
+	t.Parallel()
 	const bodyTimeout, slack = 500 * time.Millisecond, 2 * time.Second
 	noDeadline := func(app *fiber.App) {
 		srv := app.Server()
@@ -236,6 +224,7 @@ func TestSlowJSONBodyToTheUploadRouteIsCutAtTheBodyDeadline(t *testing.T) {
 		"Multipart/Related+JSON",
 	} {
 		t.Run(contentType, func(t *testing.T) {
+			t.Parallel()
 			target := "/api/v1/clusters/" + uuid.New().String() + "/storage/" + uuid.New().String() + "/upload"
 			raw := requestHead(fiber.MethodPost, target, "Content-Type: "+contentType) +
 				"Content-Length: 65536\r\n\r\n" + strings.Repeat(" ", bodyPrefetch)

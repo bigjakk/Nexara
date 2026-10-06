@@ -58,15 +58,7 @@ var vmImportLegacyPermissions = map[string]string{
 // the /clusters/:cluster_id prefix is shared with nine other domains.
 func declaredVMImportEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		key := e.Method + " " + e.Path
-		if _, listed := vmImportLegacyPermissions[key]; listed {
-			out[key] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(vmImportLegacyPermissions))
 }
 
 // TestVMImportRoutesDeclareTheSamePermissionTheyEnforced is the tally that
@@ -119,17 +111,13 @@ func TestVMImportRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	}
 }
 
-// TestURLProbeKeepsItsStorageGrant is the assertion behind the one
-// permission in this domain that looks wrong and is not.
-//
-// query-url-metadata makes a NODE issue an outbound request to a
-// caller-supplied URL — an SSRF-shaped primitive — so it was deliberately
-// held to manage:storage, the same bar as the download it precedes, rather
-// than to the lower manage:vm_import. enable-content is manage:storage for
-// a related reason: changing what a storage may hold is a
-// storage-management act. A later "these are import routes, they should all
-// be manage:vm_import" pass would be a privilege reduction on both, and
-// this is where it fails.
+// TestURLProbeKeepsItsStorageGrant is the assertion behind the one permission in this domain that
+// looks wrong and is not. query-url-metadata makes a NODE issue an outbound request to a caller-supplied
+// URL (an SSRF-shaped primitive), so it was deliberately held to manage:storage, the same bar as the
+// download it precedes, rather than the lower manage:vm_import. enable-content is manage:storage for a
+// related reason: changing what a storage may hold is a storage-management act. A later "these are import
+// routes, they should all be manage:vm_import" pass would be a privilege reduction on both, and this is
+// where it fails.
 func TestURLProbeKeepsItsStorageGrant(t *testing.T) {
 	for _, tt := range []struct {
 		method string

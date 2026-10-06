@@ -40,25 +40,14 @@ func veeamRoute(path string) string {
 	).Replace(path)
 }
 
-// veeamRoutesOutsideTheClusterCheckShape is this domain's half of the
-// registry-wide exception list in registry_vms_test.go.
-//
-// TWENTY-FOUR of the 25 are here, the highest proportion of any domain so
-// far, and it is the domain's own shape rather than an artefact of the
-// migration. A Veeam server can protect SEVERAL Proxmox clusters — unlike a
-// PBS server, which maps to at most one — so the server registry itself is an
-// instance-wide resource and its path names no cluster at all. The data those
-// servers produce IS per-cluster, but the cluster is resolved at request time
-// through the veeam_platforms mapping rather than read out of the URL.
-//
-// The one route that is NOT here is the VM detail page's Veeam card: its
-// subject is a guest, its path starts with /clusters/:cluster_id, and it gates
-// on that cluster like every other per-guest route.
-//
-// The map is built rather than written out because the 24 share only THREE
-// reasons between them — 11 global, 4 filtered, 9 deferred — and twenty-four
-// copies of three sentences is a list nobody re-reads, which is the failure the
-// exception surface exists to avoid.
+// veeamRoutesOutsideTheClusterCheckShape is this domain's half of the registry-wide exception list in
+// registry_vms_test.go. TWENTY-FOUR of the 25 are here, the domain's own shape: a Veeam server can protect
+// SEVERAL Proxmox clusters (unlike a PBS server, which maps to at most one), so the server registry is
+// instance-wide and its path names no cluster; the data it produces IS per-cluster, resolved at request
+// time through the veeam_platforms mapping. The one route not here is the VM detail page's Veeam card,
+// whose path starts with /clusters/:cluster_id and gates on that cluster like any per-guest route. The map
+// is built rather than written out because the 24 share only THREE reasons (11 global, 4 filtered, 9
+// deferred), and twenty-four copies of three sentences is a list nobody re-reads.
 var veeamRoutesOutsideTheClusterCheckShape = func() map[string]string {
 	const global = "global: a Veeam server can protect several clusters, so the registry and the " +
 		"answers that span every one of them are instance-wide; the path names no cluster"
@@ -108,20 +97,13 @@ var veeamRoutesOutsideTheClusterCheckShape = func() map[string]string {
 	return out
 }()
 
-// veeamLegacyPermissions is what each handler checked with hand-placed calls
-// BEFORE Phase 6g, transcribed from `git show HEAD:internal/api/handlers/veeam.go`
-// and its four siblings at commit facdf56.
-//
-// calls counts the permission calls each handler made, per ROUTE rather than
-// per source line, the way backupLegacyPermissions does. Two routes make TWO:
-//
-//   - List and Get run requirePerm("view","veeam") as the gate AND
-//     hasGlobalPerm("manage","veeam") through callerSeesUsername, which decides
-//     whether the configured account name is serialized. Only the first hoists;
-//     the second is a rendering decision no middleware can make.
-//   - MapBackupObjectGuest runs accessibleClusters("view","veeam") to resolve the
-//     object and then requireClusterPerm("manage","veeam", …) on the cluster its
-//     platform maps to.
+// veeamLegacyPermissions is what each handler checked with hand-placed calls BEFORE Phase 6g,
+// transcribed from `git show HEAD:internal/api/handlers/veeam.go` and its four siblings at facdf56. calls
+// counts the permission calls per ROUTE, as backupLegacyPermissions does. Two routes make TWO: List and
+// Get run requirePerm("view","veeam") as the gate AND hasGlobalPerm("manage","veeam") through
+// callerSeesUsername (whether the configured account name is serialized; only the first hoists, the second
+// is a rendering decision no middleware can make); MapBackupObjectGuest runs accessibleClusters("view",
+// "veeam") to resolve the object, then requireClusterPerm("manage","veeam", ...) on its platform's cluster.
 var veeamLegacyPermissions = map[string]struct {
 	permission string
 	shape      string
@@ -169,15 +151,7 @@ var veeamLegacyPermissions = map[string]struct {
 // filter would either miss the card or sweep in every other cluster route.
 func declaredVeeamEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		key := e.Method + " " + e.Path
-		if _, listed := veeamLegacyPermissions[key]; listed {
-			out[key] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(veeamLegacyPermissions))
 }
 
 // TestVeeamRoutesDeclareTheSamePermissionTheyEnforced is the tally that makes
@@ -354,32 +328,24 @@ func TestVeeamGlobalRoutesAreGatedByTheirDeclaration(t *testing.T) {
 	}
 }
 
-// TestVeeamLimitersShareOneBudgetPerGroup pins the property the legacy block
-// spelled out in prose and nothing asserted: the three connect routes share ONE
-// limiter and the seven control routes share ONE, rather than each route
-// constructing its own.
-//
-// A per-route instance holds a per-route STORE, which multiplies the budget the
-// limiter exists to cap — ten domain logons a minute becomes thirty across
-// create, update and test — and nothing about the behaviour of a single route
-// would look wrong.
-//
-// It has to be a BEHAVIOURAL test, and that is the whole reason it is written
-// this way. Comparing the two fiber.Handler values with reflect.Value.Pointer()
-// reads like the obvious check and is vacuous: Pointer() on a func returns the
-// CODE pointer, so every closure limiter.New returns — however many separate
-// stores they hold — compares equal, and the regression above would sail past
-// it. Spending the budget is the only thing that can tell one store from two.
-//
-// So: fire Max+1 requests SPREAD ACROSS the group's routes and require the last
-// to be refused. With one shared store the budget is exhausted; with a store per
-// route none of them ever gets close, because Max+1 split N ways is far under
-// Max each.
+// TestVeeamLimitersShareOneBudgetPerGroup pins what the legacy block spelled out in prose and nothing
+// asserted: the three connect routes share ONE limiter and the seven control routes share ONE. A per-route
+// instance holds a per-route STORE, multiplying the budget the limiter exists to cap (ten domain logons a
+// minute become thirty) with nothing about a single route looking wrong. It has to be BEHAVIOURAL:
+// comparing the fiber.Handler values with reflect.Value.Pointer() is vacuous, since Pointer() on a func
+// returns the CODE pointer and every closure limiter.New returns compares equal however many stores they
+// hold. So fire Max+1 requests SPREAD ACROSS the group's routes and require the last refused: one shared
+// store is exhausted, while a store per route never gets close (Max+1 split N ways is far under Max each).
 func TestVeeamLimitersShareOneBudgetPerGroup(t *testing.T) {
-	// Every endpoint comes from ONE registry, because that is the thing under
-	// test: declaredVeeamEndpoints builds a fresh Server, and two calls would
-	// hand back two sets of limiters however buildRegistry was written.
-	declared := declaredVeeamEndpoints(t)
+	// A stub of its own, and every endpoint from its one registry build: the test
+	// spends the limiters, which the shared stub keeps for the whole binary, and two
+	// builds would hand back two sets of limiters however buildRegistry was written.
+	declared := map[string]Endpoint{}
+	for _, e := range newRouteStubServer(t).registry.Endpoints() {
+		if keyedIn(veeamLegacyPermissions)(e) {
+			declared[e.Method+" "+e.Path] = e
+		}
+	}
 
 	groups := []struct {
 		name string
@@ -537,17 +503,12 @@ func probeVeeamEndpoint(t *testing.T, method, path string, cap *capture) Endpoin
 	return e
 }
 
-// TestMapBackupObjectGuestKeepsItsBothOrNeitherShape pins the declaration the
-// handler's cross-field rule reads.
-//
-// `(req.ClusterID == nil) != (req.VMID == nil)` became
-// `clusterSupplied != vmidSupplied`, and that translation is correct while
-// BOTH parameters stay optional: an Opt accessor never reports a default as
-// supplied (apischema.Property.Default), so a declared default could not make
-// the rule refuse a clear — it would only document the clear as a pin. apischema
-// reads an explicit JSON null as absent (present() in validate.go), which is
-// what keeps `{"cluster_id":null,"vmid":null}` — the payload the unmap button
-// sends — meaning "clear it".
+// TestMapBackupObjectGuestKeepsItsBothOrNeitherShape pins the declaration the handler's cross-field rule
+// reads. `(req.ClusterID == nil) != (req.VMID == nil)` became `clusterSupplied != vmidSupplied`, correct
+// while BOTH parameters stay optional: an Opt accessor never reports a default as supplied
+// (apischema.Property.Default), so a declared default could not make the rule refuse a clear, only
+// document it as a pin. apischema reads an explicit JSON null as absent (present() in validate.go), which
+// keeps `{"cluster_id":null,"vmid":null}`, the payload the unmap button sends, meaning "clear it".
 func TestMapBackupObjectGuestKeepsItsBothOrNeitherShape(t *testing.T) {
 	const path = veeamScope + "/:id/backup-objects/:object_id/guest"
 	e := declaredEndpoint(t, fiber.MethodPut, path)

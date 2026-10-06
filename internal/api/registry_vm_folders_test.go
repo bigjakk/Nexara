@@ -27,14 +27,7 @@ var vmFolderLegacyPermissions = map[string]string{
 
 func declaredVMFolderEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if _, want := vmFolderLegacyPermissions[e.Method+" "+e.Path]; want {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(vmFolderLegacyPermissions))
 }
 
 // TestVMFolderRoutesDeclareTheSamePermissionTheyEnforced is the tally that
@@ -78,25 +71,18 @@ func TestVMFolderRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	}
 }
 
-// TestVMFolderReparentIsStillLegacy records the vocabulary gap this domain hit,
-// so it stays a decision rather than becoming an omission.
-//
-// PATCH /vm-folders/:folder_id carries a THREE-state parent_id — absent leaves
-// the folder where it is, an explicit null moves it to the top level, a uuid
-// moves it under that folder — decoded by the handler's own jsonNullUUID.
-// apischema's present() reads an explicit JSON null as ABSENT (validate.go), so
-// a declaration would collapse the first two states and silently turn "move
-// this folder to the top level" into a request that answers 200 and changes
-// nothing. That is worse than leaving the route imperative: a caller cannot
-// tell it did not happen.
-//
-// Pinned from both sides: the route must still be registered, and it must NOT
-// be in the registry — a well-meaning later declaration of it is a silent
-// behaviour change, not a compile error.
+// TestVMFolderReparentIsStillLegacy records the vocabulary gap this domain hit, so it stays a decision
+// rather than an omission. PATCH /vm-folders/:folder_id carries a THREE-state parent_id (absent leaves the
+// folder where it is, an explicit null moves it to the top level, a uuid moves it under that folder),
+// decoded by the handler's own jsonNullUUID. apischema's present() reads an explicit JSON null as ABSENT
+// (validate.go), so a declaration would collapse the first two states and turn "move this folder to the top
+// level" into a request that answers 200 and changes nothing, worse than leaving the route imperative
+// because a caller cannot tell it did not happen. Pinned from both sides: still registered, and NOT in the
+// registry (a well-meaning later declaration is a silent behaviour change, not a compile error).
 func TestVMFolderReparentIsStillLegacy(t *testing.T) {
 	const key = "PATCH /api/v1/clusters/:cluster_id/vm-folders/:folder_id"
 
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	if registryRouteKeySet(s.registry.Endpoints())[key] {
 		t.Error("the folder re-parent is declared in the registry, but apischema reads an explicit JSON " +
 			"null as absent, so \"move to the top level\" would become a no-op — see registerVMFolderEndpoints")

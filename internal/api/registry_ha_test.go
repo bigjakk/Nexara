@@ -68,14 +68,7 @@ var haLegacyPermissions = map[string]string{
 // /ha prefix, keyed "METHOD path".
 func declaredHAEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, haScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(haScope))
 }
 
 // TestHARoutesDeclareTheSamePermissionTheyEnforced is the tally that makes
@@ -274,22 +267,15 @@ func TestHAGroupAndRuleNamesRejectTraversal(t *testing.T) {
 	}
 }
 
-// TestHAEditFormsKeepTheEmptyStringSentinel is the compatibility half of
-// this domain's migration, and the one that would have been easiest to
-// break.
-//
-// Three editors send a field empty so that clearing it CLEARS the stored
-// value: the resource editor sends group:"" when "no group" is picked and
-// comment:"" when the note is emptied (it sends only the fields the operator
-// changed), and the group and rule editors send comment:"" whenever the box is
-// blank. apischema treats "" as a value the caller SUPPLIED (not an absent
-// one), and every registered format rejects it — so a format on any of these
-// would 400 a save that has always worked, and folding "" into "absent" in the
-// handler would turn the same save into a silent no-op.
-//
-// This checks both ends: the schema accepts the value, and it arrives
-// marked as supplied, which is what optStringPtr turns into a non-nil
-// pointer the client actually sends.
+// TestHAEditFormsKeepTheEmptyStringSentinel is the compatibility half of this domain's migration, and
+// the one easiest to break. Three editors send a field empty so that clearing it CLEARS the stored value:
+// the resource editor sends group:"" when "no group" is picked and comment:"" when the note is emptied (only
+// the fields the operator changed), and the group and rule editors send comment:"" whenever the box is
+// blank. apischema treats "" as a value the caller SUPPLIED and every registered format rejects it, so a
+// format on any of these would 400 a save that has always worked, and folding "" into "absent" in the
+// handler would turn the same save into a silent no-op. This checks both ends: the schema accepts the
+// value, and it arrives marked as supplied, which optStringPtr turns into the non-nil pointer the client
+// actually sends.
 func TestHAEditFormsKeepTheEmptyStringSentinel(t *testing.T) {
 	for _, tt := range []struct {
 		name  string

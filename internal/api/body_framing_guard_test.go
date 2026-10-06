@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,66 +24,16 @@ import (
 	"testing"
 )
 
-// TestGuard_NothingDetachesAnUnreadRequestBody holds, over every non-test Go
-// file of every package in this module — every one `go list ./...` reports,
-// whether anything imports it or not, as the release image builds it:
-// CGO_ENABLED=0, GOOS=linux, GOARCH=amd64, no build tags, the way
-// docker/nexara/Dockerfile runs go build — what closeConnectionsLeftMidBody
-// and bodyMayBeLeftUnread cannot check at run time. It reads the code as the
-// compiler does: each package is type-checked (go/types, against the export
-// data `go list -export` names), and a rule matches the function, method or
-// field a name resolves to — whatever the receiver is called, however the
-// value got there, and whether it is called, taken as a method value, named in
-// a method expression, reached through an embedded field, or called on an
-// interface or type parameter that *fasthttp.Request or
-// *fasthttp.RequestHeader satisfies. It refuses:
-//
-//   - any reference to a method of *fasthttp.Request that releases, replaces,
-//     reads a request over, or writes out the body (requestMethodsRefused):
-//     bodyMayBeLeftUnread would read a body such a method let go of, with its
-//     rest still on the connection, as one read to its end;
-//   - any reference to a method of *fasthttp.RequestHeader that rewrites the
-//     framing, or the path, method or Content-Type the upload exemption is
-//     decided by (headerMethodsRefused), and any call of a keyed header
-//     mutator (headerMethodsKeyed) whose key is Content-Length,
-//     Transfer-Encoding or Content-Type, or is not a constant it can read — a
-//     method value or method expression of one included;
-//   - any assignment (=) over a fasthttp.Request, RequestHeader or Server
-//     value, and any composite literal of one;
-//   - any assignment to fasthttp.Server's Handler, ContinueHandler,
-//     HeaderReceived or ErrorHandler field, or taking one's address: New sets
-//     them, and nothing else may replace or bypass the wrapper and the
-//     redaction it installs there;
-//   - anything that rewrites the path or method a request is routed by after
-//     closeConnectionsLeftMidBody decided whether its body is the storage
-//     upload's: Fiber's Ctx.Path and Ctx.Method (and Req.Method) given an
-//     argument, or referred to without being called, and Ctx.Reset, all of
-//     which re-route the request; fasthttp's own path and method writers
-//     (uriMethodsRefused — on every URI, the request's or not, as its comment
-//     says — and the SetRequestURI, SetURI and SetMethod methods among the
-//     request's and the header's); and Fiber's rewrite middleware,
-//     which is built on Ctx.Path. The Content-Type writers above are refused
-//     for the same reason: the exemption is decided by all three;
-//   - any reference to what serves Fiber without the server New configured —
-//     (*fiber.App).Handler, the adaptor's FiberApp, FiberHandler and
-//     FiberHandlerFunc, and fasthttp's own Serve… and ListenAndServe…, which
-//     build a default server around the handler they are given, dropping the
-//     timeouts, the redaction and the upload rules — or swaps or suppresses
-//     the answer the close rides on
-//     — RequestCtx.HijackSetNoResponse and TimeoutError…,
-//     fasthttp.TimeoutHandler and TimeoutWithCodeHandler — or hands the live
-//     request elsewhere: RequestCtx.Init and Init2, fasthttp.ReleaseRequest,
-//     every fasthttp function and method named Do or Do and a capitalised
-//     word (the clients' Do, DoTimeout, DoDeadline, DoRedirects), and
-//     RequestCtx.Conn, under which a deadline or a read would reach past the
-//     body's stream;
-//   - importing Fiber's timeout, proxy or rewrite middleware.
-//
-// What it cannot see, and does not claim to: code outside this module (a
-// library handed the request may do any of this), test files, reflection and
-// unsafe, and a request converted to an interface value that something else
-// then calls a refused method on — fmt calling String for a %v, say; the call
-// happens in the standard library, not here.
+// TestGuard_NothingDetachesAnUnreadRequestBody holds, over every non-test Go file of every package
+// `go list ./...` reports (the release image's build context), what closeConnectionsLeftMidBody and
+// bodyMayBeLeftUnread cannot check at run time. Each package is type-checked, and a rule matches the
+// function, method or field a name resolves to however it is reached (called, a method value or
+// expression, an embedded field, an interface or type parameter). Refused: anything that releases,
+// replaces, reads over or writes out a request's body; rewrites the framing, path, method or Content-Type
+// the upload exemption is decided by (headerMethodsKeyed by key); assigns over a fasthttp Request,
+// RequestHeader or Server or its Handler/ContinueHandler/HeaderReceived/ErrorHandler field; re-routes a
+// request after the decision; serves Fiber without the server New configured; swaps the answer the close
+// rides on; or hands the live request elsewhere. Blind to other modules, test files, reflection and unsafe.
 func TestGuard_NothingDetachesAnUnreadRequestBody(t *testing.T) {
 	prog := loadBodyGuardProgram(t)
 	if prog.files < 300 {
@@ -229,17 +180,10 @@ var headerMethodsKept = []string{
 	"Write", "WriteTo",
 }
 
-// uriMethodsRefused are the methods of *fasthttp.URI the guard refuses: each
-// writes a path into a URI, which on the request's own is the path it is
-// routed by.
-//
-// They are refused on every *fasthttp.URI, the request's or not. Which URI a
-// value is depends on where it came from — ctx.URI(), a fasthttp.AcquireURI()
-// of a handler's own, a field — and go/types sees one type for all of them,
-// so the guard cannot narrow these the way calledOn narrows the header's
-// methods by type. A URI a handler builds and rewrites for itself — for a
-// redirect, say — needs an entry in bodyGuardAllowed, with its reason. None
-// does today.
+// uriMethodsRefused are the *fasthttp.URI methods that write a path, which on the request's own
+// is the path it is routed by. They are refused on EVERY URI: go/types sees one type for all
+// of them, so unlike the header's methods (calledOn) they cannot be narrowed. A URI a handler
+// builds and rewrites for itself, for a redirect say, needs a bodyGuardAllowed entry; none does.
 var uriMethodsRefused = map[string]string{
 	"CopyTo":       "writes this URI's path over another's",
 	"Parse":        "parses a whole URI, path included, over this one",
@@ -995,42 +939,78 @@ func loadBodyGuardProgramOnce() (*bodyGuardProgram, error) {
 	}
 
 	prog := &bodyGuardProgram{fset: token.NewFileSet()}
-	prog.imp = importer.ForCompiler(prog.fset, "gc", func(path string) (io.ReadCloser, error) {
+	prog.imp = &lockedImporter{imp: importer.ForCompiler(prog.fset, "gc", func(path string) (io.ReadCloser, error) {
 		export := exports[path]
 		if export == "" {
 			return nil, fmt.Errorf("go list gave no export data for %s", path)
 		}
 		return os.Open(export)
-	})
+	})}
 	if prog.rules, err = newBodyGuardRules(prog.imp); err != nil {
 		return nil, err
 	}
-	for _, p := range targets {
-		if len(p.CgoFiles) > 0 {
-			return nil, fmt.Errorf("%s uses cgo, whose files the guard does not type-check", p.ImportPath)
-		}
-		pkg := bodyGuardPackage{path: p.ImportPath}
-		for _, name := range p.GoFiles {
-			full := filepath.Join(p.Dir, name)
-			f, err := parser.ParseFile(prog.fset, full, nil, parser.SkipObjectResolution)
-			if err != nil {
-				return nil, err
-			}
-			rel, err := filepath.Rel(root, full)
-			if err != nil {
-				return nil, err
-			}
-			pkg.files = append(pkg.files, f)
-			pkg.names = append(pkg.names, filepath.ToSlash(rel))
-		}
-		pkg.info = newBodyGuardInfo()
-		if _, err := (&types.Config{Importer: prog.imp}).Check(p.ImportPath, prog.fset, pkg.files, pkg.info); err != nil {
-			return nil, fmt.Errorf("type-checking %s: %w", p.ImportPath, err)
-		}
-		prog.pkgs = append(prog.pkgs, pkg)
+	// The packages are parsed and checked side by side — under -race that is nearly all of
+	// the guard's time — over one importer, so each fasthttp and Fiber object the rules
+	// hold is the one every package resolves to.
+	prog.pkgs = make([]bodyGuardPackage, len(targets))
+	errs := make([]error, len(targets))
+	var wg sync.WaitGroup
+	workers := make(chan struct{}, min(runtime.GOMAXPROCS(0), 8))
+	for i, p := range targets {
+		wg.Add(1)
+		workers <- struct{}{}
+		go func() {
+			defer func() { <-workers; wg.Done() }()
+			prog.pkgs[i], errs[i] = checkBodyGuardPackage(prog, root, p)
+		}()
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	for _, pkg := range prog.pkgs {
 		prog.files += len(pkg.files)
 	}
 	return prog, nil
+}
+
+// checkBodyGuardPackage parses and type-checks one module package.
+func checkBodyGuardPackage(prog *bodyGuardProgram, root string, p goListedPackage) (bodyGuardPackage, error) {
+	if len(p.CgoFiles) > 0 {
+		return bodyGuardPackage{}, fmt.Errorf("%s uses cgo, whose files the guard does not type-check", p.ImportPath)
+	}
+	pkg := bodyGuardPackage{path: p.ImportPath}
+	for _, name := range p.GoFiles {
+		full := filepath.Join(p.Dir, name)
+		f, err := parser.ParseFile(prog.fset, full, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return bodyGuardPackage{}, err
+		}
+		rel, err := filepath.Rel(root, full)
+		if err != nil {
+			return bodyGuardPackage{}, err
+		}
+		pkg.files = append(pkg.files, f)
+		pkg.names = append(pkg.names, filepath.ToSlash(rel))
+	}
+	pkg.info = newBodyGuardInfo()
+	if _, err := (&types.Config{Importer: prog.imp}).Check(p.ImportPath, prog.fset, pkg.files, pkg.info); err != nil {
+		return bodyGuardPackage{}, fmt.Errorf("type-checking %s: %w", p.ImportPath, err)
+	}
+	return pkg, nil
+}
+
+// lockedImporter is an importer that packages checked side by side may share:
+// the gc importer keeps the packages it has read in a map, unguarded.
+type lockedImporter struct {
+	mu  sync.Mutex
+	imp types.Importer
+}
+
+func (l *lockedImporter) Import(path string) (*types.Package, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.imp.Import(path)
 }
 
 func newBodyGuardInfo() *types.Info {

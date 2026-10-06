@@ -27,21 +27,13 @@ const networkInterfaceRouteCount = 7
 
 const testIfaceName = "vmbr0"
 
-// networkInterfaceLegacyPermissions is what each handler checked with a
-// hand-placed call BEFORE Phase 6e, transcribed from
-// `git show HEAD:internal/api/handlers/networks.go` at commit eb888b6: one
-// requireClusterPerm per handler, nothing else — no requirePerm, no
-// hasClusterPerm, no accessibleClusters.
-//
-// Every one of them hoists: the permission is a pair of literals in each
-// case and :cluster_id is the first path parameter of every route, so
-// nothing here is Deferred, Advisory, Public, SelfService or global.
-//
-// The entry worth writing out is the DELETE, which is the only one of the
-// seven on delete:network. revert is manage:network even though it throws a
-// pending configuration away, because what it discards is an unapplied edit
-// rather than an interface — and that asymmetry is exactly the kind of thing
-// a tally exists to freeze.
+// networkInterfaceLegacyPermissions is what each handler checked with a hand-placed call BEFORE Phase 6e,
+// transcribed from `git show HEAD:internal/api/handlers/networks.go` at eb888b6: one requireClusterPerm
+// per handler, nothing else. Every one hoists (the permission is a pair of literals and :cluster_id is
+// the first path parameter), so nothing is Deferred, Advisory, Public, SelfService or global. The entry
+// worth writing out is the DELETE, the only one of the seven on delete:network; revert is manage:network
+// though it throws a pending configuration away, because what it discards is an unapplied edit rather
+// than an interface, the asymmetry a tally exists to freeze.
 var networkInterfaceLegacyPermissions = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/networks":                      "view:network",
 	"GET /api/v1/clusters/:cluster_id/networks/:node_name":           "view:network",
@@ -57,7 +49,7 @@ var networkInterfaceLegacyPermissions = map[string]string{
 // passes its own table.
 func declaredNetworkEndpoints(t *testing.T, tally map[string]string) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	out := map[string]Endpoint{}
 	for _, e := range s.registry.Endpoints() {
 		if _, ours := tally[e.Method+" "+e.Path]; ours {
@@ -67,20 +59,13 @@ func declaredNetworkEndpoints(t *testing.T, tally map[string]string) map[string]
 	return out
 }
 
-// assertNetworkTally is the check that makes each NetworkHandler slice a
-// refactor rather than a change: every hand-placed call moves into
-// middleware with the SAME action and the SAME resource.
-//
-// It compares the rendered permission rather than only the action, because
-// checking the action alone would let a route drift onto another resource
-// entirely and still pass — which is not hypothetical: the five node
-// firewall routes spent six months on a :firewall resource that the
-// permission catalogue never contained, and every one of them 403'd.
-//
-// scope is the scope every route in the table must declare, so that a
-// cluster-scoped batch cannot quietly acquire a global route (which would
-// refuse every operator holding the grant on exactly the cluster they are
-// acting on) or the reverse.
+// assertNetworkTally makes each NetworkHandler slice a refactor rather than a change: every hand-placed
+// call moves into middleware with the SAME action and the SAME resource. It compares the rendered
+// permission, since the action alone would let a route drift onto another resource and pass (the five
+// node firewall routes spent six months on a :firewall resource the catalogue never contained, and every
+// one 403'd). scope is what every route in the table must declare, so a cluster-scoped batch cannot
+// quietly acquire a global route (refusing every operator holding the grant on the cluster they act on)
+// or the reverse.
 func assertNetworkTally(t *testing.T, tally map[string]string, want int, scope ScopeKind, byPermission map[string]int) {
 	t.Helper()
 	declared := declaredNetworkEndpoints(t, tally)
@@ -140,7 +125,7 @@ func TestNetworkInterfaceRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T
 // route trips the first of them — so a loop sharing that body would never
 // run in the one situation it exists for.
 func TestEveryDeclaredNetworkInterfaceRouteIsInTheTally(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	seen := 0
 	for _, e := range s.registry.Endpoints() {
 		if !strings.HasPrefix(e.Path, networkScope) {
@@ -159,19 +144,12 @@ func TestEveryDeclaredNetworkInterfaceRouteIsInTheTally(t *testing.T) {
 	}
 }
 
-// TestNetworkInterfaceBodyDeclaresEveryProxmoxOptionField is the guard
-// against the ONE regression this migration could ship silently.
-//
-// The layer being replaced bound the body with c.Bind().Body into
-// proxmox.CreateNetworkInterfaceParams, so every JSON tag on that struct has
-// always been an accepted key — and apischema rejects a key the schema does
-// not declare. A field left out of the declaration therefore turns a request
-// that has always worked into a 400 that blames the caller, and no fixture
-// would reveal it unless the fixture happened to send that field.
-//
-// Reflecting over the struct rather than listing the names is the point: a
-// field ADDED to the Proxmox params in a later release fails here until it is
-// declared, instead of quietly becoming unsendable.
+// TestNetworkInterfaceBodyDeclaresEveryProxmoxOptionField guards the ONE regression this migration could
+// ship silently: the replaced layer bound the body with c.Bind().Body into
+// proxmox.CreateNetworkInterfaceParams, so every JSON tag has always been an accepted key, while apischema
+// rejects a key the schema does not declare. A field left out turns a request that always worked into a
+// 400 that blames the caller, which no fixture reveals unless it sends that field. Reflecting over the
+// struct rather than listing names means a field ADDED upstream fails here until it is declared.
 func TestNetworkInterfaceBodyDeclaresEveryProxmoxOptionField(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -317,20 +295,12 @@ func TestNetworkInterfaceDeleteKeysAreAllowListed(t *testing.T) {
 	}
 }
 
-// TestNetworkInterfaceSentinelsSurvive is the case class the brief for this
-// migration called out, and the one a format would have broken.
-//
-// Three values have to keep meaning what they always meant:
-//
-//   - autostart 0 — the explicit off, which Proxmox's own checkbox sends as
-//     an unchecked value and which is ALWAYS written to the form.
-//   - mtu 0, ovs_tag 0, vlan-id 0 — "not set", which
-//     networkIfaceOptionsToForm spells by omitting the key. A Minimum of
-//     1280 or 1 would 400 a caller who has been spelling it that way since
-//     the endpoint shipped.
-//   - an empty string on any of the text settings — also "not set", dropped
-//     by the same function. Every registered apischema format rejects "", so
-//     none of them carries one.
+// TestNetworkInterfaceSentinelsSurvive covers the case class a format would have broken. Three values
+// must keep meaning what they always meant: autostart 0, the explicit off (Proxmox's unchecked checkbox,
+// ALWAYS written to the form); mtu 0, ovs_tag 0 and vlan-id 0, "not set", which networkIfaceOptionsToForm
+// spells by omitting the key (a Minimum of 1280 or 1 would 400 a caller who has spelled it that way since
+// the endpoint shipped); and an empty string on any text setting, also "not set" and dropped by the same
+// function (every registered apischema format rejects "", so none carries one).
 func TestNetworkInterfaceSentinelsSurvive(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPost, networkScope+"/:node_name")
 	for _, tt := range []struct {
@@ -487,18 +457,11 @@ func TestNetworkInterfaceRoutesRejectAnUndeclaredQueryKey(t *testing.T) {
 	}
 }
 
-// networkValidValues is one acceptable value per REQUIRED parameter across
-// the whole NetworkHandler registry.
-//
-// It exists so that a case about one parameter fills in every other required
-// one, and therefore fails for the reason under test rather than for a
-// missing sibling. A Validate call that supplies a single key always errors,
-// which would make every "this value is refused" assertion pass vacuously —
-// a shape this repo has been bitten by before.
-//
-// The names are the placeholder scheme's rather than textbook ones, because
-// these are route substitutions and a value that could collide with a real
-// object buys nothing and has to be argued about in every review.
+// networkValidValues is one acceptable value per REQUIRED parameter across the whole NetworkHandler
+// registry, so a case about one parameter fills in every other required one and fails for the reason
+// under test rather than a missing sibling: a Validate call that supplies a single key always errors,
+// which would make every "this value is refused" assertion pass vacuously. The names are the placeholder
+// scheme's, since a value that could collide with a real object has to be argued about in every review.
 var networkValidValues = map[string]any{
 	"cluster_id": testClusterID,
 	"node_name":  testNodeName,

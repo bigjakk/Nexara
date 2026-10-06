@@ -3,8 +3,6 @@ package handlers
 import (
 	"cmp"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"maps"
 	"path/filepath"
 	"reflect"
@@ -15,34 +13,23 @@ import (
 	"github.com/bigjakk/nexara/internal/auth"
 )
 
-// TestGuard_SessionsRotateOnlyThroughRotateRefreshToken keeps the "0 rows means
-// refused" half of the refresh race fix from being bypassed.
-//
-// queries/sessions.sql's RotateSessionToken is conditional, and says so with a
-// row count: 0 means the session was revoked, expired or already rotated since the
-// refresh validated it, and no token may be issued. A caller that ignores the
-// count gets the old bug back exactly — a revoked session rotated, a live access
-// token minted for it — and nothing in the type system objects, because the
-// count is just an int64. auth.RotateRefreshToken is the one place that turns it
-// into an error, so it must be the only caller. The unconditional query it
-// replaced, UpdateSessionTokenHash, must not come back either.
-//
-// A static check, because no behavioural test can see a caller that does not
-// exist yet: the handler tests prove the handler that IS there refuses, not that
-// a second one would.
-//
-// Both spellings are watched — a call (`q.RotateSessionToken(...)`) and a bare
-// reference (`f := q.RotateSessionToken`) — because the second sails past a check
-// that only looks at call expressions and still discards the count.
+// TestGuard_SessionsRotateOnlyThroughRotateRefreshToken keeps the "0 rows means refused" half of the
+// refresh race fix from being bypassed. RotateSessionToken is conditional and says so with a row
+// count: 0 means the session was revoked, expired or already rotated since the refresh validated it.
+// A caller that ignores the count gets the old bug back (a live access token for a revoked session)
+// and the type system cannot object, so auth.RotateRefreshToken, the one place that turns the count
+// into an error, must be the only caller; the unconditional UpdateSessionTokenHash must not return.
+// Static, because no behavioural test sees a caller that does not exist yet. A call and a bare
+// reference (`f := q.RotateSessionToken`) are both watched: the second discards the count too.
 func TestGuard_SessionsRotateOnlyThroughRotateRefreshToken(t *testing.T) {
 	const allowed = "internal/auth/session.go"
 
-	fset := token.NewFileSet()
+	fset := guardFset
 	scanned := 0
 	allowedHits := 0
 
 	for _, path := range goSourceFiles(t) {
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		file, err := guardParsed(path)
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}
@@ -83,31 +70,21 @@ func TestGuard_SessionsRotateOnlyThroughRotateRefreshToken(t *testing.T) {
 	}
 }
 
-// TestGuard_PreviousTokenLookupOnlyDecides keeps the lookup of a session by the
-// token it had one rotation ago from ever being used to authenticate.
-//
-// GetSessionByPreviousTokenHash is the one query in which a rotated-away token
-// matches a live session, and that match is only safe for decisions that issue
-// nothing: ending the session (FindSessionForLogout) and choosing how a refusal is
-// shaped (RefusalSparesCookie). Reached from anywhere else — Refresh, the session
-// list, a new endpoint — it would turn every token a session ever had into a
-// second credential for the length of its window. So it may be named in exactly
-// one file, internal/auth/session.go, and in it only inside those two methods and
-// once in each. ValidateRefreshToken in particular must not: it is what Refresh
-// and is_current stand on.
-//
-// A static check, because no behavioural test can see a caller that does not
-// exist yet. Both spellings are watched, a call and a bare reference, as in
-// TestGuard_SessionsRotateOnlyThroughRotateRefreshToken, and the guard fails if
-// it cannot see the two uses it permits.
+// TestGuard_PreviousTokenLookupOnlyDecides keeps GetSessionByPreviousTokenHash, the one query where a
+// rotated-away token matches a live session, from ever authenticating. That match is safe only for
+// decisions that issue nothing: ending the session (FindSessionForLogout) and shaping a refusal
+// (RefusalSparesCookie). Anywhere else (Refresh, the session list) it would make every token a session
+// ever had a second credential for its window, so it may be named only in internal/auth/session.go,
+// inside those two methods, once each; ValidateRefreshToken in particular must not. Static, a call and
+// a bare reference watched, and it fails if it cannot see the two uses it permits.
 func TestGuard_PreviousTokenLookupOnlyDecides(t *testing.T) {
 	const allowedFile = "internal/auth/session.go"
 	allowed := map[string]int{"FindSessionForLogout": 0, "RefusalSparesCookie": 0}
 
-	fset := token.NewFileSet()
+	fset := guardFset
 	scanned := 0
 	for _, path := range goSourceFiles(t) {
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		file, err := guardParsed(path)
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}
@@ -147,30 +124,15 @@ func TestGuard_PreviousTokenLookupOnlyDecides(t *testing.T) {
 	}
 }
 
-// TestGuard_FindSessionForLogoutIsOnlyReachedFromLogoutAndLogoutAll keeps the sign-out lookup
-// from becoming a way to authenticate.
-//
-// FindSessionForLogout is the one method that hands back a WHOLE session for a
-// token that is not its current one: a match on the token the session had one
-// rotation ago, for the length of the sign-out window. That is safe for uses that
-// issue nothing, and the two sign-out handlers are exactly those: Logout ends the
-// session the token names, and LogoutAll only decides whether the cookie in its
-// request is the caller's to delete (it issues nothing and identifies no one; the
-// caller is the access token's user, found by authRequired). Everything that
-// stands on "this token is the session's live credential" must go through
-// ValidateRefreshToken instead, which never matches a previous token: Refresh, and
-// the session list's is_current (currentSessionID), which resolves the caller's
-// own session through the refresh cookie.
-//
-// Pointing currentSessionID at FindSessionForLogout is the case worth naming,
-// because it passes every behavioural test that existed — the method returns a
-// complete, correct-looking session — and quietly makes a rotated-away cookie
-// work as an identity for the label, and for whatever is built on it later. A
-// static check, because no behavioural test can see a caller that does not exist
-// yet. So the method may be named in exactly two places outside tests: one call
-// in Logout and one in LogoutAll, both in internal/api/handlers/auth.go. Both
-// spellings are watched, a call and a bare reference, and the guard fails if it
-// cannot see the one use each permits.
+// TestGuard_FindSessionForLogoutIsOnlyReachedFromLogoutAndLogoutAll keeps the sign-out lookup from
+// becoming a way to authenticate. FindSessionForLogout returns a WHOLE session for a token that is not
+// its current one (a match on the previous token, for the sign-out window): safe for Logout, which ends
+// the session the token names, and LogoutAll, which only decides whether the request's cookie is the
+// caller's to delete. Anything standing on "this token is the live credential" must use
+// ValidateRefreshToken, which never matches a previous token. Pointing currentSessionID at
+// FindSessionForLogout passes every behavioural test (it returns a complete session) and quietly makes
+// a rotated-away cookie an identity for is_current, so the method may be named only in one call each in
+// Logout and LogoutAll (internal/api/handlers/auth.go); the guard fails if it cannot see both.
 func TestGuard_FindSessionForLogoutIsOnlyReachedFromLogoutAndLogoutAll(t *testing.T) {
 	const allowedFile = "internal/api/handlers/auth.go"
 	// Each permitted function, and the reason it may. A new entry is a decision,
@@ -181,11 +143,11 @@ func TestGuard_FindSessionForLogoutIsOnlyReachedFromLogoutAndLogoutAll(t *testin
 	}
 	allowedNames := slices.Sorted(maps.Keys(allowed))
 
-	fset := token.NewFileSet()
+	fset := guardFset
 	scanned := 0
 	hits := map[string]int{}
 	for _, path := range goSourceFiles(t) {
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		file, err := guardParsed(path)
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}

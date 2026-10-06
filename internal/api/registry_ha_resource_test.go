@@ -256,17 +256,13 @@ func haDeleteAudit(t *testing.T, d *haCreateDBTX) map[string]any {
 	return details
 }
 
-// TestHADeleteResourceAuditsTheSettingsItStored pins the delete's audit row to
-// the resource's stored state: a retry count or failback the resource set is
-// recorded, 0 included, and one it left to Proxmox's default is not. These were
-// ints tested != 0, so an explicit 0 — restart or relocation switched off —
-// vanished from the row and failback was never recorded at all.
-//
-// A snapshot that could not be read must not pass for a resource on every
-// default, which is what its missing keys would otherwise say — and its error
-// must stay out of the row, which every Viewer can read and which a connection
-// error would fill with the PVE host and port. So each case compares the WHOLE
-// detail map, not the keys it expects: a key nobody asked for fails it.
+// TestHADeleteResourceAuditsTheSettingsItStored pins the delete's audit row to the resource's stored
+// state: a retry count or failback the resource set is recorded, 0 included, and one it left to Proxmox's
+// default is not (these were ints tested != 0, so an explicit 0, restart or relocation switched off,
+// vanished from the row and failback was never recorded). A snapshot that could not be read must not pass
+// for a resource on every default, which its missing keys would otherwise say, and its error must stay out
+// of the row, which every Viewer can read and a connection error would fill with the PVE host and port.
+// So each case compares the WHOLE detail map, not the keys it expects: a key nobody asked for fails it.
 func TestHADeleteResourceAuditsTheSettingsItStored(t *testing.T) {
 	num := func(s string) json.Number { return json.Number(s) }
 	for _, tt := range []struct {

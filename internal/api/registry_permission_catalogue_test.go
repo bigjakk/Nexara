@@ -9,22 +9,13 @@ import (
 	"testing"
 )
 
-// This file closes the gap that let the node firewall routes 403 every
-// caller for six months.
-//
-// The RBAC engine resolves a permission by joining user_roles →
-// role_permissions → permissions and matching on (action, resource). The
-// permissions table is seeded ONLY by migrations — no Go code and no query
-// in queries/ ever inserts into it — so a resource the migrations never
-// seed cannot be granted to any role, cannot be held by any user, and
-// cannot be matched by HasPermission. A route declaring one is not
-// "restrictively gated"; it is unreachable, and it fails the same way for
-// Admin as for an anonymous caller, which is why nobody read the 403 as a
-// bug.
-//
-// rbac_route_guard_test.go already pins the ACTION vocabulary (knownActions)
-// and proves every route reaches a permission check. Neither catches a
-// well-formed check against a resource that does not exist. This does.
+// This file closes the gap that let the node firewall routes 403 every caller for six months. The RBAC
+// engine joins user_roles, role_permissions and permissions and matches on (action, resource), and the
+// permissions table is seeded ONLY by migrations (no Go code or query inserts into it), so a resource the
+// migrations never seed cannot be granted, held or matched. A route declaring one is not "restrictively
+// gated" but unreachable, failing the same way for Admin as for an anonymous caller, which is why nobody
+// read the 403 as a bug. rbac_route_guard_test.go pins the ACTION vocabulary and proves every route
+// reaches a permission check; neither catches a well-formed check against a resource that does not exist.
 
 // permissionInsertRe finds the head of one INSERT INTO permissions
 // statement. Only the head: where the statement ENDS is decided by
@@ -36,22 +27,13 @@ var permissionInsertRe = regexp.MustCompile(`(?is)INSERT\s+INTO\s+permissions\s*
 // permissionTupleRe pulls the quoted literals out of one VALUES tuple.
 var permissionTupleRe = regexp.MustCompile(`'([^']*)'`)
 
-// stripSQLComments removes -- line comments and /* */ block comments,
-// leaving string literals alone.
-//
-// It is not decoration. Without it the parser reads commented-out SQL as
-// live, so a migration that documents a permission it deliberately did NOT
-// add — or one that comments an insert out during a revert — would teach
-// the catalogue that the permission exists and silently re-open the very
-// bug TestGuard_DeclaredPermissionsExistInTheCatalogue was written to
-// catch. That is the vacuous direction: the guard keeps passing while no
-// longer able to fail.
-//
-// BLOCK comments are handled for a second-order version of the same
-// failure. An apostrophe inside one — "/* Nexara's catalogue */" — would
-// otherwise flip the in-string flag ON outside any literal, and every --
-// comment after it in the file would survive stripping. migrations/ already
-// contains block comments; it is one apostrophe away from mattering.
+// stripSQLComments removes -- line comments and /* */ block comments, leaving string literals alone.
+// Without it the parser reads commented-out SQL as live: a migration that documents a permission it
+// deliberately did NOT add, or comments an insert out during a revert, would teach the catalogue that the
+// permission exists and re-open the bug TestGuard_DeclaredPermissionsExistInTheCatalogue was written to
+// catch, the vacuous direction. BLOCK comments are handled for a second-order version of the same failure:
+// an apostrophe inside one ("/* Nexara's catalogue */") would flip the in-string flag ON outside any
+// literal and every -- comment after it in the file would survive stripping.
 func stripSQLComments(sql string) string {
 	var out strings.Builder
 	out.Grow(len(sql))
@@ -179,17 +161,12 @@ func isBareIdentifier(s string) bool {
 	return true
 }
 
-// TestParsePermissionInsertsHandlesTheAwkwardSQL is the parser's own
-// bite-proof, on synthetic input.
-//
-// Some of these shapes are transcribed from real migrations — the plain
-// seed from 000016, the gen_random_uuid() form that 19 of the 22 seeding
-// files use, the parenthesised description from 000078 — and the rest are
-// the ones that are NOT in migrations/ yet: a commented-out insert, a
-// semicolon inside a description, a block comment containing an
-// apostrophe. Those are the point. A parser that got every one of them
-// wrong would still agree with the database today and look correct, which
-// is how a guard ends up unable to fail.
+// TestParsePermissionInsertsHandlesTheAwkwardSQL is the parser's own bite-proof, on synthetic input.
+// Some shapes are transcribed from real migrations (the plain seed from 000016, the gen_random_uuid() form
+// 19 of the 22 seeding files use, the parenthesised description from 000078); the rest are NOT in
+// migrations/ yet and are the point: a commented-out insert, a semicolon inside a description, a block
+// comment containing an apostrophe. A parser that got every one wrong would still agree with the database
+// today, which is how a guard ends up unable to fail.
 func TestParsePermissionInsertsHandlesTheAwkwardSQL(t *testing.T) {
 	t.Parallel()
 
@@ -332,7 +309,7 @@ func TestGuard_DeclaredPermissionsExistInTheCatalogue(t *testing.T) {
 	missing := map[string][]site{}
 	checked := 0
 
-	for _, e := range newRouteStubServer(t).registry.Endpoints() {
+	for _, e := range sharedRouteStub(t).registry.Endpoints() {
 		route := e.Method + " " + e.Path
 		var sites []site
 		if c := e.Permissions.Check; c != nil {
@@ -402,7 +379,7 @@ func TestGuard_DeclaredActionsAreInTheCatalogue(t *testing.T) {
 
 	checked := 0
 	seen := map[string][]string{}
-	for _, e := range newRouteStubServer(t).registry.Endpoints() {
+	for _, e := range sharedRouteStub(t).registry.Endpoints() {
 		route := e.Method + " " + e.Path
 		var checks []Check
 		if c := e.Permissions.Check; c != nil {

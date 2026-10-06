@@ -2,8 +2,6 @@ package api
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,21 +9,15 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-// TestClusterCreateLimiterCannotBeSpelledAround is a regression test for a
-// bypass that a path-comparing limiter has by construction.
-//
-// Fiber routes on a lowercased, slash-trimmed path — CaseSensitive and
-// StrictRouting are both left false in buildFiberConfig — so "POST
-// /API/v1/clusters//" reaches the same handler as "/api/v1/clusters". An
-// app-level limiter whose Next() compares c.Path() against "/api/v1/clusters"
-// does NOT match those spellings and steps aside, while the request still runs
-// the handler and, in bootstrap mode, still spends a real /access/ticket
-// attempt against the operator's hypervisor. The cap that exists to stop Nexara
-// being used as a password-spraying proxy was 60x looser than advertised for
-// anyone who typed the path differently.
-//
-// Attaching the limiter to the route removes the class: matching is Fiber's job
-// and happens before the middleware runs.
+// TestClusterCreateLimiterCannotBeSpelledAround is a regression test for a bypass a path-comparing
+// limiter has by construction. Fiber routes on a lowercased, slash-trimmed path (CaseSensitive and
+// StrictRouting are both false in buildFiberConfig), so "POST /API/v1/clusters//" reaches the same handler
+// as "/api/v1/clusters". An app-level limiter whose Next() compares c.Path() against "/api/v1/clusters"
+// does NOT match those spellings and steps aside while the request still runs the handler and, in bootstrap
+// mode, spends a real /access/ticket attempt against the operator's hypervisor: the cap meant to stop
+// Nexara being a password-spraying proxy was 60x looser than advertised for anyone who typed the path
+// differently. Attaching the limiter to the route removes the class: matching is Fiber's job and happens
+// before the middleware runs.
 func TestClusterCreateLimiterCannotBeSpelledAround(t *testing.T) {
 	const max = 10
 
@@ -75,27 +67,15 @@ func TestClusterCreateLimiterCannotBeSpelledAround(t *testing.T) {
 	}
 }
 
-// TestClusterCreateLimiterIsRouteScopedNotAppLevel is a guard over the real
-// wiring, because the behavioural version of this assertion is a tautology —
-// building a route with auth ahead of the limiter and then observing that the
-// limiter sits behind auth proves nothing about setupRoutes.
-//
-// Two properties matter and neither is visible from a hand-built app:
-//
-//   - Registered on the ROUTE. An app.Use limiter matching on c.Path() is
-//     bypassable by path spelling (see the test above), because Fiber routes on
-//     a lowercased, slash-trimmed path.
-//   - Therefore it runs after authentication, so anonymous traffic cannot drain
-//     the budget and lock legitimate onboarding out.
-//
-// Since Phase 6j the route is DECLARED rather than registered in router.go, so
-// the first half is read off the declaration the running route table was built
-// from rather than out of router.go's source. That is strictly stronger than
-// the AST search it replaces: a mention of clusterCreateLimiter anywhere in the
-// file satisfied a text search, while Endpoint.RateLimiter being non-nil is the
-// value mountRegistry actually splices into the chain. Its POSITION in that
-// chain — after authentication, ahead of the permission check — is pinned by
-// TestRegistryChainOrder.
+// TestClusterCreateLimiterIsRouteScopedNotAppLevel guards the real wiring, because the behavioural
+// version is a tautology (a hand-built app with auth ahead of the limiter proves nothing about
+// setupRoutes). Two properties, neither visible from a hand-built app: it is registered on the ROUTE (an
+// app.Use limiter matching c.Path() is bypassable by path spelling, see above), and so it runs after
+// authentication, so anonymous traffic cannot drain the budget and lock legitimate onboarding out. Since
+// Phase 6j the route is DECLARED, so the first half is read off the declaration the running route table was
+// built from: Endpoint.RateLimiter being non-nil is the value mountRegistry splices into the chain, where a
+// text search was satisfied by any mention of clusterCreateLimiter in router.go. Its POSITION in the chain
+// (after authentication, ahead of the permission check) is pinned by TestRegistryChainOrder.
 func TestClusterCreateLimiterIsRouteScopedNotAppLevel(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPost, pathPrefix+"clusters")
 	if e.RateLimiter == nil {
@@ -111,8 +91,7 @@ func TestClusterCreateLimiterIsRouteScopedNotAppLevel(t *testing.T) {
 		}
 	}
 
-	fset := token.NewFileSet()
-	mw, err := parser.ParseFile(fset, "middleware.go", nil, 0)
+	mw, err := parsedSource("middleware.go")
 	if err != nil {
 		t.Fatalf("parse middleware.go: %v", err)
 	}

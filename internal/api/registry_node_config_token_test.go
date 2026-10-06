@@ -758,7 +758,7 @@ func TestNodeConfigReadsReturnTheSaveToken(t *testing.T) {
 	t.Run("the token fits the parameter that carries it back", func(t *testing.T) {
 		w, _, _ := newWorld(t)
 		token := w.tokenFrom(t, w.optionsGET(testNodeName))
-		for _, e := range []Endpoint{sharedEndpoint(t, fiber.MethodPut, nodeOptionsPath), sharedEndpoint(t, fiber.MethodPut, acmeConfigPath)} {
+		for _, e := range []Endpoint{declaredEndpoint(t, fiber.MethodPut, nodeOptionsPath), declaredEndpoint(t, fiber.MethodPut, acmeConfigPath)} {
 			if bound := e.Parameters["digest"].MaxLength; bound == nil || len(token) > *bound {
 				t.Errorf("PUT %s declares the digest bound %v, and the token is %d characters", e.Path, bound, len(token))
 			}
@@ -1300,7 +1300,7 @@ func TestNodeConfigACMESaveRefusesControlCharacters(t *testing.T) {
 	// The settings are the declaration's own (everything on the PUT that is neither a
 	// path parameter nor plumbing), so a key added to the route is held to this test too.
 	var keys []string
-	for name := range sharedEndpoint(t, fiber.MethodPut, acmeConfigPath).Parameters {
+	for name := range declaredEndpoint(t, fiber.MethodPut, acmeConfigPath).Parameters {
 		if !slices.Contains([]string{"cluster_id", "node", "delete", "digest"}, name) {
 			keys = append(keys, name)
 		}

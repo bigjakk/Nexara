@@ -2,51 +2,21 @@ package handlers
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"path/filepath"
 	"sort"
 	"testing"
 )
 
-// Static-analysis guard, in the spirit of guest_cluster_scope_guard_test.go: no
-// database, no running server.
-//
-// A rolling update job is looked up by its Nexara uuid, and a uuid says nothing
-// about which cluster the job belongs to. The permission gate authorizes the
-// cluster named in the PATH — that is what the declared Check in
-// internal/api/registry_rolling_update.go resolves — so a handler that loads a
-// job by uuid and then acts on it WITHOUT checking that the row belongs to the
-// path's cluster serves cross-cluster: a caller holding manage:rolling_update on
-// cluster A puts A in the path and B's job id in it.
-//
-// SEVEN of the eight did exactly that. CancelJob alone carried the comparison,
-// with a comment saying why ("the permission check above covered the URL
-// cluster; make sure the job actually belongs to it"); GetJob, StartJob,
-// PauseJob, ResumeJob, ListNodes, ConfirmUpgrade and SkipNode did not, so
-// another cluster's job could be read, started, paused, resumed, confirmed or
-// skipped. PauseJob and ResumeJob did not even LOAD the job — they issued the
-// guarded UPDATE straight from the path id.
-//
-// The comparison now lives in ONE place, jobInCluster, and this guard is what
-// stops the next direct lookup reopening the hole. That shape is deliberate and
-// is the lesson of the opt-in-guard class: a validator in the CALLER is one the
-// next caller silently skips, so the check goes at the choke point and the guard
-// proves nothing routes around it.
-//
-// BE CLEAR ABOUT WHAT THIS DOES NOT CATCH. It matches only the literal
-// `x.queries.GetRollingUpdateJob(…)` shape, so hoisting the receiver walks past
-// it; and it proves the choke point is USED, not that its result is acted on.
-// It catches the shape that actually occurred — a direct lookup with no
-// comparison at all — and should not be trusted further than that.
-//
-// It DOES sweep the whole package rather than rolling_update.go alone, which is
-// the difference between "the eight routes are scoped" and "nothing anywhere can
-// reach the row unscoped". A guard for a choke point has to watch every door, or
-// the next caller is simply written in a different file. A lookup from OUTSIDE
-// this package is out of reach — internal/rolling's orchestrator calls the same
-// query — but it operates on jobs it already owns rather than on an id a request
-// supplied, which is the distinction that matters here.
+// Static-analysis guard, in the spirit of guest_cluster_scope_guard_test.go. A rolling update job is
+// looked up by uuid, which says nothing about its cluster, while the gate authorizes the PATH's
+// cluster (the declared Check in registry_rolling_update.go), so a handler that loads a job by uuid
+// and acts on it WITHOUT checking the row belongs to the path's cluster serves cross-cluster. Seven
+// of the eight did exactly that (only CancelJob compared; PauseJob and ResumeJob did not even LOAD
+// the job, they issued the guarded UPDATE from the path id). The comparison now lives in ONE place,
+// jobInCluster, and this guard proves nothing routes around it. It matches only the literal
+// `x.queries.GetRollingUpdateJob(...)` shape and proves the choke point is USED, not that its result
+// is acted on. It sweeps the whole package, since a choke point must be watched at every door;
+// internal/rolling's orchestrator calls the same query on jobs it already owns.
 const (
 	rollingJobLookup     = "GetRollingUpdateJob"
 	rollingJobChokePoint = "RollingUpdateHandler.jobInCluster"
@@ -75,14 +45,13 @@ func TestGuard_RollingUpdateJobLookupsAreClusterScoped(t *testing.T) {
 		t.Fatalf("glob: %v", err)
 	}
 
-	fset := token.NewFileSet()
 	callsChokePoint := map[string]bool{}
 	callsLookup := map[string]bool{}
 	declaredIn := map[string]string{}
 	var chokePointBody *ast.BlockStmt
 
 	for _, path := range paths {
-		file, parseErr := parser.ParseFile(fset, path, nil, 0)
+		file, parseErr := guardParsed(path)
 		if parseErr != nil {
 			t.Fatalf("parse %s: %v", path, parseErr)
 		}

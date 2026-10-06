@@ -7,29 +7,15 @@ import (
 	"testing"
 )
 
-// Static-analysis guard, in the same spirit as tracktask_guard_test.go: no
-// database, no running server, so it fails CI the moment a handler grows the
-// stored-credential/mutable-address pairing without the refusal.
-//
-// The tell is narrow and deliberate. An Update handler that lets a caller move
-// an address while keeping the secret has to carry the old ciphertext forward
-// from the row it just loaded — `existing.<Something>Encrypted`. Every handler
-// in this package that does so must also consult credentialRedirected, use the
-// result, and do it before the write.
-//
-// BE CLEAR ABOUT WHAT THIS DOES NOT CATCH. It is a check against copy-pasting
-// an existing Update handler, not a proof:
-//
-//   - It keys on the `existing` variable name. A handler that names its loaded
-//     row `srv`, `cfg` or `creds` is invisible to it.
-//   - It only sees an address and a credential in the SAME row. The pairing can
-//     span tables: cluster_ssh_credentials stores a key against a cluster_id,
-//     while the address it is delivered to lives in nodes.address, which the
-//     collector fills from whatever the cluster's api_url reports. Nothing here
-//     models that, and credentialRedirected would not fix it.
-//   - It cannot tell that the arguments are the right ones.
-//
-// See credential_redirect.go for the rule itself.
+// Static-analysis guard, in the spirit of tracktask_guard_test.go: it fails when a handler grows the
+// stored-credential/mutable-address pairing without the refusal. The tell is narrow: an Update
+// handler that lets a caller move an address while keeping the secret carries the old ciphertext
+// forward from the row it just loaded (`existing.<Something>Encrypted`), and every such handler must
+// consult credentialRedirected, use the result, and do it before the write (the rule is in
+// credential_redirect.go). A check against copy-pasting an existing Update handler, not a proof: it keys
+// on the variable name `existing`; it sees only an address and a credential in the SAME row (the
+// cluster_ssh_credentials key is delivered to nodes.address, which the collector fills from api_url,
+// and nothing models that); and it cannot tell the arguments are the right ones.
 
 // storedCredentialCarriers returns the name of every function in the package
 // that carries a stored ciphertext forward from a loaded row, mapped to

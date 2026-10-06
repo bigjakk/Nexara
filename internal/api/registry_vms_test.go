@@ -27,20 +27,6 @@ const (
 	attachRouteTarget = "/api/v1/clusters/" + testClusterID + "/vms/" + testVMID + "/disks/attach"
 )
 
-// declaredEndpoint returns the production declaration for one route, and
-// fails if the registry does not have it.
-func declaredEndpoint(t *testing.T, method, path string) Endpoint {
-	t.Helper()
-	s := newRouteStubServer(t)
-	for _, e := range s.registry.Endpoints() {
-		if e.Method == method && e.Path == path {
-			return e
-		}
-	}
-	t.Fatalf("%s %s is not declared in the registry", method, path)
-	return Endpoint{}
-}
-
 // probeEndpoint is a declared endpoint with its handler swapped for a
 // capture, so a test can see exactly what the schema handed over without
 // needing the handler's database and Proxmox client.
@@ -341,23 +327,14 @@ var vmRoutesWithDeferredPermission = map[string]string{
 	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template":   "clones a container with CloneCT when the row is lxc",
 }
 
-// routesOutsideTheClusterCheckShape names every declared route that is
-// deliberately NOT a plain cluster-scoped Check, with the reason, merged
-// from the per-domain tables each migration writes.
-//
-// TestVMRoutesDeclareACheck holds "a declared route is a cluster-scoped
-// Check unless it is listed here" across the whole registry, and up to
-// Phase 6b every route in it was one — the two VM exceptions above were
-// still cluster-scoped, just Deferred. Phase 6c is the first batch with
-// routes whose subject is not a cluster at all (a migration job, a PBS
-// server, the instance-wide virtio-win catalog), so the exception surface
-// has to be able to say that. It stays an enumerated list with a reason
-// per entry for the same purpose it always had: a shape nobody listed is a
-// shape nobody re-reads.
-//
-// The check runs in both directions — an entry whose route IS a plain
-// cluster Check is reported as stale, so this cannot rot into a blanket
-// waiver.
+// routesOutsideTheClusterCheckShape names every declared route that is deliberately NOT a plain
+// cluster-scoped Check, with the reason, merged from the per-domain tables each migration writes.
+// TestVMRoutesDeclareACheck holds "a declared route is a cluster-scoped Check unless listed here" across
+// the whole registry; Phase 6c brought routes whose subject is not a cluster at all (a migration job, a
+// PBS server, the instance-wide virtio-win catalog), so the exception surface must be able to say that.
+// It stays an enumerated list with a reason per entry (a shape nobody listed is one nobody re-reads), and
+// is checked both ways: an entry whose route IS a plain cluster Check is reported stale, so it cannot
+// become a blanket waiver.
 var routesOutsideTheClusterCheckShape = func() map[string]string {
 	out := map[string]string{}
 	for _, m := range []map[string]string{
@@ -532,7 +509,7 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 		"registerVersionEndpoint":          0,
 	}
 	reg := NewRegistry()
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	registerVMEndpoints(reg, s.vmHandler, s.mappingUsageLimiter())
 	declared["registerVMEndpoints"] = reg.Len()
@@ -746,28 +723,15 @@ func TestRegistryDomainCountsAreIndividuallyRight(t *testing.T) {
 	}
 }
 
-// TestVMRoutesDeclareACheck records what the survey of these 33 handlers
-// found: all but two resolved the cluster from the path and then made one
-// static requireClusterPerm call, so all but two are declarable as a
-// plain Check. None needed Advisory (a listing filtered rather than
-// gated).
-//
-// It is a record rather than a rule: a VM route that genuinely computes
-// its permission SHOULD declare Deferred, and this test is where that
-// gets noticed and re-justified instead of slipping through. That is
-// exactly how the two exceptions got here — they were declared as plain
-// manage:vm Checks first, and a security review found that a caller with
-// manage:vm and no container rights could irreversibly convert a
-// container through them.
-//
-// It walks the WHOLE registry rather than only the VM declarations, and
-// keeps doing so as later phases add domains: "every declared route is a
-// cluster-scoped Check unless it is on a listed exception" is an invariant
-// worth holding across the registry, and a per-domain filter here would
-// let a new domain's route escape it by simply not being a VM route. The
-// count is the sum of the per-domain constants for the same reason.
+// TestVMRoutesDeclareACheck records what the survey of the 33 VM handlers found: all but two resolved the
+// cluster from the path and made one static requireClusterPerm call, so all but two are a plain Check
+// (none needed Advisory). It is a record rather than a rule: a route that genuinely computes its
+// permission SHOULD declare Deferred, and this is where that gets re-justified instead of slipping
+// through. The two exceptions were declared plain manage:vm Checks first, and a security review found a
+// caller with manage:vm and no container rights could irreversibly convert a container through them. It
+// walks the WHOLE registry, since a per-domain filter would let a new domain's route escape the invariant.
 func TestVMRoutesDeclareACheck(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	endpoints := s.registry.Endpoints()
 	if want := registryRouteCount(); len(endpoints) != want {
 		t.Errorf("the registry holds %d endpoints, want %d — the sum of the per-domain counts in "+
@@ -844,7 +808,7 @@ func TestVMRoutesDeclareACheck(t *testing.T) {
 // a path parameter the path does not name, which Register catches too but
 // only for the exact spelling.
 func TestVMRoutesDeclareEveryPathParameter(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	for _, e := range s.registry.Endpoints() {
 		for _, name := range pathParamNames(e.Path) {
 			prop, ok := e.Parameters[name]
@@ -932,28 +896,15 @@ func TestPoolParameterKeepsTheRemovalSentinel(t *testing.T) {
 	}
 }
 
-// TestPoolParameterRejectsWhatProxmoxWouldBounce is the other half. Each
-// value here previously reached Proxmox and came back as a 502 quoting a
-// URL the caller never wrote, because SetVMPool interpolates the value
-// into "/pools/{pool}" (internal/proxmox/client_admin.go).
-//
-// Traversal is NOT what this rejects, and the cases are chosen so nobody
-// reads it that way. url.PathEscape does not make "../../access/users" inert —
-// it encodes "/" as %2F, and pveproxy decodes that back into separators before
-// it routes (see proxmox.validatePathSegment) — but proxmox.UpdateResourcePool,
-// which SetVMPool calls, refuses the slash in validatePathSegment before any
-// request is built, and that client guard is what holds a traversal. Nor is
-// this value one: it is a SHAPE, not a destination. At pveproxy it answers 501,
-// because {poolid} is a leaf and the path below it names nothing, and a proxy
-// that decoded %2F and normalised would over-pop it past /api2/json onto
-// /api2/access/users, which is not an API path. This rule rejects it for
-// being four levels deep, not for looking dangerous. What was wrong was the
-// ERROR: a 502 naming Proxmox for a request this API could have refused
-// itself.
-//
-// Note "." and ".." are NOT in this table. pve-poolid's segment charset
-// allows a bare dot, so they are pool ids Proxmox accepts; rejecting them
-// would be the invented-strictness mistake this pattern avoids.
+// TestPoolParameterRejectsWhatProxmoxWouldBounce is the other half: each value here previously reached
+// Proxmox and came back as a 502 quoting a URL the caller never wrote, because SetVMPool interpolates the
+// value into "/pools/{pool}". Traversal is NOT what this rejects: url.PathEscape does not make
+// "../../access/users" inert (pveproxy decodes %2F back into separators), but proxmox.UpdateResourcePool
+// refuses the slash in validatePathSegment before any request is built, and that client guard is what holds
+// a traversal. This value is a SHAPE, not a destination (at pveproxy it answers 501, a leaf with nothing
+// below it): it is rejected for being four levels deep, and what was wrong was the ERROR, a 502 naming
+// Proxmox for a request this API could have refused itself. "." and ".." are NOT in this table:
+// pve-poolid's charset allows a bare dot, and rejecting them would be the invented-strictness mistake.
 func TestPoolParameterRejectsWhatProxmoxWouldBounce(t *testing.T) {
 	const path = "/api/v1/clusters/:cluster_id/vms/:vm_id/pool"
 	target := "/api/v1/clusters/" + testClusterID + "/vms/" + testVMID + "/pool"
@@ -993,7 +944,7 @@ func TestPoolParameterRejectsWhatProxmoxWouldBounce(t *testing.T) {
 // still passed.
 func TestEveryPoolParameterCarriesThePattern(t *testing.T) {
 	var found int
-	for _, e := range newRouteStubServer(t).registry.Endpoints() {
+	for _, e := range sharedRouteStub(t).registry.Endpoints() {
 		prop, ok := e.Parameters["pool"]
 		if !ok {
 			continue
@@ -1077,7 +1028,7 @@ func TestBusEnumMatchesTheClient(t *testing.T) {
 // compiles each schema as it is declared: if buildRegistry were ever
 // changed to report rather than panic, this would still fail.
 func TestEveryVMEndpointCompiles(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	for _, e := range s.registry.Endpoints() {
 		if err := e.Parameters.Compile(); err != nil {
 			t.Errorf("%s %s: %v", e.Method, e.Path, err)
@@ -1135,22 +1086,13 @@ var snapshotCreateRoutes = []struct {
 	},
 }
 
-// TestSnapshotNameCapAgreesAcrossLayers is the pin under a number that
-// went years without anyone checking it.
-//
-// 40 is not Nexara's: pve-common registers pve-snapshot-name with
-// `maxLength => 40`, and every snapname parameter upstream uses that
-// standard option (see handlers.SnapshotMaxNameLen for the citation). The
-// risk is no longer that the number is wrong — it is that the three places
-// stating it drift apart, which is exactly what happened before the
-// declaration carried a MaxLength at all: the payload published "2 to 128
-// characters" for a route that answered 400 at 41.
-//
-// So this asserts all three say the same thing: the declared MaxLength,
-// the published prose, and the boundary the route actually enforces. The
-// MaxLength now references the constant rather than restating it, which
-// removes one drift axis; the prose is still hand-written, and is the one
-// this test is really holding.
+// TestSnapshotNameCapAgreesAcrossLayers is the pin under a number that went years unchecked. 40 is not
+// Nexara's: pve-common registers pve-snapshot-name with `maxLength => 40` and every upstream snapname uses
+// it (see handlers.SnapshotMaxNameLen). The risk is that the three places stating it drift, as they did
+// before the declaration carried a MaxLength (the payload published "2 to 128 characters" for a route that
+// answered 400 at 41). So the declared MaxLength, the published prose and the boundary the route enforces
+// must agree; the MaxLength now references the constant, and the hand-written prose is the one this
+// test really holds.
 func TestSnapshotNameCapAgreesAcrossLayers(t *testing.T) {
 	wantPhrase := fmt.Sprintf("2-%d characters", handlers.SnapshotMaxNameLen)
 
@@ -1283,20 +1225,13 @@ func newRecoveringRegistryApp(t *testing.T, es ...Endpoint) *fiber.App {
 	return app
 }
 
-// TestSnapshotCreateHandlerPassesItsOwnGuestKind closes the gap the
-// reserved-name split opens: proxmox.ValidateSnapshotName takes the guest
-// kind from its CALLER, and a caller that passes the wrong one is silent.
-//
-// Swap the two constants and every rule test still passes — those call
-// proxmox.ValidateSnapshotName directly and never see which kind the
-// handler chose. So this drives the REAL handler, with a name that is
-// reserved for exactly one of the two kinds.
-//
-// The schema cannot be what refuses these: "pending" and "vzdump" are both
-// valid pve-configid values, which the first subtest asserts rather than
-// assumes. A 400 from these routes therefore came from the handler, and
-// naming the wrong kind would let the name through to a nil database
-// instead.
+// TestSnapshotCreateHandlerPassesItsOwnGuestKind closes the gap the reserved-name split opens:
+// proxmox.ValidateSnapshotName takes the guest kind from its CALLER, and a wrong one is silent. The rule
+// tests call it directly and never see which kind the handler chose, so swapping the two constants leaves
+// them green; this drives the REAL handler with a name reserved for exactly one kind. The schema cannot
+// be what refuses these ("pending" and "vzdump" are valid pve-configid values, which the first subtest
+// asserts), so a 400 came from the handler, and naming the wrong kind would let the name through to a nil
+// database instead.
 func TestSnapshotCreateHandlerPassesItsOwnGuestKind(t *testing.T) {
 	for _, rt := range snapshotCreateRoutes {
 		t.Run(rt.kind, func(t *testing.T) {
@@ -1350,26 +1285,14 @@ func TestSnapshotCreateHandlerPassesItsOwnGuestKind(t *testing.T) {
 	}
 }
 
-// TestSnapshotNameParamRefusesTraversal proves the claim snapshotNameParam's
-// doc comment makes: its Pattern, not percent-escaping, is what keeps a
-// path segment from walking out of the snapshot it addresses.
-//
-// Asserting the Pattern is DECLARED is a different and weaker statement
-// than asserting it REFUSES this — a rule can be present and still admit
-// the thing it was put there for. So this sends the payload.
-//
-// Escaping is not the guard. The snapshot methods url.PathEscape the name,
-// which re-encodes a "%" as "%25", so a raw "%2e%2e%2f" reaches Proxmox as a
-// literal name rather than as "../" — but PathEscape leaves a bare "." and
-// ".." alone, and those resolve upward wherever a proxy in front of pveproxy
-// normalises the path (pveproxy itself takes them literally; see
-// proxmox.validatePathSegment).
-// Both spellings below must be refused here, at the declaration, whether
-// Fiber hands the decoded form to validation or the raw one: the decoded form
-// carries separators and dots, the raw form carries percents, and the
-// pve-configid-existing pattern admits neither. The client's own guard —
-// validatePathSegment (client.go), called from the snapshot methods in
-// client_guests.go ("Addressing an existing snapshot") — is the second layer.
+// TestSnapshotNameParamRefusesTraversal proves the claim snapshotNameParam's doc makes: its Pattern,
+// not percent-escaping, keeps a path segment from walking out of the snapshot it addresses. A declared
+// Pattern is weaker than one that REFUSES the payload, so this sends it. Escaping is not the guard: the
+// snapshot methods url.PathEscape the name, so a raw "%2e%2e%2f" reaches Proxmox as a literal name, but
+// PathEscape leaves a bare "." and ".." alone, which resolve upward behind a normalising proxy (pveproxy
+// itself takes them literally). Both spellings must be refused at the declaration whether Fiber hands the
+// decoded form (separators and dots) or the raw one (percents), neither of which pve-configid-existing
+// admits; validatePathSegment in the client is the second layer.
 func TestSnapshotNameParamRefusesTraversal(t *testing.T) {
 	routes := []struct {
 		method string

@@ -55,14 +55,9 @@ var oidcRoutesOutsideTheClusterCheckShape = map[string]string{
 // "METHOD path".
 func declaredOIDCEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, oidcConfigScope) || e.Path == oidcAuthorizePath {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, func(e Endpoint) bool {
+		return strings.HasPrefix(e.Path, oidcConfigScope) || e.Path == oidcAuthorizePath
+	})
 }
 
 // TestOIDCRoutesDeclareTheSamePermissionTheyEnforced is the tally: 6
@@ -203,24 +198,18 @@ func TestOIDCAuthorizeIsPublicAndReviewed(t *testing.T) {
 	}
 }
 
-// TestOIDCCallbackIsStillLegacy records a decision, not a gap.
-//
-// The provider callback is the first route in this migration that the registry
-// cannot express for a reason other than a parameter TYPE. Its query string is
-// composed by the identity provider: RFC 9207 adds `iss`, OIDC session
-// management adds `session_state`, an error response carries `error` and
-// `error_description`, and nothing stops a provider adding its own. The
-// registry answers an undeclared key with a 400, so any declaration — however
-// generous — turns "this provider sends one extra parameter" into "SSO login
-// returns 400", at the moment a user is trying to sign in and with nothing in
-// the response to point at.
-//
-// It is pinned from both sides: the route must still be registered, and it must
-// NOT be in the registry.
+// TestOIDCCallbackIsStillLegacy records a decision, not a gap. The provider callback is the first
+// route in this migration the registry cannot express for a reason other than a parameter TYPE: its query
+// string is composed by the identity provider (RFC 9207 adds `iss`, OIDC session management adds
+// `session_state`, an error response carries `error` and `error_description`, and nothing stops a provider
+// adding its own). The registry answers an undeclared key with a 400, so any declaration, however generous,
+// turns "this provider sends one extra parameter" into "SSO login returns 400", at the moment a user is
+// signing in and with nothing in the response to point at. Pinned from both sides: still registered, and
+// NOT in the registry.
 func TestOIDCCallbackIsStillLegacy(t *testing.T) {
 	const key = "GET /api/v1/auth/oidc/callback"
 
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	if registryRouteKeySet(s.registry.Endpoints())[key] {
 		t.Fatalf("%s is declared in the registry, but its query string is composed by the identity "+
 			"provider and an undeclared key is a 400 — see registerOIDCEndpoints", key)

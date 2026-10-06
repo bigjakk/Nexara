@@ -36,22 +36,12 @@ func cephRoute(path string) string {
 	).Replace(path)
 }
 
-// cephLegacyPermissions is the permission each Ceph route was gated on
-// BEFORE Phase 6b, transcribed from internal/api/handlers/ceph.go and
-// internal/api/handlers/ceph_osd.go at commit 13ceac0.
-//
-// The tally is 17 routes to FOURTEEN requireClusterPerm calls, and the
-// gap is the thing worth checking rather than a discrepancy to wave away:
-// eleven handlers carried their own call, and the five OSD lifecycle
-// routes shared two — osdMembershipAction for in/out and osdDaemonAction
-// for start/stop/restart. Both took the action as an argument, so a
-// reader had to confirm the permission did NOT vary with it before the
-// check could be hoisted into middleware. It did not: all five are
-// manage:ceph.
-//
-// Both directions are compared below — a route in this table with no
-// declaration, and a declared Ceph route missing from this table, are each
-// a failure — so neither list can quietly drift away from the other.
+// cephLegacyPermissions is the permission each Ceph route was gated on BEFORE Phase 6b, transcribed from
+// handlers/ceph.go and ceph_osd.go at 13ceac0. 17 routes carried FOURTEEN requireClusterPerm calls: the
+// five OSD lifecycle routes shared two (osdMembershipAction, osdDaemonAction), both taking the action as
+// an argument, so a reader had to confirm the permission did NOT vary with it before hoisting the check
+// into middleware; all five are manage:ceph. Both directions are compared (a table route with no
+// declaration, a declared Ceph route missing from the table) so neither list drifts from the other.
 var cephLegacyPermissions = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/ceph/status":                 "view:ceph",
 	"GET /api/v1/clusters/:cluster_id/ceph/osds":                   "view:ceph",
@@ -76,14 +66,7 @@ var cephLegacyPermissions = map[string]string{
 // /ceph prefix, keyed "METHOD path".
 func declaredCephEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, cephScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(cephScope))
 }
 
 // TestCephRoutesDeclareTheSamePermissionTheyEnforced is the tally that
@@ -420,20 +403,14 @@ func TestCreateCephPoolBody(t *testing.T) {
 	}
 }
 
-// TestCephPoolNameParamAndBodyAgree pins that a pool this API can create
-// is a pool this API can delete. Two independent patterns would drift, and
-// the direction that bites is a create rule looser than the delete rule:
-// it produces a pool the operator then cannot remove.
-//
-// The PATTERN half is compared directly. The LENGTH half cannot be, and
-// comparing the two MaxLength numbers is what hid the defect: the create
-// body's name is the literal JSON string, while the delete route validates
-// the raw, still percent-encoded path segment, where one rune can cost twelve
-// characters. So that half is driven through both real declarations — with a
-// capturing handler in place of each real one — using names at the create cap
-// in each encoding cost, each sent the way the SPA sends it, through
-// encodeURIComponent. The delete case also decodes what the route handed over
-// and requires the name back, the step the real handler (accessParam) takes.
+// TestCephPoolNameParamAndBodyAgree pins that a pool this API can create is a pool it can delete: two
+// independent patterns drift, and a create rule looser than the delete rule makes a pool the operator
+// cannot remove. The PATTERN half is compared directly. The LENGTH half cannot be (comparing the two
+// MaxLength numbers hid the defect): the create body's name is the literal JSON string, while the delete
+// route validates the raw percent-encoded path segment, where one rune can cost twelve characters. So it
+// is driven through both real declarations with a capturing handler, using names at the create cap in
+// each encoding cost, sent as the SPA sends them (encodeURIComponent); the delete case also decodes what
+// the route handed over and requires the name back, the step the real handler (accessParam) takes.
 func TestCephPoolNameParamAndBodyAgree(t *testing.T) {
 	create := declaredEndpoint(t, fiber.MethodPost, cephScope+"/pools").Parameters["name"]
 	del := declaredEndpoint(t, fiber.MethodDelete, cephScope+"/pools/:pool_name").Parameters["pool_name"]
@@ -512,42 +489,15 @@ func encodeURIComponent(s string) string {
 	return b.String()
 }
 
-// TestCephPoolNameSurvivesThePathSegment drives the names PVE's own rule
-// admits at the DELETE route as real requests, and checks the handler is
-// handed the name the caller sent.
-//
-// The catalogue's witnesses already prove the regex takes these, but the
-// regex is only the first thing standing between the caller and Proxmox:
-// Fiber has to route a path segment containing the character, and it has to
-// hand the handler the same bytes back. A rule that admits a name the
-// router cannot carry would be a fix on paper only — the pool would still
-// be undeletable, just with a different status code.
-//
-// Every name here is one PVE accepts and this API used to answer 400 to:
-// the pattern was an invented ^\.?[A-Za-z0-9][A-Za-z0-9._-]*$, so a pool
-// called "rbd+meta" could be neither read, edited nor destroyed through
-// Nexara. ".mgr" is included as the regression the leading-dot allowance
-// was added for.
-//
-// The names are sent RAW rather than through url.PathEscape, because that
-// is what a client has to do for them to arrive intact: Fiber runs with
-// UnescapePath at its default of false, so c.Params hands back the segment
-// exactly as it came in (the same fact firewallIPSetEntryCIDRParam is built
-// around). Every character used here is legal unencoded in a path segment
-// — RFC 3986 sub-delims and unreserved.
-//
-// The characters that are NOT — "#", "%", "?" and a space, which a client
-// must percent-encode — used to arrive still encoded and be escaped a second
-// time by DeleteCephPool's url.PathEscape, so Proxmox was asked for a pool
-// whose name literally contained "%23". That is FIXED: the handler now
-// decodes the segment (handlers/ceph.go) before the client sees it, so the
-// name the caller meant is the name Proxmox receives. The sibling defect on
-// the IP set route was fixed in the same change.
-//
-// Widening the rule did not cause that defect, but it did widen its reach
-// before the fix — POST /ceph/pools can create such a pool, where previously
-// only something outside Nexara could — which is why the two landed
-// together rather than the encoding being left for separate scoping.
+// TestCephPoolNameSurvivesThePathSegment sends the names PVE's own rule admits at the DELETE route as
+// real requests and checks the handler gets the name the caller sent: the catalogue's witnesses prove the
+// regex, but Fiber must also route a segment containing the character and hand the bytes back, or a rule
+// admitting a name the router cannot carry is a fix on paper only. Each name is one PVE accepts and this
+// API used to answer 400 to (the invented pattern made "rbd+meta" undeletable; ".mgr" is the regression
+// the leading dot was added for). They are sent RAW (UnescapePath is false, so c.Params returns the
+// segment as it came; every character is legal unencoded). "#", "%", "?" and a space must be
+// percent-encoded, and used to be escaped a second time by DeleteCephPool's url.PathEscape ("%23"
+// literally); the handler now decodes the segment first (handlers/ceph.go).
 func TestCephPoolNameSurvivesThePathSegment(t *testing.T) {
 	const path = cephScope + "/pools/:pool_name"
 	prefix := strings.Replace(cephRoute(path), "store01", "", 1)
@@ -574,40 +524,15 @@ func TestCephPoolNameSurvivesThePathSegment(t *testing.T) {
 	}
 }
 
-// TestCephPoolDeleteStillRefusesATraversingName is the other half: the one
-// respect in which this rule is deliberately STRICTER than PVE's.
-//
-// PVE's own pattern (^[^:/\s]+$) admits "." and "..", and
-// proxmox.DeleteCephPool concatenates the name into a Proxmox path. pveproxy
-// would take either literally, as the pool's name (see
-// proxmox.validatePathSegment); behind a normalising proxy ".." pops the pool
-// collection and lands DELETE on /nodes/{node}/ceph, and "." stops a level
-// short on /ceph/pool. RE2 has no negative lookahead, so the catalogue's rule
-// excludes them positively, by requiring one character that is not a dot.
-// That also excludes "...", which is no dot segment to anyone and which
-// upstream would take as an ordinary pool name.
-//
-// The segment is sent RAW, and that is the case that matters: nothing
-// between the client and the router collapses a dot segment, so ".."
-// really does arrive as ".." and the pattern is the thing that stops it.
-//
-// The percent-encoded form is a different string, and this rule does NOT
-// stop it — a claim two earlier versions of this comment both got wrong, in
-// opposite directions. What is actually true, traced through the code:
-//
-// Validation runs on the RAW segment. readSource (registry_params.go) reads
-// c.Params, and Fiber's UnescapePath is false, so Parameters.Validate never
-// sees a decoded value. This pattern ACCEPTS "%2E%2E" — "%" is not a dot, a
-// colon, a slash, a backslash or whitespace, so it satisfies the class. The
-// decode happens afterwards, in the handler (handlers/ceph.go), and the
-// value that then reaches proxmox.DeleteCephPool is "..", which
-// validatePathSegment refuses with a 400.
-//
-// So the chain is: pattern accepts -> handler decodes -> CLIENT refuses.
-// The gate for the encoded form is validatePathSegment at the choke point,
-// not this rule, and the cases below (".", "..", "...", "....") exercise
-// only the raw form. Do not read this comment as licence to drop the client
-// guard as belt-and-braces; it is the only thing standing there.
+// TestCephPoolDeleteStillRefusesATraversingName is the one respect in which this rule is deliberately
+// STRICTER than PVE's ^[^:/\s]+$, which admits "." and "..": proxmox.DeleteCephPool concatenates the name
+// into a path (pveproxy takes them literally, behind a normalising proxy ".." pops the pool collection;
+// see proxmox.validatePathSegment). RE2 has no negative lookahead, so the rule requires one non-dot
+// character, which also refuses "...". The segment is sent RAW, where ".." really arrives as "..".
+// The percent-encoded form is NOT stopped here: validation runs on the raw segment (UnescapePath is false),
+// "%2E%2E" satisfies the class, the handler then decodes it and the CLIENT's validatePathSegment refuses
+// it. That guard is the only thing standing there; do not drop it as belt-and-braces. The cases
+// exercise the raw form only.
 func TestCephPoolDeleteStillRefusesATraversingName(t *testing.T) {
 	const path = cephScope + "/pools/:pool_name"
 	prefix := strings.Replace(cephRoute(path), "store01", "", 1)
@@ -632,39 +557,15 @@ func TestCephPoolDeleteStillRefusesATraversingName(t *testing.T) {
 	}
 }
 
-// TestCephPoolNameRefusesABackslashOnBothHalves pins the second deliberate
-// divergence from PVE's pattern, and it guards a REGRESSION rather than a
-// hypothetical.
-//
-// The two client methods do not check the name the same way.
-// proxmox.DeleteCephPool runs validatePathSegment (internal/proxmox/client.go),
-// which refuses "/" AND "\". proxmox.CreateCephPool runs no such check — it
-// only refuses an empty name — because the name travels in the FORM BODY
-// rather than in a path, so it needs no traversal guard.
-//
-// That asymmetry means a rule admitting a backslash is not merely lax, it is
-// productive of unaddressable state: POST {"name":"a\\b"} answers 204 and the
-// pool is created on the cluster, and every DELETE of it afterwards answers
-// 400 `ceph pool name "a\b" must not contain a path separator`. Nexara mints a
-// pool Nexara can never remove — the same failure the widening of this rule
-// set out to close, arrived at from the create side instead of the delete
-// side.
-//
-// So BOTH halves are asserted, and the create half is the one that matters:
-// a rule that refused the backslash only on the delete path would leave
-// exactly the bug above in place.
-//
-// The two halves are driven DIFFERENTLY, and the reason is worth recording
-// because it looks like an inconsistency. The create half goes through the
-// real router, because a JSON string body carries a literal backslash
-// unchanged. The delete half validates the declaration directly, because
-// app.Test serialises the request through net/url, which percent-encodes a
-// raw backslash in a path — "a\b" arrives at the handler as "a%5Cb", a
-// different string that this rule rightly accepts. That is a property of
-// the TEST HARNESS, not of the system: nothing in HTTP stops a hand-built
-// request putting a raw 0x5C byte in the request line, so the exclusion is
-// still load-bearing on the path and is asserted where it can actually be
-// observed.
+// TestCephPoolNameRefusesABackslashOnBothHalves pins the second deliberate divergence from PVE's pattern
+// and guards a REGRESSION. The client methods check differently: DeleteCephPool runs validatePathSegment
+// (refuses "/" and "\"), CreateCephPool only refuses an empty name (the name travels in the FORM BODY). So
+// a rule admitting a backslash mints a pool Nexara can never remove (POST {"name":"a\\b"} is a 204, every
+// DELETE then a 400), the failure this rule's widening set out to close, from the create side. Both
+// halves are asserted, the create half being the one that matters, and driven differently: create through
+// the real router (a JSON body carries the backslash unchanged); delete against the declaration directly,
+// since app.Test serialises through net/url, which percent-encodes a raw backslash ("a%5Cb", a different
+// string the rule rightly accepts), a property of the harness, not of HTTP.
 func TestCephPoolNameRefusesABackslashOnBothHalves(t *testing.T) {
 	names := []string{`a\b`, `\pool`, `pool\`, `..\..`}
 
@@ -832,17 +733,12 @@ func authedJSON(method, target, body string) *http.Request {
 	return req
 }
 
-// TestEveryCephEndpointIsDocumented holds the declarations to the standard
-// that makes this whole effort worth doing: every route and every
-// parameter says what it is for, because the declaration IS the
-// documentation and 319 endpoints in this API still say nothing.
-//
-// Only two of the four checks below can actually fire — Register panics on
-// a blank Description, a blank Group or a schema that fails Compile, so
-// those three have necessarily passed by the time declaredCephEndpoints
-// returns. The two that bite are the Group value (Register requires A
-// group, not THIS one) and the per-parameter Description, which Compile
-// does not look at at all.
+// TestEveryCephEndpointIsDocumented holds the declarations to the standard that makes this effort
+// worth doing: every route and parameter says what it is for, because the declaration IS the
+// documentation. Only two of the four checks can fire: Register panics on a blank Description, a blank
+// Group or a schema that fails Compile, so those have passed by the time declaredCephEndpoints returns;
+// the two that bite are the Group VALUE (Register requires a group, not THIS one) and the
+// per-parameter Description, which Compile does not look at.
 func TestEveryCephEndpointIsDocumented(t *testing.T) {
 	for key, e := range declaredCephEndpoints(t) {
 		if err := e.Parameters.Compile(); err != nil {

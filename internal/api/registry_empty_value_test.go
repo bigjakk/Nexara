@@ -14,25 +14,16 @@ import (
 	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
-// Two rulings on the empty string live in this file, and they point opposite
-// ways on purpose.
-//
-// A listing FILTER that the handler read as `if x != ""` keeps that meaning:
-// ?x= is "no filter", as it was before the registry. The task, audit-log and
-// CVE tests hold the filters that carry a rule or an enum to it with
-// assertEmptyFilterSentinel and assertEmptyOrUUIDDeclaration. The six that
-// carry neither — the audit log's resource_type, action, source and two time
-// bounds, and the vmids both listings share — are held by the 204 rows in
-// TestAuditListBoundsArePinned and TestTaskListBoundsArePinned and by the
-// handler tests in package handlers; kev, a boolean, by its EmptyIsAbsent
-// declaration and the twin without it in TestVulnerabilityFiltersAreDeclared.
-//
-// A QUERY parameter whose old handler substituted a DEFAULT for an empty
-// value, and whose declaration closes its vocabulary with an enum, does not:
-// ?x= is a 400. TestEmptyTextDefaultsAreRefused pins that. BODY parameters of
-// that shape go the other way — the task create's status, ha_policy, a report
-// schedule's format and vm-import's source_acquisition keep "" in their enums
-// and their handlers substitute the default — and nothing here covers them.
+// Two rulings on the empty string live here, pointing opposite ways on purpose. A listing FILTER the handler read as
+// `if x != ""` keeps that meaning: ?x= is "no filter", as before the registry. The task, audit-log and CVE tests hold
+// the filters carrying a rule or enum with assertEmptyFilterSentinel and assertEmptyOrUUIDDeclaration; the six carrying
+// neither (the audit log's resource_type, action, source and two time bounds, and the vmids both listings share) are
+// held by the 204 rows in TestAuditListBoundsArePinned and TestTaskListBoundsArePinned and the handler tests; kev, a
+// boolean, by its EmptyIsAbsent declaration and the twin in TestVulnerabilityFiltersAreDeclared. A QUERY parameter whose
+// old handler substituted a DEFAULT for an empty value, and whose declaration closes its vocabulary with an enum, does
+// not: ?x= is a 400 (TestEmptyTextDefaultsAreRefused). BODY parameters of that shape go the other way (task create's
+// status, ha_policy, a report schedule's format and vm-import's source_acquisition keep "" in their enums and the
+// handlers substitute the default) and nothing here covers them.
 
 // assertEmptyOrUUIDDeclaration holds a uuid filter to the declaration that
 // keeps its empty value: the empty-or-uuid rule rather than the uuid format,
@@ -65,20 +56,14 @@ func emptyFilterRefusals(valid string) []string {
 	return []string{"..", ".", "%2e%2e", "/", "\n", valid + "\n"}
 }
 
-// assertEmptyFilterSentinel drives one "" = no-filter parameter through its
-// endpoint's own declaration: the empty string must be accepted and read back
-// as "", valid must be accepted, and every emptyFilterRefusals value must be
-// refused by a validation error that names the parameter. base carries the
-// endpoint's required parameters, which Validate would otherwise report as
-// missing before it reached this one.
-//
-// A refusal is only evidence about the RULE if the rule is what refuses it, so
-// each value is first run through a twin of the property with its pattern and
-// enum stripped and every other facet kept, where it must pass. The exception
-// is a value longer than the declared MaxLength — the uuid with a trailing
-// newline, 37 characters against 36 — which the twin refuses as well; that one
-// is held by the length cap and the rule together, and the twin is required to
-// refuse it so the exception cannot hide some other reason.
+// assertEmptyFilterSentinel drives one "" = no-filter parameter through its endpoint's own declaration:
+// "" must be accepted and read back as "", valid accepted, and every emptyFilterRefusals value refused by a
+// validation error naming the parameter (base carries the required parameters, which Validate would
+// otherwise report missing first). A refusal is evidence about the RULE only if the rule refuses it, so each
+// value is first run through a twin of the property with its pattern and enum stripped and every other facet
+// kept, where it must pass. The exception is a value longer than MaxLength (the uuid plus a newline, 37 vs
+// 36), which the twin refuses too: held by the cap and the rule together, and the twin must refuse it so
+// the exception cannot hide another reason.
 func assertEmptyFilterSentinel(t *testing.T, e Endpoint, name, valid string, base map[string]any) {
 	t.Helper()
 	prop, ok := e.Parameters[name]
@@ -157,24 +142,14 @@ func TestEmptyFilterListingsDeclareWhatTheHandlerTestsCover(t *testing.T) {
 	}
 }
 
-// TestEmptyTextDefaultsAreRefused pins a decision, not a regression: an EMPTY
-// value for each of these is a 400 on purpose — the operator's decision of
-// 2026-09-23, the same ruling as for an empty integer ?limit=
-// (TestDRSHistoryLimitIsBounded).
-//
-// Before the registry each was read with c.Query(name, default) — the task
-// sort pair with c.Query(name) and parseTaskSort's own `if x == ""` — and
-// both substituted the default for an empty value as well as an absent one,
-// so ?range= meant 1h. A declared Default applies only to a key the caller
-// did not send, and every one of these carries an enum "" is not in. Restoring
-// the substitution means putting "" in an enum, which fails its row here.
-//
-// Three sets of the parameters those calls read are absent, and none is an
-// oversight. The PBS RRD route's timeframe and cf declare no enum and still
-// accept "", which PBSClient.GetDatastoreRRD turns into the same defaults, so
-// nothing changed there to decide. The settings list and read, and the OIDC
-// callback (error and error_description), are still legacy routes in
-// router.go, and their c.Query calls substitute as they always did.
+// TestEmptyTextDefaultsAreRefused pins a decision, not a regression: an EMPTY value for each of these is
+// a 400 on purpose (the operator's ruling of 2026-09-23, the same as for an empty integer ?limit=,
+// TestDRSHistoryLimitIsBounded). Before the registry each was read with c.Query(name, default) (the task
+// sort pair with parseTaskSort's own `if x == ""`), substituting the default for an empty value as well as
+// an absent one, so ?range= meant 1h. A declared Default applies only to a key not sent, and each of these
+// carries an enum "" is not in; restoring the substitution means putting "" in an enum, which fails its
+// row. Absent on purpose: the PBS RRD route's timeframe and cf (no enum, still accept "", which
+// GetDatastoreRRD turns into the same defaults), and the settings reads and OIDC callback (still legacy).
 func TestEmptyTextDefaultsAreRefused(t *testing.T) {
 	fill := strings.NewReplacer(
 		":cluster_id", testClusterID,

@@ -18,17 +18,12 @@ const firewallTemplateRouteCount = 4
 
 const testTemplateID = "7b1c9d2e-4a35-4f60-8c21-000000000006"
 
-// firewallTemplateRoutesOutsideTheClusterCheckShape is this domain's half of
-// the registry-wide exception list in registry_vms_test.go.
-//
-// Three entries, all for the same reason: a firewall template is stored in
-// NEXARA's database, not on a cluster, so there is no cluster for a
-// cluster-scoped check to resolve. The handlers used requirePerm
-// (HasGlobalPermission) rather than requireClusterPerm, and the paths name
-// no cluster — Register would refuse a cluster-scoped Check on them.
-//
-// The fourth route, apply, is NOT here: it writes into one cluster's
-// firewall and is cluster-scoped, which is the whole point of the split.
+// firewallTemplateRoutesOutsideTheClusterCheckShape is this domain's half of the registry-wide
+// exception list in registry_vms_test.go. Three entries, one reason: a firewall template is stored in
+// NEXARA's database, not on a cluster, so there is no cluster for a cluster-scoped check to resolve. The
+// handlers used requirePerm (HasGlobalPermission) rather than requireClusterPerm, and the paths name no
+// cluster (Register would refuse a cluster-scoped Check on them). The fourth route, apply, is NOT here: it
+// writes into one cluster's firewall and is cluster-scoped, which is the point of the split.
 var firewallTemplateRoutesOutsideTheClusterCheckShape = map[string]string{
 	"GET /api/v1/firewall-templates": "global: a template belongs to the install rather than to a " +
 		"cluster, and the path names none",
@@ -122,20 +117,15 @@ func TestApplyTemplateIsClusterScopedNotGlobal(t *testing.T) {
 	}
 }
 
-// TestFirewallTemplateWritesAreStillLegacy pins the two routes this
-// migration deliberately left behind, so that "4 of 6" is an assertion
-// rather than a thing a reader has to notice.
-//
-// Their body carries `rules`, a JSON ARRAY OF OBJECTS, and apischema's
-// Property.Items is restricted to scalar element types — compileItems
-// refuses an Object element outright. Three halves are asserted: the routes
-// are NOT in the registry, they ARE still mounted (a route that vanished
-// would be an outage rather than a deferral), and the registry would still
-// refuse the declaration they need. The third is what keeps this from
-// rotting into a note nobody re-reads: the day apischema grows object items,
-// this test fails and the carve-out gets revisited.
+// TestFirewallTemplateWritesAreStillLegacy pins the two routes this migration left behind, so "4 of 6"
+// is an assertion and not a thing a reader has to notice. Their body carries `rules`, a JSON ARRAY OF
+// OBJECTS, and apischema's Property.Items is restricted to scalar elements (compileItems refuses an Object
+// element outright). Three halves: the routes are NOT in the registry, they ARE still mounted (a vanished
+// route would be an outage, not a deferral), and the registry would still refuse the declaration they
+// need. The third keeps this from rotting into a note: the day apischema grows object items, this fails
+// and the carve-out is revisited.
 func TestFirewallTemplateWritesAreStillLegacy(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	legacy := []struct {
 		method string

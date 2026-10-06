@@ -71,9 +71,9 @@ func nodeNotesRequest() *http.Request {
 // to the bounds of PVE's $confdesc (PVE/NodeConfig.pm): startall-onboot-delay 0-300,
 // ballooning-target 0-100, description at most 64*1024 characters.
 func TestNodeOptionsDeclaration(t *testing.T) {
-	put := sharedEndpoint(t, fiber.MethodPut, nodeOptionsPath)
-	get := sharedEndpoint(t, fiber.MethodGet, nodeOptionsPath)
-	notes := sharedEndpoint(t, fiber.MethodGet, nodeNotesPath)
+	put := declaredEndpoint(t, fiber.MethodPut, nodeOptionsPath)
+	get := declaredEndpoint(t, fiber.MethodGet, nodeOptionsPath)
+	notes := declaredEndpoint(t, fiber.MethodGet, nodeNotesPath)
 
 	var body []string
 	for name := range put.Parameters {

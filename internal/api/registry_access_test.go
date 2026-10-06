@@ -160,7 +160,7 @@ func TestAccessRoutesAreGatedByTheirDeclaration(t *testing.T) {
 		method, path, _ := strings.Cut(key, " ")
 		want := action + ":" + handlers.AccessResource
 		t.Run(key, func(t *testing.T) {
-			e := sharedEndpoint(t, method, path)
+			e := declaredEndpoint(t, method, path)
 			cap := &capture{}
 			gated := e
 			gated.Handler = cap.handler()
@@ -204,7 +204,7 @@ func TestAccessRoutesAreGatedByTheirDeclaration(t *testing.T) {
 // database nor a session.
 func probeAccessEndpoint(t *testing.T, method, path string, cap *capture) Endpoint {
 	t.Helper()
-	e := sharedEndpoint(t, method, path)
+	e := declaredEndpoint(t, method, path)
 	e.Handler = cap.handler()
 	e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
 	return e
@@ -275,7 +275,7 @@ func TestAccessPathSegmentsAreAnchored(t *testing.T) {
 
 	for _, seg := range segments {
 		t.Run(seg.name, func(t *testing.T) {
-			e := sharedEndpoint(t, fiber.MethodGet, seg.route)
+			e := declaredEndpoint(t, fiber.MethodGet, seg.route)
 			prop, ok := e.Parameters[seg.param]
 			if !ok {
 				t.Fatalf("%s declares no %q parameter", seg.route, seg.param)
@@ -331,7 +331,7 @@ func TestAccessPathSegmentsAreAnchored(t *testing.T) {
 // picking the class by eye is not good enough and why the two rules below are
 // derived from their own sources of truth instead.
 func TestAccessPatternsAreNoNarrowerThanWhatACallerCanSend(t *testing.T) {
-	userid := sharedEndpoint(t, fiber.MethodGet, accessScope+"/users/:userid").Parameters["userid"]
+	userid := declaredEndpoint(t, fiber.MethodGet, accessScope+"/users/:userid").Parameters["userid"]
 	uidRe := regexp.MustCompile(userid.Pattern)
 
 	// encodeURIComponent's unreserved set, verbatim from the ECMAScript spec:
@@ -359,7 +359,7 @@ func TestAccessPatternsAreNoNarrowerThanWhatACallerCanSend(t *testing.T) {
 	// 1..3 drawn from proxmox.accessNamePattern's own class, the declaration
 	// must accept exactly what that validator accepts — which is everything
 	// except the two literal traversal segments.
-	groupid := sharedEndpoint(t, fiber.MethodGet, accessScope+"/groups/:groupid").Parameters["groupid"]
+	groupid := declaredEndpoint(t, fiber.MethodGet, accessScope+"/groups/:groupid").Parameters["groupid"]
 	nameRe := regexp.MustCompile(groupid.Pattern)
 	const class = "aZ0._-" // one representative of each character kind in [A-Za-z0-9._-]
 	var walk func(prefix string, depth int)
@@ -436,7 +436,7 @@ var accessForceRoutes = []struct{ method, path string }{
 func TestAccessForceIsReadFromTheQueryString(t *testing.T) {
 	for _, r := range accessForceRoutes {
 		t.Run(r.method+" "+r.path, func(t *testing.T) {
-			e := sharedEndpoint(t, r.method, r.path)
+			e := declaredEndpoint(t, r.method, r.path)
 			prop, ok := e.Parameters["force"]
 			if !ok {
 				t.Fatalf("declares no force parameter, but the handler reads one")
@@ -509,7 +509,7 @@ func TestAccessUserFieldsStayTristate(t *testing.T) {
 		{fiber.MethodPut, accessScope + "/users/:userid"},
 	} {
 		t.Run(route.method, func(t *testing.T) {
-			e := sharedEndpoint(t, route.method, route.path)
+			e := declaredEndpoint(t, route.method, route.path)
 			for _, name := range tristate {
 				prop, ok := e.Parameters[name]
 				if !ok {
@@ -533,7 +533,7 @@ func TestAccessUserFieldsStayTristate(t *testing.T) {
 		{fiber.MethodPost, accessScope + "/users"},
 		{fiber.MethodPut, accessScope + "/users/:userid"},
 	} {
-		if f := sharedEndpoint(t, route.method, route.path).Parameters["email"].Format; f != "" {
+		if f := declaredEndpoint(t, route.method, route.path).Parameters["email"].Format; f != "" {
 			t.Errorf("%s %s: email declares format %q; that refuses \"\", which is how a caller clears it",
 				route.method, route.path, f)
 		}
@@ -581,7 +581,7 @@ func TestAccessRequiredSetsMatchWhatEachHandlerEnforced(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			e := sharedEndpoint(t, tc.method, tc.path)
+			e := declaredEndpoint(t, tc.method, tc.path)
 			for _, name := range tc.required {
 				prop, ok := e.Parameters[name]
 				if !ok {
@@ -648,7 +648,7 @@ func TestAccessRoleUpdateDoesNotDeclareARoleIDBody(t *testing.T) {
 		{fiber.MethodPut, accessScope + "/groups/:groupid", "groupid", `{"comment":"x","groupid":"other"}`},
 	} {
 		t.Run(tc.ignored, func(t *testing.T) {
-			e := sharedEndpoint(t, tc.method, tc.path)
+			e := declaredEndpoint(t, tc.method, tc.path)
 			prop := e.Parameters[tc.ignored]
 			if prop.Source == apischema.SourceBody {
 				t.Fatalf("%q is declared as a body parameter; it is the path segment", tc.ignored)
@@ -678,7 +678,7 @@ func TestAccessRoleUpdateDoesNotDeclareARoleIDBody(t *testing.T) {
 // proxy), and declaring it there would create a write path whose audit row this
 // file's own guard would then have to police.
 func TestAccessPasswordIsWriteOnly(t *testing.T) {
-	create := sharedEndpoint(t, fiber.MethodPost, accessScope+"/users")
+	create := declaredEndpoint(t, fiber.MethodPost, accessScope+"/users")
 	prop, ok := create.Parameters["password"]
 	if !ok {
 		t.Fatal("POST .../access/users declares no password parameter")
@@ -692,7 +692,7 @@ func TestAccessPasswordIsWriteOnly(t *testing.T) {
 		{fiber.MethodPost, accessScope + "/users/:userid/tokens/:tokenid"},
 		{fiber.MethodPut, accessScope + "/users/:userid/tokens/:tokenid"},
 	} {
-		if _, declared := sharedEndpoint(t, route.method, route.path).Parameters["password"]; declared {
+		if _, declared := declaredEndpoint(t, route.method, route.path).Parameters["password"]; declared {
 			t.Errorf("%s %s declares a password parameter; this route has never accepted one",
 				route.method, route.path)
 		}
@@ -705,7 +705,7 @@ func TestAccessPasswordIsWriteOnly(t *testing.T) {
 func TestAccessIdentifiersAreClusterUUIDs(t *testing.T) {
 	for key := range accessLegacyPermissions {
 		method, path, _ := strings.Cut(key, " ")
-		e := sharedEndpoint(t, method, path)
+		e := declaredEndpoint(t, method, path)
 		prop, ok := e.Parameters["cluster_id"]
 		if !ok {
 			t.Errorf("%s declares no cluster_id", key)

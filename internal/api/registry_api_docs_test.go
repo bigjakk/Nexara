@@ -4,35 +4,20 @@ import (
 	"testing"
 )
 
-// TestAPIDocsIsStillLegacy records the decision that GET /api/v1/api-docs — the
-// endpoint this whole effort exists to improve — is the one route the registry
-// cannot declare, and pins that it is a decision rather than an oversight.
-//
-// It is in instanceSharedRoutes, with the reason carried verbatim there: "route
-// catalog derived from the router; no tenant data". That shape — authenticated,
-// serving instance-level data identical for every caller, with no subject to
-// authorize — has no member in the Permissions vocabulary:
-//
-//   - Check and Alternatives install a gate it has never had, and adding one is
-//     a behaviour change rather than a migration.
-//   - Deferred and Advisory both require the handler to reach a permission leaf
-//     (registryEnforcementGaps), and GetDocs reaches none — correctly.
-//   - Public would drop authentication, which it does have.
-//   - SelfService is the shape it is nearest to and the one it must not use:
-//     the comment on instanceSharedRoutes says why the two lists are kept
-//     apart, and folding this in would make selfServiceRoutes' stated invariant
-//     ("acts solely on the caller's own identity") false for every route in it.
-//
-// The same gap holds the three branding reads back — see
-// TestSettingsReadsAreStillLegacy — and the report accompanying this change
-// asks for the missing shape.
-//
-// Pinned from both sides, like every other carve-out: the route must still be
-// registered and still carry its exemption, and it must NOT be in the registry.
+// TestAPIDocsIsStillLegacy records the decision that GET /api/v1/api-docs, the endpoint this whole
+// effort exists to improve, is the one route the registry cannot declare, and pins it as a decision rather
+// than an oversight. It is in instanceSharedRoutes ("route catalog derived from the router; no tenant
+// data"): authenticated, serving instance-level data identical for every caller, no subject to authorize,
+// a shape with no member in the Permissions vocabulary. Check and Alternatives would install a gate it has
+// never had; Deferred and Advisory require the handler to reach a permission leaf (registryEnforcementGaps)
+// and GetDocs reaches none; Public would drop authentication it does have; SelfService is nearest and must
+// not be used (it would make selfServiceRoutes' invariant, "acts solely on the caller's own identity",
+// false). The same gap holds the three branding reads back (TestSettingsReadsAreStillLegacy). Pinned from
+// both sides: still registered with its exemption, and NOT in the registry.
 func TestAPIDocsIsStillLegacy(t *testing.T) {
 	const key = "GET /api/v1/api-docs"
 
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	if registryRouteKeySet(s.registry.Endpoints())[key] {
 		t.Error("the API docs route is declared in the registry, but Permissions has no shape for an " +
 			"authenticated route with no subject to authorize — see this test's doc comment")

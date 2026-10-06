@@ -5,27 +5,13 @@ import (
 	"testing"
 )
 
-// The query half of this was a cross-cluster read; this is the handler half.
-//
-// ListCVEScanVulnsByNode now takes a ScanID as well as a ScanNodeID, and the
-// SQL guard in internal/db (TestCVEVulnReadsAreScanScoped) holds the query to
-// filtering on both. What that guard cannot see is WHICH scan id the handler
-// passes: `ScanID: uuid.Nil` or `ScanID: nid` compiles, satisfies the query's
-// signature, and reopens the hole while every SQL-level check stays green.
-//
-// So this pins the value. scanID is the local ListVulnerabilities parses out
-// of the PATH and then checks against the cluster in the path:
-//
-//	scan, err := h.queries.GetCVEScan(c.Context(), scanID)
-//	if scan.ClusterID != clusterID { 404 }
-//
-// nid, by contrast, is whatever ?node_id= carried and is checked against
-// nothing. Passing the first is what confines the read to a scan the caller is
-// entitled to; passing the second would be the original bug with extra steps.
-//
-// WHAT IT DOES NOT CATCH: that `scanID` still holds the validated path value
-// at the call site — a reassignment in between would pass unnoticed. It keys
-// on the identifier, not on dataflow.
+// The query half was a cross-cluster read; this is the handler half. ListCVEScanVulnsByNode takes a
+// ScanID as well as a ScanNodeID, and TestCVEVulnReadsAreScanScoped (internal/db) holds the query to
+// filtering on both, but cannot see WHICH scan id the handler passes: `ScanID: uuid.Nil` or
+// `ScanID: nid` compiles and reopens the hole. scanID is the local ListVulnerabilities parses from the
+// PATH and checks against the path's cluster (GetCVEScan, then scan.ClusterID != clusterID is a 404);
+// nid is whatever ?node_id= carried and is checked against nothing. This pins the first. It keys on the
+// identifier, not dataflow: a reassignment between the parse and the call would pass.
 func TestGuard_CVENodeFilterPassesTheValidatedScanID(t *testing.T) {
 	const (
 		queryName   = "ListCVEScanVulnsByNode"

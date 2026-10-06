@@ -8,21 +8,13 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-// TestAuthLimiterCannotBeSpelledAround is a regression test for a live
-// authentication brute-force bypass.
-//
-// Fiber routes on a lowercased, slash-trimmed path (CaseSensitive and
-// StrictRouting are both false in buildFiberConfig) while c.Path() returns the
-// raw path. The auth limiter matched the raw path exactly, so:
-//
-//   - "POST /api/v1/auth/login/" reached the login handler with NO rate limit
-//     whatsoever — the auth limiter's switch missed it, and the general
-//     limiter's "/api/v1/auth/" prefix check still matched, so that skipped it
-//     too. 15/min became unlimited.
-//   - "POST /API/v1/auth/login" fell through to the general limiter's budget:
-//     600/min instead of 15/min.
-//
-// Verified against fiber v3 before and after the fix. limiterPath() normalizes
+// TestAuthLimiterCannotBeSpelledAround is a regression test for a live authentication brute-force
+// bypass. Fiber routes on a lowercased, slash-trimmed path (CaseSensitive and StrictRouting are both false
+// in buildFiberConfig) while c.Path() returns the raw path, and the auth limiter matched the raw path
+// exactly. "POST /api/v1/auth/login/" reached the login handler with NO rate limit (the auth limiter's
+// switch missed it and the general limiter's "/api/v1/auth/" prefix check still matched, so that skipped it
+// too: 15/min became unlimited); "POST /API/v1/auth/login" fell through to the general limiter's budget,
+// 600/min instead of 15/min. Verified against fiber v3 before and after the fix; limiterPath() normalizes
 // to the spelling Fiber actually routed on.
 func TestAuthLimiterCannotBeSpelledAround(t *testing.T) {
 	// newTestServer sets RateLimitMax=100, and the auth cap is 15 — so a 429

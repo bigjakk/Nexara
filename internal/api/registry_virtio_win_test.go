@@ -67,14 +67,7 @@ var virtioWinLegacyPermissions = map[string]struct {
 // keyed "METHOD path".
 func declaredVirtioWinEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, virtioWinGlobalScope) || strings.HasPrefix(e.Path, virtioWinClusterScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(virtioWinGlobalScope, virtioWinClusterScope))
 }
 
 // TestVirtioWinRoutesDeclareTheSamePermissionTheyEnforced is the tally

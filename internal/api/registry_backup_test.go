@@ -35,20 +35,12 @@ func backupRoute(path string) string {
 	).Replace(path)
 }
 
-// backupRoutesOutsideTheClusterCheckShape is this domain's half of the
-// registry-wide exception list in registry_vms_test.go.
-//
-// TWENTY-ONE of the 28 are here, which is the highest proportion of any
-// domain so far and is the domain's own shape rather than an artefact of the
-// migration. A PBS server may belong to a cluster or to no cluster at all,
-// and which of the two decides whether the grant is cluster-scoped or
-// instance-wide — a DB read, on every one of the 19 routes nested under
-// /pbs-servers/:pbs_id. The remaining two span every cluster at once and
-// filter instead of gating.
-//
-// The map is built rather than written out because the 19 share one reason
-// verbatim, and nineteen copies of one sentence is a list nobody re-reads —
-// which is the failure the exception surface exists to avoid.
+// backupRoutesOutsideTheClusterCheckShape is this domain's half of the registry-wide exception list in
+// registry_vms_test.go. TWENTY-ONE of the 28 are here, the highest proportion of any domain and its own
+// shape: a PBS server may belong to a cluster or to none, which decides whether the grant is cluster-scoped
+// or instance-wide, a DB read on every one of the 19 routes nested under /pbs-servers/:pbs_id; the other
+// two span every cluster and filter instead of gating. The map is built rather than written out because the
+// 19 share one reason verbatim, and nineteen copies of one sentence is a list nobody re-reads.
 var backupRoutesOutsideTheClusterCheckShape = func() map[string]string {
 	const deferred = "Deferred: requirePBSPerm loads the PBS server row and gates on its cluster, or " +
 		"instance-wide when the server is standalone"
@@ -140,15 +132,7 @@ var backupLegacyPermissions = map[string]struct {
 // reads like a miscount.
 func declaredBackupEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		key := e.Method + " " + e.Path
-		if _, listed := backupLegacyPermissions[key]; listed {
-			out[key] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(backupLegacyPermissions))
 }
 
 // TestBackupRoutesDeclareTheSamePermissionTheyEnforced is the tally that
@@ -244,21 +228,14 @@ func TestBackupRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	}
 }
 
-// TestBackupPathSegmentsAreAnchored is the traversal guard for this domain.
-//
-// Every one of these values becomes a SEGMENT of a Proxmox or PBS request
-// path by concatenation with url.PathEscape, which escapes "/" and leaves
-// "." and ".." alone — so an un-anchored store or job id travels as a bare
-// dot segment. pveproxy takes it literally, as a job id (see
-// proxmox.validatePathSegment); a normalising reverse proxy in front of it
-// resolves it — a final "." onto the collection it sits in, a ".." one level
-// above — so PUT or DELETE /cluster/backup/{id} lands on /cluster/backup or
-// on /cluster. PBS refuses it only because its own normalize_path does, which
-// a normalising reverse proxy in front would undo. Nothing but a non-empty
-// check stood behind those two, which ".." satisfies. The upid is the
-// exception: PBSClient's task reads refuse "." and ".." in
-// validatePBSTaskUPID before any path is built, so for it the anchor is the
-// first of two layers rather than the only one.
+// TestBackupPathSegmentsAreAnchored is the traversal guard for this domain. Every one of these values
+// becomes a SEGMENT of a Proxmox or PBS request path by concatenation with url.PathEscape, which escapes "/"
+// and leaves "." and ".." alone, so an un-anchored store or job id travels as a bare dot segment. pveproxy
+// takes it literally (see proxmox.validatePathSegment); a normalising reverse proxy resolves it, a final
+// "." onto the collection it sits in, a ".." one level above, so PUT or DELETE /cluster/backup/{id} lands on
+// /cluster/backup or /cluster. PBS refuses it only because its own normalize_path does. Nothing but a
+// non-empty check stood behind those two, which ".." satisfies. The upid is the exception: PBSClient's task
+// reads refuse "." and ".." in validatePBSTaskUPID first, so there the anchor is one of two layers.
 func TestBackupPathSegmentsAreAnchored(t *testing.T) {
 	segments := map[string][]string{
 		"store": {
@@ -442,18 +419,13 @@ func TestDeleteSnapshotReadsItsBodyNotTheQueryString(t *testing.T) {
 	}
 }
 
-// TestBackupJobBodyKeepsItsFourTristates is the compatibility assertion for
-// the partial-update contract.
-//
-// enabled, all, node and comment were bound as pointers precisely so that
-// "the caller never mentioned this" stays distinct from "the caller sent
-// zero or empty": clearedProperties() unsets node and comment only on an
-// explicit empty, and selectionKeys() reads all=0 as "not a selection". The
-// handler's OptInt/OptString reads keep that even with a Default declared
-// (apischema.Property.Default) — the end-to-end check below is what pins the
-// toggle, which PUTs `{"enabled":0}` and nothing else — so the declaration
-// check is about the docs: a default would describe an omitted field as set
-// to it, when it is left alone.
+// TestBackupJobBodyKeepsItsFourTristates is the compatibility assertion for the partial-update contract.
+// enabled, all, node and comment were bound as pointers so "the caller never mentioned this" stays distinct
+// from "the caller sent zero or empty": clearedProperties() unsets node and comment only on an explicit
+// empty, and selectionKeys() reads all=0 as "not a selection". The handler's OptInt/OptString reads keep that
+// even with a Default declared (apischema.Property.Default); the end-to-end check below pins the toggle,
+// which PUTs `{"enabled":0}` alone, so the declaration check is about the docs: a default would describe an
+// omitted field as set to it, when it is left alone.
 func TestBackupJobBodyKeepsItsFourTristates(t *testing.T) {
 	for _, path := range []string{clusterScope + "/backup-jobs", clusterScope + "/backup-jobs/:job_id"} {
 		method := fiber.MethodPost

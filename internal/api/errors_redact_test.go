@@ -24,19 +24,14 @@ func bareErrorServer(t *testing.T, mount ...func(*fiber.App)) string {
 	return serveAppOnLoopback(t, app)
 }
 
-// TestServerErrorsAnswerWithoutTheRequest sends, for each way a request head
-// makes fasthttp quote its own bytes in the error it answers with, a head
-// carrying canaries exactly where the quote falls — the refresh cookie and a
-// bearer token among them — and holds the server New builds to answering with
-// none of them: the error envelope with the status's slug and reason phrase,
-// and nothing else.
-//
-// Each case first shows the canaries in the answer of the twin without the
-// redaction, where fasthttp's error text reaches the client as the envelope's
-// message. That is what makes the case a quote of the request rather than a
-// head the server answers some other way. TestFiberSentErrorStatusesCarryTheirSlug
-// holds the statuses Fiber classifies from the error's own text — 408, 431 and
-// 501 — which the redaction must leave as they are.
+// TestServerErrorsAnswerWithoutTheRequest sends, for each way a request head makes fasthttp quote its
+// own bytes in the error it answers with, a head carrying canaries exactly where the quote falls (the
+// refresh cookie and a bearer token among them) and holds the server New builds to answering with none of
+// them: the error envelope with the status's slug and reason phrase, and nothing else. Each case first
+// shows the canaries in the answer of the twin without the redaction, where fasthttp's error text reaches
+// the client as the envelope's message, which is what makes the case a quote of the request.
+// TestFiberSentErrorStatusesCarryTheirSlug holds the statuses Fiber classifies from the error's own text
+// (408, 431, 501), which the redaction must leave as they are.
 func TestServerErrorsAnswerWithoutTheRequest(t *testing.T) {
 	const host = "Host: example.com\r\n"
 	const get = "GET /api/v1/version HTTP/1.1\r\n"

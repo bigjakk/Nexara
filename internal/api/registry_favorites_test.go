@@ -31,28 +31,15 @@ var favoritesRoutesOutsideTheClusterCheckShape = map[string]string{
 
 func declaredFavoritesEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if e.Path == favoritesScope {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, func(e Endpoint) bool { return e.Path == favoritesScope })
 }
 
-// TestFavoritesRoutesDeclareWhatTheyEnforced is this domain's tally.
-//
-// From `git show HEAD:internal/api/handlers/favorites.go` at commit eaeafa7 —
-// three handlers, ONE require*Perm call between them:
-//
-//	ListFavorites   three accessibleClusters reads, no gate.
-//	AddFavorite     requireClusterPerm(c, "view", target.ResourceType,
-//	                target.ClusterID) — both halves out of the body.
-//	RemoveFavorite  nothing at all, deliberately; it was already listed in
-//	                selfServiceRoutes with that reason.
-//
-// The three declarations say exactly that, and nothing more.
+// TestFavoritesRoutesDeclareWhatTheyEnforced is this domain's tally. From
+// `git show HEAD:internal/api/handlers/favorites.go` at commit eaeafa7: three handlers, ONE require*Perm
+// call between them. ListFavorites made three accessibleClusters reads and no gate; AddFavorite called
+// requireClusterPerm(c, "view", target.ResourceType, target.ClusterID), both halves out of the body;
+// RemoveFavorite checked nothing at all, deliberately (already listed in selfServiceRoutes with that
+// reason). The three declarations say exactly that, and nothing more.
 func TestFavoritesRoutesDeclareWhatTheyEnforced(t *testing.T) {
 	declared := declaredFavoritesEndpoints(t)
 	if len(declared) != favoritesRouteCount {

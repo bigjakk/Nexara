@@ -29,14 +29,7 @@ var scheduleLegacyPermissions = map[string]string{
 
 func declaredScheduleEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, scheduleScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(scheduleScope))
 }
 
 // TestScheduleRoutesDeclareTheSamePermissionTheyEnforced is the tally that
@@ -134,25 +127,16 @@ func TestScheduleStatusVocabularyIsDescribed(t *testing.T) {
 	}
 }
 
-// TestScheduleResourceTypeVocabulary pins the declared resource_type Enum
-// against the two places the stored value is read back.
-//
-// This is the same shape as TestScheduleActionVocabulary and it is here
-// because the drift it guards actually happened. resource_type carried no Enum
-// at all — any string of 32 characters or fewer was stored — while its
-// published Typetext read "<vm|lxc>". "lxc" is Proxmox's word for the guest
-// type and it is not the scheduler's: both switches in
-// internal/scheduler/scheduler.go match "vm" and "ct" and return "unsupported
-// resource type" for anything else. A caller following the docs therefore
-// created a schedule that was accepted, shown as armed, and failed on EVERY
-// fire into last_error, where nothing surfaces it.
-//
-// Nothing here writes the vocabulary down. The declaration is read from the
-// registry, the scheduler's branches from scheduler.ResourceTypeKeys, and the
-// snapshot-name check's from handlers.ScheduleResourceTypeKeys — three derived
-// sets, because a test that restates the list is a fourth copy that drifts with
-// the rest. The non-vacuity floor below is what stops all three going empty
-// together and reporting agreement.
+// TestScheduleResourceTypeVocabulary pins the declared resource_type Enum against the two places the
+// stored value is read back, the shape of TestScheduleActionVocabulary, here because the drift actually
+// happened. resource_type carried no Enum (any string of 32 characters or fewer was stored) while its
+// published Typetext read "<vm|lxc>". "lxc" is Proxmox's word for the guest type, not the scheduler's: both
+// switches in internal/scheduler/scheduler.go match "vm" and "ct" and return "unsupported resource type"
+// for anything else, so a caller following the docs created a schedule that was accepted, shown as armed,
+// and failed on EVERY fire into last_error, where nothing surfaces it. Nothing here writes the vocabulary
+// down: the declaration, scheduler.ResourceTypeKeys and handlers.ScheduleResourceTypeKeys are three derived
+// sets (a restated list is a fourth copy that drifts), and the non-vacuity floor stops all three going
+// empty together and reporting agreement.
 func TestScheduleResourceTypeVocabulary(t *testing.T) {
 	declared := slices.Clone(declaredEndpoint(t, fiber.MethodPost, scheduleScope).Parameters["resource_type"].Enum)
 	slices.Sort(declared)

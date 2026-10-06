@@ -409,7 +409,7 @@ func TestDocs_TheSessionEndingCapsAreStatedWhereTheyAreDocumented(t *testing.T) 
 		{fiber.MethodPost, logoutAllURL, "Sign out everywhere", logoutAllRateLimit},
 		{fiber.MethodDelete, "/api/v1/auth/sessions/:id", "End one session", sessionRevokeRateLimit},
 	} {
-		desc := strings.Join(strings.Fields(sharedEndpoint(t, tc.method, tc.path).Description), " ")
+		desc := strings.Join(strings.Fields(declaredEndpoint(t, tc.method, tc.path).Description), " ")
 		for _, want := range []string{fmt.Sprintf("at most %d calls a minute", tc.cap), "answered 429 with a Retry-After header", refused} {
 			if !strings.Contains(desc, want) {
 				t.Errorf("%s %s: the declaration does not say %q, which the limiter makes true", tc.method, tc.path, want)

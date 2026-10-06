@@ -89,14 +89,7 @@ var reportLegacyPermissions = map[string]struct {
 // "METHOD path".
 func declaredReportEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, reportScope+"/") {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(reportScope+"/"))
 }
 
 // TestReportRoutesDeclareTheSamePermissionTheyEnforced is the tally that
@@ -207,17 +200,12 @@ func TestReportIDIsAPathParameterOnly(t *testing.T) {
 	}
 }
 
-// TestReportClusterIDTakesItsWireNameUnderAnAlias is the assertion behind
-// the three declarations in this domain that could not use the name their
-// callers send.
-//
-// checkPathParams refuses a body parameter named "cluster_id" because
-// clusterIDFromParam reads that name to decide which cluster the gate
-// authorizes. No gate runs on these paths, but the guard is about the name
-// rather than about today's path. The parameter is therefore declared as
-// report_cluster_id with "cluster_id" as its alias, and BOTH spellings have
-// to keep working: the schedule form and the generate dialog both send
-// "cluster_id".
+// TestReportClusterIDTakesItsWireNameUnderAnAlias is the assertion behind the three declarations in
+// this domain that could not use the name their callers send. checkPathParams refuses a body parameter
+// named "cluster_id" because clusterIDFromParam reads that name to decide which cluster the gate
+// authorizes. No gate runs on these paths, but the guard is about the name rather than today's path. The
+// parameter is declared as report_cluster_id with "cluster_id" as its alias, and BOTH spellings have to keep
+// working: the schedule form and the generate dialog both send "cluster_id".
 func TestReportClusterIDTakesItsWireNameUnderAnAlias(t *testing.T) {
 	for _, tt := range []struct {
 		method string
@@ -331,19 +319,12 @@ func TestScheduleCreateRequiresOnlyWhatTheHandlerDid(t *testing.T) {
 		t.Errorf("required parameters = %v, want %v", got, want)
 	}
 
-	// schedule is OPTIONAL and empty-able, and those are two separate
-	// concessions to the same old behaviour.
-	//
-	// This assertion is here because its earlier version got the answer
-	// wrong in a way that is worth not repeating. It listed "schedule" in
-	// the required set, which pinned a REGRESSION rather than catching one:
-	// the old handler ran `if schedule != ""` before validating, so a body
-	// that OMITTED the key inserted a manual-only row and answered 201.
-	// Declaring it required turned that into a 400 naming a parameter the
-	// caller had never needed to send, and the test then froze it.
-	//
-	// A required-set test only protects the callers it remembers. The old
-	// one remembered the empty-string caller and forgot the absent-key one.
+	// schedule is OPTIONAL and empty-able, two separate concessions to the same old behaviour. An earlier
+	// version of this assertion listed "schedule" as required, which pinned a REGRESSION rather than catching
+	// one: the old handler ran `if schedule != ""` before validating, so a body that OMITTED the key inserted a
+	// manual-only row and answered 201, and declaring it required turned that into a 400 naming a parameter
+	// the caller never needed to send. A required-set test only protects the callers it remembers; the old one
+	// remembered the empty-string caller and forgot the absent-key one.
 	if prop := e.Parameters["schedule"]; !prop.Optional {
 		t.Error("schedule is required; omitting it used to insert a manual-only schedule and answer 201")
 	}

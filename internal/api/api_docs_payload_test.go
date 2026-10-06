@@ -263,19 +263,11 @@ func TestDocParameters_OptionalAndDefault(t *testing.T) {
 	}
 }
 
-// TestDocParameters_Constraints pins that every rule a caller must
-// satisfy reaches the payload.
-//
-// Without these, the docs answer "does this parameter exist" and not
-// "what is a valid request" — which is the same failure the disk-attach
-// incident was, one field along: snap_name's pattern forbids a leading
-// digit, and a caller sending "1abc" gets a 400 nothing in the docs let
-// them predict.
-//
-// The zero-valued cases are the point of the table. A minimum of 0 is a
-// real floor and an absent minimum is no floor; a pointer is what keeps
-// them apart, and a test that only ever used non-zero bounds would pass
-// just as happily against a *float64 flattened to a float64.
+// TestDocParameters_Constraints pins that every rule a caller must satisfy reaches the payload: without
+// them the docs answer "does this parameter exist", not "what is a valid request" (snap_name's pattern
+// forbids a leading digit, and "1abc" is a 400 nothing in the docs predicts). The zero-valued cases
+// are the point: a minimum of 0 is a real floor and an absent minimum is no floor, a pointer keeps
+// them apart, and non-zero bounds alone would pass against a *float64 flattened to a float64.
 func TestDocParameters_Constraints(t *testing.T) {
 	got := docParamsOf(t, Endpoint{
 		Method: fiber.MethodPost, Path: "/api/v1/probe",
@@ -432,17 +424,11 @@ func wantPtr[T comparable](t *testing.T, field string, got *T, want T) {
 	}
 }
 
-// TestDocParameters_BoundsAreNotAliased proves the payload does not share
-// a bound pointer with the schema it was rendered from. Register does not
-// clone an endpoint's Parameters and neither does Compile, so the pointer
-// the schema holds IS the one docParameters reads; apischema deep-copies
-// a standard option per route for exactly this reason, and a payload that
-// aliased the bound would hand every reader a pointer into the live
-// schema.
-//
-// All FOUR bounds are checked, not just the first: they are four separate
-// clonePtr calls, and a single-field test passes against three of them
-// written as a plain assignment.
+// TestDocParameters_BoundsAreNotAliased proves the payload does not share a bound pointer with the
+// schema it was rendered from: Register and Compile do not clone Parameters, so the pointer the schema
+// holds IS the one docParameters reads, and a payload that aliased it would hand every reader a pointer
+// into the live schema. All FOUR bounds are checked: they are four separate clonePtr calls, and a
+// single-field test passes against three of them written as a plain assignment.
 func TestDocParameters_BoundsAreNotAliased(t *testing.T) {
 	props := apischema.Properties{
 		"index": {
@@ -602,20 +588,14 @@ func TestDocEndpoints_NilRegistry(t *testing.T) {
 	}
 }
 
-// TestGuard_DeclaredDocsReachTheDocsHandler proves the seam end to end
-// against the REAL route table: setupRoutes must hand the docs handler
-// every declaration, and every declared key must match a route that is
-// actually registered.
-//
-// The second half is the same drift TestEndpointMetaMatchesRegisteredRoutes
-// catches for the curated overlay, and it fails the same silent way: a
-// key that matches no route renders nothing at all, and nothing else
-// notices. It is worth asserting separately because the two keys are
-// produced by different code — the overlay's are hand-typed, the
-// declarations' come from Endpoint.Path — and only one of them is
-// currently proven to survive Fiber's registration.
+// TestGuard_DeclaredDocsReachTheDocsHandler proves the seam against the REAL route table: setupRoutes
+// must hand the docs handler every declaration, and every declared key must match a registered route.
+// The second half is the drift TestEndpointMetaMatchesRegisteredRoutes catches for the overlay, failing
+// the same silent way (a key matching no route renders nothing); it is separate because the keys come
+// from different code (the overlay's are hand-typed, the declarations' come from Endpoint.Path) and
+// only one is proven to survive Fiber's registration.
 func TestGuard_DeclaredDocsReachTheDocsHandler(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	declared := s.apiDocsHandler.DeclaredEndpointKeys()
 	if len(declared) != s.registry.Len() {
@@ -646,17 +626,11 @@ func TestGuard_DeclaredDocsReachTheDocsHandler(t *testing.T) {
 	}
 }
 
-// TestDocEndpoints_TrailingSlashPathStillResolves covers the one path
-// shape where the two sides of the docs lookup could disagree.
-//
-// GetDocs normalises the route-table path before looking a declaration
-// up, so a declaration keyed on the RAW path would miss for any route
-// mounted at ".../foo/" — fall through to endpointMeta, miss there too,
-// and render the endpoint with a blank description and no parameters.
-// Nothing declares such a path today, and Register does not forbid one:
-// the registry_shadow_guard tests register exactly this shape on purpose,
-// because Fiber's StrictRouting is unset and treats the two spellings as
-// one route. So the agreement has to hold rather than be legislated away.
+// TestDocEndpoints_TrailingSlashPathStillResolves covers the one path shape where the two sides of the
+// docs lookup could disagree: GetDocs normalises the route-table path before the lookup, so a
+// declaration keyed on the RAW path would miss for a route mounted at ".../foo/" and render a blank
+// endpoint. Nothing declares one today and Register does not forbid it (StrictRouting is unset, so
+// the two spellings are one route), so the agreement has to hold rather than be legislated away.
 func TestDocEndpoints_TrailingSlashPathStillResolves(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(registryProbeEndpointNoParams("/api/v1/probe/",
@@ -683,7 +657,7 @@ func TestDocEndpoints_TrailingSlashPathStillResolves(t *testing.T) {
 // index means slot 0, which on a VM with a disk is its boot disk, and
 // that is worse than saying nothing.
 func TestGuard_AttachDiskIndexStaysDefaultless(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	const key = "POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach"
 	var params []handlers.APIParameter
@@ -719,56 +693,18 @@ func TestGuard_AttachDiskIndexStaysDefaultless(t *testing.T) {
 	}
 }
 
-// TestGuard_DeclarationDropsNoDocumentedPermission (RETIRED) was the guard
-// for the regression this phase very nearly shipped: GetDocs renders a
-// declared route from its declaration and stops reading endpointMeta for
-// it, so anything the overlay said and the declaration did not say would
-// go silently missing from the PAYLOAD's permission field.
-//
-// Be precise about what it actually checked, because the obvious reading
-// overstates it: `overlay := handlers.EndpointMetaPermissions()` returns
-// only the `Permission` FIELD of each endpointMeta entry, never the
-// Description. For convert-to-template that field was "manage:vm" —
-// "manage:container" lived only in endpointMeta's Description sentence,
-// which this guard never read and therefore never compared against
-// anything. It could only ever prove "manage:vm still appears somewhere
-// in what the declaration renders" for that route, never "manage:container
-// still appears somewhere". Confirmed by re-running this exact body against
-// registry_vms.go with "and manage:container as well when the guest is a
-// container." deleted from both convert-to-template's and
-// clone-to-template's Description: it still passes, 210 comparisons, zero
-// findings. So while this comment block's earlier revision claimed the
-// guard covered the manage:container half, it did not — nothing in this
-// test suite did, and per the assessment on the endpointMeta cleanup this
-// file's other guards inherited, nothing does today either.
-//
-// What it DID do was catch a route whose overlay Permission field (the one
-// thing it could see) stopped appearing anywhere in the declaration — a
-// one-time migration-safety check ("did we lose the ONE fact this narrow
-// view had") against the OLD, frozen endpointMeta text, which is a
-// comparison that needs an old copy to diff against. Its own anti-vacuity
-// check — "no declared route has a curated permission to compare... remove
-// it once endpointMeta no longer overlaps the registry" — said explicitly
-// what should happen once that old copy was gone: this test's `checked`
-// count is a self-fulfilling zero once every registry-overlapping
-// endpointMeta entry is removed (see internal/api/handlers/api_docs.go's
-// endpointMeta doc comment for the full removal), which is the state this
-// repo is now in.
-//
-// Unlike TestAPIKeyDocsPromiseWhatTheRoutesEnforce (registry_api_keys_test.go,
-// also retired the same way), there is no replacement test for the narrow
-// thing this one verified, because there is nothing left to verify it
-// against: a migration-time "did the Permission field survive" diff has no
-// object once the field it diffed no longer exists anywhere. It is NOT a
-// replacement for prose-level review of a Deferred or Advisory route's
-// Description — it never did that job even before retirement.
+// The old TestGuard_DeclarationDropsNoDocumentedPermission was retired with the endpointMeta overlay
+// entries it diffed against, and nothing replaces it. It read only the overlay's Permission FIELD,
+// never the Description, so it never covered convert-to-template's manage:container half (deleting
+// that sentence from the declaration left it green); a migration-time diff needs an old copy to diff
+// against, and prose-level review of a Deferred or Advisory Description was never its job.
 
 // TestDeclaredParameterNames_CoversEveryPathParam re-states, over the
 // real registry and through the docs accessor, what checkPathParams
 // enforces at registration: a :param with no schema entry reaches the
 // handler as a value no accessor can read.
 func TestDeclaredParameterNames_CoversEveryPathParam(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 
 	names := declaredParameterNames(s.registry)
 	for _, e := range s.registry.Endpoints() {
@@ -782,17 +718,11 @@ func TestDeclaredParameterNames_CoversEveryPathParam(t *testing.T) {
 	}
 }
 
-// TestDocParameters_RuleText is the payload half of the rule catalogue's
-// payoff: a parameter that names a rule must also say what that rule
-// permits.
-//
-// A bare `format: "pve-configid"` states that a rule applies without
-// stating what it is. An operator on the in-app catalog can at least go
-// and read apischema/catalogue.go; an external consumer reading
-// /api/v1/api-docs cannot, and neither can anyone debugging a 400 at
-// three in the morning. That is the same failure the undocumented
-// `pattern` was, one level of indirection along — and the catalogue was
-// written specifically to answer it.
+// TestDocParameters_RuleText is the payload half of the rule catalogue's payoff: a parameter that
+// names a rule must also say what it permits. A bare `format: "pve-configid"` states that a rule
+// applies without stating what it is; an operator on the in-app catalog can read
+// apischema/catalogue.go, an external consumer of /api/v1/api-docs cannot (the undocumented `pattern`
+// failure, one indirection along).
 func TestDocParameters_RuleText(t *testing.T) {
 	got := docParamsOf(t, Endpoint{
 		Method: fiber.MethodPost, Path: "/api/v1/probe",
@@ -912,21 +842,13 @@ func TestDocParameters_RuleText(t *testing.T) {
 			t.Errorf("rule.permits = %q and never mentions the empty string, which is the only "+
 				"reason this rule exists apart from its base", r.Permits)
 		}
-		// What is NOT asserted, and must not be: that the line says what
-		// sending "" DOES. Two of the five rules do say so, because theirs
-		// generalises over every site; three deliberately do not. A shape
-		// check here would either fail the three or fail a rewording of
-		// the two, and would be deleted rather than satisfied — the same
-		// reason prose-scraping was rejected for the narrowing guard in
-		// registry_rule_catalogue_test.go. A first draft tried "must be
-		// longer than its base" and was wrong on its first run: the
-		// derived line is legitimately SHORTER, because it names the base
-		// rule instead of restating its character class.
-		//
-		// The subtest name says what it proves — the line ARRIVES and
-		// NAMES the empty string — rather than what it would be nice to
-		// prove. The earlier name promised a meaning check and would have
-		// passed against a line with no meaning in it.
+		// What is NOT asserted, and must not be: that the line says what sending "" DOES. Two of the five rules
+		// do, because theirs generalises over every site; three deliberately do not, and a shape check would
+		// fail the three or a rewording of the two and be deleted rather than satisfied (the reason prose-
+		// scraping was rejected in registry_rule_catalogue_test.go). A "must be longer than its base" draft was
+		// wrong on its first run: the derived line is legitimately SHORTER, naming the base rule instead of
+		// restating it. The subtest name says what it proves, that the line ARRIVES and NAMES the empty
+		// string, not a meaning check that would have passed against a line with none.
 	})
 
 	t.Run("an uncatalogued pattern renders no rule", func(t *testing.T) {
@@ -1010,21 +932,13 @@ func TestBuildRuleByPattern(t *testing.T) {
 	})
 }
 
-// TestGuard_EveryNamedRuleInThePayloadSaysWhatItPermits walks the REAL
-// registry and fails if any parameter names a rule the payload does not
-// explain.
-//
-// The synthetic tests above prove the wiring works for one declaration.
-// This one proves it reaches every declaration that has a rule to state,
-// which is the claim an operator actually relies on — and it is the guard
-// that could not have existed before this change, because until now there
-// was nothing in the payload for it to check.
-//
-// The floors are what keep it from passing by looking at nothing: a bug
-// that stopped rendering rules entirely, or a stub server that registered
-// no routes, would otherwise leave an empty loop and a green test.
+// TestGuard_EveryNamedRuleInThePayloadSaysWhatItPermits walks the REAL registry and fails if a
+// parameter names a rule the payload does not explain: the synthetic tests above prove the wiring for
+// one declaration, this proves it reaches every declaration that has a rule to state, the claim an
+// operator relies on. The floors keep it from passing by looking at nothing (rendering stopped, or a
+// stub that registered no routes, would leave an empty loop and a green test).
 func TestGuard_EveryNamedRuleInThePayloadSaysWhatItPermits(t *testing.T) {
-	s := newRouteStubServer(t)
+	s := sharedRouteStub(t)
 	eps := docEndpoints(s.registry)
 	if len(eps) < 400 {
 		t.Fatalf("docEndpoints rendered %d endpoints, want the declared set; this test would pass "+
@@ -1053,31 +967,14 @@ func TestGuard_EveryNamedRuleInThePayloadSaysWhatItPermits(t *testing.T) {
 		if rule.Name != named {
 			t.Errorf("%s: rule.name = %q, want %q", where, rule.Name, named)
 		}
-		// The check above derives `named` from the SAME index production
-		// reads, so on its own it proves self-consistency and not correct
-		// attribution: corrupt ruleByPattern and both sides move together.
-		// The published regex is the independent witness. A pattern is
-		// indexed BY its regex, so a correctly attributed rule always
-		// publishes the regex the parameter declares, and a misindexed one
-		// shows up here as two regexes that do not match.
-		//
-		// Gated on format == "" because docRule resolves a Format FIRST:
-		// with both fields set, rule.Regex is correctly the format's and
-		// has no reason to equal the pattern, and this would report a
-		// misattribution that did not happen. bothFields below is what
-		// reports that case, and it reports the true thing.
-		//
-		// This holds for every catalogued pattern as things stand — all of
-		// them are RuleIsRegex — but note that nothing enforces it in
-		// general. The count is deliberately not written down here: it has
-		// already rotted once (13 → 14 when pve-object-id-or-empty was
-		// catalogued) while the claim itself stayed true, and a number that
-		// rots independently of the sentence it supports is a number that
-		// teaches readers to distrust the sentence.
-		// orEmptyRules panics on a non-regex base, which covers only the
-		// entries it derives from; a hand-written pattern entry with
-		// RuleIsRegex false would be indexed by its prose and publish no
-		// regex, and this check would simply not fire for it.
+		// `named` is derived from the SAME index production reads, so the check above proves self-consistency,
+		// not attribution: corrupt ruleByPattern and both sides move together. The published regex is the
+		// independent witness: a pattern is indexed BY its regex, so a correctly attributed rule publishes
+		// the regex the parameter declares. Gated on format == "" because docRule resolves a Format FIRST
+		// (then rule.Regex is correctly the format's); bothFields reports that case. This holds for every
+		// catalogued pattern today (all RuleIsRegex) though nothing enforces it in general: orEmptyRules
+		// panics on a non-regex base, but a hand-written RuleIsRegex-false pattern entry would publish no
+		// regex and this check would not fire. The count is not written down: it rotted once (13 to 14).
 		if format == "" && pattern != "" && rule.Regex != pattern {
 			t.Errorf("%s: rule %q publishes the regex %s, but the parameter declares the pattern %s — "+
 				"the pattern was attributed to the wrong catalogue entry",
@@ -1128,24 +1025,14 @@ func TestGuard_EveryNamedRuleInThePayloadSaysWhatItPermits(t *testing.T) {
 	}
 }
 
-// TestGuard_PublishedRuleFieldsAreTheReviewedSet holds the rule block to
-// the three fields that were reviewed for publication.
-//
-// /api/v1/api-docs is served to any authenticated caller and this repo is
-// public, so APIRule is a public surface and every field added to it is a
-// publication decision. The catalogue entry it is rendered from carries
-// five more: the upstream Proxmox file, that upstream rule verbatim, a
-// divergence note, and the Accepts/Rejects witnesses. Those were left out
-// deliberately — the first three are maintainer notes naming Go
-// identifiers and repo paths, and the witnesses are FREE-FORM STRINGS, the
-// one place in the catalogue where a real host, guest or storage name
-// could plausibly be typed. Adding any of them by reflex, because the
-// field was sitting right there in RuleDoc, is the mistake this catches.
-//
-// It is a field-set check rather than a string scan on purpose: a scan
-// would have to name the tokens it forbids, and writing the estate's real
-// identifiers into a public repo to prove they are not in a public payload
-// is the leak it was meant to prevent.
+// TestGuard_PublishedRuleFieldsAreTheReviewedSet holds the rule block to the three fields reviewed for
+// publication. /api/v1/api-docs is served to any authenticated caller and this repo is public, so
+// every field added to APIRule is a publication decision. The catalogue entry carries five more
+// (the upstream file, the upstream rule verbatim, a divergence note, the Accepts/Rejects witnesses),
+// left out on purpose: the first three are maintainer notes naming Go identifiers and repo paths, and
+// the witnesses are free-form strings, the one place a real host, guest or storage name could be
+// typed. A field-set check rather than a string scan, since a scan would have to name the tokens it
+// forbids, writing the estate's real identifiers into a public repo to prove they are absent.
 func TestGuard_PublishedRuleFieldsAreTheReviewedSet(t *testing.T) {
 	want := []string{"Name", "Permits", "Regex"}
 
@@ -1200,22 +1087,13 @@ func TestGuard_NoPublishedRuleCarriesAnAddressLiteral(t *testing.T) {
 	}
 }
 
-// nameCollisionRules are the catalogue entries whose Divergence says
-// Proxmox registers a DIFFERENT rule under the same name.
-//
-// They are listed because they are the one divergence shape `origin`
-// cannot compress. For every other entry, "origin: proxmox" carries the
-// actionable half — Proxmox is the authority and may refuse what we
-// accept — which is why withholding the Divergence prose from the payload
-// costs a caller nothing. A name collision is the opposite: a reader who
-// knows Proxmox sees `format: "disk-size"` and applies PVE's semantics,
-// where a bare number is BYTES and here it is GiB. Nothing in the
-// published fields contradicts them unless the Permits line does.
-//
-// Both entries currently do — disk-size's ends "a bare number is already
-// GiB" and bwlimit's says "in KiB/s" — and the guard below exists so that
-// a THIRD collision cannot be added without someone deciding, on purpose,
-// whether its Permits line closes the same trap.
+// nameCollisionRules are the catalogue entries whose Divergence says Proxmox registers a DIFFERENT
+// rule under the same name: the one divergence shape `origin` cannot compress. For every other entry
+// "origin: proxmox" carries the actionable half (Proxmox is the authority and may refuse what we
+// accept), but a reader who knows PVE sees `format: "disk-size"` and applies its semantics (a bare
+// number is BYTES, here GiB) unless the Permits line contradicts them. Both entries do (disk-size's
+// "a bare number is already GiB", bwlimit's "in KiB/s"), and the guard below makes a THIRD collision
+// a deliberate decision about its Permits line.
 var nameCollisionRules = []string{"bwlimit", "disk-size"}
 
 // TestGuard_NameCollisionRulesStayTheKnownTwo is the ratchet under the

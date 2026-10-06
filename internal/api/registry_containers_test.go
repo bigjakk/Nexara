@@ -35,22 +35,14 @@ func ctRoute(path string) string {
 	).Replace(path)
 }
 
-// containerLegacyPermissions is the permission each container handler
-// checked with a hand-placed requireClusterPerm call BEFORE Phase 6a,
-// transcribed from internal/api/handlers/containers.go at commit 2f2500f
-// (18 handlers, 18 calls, every one of them cluster-scoped on the
-// "container" resource).
-//
-// It exists so the migration is verifiable rather than asserted: the check
-// moved from the handler body into route middleware, and the only thing
-// that makes that safe is the two being the same check. Both directions
-// are compared below — a route in this table with no declaration, and a
-// declared container route missing from this table, are each a failure —
-// so neither list can quietly drift away from the other.
-//
-// DeleteSnapshot is the one entry that is NOT simply what the code always
-// did: its gate was corrected from execute to delete before this
-// migration, and the declaration carries the corrected value.
+// containerLegacyPermissions is the permission each container handler checked with a hand-placed
+// requireClusterPerm call BEFORE Phase 6a, transcribed from internal/api/handlers/containers.go at commit
+// 2f2500f (18 handlers, 18 calls, all cluster-scoped on the "container" resource). It makes the migration
+// verifiable rather than asserted: the check moved from the handler body into route middleware, safe only
+// if the two are the same check. Both directions are compared (a route here with no declaration, a declared
+// container route missing here), so neither list drifts quietly. DeleteSnapshot is the one entry that is
+// NOT what the code always did: its gate was corrected from execute to delete before this migration, and
+// the declaration carries the corrected value.
 var containerLegacyPermissions = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/containers":                                       "view:container",
 	"POST /api/v1/clusters/:cluster_id/containers":                                      "manage:container",
@@ -76,14 +68,7 @@ var containerLegacyPermissions = map[string]string{
 // the /containers prefix, keyed "METHOD path".
 func declaredContainerEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, containerScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(containerScope))
 }
 
 // TestContainerRoutesDeclareTheSamePermissionTheyEnforced is the tally
@@ -177,17 +162,12 @@ func TestContainerRoutesDeclareEveryPathParameter(t *testing.T) {
 	}
 }
 
-// TestContainerStatusEnumMatchesTheHandler pins that the declared action
-// vocabulary IS handlers.ContainerStatusActions rather than a hand-written
-// literal beside it, and that it is NOT the VM list: LXC has no reset.
-//
-// The link to the switch in ContainerHandler.PerformAction is one hop
-// further and is held by TestContainerStatusActions in the handlers
-// package, which names the six actions that switch covers. Nothing here
-// reads the switch itself — a case deleted from it would still leave this
-// green, and would answer "dispatched" with an empty UPID. That gap is
-// the VM route's too; closing it needs an AST walk over the handler, not
-// an assertion on the schema.
+// TestContainerStatusEnumMatchesTheHandler pins that the declared action vocabulary IS
+// handlers.ContainerStatusActions rather than a literal beside it, and is NOT the VM list: LXC has no reset.
+// The link to the switch in ContainerHandler.PerformAction is one hop further, held by
+// TestContainerStatusActions in the handlers package. Nothing here reads the switch itself: a case deleted
+// from it would leave this green and answer "dispatched" with an empty UPID. That gap is the VM route's
+// too; closing it needs an AST walk over the handler, not an assertion on the schema.
 func TestContainerStatusEnumMatchesTheHandler(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodPost, containerScope+"/:ct_id/status")
 	action := e.Parameters["action"]
@@ -654,19 +634,13 @@ func TestContainerRouteIsGatedByItsDeclaration(t *testing.T) {
 	})
 }
 
-// TestEveryContainerEndpointIsDocumented holds the declarations to the
-// standard that makes this whole effort worth doing: every route and every
-// parameter says what it is for, because the declaration IS the
-// documentation and 319 endpoints in this API still say nothing.
-//
-// Only two of the four checks below can actually fire, and it is worth
-// knowing which. Register PANICS on a blank Description, a blank Group or
-// a schema that fails Compile, so those three have necessarily passed by
-// the time declaredContainerEndpoints returns — they are belt and braces
-// against buildRegistry ever being changed to report instead of panic,
-// matching TestEveryVMEndpointCompiles. The two that bite are the Group
-// value (Register requires A group, not THIS one) and the per-parameter
-// Description, which Compile does not look at at all.
+// TestEveryContainerEndpointIsDocumented holds the declarations to the standard that makes this effort
+// worth doing: every route and parameter says what it is for, because the declaration IS the documentation.
+// Only two of the four checks can fire. Register PANICS on a blank Description, a blank Group or a schema
+// that fails Compile, so those three have passed by the time declaredContainerEndpoints returns (belt and
+// braces against buildRegistry ever reporting instead of panicking, as in TestEveryVMEndpointCompiles). The
+// two that bite are the Group value (Register requires A group, not THIS one) and the per-parameter
+// Description, which Compile does not look at.
 func TestEveryContainerEndpointIsDocumented(t *testing.T) {
 	for key, e := range declaredContainerEndpoints(t) {
 		if err := e.Parameters.Compile(); err != nil {

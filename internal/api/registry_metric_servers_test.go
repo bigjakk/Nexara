@@ -32,14 +32,7 @@ var metricServerLegacyPermissions = map[string]string{
 
 func declaredMetricServerEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if strings.HasPrefix(e.Path, metricServerScope) {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(metricServerScope))
 }
 
 // TestMetricServerRoutesDeclareTheSamePermissionTheyEnforced is the tally that

@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -15,143 +13,25 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// Five GET handlers return a Proxmox struct that carries credential-shaped
-// fields, and keep these out of the response:
-//
-//	GET .../storage/:storage_id/config   StorageConfig{password,keyring}
-//	GET .../sdn/ipams                    SDNIPAM{token}
-//	GET .../sdn/dns                      SDNDNS{key}
-//	GET .../access/users                 AccessUser{keys}
-//	GET .../access/users/:userid         AccessUserDetail{keys}
-//
-// All five are gated on view:storage, view:network or view:access, which every
-// built-in Viewer holds. metric_servers.go had already established the rule for
-// its own InfluxDB token — blank the write-only credential on the read — and
-// the first three follow it. For the storage body it is defence in depth:
-// Proxmox keeps a storage plugin's password and keyring under /etc/pve/priv and
-// the read should never carry them (see newStorageConfigResponse). Its
-// encryption-key is NOT blanked: on this read it is the key's fingerprint,
-// which the edit dialog shows, and blanking it protected nothing.
-//
-// The two user reads apply the same rule to a two-factor field: a user's keys
-// (see accessUserResponse for what it holds) is left out of the body, and a
-// has_keys bool says whether the field is set.
-//
-// The guards below are in three layers because each catches a different
-// mistake:
-//
-//  1. TestReadStructsStripCredentials fills every string field with a probe
-//     value and checks what survives into the JSON. It fails if a strip is
-//     removed, and it fails on a NEW credential-shaped field nobody has
-//     classified yet — which is the failure mode per-field assertions cannot
-//     see.
-//  2. TestGuard_StorageConfigResponseHasOneConstructor pins the storage body
-//     to its constructor, so deleting the call rather than the assignment is
-//     caught too. TestGuard_AccessUserResponsesHaveOneConstructor does the same
-//     for the two user bodies.
-//  3. TestGuard_CredentialReadsAreShapedBeforeResponding requires every
-//     handler that performs one of these reads to call the shaper, so a
-//     handler that skips it — or a new one that never had it — is caught.
-//
-// Stated limitation: all three reason about THIS package, and only about the
-// five structs listed in readStructs. A credential leaving by another route —
-// a log line, an audit row, an error string, another package's handler — is out
-// of their sight. The audit route in particular matters here: audit_log.details
-// is readable by anyone with view:audit, which every Viewer has by default, and
-// identity_secret_guard_test.go is the guard that covers that route for the
-// identity handlers.
-//
-// A second limitation, worth naming because it looks like coverage: the walk
-// is FLAT and string-only. readStructs lists five handler-RESPONSE structs,
-// and TestReadStructsStripCredentials iterates each one's own fields and
-// skips everything whose Kind is not reflect.String. A non-string field is
-// still examined by NAME — it is reported if its json name looks
-// credential-shaped — but its own fields are never reached, so a
-// credential-bearing STRUCT held as a field is never opened, exported or not,
-// on a listed struct or not. (isCredentialish("config") is false, so even the
-// name check is silent here.) internal/rolling's
-// failoverTarget, which holds a proxmox.ClientConfig in `config`, is out of
-// scope twice over: it is not a response struct, and a struct field would be
-// passed over even if it were. Field visibility is not what decides this; do
-// not reach for exporting a field as a way of buying coverage here. The fix
-// for that shape is redaction on the TYPE, not another classifier: see the
-// ClientConfig entry below.
-//
-// The sweep that produced this file also looked at every other internal/proxmox
-// struct with a credential-shaped field and settled each one. It found one leak,
-// keys on AccessUser and AccessUserDetail, since shaped and listed in
-// readStructs above. It could not find a secret under a name that is not
-// credential-SHAPED, which is the blind spot credentialish describes, and for
-// that reason it missed AccessDomain.TFA: isCredentialish("tfa") is false, yet on
-// GET .../access/domains/:realm the field was Proxmox's whole two-factor property
-// string, the Yubico API key included, readable by every Viewer. It is now
-// reduced to its type, as Proxmox's own realm list gives it, where the client
-// decodes it (proxmox.RealmTFAType, in GetAccessDomain and GetAccessDomains) and
-// again by accessDomainForRead and accessDomainsForRead; the shaper guard below
-// requires the handlers' half.
-//
-// AccessDomain is NOT listed in readStructs, and cannot be: that test fatals on a
-// struct with no credential-shaped field, and none of AccessDomain's five json
-// names is one. What guards it instead is TestAccessDomainFieldSet in
-// internal/proxmox, which pins the fields it decodes: Proxmox's read returns the
-// realm's whole section, domains.cfg holds secrets, some under names that say
-// nothing (tfa),
-// and a field added is sent the moment it is decoded. access_realm_test.go, the
-// client tests and the route tests in internal/api pin what is sent.
-//
-// The rest needed no change, and none is enforced here, so those findings are
-// recorded rather than re-derived:
-//
-//	AccessToken                              carries no secret by construction;
-//	  Proxmox returns a token's value exactly once, at creation.
-//	AccessTokenCreated.Value                 IS the secret, returned on purpose
-//	  by CreateToken/UpdateToken — there is no read-back endpoint — and already
-//	  kept out of the audit row.
-//	TermProxyResponse.Password               never read anywhere; the sibling
-//	  Ticket is sent to the browser on purpose, as noVNC's RFB password, and is
-//	  logged by length only.
-//	NodeSubscription.Key                     decoded by the collector, which
-//	  reads Status and Level and discards the rest. No handler calls it.
-//	TargetEndpoint.APIToken                  write-side only, for remote
-//	  migration. The real property string now lives on PropertyString(), while
-//	  String/GoString/LogValue/MarshalJSON redact every rendering that
-//	  dispatches on the type. Guarded in internal/proxmox by
-//	  TestGuard_TargetEndpointNeverPrintsItsToken.
-//	ClientConfig.TokenSecret                 never returned by a handler — it
-//	  is a constructor argument, built as a literal and passed straight to
-//	  NewClient/NewPBSClient at every one of its fourteen non-test sites —
-//	  including failoverTarget.config, which holds one only to hand it over. It is
-//	  recorded here, and NOT added to readStructs, on purpose: with no handler
-//	  response to shape there is no respond func to write, and inventing one
-//	  would be a second mechanism that proves nothing. The exposure is
-//	  rendering, not responding, so the fix is on the type —
-//	  String/GoString/LogValue/MarshalJSON, guarded in internal/proxmox by
-//	  TestGuard_ClientConfigNeverPrintsItsTokenSecret. That is also as much of
-//	  the failoverTarget shape as anything can cover: `t.config` selected from
-//	  one is redacted; only %v of the whole failoverTarget is not.
-//	ClusterJoinInfo, NodeCertificate, NodeListEntry, StorageConfig.fingerprint
-//	  carry TLS fingerprints and public key metadata — public by definition.
-//	VMConfig (a bare map[string]interface{}) is returned raw by the VM and CT
-//	  config handlers. PVE masks cipassword on read and sshkeys are public, but
-//	  a map has no field list, so nothing of this shape can guard it.
+// Five GET handlers return a Proxmox struct with credential-shaped fields and keep them out of the
+// response: storage/:storage_id/config StorageConfig{password,keyring}, sdn/ipams SDNIPAM{token},
+// sdn/dns SDNDNS{key}, access/users and access/users/:userid AccessUser{keys} (a has_keys bool says
+// whether it is set), all gated on view:* every Viewer holds. Three layers: TestReadStructsStripCredentials
+// fills every string field with a probe and checks what survives into the JSON (it fails when a strip
+// is removed and on a NEW credential-shaped field nobody classified); the ...HasOneConstructor guards pin
+// the bodies to their constructors; TestGuard_CredentialReadsAreShapedBeforeResponding requires every
+// reading handler to call its shaper. Limits: THIS package and the five readStructs only, and the walk
+// is flat and string-only: a credential-bearing struct held as a field is never opened (exporting a
+// field buys no coverage; the fix is redaction on the TYPE).
 
-// credentialish are the substrings that make a json field name look like it
-// carries something a caller could authenticate with. Deliberately broad: a
-// false positive costs one line in keptFields with a reason, while a false
-// negative is a published secret.
-//
-// What it cannot catch, stated plainly: a credential whose field name says
-// nothing. proxmox.ACMEPlugin.Data is the live example — it holds the DNS
-// provider's API credentials and is blanked by hand in acme.go, and no list of
-// name substrings would ever have found it. proxmox.AccessDomain.TFA is another:
-// a realm's two-factor property string, Yubico API key and all. A field named for
-// its role rather than its content still needs a human to notice.
-//
-// This list has a second consumer:
-// TestGuard_CredentialBearingTypesRedactTheirRenderings in
-// credential_render_guard_test.go reads it to classify every type under
-// internal/ that renders itself. Widening it widens that guard too, which is
-// the intent — one vocabulary, not two.
+// credentialish are the substrings that make a json field name look like it carries something a caller
+// could authenticate with. Deliberately broad: a false positive costs one keptFields line with a
+// reason, a false negative is a published secret. It cannot catch a credential whose name says
+// nothing: proxmox.ACMEPlugin.Data (DNS provider credentials, blanked by hand in acme.go) and
+// proxmox.AccessDomain.TFA (a realm's two-factor string, Yubico API key and all; now reduced to its
+// type by the client and accessDomainForRead, and pinned by TestAccessDomainFieldSet, since
+// readStructs cannot list a struct with no credential-shaped field). Its second consumer,
+// TestGuard_CredentialBearingTypesRedactTheirRenderings, reads it too: one vocabulary, not two.
 var credentialish = []string{
 	"password", "passwd", "token", "secret", "key", "keyring", "passphrase",
 	"credential", "pubkey", "privkey", "psk", "apitoken", "ticket", "salt",
@@ -189,6 +69,14 @@ type readStruct struct {
 	keptFields map[string]string
 }
 
+// readStructs lists the five response structs. Every other internal/proxmox struct with a
+// credential-shaped field was reviewed and is not enforced here: AccessToken carries no secret (PVE
+// returns a token's value once, at creation); AccessTokenCreated.Value IS the secret, returned on
+// purpose and kept out of the audit row; TermProxyResponse.Password is never read (Ticket is noVNC's
+// password, logged by length only); NodeSubscription.Key is discarded by the collector; TargetEndpoint.
+// APIToken and ClientConfig.TokenSecret are never returned by a handler and redact on the TYPE
+// (TestGuard_TargetEndpointNeverPrintsItsToken, TestGuard_ClientConfigNeverPrintsItsTokenSecret in
+// internal/proxmox); TLS fingerprints are public; VMConfig is a bare map no field list can guard.
 func readStructs() []readStruct {
 	return []readStruct{
 		{
@@ -431,30 +319,12 @@ func TestReadStructsStripCredentials(t *testing.T) {
 	}
 }
 
-// parsePackageFiles parses every non-test .go file in this package.
+// parsePackageFiles parses every non-test .go file in this package: parseGoFiles
+// over ".", which fails on an empty package, so the AST guards below cannot pass
+// without looking at anything.
 func parsePackageFiles(t *testing.T) (*token.FileSet, []*ast.File) {
 	t.Helper()
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read package dir: %v", err)
-	}
-	fset := token.NewFileSet()
-	var files []*ast.File
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
-		files = append(files, f)
-	}
-	if len(files) == 0 {
-		t.Fatal("parsed no package files — the AST guards below would pass without looking at anything")
-	}
-	return fset, files
+	return parseGoFiles(t, ".")
 }
 
 // TestGuard_StorageConfigResponseHasOneConstructor keeps the credential

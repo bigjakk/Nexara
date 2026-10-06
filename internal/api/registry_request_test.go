@@ -227,17 +227,11 @@ func TestRegistryRejectsAMissingRequiredParameter(t *testing.T) {
 	}
 }
 
-// TestRegistryAnswers500ForADeclarationBug pins the OTHER half of the
-// error mapping: a plain error out of Validate is OUR mistake, not the
-// caller's, so it must not come back as a 400 blaming them — and the
-// detail must not come back at all, since it describes internal parameter
-// plumbing to whoever happened to send the request.
-//
-// Reaching this needs Register to be bypassed, because Register compiles
-// every schema and Compile rejects a numeric bound on a string. That is
-// the point: after registration this branch is unreachable, and the
-// bypass here is what proves the branch is still correct if it ever is
-// reached.
+// TestRegistryAnswers500ForADeclarationBug pins the OTHER half of the error mapping: a plain error out
+// of Validate is OUR mistake, so it must not come back as a 400 blaming the caller, and its detail
+// (internal parameter plumbing) must not come back at all. Reaching it needs Register bypassed, since
+// Compile rejects a numeric bound on a string: after registration this branch is unreachable, and the
+// bypass proves it is still correct if it ever is reached.
 func TestRegistryAnswers500ForADeclarationBug(t *testing.T) {
 	cap := &capture{}
 	broken := Endpoint{
@@ -386,20 +380,13 @@ func TestRegistryOmitsUnseenKeysRatherThanPassingEmptyStrings(t *testing.T) {
 	})
 
 	t.Run("an optional path segment is refused, and read as absent if one arrives", func(t *testing.T) {
-		// The path branch of the same rule, held at two layers.
-		//
-		// Register refuses the shape: checkPathParams refuses "?" in every
-		// registry path, because an optional :cluster_id? matched empty let
-		// a cluster gate fall back to :id. This route has no cluster gate at
-		// all, and that is the point — it holds the refusal as unconditional.
-		//
-		// readSource is the layer under it. c.Params returns "" both for an
-		// unmatched optional segment and for one matched empty, and readSource
-		// reads that "" as absent rather than as a supplied value. Nothing
-		// registered can reach that branch while the refusal holds, so the
-		// route is also mounted past Register, as
-		// TestRegistryAnswers500ForADeclarationBug does, to keep the branch
-		// tested for the day the refusal is relaxed.
+		// The path branch of the same rule, held at two layers. Register refuses the shape: checkPathParams
+		// refuses "?" in every registry path, because an optional :cluster_id? matched empty let a cluster gate
+		// fall back to :id (this route has no cluster gate, which holds the refusal as unconditional). readSource
+		// is the layer under it: c.Params returns "" both for an unmatched optional segment and one matched empty,
+		// and readSource reads that "" as absent. Nothing registered can reach that branch while the refusal
+		// holds, so the route is also mounted past Register, as in TestRegistryAnswers500ForADeclarationBug, to
+		// keep it tested for the day the refusal is relaxed.
 		cap := &capture{}
 		e := Endpoint{
 			Method:      fiber.MethodGet,
@@ -938,18 +925,13 @@ func TestBodyIsBoundedOnAnEndpointThatDeclaresNoBodyParameter(t *testing.T) {
 	}
 }
 
-// A chunked body reports a Content-Length of -1 and cannot be sized before
-// reading, so it is one of the two shapes the Content-Length bound cannot
-// measure. The other is a content-coded body, which the server refuses before
-// any route runs (refuseContentCodedRequests, middleware.go); the test below
-// shows this path would not decode one even without that. The server refuses
-// a chunked body before any route runs too (refuseChunkedRequestBodies,
-// body_framing.go) — on every route but the storage upload, which declares no
-// body parameter, so there this check is what refuses a chunked JSON body
-// unread. It is tested here rather than through app.Test because Fiber's test
-// harness serialises ContentLength verbatim, emitting a literal
-// "Content-Length: -1" header that fasthttp rejects while parsing, before any
-// of this code runs.
+// A chunked body reports a Content-Length of -1 and cannot be sized before reading: one of the two
+// shapes the Content-Length bound cannot measure (the other, a content-coded body, is refused before any
+// route runs by refuseContentCodedRequests; the test below shows this path would not decode one anyway).
+// The server refuses a chunked body before any route runs too (refuseChunkedRequestBodies) except on the
+// storage upload, which declares no body parameter, so there this check is what refuses a chunked JSON body
+// unread. Tested here rather than through app.Test, whose harness emits a literal "Content-Length: -1"
+// that fasthttp rejects while parsing, before any of this code runs.
 func TestUnsizeableBodyIsRefusedUnreadOnAnEndpointDeclaringNoBodyParameter(t *testing.T) {
 	app := fiber.New()
 	e := Endpoint{
@@ -983,22 +965,14 @@ func TestUnsizeableBodyIsRefusedUnreadOnAnEndpointDeclaringNoBodyParameter(t *te
 	}
 }
 
-// TestEncodedBodyIsNeverDecodedOnAnEndpointDeclaringNoBodyParameter covers the
-// layer behind refuseContentCodedRequests, with that gate absent: an endpoint
-// that declares no body parameter reads c.BodyRaw(), which never decodes, so
-// an encoded body that got past the gate would reach JSON parsing as the
-// compressed bytes it is — a 400 — and could not inflate.
-//
-// The app here is a bare registry app with no app-level middleware, which is
-// what lets this layer be broken and caught on its own: in the server New
-// builds, the gate refuses every one of these first
-// (middleware_content_coding_test.go).
-//
-// The payload is a compressed "{}", which is the discriminating choice:
-// decoded, it is the one body this route accepts
-// (TestBodyIsBoundedOnAnEndpointThatDeclaresNoBodyParameter's first case), so
-// a reader that decoded would answer 200. The precondition shows that c.Body()
-// does decode each fixture to exactly that.
+// TestEncodedBodyIsNeverDecodedOnAnEndpointDeclaringNoBodyParameter covers the layer behind
+// refuseContentCodedRequests, with that gate absent: an endpoint that declares no body parameter reads
+// c.BodyRaw(), which never decodes, so an encoded body that got past the gate reaches JSON parsing as the
+// compressed bytes it is (a 400) and cannot inflate. The app is a bare registry app with no app-level
+// middleware, so this layer can be broken and caught on its own (on the real server the gate refuses first,
+// middleware_content_coding_test.go). The payload is a compressed "{}", decoded the one body this route
+// accepts, so a reader that decoded would answer 200; the precondition shows c.Body() decodes each
+// fixture to exactly that.
 func TestEncodedBodyIsNeverDecodedOnAnEndpointDeclaringNoBodyParameter(t *testing.T) {
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
 	reg := NewRegistry()

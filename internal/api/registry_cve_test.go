@@ -70,17 +70,7 @@ var cveLegacyPermissions = map[string]string{
 // path prefixes, keyed "METHOD path".
 func declaredCVEEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		for _, prefix := range cvePathPrefixes {
-			if strings.HasPrefix(e.Path, prefix) {
-				out[e.Method+" "+e.Path] = e
-				break
-			}
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, underPath(cvePathPrefixes...))
 }
 
 // TestCVERoutesDeclareTheSamePermissionTheyEnforced is the tally that
@@ -230,20 +220,14 @@ func TestCVEScanListPagingIsBounded(t *testing.T) {
 	}
 }
 
-// TestVulnerabilityFiltersAreDeclared covers the three query parameters
-// the vulnerability listing branches on, and the distinction the handler
-// depends on: it reads severity and node_id as VALUES, so an empty one is the
-// "no filter" it was before the registry (`if severity != ""`,
-// `nodeID != ""`) rather than a filter the caller chose. The enum carries ""
-// as a member and node_id carries the empty-or-uuid rule — the uuid format
-// would refuse "", as every registered format does.
-//
-// kev is a boolean, which no enum member or rule can widen, and the old
-// handler compared it with "true", so ?kev= was false. Its declaration counts
-// an empty value as absent instead: it reaches the handler on the default,
-// not as a value the caller supplied. What the handler then runs for each
-// filter is TestCVEVulnerabilityListTreatsAnEmptyFilterAsNone's, in the
-// handlers package.
+// TestVulnerabilityFiltersAreDeclared covers the three query parameters the vulnerability listing
+// branches on, and the distinction the handler depends on: it reads severity and node_id as VALUES, so an
+// empty one is the "no filter" it was before the registry (`if severity != ""`, `nodeID != ""`), not a
+// filter the caller chose. The enum carries "" as a member and node_id carries the empty-or-uuid rule (the
+// uuid format would refuse "", as every registered format does). kev is a boolean, which no enum member or
+// rule can widen, and the old handler compared it with "true", so ?kev= was false: its declaration counts
+// an empty value as absent, reaching the handler on the default. What the handler then runs for each filter
+// is TestCVEVulnerabilityListTreatsAnEmptyFilterAsNone's, in the handlers package.
 func TestVulnerabilityFiltersAreDeclared(t *testing.T) {
 	const path = cveScanScope + "/:scan_id/vulnerabilities"
 	e := declaredEndpoint(t, fiber.MethodGet, path)

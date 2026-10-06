@@ -57,7 +57,7 @@ func mappingTarget(path, id string) string {
 func mappingProbe(t *testing.T, method, path string) (*fiber.App, *capture) {
 	t.Helper()
 	cap := &capture{}
-	e := sharedEndpoint(t, method, path)
+	e := declaredEndpoint(t, method, path)
 	e.Handler = cap.handler()
 	e.Permissions = Permissions{SelfService: "parameter fixture; authorization is exercised separately"}
 	e.RateLimiter = nil
@@ -128,7 +128,7 @@ func TestMappingRoutesDeclareTheirPermissions(t *testing.T) {
 			{fiber.MethodDelete, k.item, "manage:cluster"},
 			{fiber.MethodGet, k.usage, "view:vm"},
 		} {
-			e := sharedEndpoint(t, tt.method, tt.path)
+			e := declaredEndpoint(t, tt.method, tt.path)
 			switch {
 			case e.Permissions.Check == nil:
 				t.Errorf("%s %s declares %q rather than a Check", tt.method, tt.path, e.Permissions.Describe())
@@ -151,7 +151,7 @@ func TestEveryMappingEndpointIsDocumented(t *testing.T) {
 			{fiber.MethodDelete, k.item, "Clusters"},
 			{fiber.MethodGet, k.usage, "Clusters"},
 		} {
-			e := sharedEndpoint(t, tt.method, tt.path)
+			e := declaredEndpoint(t, tt.method, tt.path)
 			key := tt.method + " " + tt.path
 			if err := e.Parameters.Compile(); err != nil {
 				t.Errorf("%s: %v", key, err)
@@ -487,14 +487,14 @@ func usageProbe(t *testing.T, users []string, routes map[string]fiber.Handler) f
 func TestUSBMappingUsageIsRateLimited(t *testing.T) {
 	for _, k := range mappingKinds {
 		for _, tt := range []struct{ method, path string }{{fiber.MethodGet, k.create}, {fiber.MethodPut, k.item}, {fiber.MethodDelete, k.item}} {
-			if e := sharedEndpoint(t, tt.method, tt.path); e.RateLimiter != nil {
+			if e := declaredEndpoint(t, tt.method, tt.path); e.RateLimiter != nil {
 				t.Errorf("%s %s carries a route limiter; only the usage routes should", tt.method, tt.path)
 			}
 		}
 	}
 	// This route's limiter is shared with every test that mounts the shared stub's
 	// declaration, but its buckets are per user and these users are fresh.
-	e := sharedEndpoint(t, fiber.MethodGet, mappingKinds[0].usage)
+	e := declaredEndpoint(t, fiber.MethodGet, mappingKinds[0].usage)
 	if e.RateLimiter == nil {
 		t.Fatal("the usage route carries no limiter of its own")
 	}
@@ -523,7 +523,7 @@ func TestUSBMappingUsageIsRateLimited(t *testing.T) {
 // (six USB and four PCI requests spend it, the eleventh is refused on either route),
 // since two handlers compared by code pointer look equal even with separate state.
 func TestMappingUsageRoutesShareOneLimiter(t *testing.T) {
-	usb, pci := sharedEndpoint(t, fiber.MethodGet, mappingKinds[0].usage).RateLimiter, sharedEndpoint(t, fiber.MethodGet, mappingKinds[1].usage).RateLimiter
+	usb, pci := declaredEndpoint(t, fiber.MethodGet, mappingKinds[0].usage).RateLimiter, declaredEndpoint(t, fiber.MethodGet, mappingKinds[1].usage).RateLimiter
 	if usb == nil || pci == nil {
 		t.Fatalf("usage limiters: usb %v, pci %v; want both", usb != nil, pci != nil)
 	}

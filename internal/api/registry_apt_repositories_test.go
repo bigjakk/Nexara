@@ -27,14 +27,7 @@ var aptLegacyPermissions = map[string]string{
 
 func declaredAptEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		if e.Path == aptScope {
-			out[e.Method+" "+e.Path] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, func(e Endpoint) bool { return e.Path == aptScope })
 }
 
 // TestAptRoutesDeclareTheSamePermissionTheyEnforced is the tally that makes

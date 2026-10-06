@@ -26,32 +26,16 @@ var guestSnapshotRoutesOutsideTheClusterCheckShape = map[string]string{
 
 func declaredGuestSnapshotEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
-	s := newRouteStubServer(t)
-	out := map[string]Endpoint{}
-	for _, e := range s.registry.Endpoints() {
-		key := e.Method + " " + e.Path
-		if _, listed := guestSnapshotRoutesOutsideTheClusterCheckShape[key]; listed {
-			out[key] = e
-		}
-	}
-	return out
+	return declaredEndpointsWhere(t, keyedIn(guestSnapshotRoutesOutsideTheClusterCheckShape))
 }
 
-// TestGuestSnapshotRoutesDeclareWhatTheyEnforced is this domain's tally.
-//
-// Neither handler held a require*Perm call, which is why neither is a Check.
-// From `git show HEAD:internal/api/handlers/guest_snapshots.go` at commit
-// eaeafa7:
-//
-//	List    two accessibleClusters reads ("view","vm" and "view","container"),
-//	        no gate at all — filterGuestSnapshotRows drops what the caller may
-//	        not see.
-//	Resync  two hasClusterPerm reads on the same pair, refusing only when
-//	        NEITHER is held, then a finer per-class refusal once the guest row
-//	        names its type.
-//
-// The declarations say exactly that: Advisory for the first, Alternatives for
-// the coarse half of the second.
+// TestGuestSnapshotRoutesDeclareWhatTheyEnforced is this domain's tally. Neither handler held a
+// require*Perm call, which is why neither is a Check. From handlers/guest_snapshots.go at commit eaeafa7:
+// List made two accessibleClusters reads ("view","vm" and "view","container") and no gate,
+// filterGuestSnapshotRows dropping what the caller may not see; Resync made two hasClusterPerm reads on the
+// same pair, refusing only when NEITHER is held, then a finer per-class refusal once the guest row names its
+// type. The declarations say exactly that: Advisory for the first, Alternatives for the coarse half of the
+// second.
 func TestGuestSnapshotRoutesDeclareWhatTheyEnforced(t *testing.T) {
 	declared := declaredGuestSnapshotEndpoints(t)
 	if len(declared) != guestSnapshotRouteCount {
@@ -127,19 +111,13 @@ func TestGuestSnapshotResyncGateIsEitherGuestPermission(t *testing.T) {
 	}
 }
 
-// TestGuestSnapshotFilterIsNotNamedClusterID is the escalation guard this
-// route's declaration had to route around, recorded so the workaround is not
-// mistaken for an arbitrary name.
-//
-// checkPathParams refuses a parameter NAMED cluster_id that resolves to
-// anything but the path, because clusterIDFromParam reads that name to decide
-// which cluster a gate authorizes. The filter here is genuinely a query
-// parameter, so it is declared under another name with "cluster_id" as an
-// alias — the spelling the listing read before it was declared.
-//
-// The EMPTY value is the other half: the handler used to read
-// `if cid != ""`, so ?cluster_id= meant "no filter". A uuid format would 400
-// it — every registered format rejects "" — so the rule is empty-or-uuid.
+// TestGuestSnapshotFilterIsNotNamedClusterID is the escalation guard this route's declaration had to
+// route around, recorded so the workaround is not mistaken for an arbitrary name. checkPathParams refuses a
+// parameter NAMED cluster_id that resolves to anything but the path, because clusterIDFromParam reads that
+// name to decide which cluster a gate authorizes. The filter here is genuinely a query parameter, so it is
+// declared under another name with "cluster_id" as an alias, the spelling the listing read before. The
+// EMPTY value is the other half: the handler read `if cid != ""`, so ?cluster_id= meant "no filter", and a
+// uuid format would 400 it (every registered format rejects ""), so the rule is empty-or-uuid.
 func TestGuestSnapshotFilterIsNotNamedClusterID(t *testing.T) {
 	e := declaredEndpoint(t, fiber.MethodGet, guestSnapshotScope)
 	if _, declared := e.Parameters["cluster_id"]; declared {

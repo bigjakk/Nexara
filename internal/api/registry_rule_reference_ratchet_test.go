@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/printer"
 	"go/token"
 	"maps"
@@ -17,74 +16,26 @@ import (
 	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
-// This file closes the blind spot the guards in registry_rule_catalogue_test.go
-// name and cannot reach: a declaration that STOPS carrying a catalogued rule.
-//
-// Every guard there finds a site by matching the rule's TEXT — the compiled
-// Pattern against the catalogue's regex. That works because at runtime
-// apischema.Rule("x") and a pasted copy of the same regex are the same string,
-// and it is exactly why a TIGHTENED copy is invisible: the new regex matches no
-// catalogue entry, so the parameter does not fail any check, it LEAVES the walk.
-// Every rule guard then has nothing to say about it.
-//
-// Measured, not hypothesised. Replacing pveObjectNameParam's
-// Pattern: apischema.Rule("pve-object-id") with a hand-written ^[a-z][a-z0-9]*$
-// and a MaxLength of 8 narrows every route that takes it — 33 Endpoint
-// declarations in registry_firewall.go and registry_sdn.go, five ACME path
-// parameters through acmeObjectNameParam (a bare call to it), and the two ACME
-// body names (createACMEPluginParams calls it directly and takes both halves;
-// createACMEAccountParams goes through pveObjectNameOrEmptyParam, which swaps
-// the Pattern for the catalogued sentinel, so it is reached by the MaxLength
-// half only — as are the alias rename and VNet zone bodies that helper serves
-// on two of those 33). The Pattern half passes all six guards in
-// registry_rule_catalogue_test.go. Of those six, the MaxLength half is seen
-// only by TestGuard_RuleNarrowingSitesAreDeclared, and only through the three
-// pve-object-id-or-empty sites, which inherit the cap under a rule it still
-// recognises — and the three sentinel tests named below pin that cap on
-// purpose. (That file's own note counts 20 routes; that is the routes whose
-// accepted set demonstrably changed, not the reach.) The Pattern half is
-// noticed only by unrelated domain tests, and only because they happen to
-// exercise real values on those routes; a parameter without such a test
-// slips through in silence. TestNoInlinePatternRestatesACataloguedRule
-// compares for EQUALITY, so it catches the verbatim re-inline and is blind to
-// the tightened one for the same reason.
-//
-// So this guard asks a question no value-matching check can: does the SOURCE
-// still name the rule? It reads the declaration files as text, resolves what
-// each Pattern reaches, and ratchets the answer.
+// This file closes the blind spot the guards in registry_rule_catalogue_test.go name and cannot
+// reach: a declaration that STOPS carrying a catalogued rule. Those guards find a site by matching
+// the rule's TEXT, so a TIGHTENED copy matches no entry and LEAVES the walk instead of failing.
+// Measured: replacing pveObjectNameParam's Rule("pve-object-id") with ^[a-z][a-z0-9]*$ and a
+// MaxLength of 8 narrows 33 Endpoint declarations in registry_firewall.go and registry_sdn.go, five
+// ACME path parameters and the two ACME body names; the Pattern half passes all six catalogue
+// guards, and the MaxLength half is seen only through the three pve-object-id-or-empty sentinel
+// tests (that file's count of 20 routes is those whose accepted set demonstrably changed). So this
+// guard asks what no value-matching check can: does the SOURCE still name the rule?
 
-// ruleReferenceSites is the closed set of declared parameters whose pattern
-// comes from the catalogue BY NAME — every place the registry source spells
-// apischema.Rule, whether at the parameter or through one of the package-level
-// bindings that hold one (emptyOrNodeName, emptyOrUUID, pbsSafeIDPattern and
-// the rest).
-//
-// Each line is "<file> <container> = <rule>" for a named Property declaration,
-// and "<file> <container> [<parameter>] = <rule>" when the pattern sits under a
-// Properties key. An element schema adds "[]" to the key, or stands alone as
-// "<file> <container> []" when the array it belongs to has no key of its own.
-//
-// The list exists for the direction nothing derived can provide: it fails when
-// a site STOPS naming its rule. A derived check cannot, because the evidence is
-// gone — a tightened literal looks exactly like a parameter that never had a
-// rule in the first place.
-//
-// # Why the identity is the container and not the route
-//
-// Counting routes was the obvious shape and is the wrong one. pve-object-id
-// reaches 33 route declarations through pveObjectNameParam alone; a ratchet on
-// the route count moves every time anyone adds or removes an endpoint, which is
-// a ratchet people learn to bump without reading, and — worse — a bare total
-// hides the defect outright, because a tightened literal at one site and a new
-// apischema.Rule reference at another cancel.
-//
-// The container is stable under exactly the churn the route count is not.
-// Adding a route that takes pveObjectNameParam("…") or emptyOrNodeName does not
-// move this list at all, and neither does deleting one, because the shared
-// declaration is what carries the rule. It moves only when a route declares its
-// OWN inline rule reference, which 13 of the 50 entries below do — the ones whose
-// container is a register…Endpoints function rather than a named parameter — and
-// then the failure names which of the five things happened.
+// ruleReferenceSites is the closed set of declared parameters whose pattern comes from the
+// catalogue BY NAME: every place the registry source spells apischema.Rule, at the parameter or
+// through a package-level binding that holds one (emptyOrNodeName, emptyOrUUID, ...). Each line is
+// "<file> <container> = <rule>", with "[<parameter>]" under a Properties key and "[]" for an
+// element schema. It exists for the direction nothing derived can provide: a site that STOPS
+// naming its rule leaves no evidence. The identity is the CONTAINER, not the route: pve-object-id
+// reaches 33 routes through pveObjectNameParam alone, a route count moves on every endpoint
+// change (a ratchet people learn to bump) and a tightened literal at one site cancels a new rule
+// reference at another. The list moves only when a route declares its OWN inline rule reference,
+// which 13 of the 50 entries do.
 var ruleReferenceSites = []string{
 	"registry_access.go accessNameParam = path-safe-dotted-name",
 	"registry_access.go registerAccessEndpoints [groupid] = path-safe-dotted-name",
@@ -138,110 +89,16 @@ var ruleReferenceSites = []string{
 	"registry_vms.go snapshotNameParam = pve-configid-existing",
 }
 
-// TestGuard_RuleReferenceSitesStillNameTheirRule is the ratchet.
-//
-// It fails in all five directions, and the message says which one — which
-// matters more here than usual, because two of them look identical in the
-// source and want opposite edits:
-//
-//   - RETIRED — the site still declares a pattern and no longer names a rule.
-//     THIS IS THE DEFECT. Nothing else in the repo reports it.
-//   - STRIPPED — the parameter is still declared and has no pattern at all.
-//     The same defect widened instead of narrowed, and the one case where
-//     the obvious reading of "the rule is gone" is the wrong one.
-//   - RETARGETED — the site names a different rule than it did.
-//   - GONE — the declaration itself is not in the source. Delete the line,
-//     once you have ruled out a rename.
-//   - NEW — a site names a rule and is not listed. Add the line.
-//
-// # What this cannot see
-//
-// It reads the source, so it answers "does the declaration name the rule",
-// not "does the route end up applying it". The other direction is
-// declaredRuleSites in registry_rule_catalogue_test.go, which walks the built
-// registry; the two are deliberately different readings of the same fact and
-// neither subsumes the other.
-//
-// FORMATS ARE NOT RATCHETED. A format is reached by name as a bare string —
-// Format: "uuid" — so the same swap is possible there: replace
-// Format: "node-name" with a tightened Pattern and the site leaves
-// declaredRuleSites just as silently. It is left out because 52 declarations
-// carry a format and 42 of those are "uuid", many written inline in a route
-// declaration, so ratcheting them WOULD move on ordinary route churn — the
-// failure mode the container identity above exists to avoid. The exposure is
-// real and is stated here rather than covered.
-//
-// A BARE IDENTIFIER OR A DIRECT CALL, AND NOTHING ELSE. A pattern reaching a
-// rule through an identifier is resolved when that identifier is a
-// package-level binding of apischema.Rule("x") in these same files. Every other
-// expression — a binding of a binding, a selector from another package, a
-// helper call, an arithmetic one — reads as "names no rule" and simply never
-// enters the list. It is not reported as a regression; it is not covered.
-//
-// That is not a hypothetical shape. Three declarations are built that way
-// today, and they are mundane rather than exotic — the single device path and
-// the comma-separated device list in registry_nodes.go, each a "+" tree
-// assembled around devicePathBody, and the recipient element in
-// registry_reports.go, which reaches handlers.EmailAddressPattern through a
-// selector into another package.
-//
-// NONE OF THE THREE IS A LOSS HERE, and the reason is worth stating so that
-// nobody "fixes" them into the list: each reaches a single definition a reader
-// can open, and neither devicePathBody nor EmailAddressPattern is a catalogue
-// entry, so there is no rule reference for this ratchet to have lost.
-// registry_rule_catalogue_test.go exempts the same shape for the same reason
-// and names devicePathBody outright. What the walk owes them is nothing; what
-// it owes a CATALOGUED rule assembled this way is everything, because that one
-// silently opts out of the catalogue.
-//
-// THERE WAS A FOURTH, AND IT WAS THAT SECOND KIND. createACMEAccountParams in
-// registry_acme.go took the property pveObjectNameParam built and prefixed its
-// Pattern with `^$|`, an assignment whose right-hand side was a "+" of a
-// literal and the property's own field: a sentinel variant of a catalogued
-// rule, derived AT THE DECLARATION rather than by the catalogue's own orEmpty.
-// Tightening that line to `^[a-z][a-z0-9]{0,7}$` — which turns "", every
-// uppercase name and every name past 8 characters into a 400 — passed the
-// whole of ./internal/api/... Nothing next door fired, because the result
-// matched no catalogue entry; nothing here did, because the expression was
-// never a reference.
-//
-// The fix was not to teach this walk to fold a "+" tree. It was to catalogue
-// the variant as pve-object-id-or-empty, which turned the expression back into
-// an apischema.Rule call. That call now lives in pveObjectNameOrEmptyParam
-// (registry_networks.go), the site in the list above, and tightening ITS
-// Pattern reports RETIRED. A Pattern reassigned to a literal at one of the
-// helper's three call sites after it returns is out of this walk's reach —
-// the walk keys on the container that spells the call and does not follow a
-// call into a helper (a reassignment to another apischema.Rule is reported,
-// as a new site) — so those sites are held by their route tests instead:
-// TestACMEAccountNameKeepsItsEmptySentinel,
-// TestFirewallAliasRenameKeepsTheEmptySentinel and
-// TestSDNVNetUpdateZoneKeepsTheEmptySentinel. A hand-derived sentinel is the
-// one instance of this shape with an answer cheaper than widening the
-// resolver, and it should get that answer rather than this one.
-//
-// Resolution is also by NAME rather than by scope. A function-local variable
-// shadowing one of those bindings would be read as the binding, and a var spec
-// declaring several names at once is attributed wholly to the first. Neither
-// exists today, and this walk would not notice one arriving.
-//
-// registry_*.go IS THE WHOLE SCOPE. That is not an assumption: every
-// apischema.Rule reference in package api lives in one of these files today. A
-// declaration moved to another file leaves the walk, and its site is reported
-// GONE — true, but the reader has to notice the matching NEW line elsewhere to
-// see that nothing was lost. GONE's message says so; it cannot tell the two
-// apart on its own.
-//
-// It says nothing about whether the rule is the RIGHT one, or whether a sibling
-// MaxLength or Enum narrows it. Those are the catalogue witnesses and
-// TestGuard_RuleNarrowingSitesAreDeclared.
-//
-// One COST rather than a blind spot, stated so it is not a surprise: two
-// rule-bearing Patterns at one identity fail outright and cannot be listed,
-// because the ratchet could not then tell them apart. The fix is to give one a
-// named Property — the idiom every shared parameter here already uses — so the
-// guard pushes toward the shape the catalogue's own scope note asks for. No
-// site is in that position today.
+// TestGuard_RuleReferenceSitesStillNameTheirRule is the ratchet. It fails in five directions and
+// says which, since two look identical in the source and want opposite edits: RETIRED (a pattern,
+// no rule named: THE DEFECT, which nothing else reports), STRIPPED (no pattern at all),
+// RETARGETED, GONE (not in the source; delete the line once a rename is ruled out) and NEW. It
+// reads source, so it cannot see whether the route APPLIES the rule (declaredRuleSites reads the
+// built registry), FORMATS (52, 42 of them inline "uuid": they would move on route churn), a
+// pattern assembled any way but a bare identifier bound to apischema.Rule or a direct call
+// (devicePathBody and handlers.EmailAddressPattern are not catalogue entries; a hand-derived
+// sentinel was catalogued as pve-object-id-or-empty, its call sites held by the three sentinel
+// tests), name scoping, files outside registry_*.go, or whether the rule is the RIGHT one.
 func TestGuard_RuleReferenceSitesStillNameTheirRule(t *testing.T) {
 	t.Parallel()
 
@@ -318,22 +175,11 @@ func TestGuard_RuleReferenceSitesStillNameTheirRule(t *testing.T) {
 			examined, len(ruleReferenceSites))
 	}
 
-	// Two Patterns at one identity are two sites this ratchet cannot tell
-	// apart: tighten one and add the other and the pair cancels, which is the
-	// cancellation the container identity was chosen to avoid. Report it and
-	// leave the site out of the diff below, where it would otherwise read as a
-	// rule retargeted to itself.
-	//
-	// The count is over every Pattern spelling at the identity, not only the
-	// ones that name a rule, because the cancelling pair need not be two rules.
-	// A container that carries Pattern: apischema.Rule("x") and then overrides
-	// it with p.Pattern = `^tight$` would leave got equal to want and pass in
-	// silence. Nothing does that today — but build-from-a-helper-then-override
-	// is already the idiom at poolCreateIDParam, optPoolID and
-	// pbsAttachedClusterUpdateParam, each of which happens to write only ONE
-	// Pattern of its own, so the second one is an edit away rather than a
-	// rewrite away. Sites with no rule at all are left alone: they are not this
-	// ratchet's business.
+	// Two Patterns at one identity are two sites this ratchet cannot tell apart: tighten one, add
+	// the other and the pair cancels. Report it and leave the site out of the diff below. The count
+	// is over every Pattern spelling, not only rule references: a container that builds a rule and
+	// then overrides it with p.Pattern = `^tight$` (the idiom at poolCreateIDParam, optPoolID and
+	// pbsAttachedClusterUpdateParam, each writing one Pattern today) would otherwise pass in silence.
 	ambiguous := make(map[string]bool)
 	for _, site := range slices.Sorted(maps.Keys(byField)) {
 		if len(gotBySite[site]) == 0 {
@@ -486,20 +332,12 @@ type patternSpelling struct {
 	line  int
 }
 
-// registryRuleSpellings reads every declaration file and classifies each
-// Pattern and Format by HOW the source reaches its value.
-//
-// An identifier is resolved one hop, through the package-level bindings that
-// hold a rule — emptyOrNodeName, emptyOrUUID, pbsSafeIDPattern and the rest.
-// That hop is not optional: six such bindings carry a rule to 24 of the 38
-// sites in ruleReferenceSites, and recording only the binding would leave every
-// one of its use sites free to be replaced by a literal without the guard
-// noticing — the same defect one layer down, and the more likely one, because
-// the site that gets pasted over is whichever one someone was editing.
-// The second return is every site identity the registry DECLARES at all,
-// facet or no facet, so that a rule which was stripped can be told from a
-// parameter that was deleted. Those two look identical from the facets alone
-// and need opposite advice.
+// registryRuleSpellings reads every declaration file and classifies each Pattern and Format by
+// HOW the source reaches its value. An identifier is resolved one hop through the package-level
+// bindings that hold a rule: six of them carry a rule to 24 of the 38 sites, and recording only
+// the binding would leave each use site free to be pasted over. The second return is every site
+// identity the registry DECLARES, facet or no facet, so a stripped rule can be told from a
+// deleted parameter, which look identical from the facets alone and need opposite advice.
 func registryRuleSpellings(t *testing.T) ([]patternSpelling, map[string]bool) {
 	t.Helper()
 
@@ -511,13 +349,13 @@ func registryRuleSpellings(t *testing.T) ([]patternSpelling, map[string]bool) {
 	if err != nil {
 		t.Fatalf("globbing the registry files: %v", err)
 	}
-	fset := token.NewFileSet()
+	fset := parsedSourceFset
 	parsed := make(map[string]*ast.File, len(names))
 	for _, name := range names {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		f, err := parser.ParseFile(fset, name, nil, parser.SkipObjectResolution)
+		f, err := parsedSource(name)
 		if err != nil {
 			t.Fatalf("parsing %s: %v", name, err)
 		}
@@ -617,21 +455,13 @@ func declContainers(decl ast.Decl) []container {
 	}
 }
 
-// containerSpellings finds every Pattern and Format written inside one
-// top-level declaration, as a composite-literal field or as an assignment to
-// one (poolCreateIDParam and optPoolID both set p.Pattern after building the
-// property from a shared helper).
-//
-// It also returns every site identity the container DECLARES, facet or no
-// facet, which is what lets a stripped rule be told from a deleted parameter.
-// Both that set and the facet sites are spelled by siteOf, so the two cannot
-// disagree about what a site is called — they did once, and the cost was that
-// STRIPPED could never fire for an element schema.
-//
-// Within that, the set is deliberately generous: ANY string-keyed entry inside
-// the container counts, so an unrelated string-keyed map would make a site read
-// as declared. That errs toward the louder message, which is the safe direction
-// — STRIPPED asks the reader to look, GONE tells them to delete a line.
+// containerSpellings finds every Pattern and Format written inside one top-level declaration, as
+// a composite-literal field or an assignment (poolCreateIDParam and optPoolID set p.Pattern
+// after building the property from a shared helper), and every site identity it DECLARES. Both
+// are spelled by siteOf so they cannot disagree on a name (they once did, and STRIPPED could
+// never fire for an element schema). The declared set is generous on purpose: any string-keyed
+// entry counts, which errs toward the louder message (STRIPPED asks the reader to look, GONE
+// says delete a line).
 func containerSpellings(fset *token.FileSet, node ast.Node, prefix string, ruleOf func(ast.Expr) string) ([]patternSpelling, []string) {
 	var out []patternSpelling
 	var keys []string

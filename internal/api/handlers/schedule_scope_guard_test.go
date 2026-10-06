@@ -2,54 +2,22 @@ package handlers
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"go/types"
 	"path/filepath"
 	"sort"
 	"testing"
 )
 
-// Static-analysis guard, in the shape of rolling_job_scope_guard_test.go: no
-// database, no running server.
-//
-// A scheduled task is looked up by its Nexara uuid, and a uuid says nothing
-// about which cluster the task belongs to. The permission gate authorizes the
-// cluster named in the PATH — that is what the declared
-// clusterCheck("manage","schedule") in internal/api/registry_schedules.go
-// resolves — so a handler that reaches a task by uuid and then acts on it
-// WITHOUT checking that the row belongs to the path's cluster serves
-// cross-cluster.
-//
-// That is not hypothetical here. Until this change, UpdateScheduledTask and
-// DeleteScheduledTask were `WHERE id = $1` with no cluster predicate and
-// neither handler re-read the row, so manage:schedule on ANY cluster authorized
-// a write to EVERY scheduled task in the install. The task uuids are not secret:
-// schedule_created and schedule_updated audit rows carry them alongside their
-// real cluster, and view:audit is a default Viewer grant. Rewriting another
-// cluster's reboot task to `* * * * *` with enabled=true was a request away —
-// and the audit row stamps the PATH's cluster, so the operator who owns the task
-// never sees it in their own log.
-//
-// The comparison now lives in ONE place, taskInCluster, and this guard is what
-// stops the next lookup reopening the hole. That shape is deliberate and is the
-// lesson of the opt-in-guard class: a validator in the CALLER is one the next
-// caller silently skips, so the check goes at the choke point and the guard
-// proves nothing routes around it.
-//
-// BE CLEAR ABOUT WHAT THIS DOES NOT CATCH, in the same terms its sibling uses.
-// It matches only the literal `x.queries.GetScheduledTask(…)` shape, so hoisting
-// the receiver walks past it; and it proves the choke point is USED, not that
-// its result is acted on. The SQL predicate in queries/scheduled_tasks.sql is
-// the independent second layer for exactly that reason — it cannot be removed
-// by an edit to this package.
-//
-// It sweeps the whole package rather than schedules.go alone, which is the
-// difference between "the two routes are scoped" and "nothing anywhere can reach
-// the row unscoped". A lookup from OUTSIDE this package is out of reach —
-// internal/scheduler reads the same table — but it operates on tasks it claimed
-// itself rather than on an id a request supplied, which is the distinction that
-// matters here.
+// Static-analysis guard, in the shape of rolling_job_scope_guard_test.go. A scheduled task is looked
+// up by uuid, which says nothing about its cluster, while the gate authorizes the PATH's cluster
+// (clusterCheck("manage","schedule") in registry_schedules.go). Until this change Update/Delete were
+// `WHERE id = $1` with no cluster predicate, so manage:schedule on ANY cluster authorized a write to
+// EVERY task in the install; the uuids are not secret (schedule_* audit rows carry them, and view:audit
+// is a default Viewer grant) and the audit row stamps the PATH's cluster. The comparison now lives in
+// ONE place, taskInCluster, and this guard proves nothing routes around it. It matches only the
+// literal `x.queries.GetScheduledTask(...)` shape and proves the choke point is USED, not that its
+// result is acted on; queries/scheduled_tasks.sql is the independent second layer. It sweeps the whole
+// package (internal/scheduler reads the same table, but on tasks it claimed itself).
 const (
 	scheduledTaskLookup     = "GetScheduledTask"
 	scheduledTaskChokePoint = "ScheduleHandler.taskInCluster"
@@ -72,14 +40,13 @@ func TestGuard_ScheduledTaskLookupsAreClusterScoped(t *testing.T) {
 		t.Fatalf("glob: %v", err)
 	}
 
-	fset := token.NewFileSet()
 	callsChokePoint := map[string]bool{}
 	callsLookup := map[string]bool{}
 	declaredIn := map[string]string{}
 	var chokePointBody *ast.BlockStmt
 
 	for _, path := range paths {
-		file, parseErr := parser.ParseFile(fset, path, nil, 0)
+		file, parseErr := guardParsed(path)
 		if parseErr != nil {
 			t.Fatalf("parse %s: %v", path, parseErr)
 		}
@@ -152,30 +119,18 @@ func TestGuard_ScheduledTaskLookupsAreClusterScoped(t *testing.T) {
 	}
 }
 
-// TestGuard_ScheduledTaskWritesCarryTheClusterPredicate is the second layer,
-// checked from the Go side because that is where a caller could drop it.
-//
-// queries/scheduled_tasks.sql scopes both writes on cluster_id, and sqlc turns
-// that into a ClusterID field on each params struct. A caller that stops filling
-// it in passes uuid.Nil, which matches no row — so the failure is a silent
-// no-op rather than a cross-cluster write, and the rows==0 check turns it into a
-// 404.
-//
-// It asserts the VALUE and not merely that the field is set, and the difference
-// became load-bearing when taskInCluster started returning the row: with the
-// task in scope, `ClusterID: task.ClusterID` compiles, reads plausibly, and is
-// a no-op today only because taskInCluster has already proved the two equal. It
-// would stop being a no-op the moment that comparison is relaxed, and by then
-// the write would be scoping itself on a value it read out of the row it is
-// about to write — authorization by self-assertion. The path's clusterID is the
-// only value that carries the caller's authority here, so that is the one
-// pinned.
+// TestGuard_ScheduledTaskWritesCarryTheClusterPredicate is the second layer, checked from the Go side
+// where a caller could drop it: queries/scheduled_tasks.sql scopes both writes on cluster_id, and a
+// caller that stops filling the params field passes uuid.Nil, which matches no row (a silent no-op,
+// turned into a 404 by the rows==0 check). It asserts the VALUE, not merely that the field is set:
+// `ClusterID: task.ClusterID` compiles and is a no-op today only because taskInCluster proved the two
+// equal, and would be authorization by self-assertion the moment that comparison is relaxed. The
+// path's clusterID is the only value carrying the caller's authority, so that is the one pinned.
 func TestGuard_ScheduledTaskWritesCarryTheClusterPredicate(t *testing.T) {
 	// The identifier schedules.go binds the path's :cluster_id to.
 	const wantClusterIDIdent = "clusterID"
 
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "schedules.go", nil, 0)
+	file, err := guardParsed("schedules.go")
 	if err != nil {
 		t.Fatalf("parse schedules.go: %v", err)
 	}
