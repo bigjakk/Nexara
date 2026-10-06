@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -13,122 +14,31 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/auth"
-	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The tests in this file are about what Refresh and Logout do to the POOL — the
-// handful of database connections the whole process shares — and to the response
-// path, rather than about what they answer.
-//
-// Refresh runs a transaction, which holds one connection from Begin until it
-// commits or rolls back. Every query that goes to the pool instead of to the
-// transaction needs a connection of its own. A request that makes one while it
-// still holds its own is waiting for a connection it can only get from requests
-// that are, like it, waiting — and with one more such request than the pool has
-// connections, every connection is held by a request waiting for another, and no
-// query in the process (API, collector, scheduler, WebSocket hub) runs again.
-// Nothing times out, because a request's context has no deadline.
-//
-// Two defences, and a test for each: a transaction is released BEFORE any pool
-// query (every test that uses the harness checks it, see checkConnectionAccounting;
-// the concurrency test below is the one that makes it matter), and the database
-// work of a request is bounded, so that a pool starved for any other reason is
-// answered with a 503 and not waited on for ever.
+// What Refresh and Logout do to the POOL, the few connections the whole process shares.
+// Refresh's transaction holds one from Begin until it commits or rolls back, so a pool
+// query made meanwhile needs a second: with one more such request than the pool has
+// connections, every connection is held by a request waiting for another and no query in
+// the process runs again, because a request's context has no deadline. Two defences, each
+// tested: a transaction is released BEFORE any pool query (every harness test checks it, see
+// authConnectionComplaints), and the database work of a request is bounded, so a pool
+// starved for any other reason answers 503.
 
-// recordingTB stands in for the *testing.T handed to one call of a check, to show
-// that the check fails when it should: it records what the check reports and
-// fails nothing.
-type recordingTB struct {
-	testing.TB
-	reported []string
-}
-
-func (r *recordingTB) Helper() {}
-
-func (r *recordingTB) Errorf(format string, args ...any) {
-	r.reported = append(r.reported, fmt.Sprintf(format, args...))
-}
-
-// TestRaceHarness_FlagsAPoolQueryMadeWhileATransactionIsOpen gives the check every
-// test in this package inherits its controls. A check that has only ever been
-// seen to pass cannot be trusted to fail, so this drives the instrument by hand:
-// a pool statement with no transaction open is not flagged, the same statement
-// with one open is, a statement on the transaction is not, a transaction counts
-// as open until it is closed — once — and the end-of-test check reports each of
-// the two ways of getting it wrong.
-func TestRaceHarness_FlagsAPoolQueryMadeWhileATransactionIsOpen(t *testing.T) {
-	// concurrent: the inherited check would flag this very test for what it does
-	// on purpose; it is run by hand below instead.
-	a := newAuthRaceAppWith(t, nil, raceOptions{concurrent: true})
-	ctx := context.Background()
-	pool := db.New(raceConn{store: a.store, gate: a.gate})
-
-	read := func(q *db.Queries) {
-		t.Helper()
-		if _, err := q.GetUserByID(ctx, a.store.user.ID); err != nil {
-			t.Fatalf("read: %v", err)
-		}
+// holdPool takes the pool's only connection until release is called or the test ends.
+func (a *authRaceApp) holdPool(t *testing.T) (release func()) {
+	t.Helper()
+	if err := a.gate.acquire(context.Background()); err != nil {
+		t.Fatalf("take the pool's only connection: %v", err)
 	}
-	check := func() []string {
-		rec := &recordingTB{TB: t}
-		checkConnectionAccounting(rec, a.store)
-		return rec.reported
-	}
-
-	read(pool)
-	if got := a.store.poolStatementsWhileTx(); len(got) != 0 {
-		t.Fatalf("a pool statement with no transaction open was flagged: %v", got)
-	}
-	if got := check(); len(got) != 0 {
-		t.Fatalf("the check reported on a clean store: %v", got)
-	}
-
-	tx, err := a.pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	if n := a.store.openTransactions(); n != 1 {
-		t.Fatalf("openTransactions = %d after Begin, want 1", n)
-	}
-	if got := check(); len(got) != 1 || !strings.Contains(got[0], "left open") {
-		t.Fatalf("the check reported %v for a transaction left open, want exactly that one complaint", got)
-	}
-
-	read(pool.WithTx(tx))
-	if got := a.store.poolStatementsWhileTx(); len(got) != 0 {
-		t.Fatalf("a statement ON the transaction was flagged as a pool statement: %v", got)
-	}
-
-	read(pool)
-	if got := a.store.poolStatementsWhileTx(); len(got) != 1 || got[0] != "GetUserByID" {
-		t.Fatalf("a pool statement with a transaction open was not flagged: %v", got)
-	}
-	if got := check(); len(got) != 2 {
-		t.Fatalf("the check reported %v for a pool statement made with a transaction open, want that and the open transaction", got)
-	}
-
-	if err := tx.Rollback(ctx); err != nil {
-		t.Fatalf("rollback: %v", err)
-	}
-	if err := tx.Rollback(ctx); !errors.Is(err, pgx.ErrTxClosed) {
-		t.Errorf("a second rollback answered %v, want pgx.ErrTxClosed", err)
-	}
-	if err := tx.Commit(ctx); !errors.Is(err, pgx.ErrTxClosed) {
-		t.Errorf("a commit after the rollback answered %v, want pgx.ErrTxClosed", err)
-	}
-	if n := a.store.openTransactions(); n != 0 {
-		t.Errorf("openTransactions = %d after the rollback, want 0 (a transaction must be counted out exactly once)", n)
-	}
-	// The offence stays recorded after the transaction is closed: the check is made
-	// at the END of a test, long after the statement was.
-	if got := check(); len(got) != 1 || !strings.Contains(got[0], "POOL") {
-		t.Errorf("the check reported %v after the transaction closed, want the pool statement made while it was open", got)
-	}
+	var once sync.Once
+	release = func() { once.Do(a.gate.release) }
+	t.Cleanup(release)
+	return release
 }
 
 // refreshResult is the outcome of one refresh sent from a goroutine.
@@ -138,17 +48,14 @@ type refreshResult struct {
 	err    error
 }
 
-// refreshAll sends n refreshes at once, all presenting the session's current
-// cookie, and returns when every one has answered. A request that does not answer
-// within timeout is reported in its result, not by failing the test, so that the
-// caller can say what the others did.
+// refreshAll sends n refreshes at once, all presenting the session's current cookie, and
+// returns when every one has answered. A request that does not answer within timeout is
+// reported in its result, so the caller can say what the others did.
 func (a *authRaceApp) refreshAll(n int, timeout time.Duration) []refreshResult {
 	results := make([]refreshResult, n)
 	var wg sync.WaitGroup
 	for i := range results {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			resp, err := a.app.Test(raceRequest("/auth/refresh", "{}", raceCurrentToken, nil), fiber.TestConfig{Timeout: timeout, FailOnTimeout: true})
 			if err != nil {
 				results[i] = refreshResult{err: err}
@@ -156,23 +63,17 @@ func (a *authRaceApp) refreshAll(n int, timeout time.Duration) []refreshResult {
 			}
 			defer func() { _ = resp.Body.Close() }()
 			results[i] = refreshResult{status: resp.StatusCode, cookie: refreshCookies(resp)}
-		}()
+		})
 	}
 	wg.Wait()
 	return results
 }
 
-// lineUp makes requests concurrent refreshes meet at a pool of conns connections
-// in the worst order, twice over. Nobody begins a transaction until every request
-// has validated; and nobody who then holds a connection moves on until all of the
-// pool's are held and the rest of the requests are queued for one. Without the
-// second line-up a holder can finish its whole refresh before the others have
-// queued, and the pool never fills.
-//
-// Only the first conns holders wait: the ones a connection is handed to later find
-// it already so. The moment the pool is seen saturated is latched, because it
-// stops being so as soon as the first holder commits and its connection is handed
-// on.
+// lineUp makes requests concurrent refreshes meet at a pool of conns connections in the
+// worst order, twice over. Nobody begins a transaction until every request has validated;
+// and nobody who then holds a connection moves on until all of the pool's are held and
+// the rest are queued for one. The moment the pool is seen saturated is latched, because it
+// stops being so as soon as the first holder commits and its connection is handed on.
 func (a *authRaceApp) lineUp(requests, conns int) {
 	var arrived sync.WaitGroup
 	arrived.Add(requests)
@@ -185,44 +86,33 @@ func (a *authRaceApp) lineUp(requests, conns int) {
 	saturated := make(chan struct{})
 	var latch sync.Once
 	a.pool.afterBegin = func() {
-		if int(holders.Add(1)) > conns {
+		if int(holders.Add(1)) > conns { // only the first conns holders wait
 			return
 		}
-		tick := time.NewTicker(time.Millisecond)
-		defer tick.Stop()
-		giveUp := time.NewTimer(10 * time.Second)
-		defer giveUp.Stop()
+		giveUp := time.After(10 * time.Second)
 		for {
+			changed := a.gate.changes()
 			if a.gate.inUse() == conns && a.gate.waiters() == requests-conns {
 				latch.Do(func() { close(saturated) })
 			}
 			select {
 			case <-saturated:
 				return
-			case <-giveUp.C:
+			case <-changed:
+			case <-giveUp:
 				return
-			case <-tick.C:
 			}
 		}
 	}
 }
 
-// TestRefresh_ConcurrentRefreshesNeverHoldThePoolWhileWaitingForIt is the
-// deadlock, made to happen, on a pool of a few connections instead of a
-// production one.
-//
-// N requests present one cookie and line up (see lineUp) with the pool saturated.
-// One wins the rotation and commits, and each of the others, holding a connection
-// with its rotation affecting no rows, must ask the pool whether it lost to a
-// concurrent refresh. If it asks WITHOUT giving its connection back, then with
-// more such requests than the pool has connections, all of them are waiting for a
-// connection only a waiter can free: nothing completes.
-//
-// All requests must complete, within a timeout far shorter than the request's own,
-// and come out as exactly one winner and N-1 refusals that spare the cookie (409)
-// — the answer a loser to a concurrent refresh is owed. The rows run the smallest
-// pools at which that deadlocks, and a pool of the production minimum of four with
-// one request more than it has connections.
+// TestRefresh_ConcurrentRefreshesNeverHoldThePoolWhileWaitingForIt is the deadlock, made
+// to happen on a pool of a few connections. N requests present one cookie and line up with
+// the pool saturated; one wins the rotation, and each loser, holding a connection with its
+// rotation affecting no rows, must ask the pool whether it lost to a concurrent refresh. If
+// it asks WITHOUT giving its connection back, nothing completes. Exactly one request wins
+// and N-1 are answered 409, and every one completes within a timeout far shorter than the
+// request's own.
 func TestRefresh_ConcurrentRefreshesNeverHoldThePoolWhileWaitingForIt(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -236,11 +126,9 @@ func TestRefresh_ConcurrentRefreshesNeverHoldThePoolWhileWaitingForIt(t *testing
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// The handler's bound is far shorter than the request timeout, so that a
-			// deadlock fails as the handler's 503 or 401 — naming the cause — and not
-			// as a request that never came back. It is long enough that a healthy run
-			// never meets it, however the goroutines are scheduled: requests that
-			// arrive early wait at the line-up with their clock running.
+			// The handler's bound is far shorter than the request timeout, so a deadlock
+			// fails as the handler's 503 or 401, naming the cause; and long enough that a
+			// healthy run never meets it however the goroutines are scheduled.
 			a := newAuthRaceAppWith(t, nil, raceOptions{gateSize: tt.conns, dbTimeout: 5 * time.Second, concurrent: true})
 			a.lineUp(tt.requests, tt.conns)
 
@@ -274,39 +162,22 @@ func TestRefresh_ConcurrentRefreshesNeverHoldThePoolWhileWaitingForIt(t *testing
 	}
 }
 
-// TestRefresh_AnAccountRefusalGivesItsConnectionBackBeforeItRevokes is the same
-// deadlock on the other three branches that go to the pool with a transaction
-// open: the user is gone, the account is disabled, the role changed. Each revokes
-// the session through the pool (and the last writes an audit row there), so with
-// no losers needed at all — as many such requests as the pool has connections —
-// every one holds a connection and asks for a second.
-//
-// The pool has two connections and two requests present the cookie, saturating it
-// (see lineUp). Both must be answered 401 with the cookie cleared, and, which is
-// the part that fails when the request does not let go first, the session must
-// really be revoked, by both: a revoke that ran out of the bound is swallowed by
-// the handler, and the 401 looks the same.
+// TestRefresh_AnAccountRefusalGivesItsConnectionBackBeforeItRevokes is the same deadlock on
+// the other branches that go to the pool with a transaction open: each revokes the session
+// through the pool (the last also writes an audit row there), so with as many such requests
+// as the pool has connections every one holds a connection and asks for a second. Both
+// requests must be answered 401 with the cookie cleared and, the part that fails when the
+// request does not let go first, the session must really be revoked, by both: a revoke that
+// ran out of the bound is swallowed by the handler and the 401 looks the same.
 func TestRefresh_AnAccountRefusalGivesItsConnectionBackBeforeItRevokes(t *testing.T) {
 	const conns = 2
 
-	tests := []struct {
-		name  string
-		tweak func(*raceStore)
-		audit string // the audit action each request writes, if any
-	}{
-		{"the user no longer exists", func(s *raceStore) { s.userErr = pgx.ErrNoRows }, ""},
-		{"the account is disabled", func(s *raceStore) { s.user.IsActive = false }, ""},
-		{"the user's role changed since the session was issued", func(s *raceStore) { s.user.Role = "viewer" }, "refresh_denied_role_changed"},
-	}
-
-	for _, tt := range tests {
+	for _, tt := range authRefusedAccounts {
 		t.Run(tt.name, func(t *testing.T) {
 			a := newAuthRaceAppWith(t, tt.tweak, raceOptions{gateSize: conns, dbTimeout: 2 * time.Second, concurrent: true})
 			a.lineUp(conns, conns)
 
-			results := a.refreshAll(conns, 15*time.Second)
-
-			for i, r := range results {
+			for i, r := range a.refreshAll(conns, 15*time.Second) {
 				switch {
 				case r.err != nil:
 					t.Errorf("request %d did not complete: %v", i, r.err)
@@ -345,16 +216,12 @@ func TestRefresh_AnAccountRefusalGivesItsConnectionBackBeforeItRevokes(t *testin
 	}
 }
 
-// TestRefresh_AStarvedPoolIsA503NotAHang pins the second defence: the database
-// work of a refresh is bounded, so a pool that cannot give it a connection is
-// answered, as "nothing was decided", instead of waited on for ever.
-//
-// Another consumer holds the pool's only connection. The request must come back
-// 503 after about the handler's bound, with the cookie untouched and nothing
-// written; and, as the control, the same request succeeds the moment the
-// connection is free, so the 503 is the starvation and not the harness. Both
-// places a refresh can wait for the pool are covered: the lookup that opens it,
-// and Begin.
+// TestRefresh_AStarvedPoolIsA503NotAHang pins the second defence: the database work of a
+// refresh is bounded, so a pool that cannot give it a connection is answered ("nothing was
+// decided"), not waited on for ever. Another consumer holds the pool's only connection; the
+// request must come back 503 after about the handler's bound, cookie untouched and nothing
+// written, and the same request succeeds the moment the connection is free (the control).
+// Both places a refresh can wait for the pool are covered: the lookup that opens it, and Begin.
 func TestRefresh_AStarvedPoolIsA503NotAHang(t *testing.T) {
 	const bound = 200 * time.Millisecond
 
@@ -363,15 +230,8 @@ func TestRefresh_AStarvedPoolIsA503NotAHang(t *testing.T) {
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			t.Fatalf("status = %d, want 503 (body %v)", resp.StatusCode, decodeObject(t, resp))
 		}
-		if elapsed < bound {
-			t.Errorf("answered after %v, before the handler's bound of %v: it did not wait for the pool at all", elapsed, bound)
-		}
-		if elapsed > 3*time.Second {
-			t.Errorf("answered after %v, long after the handler's bound of %v", elapsed, bound)
-		}
-		if cookies := refreshCookies(resp); len(cookies) != 0 {
-			t.Errorf("Set-Cookie = %+v, want the cookie left alone", cookies)
-		}
+		checkBounded(t, elapsed, bound)
+		authRequireCookie(t, resp, cookieUntouched)
 		if n := len(a.store.named("RotateSessionToken")) + len(a.store.named("RevokeSession")); n != 0 {
 			t.Errorf("a starved refresh changed the session (%d writes)", n)
 		}
@@ -382,15 +242,7 @@ func TestRefresh_AStarvedPoolIsA503NotAHang(t *testing.T) {
 
 	t.Run("the pool cannot answer the lookup that opens the refresh", func(t *testing.T) {
 		a := newAuthRaceAppWith(t, nil, raceOptions{gateSize: 1, dbTimeout: bound})
-		if err := a.gate.acquire(context.Background()); err != nil {
-			t.Fatalf("take the pool's only connection: %v", err)
-		}
-		held := true
-		defer func() {
-			if held {
-				a.gate.release()
-			}
-		}()
+		release := a.holdPool(t)
 
 		resp, elapsed := a.postTimed(t, "/auth/refresh", "{}", raceCurrentToken, nil, 5*time.Second)
 		check(t, a, resp, elapsed)
@@ -398,9 +250,7 @@ func TestRefresh_AStarvedPoolIsA503NotAHang(t *testing.T) {
 			t.Errorf("%d statements reached the database although the pool had no connection to run them on", n)
 		}
 
-		// Control: with the connection back, the same request is answered.
-		a.gate.release()
-		held = false
+		release()
 		if again := a.post(t, "/auth/refresh", raceCurrentToken, nil); again.StatusCode != http.StatusOK {
 			t.Errorf("with the pool free again the refresh answered %d, want 200", again.StatusCode)
 		}
@@ -408,19 +258,15 @@ func TestRefresh_AStarvedPoolIsA503NotAHang(t *testing.T) {
 
 	t.Run("the pool cannot give the refresh a connection to begin on", func(t *testing.T) {
 		a := newAuthRaceAppWith(t, nil, raceOptions{gateSize: 1, dbTimeout: bound})
-		// The opening lookup runs (the pool is free), and then another consumer takes
-		// the connection just before Begin asks for it.
+		// The opening lookup runs, then another consumer takes the connection just before
+		// Begin asks for it.
 		taken := false
-		a.pool.beforeBegin = func() {
-			if err := a.gate.acquire(context.Background()); err == nil {
-				taken = true
-			}
-		}
-		defer func() {
+		a.pool.beforeBegin = func() { taken = a.gate.acquire(context.Background()) == nil }
+		t.Cleanup(func() {
 			if taken {
 				a.gate.release()
 			}
-		}()
+		})
 
 		resp, elapsed := a.postTimed(t, "/auth/refresh", "{}", raceCurrentToken, nil, 5*time.Second)
 		check(t, a, resp, elapsed)
@@ -436,20 +282,12 @@ func TestRefresh_AStarvedPoolIsA503NotAHang(t *testing.T) {
 	})
 }
 
-// TestRefresh_AWriteThatFailsIsNotARefusalAndIssuesNothing pins the ways a refresh
-// can fail after it has validated: the transaction cannot be started, the
-// rotation fails, the commit fails. Each is a failure, not a refusal — the cookie
-// is left alone, nothing is issued, no Redis row is written — and each is a 500,
-// or a 503 where the cause is the database not answering (the bound ran out, or
-// no connection could be made), which is answered like any lookup that could not
-// be made: nothing was decided, retry.
-//
-// Each is also logged, with the session id and never a token or a hash: a 500 or a
-// 503 that changed nothing is otherwise invisible, and the session id is what lets
-// an operator find the session that was being rotated.
-//
-// The control is the first row of TestRefresh_RotationOutcomes, which answers 200
-// on the same harness.
+// TestRefresh_AWriteThatFailsIsNotARefusalAndIssuesNothing pins the ways a refresh can fail
+// after it has validated: the transaction cannot be started, the rotation fails, the commit
+// fails. Each is a failure, not a refusal: the cookie is left alone, nothing is issued, no
+// Redis row is written, and the answer is a 500, or a 503 where the cause is the database
+// not answering. Each is logged with the session id and never a token or a hash. The control
+// is the first row of TestRefresh_RotationOutcomes.
 func TestRefresh_AWriteThatFailsIsNotARefusalAndIssuesNothing(t *testing.T) {
 	boom := errRaceTransient
 	bug := errRaceBug
@@ -460,15 +298,14 @@ func TestRefresh_AWriteThatFailsIsNotARefusalAndIssuesNothing(t *testing.T) {
 		tweak func(*raceStore)
 		begin error // what Begin fails with, if anything
 		want  int
-		// wantRolledBack is whether a transaction was begun and had to be rolled back
-		// (rather than committed or never begun).
+		// wantRolledBack is whether a transaction was begun and rolled back (rather than
+		// committed or never begun).
 		wantRolledBack bool
 		wantNoTx       bool
 		wantLog        string // the log line, which names the session
-		// wantRotated is whether the session's token ended up rotated. It is false for
-		// every failure except a commit that landed with its answer lost, which is the
-		// case the "unconfirmed" wording exists for: the session IS rotated, the client
-		// never got the new cookie, and the handler cannot know.
+		// wantRotated is whether the session's token ended up rotated: only for a commit that
+		// landed with its answer lost, where the client never got the new cookie and the
+		// handler cannot know.
 		wantRotated bool
 	}{
 		{
@@ -504,7 +341,6 @@ func TestRefresh_AWriteThatFailsIsNotARefusalAndIssuesNothing(t *testing.T) {
 			wantLog: "refresh: commit did not complete; its outcome is UNCONFIRMED",
 		},
 		{
-			// The same failure, the same answer — and the session rotated all the same.
 			name:    "the commit lands and its answer is lost",
 			tweak:   func(s *raceStore) { s.commitErr = boom; s.commitLands = true },
 			want:    http.StatusServiceUnavailable,
@@ -519,11 +355,8 @@ func TestRefresh_AWriteThatFailsIsNotARefusalAndIssuesNothing(t *testing.T) {
 			a.pool.beginErr = tt.begin
 
 			resp := a.post(t, "/auth/refresh", raceCurrentToken, nil)
-			body := decodeObject(t, resp)
+			body := authRequireStatus(t, resp, tt.want)
 
-			if resp.StatusCode != tt.want {
-				t.Fatalf("status = %d, want %d (body %v)", resp.StatusCode, tt.want, body)
-			}
 			out := logs.String()
 			if !strings.Contains(out, tt.wantLog) {
 				t.Errorf("no %q line in the log: %q", tt.wantLog, out)
@@ -534,9 +367,7 @@ func TestRefresh_AWriteThatFailsIsNotARefusalAndIssuesNothing(t *testing.T) {
 			if strings.Contains(out, raceCurrentToken) || strings.Contains(out, auth.HashToken(raceCurrentToken)) {
 				t.Errorf("the log carries the token or its hash: %q", out)
 			}
-			if cookies := refreshCookies(resp); len(cookies) != 0 {
-				t.Errorf("Set-Cookie = %+v, want the cookie left alone", cookies)
-			}
+			authRequireCookie(t, resp, cookieUntouched)
 			if _, issued := body["access_token"]; issued {
 				t.Errorf("a refresh that failed issued an access token: %v", body)
 			}
@@ -553,11 +384,8 @@ func TestRefresh_AWriteThatFailsIsNotARefusalAndIssuesNothing(t *testing.T) {
 				t.Errorf("the unconfirmed commit's log line does not say the session may have been rotated: %q", out)
 			}
 
-			a.pool.mu.Lock()
-			began := len(a.pool.txs)
-			a.pool.mu.Unlock()
 			if tt.wantNoTx {
-				if began != 0 {
+				if began := a.pool.txCount(); began != 0 {
 					t.Errorf("%d transactions were begun although Begin failed", began)
 				}
 				return
@@ -573,101 +401,90 @@ func TestRefresh_AWriteThatFailsIsNotARefusalAndIssuesNothing(t *testing.T) {
 	}
 }
 
-// TestRefresh_AStarvedRefusalLookupIsBoundedToo covers the one pool query a refresh
-// can make after the opening lookup without a transaction: the question a refusal
-// asks, whether the stale token was one a concurrent refresh had just replaced.
-//
-// The cookie is a token no session holds, so the opening lookup answers "no such
-// session" and the refusal asks; the pool is taken between the two. The question
-// must not wait for ever. A lookup that could not be made is answered the way the
-// refusal has always answered it — as stale, 401 with the cookie cleared, because
-// the caller already knows the token is not current — and promptly.
+// TestRefresh_AStarvedRefusalLookupIsBoundedToo covers the one pool query a refresh can
+// make after the opening lookup without a transaction: the question a refusal asks, whether
+// the stale token was one a concurrent refresh had just replaced. The cookie is a token no
+// session holds, so the refusal asks, and the pool is taken between the two. The question
+// must not wait for ever: it is answered as stale (401, cookie cleared, the caller already
+// knows the token is not current), promptly.
 func TestRefresh_AStarvedRefusalLookupIsBoundedToo(t *testing.T) {
 	const bound = 200 * time.Millisecond
 	a := newAuthRaceAppWith(t, nil, raceOptions{gateSize: 1, dbTimeout: bound, followUpTimeout: bound})
-	taken := false
-	a.store.afterPool = func(name string) {
-		if name == "GetSessionByTokenHash" && !taken {
-			if err := a.gate.acquire(context.Background()); err == nil {
-				taken = true
-			}
-		}
-	}
-	defer func() {
-		if taken {
-			a.gate.release()
-		}
-	}()
+	taken, give := a.starveAfter("GetSessionByTokenHash")
+	defer give()
 
 	resp, elapsed := a.postTimed(t, "/auth/refresh", "{}", "a-token-no-session-holds", nil, 5*time.Second)
 
-	if !taken {
+	if !taken() {
 		t.Fatal("the pool was never taken: the opening lookup did not run, so this test proved nothing")
 	}
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 (body %v)", resp.StatusCode, decodeObject(t, resp))
 	}
-	if cookies := refreshCookies(resp); len(cookies) != 1 || !cookieDeleted(cookies[0]) {
-		t.Errorf("Set-Cookie = %+v, want the cookie deleted", cookies)
-	}
-	if elapsed < bound || elapsed > 3*time.Second {
-		t.Errorf("answered after %v, want about the handler's bound of %v", elapsed, bound)
-	}
+	authRequireCookie(t, resp, cookieCleared)
+	checkBounded(t, elapsed, bound)
 	if n := len(a.store.named("GetSessionByPreviousTokenHash")); n != 0 {
 		t.Errorf("the refusal's question reached the database %d times although the pool had no connection for it", n)
 	}
 }
 
-// TestLogout_AStarvedRevokeIsA503 is the same bound on the one pool statement
-// Logout makes after its lookup: the revoke. The lookup finds the session, the
-// pool is taken, and the revoke must come back as "could not be confirmed" within
-// the bound, with nothing revoked and the cookie cleared.
-func TestLogout_AStarvedRevokeIsA503(t *testing.T) {
+// TestLogout_AStarvedPoolIsA503NotAHang is the same bound on Logout, which holds no
+// transaction but waits for the pool like any request, with a context that has no deadline
+// either. The pool is starved before the lookup, or goes dark just after it so that the
+// revoke cannot get a connection. The answer is a 503 with the cookie cleared (as every
+// Logout answer but the 403), a message that does not say "try again" (checkLogoutUnconfirmed),
+// and nothing revoked; with the pool free again the same sign-out ends the session.
+func TestLogout_AStarvedPoolIsA503NotAHang(t *testing.T) {
 	const bound = 200 * time.Millisecond
-	a := newAuthRaceAppWith(t, nil, raceOptions{gateSize: 1, dbTimeout: bound})
-	taken := false
-	a.store.afterPool = func(name string) {
-		if name == "GetSessionByTokenHash" && !taken {
-			if err := a.gate.acquire(context.Background()); err == nil {
-				taken = true
+
+	for _, tt := range []struct {
+		name string
+		// starve arms the starvation and returns whether it happened and how to undo it.
+		starve func(t *testing.T, a *authRaceApp) (happened func() bool, undo func())
+	}{
+		{"before the lookup", func(t *testing.T, a *authRaceApp) (func() bool, func()) {
+			return func() bool { return true }, a.holdPool(t)
+		}},
+		{"after the lookup, at the revoke", func(_ *testing.T, a *authRaceApp) (func() bool, func()) {
+			taken, give := a.starveAfter("GetSessionByTokenHash")
+			return taken, give
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newAuthRaceAppWith(t, nil, raceOptions{gateSize: 1, dbTimeout: bound})
+			happened, undo := tt.starve(t, a)
+			defer undo()
+
+			resp, elapsed := a.postTimed(t, "/auth/logout", "{}", raceCurrentToken, nil, 5*time.Second)
+			body := authRequireStatus(t, resp, http.StatusServiceUnavailable)
+
+			if !happened() {
+				t.Fatal("the pool was never taken, so this test proved nothing")
 			}
-		}
-	}
-	defer func() {
-		if taken {
-			a.gate.release()
-		}
-	}()
+			checkBounded(t, elapsed, bound)
+			authRequireCookie(t, resp, cookieCleared)
+			checkLogoutUnconfirmed(t, body)
+			if n := len(a.store.named("RevokeSession")); n != 0 || a.store.snapshot().IsRevoked {
+				t.Errorf("RevokeSession sent %d times, session revoked = %t, for a pool that could not answer", n, a.store.snapshot().IsRevoked)
+			}
 
-	resp, elapsed := a.postTimed(t, "/auth/logout", "{}", raceCurrentToken, nil, 5*time.Second)
-	body := decodeObject(t, resp)
-
-	if !taken {
-		t.Fatal("the pool was never taken: the lookup did not run, so this test proved nothing")
-	}
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 (body %v)", resp.StatusCode, body)
-	}
-	checkLogoutUnconfirmed(t, body)
-	if cookies := refreshCookies(resp); len(cookies) != 1 || !cookieDeleted(cookies[0]) {
-		t.Errorf("Set-Cookie = %+v, want the cookie deleted", cookies)
-	}
-	if elapsed < bound || elapsed > 3*time.Second {
-		t.Errorf("answered after %v, want about the handler's bound of %v", elapsed, bound)
-	}
-	if a.store.snapshot().IsRevoked {
-		t.Error("the session is revoked although the revoke never reached the database")
+			undo()
+			a.store.afterPool = nil
+			if again := a.post(t, "/auth/logout", raceCurrentToken, nil); again.StatusCode != http.StatusOK || !a.store.snapshot().IsRevoked {
+				t.Errorf("with the pool free again the sign-out answered %d (revoked = %t), want 200 and the session ended: the control proves nothing otherwise",
+					again.StatusCode, a.store.snapshot().IsRevoked)
+			}
+		})
 	}
 }
 
-// TestRefresh_ReleasingTheTransactionTwiceIsNotAFailure pins what the double
-// release costs in the log: nothing. A refresh now gives its connection back
-// before the pool queries that need one, and the deferred release that remains as
-// the backstop then finds the transaction already closed — and so does a winner's,
-// after the commit. pgx answers that with ErrTxClosed, which is not a failure, and
-// a log line for it on every refresh would bury the one that is. The controls are
-// the rollbacks that DO fail: one is logged, and a refresh that released early
-// and fails again in the backstop logs once, not twice.
+// TestRefresh_ReleasingTheTransactionTwiceIsNotAFailure pins what the double release costs
+// in the log: nothing. A refresh gives its connection back before the pool queries that need
+// one, and the deferred release that remains as the backstop then finds the transaction
+// already closed, as does a winner's after the commit. pgx answers that with ErrTxClosed,
+// which is not a failure and must not bury the line that is. The controls are the rollbacks
+// that DO fail: one is logged, and a refresh that released early and fails again in the
+// backstop logs once, not twice.
 func TestRefresh_ReleasingTheTransactionTwiceIsNotAFailure(t *testing.T) {
 	const line = "refresh: transaction rollback failed"
 	boom := errors.New("connection reset by peer")
@@ -691,9 +508,8 @@ func TestRefresh_ReleasingTheTransactionTwiceIsNotAFailure(t *testing.T) {
 			1,
 		},
 		{
-			// A statement that ran out of its bound makes pgx close the connection, so
-			// the rollback that follows every bounded stall finds it closed. That is
-			// not a failure and must not be logged as one on each of them.
+			// A statement that ran out of its bound makes pgx close the connection, so the
+			// rollback after every bounded stall finds it closed: not a failure.
 			"a connection pgx already closed: the rollback finds it closed, which is not a failure",
 			func(s *raceStore) {
 				s.rotateErr = errRaceTransient
@@ -702,8 +518,7 @@ func TestRefresh_ReleasingTheTransactionTwiceIsNotAFailure(t *testing.T) {
 			0,
 		},
 		{
-			// ...and the exemption is that one error and no other: a closed network
-			// connection is something else, and still a rollback that failed.
+			// The exemption is that one error and no other.
 			"a rollback that fails because the network connection is closed is still a failure",
 			func(s *raceStore) {
 				s.rotateErr = errRaceTransient
@@ -727,11 +542,10 @@ func TestRefresh_ReleasingTheTransactionTwiceIsNotAFailure(t *testing.T) {
 	}
 }
 
-// checkLogoutUnconfirmed holds a sign-out's 503 to what it must say. The cookie
-// has been cleared by then, so a browser's second attempt carries no token and is
-// answered 200 for nothing: the message must say the sign-out could not be
-// confirmed and the session may still be active, and name what to do, and it must
-// not tell anyone to try again as if that would work.
+// checkLogoutUnconfirmed holds a sign-out's 503 to what it must say. The cookie has been
+// cleared by then, so a browser's second attempt carries no token and is answered 200 for
+// nothing: the message must say the sign-out could not be confirmed, that the session may
+// still be active, and name what to do; it must not tell anyone to try again.
 func checkLogoutUnconfirmed(t *testing.T, body map[string]any) {
 	t.Helper()
 	msg, _ := body["message"].(string)
@@ -746,58 +560,10 @@ func checkLogoutUnconfirmed(t *testing.T, body map[string]any) {
 	}
 }
 
-// TestLogout_AStarvedPoolIsA503NotAHang is the same bound on Logout. Logout holds
-// no transaction, but it waits for the pool like any other request, and its
-// context has no deadline either.
-//
-// The answer is a 503 with the cookie cleared, as every Logout answer but the 403
-// clears it, and a message that does not say "try again" (see checkLogoutUnconfirmed). The
-// control: with the pool free, the same sign-out ends the session.
-func TestLogout_AStarvedPoolIsA503NotAHang(t *testing.T) {
-	const bound = 200 * time.Millisecond
-	a := newAuthRaceAppWith(t, nil, raceOptions{gateSize: 1, dbTimeout: bound})
-	if err := a.gate.acquire(context.Background()); err != nil {
-		t.Fatalf("take the pool's only connection: %v", err)
-	}
-	held := true
-	defer func() {
-		if held {
-			a.gate.release()
-		}
-	}()
-
-	resp, elapsed := a.postTimed(t, "/auth/logout", "{}", raceCurrentToken, nil, 5*time.Second)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 (body %v)", resp.StatusCode, body)
-	}
-	if elapsed < bound || elapsed > 3*time.Second {
-		t.Errorf("answered after %v, want about the handler's bound of %v", elapsed, bound)
-	}
-	if cookies := refreshCookies(resp); len(cookies) != 1 || !cookieDeleted(cookies[0]) {
-		t.Errorf("Set-Cookie = %+v, want the cookie deleted as on every sign-out answer", cookies)
-	}
-	checkLogoutUnconfirmed(t, body)
-	if n := len(a.store.named("RevokeSession")); n != 0 {
-		t.Errorf("RevokeSession sent %d times for a pool that could not answer", n)
-	}
-
-	a.gate.release()
-	held = false
-	if again := a.post(t, "/auth/logout", raceCurrentToken, nil); again.StatusCode != http.StatusOK {
-		t.Fatalf("with the pool free again the sign-out answered %d, want 200", again.StatusCode)
-	}
-	if !a.store.snapshot().IsRevoked {
-		t.Error("with the pool free again the sign-out did not end the session: the control proves nothing")
-	}
-}
-
-// TestLogout_ARevokeThatFailsIsNotASuccess covers the write half of Logout: the
-// lookup found the session and revoking it failed. A failure is a 500; running
-// out of the bound is the same 503 as a lookup that could not be made, with the
-// same message — and with neither is the session revoked, the audit row written,
-// or the cookie spared.
+// TestLogout_ARevokeThatFailsIsNotASuccess covers the write half of Logout: the lookup
+// found the session and revoking it failed. A failure is a 500; running out of the bound is
+// the 503 of a lookup that could not be made, with the same message. With neither is the
+// session revoked, the audit row written, or the cookie spared.
 func TestLogout_ARevokeThatFailsIsNotASuccess(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -824,15 +590,9 @@ func TestLogout_ARevokeThatFailsIsNotASuccess(t *testing.T) {
 			a := newAuthRaceApp(t, func(s *raceStore) { s.revokeErr = tt.err })
 
 			resp := a.post(t, "/auth/logout", raceCurrentToken, nil)
-			body := decodeObject(t, resp)
+			tt.check(t, authRequireStatus(t, resp, tt.want))
 
-			if resp.StatusCode != tt.want {
-				t.Fatalf("status = %d, want %d (body %v)", resp.StatusCode, tt.want, body)
-			}
-			tt.check(t, body)
-			if cookies := refreshCookies(resp); len(cookies) != 1 || !cookieDeleted(cookies[0]) {
-				t.Errorf("Set-Cookie = %+v, want the cookie deleted as on every sign-out answer", cookies)
-			}
+			authRequireCookie(t, resp, cookieCleared)
 			if a.store.snapshot().IsRevoked {
 				t.Error("the session is revoked although the revoke failed")
 			}
@@ -843,10 +603,9 @@ func TestLogout_ARevokeThatFailsIsNotASuccess(t *testing.T) {
 	}
 }
 
-// redisSetHook runs on every command of one kind sent to Redis (SET unless made
-// with newRedisCmdHook), ahead of the command, and decides what the command does:
-// wait, fail or panic. It is how a Redis that is slow, down or broken looks to the
-// caller.
+// redisSetHook runs on every command of one kind sent to Redis (SET unless made with
+// newRedisCmdHook), ahead of the command, and decides what it does: wait, fail or panic.
+// started is closed when the first one begins.
 type redisSetHook struct {
 	cmd     string
 	on      func(ctx context.Context) error
@@ -880,24 +639,18 @@ func (h *redisSetHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis
 	return next
 }
 
-// TestRefresh_ASlowRedisDoesNotDelayTheNewCookie pins that the winner's response
-// does not wait for the Redis row. Nothing reads the row, but a winner whose
-// Set-Cookie arrived seconds late — held behind a Redis that is slow or down —
-// leaves the loser's short retry carrying the OLD cookie into a second 409.
-//
-// Redis here never answers a SET until released. The refresh must still come back
-// 200 with its new cookie promptly; the write must have been ATTEMPTED (it is the
-// control that the hook is on the path, and that moving the write did not drop
-// it) and still be pending when the response arrives; and once Redis is released
-// the row must appear. A write kept on the request path would hold the response
-// until the hook let go, and the request would not come back in time at all.
+// TestRefresh_ASlowRedisDoesNotDelayTheNewCookie pins that the winner's response does not
+// wait for the Redis row: a winner whose Set-Cookie arrived seconds late would leave the
+// loser's short retry carrying the OLD cookie into a second 409. Redis never answers a SET
+// until released. The refresh must still come back 200 with its new cookie promptly; the
+// write must have been attempted (the control that moving it did not drop it), still be
+// pending when the response arrives, run under a deadline of its own, and land once Redis
+// is released.
 func TestRefresh_ASlowRedisDoesNotDelayTheNewCookie(t *testing.T) {
 	a := newAuthRaceApp(t, nil)
 	release := make(chan struct{})
 	var once sync.Once
 	unblock := func() { once.Do(func() { close(release) }) }
-	// The context the write runs in: it must carry a deadline of its own, or a Redis
-	// that never answers leaves one goroutine behind per refresh for ever.
 	type deadlineSeen struct {
 		at time.Time
 		ok bool
@@ -924,9 +677,7 @@ func TestRefresh_ASlowRedisDoesNotDelayTheNewCookie(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if cookies := refreshCookies(resp); len(cookies) != 1 || cookies[0].Value == "" || cookieDeleted(cookies[0]) {
-		t.Errorf("Set-Cookie = %+v, want one fresh refresh cookie", cookies)
-	}
+	authRequireCookie(t, resp, cookieNew)
 	if elapsed > 1500*time.Millisecond {
 		t.Errorf("the response took %v with Redis not answering; the new cookie is waiting on the cache row", elapsed)
 	}
@@ -954,12 +705,47 @@ func TestRefresh_ASlowRedisDoesNotDelayTheNewCookie(t *testing.T) {
 	a.awaitSessionRedisRow(t)
 }
 
-// TestRefresh_ARedisThatFailsOrPanicsCostsTheRefreshNothing pins what is left of
-// the Redis write once it is off the request path: a failure is a logged warning
-// and changes nothing the client sees, and a panic in it — in a goroutine no
-// request is waiting on, where an unrecovered one would take the whole process
-// down — is recovered, logged, and equally invisible. The control is the first
-// row of TestRefresh_RotationOutcomes: with a healthy Redis the row is written.
+// authLogWatch is the captured production log with a signal on every write, so a test waits for
+// a line the code logs from a goroutine instead of polling for it. It must be made before the
+// request that logs: a line written through the handler it replaces would never signal.
+type authLogWatch struct {
+	*lockedLog
+	wrote chan struct{}
+}
+
+func authWatchLog(t *testing.T) *authLogWatch {
+	t.Helper()
+	w := &authLogWatch{lockedLog: captureProductionLog(t), wrote: make(chan struct{}, 1)}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	return w
+}
+
+func (w *authLogWatch) Write(b []byte) (int, error) {
+	n, err := w.lockedLog.Write(b)
+	select {
+	case w.wrote <- struct{}{}:
+	default:
+	}
+	return n, err
+}
+
+// await waits until the log holds want, and fails the test if it never does.
+func (w *authLogWatch) await(t *testing.T, want string) {
+	t.Helper()
+	timeout := time.After(5 * time.Second)
+	for !strings.Contains(w.String(), want) {
+		select {
+		case <-w.wrote:
+		case <-timeout:
+			t.Fatalf("no %q line in the log: %q", want, w.String())
+		}
+	}
+}
+
+// TestRefresh_ARedisThatFailsOrPanicsCostsTheRefreshNothing pins what is left of the Redis
+// write once it is off the request path: a failure is a logged warning and changes nothing
+// the client sees, and a panic in it, in a goroutine no request is waiting on where an
+// unrecovered one would take the process down, is recovered, logged and equally invisible.
 func TestRefresh_ARedisThatFailsOrPanicsCostsTheRefreshNothing(t *testing.T) {
 	tests := []struct {
 		name string
@@ -972,7 +758,7 @@ func TestRefresh_ARedisThatFailsOrPanicsCostsTheRefreshNothing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			logs := captureProductionLog(t)
+			logs := authWatchLog(t)
 			a := newAuthRaceApp(t, nil)
 			a.rdb.AddHook(newRedisSetHook(tt.on))
 
@@ -981,22 +767,13 @@ func TestRefresh_ARedisThatFailsOrPanicsCostsTheRefreshNothing(t *testing.T) {
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d, want 200", resp.StatusCode)
 			}
-			if cookies := refreshCookies(resp); len(cookies) != 1 || cookies[0].Value == "" || cookieDeleted(cookies[0]) {
-				t.Errorf("Set-Cookie = %+v, want one fresh refresh cookie", cookies)
-			}
+			authRequireCookie(t, resp, cookieNew)
 			if _, issued := decodeObject(t, resp)["access_token"]; !issued {
 				t.Error("a refresh whose cache write failed did not issue its access token")
 			}
 
-			deadline := time.Now().Add(3 * time.Second)
-			for !strings.Contains(logs.String(), tt.want) && time.Now().Before(deadline) {
-				time.Sleep(5 * time.Millisecond)
-			}
-			out := logs.String()
-			if !strings.Contains(out, tt.want) {
-				t.Errorf("no %q line in the log: %q", tt.want, out)
-			}
-			if !strings.Contains(out, a.store.snapshot().ID.String()) {
+			logs.await(t, tt.want)
+			if out := logs.String(); !strings.Contains(out, a.store.snapshot().ID.String()) {
 				t.Errorf("the log line does not name the session: %q", out)
 			}
 			if a.redis.Exists("nexara:session:" + a.store.snapshot().ID.String()) {

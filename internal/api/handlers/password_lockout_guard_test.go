@@ -2,11 +2,7 @@ package handlers
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"io/fs"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -30,9 +26,7 @@ func TestChangePassword_EndingSessionsDoesNotLiftTheLockout(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			a, _ := lockoutApp(t, kind, raceOptions{})
 			a.redis.Set(a.sessionKey(), "{}")
-			for i := 1; i <= passwordLockoutThreshold; i++ {
-				a.change(t, wrongChangeBody)
-			}
+			a.lockoutArm(t)
 			if status, _, _ := a.change(t, changeBody); status != http.StatusTooManyRequests {
 				t.Fatalf("the account is not locked after %d wrong passwords (%d): this test proved nothing", passwordLockoutThreshold, status)
 			}
@@ -72,38 +66,19 @@ func TestChangePassword_EndingSessionsDoesNotLiftTheLockout(t *testing.T) {
 func TestGuard_OnlyChangePasswordTouchesTheLockout(t *testing.T) {
 	t.Run("the keys are written in one file", func(t *testing.T) {
 		const owner = "internal/api/handlers/password_lockout.go"
-		for _, dir := range []string{"internal", "cmd", "pkg"} {
-			root := filepath.Join(repoRoot, dir)
-			err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-					return nil
-				}
-				raw, err := os.ReadFile(path)
-				if err != nil {
-					return err
-				}
-				rel, err := filepath.Rel(repoRoot, path)
-				if err != nil {
-					return err
-				}
-				rel = filepath.ToSlash(rel)
-				if strings.Contains(string(raw), "pwchange:") && rel != owner {
-					t.Errorf("%s mentions the lockout's keys (pwchange:): only %s may, so that nothing else can read, clear or extend the lock", rel, owner)
-				}
-				return nil
-			})
-			if err != nil {
-				t.Fatalf("walk %s: %v", dir, err)
+		_, sources := authParsedSources(t)
+		held := false
+		for _, src := range sources {
+			if !strings.Contains(string(src.text), "pwchange:") {
+				continue
+			}
+			if src.rel != owner {
+				t.Errorf("%s mentions the lockout's keys (pwchange:): only %s may, so that nothing else can read, clear or extend the lock", src.rel, owner)
+			} else if strings.Contains(string(src.text), `"pwchange:user:`) {
+				held = true
 			}
 		}
-		raw, err := os.ReadFile(filepath.Join(repoRoot, owner))
-		if err != nil {
-			t.Fatalf("read %s: %v", owner, err)
-		}
-		if !strings.Contains(string(raw), `"pwchange:user:`) {
+		if !held {
 			t.Errorf("%s no longer holds the lockout's keys: this guard has gone stale", owner)
 		}
 	})
@@ -126,19 +101,12 @@ func TestGuard_OnlyChangePasswordTouchesTheLockout(t *testing.T) {
 		// named like one may call another of the store's: only its callers are checked.
 		seen := map[string][]string{}
 
-		files, err := filepath.Glob(filepath.Join(repoRoot, "internal", "api", "handlers", "*.go"))
-		if err != nil {
-			t.Fatalf("glob: %v", err)
-		}
-		fset := token.NewFileSet()
-		for _, path := range files {
-			if strings.HasSuffix(path, "_test.go") {
+		_, sources := authParsedSources(t)
+		for _, src := range sources {
+			if filepath.ToSlash(filepath.Dir(src.rel)) != "internal/api/handlers" {
 				continue
 			}
-			file, err := parser.ParseFile(fset, path, nil, 0)
-			if err != nil {
-				t.Fatalf("parse %s: %v", path, err)
-			}
+			file := src.file
 			for _, decl := range file.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
 				if !ok || fn.Body == nil {

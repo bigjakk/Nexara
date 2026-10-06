@@ -16,12 +16,11 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The second factor widens the window between a credential check and the session
-// it earns from milliseconds to the five minutes a pending token lives, and these
-// tests drive that window: the password step records the epoch it read in the
-// pending token, and the session the second step creates is conditional on THAT —
-// not on the epoch of the user row the second step re-reads, which is the epoch a
-// password change, a sign-out of all devices or a deactivation has just produced.
+// The second factor widens the window between a credential check and the session it earns
+// from milliseconds to the five minutes a pending token lives. The password step records the
+// epoch it read in the pending token, and the session the second step creates is conditional
+// on THAT, not on the epoch of the user row the second step re-reads, which a password change,
+// a sign-out of all devices or a deactivation has just moved.
 
 // epochTOTPUser is a local account with a second factor, and the plain secret to
 // generate its codes from.
@@ -101,27 +100,15 @@ func TestTOTPLogin_ThePendingTokenCarriesThePasswordStepsEpoch(t *testing.T) {
 // told: the answer an expired token gets, word for word, so that it is no oracle.
 const staleTokenMessage = "Invalid or expired pending token"
 
-// TestTOTPLogin_AStalePendingTokenIsRefusedBeforeAnyCodeIsSpent is the early half of
-// the protection against a revoke-all between the two steps: the password is right at
-// step one, the user changes it (or signs out everywhere) while the code is being
-// typed, and step two — whose re-read of the user shows a DIFFERENT epoch from the one
-// the pending token carries — refuses the token before it looks at the code.
-//
-// What "before" buys is three things, each asserted on its own for each kind of code
-// a second step can send (a valid code, a wrong one, a recovery code):
-//
-//   - no single-use recovery code is spent on a login that cannot be allowed;
-//   - no failure is counted against the user (and no lockout can follow), so a stale
-//     token cannot be used to lock an account out, nor to test codes against it;
-//   - the token and its attempt counter are destroyed, so it stops being a second-factor
-//     oracle for the rest of its five minutes, and the answer is the expired-token text
-//     word for word.
-//
-// And it is the INSERT that is never reached — zero session inserts — which is what
-// makes this check killable on its own: with it removed the insert is attempted (and
-// refused by the conditional insert, which is the second line, driven by the hook rows
-// of TestTOTPLogin_ARevokeAllBetweenTheStepsRefusesTheSession). The refusal is audited,
-// like the insert's: a correct credential that a revoke-all had replaced.
+// TestTOTPLogin_AStalePendingTokenIsRefusedBeforeAnyCodeIsSpent is the early half of the
+// protection against a revoke-all between the two steps: the password is right at step one,
+// the user changes it while the code is typed, and step two, whose re-read shows a DIFFERENT
+// epoch from the pending token's, refuses the token before it looks at the code, for each kind
+// of code. So no single-use recovery code is spent on a login that cannot be allowed, no
+// failure is counted (a stale token cannot lock an account out or test codes against it), and
+// the token is destroyed, the answer being the expired-token text word for word. No session
+// insert is reached, which makes this killable on its own; the refusal is audited as a refused
+// sign-in. The late half is TestTOTPLogin_ARevokeAllBetweenTheStepsRefusesTheSession.
 func TestTOTPLogin_AStalePendingTokenIsRefusedBeforeAnyCodeIsSpent(t *testing.T) {
 	logs := captureProductionLog(t)
 
@@ -131,7 +118,6 @@ func TestTOTPLogin_AStalePendingTokenIsRefusedBeforeAnyCodeIsSpent(t *testing.T)
 	}{
 		{"a password change, or a sign-out of all devices: the epoch moves", func(u *db.User) { u.AuthEpoch++ }},
 		{"two revoke-alls", func(u *db.User) { u.AuthEpoch += 2 }},
-		{"an account deactivated and reactivated: active again, a different epoch", func(u *db.User) { u.AuthEpoch++ }},
 	}
 	kinds := []string{"a valid code", "a wrong code", "a recovery code"}
 
@@ -160,11 +146,7 @@ func TestTOTPLogin_AStalePendingTokenIsRefusedBeforeAnyCodeIsSpent(t *testing.T)
 					body = `{"totp_pending_token":"` + token + `","recovery_code":"` + recoveryPlain[0] + `"}`
 				}
 				resp := a.post(t, "/auth/totp/verify-login", body)
-				out := decodeObject(t, resp)
-
-				if resp.StatusCode != http.StatusUnauthorized {
-					t.Fatalf("status = %d, want 401 (body %v)", resp.StatusCode, out)
-				}
+				out := authRequireStatus(t, resp, http.StatusUnauthorized)
 				if msg, _ := out["message"].(string); msg != staleTokenMessage {
 					t.Errorf("message = %q, want exactly %q: a stale token must read as an expired one", msg, staleTokenMessage)
 				}
@@ -228,11 +210,7 @@ func TestTOTPLogin_TheEarlyRefusalAuditRunsOnAFollowUpDeadline(t *testing.T) {
 	store.mutate(user.ID, func(u *db.User) { u.AuthEpoch++ })
 
 	resp := a.send(t, http.MethodPost, "/auth/totp/verify-login", epochVerifyBody(t, token, plain), nil, 10*time.Second)
-	out := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 (body %v)", resp.StatusCode, out)
-	}
+	out := authRequireStatus(t, resp, http.StatusUnauthorized)
 	if msg, _ := out["message"].(string); msg != staleTokenMessage {
 		t.Errorf("message = %q, want %q", msg, staleTokenMessage)
 	}
@@ -257,16 +235,12 @@ func epochWrongCode(t *testing.T, plainSecret string) string {
 }
 
 // TestTOTPLogin_ARevokeAllBetweenTheStepsRefusesTheSession is the late half, and the
-// independent proof of the conditional INSERT: the early comparison cannot see a
-// revoke-all that lands after the second step's re-read, and the hook rows put one
-// exactly there — the re-read saw the old epoch, the epoch moves right behind it — so
-// that the code is validated, the session insert is attempted at the pending token's
-// epoch, and the insert alone refuses it.
-//
-// The control is the same two steps with nothing landing, which creates a session at
-// the epoch the pending token carried. An account that is inactive when the second step
-// re-reads it is told 403, as it always was: that check comes before everything else.
-// The rows that refuse issue nothing, and audit the refusal as a refused sign-in.
+// independent proof of the conditional INSERT: the early comparison cannot see a revoke-all
+// that lands after the second step's re-read, and the hook rows put one exactly there, so the
+// code is validated, the insert is attempted at the pending token's epoch, and the insert
+// alone refuses it. The control is the two steps with nothing landing; an account inactive at
+// the re-read is told 403, as it always was. The refusals issue nothing and are audited as
+// refused sign-ins.
 func TestTOTPLogin_ARevokeAllBetweenTheStepsRefusesTheSession(t *testing.T) {
 	logs := captureProductionLog(t)
 
@@ -314,11 +288,7 @@ func TestTOTPLogin_ARevokeAllBetweenTheStepsRefusesTheSession(t *testing.T) {
 			}
 
 			resp := a.post(t, "/auth/totp/verify-login", epochVerifyBody(t, token, plain))
-			body := decodeObject(t, resp)
-
-			if resp.StatusCode != tt.want {
-				t.Fatalf("status = %d, want %d (body %v)", resp.StatusCode, tt.want, body)
-			}
+			body := authRequireStatus(t, resp, tt.want)
 			if tt.want == http.StatusOK {
 				inserts := store.named("CreateSessionAtEpoch")
 				if len(inserts) != 1 || epochArg(t, inserts[0]) != 5 {
@@ -365,14 +335,12 @@ func TestTOTPLogin_ARevokeAllBetweenTheStepsRefusesTheSession(t *testing.T) {
 	}
 }
 
-// TestTOTPLogin_APendingTokenWithoutAnEpochIsRefusedBeforeAnyCodeIsSpent: a token
-// minted by a release that recorded no epoch cannot be tied to the password step's
-// check, so the session it would create could not be conditional on anything. It is
-// refused as an expired token and destroyed — it can never succeed — and before the
-// user is read or any code is looked at: a single-use recovery code in particular
-// must not be burned on a login that was never going to be allowed. The wrong code
-// the row sends is the proof: it still hears "expired", not "invalid code", and the
-// failure counter that a wrong code would move does not.
+// TestTOTPLogin_APendingTokenWithoutAnEpochIsRefusedBeforeAnyCodeIsSpent: a token minted by
+// a release that recorded no epoch cannot be tied to the password step's check, so the
+// session it would create could not be conditional on anything. It is refused as an expired
+// token and destroyed, before the user is read or any code looked at (a single-use recovery
+// code must not be burned on a login never going to be allowed): the wrong code the row sends
+// still hears "expired", and the failure counter does not move.
 func TestTOTPLogin_APendingTokenWithoutAnEpochIsRefusedBeforeAnyCodeIsSpent(t *testing.T) {
 	user, plain := epochTOTPUser(t, epochLoginEmail, 0)
 	a := newEpochApp(t, newEpochStore(user), epochOptions{totp: true})
@@ -391,11 +359,7 @@ func TestTOTPLogin_APendingTokenWithoutAnEpochIsRefusedBeforeAnyCodeIsSpent(t *t
 			t.Fatal(err)
 		}
 		resp := a.post(t, "/auth/totp/verify-login", body)
-		out := decodeObject(t, resp)
-
-		if resp.StatusCode != http.StatusUnauthorized {
-			t.Fatalf("status = %d, want 401 (body %v)", resp.StatusCode, out)
-		}
+		out := authRequireStatus(t, resp, http.StatusUnauthorized)
 		if msg, _ := out["message"].(string); !strings.Contains(msg, "Invalid or expired pending token") {
 			t.Errorf("message = %q, want the answer an expired token gets", msg)
 		}
@@ -424,11 +388,7 @@ func TestTOTPLogin_ADatabaseFailureOfTheInsertIsNotARefusal(t *testing.T) {
 	store.failOn["CreateSessionAtEpoch"] = errRaceTransient
 
 	resp := a.post(t, "/auth/totp/verify-login", epochVerifyBody(t, token, plain))
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 (body %v)", resp.StatusCode, body)
-	}
+	body := authRequireStatus(t, resp, http.StatusServiceUnavailable)
 	if msg, _ := body["message"].(string); strings.Contains(msg, "sessions were ended") {
 		t.Errorf("message = %q blames the credential for a database failure", msg)
 	}

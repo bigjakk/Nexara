@@ -12,16 +12,12 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// TestSessionResponseOmitsTokenHash is the assertion this DTO exists for.
-//
-// db.Session carries token_hash — the verifier for a live refresh token — and,
-// since migration 000105, previous_token_hash, the verifier for the token it had
-// before its last rotation, which still signs the session out for a couple of
-// minutes. If a future change serialises the model directly, or someone adds
-// either field to sessionResponse "for debugging", every caller is handed the
-// means to impersonate or end their own sessions, and anything that logs the
-// response body spreads it further. Marshalling and searching the JSON catches
-// that whatever route it arrives by, including an embedded struct.
+// TestSessionResponseOmitsTokenHash is the assertion this DTO exists for. db.Session carries
+// token_hash, the verifier for a live refresh token, and previous_token_hash, the verifier for
+// the token it had before its last rotation, which still signs the session out for a couple of
+// minutes. If a change serialises the model directly, or adds either field to sessionResponse
+// "for debugging", every caller is handed the means to impersonate or end their own sessions.
+// Marshalling and searching the JSON catches that however it arrives, an embedded struct too.
 func TestSessionResponseOmitsTokenHash(t *testing.T) {
 	const secret = "a1b2c3d4e5f6-the-hash-value"
 	const previousSecret = "f6e5d4c3b2a1-the-previous-hash-value"
@@ -55,15 +51,11 @@ func TestSessionResponseOmitsTokenHash(t *testing.T) {
 	}
 }
 
-// TestSessionModelNeverSerialisesItsTokenHashes is the second line of the same
-// defence. sessionResponse leaves both hashes behind by construction, but the
-// model they live in is what a stray c.JSON(session) — or a struct that embeds
-// db.Session — would serialise, and sqlc.yaml tags both columns json:"-" so that
-// it cannot. Removing either override regenerates the model with a visible tag,
-// and this fails.
-//
-// The control is a field of the same struct that DOES come out, so the test
-// cannot pass by marshalling to nothing.
+// TestSessionModelNeverSerialisesItsTokenHashes is the second line of the same defence: a
+// stray c.JSON(session), or a struct that embeds db.Session, would serialise the model, and
+// sqlc.yaml tags both columns json:"-" so it cannot. Removing either override regenerates the
+// model with a visible tag, and this fails. The control is a field of the same struct that DOES
+// come out, so the test cannot pass by marshalling to nothing.
 func TestSessionModelNeverSerialisesItsTokenHashes(t *testing.T) {
 	const secret = "a1b2c3d4e5f6-the-hash-value"
 	const previousSecret = "f6e5d4c3b2a1-the-previous-hash-value"
@@ -90,14 +82,11 @@ func TestSessionModelNeverSerialisesItsTokenHashes(t *testing.T) {
 	}
 }
 
-// TestToSessionResponseIsCurrent covers the flag the UI uses to warn before
-// you sign out the device you are holding.
-//
-// The uuid.Nil case is the one worth pinning: currentSessionID returns Nil when
-// there is no usable refresh cookie, and a naive equality would then mark a
-// session current whenever its own id happened to be the zero UUID. More
-// importantly it must never mark an *arbitrary* session current — no cookie
-// means no session is flagged, not all of them.
+// TestToSessionResponseIsCurrent covers the flag the UI uses to warn before you sign out the
+// device you are holding. The uuid.Nil case is the one worth pinning: currentSessionID returns
+// Nil when there is no usable refresh cookie, and a naive equality would mark a session current
+// whenever its own id happened to be the zero UUID. No cookie means no session is flagged, not
+// all of them.
 func TestToSessionResponseIsCurrent(t *testing.T) {
 	sessionID := uuid.New()
 	otherID := uuid.New()
@@ -122,10 +111,9 @@ func TestToSessionResponseIsCurrent(t *testing.T) {
 	}
 }
 
-// TestToSessionResponseNullDeviceFields covers sessions predating migration
-// 000045, which added the device columns. Those rows have them NULL, and the
-// frontend renders the field directly — a null reaching it would print
-// "null" as the device name rather than falling back to a placeholder.
+// TestToSessionResponseNullDeviceFields covers sessions predating migration 000045, whose
+// device columns are NULL: the frontend renders the field directly, and a null reaching it would
+// print "null" as the device name instead of falling back to a placeholder.
 func TestToSessionResponseNullDeviceFields(t *testing.T) {
 	got := toSessionResponse(db.Session{ID: uuid.New()}, uuid.Nil)
 
@@ -166,11 +154,8 @@ func TestTextOrEmpty(t *testing.T) {
 	}
 }
 
-// TestSessionResponseTimestampsAreRFC3339 pins the wire format. The frontend
-// parses these with `new Date(...)`, which silently yields Invalid Date for a
-// Go default-formatted time ("2006-01-02 15:04:05.999999999 -0700 MST") — a
-// failure that shows up as "Invalid Date" in the session list rather than as
-// an error anyone traces back to here.
+// TestSessionResponseTimestampsAreRFC3339 pins the wire format: the frontend parses these
+// with `new Date(...)`, which silently yields Invalid Date for a Go default-formatted time.
 func TestSessionResponseTimestampsAreRFC3339(t *testing.T) {
 	now := time.Date(2026, 9, 8, 14, 30, 5, 123456789, time.UTC)
 	got := toSessionResponse(db.Session{

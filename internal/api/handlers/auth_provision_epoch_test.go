@@ -12,14 +12,12 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The two sign-ins that need an outside party — an identity provider (SSO) and a
-// directory (LDAP) — cannot be driven end to end here. What can be driven is
-// everything after that party has said yes, and that is where the epoch is handed
-// on: the account the provisioning returned is the account whose epoch the SSO
-// exchange code records, and the row the directory login returns carries the epoch it
-// read. Both used to be unreachable by any test, so a hand-off that dropped the epoch
-// (a code recording 0, a login returning a user rebuilt from its id) would have
-// refused every SSO and directory sign-in of any user whose epoch had ever moved.
+// The two sign-ins that need an outside party, an identity provider (SSO) and a directory
+// (LDAP), cannot be driven end to end here. What can be driven is everything after that party
+// has said yes, which is where the epoch is handed on: the account the provisioning returned is
+// the account whose epoch the SSO exchange code records, and the row the directory login returns
+// carries the epoch it read. A hand-off that dropped it (a code recording 0, a user rebuilt from
+// its id) would refuse every sign-in of any user whose epoch has ever moved.
 
 // callProvision runs fn inside a request, so that it has the fiber context the
 // provisioning functions read the request context from.

@@ -14,15 +14,13 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The tests of the sign-in paths against a revoke-all that lands after the
-// credential check: password login, registration, and the SSO exchange. The TOTP
-// second step has its own file (totp_login_epoch_test.go) and the deactivation
-// transaction its own (users_deactivate_test.go); the harness is
-// auth_epoch_harness_test.go.
+// The sign-in paths against a revoke-all that lands after the credential check: password
+// login, registration and the SSO exchange. The TOTP second step is in totp_login_epoch_test.go,
+// the deactivation in users_deactivate_test.go, the harness in auth_epoch_harness_test.go.
 
 // epochArg is the epoch argument of a CreateSessionAtEpoch statement: the last of
 // its ten, in the order queries/sessions.sql generates them.
-func epochArg(t *testing.T, st epochStatement) int64 {
+func epochArg(t *testing.T, st authFakeStmt) int64 {
 	t.Helper()
 	if len(st.args) != 10 {
 		t.Fatalf("CreateSessionAtEpoch got %d arguments, want 10: %v", len(st.args), st.args)
@@ -42,11 +40,7 @@ func TestLogin_TheSessionIsCreatedAgainstTheEpochThePasswordCheckRead(t *testing
 	a := newEpochApp(t, newEpochStore(user), epochOptions{})
 
 	resp := a.post(t, "/auth/login", epochLoginBody(epochLoginEmail))
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %v)", resp.StatusCode, body)
-	}
+	body := authRequireStatus(t, resp, http.StatusOK)
 	if tok, _ := body["access_token"].(string); tok == "" {
 		t.Errorf("no access token: %v", body)
 	}
@@ -73,18 +67,13 @@ func TestLogin_TheSessionIsCreatedAgainstTheEpochThePasswordCheckRead(t *testing
 	}
 }
 
-// TestLogin_ARevokeAllAfterTheCredentialCheckRefusesTheSession drives the race the
-// change exists for: the password has been compared (it took the better part of a
-// hundred milliseconds), and before the session is inserted a revoke-all commits —
-// the user changed their password in another tab, signed out of all devices, or an
-// administrator deactivated the account. The hook lands the change right behind the
-// read of the user, which is exactly where bcrypt leaves the window.
-//
-// Every row must answer 401 telling the user to sign in again, and must issue
-// NOTHING: no access token, no cookie, no session row, no "login" audit row. And the
-// session insert must have been ATTEMPTED, against the epoch the check read — the
-// refusal is the insert's, not a pre-check the handler made on a re-read row, which
-// would leave the narrower window between that read and the insert open.
+// TestLogin_ARevokeAllAfterTheCredentialCheckRefusesTheSession drives the race the change
+// exists for: the password has been compared (the better part of a hundred milliseconds), and
+// before the session is inserted a revoke-all commits (a password change in another tab, a
+// sign-out of all devices, an administrator's deactivation). Every refusal row answers 401
+// telling the user to sign in again and issues NOTHING, and the insert must have been ATTEMPTED
+// against the epoch the check read: the refusal is the insert's, not a pre-check on a re-read
+// row, which would leave a narrower window open.
 func TestLogin_ARevokeAllAfterTheCredentialCheckRefusesTheSession(t *testing.T) {
 	logs := captureProductionLog(t)
 
@@ -126,11 +115,7 @@ func TestLogin_ARevokeAllAfterTheCredentialCheckRefusesTheSession(t *testing.T) 
 			a := newEpochApp(t, store, epochOptions{})
 
 			resp := a.post(t, "/auth/login", epochLoginBody(epochLoginEmail))
-			body := decodeObject(t, resp)
-
-			if resp.StatusCode != tt.want {
-				t.Fatalf("status = %d, want %d (body %v)", resp.StatusCode, tt.want, body)
-			}
+			body := authRequireStatus(t, resp, tt.want)
 			if tt.want == http.StatusOK {
 				if live := store.liveSessionsOf(user.ID); len(live) != 1 {
 					t.Errorf("%d live sessions for the control, want 1", len(live))
@@ -181,12 +166,10 @@ func TestLogin_ARevokeAllAfterTheCredentialCheckRefusesTheSession(t *testing.T) 
 	}
 }
 
-// TestLogin_ADatabaseFailureOfTheInsertIsNotARefusal holds the three-outcome rule
-// where the handler turns the insert's answer into a status: "no row" is the 401
-// above, but the database failing is a 503 when it was away or too busy and a 500
-// when it was a defect, and neither blames the credential — the message must not tell
-// the user to sign in again as if their password had been replaced — nor issues
-// anything.
+// TestLogin_ADatabaseFailureOfTheInsertIsNotARefusal holds the three-outcome rule where the
+// handler turns the insert's answer into a status: "no row" is the 401 above, but the database
+// failing is a 503 when it was away and a 500 for a defect, and neither blames the credential
+// (the message must not tell the user to sign in again) nor issues anything.
 func TestLogin_ADatabaseFailureOfTheInsertIsNotARefusal(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -206,11 +189,7 @@ func TestLogin_ADatabaseFailureOfTheInsertIsNotARefusal(t *testing.T) {
 			a := newEpochApp(t, store, epochOptions{})
 
 			resp := a.post(t, "/auth/login", epochLoginBody(epochLoginEmail))
-			body := decodeObject(t, resp)
-
-			if resp.StatusCode != tt.want {
-				t.Fatalf("status = %d, want %d (body %v)", resp.StatusCode, tt.want, body)
-			}
+			body := authRequireStatus(t, resp, tt.want)
 			msg, _ := body["message"].(string)
 			if !strings.Contains(msg, tt.wantMessage) {
 				t.Errorf("message = %q, want it to contain %q", msg, tt.wantMessage)
@@ -248,11 +227,7 @@ func TestLogin_TheSessionInsertIsBounded(t *testing.T) {
 	start := time.Now()
 	resp := a.send(t, http.MethodPost, "/auth/login", epochLoginBody(epochLoginEmail), nil, 10*time.Second)
 	elapsed := time.Since(start)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 (body %v)", resp.StatusCode, body)
-	}
+	body := authRequireStatus(t, resp, http.StatusServiceUnavailable)
 	if elapsed > 5*time.Second {
 		t.Errorf("answered after %v with a 100 ms bound", elapsed)
 	}
@@ -260,22 +235,17 @@ func TestLogin_TheSessionInsertIsBounded(t *testing.T) {
 	epochRequireNoLoginAudit(t, store)
 }
 
-// TestRegister_TheFirstUserStillGetsItsSession pins that the first registration, the
-// one sign-in with no earlier credential check, still creates its session — through
-// the same conditional insert as every other, against the epoch the new account was
-// created with (0) — and answers as it always did. It is the bootstrap's half of the
-// split auth_register_admin_test.go describes: an administrator's registration, which
+// TestRegister_TheFirstUserStillGetsItsSession pins that the first registration, the one
+// sign-in with no earlier credential check, still creates its session through the same
+// conditional insert, against the new account's epoch (0), and is audited as the new account
+// itself: the bootstrap caller has no session, so there is no administrator to name.
 // has a session of its own already, signs nobody in.
 func TestRegister_TheFirstUserStillGetsItsSession(t *testing.T) {
 	store := newEpochStore()
 	a := newEpochApp(t, store, epochOptions{})
 
 	resp := a.post(t, "/auth/register", `{"email":"`+epochAdminEmail+`","password":"`+racePassword+`","display_name":"First User"}`)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (body %v)", resp.StatusCode, body)
-	}
+	body := authRequireStatus(t, resp, http.StatusCreated)
 	if tok, _ := body["access_token"].(string); tok == "" {
 		t.Errorf("no access token: %v", body)
 	}
@@ -308,8 +278,9 @@ func TestRegister_TheFirstUserStillGetsItsSession(t *testing.T) {
 	if live := store.liveSessionsOf(created.ID); len(live) != 1 {
 		t.Errorf("%d live sessions, want 1", len(live))
 	}
-	if got := store.auditActions(); len(got) != 1 || got[0] != "register" {
-		t.Errorf("audit actions = %v, want [register]", got)
+	wantRow := authFakeAuditRow{actor: created.ID, resourceType: "auth", resourceID: created.ID.String(), action: "register"}
+	if rows := store.auditRowsWritten(); !reflect.DeepEqual(rows, []authFakeAuditRow{wantRow}) {
+		t.Errorf("audit rows = %+v, want exactly %+v", rows, wantRow)
 	}
 	if got := store.poolStatementsWhileTx(); len(got) != 0 {
 		t.Errorf("statements went to the POOL while the registration transaction was open: %v", got)
@@ -331,11 +302,7 @@ func TestRegister_ASessionRefusedAfterTheAccountWasCreatedIsA401(t *testing.T) {
 	a := newEpochApp(t, store, epochOptions{})
 
 	resp := a.post(t, "/auth/register", `{"email":"`+epochAdminEmail+`","password":"`+racePassword+`"}`)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 (body %v)", resp.StatusCode, body)
-	}
+	body := authRequireStatus(t, resp, http.StatusUnauthorized)
 	if msg, _ := body["message"].(string); !strings.Contains(msg, "sign in again") {
 		t.Errorf("message = %q, want it to tell the caller to sign in", msg)
 	}
@@ -362,11 +329,7 @@ func TestRegister_TheSessionInsertIsBounded(t *testing.T) {
 	start := time.Now()
 	resp := a.send(t, http.MethodPost, "/auth/register", `{"email":"`+epochAdminEmail+`","password":"`+racePassword+`"}`, nil, 10*time.Second)
 	elapsed := time.Since(start)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 (body %v)", resp.StatusCode, body)
-	}
+	body := authRequireStatus(t, resp, http.StatusServiceUnavailable)
 	if elapsed > 5*time.Second {
 		t.Errorf("answered after %v with a 100 ms bound", elapsed)
 	}
@@ -380,11 +343,11 @@ func TestRegister_TheSessionInsertIsBounded(t *testing.T) {
 	}
 }
 
-// TestLogin_ARedisThatIsDownDoesNotFailTheSignIn: the Redis row of a session is a
-// mirror that nothing reads, written after the insert has committed. When the write
-// fails the session exists in PostgreSQL either way, and answering "nothing was
-// issued" for it would leave a live session with no token anybody holds. The sign-in
-// succeeds, and the failure is logged — with the session id, never a token.
+// TestLogin_ARedisThatIsDownDoesNotFailTheSignIn: the Redis row of a session is a mirror
+// nothing reads, written after the insert has committed. When the write fails the session
+// exists in PostgreSQL either way, and answering "nothing was issued" would leave a live
+// session with no token anybody holds. The sign-in succeeds, and the failure is logged with
+// the session id, never a token.
 func TestLogin_ARedisThatIsDownDoesNotFailTheSignIn(t *testing.T) {
 	logs := captureProductionLog(t)
 	user := epochUser(t, epochLoginEmail, 2)
@@ -431,11 +394,7 @@ func TestLogin_TheRefusalAuditRunsOnAFollowUpDeadline(t *testing.T) {
 	a := newEpochApp(t, store, epochOptions{followUpTimeout: 100 * time.Millisecond})
 
 	resp := a.send(t, http.MethodPost, "/auth/login", epochLoginBody(epochLoginEmail), nil, 10*time.Second)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 (body %v)", resp.StatusCode, body)
-	}
+	body := authRequireStatus(t, resp, http.StatusUnauthorized)
 	requireStallCutShort(t, store, "InsertAuditLog")
 	epochRequireNothingIssued(t, resp, body)
 }
@@ -451,15 +410,12 @@ func epochSeedExchange(t *testing.T, a *epochApp, user db.User) string {
 	return code
 }
 
-// TestOIDCExchange_TheSessionIsCreatedAgainstTheEpochTheCallbackRead is the SSO
-// half. The callback is where the identity provider was consulted and the user read;
-// the exchange comes a redirect later and RE-READS the user for the active flag. A
-// revoke-all that lands between the two is invisible to that re-read — its row
-// already carries the new epoch — so the session must be conditional on the epoch
-// the code carries. The row below shows it: the store moves to epoch 4 after the
-// callback read 3, the exchange re-reads 4, and the session is still refused.
-//
-// The control is the same pair without the revoke-all, which creates a session at 3.
+// TestOIDCExchange_TheSessionIsCreatedAgainstTheEpochTheCallbackRead is the SSO half. The
+// exchange comes a redirect after the callback and RE-READS the user for the active flag, which
+// a revoke-all that landed between the two is invisible to (its row already carries the new
+// epoch), so the session must be conditional on the epoch the code carries: the store moves to
+// epoch 4 after the callback read 3 and the session is still refused. The control is the same
+// pair without the revoke-all.
 func TestOIDCExchange_TheSessionIsCreatedAgainstTheEpochTheCallbackRead(t *testing.T) {
 	newUser := func() db.User {
 		u := epochUser(t, epochLoginEmail, 3)
@@ -494,11 +450,7 @@ func TestOIDCExchange_TheSessionIsCreatedAgainstTheEpochTheCallbackRead(t *testi
 		code := epochSeedExchange(t, a, user)
 
 		resp := a.post(t, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`)
-		body := decodeObject(t, resp)
-
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("status = %d, want 200 (body %v)", resp.StatusCode, body)
-		}
+		authRequireStatus(t, resp, http.StatusOK)
 		inserts := a.store.named("CreateSessionAtEpoch")
 		if len(inserts) != 1 || epochArg(t, inserts[0]) != 3 {
 			t.Fatalf("session inserts = %v, want one against epoch 3", inserts)
@@ -530,6 +482,9 @@ func TestOIDCExchange_TheSessionIsCreatedAgainstTheEpochTheCallbackRead(t *testi
 				if resp.StatusCode != http.StatusForbidden {
 					t.Fatalf("status = %d, want 403 for a disabled account (body %v)", resp.StatusCode, body)
 				}
+				if msg, _ := body["message"].(string); !strings.Contains(msg, "Account is disabled") {
+					t.Errorf("message = %q, want the disabled-account answer", msg)
+				}
 			} else {
 				if resp.StatusCode != http.StatusUnauthorized {
 					t.Fatalf("status = %d, want 401 (body %v)", resp.StatusCode, body)
@@ -560,11 +515,10 @@ func TestOIDCExchange_TheSessionIsCreatedAgainstTheEpochTheCallbackRead(t *testi
 	}
 }
 
-// TestOIDCExchange_ACodeWithoutAUsableEpochIsRefused: a code written by a release
-// that recorded no epoch — in the seconds around an upgrade — or one whose epoch is
-// not a number cannot be tied to the callback's read, so the session it would create
-// could not be conditional on anything. It is refused like an expired code, with
-// nothing issued and no session.
+// TestOIDCExchange_ACodeWithoutAUsableEpochIsRefused: a code written by a release that
+// recorded no epoch, or one whose epoch is not a number, cannot be tied to the callback's
+// read, so the session it would create could not be conditional on anything. It is refused
+// like an expired code, with nothing issued and no session.
 func TestOIDCExchange_ACodeWithoutAUsableEpochIsRefused(t *testing.T) {
 	tests := []struct {
 		name string
@@ -592,11 +546,7 @@ func TestOIDCExchange_ACodeWithoutAUsableEpochIsRefused(t *testing.T) {
 			}
 
 			resp := a.post(t, "/auth/oidc/token-exchange", `{"code":"handmade"}`)
-			body := decodeObject(t, resp)
-
-			if resp.StatusCode != http.StatusUnauthorized {
-				t.Fatalf("status = %d, want 401 (body %v)", resp.StatusCode, body)
-			}
+			body := authRequireStatus(t, resp, http.StatusUnauthorized)
 			if msg, _ := body["message"].(string); !strings.Contains(msg, "Invalid or expired exchange code") {
 				t.Errorf("message = %q, want the answer an expired code gets", msg)
 			}
@@ -607,26 +557,6 @@ func TestOIDCExchange_ACodeWithoutAUsableEpochIsRefused(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestOIDCExchange_ADisabledAccountIsStillTold403 keeps the exchange's own answer for
-// an account that was already disabled when the browser came back: 403, as before.
-func TestOIDCExchange_ADisabledAccountIsStillTold403(t *testing.T) {
-	user := epochUser(t, epochLoginEmail, 3)
-	user.AuthSource, user.IsActive = "oidc", false
-	a := newEpochApp(t, newEpochStore(user), epochOptions{})
-	code := epochSeedExchange(t, a, user)
-
-	resp := a.post(t, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (body %v)", resp.StatusCode, body)
-	}
-	if msg, _ := body["message"].(string); !strings.Contains(msg, "Account is disabled") {
-		t.Errorf("message = %q", msg)
-	}
-	epochRequireNothingIssued(t, resp, body)
 }
 
 // TestOIDCExchange_ADatabaseFailureOfTheInsertIsNotARefusal: the exchange answers a
@@ -641,11 +571,7 @@ func TestOIDCExchange_ADatabaseFailureOfTheInsertIsNotARefusal(t *testing.T) {
 	code := epochSeedExchange(t, a, user)
 
 	resp := a.post(t, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 (body %v)", resp.StatusCode, body)
-	}
+	body := authRequireStatus(t, resp, http.StatusServiceUnavailable)
 	epochRequireNothingIssued(t, resp, body)
 	epochRequireNoLoginAudit(t, store)
 }

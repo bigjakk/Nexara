@@ -28,18 +28,12 @@ func pgState(code string) error {
 	return fmt.Errorf("executing: %w", &pgconn.PgError{Code: code, Message: "reported by the server"})
 }
 
-// TestIsTransientDBError pins which database failures are "the database was not
-// there to ask" and which are defects. The first kind is answered 503 and the
-// second 500 by every auth handler, so a row moving from one list to the other
-// changes what clients are told.
-//
-// The transient rows are the shapes pgx actually produces — a connection reset
-// under a read, a closed connection, an EOF in the middle of a message, a refused
-// dial, SQLSTATE class 08, 53, the shutdown states, serialization failures and
-// deadlocks — wrapped the way the call sites wrap them. The rest are the ones that
-// must never become a 503: a constraint violation, an undefined table or column,
-// a malformed value, pgx.ErrNoRows where a row was required, a scan that does not
-// fit.
+// TestIsTransientDBError pins which database failures are "the database was not there to
+// ask" (a 503 from every auth handler) and which are defects (a 500), so a row moving from one
+// list to the other changes what clients are told. The transient rows are the shapes pgx
+// produces, wrapped the way the call sites wrap them; the rest must never become a 503:
+// constraint violations, undefined objects, malformed values, pgx.ErrNoRows, a scan that does
+// not fit.
 func TestIsTransientDBError(t *testing.T) {
 	transient := map[string]error{
 		"our own bound running out":         fmt.Errorf("rotating: %w", context.DeadlineExceeded),
@@ -103,14 +97,11 @@ func TestIsTransientDBError(t *testing.T) {
 	}
 }
 
-// TestADatabaseFailureIsA503OrA500ByWhatItIs drives each failure the handlers
-// handle through the real handlers, with an error of each kind. The two answers
-// are the whole contract: the database being away is a 503 — nothing was decided,
-// retry — and a defect is a 500, and in both the cookie is left alone, the session
-// is not touched and nothing is issued. Before, a lookup that failed for any
-// reason was a 503 and a write was a 503 only when the bound ran out, so a
-// connection reset in the middle of a rotation was a 500 and the same reset in
-// the lookup before it was not.
+// TestADatabaseFailureIsA503OrA500ByWhatItIs drives each failure the handlers handle through
+// the real handlers: the database being away is a 503 (nothing was decided, retry) and a defect
+// a 500, and in both the cookie is left alone, the session is untouched and nothing is issued.
+// The classification itself is TestIsTransientDBError's, so each site is shown to use it with
+// one error of each side and each SQLSTATE route, not with a row per kind of error.
 func TestADatabaseFailureIsA503OrA500ByWhatItIs(t *testing.T) {
 	kinds := []struct {
 		name string
@@ -118,16 +109,8 @@ func TestADatabaseFailureIsA503OrA500ByWhatItIs(t *testing.T) {
 		want int
 	}{
 		{"a connection reset", errRaceTransient, http.StatusServiceUnavailable},
-		{"a closed connection", fmt.Errorf("write: %w", net.ErrClosed), http.StatusServiceUnavailable},
 		{"a server shutting down (57P01)", pgState("57P01"), http.StatusServiceUnavailable},
-		{"a serialization failure (40001)", pgState("40001"), http.StatusServiceUnavailable},
-		{"a deadlock (40P01)", pgState("40P01"), http.StatusServiceUnavailable},
-		{"a write that reached a replica after a failover (25006)", pgState("25006"), http.StatusServiceUnavailable},
-		{"a session the server closed for sitting idle (57P05)", pgState("57P05"), http.StatusServiceUnavailable},
-		{"a connection exception (08006)", pgState("08006"), http.StatusServiceUnavailable},
-		{"a closed pool (the server is shutting down)", fmt.Errorf("acquiring: %w", puddle.ErrClosedPool), http.StatusServiceUnavailable},
 		{"a unique violation (23505)", pgState("23505"), http.StatusInternalServerError},
-		{"an undefined table (42P01)", pgState("42P01"), http.StatusInternalServerError},
 		{"an error nobody classified", errRaceBug, http.StatusInternalServerError},
 	}
 
@@ -165,11 +148,7 @@ func TestADatabaseFailureIsA503OrA500ByWhatItIs(t *testing.T) {
 				}
 
 				resp, _ := a.postTimed(t, st.path, "{}", st.cookie, headers, 5*time.Second)
-				body := decodeObject(t, resp)
-
-				if resp.StatusCode != k.want {
-					t.Fatalf("status = %d, want %d (body %v)", resp.StatusCode, k.want, body)
-				}
+				body := authRequireStatus(t, resp, k.want)
 				if _, issued := body["access_token"]; issued {
 					t.Errorf("a failed request issued an access token: %v", body)
 				}
@@ -202,52 +181,13 @@ func TestADatabaseFailureIsA503OrA500ByWhatItIs(t *testing.T) {
 	}
 }
 
-// TestAFailedLookupIsLoggedAtTheLevelOfWhatItIs pins the other half of the
-// distinction: the database being away is a Warn, a defect is an Error, and the
-// 500's line says it is not going to be retried. An operator reading the log must
-// be able to tell "the database blipped" from "the code is broken" without
-// reading the status.
-func TestAFailedLookupIsLoggedAtTheLevelOfWhatItIs(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		err       error
-		wantLevel string
-		wantText  string
-	}{
-		{"the database is away", errRaceTransient, `"level":"WARN"`, "answering 503"},
-		{"a defect", errRaceBug, `"level":"ERROR"`, "answering 500"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			logs := captureProductionLog(t)
-			a := newAuthRaceApp(t, func(s *raceStore) { s.userErr = tc.err })
-
-			a.post(t, "/auth/refresh", raceCurrentToken, nil)
-
-			out := logs.String()
-			if !strings.Contains(out, "refresh: user lookup failed") || !strings.Contains(out, tc.wantText) {
-				t.Fatalf("the failed lookup left no %q line in the log: %q", tc.wantText, out)
-			}
-			if !strings.Contains(out, tc.wantLevel) {
-				t.Errorf("the line is not logged at %s: %q", tc.wantLevel, out)
-			}
-			if !strings.Contains(out, a.store.session.ID.String()) {
-				t.Errorf("the line does not name the session: %q", out)
-			}
-		})
-	}
-}
-
-// TestCommitOutcomeUnknown pins when a failed COMMIT may nevertheless have landed.
-// The handlers use it to choose what to tell a user whose password change did not
-// return cleanly: "it was not done" is safe to retry, "it may have been done" is
-// not the same message. The server answering — a serialization failure, a
-// deadlock, a unique violation, a commit that came back as a rollback — means the
-// transaction did not commit, and so does a COMMIT that never went out: pgconn
-// says so (SafeToRetry) for a statement whose context had already ended, or whose
-// connection was already closed, and the server rolls that transaction back. A
-// deadline error is NOT such a case unless it says so: one cut off while the reply
-// was awaited is exactly the one that may have landed. Everything else leaves it
-// open.
+// TestCommitOutcomeUnknown pins when a failed COMMIT may nevertheless have landed, which
+// decides what a user whose password change did not return cleanly is told ("it was not done"
+// is safe to retry; "it may have been done" is not). The server answering (a serialization
+// failure, a deadlock, a unique violation, a commit that came back as a rollback) means it did
+// not commit, and so does a COMMIT that never went out (SafeToRetry for a context that had
+// ended). A deadline cut off while the reply was awaited is NOT such a case: that one may have
+// landed. Everything else leaves it open.
 func TestCommitOutcomeUnknown(t *testing.T) {
 	unknown := map[string]error{
 		"a connection reset":                errRaceTransient,
@@ -311,13 +251,12 @@ func TestCommitOutcomeUnknown(t *testing.T) {
 	}
 }
 
-// TestSignOutFailuresAreLoggedAtTheLevelOfWhatTheyAre is the sign-outs' half of the
-// distinction TestAFailedLookupIsLoggedAtTheLevelOfWhatItIs pins for Refresh: the
-// database being away is a Warn and a defect is an Error, for each of the three
-// places Logout and LogoutAll can fail. An operator reading the log tells "the
-// database blipped" from "the code is broken" by the level, not by reading the
-// status; a defect that logs as a Warn is the one nobody pages on.
-func TestSignOutFailuresAreLoggedAtTheLevelOfWhatTheyAre(t *testing.T) {
+// TestAFailedCallIsLoggedAtTheLevelOfWhatItIs pins the other half of the 503/500 distinction:
+// the database being away is a Warn and a defect an Error, for the lookup of Refresh and the
+// lookup and revoke of Logout and LogoutAll. An operator tells "the database blipped" from "the
+// code is broken" by the level, not by reading the status; a defect logged as a Warn is the one
+// nobody pages on. Refresh's line also says which answer it is giving and names the session.
+func TestAFailedCallIsLoggedAtTheLevelOfWhatItIs(t *testing.T) {
 	type site struct {
 		name   string
 		inject func(*raceStore, error)
@@ -326,8 +265,14 @@ func TestSignOutFailuresAreLoggedAtTheLevelOfWhatTheyAre(t *testing.T) {
 		asUser bool
 		// away and defect are the log lines for the two kinds of failure.
 		away, defect string
+		namesSession bool
 	}
 	sites := []site{
+		{
+			name: "Refresh's user lookup", inject: func(s *raceStore, err error) { s.userErr = err },
+			path: "/auth/refresh", cookie: raceCurrentToken,
+			away: "refresh: user lookup failed; answering 503", defect: "refresh: user lookup failed; answering 500", namesSession: true,
+		},
 		{
 			name: "Logout's session lookup", inject: func(s *raceStore, err error) { s.currentErr = err },
 			path: "/auth/logout", cookie: raceCurrentToken,
@@ -377,6 +322,9 @@ func TestSignOutFailuresAreLoggedAtTheLevelOfWhatTheyAre(t *testing.T) {
 				}
 				if !strings.Contains(found, kind.level) {
 					t.Errorf("the line is not logged at %s: %s", kind.level, found)
+				}
+				if st.namesSession && !strings.Contains(found, a.store.session.ID.String()) {
+					t.Errorf("the line does not name the session: %s", found)
 				}
 			})
 		}

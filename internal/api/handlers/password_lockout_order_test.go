@@ -12,11 +12,10 @@ import (
 	"github.com/bigjakk/nexara/internal/auth"
 )
 
-// Two properties of the change-password lockout that only requests IN FLIGHT at the
-// same time can show, driven without a clock: the check of a password is held where
-// it starts, through the seam that stands in for auth.CheckPassword, until the test
-// lets it go, so what is in flight when is a fact of the test and not of how long a
-// bcrypt takes on the machine it runs on.
+// Two properties of the change-password lockout that only requests IN FLIGHT at the same time
+// can show, driven without a clock: the check of a password is held where it starts, through
+// the seam that stands in for auth.CheckPassword, until the test lets it go, so what is in
+// flight when is a fact of the test and not of how long a bcrypt takes on this machine.
 
 // changeAsync posts a change-password request as the harness's user from a
 // goroutine of its own, and reports its status — -1 if it never answered — on the
@@ -70,22 +69,15 @@ func awaitStatus(t *testing.T, what string, answer <-chan int, within time.Durat
 	}
 }
 
-// TestChangePassword_TheLockExistsWhileEveryGuessIsStillBeingChecked is the property
-// "count before checking" is for, shown directly and not through its side effects.
-// The budget's worth of wrong guesses arrive together and every check is held at its
-// start. By the time the last of them has begun its check it has been admitted, and
-// the admission of the last one is what arms the lock — so the lock is in place
-// while all five checks are still in progress, and a password that arrives NOW is
-// refused unchecked, the right one included.
-//
-// An implementation that checks first and counts a failure afterwards cannot pass
-// it, however it is arranged — it may read the lock before the check and count after
-// it — because until a check has failed nothing has been counted: its lock appears
-// only when a guess has been answered, and the right password that arrives while the
-// guesses are being checked is checked as well, and waits in the held check here
-// instead of being refused. The answers to a burst of wrong guesses cannot tell the
-// two apart (both are four 403s and the rest 429s), which is why the test looks at
-// what is in flight and not at what was answered.
+// TestChangePassword_TheLockExistsWhileEveryGuessIsStillBeingChecked is the property "count
+// before checking" is for, shown directly. The budget's worth of wrong guesses arrive together
+// with every check held at its start; the last admission arms the lock, so it is in place while
+// all five checks are in progress, and a password that arrives NOW is refused unchecked, the
+// right one included, as is every further guess. An implementation that checks first and counts
+// a failure afterwards cannot pass, however it is arranged: until a check has failed nothing
+// has been counted, so the right password is checked too and waits in the held check. The
+// answers to a burst cannot tell the two apart (four 403s, the rest 429s), so this looks at
+// what is in flight.
 func TestChangePassword_TheLockExistsWhileEveryGuessIsStillBeingChecked(t *testing.T) {
 	for _, kind := range []string{"redis", "memory"} {
 		t.Run(kind, func(t *testing.T) {
@@ -126,6 +118,17 @@ func TestChangePassword_TheLockExistsWhileEveryGuessIsStillBeingChecked(t *testi
 			case <-time.After(10 * time.Second):
 				t.Error("the right password was not answered while the budget's worth of guesses was being checked: it is waiting in the check itself, " +
 					"so a password that arrives while the guesses are in flight is checked too — the lock was not in place before the checks began")
+			}
+			// Guesses beyond the budget are refused unchecked, however many are sent.
+			for range 3 {
+				select {
+				case status := <-a.changeAsync(wrongChangeBody):
+					if status != http.StatusTooManyRequests {
+						t.Errorf("a guess beyond the budget = %d, want 429", status)
+					}
+				case <-time.After(5 * time.Second):
+					t.Error("a guess beyond the budget was not answered: it is waiting in the check itself")
+				}
 			}
 			if len(entered) != 0 {
 				t.Errorf("%d more checks began after the budget was spent: a request the lock refuses must not be checked", len(entered))

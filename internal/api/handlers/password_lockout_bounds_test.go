@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,16 +21,13 @@ import (
 	"github.com/bigjakk/nexara/pkg/redisutil"
 )
 
-// The bounds of the change-password lockout, held against a REAL socket.
-//
-// A hook that waits for the caller's context and then fails is a model of a Redis
-// client that honours the context's deadline, and the one production builds does
-// not: pkg/redisutil makes it with redis.ParseURL and its defaults, where the
-// context does not reach the socket (ContextTimeoutEnabled is off), a read waits
-// for ReadTimeout and a failed one is tried again. A test whose stand-in honoured
-// the deadline would pass whether the handler bounded the wait or not. So these
-// tests use the client production uses, pointed at a listener that accepts the
-// connection and never says a word.
+// The bounds of the change-password lockout, held against a REAL socket. A hook that waits for
+// the caller's context and then fails models a Redis client that honours the context's
+// deadline, and the one production builds does not: pkg/redisutil makes it with redis.ParseURL
+// and its defaults, where the context does not reach the socket, a read waits for ReadTimeout
+// and a failed one is tried again. A stand-in that honoured the deadline would pass whether the
+// handler bounded the wait or not, so these tests use the production client against a listener
+// that accepts the connection and never says a word.
 
 // blackHole listens on a loopback port, accepts every connection and never
 // answers, and returns its address. It is a Redis that has stopped replying, or a
@@ -86,7 +84,7 @@ func productionClientTo(t *testing.T, addr string) *redis.Client {
 // of an attempt (an ordinary one, and the one that armed a lock) and the clear — and
 // says so with the context's own error, whatever the client would have waited.
 func TestPasswordLockoutIsBoundedByItsContextAndNotByTheRedisClient(t *testing.T) {
-	const bound = 150 * time.Millisecond
+	const bound = 100 * time.Millisecond
 	addr := blackHole(t)
 
 	// The control is what makes the rows below mean something: the same client,
@@ -94,6 +92,7 @@ func TestPasswordLockoutIsBoundedByItsContextAndNotByTheRedisClient(t *testing.T
 	// returned at the context's deadline by itself, the rows would pass without the
 	// store bounding anything.
 	t.Run("control: the client keeps waiting past its context", func(t *testing.T) {
+		t.Parallel()
 		rdb := productionClientTo(t, addr)
 		ctx, cancel := context.WithTimeout(context.Background(), bound)
 		defer cancel()
@@ -101,10 +100,10 @@ func TestPasswordLockoutIsBoundedByItsContextAndNotByTheRedisClient(t *testing.T
 		go func() { returned <- rdb.Ping(ctx).Err() }()
 		select {
 		case err := <-returned:
-			t.Fatalf("the production Redis client returned after %v (%v), when its context ended at %v: it now honours the context on a stalled socket, "+
+			t.Fatalf("the production Redis client returned within %v (%v), when its context ended at %v: it now honours the context on a stalled socket, "+
 				"so the rows below no longer show the store bounding anything — if that is so, boundedByContext is redundant and may go, with them",
-				time.Second, err, bound)
-		case <-time.After(time.Second):
+				5*bound, err, bound)
+		case <-time.After(5 * bound):
 		}
 	})
 
@@ -130,10 +129,12 @@ func TestPasswordLockoutIsBoundedByItsContextAndNotByTheRedisClient(t *testing.T
 		t.Run(op.name, func(t *testing.T) {
 			t.Parallel()
 			store := redisPasswordLockout{rdb: productionClientTo(t, addr)}
+			// The clock starts before the context does, or a call that waits out its whole
+			// context could be measured a moment short of the bound.
+			began := time.Now()
 			ctx, cancel := context.WithTimeout(context.Background(), bound)
 			defer cancel()
 
-			began := time.Now()
 			err := op.run(ctx, store)
 			waited := time.Since(began)
 
@@ -165,47 +166,32 @@ func TestPasswordLockoutBoundedCallsDoNotLeakOrPanic(t *testing.T) {
 	})
 
 	t.Run("an answer that arrives after the caller gave up is dropped, and nothing is left running", func(t *testing.T) {
-		// Many calls are given up on and then let go. Each one's answer must go into a
-		// buffer nobody reads, and each goroutine must end: an unbuffered channel would
-		// leave every one of them blocked on a send for ever, one per request a stalled
-		// Redis was asked about.
-		const abandoned = 40
-		before := runtime.NumGoroutine()
-		release := make(chan struct{})
-		var letGo sync.Once
-		let := func() { letGo.Do(func() { close(release) }) }
-		// A call that is NOT given up on when its context ends waits here for ever; the
-		// safety lets it go after a few seconds, so that the test fails with its error
-		// instead of hanging.
-		safety := time.AfterFunc(3*time.Second, let)
-		defer safety.Stop()
-		var returned sync.WaitGroup
-		for range abandoned {
-			returned.Add(1)
-			ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
-			_, err := boundedByContext(ctx, func(context.Context) (int, error) {
-				defer returned.Done()
-				<-release
-				return 7, nil
-			})
-			cancel()
-			if !errors.Is(err, context.DeadlineExceeded) {
-				t.Fatalf("error = %v, want the context's deadline", err)
+		// Many calls are given up on and then let go. Each answer must go into a buffer nobody
+		// reads and each goroutine must end: an unbuffered channel would leave every one of them
+		// blocked on a send for ever, one per request a stalled Redis was asked about. In a
+		// synctest bubble the deadlines pass on a fake clock and Wait returns once every
+		// goroutine has ended or is blocked for good, so what is left is exactly the leak.
+		synctest.Test(t, func(t *testing.T) {
+			const abandoned = 40
+			before := runtime.NumGoroutine()
+			release := make(chan struct{})
+			for range abandoned {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+				_, err := boundedByContext(ctx, func(context.Context) (int, error) {
+					<-release
+					return 7, nil
+				})
+				cancel()
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("error = %v, want the context's deadline", err)
+				}
 			}
-		}
-		let()
-		returned.Wait()
-
-		// The goroutines end a moment after their calls return; there is no event to wait
-		// for, so what is observed is the count, against a limit.
-		deadline := time.Now().Add(5 * time.Second)
-		for runtime.NumGoroutine() > before+abandoned/4 {
-			if time.Now().After(deadline) {
-				t.Fatalf("%d goroutines are running, %d before the test: the abandoned calls never ended — their answers must not block on a reader that left",
-					runtime.NumGoroutine(), before)
+			close(release)
+			synctest.Wait()
+			if left := runtime.NumGoroutine() - before; left > abandoned/4 {
+				t.Fatalf("%d goroutines outlived their calls: the abandoned calls never ended, their answers must not block on a reader that left", left)
 			}
-			time.Sleep(time.Millisecond)
-		}
+		})
 	})
 
 	t.Run("an answer that is ready wins over a context that has not ended", func(t *testing.T) {
@@ -300,7 +286,7 @@ func (s splitLockout) clear(ctx context.Context, id uuid.UUID) error {
 // Redis client gives up, which is seconds later and retried — with the password
 // unchecked and unchanged, whichever password it carries.
 func TestChangePassword_ACountThatNeverAnswersIsA503AtTheBound(t *testing.T) {
-	const bound = 300 * time.Millisecond
+	const bound = 150 * time.Millisecond
 	for _, body := range []struct{ name, body string }{{"the right password", changeBody}, {"a wrong password", wrongChangeBody}} {
 		t.Run(body.name, func(t *testing.T) {
 			logs := captureProductionLog(t)
@@ -362,19 +348,15 @@ func (l *lateCount) reserve(_ context.Context, id uuid.UUID) (lockoutReservation
 	return lockoutReservation{}, fmt.Errorf("count a password attempt: %w", context.DeadlineExceeded)
 }
 
-// TestChangePassword_AnAbandonedCountThatLandsLaterCanArmTheLockUnrecorded pins the
-// residual boundedByContext and passwordLockoutUnavailable document, so that the
-// documentation is a statement the code keeps and not a hope. The request is
-// answered 503 because its count could not be made in time; the count then reaches
-// Redis after all, and being the fifth it arms the lock — with no audit row, and
-// with a 429 for whoever asks next that says "too many incorrect attempts" about an
-// account whose owner made none. The 503's own log line is the one place that says it
-// could happen.
-//
-// If this ever fails because the lock is no longer armed unrecorded (a marker for
-// counts in flight, an audit row from the late arming), the comments on
-// boundedByContext, reserve and passwordLockoutUnavailable, and the 503 line, say
-// something that is no longer true: change them together.
+// TestChangePassword_AnAbandonedCountThatLandsLaterCanArmTheLockUnrecorded pins the residual
+// boundedByContext and passwordLockoutUnavailable document, so the documentation is a
+// statement the code keeps and not a hope. The request is answered 503 because its count could
+// not be made in time; the count then reaches Redis after all and, being the fifth, arms the
+// lock with no audit row, and the next request gets a 429 saying "too many incorrect attempts"
+// about an account whose owner made none. The 503's own log line is the one place that says it
+// could happen. If this fails because the lock is no longer armed unrecorded, the comments on
+// boundedByContext, reserve and passwordLockoutUnavailable, and the 503 line, say something
+// that is no longer true: change them together.
 func TestChangePassword_AnAbandonedCountThatLandsLaterCanArmTheLockUnrecorded(t *testing.T) {
 	logs := captureProductionLog(t)
 	a, _ := lockoutApp(t, "redis", raceOptions{})

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -123,6 +121,41 @@ func (a *authRaceApp) changeAs(t *testing.T, user uuid.UUID, body string) (int, 
 func messageOf(body map[string]any) string {
 	msg, _ := body["message"].(string)
 	return msg
+}
+
+// lockoutArm counts attempts for id until the one that arms the lock, and returns it.
+func lockoutArm(t *testing.T, s passwordLockoutStore, id uuid.UUID) lockoutReservation {
+	t.Helper()
+	for range passwordLockoutThreshold {
+		res, err := s.reserve(context.Background(), id)
+		if err != nil {
+			t.Fatalf("reserve: %v", err)
+		}
+		if res.admission == lockoutAdmittedLast {
+			return res
+		}
+	}
+	t.Fatalf("%d attempts did not arm the lock", passwordLockoutThreshold)
+	return lockoutReservation{}
+}
+
+// lockoutSpend sends n wrong current passwords, each counted and checked and answered 403.
+func (a *authRaceApp) lockoutSpend(t *testing.T, n int) {
+	t.Helper()
+	for i := 1; i <= n; i++ {
+		if status, body, _ := a.change(t, wrongChangeBody); status != http.StatusForbidden {
+			t.Fatalf("wrong attempt %d = %d (%v), want 403", i, status, body)
+		}
+	}
+}
+
+// lockoutArm sends the wrong current passwords that lock the account, the last answered 429.
+func (a *authRaceApp) lockoutArm(t *testing.T) {
+	t.Helper()
+	a.lockoutSpend(t, passwordLockoutThreshold-1)
+	if status, body, _ := a.change(t, wrongChangeBody); status != http.StatusTooManyRequests {
+		t.Fatalf("wrong attempt %d = %d (%v), want the 429 that locks", passwordLockoutThreshold, status, body)
+	}
 }
 
 // TestPasswordLockoutStoresAgree runs one script of events against both stores and
@@ -439,16 +472,10 @@ func TestPasswordLockoutRedisKeys(t *testing.T) {
 		t.Errorf("a counter with no expiry was given %v, want %v", ttl, passwordLockoutWindow)
 	}
 
-	// Locking replaces the counter with the lock, which expires too, and which holds
-	// the token of the attempt that armed it.
-	var arming lockoutReservation
-	for i := 0; i < passwordLockoutThreshold && arming.admission != lockoutAdmittedLast; i++ {
-		var err error
-		if arming, err = l.store.reserve(ctx, id); err != nil {
-			t.Fatalf("reserve: %v", err)
-		}
-	}
-	if arming.admission != lockoutAdmittedLast || arming.token == "" {
+	// Locking replaces the counter with the lock, which expires too, and which holds the token
+	// of the attempt that armed it.
+	arming := lockoutArm(t, l.store, id)
+	if arming.token == "" {
 		t.Fatalf("the attempt that reached the threshold = %+v, want the last one, carrying a token", arming)
 	}
 	if got := l.mr.Keys(); len(got) != 1 || got[0] != "pwchange:user:lock:"+id.String() {
@@ -573,7 +600,7 @@ func TestChangePassword_LocksTheAccountAfterRepeatedWrongPasswords(t *testing.T)
 			// The lock has ended and the budget is a whole one again. The right password
 			// with a new one that is refused as too weak shows both — it is checked, and
 			// answered 400. (A change that succeeds is pinned by the rows of
-			// TestChangePassword_ASuccessHandsTheAttemptsBack.)
+			// TestChangePassword_WhatBecomesOfTheCountOnceThePasswordVerified.)
 			status, body, _ = a.change(t, weakChangeBody)
 			if status != http.StatusBadRequest {
 				t.Fatalf("the right password after the lock ended = %d (%v), want 400: it must be checked again", status, body)
@@ -598,9 +625,7 @@ func TestChangePassword_LocksTheAccountAfterRepeatedWrongPasswords(t *testing.T)
 // passwords: the wrong one that was tried, or the new one.
 func TestChangePassword_TheLockoutAuditRowSaysNothingSecret(t *testing.T) {
 	a, _ := lockoutApp(t, "redis", raceOptions{})
-	for i := 0; i < passwordLockoutThreshold; i++ {
-		a.change(t, wrongChangeBody)
-	}
+	a.lockoutArm(t)
 
 	rows := a.store.auditDetailsWritten()
 	if len(rows) != 1 {
@@ -645,24 +670,14 @@ func (a *authRaceApp) guessesBeforeTheLock(t *testing.T) int {
 	return -1
 }
 
-// TestChangePassword_WhatBecomesOfTheCountOnceThePasswordVerified holds the two
-// ends of a request that has the RIGHT current password to what each is for. Every
-// row counts some wrong guesses, sends one request with the right password, and then
-// asks how many wrong guesses the account has left before it locks.
-//
-//   - A change that COMMITS makes the secret new, so everything counted against the
-//     old one is moot: the count is cleared, and the budget is a whole one.
-//   - A request that verified the password and committed nothing — the new password
-//     is too weak, the database fails, the commit does not land, or nobody can tell —
-//     changed nothing, so the guesses already counted are aimed at the SAME secret.
-//     It gives back only the attempt it took. Clearing the lot would give whoever
-//     holds counted guesses a fresh budget against an unchanged password each time
-//     the owner mistypes a new one.
-//
-// The row that arms the lock — the right password as the fifth attempt, with a new
-// one that is refused — is the lock a verified request undoes: it was the right
-// password, not a guess, so it does not leave the account locked, but it leaves the
-// four guesses before it counted, so the next wrong one locks.
+// TestChangePassword_WhatBecomesOfTheCountOnceThePasswordVerified holds the two ends of a
+// request with the RIGHT current password to what each is for. Every row counts some wrong
+// guesses, sends one request with the right password, and asks how many wrong guesses the
+// account has left. A change that COMMITS makes the secret new, so the count is cleared. A
+// request that verified the password and committed nothing changed nothing, so the guesses
+// already counted are aimed at the SAME secret: it gives back only its own attempt, since
+// clearing the lot would hand whoever holds counted guesses a fresh budget each time the owner
+// mistypes a new password. The row that arms the lock leaves the four guesses before it counted.
 func TestChangePassword_WhatBecomesOfTheCountOnceThePasswordVerified(t *testing.T) {
 	// A whole budget is this many wrong guesses answered 403 before the one that locks.
 	const fresh = passwordLockoutThreshold - 1
@@ -703,11 +718,7 @@ func TestChangePassword_WhatBecomesOfTheCountOnceThePasswordVerified(t *testing.
 				t.Parallel()
 				a, _ := lockoutAppWith(t, kind, tc.tweak, raceOptions{})
 
-				for i := 1; i <= tc.before; i++ {
-					if status, _, _ := a.change(t, wrongChangeBody); status != http.StatusForbidden {
-						t.Fatalf("wrong attempt %d = %d, want 403", i, status)
-					}
-				}
+				a.lockoutSpend(t, tc.before)
 				status, body, _ := a.change(t, tc.body)
 				if status != tc.status {
 					t.Fatalf("the right current password = %d (%v), want %d", status, body, tc.status)
@@ -768,9 +779,7 @@ func (f faultyLockout) clear(ctx context.Context, id uuid.UUID) error {
 func TestChangePassword_TheLockoutIsPerAccountAndOnlyForThisRoute(t *testing.T) {
 	a, _ := lockoutApp(t, "redis", raceOptions{})
 	locked := a.store.user.ID
-	for i := 0; i < passwordLockoutThreshold; i++ {
-		a.change(t, wrongChangeBody)
-	}
+	a.lockoutArm(t)
 	if status, _, _ := a.change(t, changeBody); status != http.StatusTooManyRequests {
 		t.Fatalf("the locked account's right password = %d, want 429", status)
 	}
@@ -796,91 +805,6 @@ func TestChangePassword_TheLockoutIsPerAccountAndOnlyForThisRoute(t *testing.T) 
 		if a.redis.Exists(key) {
 			t.Errorf("the TOTP lockout key %q exists", key)
 		}
-	}
-}
-
-// TestChangePassword_SimultaneousGuessesAreCountedBeforeTheyAreChecked is the reason
-// the attempt is counted first. Twelve wrong passwords arrive together — each is
-// held at the read of the account until all are there and then let go at once. If a
-// guess were counted only after it failed, every one of them would find the account
-// unlocked, be checked, and answer 403: twelve guesses for the price of one
-// lockout. Counted first, exactly four are checked and answer 403, one is the fifth
-// and locks, and the other seven are refused without being checked.
-//
-// The answers alone cannot tell the two orders apart — an implementation that checks
-// every password and counts the failures afterwards also answers four 403s and eight
-// 429s to twelve wrong guesses — so the check itself is counted, through the seam
-// that stands in for auth.CheckPassword: exactly the budget's worth of passwords is
-// checked, however many were sent, and none once the account is locked.
-func TestChangePassword_SimultaneousGuessesAreCountedBeforeTheyAreChecked(t *testing.T) {
-	const requests = 12
-	for _, kind := range []string{"redis", "memory"} {
-		t.Run(kind, func(t *testing.T) {
-			a, _ := lockoutApp(t, kind, raceOptions{concurrent: true})
-			var checked atomic.Int32
-			a.handler.passwordChecker = func(hash, password string) error {
-				checked.Add(1)
-				return auth.CheckPassword(hash, password)
-			}
-
-			var arrived sync.WaitGroup
-			arrived.Add(requests)
-			a.store.lockWait = func(_ context.Context, name string) error {
-				if name == "GetUserByID" {
-					arrived.Done()
-					arrived.Wait()
-				}
-				return nil
-			}
-
-			statuses := make([]int, requests)
-			var wg sync.WaitGroup
-			for i := range statuses {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					resp, err := a.app.Test(raceRequest("/auth/change-password", wrongChangeBody, "",
-						map[string]string{"X-Test-Acting-User": a.store.user.ID.String()}),
-						fiber.TestConfig{Timeout: 60 * time.Second, FailOnTimeout: true})
-					if err != nil {
-						return
-					}
-					defer func() { _ = resp.Body.Close() }()
-					statuses[i] = resp.StatusCode
-				}()
-			}
-			wg.Wait()
-
-			counts := map[int]int{}
-			for _, s := range statuses {
-				counts[s]++
-			}
-			if counts[http.StatusForbidden] != passwordLockoutThreshold-1 || counts[http.StatusTooManyRequests] != requests-(passwordLockoutThreshold-1) {
-				t.Errorf("statuses = %v, want %d x 403 (checked) and %d x 429 (the lock, and the refused)",
-					counts, passwordLockoutThreshold-1, requests-(passwordLockoutThreshold-1))
-			}
-			if got := a.store.auditActions(); len(got) != 1 || got[0] != "password_change_locked" {
-				t.Errorf("audit actions = %v, want exactly one lockout row", got)
-			}
-			if got := int(checked.Load()); got != passwordLockoutThreshold {
-				t.Errorf("%d of %d simultaneous passwords were checked, want exactly %d, the budget: a guess must be admitted before it is checked, "+
-					"or the count is a tally of guesses that have already been made", got, requests, passwordLockoutThreshold)
-			}
-
-			// Locked now: nothing is checked, the right password included. The hold at
-			// the read of the account was for the batch.
-			a.store.mu.Lock()
-			a.store.lockWait = nil
-			a.store.mu.Unlock()
-			for _, body := range []string{wrongChangeBody, changeBody, wrongChangeBody} {
-				if status, _, _ := a.change(t, body); status != http.StatusTooManyRequests {
-					t.Errorf("a request on the locked account = %d, want 429", status)
-				}
-			}
-			if got := int(checked.Load()); got != passwordLockoutThreshold {
-				t.Errorf("%d passwords were checked once the account was locked, want still %d", got, passwordLockoutThreshold)
-			}
-		})
 	}
 }
 
@@ -1000,11 +924,7 @@ func TestChangePassword_AHandlerWithoutRedisKeepsALocalLockout(t *testing.T) {
 		t.Fatal("a nil Redis was installed as the store")
 	}
 
-	for i := 1; i < passwordLockoutThreshold; i++ {
-		if status, _, _ := a.change(t, wrongChangeBody); status != http.StatusForbidden {
-			t.Fatalf("wrong attempt %d = %d, want 403", i, status)
-		}
-	}
+	a.lockoutSpend(t, passwordLockoutThreshold-1)
 	status, _, header := a.change(t, wrongChangeBody)
 	if status != http.StatusTooManyRequests || header.Get("Retry-After") != "1800" {
 		t.Errorf("the fifth wrong attempt = %d, Retry-After %q, want 429 and 1800", status, header.Get("Retry-After"))
@@ -1175,11 +1095,7 @@ func TestPasswordLockoutHealsALockThatHasNoExpiry(t *testing.T) {
 	id := uuid.New()
 	lockKey := passwordLockKey(id)
 
-	for i := 0; i < passwordLockoutThreshold; i++ {
-		if _, err := l.store.reserve(ctx, id); err != nil {
-			t.Fatalf("reserve: %v", err)
-		}
-	}
+	lockoutArm(t, l.store, id)
 	if err := l.rdb.Persist(ctx, lockKey).Err(); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
@@ -1221,30 +1137,20 @@ func TestPasswordLockoutFiguresAreTheDocumentedOnes(t *testing.T) {
 		word, int(passwordLockoutWindow/time.Minute), int(passwordLockoutDuration/time.Minute))
 
 	for _, file := range []string{"docs/api-reference.md", "internal/api/registry_auth.go"} {
-		raw, err := os.ReadFile(filepath.Join(repoRoot, file))
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		// registry_auth.go wraps its strings, so a phrase can straddle a break.
-		text := strings.ToLower(strings.Join(strings.Fields(strings.NewReplacer(`" +`, " ", `"`, " ").Replace(string(raw))), " "))
-		if !strings.Contains(text, want) {
+		if !strings.Contains(strings.ToLower(authProse(t, file)), want) {
 			t.Errorf("%s does not say %q: the prose and passwordLockoutThreshold, passwordLockoutWindow and passwordLockoutDuration have drifted", file, want)
 		}
 	}
 }
 
-// TestPasswordLockoutTheLockCycleIsTheCeilingOnGuesses holds the one reason the
-// window is as long as it is. The audited lock cycle — the threshold's worth of
-// guesses, the lock, again — must be the fastest way to guess, and staying UNDER the
-// threshold must be slower. With a window shorter than the lock it is not: an
-// attacker could make one guess fewer than the threshold each window, window after
-// window, and out-guess one who trips the lock, with no lock, no audit row and no
-// line of its own in the log.
-//
-// Both attackers are run for a simulated day against the real store and its real
-// constants, so the figures follow the constants and need no updating here: the
-// one who trips the lock, and the one who stays one short of it for the length of
-// a window and starts again when it ends.
+// TestPasswordLockoutTheLockCycleIsTheCeilingOnGuesses holds the one reason the window is as
+// long as it is. The audited lock cycle (the threshold's worth of guesses, the lock, again)
+// must be the fastest way to guess, and staying UNDER the threshold slower. With a window
+// shorter than the lock it is not: an attacker could make one guess fewer than the threshold
+// each window and out-guess one who trips the lock, with no lock, no audit row and no line of
+// its own in the log. Both attackers are run for a simulated day against the real store and
+// its real constants: the one who trips the lock, and the one who stays one short of it for
+// the length of a window and starts again when it ends.
 func TestPasswordLockoutTheLockCycleIsTheCeilingOnGuesses(t *testing.T) {
 	window, lock := passwordLockoutWindow, passwordLockoutDuration
 	if window < lock {
@@ -1408,18 +1314,14 @@ func slowPasswordHash(t *testing.T) string {
 	return slowPasswordHashValue
 }
 
-// TestChangePassword_ALockedRequestIsRefusedBeforeAnyPasswordIsChecked is what
-// "the lock is read before the password is checked" is worth: a locked request
-// costs no bcrypt. A bcrypt at the production cost is a quarter of a second of CPU,
-// and an attacker with a token who is locked out would otherwise still be able to
-// spend it, once per request, as fast as the per-IP cap lets them — the lock would
-// bound the guesses and not the work. Everything the lock answers is the same
-// either way, so only the time tells the two apart.
-//
-// The account's password is hashed at cost 8. A request that IS checked takes the
-// time of one comparison; a locked one must take a small fraction of that. The
-// comparison is relative — the fastest checked request against the slowest locked
-// one — so that a slow or busy machine moves both.
+// TestChangePassword_ALockedRequestIsRefusedBeforeAnyPasswordIsChecked is what "the lock is
+// read before the password is checked" is worth: a locked request costs no bcrypt. A bcrypt at
+// the production cost is a quarter of a second of CPU, and an attacker with a token who is
+// locked out would otherwise still spend it once per request, so the lock would bound the
+// guesses and not the work. Every answer is the same either way, so only the time tells. The
+// account's password is hashed at cost 8; a request that IS checked takes the time of one
+// comparison and a locked one must take a small fraction of it, compared relatively (the
+// fastest checked request against the slowest locked one) so that a busy machine moves both.
 func TestChangePassword_ALockedRequestIsRefusedBeforeAnyPasswordIsChecked(t *testing.T) {
 	// The production work factor, not TestMain's cheapest one: hashing the NEW
 	// password ahead of the lock must be as visible here as checking the old one.
@@ -1467,11 +1369,7 @@ func TestMemoryPasswordLockoutForgetsWhatHasRunOut(t *testing.T) {
 	if _, err := store.reserve(ctx, counted); err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
-	for i := 0; i < passwordLockoutThreshold; i++ {
-		if _, err := store.reserve(ctx, locked); err != nil {
-			t.Fatalf("reserve: %v", err)
-		}
-	}
+	lockoutArm(t, store, locked)
 	if got := len(store.entries); got != 2 {
 		t.Fatalf("the store holds %d accounts, want the counted one and the locked one", got)
 	}
@@ -1511,11 +1409,7 @@ func TestMemoryPasswordLockoutForgetsWhatHasRunOut(t *testing.T) {
 func TestChangePassword_TheLockoutAuditRunsOnAFollowUpDeadline(t *testing.T) {
 	const bound = 200 * time.Millisecond
 	a, _ := lockoutApp(t, "memory", raceOptions{followUpTimeout: bound})
-	for i := 1; i < passwordLockoutThreshold; i++ {
-		if status, _, _ := a.change(t, wrongChangeBody); status != http.StatusForbidden {
-			t.Fatalf("wrong attempt %d = %d, want 403", i, status)
-		}
-	}
+	a.lockoutSpend(t, passwordLockoutThreshold-1)
 	w := a.watchRowLock(t, "InsertAuditLog")
 
 	requestAt := time.Now()

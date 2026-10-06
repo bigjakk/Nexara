@@ -9,39 +9,22 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/jackc/pgx/v5"
 )
 
-// The handlers share one bound for the work that DECIDES their answer, and give
-// each step that enforces or records a decision already made — the race check
-// behind a refusal, the revoke of a refused account's session, the audit row and
-// the event it publishes — a deadline of its own. The reason is what these tests
-// make happen: a request whose deciding work took its whole budget. A follow-up on
-// that budget would run on nothing, and the harm is not an error that is noticed.
-// A race loser's check fails and reads as "not a race", which answers 401 and
-// clears the cookie the winner may already have replaced — the wipe the 409 exists
-// to prevent. A refused account's session stays live. A sign-out leaves no record.
-//
-// The Redis rows of the sessions a sign-out ended are deleted as a follow-up of the
-// same kind, and last: the revoke is in PostgreSQL and decides, the audit row is
-// what must not be lost, and the cleanup is a cache nothing reads that runs on a
-// deadline of its own.
-//
-// spendBudgetAt (see auth_change_password_test.go) is the mechanism: the named
-// statement waits until the request's bound has run out and is then let through.
-// Each row also checks that the budget WAS spent — the answer took at least the
-// bound — so that a row that passes cannot be one that never met the problem.
-// That each follow-up is itself bounded is pinned where each is starved: the race
-// check in TestRefresh_AStarvedRefusalLookupIsBoundedToo, the revoke in
-// TestRefresh_TheRevokeInAGuardBranchIsBounded, the audit row and the event in
-// the Logout and LogoutAll tests, the cleanup in the change-password tests.
+// The handlers share one bound for the work that DECIDES their answer, and give each step that
+// enforces or records a decision already made (the race check behind a refusal, the revoke of
+// a refused account's session, the audit row and its event, the Redis cleanup) a deadline of
+// its own. These tests make a request's deciding work take its whole budget, since a follow-up
+// on that budget would run on nothing and the harm is not an error anyone sees: a race loser
+// is answered 401 and clears the cookie the winner may have replaced, a refused account's
+// session stays live, a sign-out leaves no record. spendBudgetAt is the mechanism, and each
+// row checks the budget WAS spent. That each follow-up is itself bounded is pinned where it is
+// starved (the Logout, LogoutAll and change-password tests, the lock tests, the pool tests).
 
-// TestRefresh_ALoserToARaceIsToldSoWhateverIsLeftOfItsBudget holds the 409 to the
-// follow-up: the race check runs on a deadline of its own, so a loser whose
-// deciding work spent the whole bound is still told it lost a race, and keeps its
-// cookie. Both places a refusal is made are covered: at the rotation, where the
-// winner got to the row first, and at the opening lookup, where the token was
-// already the previous one when the request arrived.
+// TestRefresh_ALoserToARaceIsToldSoWhateverIsLeftOfItsBudget holds the 409 to the follow-up:
+// a loser whose deciding work spent the whole bound is still told it lost a race, and keeps
+// its cookie. Both places a refusal is made are covered: at the rotation, where the winner
+// got to the row first, and at the opening lookup, where the token was already the previous one.
 func TestRefresh_ALoserToARaceIsToldSoWhateverIsLeftOfItsBudget(t *testing.T) {
 	const bound = 150 * time.Millisecond
 
@@ -72,32 +55,19 @@ func TestRefresh_ALoserToARaceIsToldSoWhateverIsLeftOfItsBudget(t *testing.T) {
 			if body["error"] != RefreshSupersededCode {
 				t.Errorf("error code = %v, want %q", body["error"], RefreshSupersededCode)
 			}
-			if cookies := refreshCookies(resp); len(cookies) != 0 {
-				t.Errorf("Set-Cookie = %+v, want the cookie left alone: the winner's newer one may be in the jar", cookies)
-			}
+			authRequireCookie(t, resp, cookieUntouched)
 		})
 	}
 }
 
-// TestRefresh_ARefusedAccountsSessionIsRevokedWhateverIsLeftOfItsBudget holds the
-// revoke of each account-refusal branch to the follow-up: the user gone, the
-// account disabled, the role changed. The read of the user spends the budget, the
-// guard then refuses, and the revoke that ends the session — and, for the role
-// change, the audit row that records why — must still happen.
+// TestRefresh_ARefusedAccountsSessionIsRevokedWhateverIsLeftOfItsBudget holds the revoke of
+// each account-refusal branch to the follow-up: the read of the user spends the budget, the
+// guard then refuses, and the revoke that ends the session (and, for the role change, the
+// audit row that records why) must still happen.
 func TestRefresh_ARefusedAccountsSessionIsRevokedWhateverIsLeftOfItsBudget(t *testing.T) {
 	const bound = 150 * time.Millisecond
 
-	tests := []struct {
-		name      string
-		tweak     func(*raceStore)
-		wantAudit []string
-	}{
-		{"the user no longer exists", func(s *raceStore) { s.userErr = pgx.ErrNoRows }, nil},
-		{"the account is disabled", func(s *raceStore) { s.user.IsActive = false }, nil},
-		{"the user's role changed", func(s *raceStore) { s.user.Role = "viewer" }, []string{"refresh_denied_role_changed"}},
-	}
-
-	for _, tt := range tests {
+	for _, tt := range authRefusedAccounts {
 		t.Run(tt.name, func(t *testing.T) {
 			a := newAuthRaceAppWith(t, tt.tweak, raceOptions{dbTimeout: bound})
 			spendBudgetAt(a, "GetUserByID")
@@ -107,60 +77,61 @@ func TestRefresh_ARefusedAccountsSessionIsRevokedWhateverIsLeftOfItsBudget(t *te
 			if elapsed < bound {
 				t.Fatalf("answered after %v, inside the bound of %v: the budget was never spent, so this test proved nothing", elapsed, bound)
 			}
-			if resp.StatusCode != http.StatusUnauthorized {
-				t.Fatalf("status = %d, want 401", resp.StatusCode)
-			}
-			if cookies := refreshCookies(resp); len(cookies) != 1 || !cookieDeleted(cookies[0]) {
-				t.Errorf("Set-Cookie = %+v, want the cookie deleted", cookies)
-			}
+			authRequireStatus(t, resp, http.StatusUnauthorized)
+			authRequireCookie(t, resp, cookieCleared)
 			if !a.store.snapshot().IsRevoked {
 				t.Error("the session is still live: the revoke ran on a budget the deciding work had spent")
 			}
-			if got := a.store.auditActions(); !reflect.DeepEqual(got, tt.wantAudit) {
-				t.Errorf("audit actions = %v, want %v", got, tt.wantAudit)
+			var wantAudit []string
+			if tt.audit != "" {
+				wantAudit = []string{tt.audit}
+			}
+			if got := a.store.auditActions(); !reflect.DeepEqual(got, wantAudit) {
+				t.Errorf("audit actions = %v, want %v", got, wantAudit)
 			}
 		})
 	}
 }
 
-// TestTheAuditRowIsWrittenWhateverIsLeftOfTheBudget holds the audit row of a
-// sign-out and of a sign-out everywhere to the follow-up, and the deletion of the
-// ended sessions' Redis rows with it: the revoke spends the request's budget — it
-// completes as the bound runs out — and the row that records it is still written,
-// and the Redis row still deleted, each under a deadline of its own.
+// authSignOutRoutes are the two sign-outs that revoke sessions and audit it.
+var authSignOutRoutes = []struct {
+	name      string
+	path      string
+	cookie    string
+	revoke    string // the statement that ends the sessions
+	wantAudit string
+	asOwner   bool
+}{
+	{name: "a sign-out", path: "/auth/logout", cookie: raceCurrentToken, revoke: "RevokeSession", wantAudit: "logout"},
+	{name: "a sign-out everywhere", path: "/auth/logout-all", revoke: "RevokeAllUserSessions", wantAudit: "logout_all", asOwner: true},
+}
+
+func (a *authRaceApp) signOutHeaders(asOwner bool) map[string]string {
+	if !asOwner {
+		return nil
+	}
+	return map[string]string{"X-Test-Acting-User": a.store.user.ID.String()}
+}
+
+// TestTheAuditRowIsWrittenWhateverIsLeftOfTheBudget holds the audit row of a sign-out and of
+// a sign-out everywhere to the follow-up, and the deletion of the ended sessions' Redis rows
+// with it: the revoke completes as the bound runs out, and the row that records it is still
+// written, and the Redis row still deleted, each under a deadline of its own.
 func TestTheAuditRowIsWrittenWhateverIsLeftOfTheBudget(t *testing.T) {
 	const bound = 150 * time.Millisecond
 
-	tests := []struct {
-		name      string
-		path      string
-		cookie    string
-		spend     string
-		wantAudit string
-		asOwner   bool
-	}{
-		{name: "a sign-out", path: "/auth/logout", cookie: raceCurrentToken, spend: "RevokeSession", wantAudit: "logout"},
-		{name: "a sign-out everywhere", path: "/auth/logout-all", spend: "RevokeAllUserSessions", wantAudit: "logout_all", asOwner: true},
-	}
-
-	for _, tt := range tests {
+	for _, tt := range authSignOutRoutes {
 		t.Run(tt.name, func(t *testing.T) {
 			a := newAuthRaceAppWith(t, nil, raceOptions{dbTimeout: bound})
 			a.redis.Set(a.sessionKey(), "{}")
-			spendBudgetAt(a, tt.spend)
-			var headers map[string]string
-			if tt.asOwner {
-				headers = map[string]string{"X-Test-Acting-User": a.store.user.ID.String()}
-			}
+			spendBudgetAt(a, tt.revoke)
 
-			resp, elapsed := a.postTimed(t, tt.path, "{}", tt.cookie, headers, 5*time.Second)
+			resp, elapsed := a.postTimed(t, tt.path, "{}", tt.cookie, a.signOutHeaders(tt.asOwner), 5*time.Second)
 
 			if elapsed < bound {
 				t.Fatalf("answered after %v, inside the bound of %v: the budget was never spent, so this test proved nothing", elapsed, bound)
 			}
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status = %d, want 200: the revoke completed", resp.StatusCode)
-			}
+			authRequireStatus(t, resp, http.StatusOK) // the revoke completed
 			if !a.store.snapshot().IsRevoked {
 				t.Error("the session is not revoked")
 			}
@@ -174,49 +145,46 @@ func TestTheAuditRowIsWrittenWhateverIsLeftOfTheBudget(t *testing.T) {
 	}
 }
 
-// TestSignOut_ARedisThatNeverAnswersTheCleanupIsBounded starves the deletion of the
-// Redis rows a sign-out leaves behind. The revoke has been answered by the database
-// by then, so the sign-out is made and the answer is the 200 it earned; what is
-// pinned is that the cleanup is held to a deadline of its own and not to the
-// request's bound, which here is far longer — a Redis that does not answer must cost
-// the follow-up bound and no more — and that it comes after the audit row: the row
-// is already written when the deletion starts, so that nothing the cache does can
-// lose it.
+// cleanupStart is what a test's Redis hook saw when the cleanup's DEL began: when, the
+// deadline its context carried, and which audit rows had been written by then.
+type cleanupStart struct {
+	at       time.Time
+	deadline time.Time
+	audits   []string
+}
+
+// stallCleanup makes the DEL of the cleanup wait for its context to end, and reports on the
+// returned channel what it saw when it began.
+func (a *authRaceApp) stallCleanup() <-chan cleanupStart {
+	started := make(chan cleanupStart, 1)
+	a.rdb.AddHook(newRedisCmdHook("del", func(ctx context.Context) error {
+		deadline, _ := ctx.Deadline()
+		select {
+		case started <- cleanupStart{at: time.Now(), deadline: deadline, audits: a.store.auditActions()}:
+		default:
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}))
+	return started
+}
+
+// TestSignOut_ARedisThatNeverAnswersTheCleanupIsBounded starves the deletion of the Redis
+// rows a sign-out leaves behind. The database has answered the revoke by then, so the answer
+// is the 200 it earned; what is pinned is that the cleanup is held to a deadline of its own,
+// not the request's far longer bound, and comes after the audit row, so nothing the cache
+// does can lose it.
 func TestSignOut_ARedisThatNeverAnswersTheCleanupIsBounded(t *testing.T) {
 	const bound = 200 * time.Millisecond
 
-	tests := []struct {
-		name      string
-		path      string
-		cookie    string
-		wantAudit string
-		asOwner   bool
-	}{
-		{name: "a sign-out", path: "/auth/logout", cookie: raceCurrentToken, wantAudit: "logout"},
-		{name: "a sign-out everywhere", path: "/auth/logout-all", wantAudit: "logout_all", asOwner: true},
-	}
-
-	for _, tt := range tests {
+	for _, tt := range authSignOutRoutes {
 		t.Run(tt.name, func(t *testing.T) {
 			a := newAuthRaceAppWith(t, nil, raceOptions{dbTimeout: bound * 25, followUpTimeout: bound})
 			a.redis.Set(a.sessionKey(), "{}")
-			started := make(chan cleanupStart, 1)
-			a.rdb.AddHook(newRedisCmdHook("del", func(ctx context.Context) error {
-				deadline, _ := ctx.Deadline()
-				select {
-				case started <- cleanupStart{at: time.Now(), deadline: deadline, audits: a.store.auditActions()}:
-				default:
-				}
-				<-ctx.Done()
-				return ctx.Err()
-			}))
-			var headers map[string]string
-			if tt.asOwner {
-				headers = map[string]string{"X-Test-Acting-User": a.store.user.ID.String()}
-			}
+			started := a.stallCleanup()
 
 			requestAt := time.Now()
-			resp, _ := a.postTimed(t, tt.path, "{}", tt.cookie, headers, 5*time.Second)
+			resp, _ := a.postTimed(t, tt.path, "{}", tt.cookie, a.signOutHeaders(tt.asOwner), 5*time.Second)
 			answeredAt := time.Now()
 
 			var start cleanupStart
@@ -225,9 +193,7 @@ func TestSignOut_ARedisThatNeverAnswersTheCleanupIsBounded(t *testing.T) {
 			default:
 				t.Fatal("the Redis cleanup never ran, so this test proved nothing")
 			}
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status = %d, want 200: the revoke was made", resp.StatusCode)
-			}
+			authRequireStatus(t, resp, http.StatusOK) // the revoke was made
 			checkAnsweredAtTheDeadline(t, bound, requestAt, start.at, start.deadline, answeredAt)
 			if !a.store.snapshot().IsRevoked {
 				t.Error("the session is not revoked")
@@ -243,22 +209,11 @@ func TestSignOut_ARedisThatNeverAnswersTheCleanupIsBounded(t *testing.T) {
 	}
 }
 
-// cleanupStart is what a test's Redis hook saw when the cleanup's DEL began: when,
-// the deadline its context carried, and which audit rows had been written by then.
-type cleanupStart struct {
-	at       time.Time
-	deadline time.Time
-	audits   []string
-}
-
-// TestWithFollowUp_RunsOnAFreshDeadlineAndPutsTheRequestContextBack drives the
-// helper the audit calls go through, directly. A handler that has spent its whole
-// budget runs a follow-up, and the context that follow-up's code reads (c.Context(),
-// which is what AuditLogAs and the event it publishes take) must be: not the
-// handler's, which has ended; a fresh one, with a deadline of its own that is no
-// longer than the follow-up bound; and cancelled once the follow-up is done. The
-// request's own context must then be exactly what it was before — the same object,
-// not a copy and not the follow-up's.
+// TestWithFollowUp_RunsOnAFreshDeadlineAndPutsTheRequestContextBack drives the helper the
+// audit calls go through. A handler that has spent its whole budget runs a follow-up, and
+// the context that code reads (c.Context(), which AuditLogAs and its event take) must be a
+// fresh one, not over, with a deadline no longer than the follow-up bound, cancelled once
+// the follow-up is done; the request's own context must then be the same object as before.
 func TestWithFollowUp_RunsOnAFreshDeadlineAndPutsTheRequestContextBack(t *testing.T) {
 	const bound, followUp = 50 * time.Millisecond, 300 * time.Millisecond
 	a := newAuthRaceAppWith(t, nil, raceOptions{dbTimeout: bound, followUpTimeout: followUp})
@@ -290,8 +245,7 @@ func TestWithFollowUp_RunsOnAFreshDeadlineAndPutsTheRequestContextBack(t *testin
 		})
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/test/followup", nil)
-	resp, err := a.app.Test(req, fiber.TestConfig{Timeout: 2 * time.Second, FailOnTimeout: true})
+	resp, err := a.app.Test(httptest.NewRequest(http.MethodGet, "/test/followup", nil), fiber.TestConfig{Timeout: 2 * time.Second, FailOnTimeout: true})
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -317,14 +271,12 @@ func TestWithFollowUp_RunsOnAFreshDeadlineAndPutsTheRequestContextBack(t *testin
 	}
 }
 
-// TestDbContext_CancelEndsTheBoundAndPutsTheRequestContextBack pins the two things
-// the cancel function dbContext returns must do, one at a time. It must cancel:
-// a cancel that only put the old context back would leave the bound's timer running
-// for the whole of its fifteen seconds in every request, a leak that nothing else
-// would show. And it must put back the context the request had before — the same
-// object — which is what keeps a cancelled one from reaching whatever runs after
-// the handler. Before the cancel, the bounded context is the request's own, which
-// is what lets AuditLogAs and the event it publishes run inside the bound.
+// TestDbContext_CancelEndsTheBoundAndPutsTheRequestContextBack pins the two things the
+// cancel function dbContext returns must do, one at a time. It must cancel: a cancel that
+// only put the old context back would leave the bound's timer running in every request. And
+// it must put back the context the request had, the same object, so a cancelled one never
+// reaches whatever runs after the handler. Before the cancel, the bounded context is the
+// request's own, which is what lets AuditLogAs and its event run inside the bound.
 func TestDbContext_CancelEndsTheBoundAndPutsTheRequestContextBack(t *testing.T) {
 	a := newAuthRaceApp(t, nil)
 	a.app.Get("/test/dbcontext", func(c fiber.Ctx) error {
@@ -353,16 +305,9 @@ func TestDbContext_CancelEndsTheBoundAndPutsTheRequestContextBack(t *testing.T) 
 	t.Cleanup(func() { _ = resp.Body.Close() })
 	got := decodeObject(t, resp)
 
-	for key, want := range map[string]bool{
-		"has_deadline":      true,
-		"installed":         true,
-		"alive_before":      true,
-		"cancelled_after":   true,
-		"restored":          true,
-		"restored_has_none": true,
-	} {
-		if got[key] != want {
-			t.Errorf("%s = %v, want %t", key, got[key], want)
+	for _, key := range []string{"has_deadline", "installed", "alive_before", "cancelled_after", "restored", "restored_has_none"} {
+		if got[key] != true {
+			t.Errorf("%s = %v, want true", key, got[key])
 		}
 	}
 }

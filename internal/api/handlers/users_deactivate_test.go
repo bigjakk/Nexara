@@ -9,20 +9,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The deactivation of an account: the change, the bump of its auth epoch, the listing
-// of its live sessions and the revoke of them are ONE transaction, bounded, released
-// before anything touches the pool again, and followed — only once it has committed —
-// by the RBAC cache, the audit row and the Redis rows of the revoked sessions.
-//
-// They used to be two steps on the pool, the second only logged when it failed: the
-// answer was a 200 for an account that was disabled with every one of its sessions
-// still live. The tests here pin what replaced that, and the state each answer leaves.
+// The deactivation of an account: the change, the bump of its auth epoch, the listing of its
+// live sessions and the revoke of them are ONE transaction, bounded, released before anything
+// touches the pool again, and followed only once it has committed by the RBAC cache, the audit
+// row and the Redis rows of the revoked sessions. They used to be two steps on the pool, the
+// second only logged when it failed, so the answer was a 200 for an account that was disabled
+// with every one of its sessions still live.
 
 // deactivationFixture is a store holding the administrator who acts, an active user
 // with two live sessions — each with its Redis row — and that user's RBAC cache row.
@@ -121,11 +118,7 @@ func TestDeactivate_TheChangeTheBumpAndTheRevokeAreOneTransaction(t *testing.T) 
 	f := newDeactivationFixture(t, epochOptions{}, nil)
 
 	resp := f.put(t, `{"is_active":false}`)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %v)", resp.StatusCode, body)
-	}
+	body := authRequireStatus(t, resp, http.StatusOK)
 	if body["is_active"] != false || body["id"] != f.target.ID.String() {
 		t.Errorf("body = %v, want the deactivated account", body)
 	}
@@ -138,6 +131,7 @@ func TestDeactivate_TheChangeTheBumpAndTheRevokeAreOneTransaction(t *testing.T) 
 	if got := f.a.pool.beginAttempts(); got != 1 {
 		t.Errorf("%d transactions were begun, want exactly one", got)
 	}
+	authRequireReadCommitted(t, f.a.pool, "deactivation")
 
 	var inTx, onPool []string
 	f.a.store.mu.Lock()
@@ -173,13 +167,11 @@ func TestDeactivate_TheChangeTheBumpAndTheRevokeAreOneTransaction(t *testing.T) 
 	}
 }
 
-// TestDeactivate_AFailureAnywhereInTheTransactionChangesNothing is the property the
-// transaction is for. A statement that fails — whichever one, the revoke above all,
-// which the old code only logged — rolls the whole of it back: the account stays
-// active, its epoch where it was, every session live, nothing audited, no Redis row
-// touched, and the answer says the account was NOT changed. A database that was away
-// is a 503 and any other failure a 500; neither is the 200 the old code answered for
-// an account that was disabled with all its sessions live.
+// TestDeactivate_AFailureAnywhereInTheTransactionChangesNothing is the property the transaction
+// is for. A statement that fails, whichever one, the revoke above all (which the old code only
+// logged), rolls the whole of it back: the account stays active at its epoch, every session
+// live, nothing audited, no Redis row touched, and the answer says NOT changed: a 503 when the
+// database was away and a 500 otherwise, never the 200 the old code answered.
 func TestDeactivate_AFailureAnywhereInTheTransactionChangesNothing(t *testing.T) {
 	for _, stmt := range []string{"UpdateUserProfile", "BumpUserAuthEpoch", "ListUserSessions", "RevokeAllUserSessions"} {
 		for _, tc := range []struct {
@@ -194,11 +186,7 @@ func TestDeactivate_AFailureAnywhereInTheTransactionChangesNothing(t *testing.T)
 				f := newDeactivationFixture(t, epochOptions{}, func(s *epochStore) { s.failOn[stmt] = tc.err })
 
 				resp := f.put(t, `{"is_active":false}`)
-				body := decodeObject(t, resp)
-
-				if resp.StatusCode != tc.want {
-					t.Fatalf("status = %d, want %d (body %v)", resp.StatusCode, tc.want, body)
-				}
+				body := authRequireStatus(t, resp, tc.want)
 				if msg, _ := body["message"].(string); !strings.Contains(msg, "NOT changed") {
 					t.Errorf("message = %q, want it to say the account was NOT changed", msg)
 				}
@@ -215,11 +203,7 @@ func TestDeactivate_AFailureAnywhereInTheTransactionChangesNothing(t *testing.T)
 		f.a.pool.beginErr = errRaceTransient
 
 		resp := f.put(t, `{"is_active":false}`)
-		body := decodeObject(t, resp)
-
-		if resp.StatusCode != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d, want 503 (body %v)", resp.StatusCode, body)
-		}
+		body := authRequireStatus(t, resp, http.StatusServiceUnavailable)
 		if msg, _ := body["message"].(string); !strings.Contains(msg, "NOT changed") {
 			t.Errorf("message = %q, want it to say the account was NOT changed", msg)
 		}
@@ -243,11 +227,7 @@ func TestDeactivate_IsBounded(t *testing.T) {
 			resp := f.a.send(t, http.MethodPut, "/users/"+f.target.ID.String(), `{"is_active":false}`,
 				map[string]string{"X-Test-Acting-User": f.admin.ID.String()}, 10*time.Second)
 			elapsed := time.Since(start)
-			body := decodeObject(t, resp)
-
-			if resp.StatusCode != http.StatusServiceUnavailable {
-				t.Fatalf("status = %d, want 503 (body %v)", resp.StatusCode, body)
-			}
+			body := authRequireStatus(t, resp, http.StatusServiceUnavailable)
 			if elapsed > 5*time.Second {
 				t.Errorf("answered after %v with a 100 ms bound", elapsed)
 			}
@@ -262,22 +242,14 @@ func TestDeactivate_IsBounded(t *testing.T) {
 	}
 }
 
-// TestDeactivate_ALostCommitReplyIsAnUnconfirmedOutcome holds the rule for a COMMIT
-// whose answer did not arrive. A COMMIT that never went out, or that the server
-// answered, is a known "not done": the message says NOT changed and the store agrees.
-// A COMMIT that went out and came back without an answer may have landed — the server
-// finishes a commit it has received — and the rows show the same answer for both
-// states the store can end in: "could not be confirmed", never "NOT changed" for a
-// deactivation that happened, never a success for one that did not. A deactivation is
-// idempotent, so the message sends the administrator to look and to repeat it, which
-// is safe either way.
-//
-// The change is still RECORDED when its outcome is unconfirmed: a user_updated audit
-// row that says so (outcome unconfirmed, with the email like every such row), because
-// an audit page filtered on that action must not miss a deactivation that landed, and
-// the row is true whichever way the commit went. The RBAC cache is purged, which is
-// right in both outcomes; nothing that presumes the commit landed runs. A COMMIT that
-// is known not to have landed writes no row at all.
+// TestDeactivate_ALostCommitReplyIsAnUnconfirmedOutcome holds the rule for a COMMIT whose
+// answer did not arrive. One that never went out, or that the server answered, is a known "not
+// done": NOT changed, and the store agrees. One that went out and came back without an answer
+// may have landed, and every row shows the same answer for both states the store can end in:
+// "could not be confirmed", never "NOT changed" for a deactivation that happened, never a
+// success for one that did not. The change is still RECORDED as a user_updated audit row that
+// says the outcome is unconfirmed, so an audit filtered on that action cannot miss a
+// deactivation that landed; the RBAC cache is purged, right either way.
 func TestDeactivate_ALostCommitReplyIsAnUnconfirmedOutcome(t *testing.T) {
 	const notChanged, unconfirmed = "NOT changed", "could not be confirmed"
 
@@ -301,11 +273,7 @@ func TestDeactivate_ALostCommitReplyIsAnUnconfirmedOutcome(t *testing.T) {
 			f := newDeactivationFixture(t, epochOptions{}, func(s *epochStore) { s.commitErr, s.commitLands = tt.err, tt.lands })
 
 			resp := f.put(t, `{"is_active":false}`)
-			body := decodeObject(t, resp)
-
-			if resp.StatusCode != tt.want {
-				t.Fatalf("status = %d, want %d (body %v)", resp.StatusCode, tt.want, body)
-			}
+			body := authRequireStatus(t, resp, tt.want)
 			msg, _ := body["message"].(string)
 			if !strings.Contains(msg, tt.wantMessage) {
 				t.Fatalf("message = %q, want it to contain %q", msg, tt.wantMessage)
@@ -354,11 +322,7 @@ func TestDeactivate_TheUnconfirmedAuditRunsOnAFollowUpDeadline(t *testing.T) {
 
 	resp := f.a.send(t, http.MethodPut, "/users/"+f.target.ID.String(), `{"is_active":false}`,
 		map[string]string{"X-Test-Acting-User": f.admin.ID.String()}, 10*time.Second)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 (body %v)", resp.StatusCode, body)
-	}
+	body := authRequireStatus(t, resp, http.StatusServiceUnavailable)
 	if msg, _ := body["message"].(string); !strings.Contains(msg, "could not be confirmed") {
 		t.Errorf("message = %q, want it to say the outcome could not be confirmed", msg)
 	}
@@ -382,11 +346,7 @@ func TestUpdateUser_EditsThatDoNotDeactivateAreUntouched(t *testing.T) {
 			f := newDeactivationFixture(t, epochOptions{}, nil)
 
 			resp := f.put(t, tt.body)
-			body := decodeObject(t, resp)
-
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body %v)", resp.StatusCode, body)
-			}
+			authRequireStatus(t, resp, http.StatusOK)
 			if got := f.a.pool.beginAttempts(); got != 0 {
 				t.Errorf("%d transactions were begun for an edit that is not a deactivation", got)
 			}
@@ -416,45 +376,13 @@ func TestDeactivate_EndsTheSessionsEvenWithoutASessionManager(t *testing.T) {
 	f := newDeactivationFixture(t, epochOptions{noSessions: true}, nil)
 
 	resp := f.put(t, `{"is_active":false}`)
-	body := decodeObject(t, resp)
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %v)", resp.StatusCode, body)
-	}
+	authRequireStatus(t, resp, http.StatusOK)
 	f.requireDeactivated(t)
 }
 
-// TestDeactivate_TheTransactionIsPinnedToReadCommitted: the revoke-all's guarantee —
-// the listing and the revoke each take a snapshot AFTER an in-flight sign-in has
-// committed, so they see its session — holds only under READ COMMITTED; under
-// REPEATABLE READ the snapshot is taken by the first statement and the late session
-// stays live (internal/db shows it against Postgres). The server's default is READ
-// COMMITTED, but a role, a database or a connection setting can change that default,
-// so the handler asks for it by name. The harness records the options of every
-// transaction it is asked to begin.
-func TestDeactivate_TheTransactionIsPinnedToReadCommitted(t *testing.T) {
-	f := newDeactivationFixture(t, epochOptions{}, nil)
-
-	resp := f.put(t, `{"is_active":false}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-
-	opts := f.a.pool.beginOptions()
-	if len(opts) != 1 {
-		t.Fatalf("%d transactions were begun with options, want exactly one", len(opts))
-	}
-	if opts[0].IsoLevel != pgx.ReadCommitted {
-		t.Errorf("the deactivation transaction asked for isolation %q, want %q by name, not the server's default", opts[0].IsoLevel, pgx.ReadCommitted)
-	}
-}
-
 // TestNewUserHandler_AMissingPoolStaysMissing is TestNewAuthHandler_AMissingPoolStaysMissing
-// for the user handler: NewUserHandler takes a *pgxpool.Pool, and stored
-// unconditionally a nil pointer there becomes a NON-nil interface holding a nil
-// pointer, which makes deactivate's `h.pool == nil` guard — the answer the no-database
-// unit tests rely on — false, and the first BeginTx dereferences nil instead. The
-// second half is the control: a real pool is kept.
+// for the user handler: stored unconditionally, a nil *pgxpool.Pool becomes a NON-nil interface,
+// and deactivate's `h.pool == nil` guard stops firing. The second half is the control.
 func TestNewUserHandler_AMissingPoolStaysMissing(t *testing.T) {
 	var none *pgxpool.Pool
 	if h := NewUserHandler(none, nil, nil, nil, nil); h.pool != nil {
@@ -468,14 +396,12 @@ func TestNewUserHandler_AMissingPoolStaysMissing(t *testing.T) {
 	}
 }
 
-// TestUpdateUser_OnlySuppliedFieldsAreWritten holds the fix for the lost update the
-// handler used to make. It reads the account, and then wrote all three profile
-// columns back from that read, so a concurrent edit that landed in between was undone
-// for every field the request had not mentioned: a deactivation put back the role a
-// concurrent edit had just demoted, and a display-name edit that had read
-// is_active = true re-activated an account that had been deactivated in the meantime
-// (its sessions stay revoked, but its password works again). The hook lands the
-// concurrent write right behind the handler's read of the account.
+// TestUpdateUser_OnlySuppliedFieldsAreWritten holds the fix for the lost update the handler
+// used to make: it read the account, then wrote all three profile columns back from that read,
+// so a concurrent edit that landed in between was undone for every field the request had not
+// mentioned (a deactivation put back a demoted role; a name edit that had read is_active = true
+// re-activated an account deactivated meanwhile). The hook lands the concurrent write right
+// behind the handler's read of the account.
 func TestUpdateUser_OnlySuppliedFieldsAreWritten(t *testing.T) {
 	tests := []struct {
 		name string
@@ -564,11 +490,7 @@ func TestUpdateUser_OnlySuppliedFieldsAreWritten(t *testing.T) {
 			}
 
 			resp := f.put(t, tt.body)
-			body := decodeObject(t, resp)
-
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body %v)", resp.StatusCode, body)
-			}
+			authRequireStatus(t, resp, http.StatusOK)
 			tt.check(t, f.a.store.user(f.target.ID))
 		})
 	}

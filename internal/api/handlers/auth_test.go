@@ -15,108 +15,72 @@ import (
 	"github.com/bigjakk/nexara/internal/auth"
 )
 
-func TestRegister_MissingFields(t *testing.T) {
+// TestAuthRoutes_RefuseABadRequest drives the handlers with no database behind them: every
+// row is refused before anything is looked up. A missing refresh token (no body, no cookie)
+// is an auth state, not a bad request (L1 in the security review for task 2.6).
+func TestAuthRoutes_RefuseABadRequest(t *testing.T) {
 	app := newTestApp(t)
 
 	tests := []struct {
 		name string
+		path string
 		body string
+		want int
 	}{
-		{"empty body", `{}`},
-		{"missing password", `{"email":"test@example.com"}`},
-		{"missing email", `{"password":"Str0ng!Pass"}`},
+		{"register: empty body", "/auth/register", `{}`, http.StatusBadRequest},
+		{"register: missing password", "/auth/register", `{"email":"test@example.com"}`, http.StatusBadRequest},
+		{"register: missing email", "/auth/register", `{"password":"Str0ng!Pass"}`, http.StatusBadRequest},
+		{"register: invalid email", "/auth/register", `{"email":"not-an-email","password":"Str0ng!Pass"}`, http.StatusBadRequest},
+		{"register: password too short", "/auth/register", `{"email":"test@example.com","password":"S1!a"}`, http.StatusBadRequest},
+		{"register: password with no uppercase", "/auth/register", `{"email":"test@example.com","password":"str0ng!pass"}`, http.StatusBadRequest},
+		{"register: password with no digit", "/auth/register", `{"email":"test@example.com","password":"Strong!Pass"}`, http.StatusBadRequest},
+		{"register: password with no special character", "/auth/register", `{"email":"test@example.com","password":"Str0ngPassw"}`, http.StatusBadRequest},
+		{"login: missing password", "/auth/login", `{"email":"test@example.com"}`, http.StatusBadRequest},
+		{"login: missing email", "/auth/login", `{"password":"Str0ng!Pass"}`, http.StatusBadRequest},
+		{"login: empty body", "/auth/login", `{}`, http.StatusBadRequest},
+		{"login: not JSON", "/auth/login", "not json", http.StatusBadRequest},
+		{"refresh: no token", "/auth/refresh", `{}`, http.StatusUnauthorized},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString(tt.body))
+			req := httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
 			}
 			defer func() { _ = resp.Body.Close() }()
+			raw, _ := io.ReadAll(resp.Body)
 
-			if resp.StatusCode != http.StatusBadRequest {
-				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			if resp.StatusCode != tt.want {
+				t.Errorf("status = %d, want %d, body: %s", resp.StatusCode, tt.want, raw)
+			}
+			if !json.Valid(raw) {
+				t.Errorf("response is not valid JSON: %s", raw)
 			}
 		})
 	}
 }
 
-func TestRegister_InvalidEmail(t *testing.T) {
-	app := newTestApp(t)
-
-	body := `{"email":"not-an-email","password":"Str0ng!Pass"}`
-	req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
-	}
-}
-
-func TestRegister_WeakPassword(t *testing.T) {
-	app := newTestApp(t)
-
-	tests := []struct {
-		name     string
-		password string
-	}{
-		{"too short", "S1!a"},
-		{"no uppercase", "str0ng!pass"},
-		{"no digit", "Strong!Pass"},
-		{"no special", "Str0ngPassw"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			body := `{"email":"test@example.com","password":"` + tt.password + `"}`
-			req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString(body))
-			req.Header.Set("Content-Type", "application/json")
-			resp, err := app.Test(req)
-			if err != nil {
-				t.Fatalf("request failed: %v", err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-
-			if resp.StatusCode != http.StatusBadRequest {
-				body, _ := io.ReadAll(resp.Body)
-				t.Errorf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusBadRequest, body)
-			}
-		})
-	}
-}
-
-// TestRegister_StrongPassword_WithNilDB_BypassesHash locks down Finding
-// #17: Register must NOT call bcrypt before the count/admin gate. We hit
-// the handler with a request that's structurally valid (good email, strong
-// password) but that will fail at the DB step because the test handler has
-// pool == nil. The new code returns 500 "registration unavailable" right
-// after password-complexity validation, well before HashPassword. If a
-// future refactor moves HashPassword back above the pool nil check, the
-// wall-clock will jump to >>1× a bcrypt cost-10 call (the cost this test
-// pins) and the calibrated assertion below will catch it.
+// TestRegister_StrongPassword_WithNilDB_BypassesHash locks down Finding #17: Register must
+// NOT call bcrypt before the count/admin gate. A structurally valid request (good email,
+// strong password) fails at the DB step because the handler has pool == nil: 500
+// "registration unavailable" right after password-complexity validation, well before
+// HashPassword. If a refactor moves HashPassword back above the pool nil check, the
+// wall-clock jumps to >>1x a bcrypt call and the calibrated assertion below catches it.
 func TestRegister_StrongPassword_WithNilDB_BypassesHash(t *testing.T) {
-	// A real work factor, not TestMain's cheapest one: the comparison below
-	// needs a bcrypt that clearly outlasts the request.
+	// A real work factor, not TestMain's cheapest one: the comparison below needs a bcrypt
+	// that clearly outlasts the request.
 	defer auth.SetBcryptCostForTesting(10)()
 	app := newTestApp(t)
 
-	// Calibrate against the runtime — bcrypt cost varies with CPU/CI load,
-	// so absolute thresholds are flaky. A real bcrypt comparison is the
-	// most relevant baseline.
+	// Calibrate against the runtime, since bcrypt cost varies with CPU/CI load.
 	calStart := time.Now()
 	auth.RunDummyBcrypt("Str0ng!Pass")
 	bcryptDuration := time.Since(calStart)
 
-	body := `{"email":"test@example.com","password":"Str0ng!Pass"}`
-	req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString(`{"email":"test@example.com","password":"Str0ng!Pass"}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	start := time.Now()
@@ -132,18 +96,16 @@ func TestRegister_StrongPassword_WithNilDB_BypassesHash(t *testing.T) {
 		t.Errorf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusInternalServerError, body)
 	}
 
-	// Register on the no-DB short-circuit path should be at least 5× faster
-	// than a real bcrypt call. If someone reverts the order, this margin
-	// disappears immediately.
-	maxAllowed := bcryptDuration / 5
-	if elapsed > maxAllowed {
+	// The no-DB short-circuit path should be at least 5x faster than a real bcrypt call; if
+	// someone reverts the order, this margin disappears immediately.
+	if maxAllowed := bcryptDuration / 5; elapsed > maxAllowed {
 		t.Errorf("Register took %v vs single bcrypt %v — hash-after-auth-check appears to be reverted (Finding #17)", elapsed, bcryptDuration)
 	}
 }
 
-// TestRegister_FirstUserAdvisoryLockKeyIsStable locks down the constant so
-// a future edit can't silently swap it for a value that collides with
-// another advisory lock holder elsewhere in the codebase, or zero it out.
+// TestRegister_FirstUserAdvisoryLockKeyIsStable locks down the constant so a future edit
+// can't silently swap it for a value that collides with another advisory lock holder
+// elsewhere in the codebase, or zero it out.
 func TestRegister_FirstUserAdvisoryLockKeyIsStable(t *testing.T) {
 	if firstUserAdvisoryLockKey == 0 {
 		t.Fatal("firstUserAdvisoryLockKey is 0 — a value of 0 risks colliding with default-initialised holders")
@@ -154,148 +116,21 @@ func TestRegister_FirstUserAdvisoryLockKeyIsStable(t *testing.T) {
 	}
 }
 
-func TestLogin_MissingFields(t *testing.T) {
-	app := newTestApp(t)
-
-	tests := []struct {
-		name string
-		body string
-	}{
-		{"missing password", `{"email":"test@example.com"}`},
-		{"missing email", `{"password":"Str0ng!Pass"}`},
-		{"empty body", `{}`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(tt.body))
-			req.Header.Set("Content-Type", "application/json")
-			resp, err := app.Test(req)
-			if err != nil {
-				t.Fatalf("request failed: %v", err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-
-			if resp.StatusCode != http.StatusBadRequest {
-				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
-			}
-		})
-	}
-}
-
-func TestLogin_InvalidJSON(t *testing.T) {
-	app := newTestApp(t)
-
-	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString("not json"))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusBadRequest {
-		body, _ := io.ReadAll(resp.Body)
-		t.Errorf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusBadRequest, body)
-	}
-
-	body, _ := io.ReadAll(resp.Body)
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		t.Fatalf("response is not valid JSON: %v", err)
-	}
-}
-
-func TestRefresh_MissingToken(t *testing.T) {
-	app := newTestApp(t)
-
-	body := `{}`
-	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	// Missing refresh token (no body, no cookie) is an auth state, not a
-	// bad request — see L1 in the security review for task 2.6.
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
-	}
-}
-
-func TestPasswordHashAndVerify(t *testing.T) {
-	password := "Str0ng!Pass"
-	hash, err := auth.HashPassword(password)
-	if err != nil {
-		t.Fatalf("HashPassword() error: %v", err)
-	}
-
-	if err := auth.CheckPassword(hash, password); err != nil {
-		t.Errorf("CheckPassword() should succeed: %v", err)
-	}
-
-	if err := auth.CheckPassword(hash, "wrong"); err == nil {
-		t.Error("CheckPassword() should fail for wrong password")
-	}
-}
-
-func TestJWTRoundtrip(t *testing.T) {
-	svc := auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour)
-
-	token, _, err := svc.GenerateAccessToken(
-		[16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
-		"test@example.com",
-		"admin",
-	)
-	if err != nil {
-		t.Fatalf("GenerateAccessToken() error: %v", err)
-	}
-
-	claims, err := svc.ValidateAccessToken(token)
-	if err != nil {
-		t.Fatalf("ValidateAccessToken() error: %v", err)
-	}
-
-	if claims.Email != "test@example.com" {
-		t.Errorf("email = %q, want %q", claims.Email, "test@example.com")
-	}
-	if claims.Role != "admin" {
-		t.Errorf("role = %q, want %q", claims.Role, "admin")
-	}
-}
-
 // newTestApp creates a Fiber app with auth handler for unit tests (no DB/Redis).
 func newTestApp(t *testing.T) *fiber.App {
 	t.Helper()
 
-	jwtSvc := auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour)
 	handler := &AuthHandler{
 		pool:       nil,
 		queries:    nil,
-		jwtService: jwtSvc,
+		jwtService: auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour),
 	}
 
-	app := fiber.New(fiber.Config{
-		ErrorHandler: func(c fiber.Ctx, err error) error {
-			code := fiber.StatusInternalServerError
-			message := "Internal Server Error"
-			if e, ok := err.(*fiber.Error); ok {
-				code = e.Code
-				message = e.Message
-			}
-			return c.Status(code).JSON(fiber.Map{
-				"error":   code,
-				"message": message,
-			})
-		},
-	})
+	app := fiber.New(fiber.Config{ErrorHandler: authErrorHandler})
 
-	// Register is still a plain fiber.Handler: it is mounted with authOptional
-	// and stays out of the registry, because the Permissions vocabulary has no
-	// shape for "parse a session if one is presented". See
-	// registerAuthEndpoints in internal/api/registry_auth.go.
+	// Register is still a plain fiber.Handler: it is mounted with authOptional and stays out of
+	// the registry, because the Permissions vocabulary has no shape for "parse a session if one
+	// is presented". See registerAuthEndpoints in internal/api/registry_auth.go.
 	app.Post("/auth/register", handler.Register)
 	app.Post("/auth/login", withRequestParams(t, authLoginMirror(), nil, handler.Login))
 	app.Post("/auth/refresh", withRequestParams(t, authRefreshMirror(), nil, handler.Refresh))
@@ -303,14 +138,11 @@ func newTestApp(t *testing.T) *fiber.App {
 	return app
 }
 
-// The two mirrors below are local copies of the parts of these routes'
-// declarations (internal/api/registry_auth.go) that the handlers read.
-//
-// Mirrors for the reason migrationListMirror gives — package api imports this
-// package, not the other way round. What each has to get right is the shape
-// these tests depend on: login refuses a missing or blank credential before the
-// handler sees it, and refresh accepts an empty body because the browser path
-// carries the token in a cookie.
+// The two mirrors below are local copies of the parts of these routes' declarations
+// (internal/api/registry_auth.go) that the handlers read, for the reason migrationListMirror
+// gives: package api imports this package, not the other way round. Login refuses a missing
+// or blank credential before the handler sees it, and refresh accepts an empty body because
+// the browser path carries the token in a cookie.
 func authLoginMirror() apischema.Properties {
 	return apischema.Properties{
 		"email":    {Type: apischema.String, MinLength: apischema.Ptr(1)},

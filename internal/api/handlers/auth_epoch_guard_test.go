@@ -1,93 +1,70 @@
 package handlers
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-// epochGuardGoFiles returns the non-test Go sources under root that are this
-// checkout's code, as slash paths relative to root. It skips generated code, vendored
-// trees, node_modules and — the part that matters — anything that is a copy of the
-// tree rather than part of it: a directory named .claude, and any directory that is
-// the root of a checkout of its own (it carries a .git entry; a worktree's is a
-// file). A gitignored agent worktree under .claude/worktrees/<name>/ holds a full
-// copy of these sources at some other commit, and a walk that counted it twice made
-// a guard that passes in CI fail on a developer's machine — the same class
-// credential_render_guard_test.go and scope_params_guard_test.go skip.
-func epochGuardGoFiles(t *testing.T, root string) []string {
-	t.Helper()
-	var files []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".git", ".claude", "node_modules", "vendor", "generated", "frontend":
-				return filepath.SkipDir
-			}
-			if filepath.Clean(path) != filepath.Clean(root) {
-				if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
-			}
-			files = append(files, filepath.ToSlash(rel))
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
-	}
-	sort.Strings(files)
-	return files
+// authSource is a non-test Go file of the repository, by slash path relative to it: its
+// text, and its syntax without comments.
+type authSource struct {
+	rel  string
+	text []byte
+	file *ast.File
 }
 
-// TestEpochGuardWalkSkipsNestedCopies pins the walk's exclusions on a tree built for
-// the purpose: a copy under .claude/worktrees (by name), a nested checkout elsewhere
-// (by its .git file), generated and vendored code, and test files are all left out;
-// the real sources are kept.
-func TestEpochGuardWalkSkipsNestedCopies(t *testing.T) {
-	root := t.TempDir()
-	write := func(rel, body string) {
-		t.Helper()
-		full := filepath.Join(root, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("internal/api/handlers/auth.go", "package handlers\n")
-	write("internal/api/handlers/auth_test.go", "package handlers\n")
-	write("internal/db/generated/models.go", "package db\n")
-	write("vendor/x/x.go", "package x\n")
-	write(".claude/worktrees/old/internal/api/handlers/auth.go", "package handlers\n")
-	write("elsewhere/checkout/.git", "gitdir: /somewhere\n")
-	write("elsewhere/checkout/internal/api/handlers/auth.go", "package handlers\n")
+var (
+	authSourcesOnce sync.Once
+	authSourcesFset *token.FileSet
+	authSourcesAll  []authSource
+	authSourcesErr  error
+)
 
-	got := epochGuardGoFiles(t, root)
-	if want := []string{"internal/api/handlers/auth.go"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("walk = %v, want %v: a copy of the tree was counted, or the real source was skipped", got, want)
+// authParsedSources is every non-test Go source of the repository (goSourceFiles: generated
+// code and nested checkouts left out), parsed once per test binary for the guards that
+// read them.
+func authParsedSources(t *testing.T) (*token.FileSet, []authSource) {
+	t.Helper()
+	authSourcesOnce.Do(func() {
+		authSourcesFset = token.NewFileSet()
+		for _, path := range goSourceFiles(t) {
+			text, err := os.ReadFile(path)
+			if err != nil {
+				authSourcesErr = err
+				return
+			}
+			file, err := parser.ParseFile(authSourcesFset, path, text, parser.SkipObjectResolution)
+			if err != nil {
+				authSourcesErr = fmt.Errorf("parse %s: %w", path, err)
+				return
+			}
+			rel, err := filepath.Rel(repoRoot, path)
+			if err != nil {
+				authSourcesErr = err
+				return
+			}
+			authSourcesAll = append(authSourcesAll, authSource{rel: filepath.ToSlash(rel), text: text, file: file})
+		}
+	})
+	if authSourcesErr != nil {
+		t.Fatal(authSourcesErr)
 	}
+	if len(authSourcesAll) < 100 {
+		t.Fatalf("scanned %d Go files, want the whole tree: the walk is not reaching the code the guards read", len(authSourcesAll))
+	}
+	return authSourcesFset, authSourcesAll
 }
 
 // epochCallSite is one call, or one non-call reference, found in the source.
@@ -97,86 +74,39 @@ type epochCallSite struct {
 	forms  []string // the epoch argument of each call, in source order; nil for a reference
 }
 
-// TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead reads the whole source tree
-// for the property the behavioural tests prove by driving each path: wherever a
-// session is created, the epoch handed to the insert is the one the credential check
-// read — and no function that re-reads the user supplies one from the row it re-read.
-//
-// It holds three things, each in a table that a new call site fails until someone has
-// read it:
-//
-//   - Every CALL of issueTokens, IssueTokens, issueOrTOTP, CreateTOTPPendingToken and
-//     SessionManager.CreateSession anywhere in the tree (not only in the handlers that
-//     exist today: a new handler calling IssueTokens is exactly what this is for) has
-//     its epoch argument in an allowed form for that call site: Login passes the epoch
-//     of the very row it hands to issueOrTOTP (a password check's, a directory
-//     login's); OIDCTokenExchange passes the epoch the exchange code carried;
-//     issueOrTOTP and issueTokens pass their own `epoch` parameter on; Register passes
-//     the account it just created; and VerifyLogin passes exactly `*pending.AuthEpoch`,
-//     the password step's.
-//   - Every NON-CALL reference to those five names (a method value handed to
-//     SetIssueTokensFn, a nil check on the function field) is one of the three that
-//     exist. `create := h.sessionManager.CreateSession; create(…)` and
-//     `mk := h.totpHandler.CreateTOTPPendingToken` are references too: the call
-//     through the alias is one the table never sees, so the reference is what is held.
-//   - No function that only passes an epoch on reads one off a user. VerifyLogin is
-//     the exception that needs a sentence: it re-reads the user, and it may read that
-//     row's AuthEpoch ONLY in the comparison with `*pending.AuthEpoch` that refuses a
-//     pending token the account has outgrown — never as the value the session is
-//     created against. issueTokens, issueOrTOTP, OIDCTokenExchange and
-//     CreateTOTPPendingToken read none at all.
-//
-// With the early comparison in place the carried epoch and the re-read one are equal
-// whenever VerifyLogin reaches the insert, so passing `user.AuthEpoch` there is
-// BEHAVIOURALLY EQUIVALENT to passing `*pending.AuthEpoch`: no test that drives a
-// request can tell them apart. This guard is what kills that mutant, which is the
-// reason it holds the argument's exact form rather than its behaviour.
-//
-// What it does NOT see, so that nobody reads it as more than it is:
-//
-//   - The SSO hand-off is pinned by the VARIABLE, not by the read point.
-//     provisionAndStoreExchange must call storeExchange with `user`, and Callback must
-//     get its code from there; but a GetUserByID re-read assigned to `user` between
-//     the provisioning and the store would pass. The window that opens is the role
-//     sync's — the statements between the provisioning and the store — and what covers
-//     the value itself is TestOIDCCallback_TheExchangeCodeCarriesTheEpochOfTheProvisionedUser,
-//     which drives provisionAndStoreExchange for every provisioning outcome.
-//   - It reads Go SYNTAX, by name. A call made through reflect, a function reached by
-//     an interface that this table does not name, or code in a directory the walk
-//     skips by name (generated, vendor, frontend, .claude) is not seen. The first two
-//     are for review; the third is code that is not part of this checkout's handlers.
+// TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead reads the source tree for what the
+// behavioural tests prove path by path: wherever a session is created, the epoch handed to the
+// insert is the one the credential check read, never one from a row the function re-read.
+// Every CALL of issueTokens, IssueTokens, issueOrTOTP, CreateTOTPPendingToken and
+// SessionManager.CreateSession must pass its epoch in the form allowed for that call site, and
+// every non-call reference to them (an alias hides a call) must be one of the three that exist.
+// `user.AuthEpoch` in VerifyLogin behaves like `*pending.AuthEpoch`, so only the exact form
+// tells them apart. The SSO hand-off is pinned by the variable, its value by
+// TestOIDCCallback_TheExchangeCodeCarriesTheEpochOfTheProvisionedUser.
 func TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead(t *testing.T) {
-	root := filepath.Join("..", "..", "..")
-	files := epochGuardGoFiles(t, root)
-	if len(files) < 100 {
-		t.Fatalf("scanned %d Go files, want the whole tree: the walk is not reaching the code it guards", len(files))
-	}
+	_, sources := authParsedSources(t)
 
 	callees := map[string]bool{
 		"issueTokens": true, "IssueTokens": true, "issueOrTOTP": true,
 		"CreateTOTPPendingToken": true, "CreateSession": true,
 	}
-	// The two OIDC hand-offs that no test can drive from the outside, because Callback
-	// needs an identity provider: Callback calls provisionAndStoreExchange (which a test
-	// drives), and provisionAndStoreExchange calls storeExchange with the user it
-	// provisioned. Keyed "path:EnclosingFunc:callee", valued by the call's arguments.
+	// The two OIDC hand-offs no test can drive from outside, because Callback needs an
+	// identity provider: Callback calls provisionAndStoreExchange (which a test drives),
+	// which calls storeExchange with the user it provisioned. Keyed
+	// "path:EnclosingFunc:callee", valued by the call's arguments.
 	handOffNames := map[string]bool{"provisionAndStoreExchange": true, "storeExchange": true}
 	handOffs := map[string][]string{}
 	var calls, refs []epochCallSite
 	readers := map[string][]string{} // "path:Func" -> the X of every X.AuthEpoch in it
 	userReads := map[string]int{}    // "path:Func" -> user.AuthEpoch reads outside the permitted comparison
 
-	for _, rel := range files {
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, filepath.Join(root, filepath.FromSlash(rel)), nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", rel, err)
-		}
+	for _, src := range sources {
+		rel := src.rel
 		visit := func(fn string, node ast.Node) {
 			where := rel + ":" + fn
 			isCallFun := map[ast.Node]bool{}
-			// The one permitted read of user.AuthEpoch: an operand of `!=` whose other
-			// operand is *pending.AuthEpoch.
+			// The one permitted read of user.AuthEpoch: an operand of `!=` whose other operand
+			// is *pending.AuthEpoch.
 			permitted := map[ast.Node]bool{}
 			ast.Inspect(node, func(n ast.Node) bool {
 				if be, ok := n.(*ast.BinaryExpr); ok && be.Op == token.NEQ {
@@ -239,7 +169,7 @@ func TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead(t *testing.T) {
 				return true
 			})
 		}
-		for _, decl := range file.Decls {
+		for _, decl := range src.file.Decls {
 			switch d := decl.(type) {
 			case *ast.FuncDecl:
 				if d.Body != nil {
@@ -296,36 +226,16 @@ func TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead(t *testing.T) {
 		}
 	})
 
-	t.Run("the functions that only pass an epoch on never read one off a user", func(t *testing.T) {
-		for _, fn := range []string{"issueTokens", "IssueTokens", "issueOrTOTP", "OIDCTokenExchange", "CreateTOTPPendingToken", "VerifyLogin"} {
-			where := "internal/api/handlers/auth.go:" + fn
-			if fn == "VerifyLogin" || fn == "CreateTOTPPendingToken" {
-				where = "internal/api/handlers/totp.go:" + fn
-			}
-			if _, ok := readers[where]; !ok && fn == "VerifyLogin" {
-				t.Fatalf("VerifyLogin reads no AuthEpoch at all: the guard no longer finds what it checks")
-			}
-			if n := userReads[where]; n != 0 {
-				t.Errorf("%s reads user.AuthEpoch %d time(s) outside the one comparison with *pending.AuthEpoch: "+
-					"it must use the epoch it is handed or carries (the credential check's), never the epoch of a user row it holds", where, n)
-			}
+	// The functions that only pass an epoch on read none at all (the next subtest's exact map);
+	// VerifyLogin, which re-reads the user, may read user.AuthEpoch only in that comparison.
+	t.Run("VerifyLogin reads user.AuthEpoch only to compare it with the pending token's", func(t *testing.T) {
+		const where = "internal/api/handlers/totp.go:VerifyLogin"
+		if _, ok := readers[where]; !ok {
+			t.Fatal("VerifyLogin reads no AuthEpoch at all: the guard no longer finds what it checks")
 		}
-		// Apart from VerifyLogin's comparison, none of them reads an AuthEpoch of any
-		// kind off anything but the pending token.
-		for _, fn := range []string{"issueTokens", "IssueTokens", "issueOrTOTP", "OIDCTokenExchange"} {
-			where := "internal/api/handlers/auth.go:" + fn
-			if r := readers[where]; len(r) != 0 {
-				t.Errorf("%s reads .AuthEpoch of %v", where, r)
-			}
-		}
-		if r := readers["internal/api/handlers/totp.go:CreateTOTPPendingToken"]; len(r) != 0 {
-			t.Errorf("CreateTOTPPendingToken reads .AuthEpoch of %v", r)
-		}
-		// VerifyLogin: pending.AuthEpoch (the carried one) and the user's, in the comparison.
-		for _, who := range readers["internal/api/handlers/totp.go:VerifyLogin"] {
-			if who != "pending" && who != "user" {
-				t.Errorf("VerifyLogin reads .AuthEpoch of %q", who)
-			}
+		if n := userReads[where]; n != 0 {
+			t.Errorf("%s reads user.AuthEpoch %d time(s) outside the one comparison with *pending.AuthEpoch: "+
+				"it must use the epoch it carries (the credential check's), never the epoch of a user row it holds", where, n)
 		}
 	})
 
@@ -352,29 +262,28 @@ func TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead(t *testing.T) {
 	})
 
 	t.Run("tryLDAPLogin returns what provisionLDAPUser returned, as it is", func(t *testing.T) {
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, filepath.Join(root, "internal", "api", "handlers", "auth.go"), nil, 0)
-		if err != nil {
-			t.Fatalf("parse auth.go: %v", err)
-		}
 		var found bool
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Name.Name != "tryLDAPLogin" || fn.Body == nil {
+		for _, src := range sources {
+			if src.rel != "internal/api/handlers/auth.go" {
 				continue
 			}
-			found = true
-			last := fn.Body.List[len(fn.Body.List)-1]
-			ret, ok := last.(*ast.ReturnStmt)
-			if !ok || len(ret.Results) != 1 {
-				t.Fatalf("tryLDAPLogin does not end in `return h.provisionLDAPUser(…)`")
-			}
-			call, ok := ret.Results[0].(*ast.CallExpr)
-			if !ok {
-				t.Fatalf("tryLDAPLogin's last return is not a call")
-			}
-			if sel, ok := call.Fun.(*ast.SelectorExpr); !ok || sel.Sel.Name != "provisionLDAPUser" {
-				t.Errorf("tryLDAPLogin ends by returning %s, want provisionLDAPUser's own answer, unchanged", types.ExprString(call.Fun))
+			for _, decl := range src.file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Name.Name != "tryLDAPLogin" || fn.Body == nil {
+					continue
+				}
+				found = true
+				ret, ok := fn.Body.List[len(fn.Body.List)-1].(*ast.ReturnStmt)
+				if !ok || len(ret.Results) != 1 {
+					t.Fatalf("tryLDAPLogin does not end in `return h.provisionLDAPUser(…)`")
+				}
+				call, ok := ret.Results[0].(*ast.CallExpr)
+				if !ok {
+					t.Fatalf("tryLDAPLogin's last return is not a call")
+				}
+				if sel, ok := call.Fun.(*ast.SelectorExpr); !ok || sel.Sel.Name != "provisionLDAPUser" {
+					t.Errorf("tryLDAPLogin ends by returning %s, want provisionLDAPUser's own answer, unchanged", types.ExprString(call.Fun))
+				}
 			}
 		}
 		if !found {
@@ -388,12 +297,11 @@ func TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead(t *testing.T) {
 		}
 	})
 
-	// Callback itself needs an identity provider, so nothing drives it. What a test
-	// does drive is provisionAndStoreExchange, and what makes that cover the callback
-	// is that Callback gets its code from it and that nothing else stores a code. A
-	// Callback that stored its own — `h.storeExchange(c.Context(), db.User{ID: user.ID})`,
-	// a user rebuilt from its id and so at epoch 0 — would pass every behavioural test
-	// and refuse the SSO sign-in of any account whose epoch has ever moved.
+	// Callback itself needs an identity provider, so nothing drives it; what a test does drive
+	// is provisionAndStoreExchange, and that covers the callback only if Callback gets its code
+	// from it and nothing else stores one. A Callback that stored its own, from a user rebuilt
+	// from its id (epoch 0), would pass every behavioural test and refuse the SSO sign-in of
+	// any account whose epoch has ever moved.
 	t.Run("the SSO exchange code is stored only from the provisioning, for the user it returned", func(t *testing.T) {
 		want := map[string][]string{
 			"internal/api/handlers/oidc.go:Callback:provisionAndStoreExchange":      {"c, cfg, userInfo"},
@@ -406,15 +314,13 @@ func TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead(t *testing.T) {
 	})
 }
 
-// TestRevokeAllPaths_BumpTheEpochFirstAndInTheirOwnTransaction proves, against the
-// handlers themselves, that the two revoke-alls that live in auth.go go through the
-// bumping code, in the right place: a password change inside its transaction, after
-// the update and before the listing and the revoke; and a sign-out of all devices on
-// the pool, as the first of its three statements. A handler that ended the sessions
-// through the raw revoke would pass every older test of it — the sessions are
-// revoked — and leave a sign-in that was in flight free to mint a live one.
-//
-// The deactivation, the third, is pinned in users_deactivate_test.go.
+// TestRevokeAllPaths_BumpTheEpochFirstAndInTheirOwnTransaction proves, against the handlers
+// themselves, that the two revoke-alls in auth.go go through the bumping code, in the right
+// place: a password change inside its transaction, after the update and before the listing
+// and the revoke; and a sign-out of all devices on the pool, as the first of its three
+// statements. A handler that ended the sessions through the raw revoke would pass every
+// older test of it and leave a sign-in that was in flight free to mint a live session. The
+// deactivation, the third, is pinned in users_deactivate_test.go.
 func TestRevokeAllPaths_BumpTheEpochFirstAndInTheirOwnTransaction(t *testing.T) {
 	order := func(a *authRaceApp, names ...string) (positions []int, inTx []bool) {
 		t.Helper()
@@ -449,9 +355,7 @@ func TestRevokeAllPaths_BumpTheEpochFirstAndInTheirOwnTransaction(t *testing.T) 
 		before := a.store.snapshotUser().AuthEpoch
 
 		resp, _ := a.postAs(t, "/auth/change-password", changeBody, 120*time.Second)
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("status = %d, want 200", resp.StatusCode)
-		}
+		authRequireStatus(t, resp, http.StatusOK)
 
 		pos, inTx := order(a, "UpdatePassword", "BumpUserAuthEpoch", "ListUserSessions", "RevokeAllUserSessions")
 		if !increasing(pos) {
@@ -470,9 +374,7 @@ func TestRevokeAllPaths_BumpTheEpochFirstAndInTheirOwnTransaction(t *testing.T) 
 		before := a.store.snapshotUser().AuthEpoch
 
 		resp, _ := a.postAs(t, "/auth/logout-all", "{}", 20*time.Second)
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("status = %d, want 200", resp.StatusCode)
-		}
+		authRequireStatus(t, resp, http.StatusOK)
 
 		pos, inTx := order(a, "BumpUserAuthEpoch", "ListUserSessions", "RevokeAllUserSessions")
 		if !increasing(pos) {
@@ -491,9 +393,8 @@ func TestRevokeAllPaths_BumpTheEpochFirstAndInTheirOwnTransaction(t *testing.T) 
 		before := a.store.snapshotUser().AuthEpoch
 
 		resp, _ := a.postAs(t, "/auth/change-password", changeBody, 120*time.Second)
-		if resp.StatusCode != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d, want 503", resp.StatusCode)
-		}
+		authRequireStatus(t, resp, http.StatusServiceUnavailable)
+
 		if got := a.store.snapshotUser().AuthEpoch; got != before {
 			t.Errorf("the epoch is %d after a change that did not happen, want %d: the bump must roll back with the change", got, before)
 		}

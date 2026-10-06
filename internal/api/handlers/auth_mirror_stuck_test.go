@@ -12,22 +12,26 @@ import (
 )
 
 // stuckRedis is a go-redis hook that holds every command stuck answers true for until
-// release is closed — what a Redis that accepts a connection and never answers looks
-// like to its caller: the command neither succeeds nor fails, and no context deadline
-// reaches it.
+// release is closed: what a Redis that accepts a connection and never answers looks like to
+// its caller, the command neither succeeding nor failing, with no context deadline reaching
+// it. done receives the outcome of each held command once it has run.
 type stuckRedis struct {
 	stuck   func(cmd redis.Cmder) bool
 	release chan struct{}
+	done    chan error
 }
 
 func (h *stuckRedis) DialHook(next redis.DialHook) redis.DialHook { return next }
 
 func (h *stuckRedis) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
-		if h.stuck(cmd) {
-			<-h.release
+		if !h.stuck(cmd) {
+			return next(ctx, cmd)
 		}
-		return next(ctx, cmd)
+		<-h.release
+		err := next(ctx, cmd)
+		h.done <- err
+		return err
 	}
 }
 
@@ -45,40 +49,32 @@ func isSessionMirrorWrite(cmd redis.Cmder) bool {
 	return strings.HasPrefix(key, "nexara:session:")
 }
 
-// TestLogin_ARedisThatNeverAnswersDoesNotHoldTheSignIn is the sign-in that the stuck
-// mirror write of internal/auth's TestCreateSession_ARedisThatNeverAnswers… would
-// otherwise hold: a Redis that accepts the write of the session's row and never
-// answers must delay the response by the mirror wait — a second — and not by the
-// client's read timeout, five seconds, tried again. Here it is the whole sign-in:
-// the answer is the 200 with its token and its cookie, the session is live, and the
-// write that was given up on lands when Redis answers after all.
-//
-// The hook holds the command rather than a deadline cutting it short, because a
-// context deadline does not reach the client's socket: only not waiting bounds it.
+// TestLogin_ARedisThatNeverAnswersDoesNotHoldTheSignIn: a Redis that accepts the write of
+// the session's row and never answers must delay the response by the mirror wait, a second,
+// and not by the client's read timeout, five seconds, tried again. The answer is the 200
+// with its token and cookie, the session is live, and the write that was given up on lands
+// when Redis answers after all. The hook holds the command rather than a deadline cutting it
+// short, because a context deadline does not reach the client's socket: only not waiting
+// bounds it. The sibling in internal/auth is TestCreateSession_ARedisThatNeverAnswers….
 func TestLogin_ARedisThatNeverAnswersDoesNotHoldTheSignIn(t *testing.T) {
 	user := epochUser(t, epochLoginEmail, 2)
 	a := newEpochApp(t, newEpochStore(user), epochOptions{})
 
-	release := make(chan struct{})
+	hook := &stuckRedis{stuck: isSessionMirrorWrite, release: make(chan struct{}), done: make(chan error, 8)}
 	var once sync.Once
-	releaseAll := func() { once.Do(func() { close(release) }) }
+	releaseAll := func() { once.Do(func() { close(hook.release) }) }
 	t.Cleanup(releaseAll)
-	a.rdb.AddHook(&stuckRedis{stuck: isSessionMirrorWrite, release: release})
+	a.rdb.AddHook(hook)
 
 	start := time.Now()
 	resp := a.send(t, http.MethodPost, "/auth/login", epochLoginBody(epochLoginEmail), nil, 10*time.Second)
 	elapsed := time.Since(start)
-	body := decodeObject(t, resp)
+	body := authRequireStatus(t, resp, http.StatusOK) // a stuck mirror must not fail a sign-in that created its session
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %v): a stuck mirror must not fail a sign-in that created its session", resp.StatusCode, body)
-	}
 	if tok, _ := body["access_token"].(string); tok == "" {
 		t.Errorf("no access token: %v", body)
 	}
-	if cookies := refreshCookies(resp); len(cookies) != 1 || cookies[0].Value == "" {
-		t.Errorf("refresh cookies = %+v, want one live cookie", cookies)
-	}
+	authRequireCookie(t, resp, cookieNew)
 	if elapsed > 3*time.Second {
 		t.Errorf("the sign-in took %v: it waited for the stuck write, whose wait is one second", elapsed)
 	}
@@ -92,9 +88,13 @@ func TestLogin_ARedisThatNeverAnswersDoesNotHoldTheSignIn(t *testing.T) {
 	}
 
 	releaseAll()
-	deadline := time.Now().Add(5 * time.Second)
-	for !a.redis.Exists(key) && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case err := <-hook.done:
+		if err != nil {
+			t.Errorf("the released write failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the released write never ran: it was abandoned, not left to finish")
 	}
 	if !a.redis.Exists(key) {
 		t.Error("the released write never landed: it was abandoned, not left to finish")
