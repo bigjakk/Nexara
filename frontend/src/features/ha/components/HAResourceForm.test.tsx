@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
+import { fill } from "@/test/user";
 import { apiClient } from "@/lib/api-client";
 import { HAResourceForm } from "./HAResourceForm";
 import type { HAResource } from "@/features/ha/api/ha-queries";
@@ -49,7 +50,7 @@ function onlyPut(): [string, unknown] {
  * that parseInt misread. The precondition makes that impossible to miss.
  */
 function setNumberInput(input: HTMLElement, text: string) {
-  fireEvent.change(input, { target: { value: text } });
+  fill(input, text);
   expect((input as HTMLInputElement).value).toBe(text);
 }
 

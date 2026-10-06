@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useState, type ReactNode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { useState } from "react";
+import { screen, waitFor } from "@testing-library/react";
+import type { UserEvent } from "@testing-library/user-event";
+import type { QueryClient } from "@tanstack/react-query";
 import { renderWithProviders } from "@/test/test-utils";
+import { deferred } from "@/test/fake-server";
+import { fill, setupUser } from "@/test/user";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
 import { usePBSKeyStore } from "@/stores/pbs-key-store";
@@ -12,9 +13,13 @@ import { AddStorageDialog } from "./AddStorageDialog";
 import { PendingPBSKeyDialog } from "./PendingPBSKey";
 import type { StorageWriteResponse } from "../types/storage";
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: { get: vi.fn(), list: vi.fn(), put: vi.fn(), post: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
+
+// Not under test, and its injected stylesheet makes every getComputedStyle
+// call (role queries, Radix Presence, user-event) match against its rules.
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedList = vi.mocked(apiClient.list);
 const mockedPost = vi.mocked(apiClient.post);
@@ -27,11 +32,10 @@ const PASTED_KEY =
 
 const CREATE_URL = "/api/v1/clusters/c1/storage";
 
+let user: UserEvent;
+
 /** Picks a storage type from the Type select and names the storage. */
-async function chooseType(
-  user: ReturnType<typeof userEvent.setup>,
-  typeLabel: string,
-) {
+async function chooseType(typeLabel: string) {
   // The Type select is the only combobox showing "Directory" on open.
   const typeSelect = screen
     .getAllByRole("combobox")
@@ -39,7 +43,7 @@ async function chooseType(
   if (!typeSelect) throw new Error("no Type select");
   await user.click(typeSelect);
   await user.click(await screen.findByRole("option", { name: typeLabel }));
-  await user.type(screen.getByLabelText("ID"), "store01");
+  fill(screen.getByLabelText("ID"), "store01");
 }
 
 /**
@@ -48,29 +52,15 @@ async function chooseType(
  * so a test can look inside its caches.
  */
 async function openAdd(typeLabel: string) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>{children}</MemoryRouter>
-    </QueryClientProvider>
-  );
-  const user = userEvent.setup();
-  render(
+  const { queryClient } = renderWithProviders(
     <>
       <AddStorageDialog clusterId="c1" />
       <PendingPBSKeyDialog />
     </>,
-    { wrapper },
   );
   await user.click(screen.getByRole("button", { name: "Add Storage" }));
-  await chooseType(user, typeLabel);
-  return { user, queryClient };
-}
-
-async function openWithType(typeLabel: string) {
-  return (await openAdd(typeLabel)).user;
+  await chooseType(typeLabel);
+  return queryClient;
 }
 
 /** Whether any mutation in the cache still holds text in its request or answer. */
@@ -106,11 +96,11 @@ function ControlledAddStorage() {
 }
 
 /** Fills the fields a PBS storage requires. */
-async function fillPBS(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText(/^Server/), "pbs.example.com");
-  await user.type(screen.getByLabelText(/^Datastore/), "datastore01");
-  await user.type(screen.getByLabelText(/^Username/), "backup@pbs");
-  await user.type(screen.getByLabelText(/^Password/), "not-a-real-password");
+function fillPBS() {
+  fill(screen.getByLabelText(/^Server/), "pbs.example.com");
+  fill(screen.getByLabelText(/^Datastore/), "datastore01");
+  fill(screen.getByLabelText(/^Username/), "backup@pbs");
+  fill(screen.getByLabelText(/^Password/), "not-a-real-password");
 }
 
 const PBS_PARAMS = {
@@ -130,28 +120,37 @@ function sentBody(): unknown {
   return call[1];
 }
 
-describe("AddStorageDialog — PBS encryption", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    usePBSKeyStore.setState({ pending: [] });
-    // A generated key is shown only to the user whose save generated it.
-    useAuthStore.setState({
-      user: {
-        id: "user-operator",
-        email: "operator@example.com",
-        display_name: "Operator",
-        role: "user",
-      },
-      permissions: [],
-      isAuthenticated: true,
-    });
-    mockedList.mockResolvedValue([]);
-    mockedPost.mockResolvedValue({ status: "created", storage: "store01" });
+beforeEach(() => {
+  user = setupUser();
+  vi.clearAllMocks();
+  usePBSKeyStore.setState({ pending: [] });
+  // A generated key is shown only to the user whose save generated it.
+  useAuthStore.setState({
+    user: {
+      id: "user-operator",
+      email: "operator@example.com",
+      display_name: "Operator",
+      role: "user",
+    },
+    permissions: [],
+    isAuthenticated: true,
   });
+  mockedList.mockResolvedValue([]);
+  mockedPost.mockResolvedValue({ status: "created", storage: "store01" });
+});
 
-  it("defaults to no encryption and sends no key", async () => {
-    const user = await openWithType("Proxmox Backup Server");
-    await fillPBS(user);
+describe("AddStorageDialog — PBS encryption", () => {
+  it("defaults to no encryption and sends no key, and offers no saved login for the password", async () => {
+    await openAdd("Proxmox Backup Server");
+    // Only the storage's credential: the username is an ordinary field.
+    expect(screen.getByLabelText(/^Password/)).toHaveAttribute(
+      "autocomplete",
+      "new-password",
+    );
+    expect(screen.getByLabelText(/^Username/)).not.toHaveAttribute(
+      "autocomplete",
+    );
+    fillPBS();
 
     expect(screen.getByRole("radio", { name: "Do not encrypt" })).toBeChecked();
     await user.click(screen.getByRole("button", { name: "Create Storage" }));
@@ -172,8 +171,8 @@ describe("AddStorageDialog — PBS encryption", () => {
       storage: "store01",
       generated_encryption_key: GENERATED_KEY,
     });
-    const user = await openWithType("Proxmox Backup Server");
-    await fillPBS(user);
+    await openAdd("Proxmox Backup Server");
+    fillPBS();
 
     await user.click(
       screen.getByRole("radio", { name: "Auto-generate a key" }),
@@ -191,46 +190,15 @@ describe("AddStorageDialog — PBS encryption", () => {
     expect(screen.getByRole("button", { name: "Done" })).toBeDisabled();
   });
 
-  it("a pasted key is sent as it is and shows no must-save dialog", async () => {
+  it("a pasted key is sent as it is, shows no must-save dialog, and leaves no copy in the mutation cache", async () => {
     // Proxmox echoes a supplied key back; that is not a key to save.
     mockedPost.mockResolvedValue({
       status: "created",
       storage: "store01",
       generated_encryption_key: PASTED_KEY,
     });
-    const user = await openWithType("Proxmox Backup Server");
-    await fillPBS(user);
-
-    await user.click(
-      screen.getByRole("radio", { name: "Use an existing key" }),
-    );
-    expect(
-      screen.getByRole("button", { name: "Create Storage" }),
-    ).toBeDisabled();
-    await user.click(screen.getByLabelText("Key"));
-    await user.paste(PASTED_KEY);
-    await user.click(screen.getByRole("button", { name: "Create Storage" }));
-
-    await waitFor(() => {
-      expect(mockedPost).toHaveBeenCalled();
-    });
-    expect(sentBody()).toEqual({
-      storage: "store01",
-      type: "pbs",
-      params: { ...PBS_PARAMS, "encryption-key": PASTED_KEY },
-    });
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("button", { name: "Create Storage" }),
-      ).toBeNull();
-    });
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(usePBSKeyStore.getState().pending).toEqual([]);
-  });
-
-  it("leaves no pasted key in the mutation cache once the create is done", async () => {
-    const { user, queryClient } = await openAdd("Proxmox Backup Server");
-    await fillPBS(user);
+    const queryClient = await openAdd("Proxmox Backup Server");
+    fillPBS();
     // The positive control: the key really did pass through the cache, so
     // its absence afterwards is not merely a cache that never saw it.
     let cacheSawKey = false;
@@ -243,15 +211,24 @@ describe("AddStorageDialog — PBS encryption", () => {
     await user.click(
       screen.getByRole("radio", { name: "Use an existing key" }),
     );
-    await user.click(screen.getByLabelText("Key"));
-    await user.paste(PASTED_KEY);
+    expect(
+      screen.getByRole("button", { name: "Create Storage" }),
+    ).toBeDisabled();
+    fill(screen.getByLabelText("Key"), PASTED_KEY);
     await user.click(screen.getByRole("button", { name: "Create Storage" }));
+
     await waitFor(() => {
       expect(
         screen.queryByRole("button", { name: "Create Storage" }),
       ).toBeNull();
     });
-
+    expect(sentBody()).toEqual({
+      storage: "store01",
+      type: "pbs",
+      params: { ...PBS_PARAMS, "encryption-key": PASTED_KEY },
+    });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(usePBSKeyStore.getState().pending).toEqual([]);
     await waitFor(() => {
       expect(
         mutationCacheHolds(queryClient, "CANARY-pasted-key-material"),
@@ -261,101 +238,58 @@ describe("AddStorageDialog — PBS encryption", () => {
     expect(cacheSawKey).toBe(true);
   });
 
-  it("offers no saved login for the storage's password", async () => {
-    await openWithType("Proxmox Backup Server");
+  // Closing resets the mutation the dialog observes, so a key delivered by the
+  // mutate call's own callback would be lost here; the hook's callback runs
+  // from the mutation itself.
+  it.each([
+    ["Escape", () => user.keyboard("{Escape}")],
+    [
+      "Cancel",
+      () => user.click(screen.getByRole("button", { name: "Cancel" })),
+    ],
+  ])(
+    "hands over the key even when the dialog was closed with %s before the answer came",
+    async (_, close) => {
+      const answer = deferred<StorageWriteResponse>();
+      mockedPost.mockReturnValue(answer.promise);
+      await openAdd("Proxmox Backup Server");
+      fillPBS();
+      await user.click(
+        screen.getByRole("radio", { name: "Auto-generate a key" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Create Storage" }));
+      await waitFor(() => {
+        expect(mockedPost).toHaveBeenCalled();
+      });
 
-    expect(screen.getByLabelText(/^Password/)).toHaveAttribute(
-      "autocomplete",
-      "new-password",
-    );
-    // Only the credential: the username is an ordinary field.
-    expect(screen.getByLabelText(/^Username/)).not.toHaveAttribute(
-      "autocomplete",
-    );
-  });
+      await close();
+      expect(screen.queryByRole("dialog")).toBeNull();
 
-  it("hands over the key even when the dialog was closed before the answer came", async () => {
-    let answer: (response: StorageWriteResponse) => void = () => undefined;
-    mockedPost.mockImplementation(
-      () =>
-        new Promise<StorageWriteResponse>((resolve) => {
-          answer = resolve;
-        }),
-    );
-    const user = await openWithType("Proxmox Backup Server");
-    await fillPBS(user);
-    await user.click(
-      screen.getByRole("radio", { name: "Auto-generate a key" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Create Storage" }));
-    await waitFor(() => {
-      expect(mockedPost).toHaveBeenCalled();
-    });
+      answer.resolve({
+        status: "created",
+        storage: "store01",
+        generated_encryption_key: GENERATED_KEY,
+      });
 
-    // Closing resets the mutation the dialog observes, so a key delivered by
-    // the mutate call's own callback would be lost here; the hook's callback
-    // runs from the mutation itself.
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    answer({
-      status: "created",
-      storage: "store01",
-      generated_encryption_key: GENERATED_KEY,
-    });
-
-    await screen.findByRole("alertdialog");
-    expect(screen.getByLabelText("Encryption key")).toHaveValue(GENERATED_KEY);
-  });
-
-  it("Cancel closes the dialog while the create runs, and the key still arrives", async () => {
-    let answer: (response: StorageWriteResponse) => void = () => undefined;
-    mockedPost.mockImplementation(
-      () =>
-        new Promise<StorageWriteResponse>((resolve) => {
-          answer = resolve;
-        }),
-    );
-    const user = await openWithType("Proxmox Backup Server");
-    await fillPBS(user);
-    await user.click(
-      screen.getByRole("radio", { name: "Auto-generate a key" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Create Storage" }));
-    await waitFor(() => {
-      expect(mockedPost).toHaveBeenCalled();
-    });
-
-    // As Escape and the close button do.
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    answer({
-      status: "created",
-      storage: "store01",
-      generated_encryption_key: GENERATED_KEY,
-    });
-    await screen.findByRole("alertdialog");
-    expect(screen.getByLabelText("Encryption key")).toHaveValue(GENERATED_KEY);
-  });
+      await screen.findByRole("alertdialog");
+      expect(screen.getByLabelText("Encryption key")).toHaveValue(
+        GENERATED_KEY,
+      );
+    },
+  );
 
   it("drops a pasted key and a typed password when the dialog closes, even where reopening keeps the form", async () => {
-    const user = userEvent.setup();
     renderWithProviders(<ControlledAddStorage />);
-    await chooseType(user, "Proxmox Backup Server");
+    await chooseType("Proxmox Backup Server");
 
     // Once closed with Escape, which goes through the dialog's onOpenChange,
     // and once with Cancel, which does not.
     for (const close of ["Escape", "Cancel"]) {
-      await user.type(
-        screen.getByLabelText(/^Password/),
-        "not-a-real-password",
-      );
+      fill(screen.getByLabelText(/^Password/), "not-a-real-password");
       await user.click(
         screen.getByRole("radio", { name: "Use an existing key" }),
       );
-      await user.click(screen.getByLabelText("Key"));
-      await user.paste(PASTED_KEY);
+      fill(screen.getByLabelText("Key"), PASTED_KEY);
 
       if (close === "Escape") await user.keyboard("{Escape}");
       else await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -375,40 +309,18 @@ describe("AddStorageDialog — PBS encryption", () => {
 });
 
 describe("AddStorageDialog — Ceph keyring", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    usePBSKeyStore.setState({ pending: [] });
-    // A generated key is shown only to the user whose save generated it.
-    useAuthStore.setState({
-      user: {
-        id: "user-operator",
-        email: "operator@example.com",
-        display_name: "Operator",
-        role: "user",
-      },
-      permissions: [],
-      isAuthenticated: true,
-    });
-    mockedList.mockResolvedValue([]);
-    mockedPost.mockResolvedValue({ status: "created", storage: "store01" });
-  });
-
   it("asks for a keyring only for an external cluster, and sends its contents", async () => {
-    const user = await openWithType("RBD (Ceph)");
+    await openAdd("RBD (Ceph)");
 
     expect(screen.queryByLabelText(/^Keyring/)).toBeNull();
-    await user.type(
-      screen.getByLabelText("Monitor Hosts"),
-      "192.0.2.11,192.0.2.12",
-    );
+    fill(screen.getByLabelText("Monitor Hosts"), "192.0.2.11,192.0.2.12");
     const keyring = screen.getByLabelText(/^Keyring/);
     expect(keyring.tagName).toBe("TEXTAREA");
     // Required once shown, as the Proxmox GUI has it.
     expect(
       screen.getByRole("button", { name: "Create Storage" }),
     ).toBeDisabled();
-    await user.click(keyring);
-    await user.paste("[client.admin]\n\tkey = CANARY-keyring-contents\n");
+    fill(keyring, "[client.admin]\n\tkey = CANARY-keyring-contents\n");
     await user.click(screen.getByRole("button", { name: "Create Storage" }));
 
     await waitFor(() => {
@@ -426,10 +338,10 @@ describe("AddStorageDialog — Ceph keyring", () => {
   });
 
   it("asks CephFS for the bare secret key, and sends it as keyring", async () => {
-    const user = await openWithType("CephFS");
+    await openAdd("CephFS");
 
     expect(screen.queryByLabelText(/^Secret Key/)).toBeNull();
-    await user.type(screen.getByLabelText("Monitor Hosts"), "192.0.2.11");
+    fill(screen.getByLabelText("Monitor Hosts"), "192.0.2.11");
     const secret = screen.getByLabelText(/^Secret Key/);
     expect(secret).toHaveAttribute("type", "password");
     // "off" is ignored on a password field; this keeps the saved Nexara
@@ -438,7 +350,7 @@ describe("AddStorageDialog — Ceph keyring", () => {
     expect(
       screen.getByRole("button", { name: "Create Storage" }),
     ).toBeDisabled();
-    await user.type(secret, "CANARY-cephfs-secret");
+    fill(secret, "CANARY-cephfs-secret");
     await user.click(screen.getByRole("button", { name: "Create Storage" }));
 
     await waitFor(() => {
@@ -456,12 +368,14 @@ describe("AddStorageDialog — Ceph keyring", () => {
   });
 
   it("does not send a keyring typed before Monitor Hosts was cleared", async () => {
-    const user = await openWithType("RBD (Ceph)");
+    await openAdd("RBD (Ceph)");
 
-    await user.type(screen.getByLabelText("Monitor Hosts"), "192.0.2.11");
-    await user.click(screen.getByLabelText(/^Keyring/));
-    await user.paste("[client.admin]\n\tkey = CANARY-keyring-contents\n");
-    await user.clear(screen.getByLabelText("Monitor Hosts"));
+    fill(screen.getByLabelText("Monitor Hosts"), "192.0.2.11");
+    fill(
+      screen.getByLabelText(/^Keyring/),
+      "[client.admin]\n\tkey = CANARY-keyring-contents\n",
+    );
+    fill(screen.getByLabelText("Monitor Hosts"), "");
     await user.click(screen.getByRole("button", { name: "Create Storage" }));
 
     await waitFor(() => {

@@ -1,23 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import type { UserEvent } from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
+import { deferred } from "@/test/fake-server";
+import { fill, setupUser } from "@/test/user";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { HardwarePanel } from "./HardwarePanel";
 
 // The transport is mocked rather than the hooks, so the real useDetachDisk and
 // useSetVMConfig run and each test can assert the exact request that leaves
 // the browser — which is the claim a destructive action's test has to make.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: { get: vi.fn(), list: vi.fn(), post: vi.fn(), put: vi.fn() },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
+
+// Not under test, and its injected stylesheet makes every getComputedStyle
+// call (role queries, Radix Presence, user-event) match against its rules.
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedGet = vi.mocked(apiClient.get);
 const mockedList = vi.mocked(apiClient.list);
@@ -89,6 +88,8 @@ const props = {
   nodeName: "pve-01",
 };
 
+let user: UserEvent;
+
 /** The disk row whose key label is `key` — the element holding its buttons. */
 function diskRow(key: string): HTMLElement {
   const rows = screen
@@ -105,7 +106,14 @@ function diskRow(key: string): HTMLElement {
   return row;
 }
 
-async function openDeleteDialog(user: ReturnType<typeof userEvent.setup>) {
+/** The card of disk `key` — the element holding its Cache and Resize To. */
+function diskCard(key: string): HTMLElement {
+  const card = diskRow(key).parentElement;
+  if (!card) throw new Error(`no disk card for ${key}`);
+  return card;
+}
+
+async function openDeleteDialog() {
   await user.click(
     within(diskRow("unused0")).getByRole("button", { name: /remove/i }),
   );
@@ -116,7 +124,7 @@ async function openDeleteDialog(user: ReturnType<typeof userEvent.setup>) {
 // new disk and a new device — each through the control a user would use. They
 // are the four kinds of state Save applies that a config refetch does not
 // re-read, so a test of "everything staged is cleared" has to stage all four.
-async function stageOneOfEachKind(user: ReturnType<typeof userEvent.setup>) {
+async function stageOneOfEachKind() {
   await user.click(
     within(diskRow("scsi0")).getByRole("button", { name: /remove/i }),
   );
@@ -126,10 +134,7 @@ async function stageOneOfEachKind(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Add Disk" }));
   const addDiskForm = screen.getByText("Add New Disk").parentElement;
   if (!addDiskForm) throw new Error("Add Disk form not found");
-  await user.selectOptions(
-    within(addDiskForm).getByDisplayValue("Select..."),
-    "store01",
-  );
+  fill(within(addDiskForm).getByDisplayValue("Select..."), "store01");
   await user.click(within(addDiskForm).getByRole("button", { name: "Add" }));
   await user.click(screen.getByRole("button", { name: /add device/i }));
   await user.click(
@@ -155,29 +160,21 @@ function expectNothingStaged() {
   expect(screen.queryByText("Serial Ports (0)")).not.toBeInTheDocument();
 }
 
-function deferred<T>() {
-  let resolve: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
+beforeEach(() => {
+  user = setupUser();
+  // reset, not clear: one test's post implementation must not answer the
+  // next test's request.
+  vi.resetAllMocks();
+  serverConfig = vmConfig();
+  serveConfig();
+});
 
 describe("HardwarePanel unused disk removal", () => {
-  beforeEach(() => {
-    // reset, not clear: one test's post implementation must not answer the
-    // next test's request.
-    vi.resetAllMocks();
-    serverConfig = vmConfig();
-    serveConfig();
-  });
-
-  it("asks before deleting, naming the volume and saying it is permanent", async () => {
-    const user = userEvent.setup();
+  it("asks before deleting, naming the volume and saying it is permanent, sends nothing when cancelled, and still stages a live disk's removal for Save without asking", async () => {
     renderWithProviders(<HardwarePanel {...props} />);
     await screen.findByText("unused0");
 
-    const dialog = await openDeleteDialog(user);
+    const dialog = await openDeleteDialog();
 
     expect(
       within(dialog).getByText("Delete unused disk unused0?"),
@@ -189,90 +186,38 @@ describe("HardwarePanel unused disk removal", () => {
     // Opening the dialog is not the delete.
     expect(mockedPost).not.toHaveBeenCalled();
     expect(mockedPut).not.toHaveBeenCalled();
-  });
 
-  it("sends nothing when cancelled, and keeps the disk", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<HardwarePanel {...props} />);
-    await screen.findByText("unused0");
-
-    const dialog = await openDeleteDialog(user);
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(mockedPost).not.toHaveBeenCalled();
     expect(mockedPut).not.toHaveBeenCalled();
     expect(diskRow("unused0")).toBeInTheDocument();
-  });
 
-  it("sends exactly the detach request on confirm, then closes", async () => {
-    mockedPost.mockImplementation(serverDropsUnused0);
-    const user = userEvent.setup();
-    renderWithProviders(<HardwarePanel {...props} />);
-    await screen.findByText("unused0");
-
-    const dialog = await openDeleteDialog(user);
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Disk" }),
+      within(diskRow("scsi0")).getByRole("button", { name: /remove/i }),
     );
 
-    expect(mockedPost.mock.calls).toEqual([[DETACH_URL, { disk: "unused0" }]]);
-    // Not smuggled into a config write alongside it.
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByText(/marked for\s+removal/i)).toBeInTheDocument();
+    expect(mockedPost).not.toHaveBeenCalled();
     expect(mockedPut).not.toHaveBeenCalled();
-    await waitFor(() => {
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    });
-    await waitFor(() => {
-      expect(screen.queryByText("unused0")).not.toBeInTheDocument();
-    });
   });
 
-  it("holds the dialog while the delete is in flight", async () => {
+  it("sends exactly the detach request, keeps a failure on screen to retry or leave and does not carry it over, holds the dialog while the delete is in flight, and closes on success", async () => {
+    const failure = new ApiClientError(409, {
+      error: "conflict",
+      message: "VM is locked (backup)",
+    });
     const pending = deferred<unknown>();
-    mockedPost.mockReturnValue(pending.promise);
-    const user = userEvent.setup();
+    mockedPost
+      .mockRejectedValueOnce(failure)
+      .mockRejectedValueOnce(failure)
+      .mockReturnValueOnce(pending.promise);
     renderWithProviders(<HardwarePanel {...props} />);
     await screen.findByText("unused0");
 
-    const dialog = await openDeleteDialog(user);
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete Disk" }),
-    );
-
-    const confirm = await within(dialog).findByRole("button", {
-      name: "Deleting...",
-    });
-    expect(confirm).toBeDisabled();
-    // Cancel cannot un-send a request, so it is not offered as if it could.
-    expect(
-      within(dialog).getByRole("button", { name: "Cancel" }),
-    ).toBeDisabled();
-    await user.keyboard("{Escape}");
-    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
-    expect(mockedPost).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      pending.resolve({ upid: "", status: "completed" });
-      await pending.promise;
-    });
-    await waitFor(() => {
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    });
-    expect(mockedPost).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps a failure on screen, lets the user retry or leave, and does not carry it over", async () => {
-    mockedPost.mockRejectedValue(
-      new ApiClientError(409, {
-        error: "conflict",
-        message: "VM is locked (backup)",
-      }),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<HardwarePanel {...props} />);
-    await screen.findByText("unused0");
-
-    let dialog = await openDeleteDialog(user);
+    let dialog = await openDeleteDialog();
     await user.click(
       within(dialog).getByRole("button", { name: "Delete Disk" }),
     );
@@ -293,30 +238,49 @@ describe("HardwarePanel unused disk removal", () => {
     expect(
       await within(dialog).findByText("VM is locked (backup)"),
     ).toBeInTheDocument();
-    expect(mockedPut).not.toHaveBeenCalled();
 
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(diskRow("unused0")).toBeInTheDocument();
 
-    dialog = await openDeleteDialog(user);
+    dialog = await openDeleteDialog();
     expect(
       within(dialog).queryByText("VM is locked (backup)"),
     ).not.toBeInTheDocument();
-  });
 
-  it("still stages a live disk's removal for Save, without asking", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<HardwarePanel {...props} />);
-    await screen.findByText("unused0");
-
+    // Once more, held in flight.
     await user.click(
-      within(diskRow("scsi0")).getByRole("button", { name: /remove/i }),
+      within(dialog).getByRole("button", { name: "Delete Disk" }),
     );
+    const confirm = await within(dialog).findByRole("button", {
+      name: "Deleting...",
+    });
+    expect(confirm).toBeDisabled();
+    // Cancel cannot un-send a request, so it is not offered as if it could.
+    expect(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    ).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(mockedPost).toHaveBeenCalledTimes(3);
 
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expect(screen.getByText(/marked for\s+removal/i)).toBeInTheDocument();
-    expect(mockedPost).not.toHaveBeenCalled();
+    await act(async () => {
+      void serverDropsUnused0();
+      pending.resolve({ upid: "", status: "completed" });
+      await pending.promise;
+    });
+    await waitFor(() => {
+      expect(dialog).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("unused0")).not.toBeInTheDocument();
+    });
+    expect(mockedPost.mock.calls).toEqual([
+      [DETACH_URL, { disk: "unused0" }],
+      [DETACH_URL, { disk: "unused0" }],
+      [DETACH_URL, { disk: "unused0" }],
+    ]);
+    // Not smuggled into a config write alongside it.
     expect(mockedPut).not.toHaveBeenCalled();
   });
 
@@ -326,10 +290,9 @@ describe("HardwarePanel unused disk removal", () => {
   // next Save sent the removal alone: half of what the user had prepared.
   it("discards every unsaved change after a delete, so a later Save cannot apply half of them", async () => {
     mockedPost.mockImplementation(serverDropsUnused0);
-    const user = userEvent.setup();
     renderWithProviders(<HardwarePanel {...props} />);
     await screen.findByText("unused0");
-    const save = screen.getByRole("button", { name: /save changes/i });
+    const save = screen.getByText("Save Changes", { selector: "button" });
     // The fixture opens clean, so Save being disabled at the end is the
     // panel having nothing to send, not the panel never having had anything.
     expect(save).toBeDisabled();
@@ -339,14 +302,13 @@ describe("HardwarePanel unused disk removal", () => {
       .getByText("Memory (MiB)")
       .parentElement?.querySelector("input");
     if (!memory) throw new Error("Memory input not found");
-    await user.clear(memory);
-    await user.type(memory, "8192");
+    fill(memory, "8192");
 
     // ...and one change of every staged kind.
-    await stageOneOfEachKind(user);
+    await stageOneOfEachKind();
     expect(save).toBeEnabled();
 
-    const dialog = await openDeleteDialog(user);
+    const dialog = await openDeleteDialog();
     expect(dialog).toHaveTextContent(
       /unsaved changes in this panel will be discarded/i,
     );
@@ -374,13 +336,12 @@ describe("HardwarePanel unused disk removal", () => {
   // only the disk removals would pass a test that staged only a disk removal.
   it("clears every staged kind once Save succeeds", async () => {
     mockedPut.mockResolvedValue({ status: "ok" });
-    const user = userEvent.setup();
     renderWithProviders(<HardwarePanel {...props} />);
     await screen.findByText("unused0");
-    const save = screen.getByRole("button", { name: /save changes/i });
+    const save = screen.getByText("Save Changes", { selector: "button" });
     expect(save).toBeDisabled();
 
-    await stageOneOfEachKind(user);
+    await stageOneOfEachKind();
     expect(save).toBeEnabled();
     await user.click(save);
 
@@ -455,10 +416,8 @@ function control(scope: HTMLElement, text: string) {
 }
 
 /** Edit net0's bridge to vmbr1, the edit NET0_ON_VMBR1 describes. */
-async function moveNet0ToVmbr1(user: ReturnType<typeof userEvent.setup>) {
-  const bridge = control(nicCard("net0"), "Bridge");
-  await user.clear(bridge);
-  await user.type(bridge, "vmbr1");
+function moveNet0ToVmbr1() {
+  fill(control(nicCard("net0"), "Bridge"), "vmbr1");
 }
 
 async function renderPanel(config: Record<string, unknown>) {
@@ -468,13 +427,10 @@ async function renderPanel(config: Record<string, unknown>) {
   // same pass as the snapshot Save compares against. Once net0's MAC is on
   // screen, Save's state is about the config, not a panel still loading.
   await screen.findByText(MAC0);
-  return screen.getByRole("button", { name: /save changes/i });
+  return screen.getByText("Save Changes", { selector: "button" });
 }
 
-async function saveAndGetFields(
-  user: ReturnType<typeof userEvent.setup>,
-  save: HTMLElement,
-) {
+async function saveAndGetFields(save: HTMLElement) {
   expect(save).toBeEnabled();
   await user.click(save);
   await waitFor(() => {
@@ -486,323 +442,207 @@ async function saveAndGetFields(
 
 describe("HardwarePanel dirty check", () => {
   beforeEach(() => {
-    vi.resetAllMocks();
-    serveConfig();
     mockedPut.mockResolvedValue({ status: "ok" });
   });
 
-  it.each([
-    // Either the NICs or the missing vga line would make this one dirty...
-    ["and no vga line", nicVM()],
-    // ...and with vga spelled out, only the NICs could.
-    ["and vga: std", nicVM({ vga: "std" })],
-  ])(
-    "opens clean with NICs carrying options it has no control for %s",
-    async (_name, config) => {
-      const user = userEvent.setup();
-      const save = await renderPanel(config);
-      expect(save).toBeDisabled();
-
-      // Not disabled for some other reason: an edit enables it.
-      await moveNet0ToVmbr1(user);
-      expect(save).toBeEnabled();
-    },
-  );
-
-  it("sends only the edited NIC, as stored but for the edited option", async () => {
-    const user = userEvent.setup();
+  // The panel opens clean with NICs carrying options it has no control for and
+  // no vga line: either would make it dirty if it were rebuilt from the fields.
+  it("sends only what was edited: a NIC as stored but for the edited option, and vga as picked, and not the other NIC", async () => {
     const save = await renderPanel(nicVM());
-
-    await moveNet0ToVmbr1(user);
-
-    expect(await saveAndGetFields(user, save)).toEqual([
-      [CONFIG_URL, { fields: { net0: NET0_ON_VMBR1 } }],
-    ]);
-  });
-
-  it("sends only vga when only vga is edited", async () => {
-    const user = userEvent.setup();
-    const save = await renderPanel(nicVM());
+    expect(save).toBeDisabled();
     const vga = control(document.body, "VGA");
     // No vga line reads as Proxmox's default, not as a type it may not be.
     expect(vga).toHaveValue("");
 
-    await user.selectOptions(vga, "qxl");
+    moveNet0ToVmbr1();
+    fill(vga, "qxl");
 
-    expect(await saveAndGetFields(user, save)).toEqual([
-      [CONFIG_URL, { fields: { vga: "qxl" } }],
+    expect(await saveAndGetFields(save)).toEqual([
+      [CONFIG_URL, { fields: { net0: NET0_ON_VMBR1, vga: "qxl" } }],
     ]);
   });
 
   it("keeps the vga options it has no control for when the type changes", async () => {
-    const user = userEvent.setup();
     const save = await renderPanel(nicVM({ vga: "std,clipboard=vnc" }));
     expect(save).toBeDisabled();
 
-    await user.selectOptions(control(document.body, "VGA"), "qxl");
+    fill(control(document.body, "VGA"), "qxl");
 
-    expect(await saveAndGetFields(user, save)).toEqual([
+    expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { vga: "qxl,clipboard=vnc" } }],
     ]);
   });
 
   it("deletes vga when it is set back to the default", async () => {
-    const user = userEvent.setup();
     const save = await renderPanel(nicVM({ vga: "qxl" }));
     const vga = control(document.body, "VGA");
     expect(vga).toHaveValue("qxl");
 
-    await user.selectOptions(vga, "Default");
+    fill(vga, "");
 
-    expect(await saveAndGetFields(user, save)).toEqual([
+    expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { delete: "vga" } }],
     ]);
   });
 
-  // React shows the FIRST option of a select whose value matches none, which
-  // here is "Default" — for a VM that has a different, real type.
-  it("shows a vga type it has no option for as the current value", async () => {
-    const save = await renderPanel(nicVM({ vga: "qxl2" }));
-    expect(control(document.body, "VGA")).toHaveValue("qxl2");
-    expect(save).toBeDisabled();
-  });
-
-  it("shows a NIC model it has no option for as the current value", async () => {
+  // The "(current)" option comes from the STORED value, which stands here for
+  // one newer than the lists (Proxmox's own enums today). It shows as the
+  // value, so the panel opens clean, and picking another does not take it out
+  // of the list: it can be picked back, and is then no change at all. React
+  // would otherwise show the FIRST option of a select whose value matches none.
+  it("keeps a stored value it has no option for as the current one: shown on open, offered after another is picked, and never sent with another edit", async () => {
     const save = await renderPanel(
-      nicVM({ net2: "pcnet=02:00:00:00:00:03,bridge=vmbr0" }),
-    );
-    expect(control(nicCard("net2"), "Model")).toHaveValue("pcnet");
-    expect(save).toBeDisabled();
-  });
-
-  it("opens clean with an audio driver it has no control for, and keeps it on a device edit", async () => {
-    const user = userEvent.setup();
-    const save = await renderPanel(
-      nicVM({ audio0: "device=ich9-intel-hda,driver=none" }),
+      nicVM({
+        net2: "pcnet=02:00:00:00:00:03,bridge=vmbr0",
+        vga: "qxl2",
+        keyboard: "ko",
+        audio0: "device=ich9-intel-hda,driver=none",
+        vmstatestorage: "store09",
+        watchdog: "model=diag288,action=inject-nmi",
+      }),
     );
     expect(save).toBeDisabled();
-
-    await user.selectOptions(control(document.body, "Audio"), "AC97");
-
-    expect(await saveAndGetFields(user, save)).toEqual([
-      [CONFIG_URL, { fields: { audio0: "device=AC97,driver=none" } }],
-    ]);
-  });
-
-  // The "(current)" option comes from the STORED value, so picking another
-  // does not take it out of the list: it can be picked back, and is then no
-  // change at all.
-  it("lets a stored NIC model it has no option for be picked back after another", async () => {
-    const user = userEvent.setup();
-    const save = await renderPanel(
-      nicVM({ net2: "pcnet=02:00:00:00:00:03,bridge=vmbr0" }),
-    );
-    const model = control(nicCard("net2"), "Model");
-
-    await user.selectOptions(model, "e1000");
-    expect(save).toBeEnabled();
-    await user.selectOptions(model, "pcnet");
-    expect(model).toHaveValue("pcnet");
-    expect(save).toBeDisabled();
-
-    // Nor does it ride along with another edit.
-    await moveNet0ToVmbr1(user);
-    expect(await saveAndGetFields(user, save)).toEqual([
-      [CONFIG_URL, { fields: { net0: NET0_ON_VMBR1 } }],
-    ]);
-  });
-
-  it("lets a stored vga type it has no option for be picked back after another", async () => {
-    const user = userEvent.setup();
-    const save = await renderPanel(nicVM({ vga: "qxl2" }));
-    const vga = control(document.body, "VGA");
-
-    await user.selectOptions(vga, "std");
-    expect(save).toBeEnabled();
-    await user.selectOptions(vga, "qxl2");
-    expect(vga).toHaveValue("qxl2");
-    expect(save).toBeDisabled();
-
-    await moveNet0ToVmbr1(user);
-    expect(await saveAndGetFields(user, save)).toEqual([
-      [CONFIG_URL, { fields: { net0: NET0_ON_VMBR1 } }],
-    ]);
-  });
-
-  // The Advanced Options section starts closed.
-  async function openAdvancedOptions(user: ReturnType<typeof userEvent.setup>) {
+    // The Advanced Options section starts closed.
     await user.click(screen.getByText("Advanced Options"));
-  }
 
-  // "ko" stands for a layout newer than the list, which is what the
-  // "(current)" option is for.
-  it("lets a stored keyboard layout it has no option for be picked back after another", async () => {
-    const user = userEvent.setup();
-    const save = await renderPanel(nicVM({ keyboard: "ko" }));
-    await openAdvancedOptions(user);
-    const keyboard = control(document.body, "Keyboard Layout");
-    expect(keyboard).toHaveValue("ko");
-
-    await user.selectOptions(keyboard, "de");
-    expect(save).toBeEnabled();
-    await user.selectOptions(keyboard, "ko");
-    expect(keyboard).toHaveValue("ko");
-    expect(save).toBeDisabled();
-
-    await moveNet0ToVmbr1(user);
-    expect(await saveAndGetFields(user, save)).toEqual([
-      [CONFIG_URL, { fields: { net0: NET0_ON_VMBR1 } }],
-    ]);
-  });
-
-  // The other selects' "(current)" options read the stored value too, so
-  // each is still offered after another value is picked. The stored values
-  // stand for ones newer than the lists (Proxmox's own enums today).
-  it.each([
-    [
-      "VM state storage",
-      { vmstatestorage: "store09" },
-      () => control(document.body, "VM State Storage"),
-      "store01",
-      "store01 (lvmthin)",
-      "store09",
-    ],
-    [
-      "watchdog device",
-      { watchdog: "model=diag288" },
-      () => screen.getByRole("combobox", { name: "Watchdog device" }),
-      "ib700",
-      "iBASE 700",
-      "diag288",
-    ],
-    [
-      "watchdog action",
-      { watchdog: "model=i6300esb,action=inject-nmi" },
-      () => screen.getByRole("combobox", { name: "Watchdog action" }),
-      "reset",
-      "Reset",
-      "inject-nmi",
-    ],
-  ])(
-    "still offers a stored %s it has no option for after another is picked",
-    async (_name, extra, select, other, otherLabel, stored) => {
-      const user = userEvent.setup();
-      await renderPanel(nicVM(extra));
-      await openAdvancedOptions(user);
+    const stored: [
+      name: string,
+      select: () => HTMLElement,
+      stored: string,
+      other: string,
+      otherLabel: string,
+    ][] = [
+      [
+        "NIC model",
+        () => control(nicCard("net2"), "Model"),
+        "pcnet",
+        "e1000",
+        "Intel E1000",
+      ],
+      [
+        "vga type",
+        () => control(document.body, "VGA"),
+        "qxl2",
+        "std",
+        "Standard VGA",
+      ],
+      [
+        "keyboard layout",
+        () => control(document.body, "Keyboard Layout"),
+        "ko",
+        "de",
+        "de",
+      ],
+      [
+        "VM state storage",
+        () => control(document.body, "VM State Storage"),
+        "store09",
+        "store01",
+        "store01 (lvmthin)",
+      ],
+      [
+        "watchdog device",
+        () => screen.getByRole("combobox", { name: "Watchdog device" }),
+        "diag288",
+        "ib700",
+        "iBASE 700",
+      ],
+      [
+        "watchdog action",
+        () => screen.getByRole("combobox", { name: "Watchdog action" }),
+        "inject-nmi",
+        "reset",
+        "Reset",
+      ],
+    ];
+    for (const [name, select, was, other, otherLabel] of stored) {
       const el = select();
-      expect(el).toHaveValue(stored);
+      expect(el, `${name} opens on the stored value`).toHaveValue(was);
       // The storage list arrives on a query of its own.
-      await within(el).findByRole("option", { name: otherLabel });
+      await within(el).findByText(otherLabel);
 
-      await user.selectOptions(el, other);
-
+      fill(el, other);
       expect(el).toHaveValue(other);
+      expect(save, `${name} change is a change`).toBeEnabled();
       expect(
-        within(el).getByRole("option", { name: `${stored} (current)` }),
+        within(el).getByRole("option", { name: `${was} (current)` }),
       ).toBeInTheDocument();
-    },
-  );
 
-  // Proxmox refuses a key that is both set and deleted ("you can't use
-  // '-net1' and -delete net1' at the same time", $update_vm_api in
-  // src/PVE/API2/Qemu.pm), which fails the whole Save. Each removal test
-  // has a twin showing the same edit, not removed, really is sent.
-  async function moveNet1ToVmbr3(user: ReturnType<typeof userEvent.setup>) {
-    const bridge = control(nicCard("net1"), "Bridge");
-    await user.clear(bridge);
-    await user.type(bridge, "vmbr3");
-  }
+      fill(el, was);
+      expect(el).toHaveValue(was);
+      expect(save, `${name} picked back is no change`).toBeDisabled();
+    }
 
-  it("sends a NIC edit when the NIC is kept", async () => {
-    const user = userEvent.setup();
-    const save = await renderPanel(nicVM());
+    // Another edit carries none of them, and keeps the audio driver option it
+    // has no control for beside the device it does.
+    moveNet0ToVmbr1();
+    fill(control(document.body, "Audio"), "AC97");
 
-    await moveNet1ToVmbr3(user);
-
-    expect(await saveAndGetFields(user, save)).toEqual([
+    expect(await saveAndGetFields(save)).toEqual([
       [
         CONFIG_URL,
         {
           fields: {
-            net1: "e1000=02:00:00:00:00:02,bridge=vmbr3,firewall=on,queues=2",
+            net0: NET0_ON_VMBR1,
+            audio0: "device=AC97,driver=none",
           },
         },
       ],
     ]);
   });
 
-  it("sends only the removal for a NIC edited and then removed", async () => {
-    const user = userEvent.setup();
-    const save = await renderPanel(nicVM());
-
-    await moveNet1ToVmbr3(user);
-    await user.click(
-      within(nicCard("net1")).getByRole("button", { name: /remove/i }),
-    );
-
-    expect(await saveAndGetFields(user, save)).toEqual([
-      [CONFIG_URL, { fields: { delete: "net1" } }],
-    ]);
-  });
-
-  async function setScsi0CacheWriteback(
-    user: ReturnType<typeof userEvent.setup>,
-  ) {
-    const card = diskRow("scsi0").parentElement;
-    if (!card) throw new Error("no disk card for scsi0");
-    await user.selectOptions(control(card, "Cache"), "writeback");
-  }
-
-  it("sends a disk edit when the disk is kept", async () => {
-    const user = userEvent.setup();
+  // Proxmox refuses a key that is both set and deleted ("you can't use
+  // '-net1' and -delete net1' at the same time", $update_vm_api in
+  // src/PVE/API2/Qemu.pm), which fails the whole Save. A NIC and a disk, with a
+  // resize on it, edited and then removed are sent as the removal alone, in one
+  // Save beside the same edits on ones that are kept, so that the edits really
+  // are sent when nothing removes them. A resize is a request of its own, sent
+  // before the config write, and for a disk the same Save removes it would race
+  // the delete.
+  it("sends only the removal for a NIC or disk edited and then removed, and the edit for one that is kept", async () => {
     const save = await renderPanel(
-      nicVM({ scsi0: "store01:vm-101-disk-0,size=32G" }),
+      nicVM({
+        scsi0: "store01:vm-101-disk-0,size=32G",
+        scsi1: "store01:vm-101-disk-1,size=16G",
+      }),
     );
 
-    await setScsi0CacheWriteback(user);
+    fill(control(nicCard("net1"), "Bridge"), "vmbr3");
+    fill(control(nicCard("net0"), "Bridge"), "vmbr9");
+    await user.click(
+      within(nicCard("net0")).getByRole("button", { name: /remove/i }),
+    );
+    fill(control(diskCard("scsi0"), "Cache"), "writeback");
+    fill(control(diskCard("scsi1"), "Cache"), "writeback");
+    fill(control(diskCard("scsi1"), "Resize To"), "40G");
+    await user.click(
+      within(diskRow("scsi1")).getByRole("button", { name: /remove/i }),
+    );
 
-    expect(await saveAndGetFields(user, save)).toEqual([
+    expect(await saveAndGetFields(save)).toEqual([
       [
         CONFIG_URL,
-        { fields: { scsi0: "store01:vm-101-disk-0,size=32G,cache=writeback" } },
+        {
+          fields: {
+            net1: "e1000=02:00:00:00:00:02,bridge=vmbr3,firewall=on,queues=2",
+            scsi0: "store01:vm-101-disk-0,size=32G,cache=writeback",
+            delete: "net0,scsi1",
+          },
+        },
       ],
     ]);
+    // Save issues a resize before the config write, so by the time that write
+    // has been answered, one would have been sent.
+    expect(mockedPost).not.toHaveBeenCalled();
   });
 
-  it("sends only the removal for a disk edited and then removed", async () => {
-    const user = userEvent.setup();
-    const save = await renderPanel(
-      nicVM({ scsi0: "store01:vm-101-disk-0,size=32G" }),
-    );
-
-    await setScsi0CacheWriteback(user);
-    await user.click(
-      within(diskRow("scsi0")).getByRole("button", { name: /remove/i }),
-    );
-
-    expect(await saveAndGetFields(user, save)).toEqual([
-      [CONFIG_URL, { fields: { delete: "scsi0" } }],
-    ]);
-  });
-
-  // A resize is not part of the config write: Save sends it as a request of
-  // its own, before that write. For a disk the same Save removes it would
-  // race the delete, so it is not sent. The twin shows it is, for a disk
-  // that is kept.
-  async function resizeScsi0To40G(user: ReturnType<typeof userEvent.setup>) {
-    const card = diskRow("scsi0").parentElement;
-    if (!card) throw new Error("no disk card for scsi0");
-    await user.type(control(card, "Resize To"), "40G");
-  }
-
-  it("sends a resize for a disk that is kept", async () => {
+  it("sends a resize for a disk that is kept, and no config write for it", async () => {
     mockedPost.mockResolvedValue({ upid: "", status: "completed" });
-    const user = userEvent.setup();
     const save = await renderPanel(
       nicVM({ scsi0: "store01:vm-101-disk-0,size=32G" }),
     );
 
-    await resizeScsi0To40G(user);
+    fill(control(diskCard("scsi0"), "Resize To"), "40G");
     expect(save).toBeEnabled();
     await user.click(save);
 
@@ -817,25 +657,6 @@ describe("HardwarePanel dirty check", () => {
     ).toBeInTheDocument();
     // A resize alone changes nothing the config write carries.
     expect(mockedPut).not.toHaveBeenCalled();
-  });
-
-  it("sends only the delete, and no resize, for a disk given a size and then removed", async () => {
-    const user = userEvent.setup();
-    const save = await renderPanel(
-      nicVM({ scsi0: "store01:vm-101-disk-0,size=32G" }),
-    );
-
-    await resizeScsi0To40G(user);
-    await user.click(
-      within(diskRow("scsi0")).getByRole("button", { name: /remove/i }),
-    );
-
-    expect(await saveAndGetFields(user, save)).toEqual([
-      [CONFIG_URL, { fields: { delete: "scsi0" } }],
-    ]);
-    // Save issues a resize before the config write, so by the time that write
-    // has been answered, one would have been sent.
-    expect(mockedPost).not.toHaveBeenCalled();
   });
 
   // Proxmox refuses a boot order naming a device the same request deletes,
@@ -854,10 +675,7 @@ describe("HardwarePanel dirty check", () => {
   const SCSI1_BOOT = "Disk (scsi1) — store01, 16G";
   const NET0_BOOT = "Network (net0) — vmbr0";
 
-  async function moveEarlierInBoot(
-    user: ReturnType<typeof userEvent.setup>,
-    label: string,
-  ) {
+  async function moveEarlierInBoot(label: string) {
     await user.click(
       screen.getByRole("button", {
         name: `Move ${label} earlier in the boot order`,
@@ -865,72 +683,67 @@ describe("HardwarePanel dirty check", () => {
     );
   }
 
-  async function removeScsi0(user: ReturnType<typeof userEvent.setup>) {
+  async function removeScsi0() {
     await user.click(
       within(diskRow("scsi0")).getByRole("button", { name: /remove/i }),
     );
   }
 
   it("sends a reordered boot order when every device in it is kept", async () => {
-    const user = userEvent.setup();
     const save = await renderPanel(bootVM());
 
-    await moveEarlierInBoot(user, SCSI1_BOOT);
+    await moveEarlierInBoot(SCSI1_BOOT);
 
-    expect(await saveAndGetFields(user, save)).toEqual([
+    expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { boot: "order=scsi1;scsi0;net0" } }],
     ]);
   });
 
   it("sends no boot order when a reorder is undone by removing the disk it moved past", async () => {
-    const user = userEvent.setup();
     const save = await renderPanel(bootVM());
 
-    await moveEarlierInBoot(user, SCSI1_BOOT);
-    await removeScsi0(user);
+    await moveEarlierInBoot(SCSI1_BOOT);
+    await removeScsi0();
 
-    expect(await saveAndGetFields(user, save)).toEqual([
+    expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { delete: "scsi0" } }],
     ]);
   });
 
   it("sends a reordered boot order without the disk the same Save removes", async () => {
-    const user = userEvent.setup();
     const save = await renderPanel(bootVM());
 
-    await moveEarlierInBoot(user, NET0_BOOT);
-    await moveEarlierInBoot(user, NET0_BOOT);
-    await removeScsi0(user);
+    await moveEarlierInBoot(NET0_BOOT);
+    await moveEarlierInBoot(NET0_BOOT);
+    await removeScsi0();
 
-    expect(await saveAndGetFields(user, save)).toEqual([
+    expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { boot: "order=net0;scsi1", delete: "scsi0" } }],
     ]);
   });
 
   it("sends a reordered boot order without the NIC the same Save removes", async () => {
-    const user = userEvent.setup();
     const save = await renderPanel(bootVM());
 
-    await moveEarlierInBoot(user, SCSI1_BOOT);
+    await moveEarlierInBoot(SCSI1_BOOT);
     await user.click(
       within(nicCard("net0")).getByRole("button", { name: /remove/i }),
     );
 
-    expect(await saveAndGetFields(user, save)).toEqual([
+    expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { boot: "order=scsi1;scsi0", delete: "net0" } }],
     ]);
   });
 
   it("sends no boot order for a ticked disk removed without a reorder", async () => {
-    const user = userEvent.setup();
     const save = await renderPanel(bootVM());
 
-    await removeScsi0(user);
+    await removeScsi0();
     // The removal leaves scsi0 ticked in the boot list: leaving it out of
     // the order is Save's doing, not the list's.
     expect(document.getElementById("boot-scsi0")).toBeChecked();
 
-    expect(await saveAndGetFields(user, save)).toEqual([
+    expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { delete: "scsi0" } }],
     ]);
   });
@@ -941,7 +754,6 @@ describe("HardwarePanel USB devices", () => {
   const MAPPINGS_URL = `/api/v1/clusters/${CLUSTER}/nodes/pve-01/usb-mappings`;
 
   beforeEach(() => {
-    vi.resetAllMocks();
     // A raw port passthrough, set in Proxmox by root; a mapped device; and a
     // SPICE port.
     serverConfig = {
@@ -953,11 +765,6 @@ describe("HardwarePanel USB devices", () => {
       usb1: "mapping=usbdev01,usb3=1",
       usb2: "spice",
     };
-    mockedGet.mockImplementation((path: string) =>
-      path === CONFIG_URL
-        ? Promise.resolve({ ...serverConfig })
-        : Promise.reject(new Error(`unexpected GET ${path}`)),
-    );
     mockedList.mockImplementation((path: string) => {
       if (path === STORAGE_URL) return Promise.resolve([imageStorage]);
       if (path === USB_URL)
@@ -969,7 +776,7 @@ describe("HardwarePanel USB devices", () => {
             prodid: "5678",
             vendid: "1234",
             // The device names itself; the row shows it cleaned.
-            product: "Example Serial\u202e Adapter",
+            product: "Example Serial‮ Adapter",
             manufacturer: "Example Corp",
             speed: "12",
             class: 0,
@@ -991,14 +798,9 @@ describe("HardwarePanel USB devices", () => {
     mockedPut.mockResolvedValue({ status: "ok" });
   });
 
-  async function openUSBSection(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(await screen.findByText("USB Devices (3)"));
-  }
-
-  it("will not offer to remove a raw passthrough, and says why", async () => {
-    const user = userEvent.setup();
+  it("will not offer to remove a raw passthrough, and says why, but removes a mapped device on Save", async () => {
     renderWithProviders(<HardwarePanel {...props} />);
-    await openUSBSection(user);
+    await user.click(await screen.findByText("USB Devices (3)"));
 
     // The raw row has no button to find it by, so by its key's own row.
     const label = screen.getByText("usb0", { exact: true });
@@ -1025,17 +827,11 @@ describe("HardwarePanel USB devices", () => {
     expect(
       within(diskRow("usb2")).getByRole("button", { name: /remove/i }),
     ).toBeEnabled();
-  });
-
-  it("removes a mapped device on Save", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<HardwarePanel {...props} />);
-    await openUSBSection(user);
 
     await user.click(
       within(diskRow("usb1")).getByRole("button", { name: /remove/i }),
     );
-    await user.click(screen.getByRole("button", { name: /save changes/i }));
+    await user.click(screen.getByText("Save Changes", { selector: "button" }));
 
     expect(mockedPut.mock.calls).toEqual([
       [CONFIG_URL, { fields: { delete: "usb1" } }],
@@ -1044,69 +840,48 @@ describe("HardwarePanel USB devices", () => {
 
   // Each add is staged until Save, so the next dialog has to count the staged
   // ones as taken — otherwise the second lands on the first's slot and
-  // silently replaces it.
-  it("puts two devices added before a Save into two slots", async () => {
-    const user = userEvent.setup();
+  // silently replaces it. CD/DVD drives are staged apart from other devices,
+  // so the slot count has to see them too, or the second drive replaces the
+  // first.
+  it("puts two devices of a kind added before a Save into two slots: USB devices and CD/DVD drives", async () => {
     renderWithProviders(<HardwarePanel {...props} />);
     await screen.findByText("USB Devices (3)");
 
-    async function addUSB(pick: (dialog: HTMLElement) => Promise<void>) {
+    async function add(
+      menuItem: RegExp,
+      pick?: (dialog: HTMLElement) => Promise<void>,
+    ) {
       await user.click(screen.getByRole("button", { name: /add device/i }));
-      await user.click(
-        await screen.findByRole("menuitem", { name: /usb device/i }),
-      );
+      await user.click(await screen.findByRole("menuitem", { name: menuItem }));
       const dialog = await screen.findByRole("dialog");
-      await pick(dialog);
+      await pick?.(dialog);
       await user.click(within(dialog).getByRole("button", { name: "Add" }));
     }
-    await addUSB(async (dialog) => {
+    await add(/usb device/i, async (dialog) => {
       await user.click(
         within(dialog).getByRole("radio", { name: /mapped device/i }),
       );
-      await user.selectOptions(
-        await within(dialog).findByLabelText("Mapping"),
-        "usbdev01",
-      );
+      fill(await within(dialog).findByLabelText("Mapping"), "usbdev01");
     });
-    await addUSB(async (dialog) => {
+    await add(/usb device/i, async (dialog) => {
       await user.click(
         within(dialog).getByRole("radio", { name: /spice port/i }),
       );
     });
-    await user.click(screen.getByRole("button", { name: /save changes/i }));
+    await add(/cd\/dvd drive/i);
+    await add(/cd\/dvd drive/i);
+    await user.click(screen.getByText("Save Changes", { selector: "button" }));
 
     expect(mockedPut.mock.calls).toEqual([
       [
         CONFIG_URL,
         {
-          fields: { usb3: "mapping=usbdev01,usb3=1", usb4: "spice,usb3=1" },
-        },
-      ],
-    ]);
-  });
-
-  // CD/DVD drives are staged apart from other devices, so the slot count has
-  // to see them too, or the second drive replaces the first.
-  it("puts two CD/DVD drives added before a Save into two slots", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<HardwarePanel {...props} />);
-    await screen.findByText("USB Devices (3)");
-
-    for (let i = 0; i < 2; i++) {
-      await user.click(screen.getByRole("button", { name: /add device/i }));
-      await user.click(
-        await screen.findByRole("menuitem", { name: /cd\/dvd drive/i }),
-      );
-      const dialog = await screen.findByRole("dialog");
-      await user.click(within(dialog).getByRole("button", { name: "Add" }));
-    }
-    await user.click(screen.getByRole("button", { name: /save changes/i }));
-
-    expect(mockedPut.mock.calls).toEqual([
-      [
-        CONFIG_URL,
-        {
-          fields: { ide0: "none,media=cdrom", ide1: "none,media=cdrom" },
+          fields: {
+            usb3: "mapping=usbdev01,usb3=1",
+            usb4: "spice,usb3=1",
+            ide0: "none,media=cdrom",
+            ide1: "none,media=cdrom",
+          },
         },
       ],
     ]);
@@ -1117,7 +892,6 @@ describe("HardwarePanel PCI devices", () => {
   const PCI_URL = `/api/v1/clusters/${CLUSTER}/nodes/pve-01/hardware/pci`;
 
   beforeEach(() => {
-    vi.resetAllMocks();
     // A raw passthrough, set in Proxmox by root; a mapped device; and a
     // mapped device with a ROM file, which only root may set or remove.
     serverConfig = {
@@ -1129,11 +903,6 @@ describe("HardwarePanel PCI devices", () => {
       hostpci1: "mapping=pcidev01,pcie=1",
       hostpci2: "mapping=pcidev02,romfile=vbios.bin",
     };
-    mockedGet.mockImplementation((path: string) =>
-      path === CONFIG_URL
-        ? Promise.resolve({ ...serverConfig })
-        : Promise.reject(new Error(`unexpected GET ${path}`)),
-    );
     mockedList.mockImplementation((path: string) => {
       if (path === STORAGE_URL) return Promise.resolve([imageStorage]);
       if (path === PCI_URL)
@@ -1154,10 +923,6 @@ describe("HardwarePanel PCI devices", () => {
     mockedPut.mockResolvedValue({ status: "ok" });
   });
 
-  async function openPCISection(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(await screen.findByText("PCI Devices (3)"));
-  }
-
   /** A row with no button to find it by: its key's own row. */
   function rowOf(key: string): HTMLElement {
     const row = screen.getByText(key, { exact: true }).parentElement;
@@ -1165,10 +930,9 @@ describe("HardwarePanel PCI devices", () => {
     return row;
   }
 
-  it("will not offer to remove a raw passthrough or a ROM file, and says why", async () => {
-    const user = userEvent.setup();
+  it("will not offer to remove a raw passthrough or a ROM file, and says why, removes a mapped device on Save, and offers PCIe for a q35 machine type staged but not yet saved", async () => {
     renderWithProviders(<HardwarePanel {...props} />);
-    await openPCISection(user);
+    await user.click(await screen.findByText("PCI Devices (3)"));
 
     // Named from the node's own PCI list — the whole device by function 0,
     // the domain qemu-server takes as optional filled in.
@@ -1176,12 +940,16 @@ describe("HardwarePanel PCI devices", () => {
       await within(rowOf("hostpci0")).findByText("Example GPU (01:00)"),
     ).toBeInTheDocument();
     expect(
-      within(rowOf("hostpci0")).getByText(/Passed through directly; only root@pam can remove it/),
+      within(rowOf("hostpci0")).getByText(
+        /Passed through directly; only root@pam can remove it/,
+      ),
     ).toBeInTheDocument();
     expect(within(rowOf("hostpci0")).queryAllByRole("button")).toEqual([]);
 
     expect(
-      within(rowOf("hostpci2")).getByText(/Uses a ROM file; only root@pam can remove it/),
+      within(rowOf("hostpci2")).getByText(
+        /Uses a ROM file; only root@pam can remove it/,
+      ),
     ).toBeInTheDocument();
     expect(within(rowOf("hostpci2")).queryAllByRole("button")).toEqual([]);
 
@@ -1191,17 +959,22 @@ describe("HardwarePanel PCI devices", () => {
       within(diskRow("hostpci1")).getByRole("button", { name: /remove/i }),
     ).toBeEnabled();
     expect(within(diskRow("hostpci1")).getByText("Mapped")).toBeInTheDocument();
-    expect(within(diskRow("hostpci1")).getByText("pcidev01")).toBeInTheDocument();
-  });
+    expect(
+      within(diskRow("hostpci1")).getByText("pcidev01"),
+    ).toBeInTheDocument();
 
-  // The machine type is saved in the same write as a device added now, so
-  // PCIe follows the staged one, not the one Proxmox has.
-  it("offers PCIe for a q35 machine type staged but not yet saved", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<HardwarePanel {...props} />);
-    const machine = await screen.findByDisplayValue("i440fx (Default)");
-    await user.selectOptions(machine, "q35");
+    await user.click(
+      within(diskRow("hostpci1")).getByRole("button", { name: /remove/i }),
+    );
+    await user.click(screen.getByText("Save Changes", { selector: "button" }));
 
+    expect(mockedPut.mock.calls).toEqual([
+      [CONFIG_URL, { fields: { delete: "hostpci1" } }],
+    ]);
+
+    // The machine type is saved in the same write as a device added now, so
+    // PCIe follows the staged one, not the one Proxmox has.
+    fill(screen.getByDisplayValue("i440fx (Default)"), "q35");
     await user.click(screen.getByRole("button", { name: /add device/i }));
     await user.click(
       await screen.findByRole("menuitem", { name: /pci device/i }),
@@ -1209,20 +982,5 @@ describe("HardwarePanel PCI devices", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByLabelText(/^PCIe/)).toBeEnabled();
     expect(within(dialog).getByLabelText(/^PCIe/)).toBeChecked();
-  });
-
-  it("removes a mapped device on Save", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<HardwarePanel {...props} />);
-    await openPCISection(user);
-
-    await user.click(
-      within(diskRow("hostpci1")).getByRole("button", { name: /remove/i }),
-    );
-    await user.click(screen.getByRole("button", { name: /save changes/i }));
-
-    expect(mockedPut.mock.calls).toEqual([
-      [CONFIG_URL, { fields: { delete: "hostpci1" } }],
-    ]);
   });
 });

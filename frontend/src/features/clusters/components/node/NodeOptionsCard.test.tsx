@@ -17,6 +17,7 @@ import { createAppQueryClient } from "@/test/app-query-client";
 import { deferred } from "@/test/fake-server";
 import { DENIED, denied, flushInAct } from "@/test/save-outcome-kit";
 import { createWrapper, renderWithProviders } from "@/test/test-utils";
+import { fill } from "@/test/user";
 import type { NodeOptions } from "../../api/node-options-queries";
 import { NodeOptionsCard } from "./NodeOptionsCard";
 
@@ -182,11 +183,6 @@ function field(dialog: HTMLElement, label: string): HTMLInputElement {
   return within(dialog).getByLabelText<HTMLInputElement>(label);
 }
 
-/** Sets a field in one change, as a paste does: the checks run on the value. */
-function fill(dialog: HTMLElement, label: string, value: string) {
-  fireEvent.change(field(dialog, label), { target: { value } });
-}
-
 /** What an input is described by: the text of the elements its aria-describedby names. */
 function describedBy(input: HTMLElement): string {
   return (input.getAttribute("aria-describedby") ?? "")
@@ -236,7 +232,7 @@ async function editAndSave(options: NodeOptions, edits: Edit[]) {
   serve(options);
   renderCard();
   const dialog = await openDialog(user);
-  for (const [label, value] of edits) fill(dialog, label, value);
+  for (const [label, value] of edits) fill(field(dialog, label), value);
   return savedBody(user, dialog);
 }
 
@@ -394,7 +390,7 @@ describe("when Edit is offered", () => {
     expect(screen.getByText("30 seconds")).toBeInTheDocument();
 
     const dialog = await openDialog(user);
-    fill(dialog, DELAY, "45");
+    fill(field(dialog, DELAY), "45");
     expect(await savedBody(user, dialog)).toEqual({
       "startall-onboot-delay": 45,
       digest: "d1",
@@ -417,7 +413,7 @@ describe("a save sends only what was changed", () => {
     expect(field(dialog, LONGITUDE)).toHaveValue("-45.25");
     expect(field(dialog, NAME)).toHaveValue("Site A");
 
-    fill(dialog, DELAY, "31");
+    fill(field(dialog, DELAY), "31");
     expect(await savedBody(user, dialog)).toEqual({
       "startall-onboot-delay": 31,
       digest: "d1",
@@ -443,9 +439,9 @@ describe("a save sends only what was changed", () => {
     expect(mockedPut).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog", { name: DIALOG })).toBeInTheDocument();
 
-    fill(dialog, DELAY, "99");
+    fill(field(dialog, DELAY), "99");
     expect(saveButton(dialog)).toBeEnabled();
-    fill(dialog, DELAY, "30");
+    fill(field(dialog, DELAY), "30");
     expect(saveButton(dialog)).toBeDisabled();
   });
 
@@ -526,7 +522,7 @@ describe("the checks of the fields", () => {
 
     const dialog = await openDialog(user);
     for (const [label, bad, good, why] of REFUSED) {
-      fill(dialog, label, bad);
+      fill(field(dialog, label), bad);
       expect(field(dialog, label), label).toHaveAttribute(
         "aria-invalid",
         "true",
@@ -540,7 +536,7 @@ describe("the checks of the fields", () => {
       }
       expect(saveButton(dialog), label).toBeDisabled();
 
-      fill(dialog, label, good);
+      fill(field(dialog, label), good);
       expect(field(dialog, label), label).not.toHaveAttribute("aria-invalid");
     }
   });
@@ -552,7 +548,7 @@ describe("the checks of the fields", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    fill(dialog, LATITUDE, "12.5");
+    fill(field(dialog, LATITUDE), "12.5");
     expect(
       within(dialog).getByText(
         "A location needs both coordinates: enter a longitude.",
@@ -561,8 +557,8 @@ describe("the checks of the fields", () => {
     expect(field(dialog, LONGITUDE)).toHaveAttribute("aria-invalid", "true");
     expect(saveButton(dialog)).toBeDisabled();
 
-    fill(dialog, LATITUDE, "");
-    fill(dialog, NAME, "Site A");
+    fill(field(dialog, LATITUDE), "");
+    fill(field(dialog, NAME), "Site A");
     expect(
       within(dialog).getByText(
         "A location needs both coordinates: enter a latitude.",
@@ -616,14 +612,14 @@ describe("Wake-on-LAN", () => {
       expect(describedBy(field(dialog, label))).toContain(NEEDS_MAC);
     }
 
-    fill(dialog, MAC_FIELD, MAC);
+    fill(field(dialog, MAC_FIELD), MAC);
 
     expect(within(dialog).queryByText(NEEDS_MAC)).toBeNull();
     for (const label of [INTERFACE, BROADCAST]) {
       expect(field(dialog, label)).toBeEnabled();
     }
-    fill(dialog, INTERFACE, "vmbr0");
-    fill(dialog, BROADCAST, "192.0.2.255");
+    fill(field(dialog, INTERFACE), "vmbr0");
+    fill(field(dialog, BROADCAST), "192.0.2.255");
     expect(await savedBody(user, dialog)).toEqual({
       wakeonlan: `${MAC},bind-interface=vmbr0,broadcast-address=192.0.2.255`,
       digest: "d1",
@@ -636,7 +632,7 @@ describe("Wake-on-LAN", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    fill(dialog, MAC_FIELD, MAC_2);
+    fill(field(dialog, MAC_FIELD), MAC_2);
     expect(lineOf(dialog, kept("foo=bar"))).toBeInTheDocument();
 
     expect(await savedBody(user, dialog)).toEqual({
@@ -651,15 +647,15 @@ describe("Wake-on-LAN", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    fill(dialog, INTERFACE, "a");
-    fill(dialog, BROADCAST, "256.0.0.1");
+    fill(field(dialog, INTERFACE), "a");
+    fill(field(dialog, BROADCAST), "256.0.0.1");
     expect(field(dialog, INTERFACE)).toHaveAttribute("aria-invalid", "true");
     expect(field(dialog, BROADCAST)).toHaveAttribute("aria-invalid", "true");
     expect(saveButton(dialog)).toBeDisabled();
 
     // With no MAC the interface and broadcast address are switched off and go
     // with the setting: not checked, not in the way, and the form says so.
-    fill(dialog, MAC_FIELD, "");
+    fill(field(dialog, MAC_FIELD), "");
 
     for (const label of [INTERFACE, BROADCAST]) {
       expect(field(dialog, label)).toBeDisabled();
@@ -689,7 +685,7 @@ describe("location", () => {
     expect(
       within(dialog).getAllByText(/Also stored with this setting/),
     ).toHaveLength(1);
-    fill(dialog, LATITUDE, "13");
+    fill(field(dialog, LATITUDE), "13");
 
     expect(await savedBody(user, dialog)).toEqual({
       location: "latitude=13,longitude=-45.25,foo=bar",
@@ -703,11 +699,11 @@ describe("location", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    fill(dialog, LATITUDE, "");
+    fill(field(dialog, LATITUDE), "");
     // Part way through, it is not a location yet.
     expect(saveButton(dialog)).toBeDisabled();
-    fill(dialog, LONGITUDE, "");
-    fill(dialog, NAME, "");
+    fill(field(dialog, LONGITUDE), "");
+    fill(field(dialog, NAME), "");
 
     expect(lineOf(dialog, removedWithIt("foo=bar"))).toBeInTheDocument();
     expect(within(dialog).queryByText(/kept as is/)).toBeNull();
@@ -742,7 +738,7 @@ describe("a value Nexara cannot read", () => {
     expect(saveButton(dialog)).toBeDisabled();
 
     // Changing another setting does not touch it.
-    fill(dialog, DELAY, "31");
+    fill(field(dialog, DELAY), "31");
     expect(await savedBody(user, dialog)).toEqual({
       "startall-onboot-delay": 31,
       digest: "d1",
@@ -801,7 +797,7 @@ describe("a node's version decides which fields there are", () => {
       }
 
       // What it hides it never sends: the one field changed is the one sent.
-      fill(dialog, DELAY, "31");
+      fill(field(dialog, DELAY), "31");
       expect(await savedBody(user, dialog)).toEqual({
         "startall-onboot-delay": 31,
         digest: "d1",
@@ -826,7 +822,7 @@ describe("a node's version decides which fields there are", () => {
     expect(field(dialog, INTERFACE)).toHaveValue("vmbr0");
     expect(field(dialog, LATITUDE)).toHaveValue("1");
 
-    fill(dialog, TARGET, "70");
+    fill(field(dialog, TARGET), "70");
     expect(await savedBody(user, dialog)).toEqual({
       "ballooning-target": 70,
       digest: "d1",
@@ -876,7 +872,7 @@ describe("the digest a save carries", () => {
     // ... and the dialog has not: it keeps the values it was drawn from.
     expect(field(dialog, DELAY)).toHaveValue("30");
 
-    fill(dialog, TARGET, "70");
+    fill(field(dialog, TARGET), "70");
     // And only what was changed here: not the delay the refresh moved.
     expect(await savedBody(user, dialog)).toEqual({
       "ballooning-target": 70,
@@ -909,7 +905,7 @@ describe("the digest a save carries", () => {
     expect(qc.getQueryState(ACME_KEY)?.isInvalidated).toBe(false);
 
     const dialog = await openDialog(user);
-    fill(dialog, DELAY, "31");
+    fill(field(dialog, DELAY), "31");
     // The read the save triggers, held: the PUT is done and the card is not.
     mockedGet.mockImplementationOnce(() => reread.promise);
     await savedBody(user, dialog);
@@ -936,7 +932,7 @@ describe("the digest a save carries", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    fill(dialog, DELAY, "31");
+    fill(field(dialog, DELAY), "31");
     mockedGet.mockRejectedValueOnce(badGateway());
     await save(user, dialog);
 
@@ -958,7 +954,7 @@ describe("the digest a save carries", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    fill(dialog, DELAY, "31");
+    fill(field(dialog, DELAY), "31");
     // Both land before React has drawn the first one's "Saving...".
     const button = saveButton(dialog);
     act(() => {
@@ -983,8 +979,8 @@ describe("a save the node refuses as stale", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    fill(dialog, DELAY, "31");
-    fill(dialog, TARGET, "");
+    fill(field(dialog, DELAY), "31");
+    fill(field(dialog, TARGET), "");
     // The re-read the 409 triggers is held, to see the dialog while it waits.
     mockedGet.mockImplementationOnce(() => reread.promise);
     await save(user, dialog);
@@ -1051,7 +1047,7 @@ describe("a save the node refuses as stale", () => {
     act(() => {
       qc.setQueryData<NodeOptions>(OPTIONS_KEY, read({ digest: "d2" }));
     });
-    fill(dialog, DELAY, "31");
+    fill(field(dialog, DELAY), "31");
     mockedGet.mockRejectedValueOnce(badGateway());
     await save(user, dialog);
 
@@ -1084,7 +1080,7 @@ describe("a save the node refuses as stale", () => {
     renderCard();
 
     const first = await openDialog(user);
-    fill(first, DELAY, "31");
+    fill(field(first, DELAY), "31");
     mockedGet.mockImplementationOnce(() => reread.promise);
     await save(user, first);
     await within(first).findByRole("alert");
@@ -1104,7 +1100,7 @@ describe("a save the node refuses as stale", () => {
     // digest.
     expect(within(second).queryByRole("alert")).toBeNull();
     expect(within(second).queryByRole("status")).toBeNull();
-    fill(second, TARGET, "70");
+    fill(field(second, TARGET), "70");
     await save(user, second);
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalledTimes(2);
@@ -1156,7 +1152,7 @@ describe("a save the node refuses as stale", () => {
       mockedPut.mockRejectedValueOnce(conflict());
       renderCard({ pveVersion });
       const dialog = await openDialog(user);
-      fill(dialog, DELAY, "31");
+      fill(field(dialog, DELAY), "31");
       mockedGet.mockResolvedValueOnce(then);
       await save(user, dialog);
 
@@ -1174,7 +1170,7 @@ describe("a save the node refuses as stale", () => {
       .mockRejectedValueOnce(conflict());
     renderCard();
     const dialog = await openDialog(user);
-    fill(dialog, DELAY, "31");
+    fill(field(dialog, DELAY), "31");
 
     mockedGet.mockResolvedValueOnce(
       read({ "startall-onboot-delay": 45, digest: "d2" }),
@@ -1260,7 +1256,7 @@ describe("a save that fails is reported once, not also as a toast", () => {
       renderCard();
 
       const dialog = await openDialog(user);
-      fill(dialog, DELAY, "31");
+      fill(field(dialog, DELAY), "31");
       await save(user, dialog);
 
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(shown);
@@ -1290,7 +1286,7 @@ describe("a save that settles after its dialog is gone", () => {
     mockedPut.mockReset();
     mockedPut.mockReturnValueOnce(held.promise);
     const dialog = await openDialog(user);
-    fill(dialog, DELAY, "31");
+    fill(field(dialog, DELAY), "31");
     await save(user, dialog);
     expect(
       await within(dialog).findByRole("button", { name: "Saving..." }),

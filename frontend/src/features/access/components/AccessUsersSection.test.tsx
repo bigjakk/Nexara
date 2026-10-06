@@ -4,72 +4,52 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
   renderHook,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import type { UserEvent } from "@testing-library/user-event";
 import {
   onlineManager,
-  QueryClient,
   QueryClientProvider,
   useMutation,
+  type QueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
+import { deferred } from "@/test/fake-server";
 import {
+  DENIED,
   SESSION_ENDINGS,
+  denied,
+  flushInAct,
   signIn,
   signOutForGood,
 } from "@/test/save-outcome-kit";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
+import { fill, setupUser } from "@/test/user";
 import type { AccessCapabilities } from "../api/access-queries";
 import { AccessUsersSection } from "./AccessUsersSection";
 
 /**
  * The server refuses, with a 409, to disable or delete the account Nexara
- * authenticates with unless ?force=true says so, and each refusal has its own
- * type-to-confirm override: the edit's forces the EDIT, the delete's the
- * DELETE. An edit's refusal once opened the delete's, so typing the user id to
- * save an edit force-deleted the user and every token it owned.
- *
- * An edit also sends only the fields the operator touched. The update is
- * tristate per field, so one sent from a form that had never read the account,
- * or had read it before it changed, overwrote the real value: saving an e-mail
- * could re-enable a disabled account, and rewrote its comment from whatever the
- * form showed.
- *
- * Every confirmation holds while its request is in flight. Closing one does not
- * recall the request, and a refusal that arrived after it had gone opened an
- * override over whatever the operator had moved on to: the delete's over the
- * edit dialog, a form to save an edit under a prompt to force-delete the user.
- * A held alert dialog keeps keyboard focus too: both its buttons are disabled,
- * which leaves the focus trap nothing to wrap between, and Tab would walk out
- * into the page. And each override's title names the action it confirms, so the
- * four are told apart by more than their button.
+ * authenticates with unless ?force=true says so. Each refusal has its own
+ * type-to-confirm override, and an edit's must force the EDIT: it once opened
+ * the delete's, so saving an edit force-deleted the user. An edit sends only the
+ * fields the operator touched. Every confirmation holds, with keyboard focus
+ * kept inside it, while its request is in flight: a refusal that arrived after
+ * the dialog had gone opened an override over whatever the operator had moved on
+ * to. Each override's title names the action it confirms.
  */
 
 // The transport is mocked, not the hooks, so the real queries and mutations
 // run and each test asserts the request that would leave the browser.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      get: vi.fn(),
-      list: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ canManage: () => true }),
@@ -77,9 +57,7 @@ vi.mock("@/hooks/useAuth", () => ({
 
 // The app's mutation-error net (lib/query-client.ts) toasts through sonner, so
 // this one mock sees every toast a run can raise.
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedList = vi.mocked(apiClient.list);
 const mockedGet = vi.mocked(apiClient.get);
@@ -144,7 +122,7 @@ const capabilities: AccessCapabilities = {
   canModifyRealms: true,
 };
 
-type UserEvent = ReturnType<typeof userEvent.setup>;
+let user: UserEvent;
 
 function refused(): ApiClientError {
   return new ApiClientError(409, { error: "Conflict", message: REFUSAL });
@@ -157,48 +135,25 @@ function unreachable(): ApiClientError {
   });
 }
 
-function deferred<T>() {
-  let resolve: (value: T) => void = () => undefined;
-  let reject: (reason: unknown) => void = () => undefined;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-/**
- * Lets whatever is already queued run, timers included, and React draw what it
- * set: for looking at what did NOT happen once a request has settled.
- */
-async function flush(): Promise<void> {
-  await act(async () => {
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
-  });
+/** A save that stays out until the test settles it: the next PUT answers with this. */
+function holdNextPut() {
+  const request = deferred<unknown>();
+  mockedPut.mockReturnValueOnce(request.promise);
+  return request;
 }
 
 /** Renders the section on `qc`, and hands it back to read queries again. */
 function renderOn(qc: QueryClient): QueryClient {
-  render(
-    <QueryClientProvider client={qc}>
-      <AccessUsersSection clusterId={CLUSTER} capabilities={capabilities} />
-    </QueryClientProvider>,
+  renderWithProviders(
+    <AccessUsersSection clusterId={CLUSTER} capabilities={capabilities} />,
+    { client: qc, router: false },
   );
   return qc;
 }
 
 /** Renders the section, and hands back its client to read queries again. */
 function renderSection(): QueryClient {
-  return renderOn(
-    new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    }),
-  );
+  return renderOn(createTestQueryClient({ keepCache: true }));
 }
 
 /** renderSection, on the app's own kind of client (test/app-query-client.ts). */
@@ -207,7 +162,7 @@ function renderSectionOnAppClient(): QueryClient {
 }
 
 /** Opens Edit on Nexara's own account and returns its dialog. */
-async function openEdit(user: UserEvent): Promise<HTMLElement> {
+async function openEdit(): Promise<HTMLElement> {
   await user.click(await screen.findByRole("button", { name: `Edit ${OWN}` }));
   return screen.findByRole("dialog", { name: `Edit ${OWN}` });
 }
@@ -216,8 +171,8 @@ async function openEdit(user: UserEvent): Promise<HTMLElement> {
  * Opens Edit on Nexara's own account, unticks "Account enabled" and saves.
  * Returns the edit dialog, which an override hides from role queries.
  */
-async function saveDisabled(user: UserEvent): Promise<HTMLElement> {
-  const edit = await openEdit(user);
+async function saveDisabled(): Promise<HTMLElement> {
+  const edit = await openEdit();
   await user.click(
     await within(edit).findByRole("checkbox", { name: "Account enabled" }),
   );
@@ -229,12 +184,15 @@ async function saveDisabled(user: UserEvent): Promise<HTMLElement> {
  * The override with that title, once open, with what it asks for typed into it:
  * the user id unless told otherwise.
  */
-async function typedOverride(user: UserEvent, title: string, typed = OWN) {
+async function typedOverride(title: string, typed = OWN) {
   const confirm = await screen.findByRole("dialog", { name: title });
-  await user.type(
+  fill(
     within(confirm).getByRole("textbox", { name: "Confirmation text" }),
     typed,
   );
+  // Radix listens for a click outside a layer only once a timer has fired, so
+  // that the click that opened it is not one. Typing took that long.
+  await flushInAct();
   return confirm;
 }
 
@@ -244,9 +202,10 @@ async function typedOverride(user: UserEvent, title: string, typed = OWN) {
  * spared that only while the aria-live region of the CopyableName inside it
  * keeps it visible, which no assertion here should depend on.
  */
-function expectNoOverride() {
+function expectNoOverride(why?: string) {
   expect(
     screen.queryByRole("dialog", { name: ANY_OVERRIDE, hidden: true }),
+    why,
   ).toBeNull();
 }
 
@@ -275,29 +234,29 @@ function backdropOf(dialog: HTMLElement): HTMLElement {
 
 /**
  * The ways out of an open dialog other than its own buttons. Each is tried on
- * the same dialog both with nothing in flight, where it has to close it, and
- * while its request is, where it has to be ignored: a dismissal that never
- * reached the dialog would pass the second without proving anything.
+ * an override both with nothing in flight, where it has to close it, and while
+ * its request is, where it has to be ignored: a dismissal that never reached the
+ * dialog would pass the second without proving anything.
  */
 const DISMISSALS: [
   name: string,
-  dismiss: (user: UserEvent, dialog: HTMLElement) => Promise<void>,
+  dismiss: (dialog: HTMLElement) => Promise<void>,
 ][] = [
   [
     "Escape",
-    async (user) => {
+    async () => {
       await user.keyboard("{Escape}");
     },
   ],
   [
     "a click outside it",
-    async (user, dialog) => {
+    async (dialog) => {
       await user.click(backdropOf(dialog));
     },
   ],
   [
     "its Close button",
-    async (user, dialog) => {
+    async (dialog) => {
       await user.click(within(dialog).getByRole("button", { name: "Close" }));
     },
   ],
@@ -306,46 +265,47 @@ const DISMISSALS: [
 /**
  * Where focus goes once a click on an override's backdrop has dropped it to the
  * page: the keys that carry it on from there and, by focusing them, the form's
- * own Close and Cancel, where a browser puts it on Shift+Tab. user-event cannot
- * say so itself: it treats a page with nothing focused as the top of the
- * document, so its Shift+Tab lands on the last element, not the one before the
- * backdrop. What the trap does about it is the same whichever way focus arrives.
+ * own Close and Cancel, where a browser puts it on Shift+Tab. user-event treats
+ * a page with nothing focused as the top of the document, so its Shift+Tab
+ * lands on the last element, not the one before the backdrop; what the trap does
+ * about it is the same whichever way focus arrives.
  */
-const ESCAPES: [
-  name: string,
-  escape: (user: UserEvent, form: HTMLElement) => Promise<void>,
-][] = [
+const ESCAPES: [name: string, escape: (form: HTMLElement) => Promise<void>][] =
   [
-    "Shift+Tab",
-    async (user) => {
-      await user.tab({ shift: true });
-    },
-  ],
-  [
-    "Tab",
-    async (user) => {
-      await user.tab();
-    },
-  ],
-  [
-    "focus landing on the form's Close button",
-    (_, form) => {
-      within(form).getByRole("button", { name: "Close", hidden: true }).focus();
-      return Promise.resolve();
-    },
-  ],
-  [
-    "focus landing on the form's Cancel button",
-    (_, form) => {
-      within(form)
-        .getByRole("button", { name: "Cancel", hidden: true })
-        .focus();
-      return Promise.resolve();
-    },
-  ],
-];
+    [
+      "Shift+Tab",
+      async () => {
+        await user.tab({ shift: true });
+      },
+    ],
+    [
+      "Tab",
+      async () => {
+        await user.tab();
+      },
+    ],
+    [
+      "focus landing on the form's Close button",
+      (form) => {
+        within(form)
+          .getByRole("button", { name: "Close", hidden: true })
+          .focus();
+        return Promise.resolve();
+      },
+    ],
+    [
+      "focus landing on the form's Cancel button",
+      (form) => {
+        within(form)
+          .getByRole("button", { name: "Cancel", hidden: true })
+          .focus();
+        return Promise.resolve();
+      },
+    ],
+  ];
 
 beforeEach(() => {
+  user = setupUser();
   vi.resetAllMocks();
   mockedList.mockImplementation((path: string) => {
     if (path === USERS_URL) {
@@ -360,7 +320,11 @@ beforeEach(() => {
   });
   mockedGet.mockImplementation((path: string) =>
     path === OWN_URL
-      ? Promise.resolve({ userid: OWN, enable: true, comment: "service account" })
+      ? Promise.resolve({
+          userid: OWN,
+          enable: true,
+          comment: "service account",
+        })
       : Promise.reject(new Error(`unexpected GET ${path}`)),
   );
   mockedPut.mockResolvedValue({ status: "ok" });
@@ -368,14 +332,37 @@ beforeEach(() => {
 });
 
 describe("an edit refused as Nexara's own credential", () => {
-  it("never sends a DELETE when its override is confirmed, but the edit again with force", async () => {
-    const user = userEvent.setup();
-    mockedPut.mockRejectedValueOnce(refused());
-    renderSection();
+  // On the app's own client, so that the net that toasts a failed mutation is
+  // there to stay silent: the refusal has its own override to answer it.
+  it("asks to Save Anyway with the server's reason and no toast, holds it while the forced edit is in flight, and sends the edit again with force, never a DELETE", async () => {
+    const forced = deferred<unknown>();
+    mockedPut
+      .mockRejectedValueOnce(refused())
+      .mockReturnValueOnce(forced.promise);
+    renderSectionOnAppClient();
 
-    await saveDisabled(user);
-    await user.click(overrideAction(await typedOverride(user, EDIT_TITLE)));
+    await saveDisabled();
+    const confirm = await screen.findByRole("dialog", { name: EDIT_TITLE });
+    expect(within(confirm).getByText(REFUSAL)).toBeInTheDocument();
+    expect(
+      within(confirm).queryByRole("button", { name: "Delete User" }),
+    ).toBeNull();
+    const saveAnyway = within(confirm).getByRole("button", {
+      name: "Save Anyway",
+    });
+    expect(saveAnyway).toBeDisabled();
+    // The net runs before a failure reaches the component's own handler, so
+    // with the override on screen, a toast that was coming has come.
+    expect(mockedToastError).not.toHaveBeenCalled();
+    expect(mockedPut.mock.calls).toEqual([[OWN_URL, DISABLE]]);
 
+    await typedOverride(EDIT_TITLE);
+    await user.click(saveAnyway);
+    expect(
+      await within(confirm).findByRole("button", { name: "Working..." }),
+    ).toBeDisabled();
+
+    forced.resolve({ status: "ok" });
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
@@ -387,23 +374,21 @@ describe("an edit refused as Nexara's own credential", () => {
   });
 
   it("re-sends the edit as it was refused, not the form as read again since", async () => {
-    const user = userEvent.setup();
     mockedPut.mockRejectedValueOnce(refused());
     const qc = renderSection();
 
     // Two fields touched and one not: a note added, the account disabled, and
     // the e-mail left as it was.
-    const edit = await openEdit(user);
-    const comment = await within(edit).findByRole("textbox", {
-      name: "Comment",
-    });
-    await user.clear(comment);
-    await user.type(comment, "retired");
+    const edit = await openEdit();
+    fill(
+      await within(edit).findByRole("textbox", { name: "Comment" }),
+      "retired",
+    );
     await user.click(
       within(edit).getByRole("checkbox", { name: "Account enabled" }),
     );
     await user.click(within(edit).getByRole("button", { name: "Save" }));
-    const confirm = await typedOverride(user, EDIT_TITLE);
+    const confirm = await typedOverride(EDIT_TITLE);
     // The account's e-mail changes elsewhere and is read again while the
     // override is open; the form, where it was left untouched, follows, and
     // the two fields the operator did touch stay as they set them.
@@ -444,12 +429,11 @@ describe("an edit refused as Nexara's own credential", () => {
   });
 
   it("re-sends the edit as it was refused, not the form as edited again while it was in flight", async () => {
-    const user = userEvent.setup();
     const first = deferred<unknown>();
     mockedPut.mockReturnValueOnce(first.promise);
     renderSection();
 
-    const edit = await openEdit(user);
+    const edit = await openEdit();
     await user.click(
       await within(edit).findByRole("checkbox", { name: "Account enabled" }),
     );
@@ -465,11 +449,11 @@ describe("an edit refused as Nexara's own credential", () => {
     });
     await user.click(enabled);
     const email = within(edit).getByRole("textbox", { name: "Email" });
-    await user.type(email, "ops@example.com");
+    fill(email, "ops@example.com");
     expect(enabled).toBeChecked();
     expect(email).toHaveValue("ops@example.com");
     first.reject(refused());
-    await user.click(overrideAction(await typedOverride(user, EDIT_TITLE)));
+    await user.click(overrideAction(await typedOverride(EDIT_TITLE)));
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
@@ -482,31 +466,61 @@ describe("an edit refused as Nexara's own credential", () => {
     ]);
   });
 
-  it("asks to Save Anyway with the server's reason, and holds it while the forced edit is in flight", async () => {
-    const user = userEvent.setup();
+  // Neither the override nor the form under it goes, and nothing else is sent:
+  // closing would not recall the forced edit. The override's confirm button is
+  // the last thing focused in it when the request disables it, and the focus
+  // trap pulls focus back by refocusing the last element that had it, which does
+  // nothing to a disabled button; focus that gets out stays out, and where it
+  // goes next can be the form's own Cancel or Close, whose Enter would close the
+  // form and unmount the held override.
+  it("holds the override against every way out while the forced edit is in flight, and keeps focus inside it", async () => {
     const forced = deferred<unknown>();
     mockedPut
       .mockRejectedValueOnce(refused())
       .mockReturnValueOnce(forced.promise);
     renderSection();
 
-    await saveDisabled(user);
-    const confirm = await screen.findByRole("dialog", { name: EDIT_TITLE });
-    expect(within(confirm).getByText(REFUSAL)).toBeInTheDocument();
-    expect(
-      within(confirm).queryByRole("button", { name: "Delete User" }),
-    ).toBeNull();
-    const saveAnyway = within(confirm).getByRole("button", {
-      name: "Save Anyway",
-    });
-    expect(saveAnyway).toBeDisabled();
-
-    await typedOverride(user, EDIT_TITLE);
-    await user.click(saveAnyway);
+    const form = await saveDisabled();
+    const confirm = await typedOverride(EDIT_TITLE);
+    await user.click(
+      within(confirm).getByRole("button", { name: "Save Anyway" }),
+    );
+    // The button says so once the request is out, which is when the dialog
+    // holds; a dismissal before then would close it whatever the guard does.
     expect(
       await within(confirm).findByRole("button", { name: "Working..." }),
     ).toBeDisabled();
+    expect(
+      within(confirm).getByRole("button", { name: "Cancel" }),
+    ).toBeDisabled();
 
+    // Focus first, while it is where the request left it: a dismissal that
+    // focuses something in the override gives the trap a place to pull focus
+    // back to, which would hide that it had none.
+    for (const [name, escape] of ESCAPES) {
+      await user.click(backdropOf(confirm));
+      expect(
+        confirm,
+        `a click outside it took the override away (before ${name})`,
+      ).toBeInTheDocument();
+      await escape(form);
+      expect
+        .soft(
+          confirm.contains(document.activeElement),
+          `focus is outside the override after ${name}`,
+        )
+        .toBe(true);
+      expect(form).toBeInTheDocument();
+    }
+    for (const [name, dismiss] of DISMISSALS) {
+      await dismiss(confirm);
+      expect(confirm, `${name} took the override away`).toBeInTheDocument();
+      expect(confirm).toHaveAttribute("data-state", "open");
+      expect(form).toBeInTheDocument();
+    }
+    expect(mockedPut).toHaveBeenCalledTimes(2);
+
+    // The edit settles on the override it was sent from.
     forced.resolve({ status: "ok" });
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
@@ -514,147 +528,71 @@ describe("an edit refused as Nexara's own credential", () => {
     expect(mockedDelete).not.toHaveBeenCalled();
   });
 
-  it.each(DISMISSALS)(
-    "ignores %s while the forced edit is in flight, with Cancel disabled",
-    async (_, dismiss) => {
-      const user = userEvent.setup();
-      const forced = deferred<unknown>();
-      mockedPut
-        .mockRejectedValueOnce(refused())
-        .mockReturnValueOnce(forced.promise);
-      renderSection();
-
-      const edit = await saveDisabled(user);
-      const confirm = await typedOverride(user, EDIT_TITLE);
-      await user.click(
-        within(confirm).getByRole("button", { name: "Save Anyway" }),
-      );
-      // The button says so once the request is out, which is when the dialog
-      // holds; a dismissal before then would close it whatever the guard does.
-      expect(
-        await within(confirm).findByRole("button", { name: "Working..." }),
-      ).toBeDisabled();
-      expect(
-        within(confirm).getByRole("button", { name: "Cancel" }),
-      ).toBeDisabled();
-
-      await dismiss(user, confirm);
-
-      // Neither the override nor the form under it went, and nothing else was
-      // sent: closing would not have recalled the forced edit.
-      expect(confirm).toBeInTheDocument();
-      expect(confirm).toHaveAttribute("data-state", "open");
-      expect(edit).toBeInTheDocument();
-      expect(mockedPut).toHaveBeenCalledTimes(2);
-
-      // The edit settles on the override it was sent from.
-      forced.resolve({ status: "ok" });
-      await waitFor(() => {
-        expect(screen.queryByRole("dialog")).toBeNull();
-      });
-      expect(mockedDelete).not.toHaveBeenCalled();
-    },
-  );
-
-  // The override's confirm button is the last thing focused in it when the
-  // request disables it, and the focus trap pulls focus back by refocusing the
-  // last element that had it, which does nothing to a disabled button. Focus
-  // that gets out then stays out: a click on the backdrop drops it to the page,
-  // and where it goes next can be the form's own Cancel or Close, whose Enter
-  // closes the form and unmounts the held override, its edit still on the way.
-  it.each(ESCAPES)(
-    "brings focus back into the override after %s, while the forced edit is in flight",
-    async (_, escape) => {
-      const user = userEvent.setup();
-      const forced = deferred<unknown>();
-      mockedPut
-        .mockRejectedValueOnce(refused())
-        .mockReturnValueOnce(forced.promise);
-      renderSection();
-
-      const form = await saveDisabled(user);
-      const confirm = await typedOverride(user, EDIT_TITLE);
-      await user.click(
-        within(confirm).getByRole("button", { name: "Save Anyway" }),
-      );
-      expect(
-        await within(confirm).findByRole("button", { name: "Working..." }),
-      ).toBeDisabled();
-
-      await user.click(backdropOf(confirm));
-      await escape(user, form);
-
-      expect(
-        confirm.contains(document.activeElement),
-        "focus is outside the override",
-      ).toBe(true);
-      expect(form).toBeInTheDocument();
-      expect(mockedPut).toHaveBeenCalledTimes(2);
-
-      forced.resolve({ status: "ok" });
-      await waitFor(() => {
-        expect(screen.queryByRole("dialog")).toBeNull();
-      });
-    },
-  );
-
-  it.each([
-    [
-      "Cancel",
-      async (user: UserEvent, dialog: HTMLElement) => {
-        await user.click(
-          within(dialog).getByRole("button", { name: "Cancel" }),
-        );
-      },
-    ],
-    ...DISMISSALS,
-  ])("goes back to the form as it was on %s", async (_, dismiss) => {
-    const user = userEvent.setup();
-    mockedPut.mockRejectedValueOnce(refused());
+  it("goes back to the form as it was on each way out of its override", async () => {
+    // Every Save is refused until the last, an ordinary edit.
+    for (let refusals = 0; refusals < 4; refusals += 1) {
+      mockedPut.mockRejectedValueOnce(refused());
+    }
     renderSection();
 
-    await saveDisabled(user);
-    await dismiss(user, await typedOverride(user, EDIT_TITLE));
+    const edit = await saveDisabled();
+    const enabled = () =>
+      within(edit).getByRole("checkbox", { name: "Account enabled" });
+    const ways: [string, (dialog: HTMLElement) => Promise<void>][] = [
+      [
+        "Cancel",
+        async (dialog) => {
+          await user.click(
+            within(dialog).getByRole("button", { name: "Cancel" }),
+          );
+        },
+      ],
+      ...DISMISSALS,
+    ];
+    for (const [index, [name, dismiss]] of ways.entries()) {
+      await dismiss(await typedOverride(EDIT_TITLE));
 
-    await waitFor(expectNoOverride);
-    const edit = screen.getByRole("dialog", { name: `Edit ${OWN}` });
-    const enabled = within(edit).getByRole("checkbox", {
-      name: "Account enabled",
-    });
-    expect(enabled).not.toBeChecked();
-    expect(mockedPut).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expectNoOverride(`${name} left the override up`);
+      });
+      expect(
+        screen.getByRole("dialog", { name: `Edit ${OWN}` }),
+        `the form was replaced after ${name}`,
+      ).toBe(edit);
+      expect(enabled(), `the untick was lost after ${name}`).not.toBeChecked();
+      expect(mockedPut).toHaveBeenCalledTimes(index + 1);
+      // Save again: the same refusal, the same override.
+      if (index < ways.length - 1) {
+        await user.click(within(edit).getByRole("button", { name: "Save" }));
+      }
+    }
 
     // The form still saves, as an ordinary edit.
-    await user.click(enabled);
+    await user.click(enabled());
     await user.click(within(edit).getByRole("button", { name: "Save" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(mockedPut.mock.calls).toEqual([
-      [OWN_URL, DISABLE],
+      ...Array.from({ length: 4 }, () => [OWN_URL, DISABLE]),
       [OWN_URL, { enable: true }],
     ]);
     expect(mockedDelete).not.toHaveBeenCalled();
   });
 
+  // On the app's own client too: neither failure of the forced edit, nor the
+  // refusal before it, may raise a toast beside the form that shows it.
   it.each([
-    [
-      "a gateway failure",
-      new ApiClientError(502, {
-        error: "Bad Gateway",
-        message: "Failed to connect to Proxmox",
-      }),
-    ],
+    ["a gateway failure", unreachable()],
     ["a second refusal", refused()],
   ])(
-    "reports %s of the forced edit in the form, not in an override",
+    "reports %s of the forced edit in the form, not in an override or a toast",
     async (_, failure) => {
-      const user = userEvent.setup();
       mockedPut.mockRejectedValueOnce(refused()).mockRejectedValueOnce(failure);
-      renderSection();
+      renderSectionOnAppClient();
 
-      await saveDisabled(user);
-      const confirm = await typedOverride(user, EDIT_TITLE);
+      await saveDisabled();
+      const confirm = await typedOverride(EDIT_TITLE);
       await user.click(
         within(confirm).getByRole("button", { name: "Save Anyway" }),
       );
@@ -662,30 +600,8 @@ describe("an edit refused as Nexara's own credential", () => {
       await waitFor(expectNoOverride);
       const edit = screen.getByRole("dialog", { name: `Edit ${OWN}` });
       expect(within(edit).getByText(failure.message)).toBeInTheDocument();
+      expect(mockedToastError).not.toHaveBeenCalled();
       expect(mockedPut).toHaveBeenCalledTimes(2);
-      expect(mockedDelete).not.toHaveBeenCalled();
-    },
-  );
-});
-
-describe("an edit that fails for any other reason", () => {
-  it.each([
-    [403, "Proxmox API permission denied"],
-    [502, "Failed to connect to Proxmox"],
-  ])(
-    "reports a %i in the form and offers no override",
-    async (status, message) => {
-      const user = userEvent.setup();
-      mockedPut.mockRejectedValueOnce(
-        new ApiClientError(status, { error: "failed", message }),
-      );
-      renderSection();
-
-      const edit = await saveDisabled(user);
-
-      expect(await within(edit).findByText(message)).toBeInTheDocument();
-      expectNoOverride();
-      expect(mockedPut).toHaveBeenCalledTimes(1);
       expect(mockedDelete).not.toHaveBeenCalled();
     },
   );
@@ -697,10 +613,7 @@ describe("an edit that fails for any other reason", () => {
 // dialog is open it shows the failure itself, the override for a refusal and
 // the form for anything else, so useUpdateAccessUser opts out
 // (errorsHandledLocally), and once the dialog is gone EditUserDialog toasts it
-// (below). Without the opt-out each failure was reported twice, and a refusal
-// put a toast up beside the override that answers it.
-//
-// These run on the app's own kind of client, and start from the control its docs
+// (below). These run on the app's own kind of client, from the control its docs
 // ask for (test/app-query-client.ts).
 describe("an edit's failure is reported once, not also as a toast", () => {
   const PROBE = "PROBE-NOT-A-REAL-FAILURE";
@@ -728,79 +641,30 @@ describe("an edit's failure is reported once, not also as a toast", () => {
     expect(mockedToastError).toHaveBeenCalledWith(PROBE);
   });
 
-  it("opens the Save Anyway override for a refusal, with no toast beside it", async () => {
-    const user = userEvent.setup();
-    mockedPut.mockRejectedValueOnce(refused());
+  // One failure after another, from the same open form: each replaces the one
+  // before it, and none opens an override or raises a toast beside the form.
+  it("shows a 403, a 502 and a failure that is not the server's in the form, with no override and no toast", async () => {
+    const failures: [failure: Error, shown: string][] = [
+      [denied(), DENIED],
+      [unreachable(), UNREACHABLE],
+      // Not the server's answer, so the form words it itself, where the net
+      // would have toasted the error's own text.
+      [new Error("socket hang up"), "Failed to update user"],
+    ];
+    for (const [failure] of failures) mockedPut.mockRejectedValueOnce(failure);
     renderSectionOnAppClient();
 
-    await saveDisabled(user);
-    const confirm = await screen.findByRole("dialog", { name: EDIT_TITLE });
-
-    // The net runs before a failure reaches the component's own handler, so
-    // with the override on screen, a toast that was coming has come.
-    expect(within(confirm).getByText(REFUSAL)).toBeInTheDocument();
-    expect(mockedToastError).not.toHaveBeenCalled();
-    expect(mockedPut.mock.calls).toEqual([[OWN_URL, DISABLE]]);
-  });
-
-  it.each([
-    [
-      "a 400",
-      new ApiClientError(400, {
-        error: "bad_request",
-        message: "Parameter verification failed",
-      }),
-      "Parameter verification failed",
-    ],
-    [
-      "a 500",
-      new ApiClientError(500, {
-        error: "internal_error",
-        message: "Internal server error",
-      }),
-      "Internal server error",
-    ],
-    // Not the server's answer, so the form words it itself, where the net
-    // would have toasted the error's own text.
-    [
-      "a failure that is not the server's",
-      new Error("socket hang up"),
-      "Failed to update user",
-    ],
-  ])(
-    "shows %s in the form, with no override and no toast",
-    async (_, failure, shown) => {
-      const user = userEvent.setup();
-      mockedPut.mockRejectedValueOnce(failure);
-      renderSectionOnAppClient();
-
-      const edit = await saveDisabled(user);
-
+    const edit = await saveDisabled();
+    for (const [index, [, shown]] of failures.entries()) {
       expect(await within(edit).findByText(shown)).toBeInTheDocument();
       expectNoOverride();
       expect(mockedToastError).not.toHaveBeenCalled();
-      expect(mockedPut).toHaveBeenCalledTimes(1);
-    },
-  );
-
-  it("shows the failure of a forced edit in the form, with no toast for it or for the refusal before it", async () => {
-    const user = userEvent.setup();
-    mockedPut
-      .mockRejectedValueOnce(refused())
-      .mockRejectedValueOnce(unreachable());
-    renderSectionOnAppClient();
-
-    await saveDisabled(user);
-    const confirm = await typedOverride(user, EDIT_TITLE);
-    await user.click(
-      within(confirm).getByRole("button", { name: "Save Anyway" }),
-    );
-
-    await waitFor(expectNoOverride);
-    const edit = screen.getByRole("dialog", { name: `Edit ${OWN}` });
-    expect(within(edit).getByText(UNREACHABLE)).toBeInTheDocument();
-    expect(mockedToastError).not.toHaveBeenCalled();
-    expect(mockedPut).toHaveBeenCalledTimes(2);
+      expect(mockedPut).toHaveBeenCalledTimes(index + 1);
+      if (index < failures.length - 1) {
+        await user.click(within(edit).getByRole("button", { name: "Save" }));
+      }
+    }
+    expect(mockedDelete).not.toHaveBeenCalled();
   });
 });
 
@@ -812,154 +676,133 @@ describe("an edit's failure is reported once, not also as a toast", () => {
 // account, and one that succeeds must not close the dialog opened in the
 // meantime.
 describe("a save that settles after its edit dialog is gone", () => {
-  const DENIED = "Proxmox API permission denied";
+  // Every way the dialog goes while the save is out, one after another on one
+  // page: each failure is toasted once, not also by the global net and not
+  // again later, and a refusal, which the dialog would have answered with an
+  // override, is worded as a refusal that was not acted on.
+  it("toasts a failure that comes after the dialog was dismissed, by each of its ways out, once, and a refusal as a refusal", async () => {
+    renderSectionOnAppClient();
+    const ways: [string, (dialog: HTMLElement) => Promise<void>][] = [
+      [
+        "Cancel",
+        async (dialog) => {
+          await user.click(
+            within(dialog).getByRole("button", { name: "Cancel" }),
+          );
+        },
+      ],
+      ...DISMISSALS,
+    ];
 
-  const LEAVES: [
-    name: string,
-    leave: (user: UserEvent, dialog: HTMLElement) => Promise<void>,
-  ][] = [
-    [
-      "Cancel",
-      async (user, dialog) => {
-        await user.click(
-          within(dialog).getByRole("button", { name: "Cancel" }),
-        );
-      },
-    ],
-    ...DISMISSALS,
-    [
-      "the page being left",
-      () => {
-        cleanup();
-        return Promise.resolve();
-      },
-    ],
-  ];
-
-  it.each(LEAVES)(
-    "toasts a failure that comes after %s, once",
-    async (_, leave) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPut.mockReturnValueOnce(held.promise);
-      renderSectionOnAppClient();
-
-      const edit = await saveDisabled(user);
+    for (const [index, [name, leave]] of ways.entries()) {
+      const request = holdNextPut();
+      const edit = await saveDisabled();
       expect(
         await within(edit).findByRole("button", { name: "Saving..." }),
       ).toBeDisabled();
-      await leave(user, edit);
+      await leave(edit);
       await waitFor(() => {
-        expect(edit).not.toBeInTheDocument();
+        expect(edit, `${name} left the dialog up`).not.toBeInTheDocument();
       });
 
-      held.reject(
-        new ApiClientError(403, { error: "forbidden", message: DENIED }),
-      );
+      request.reject(denied());
       await waitFor(() => {
-        expect(mockedToastError).toHaveBeenCalledWith(savingFailed(DENIED));
+        expect(mockedToastError).toHaveBeenCalledTimes(index + 1);
       });
-      // Once: not also by the global net, and not again later.
-      await flush();
-      expect(mockedToastError).toHaveBeenCalledTimes(1);
-      expect(mockedPut).toHaveBeenCalledTimes(1);
-    },
-  );
+      await flushInAct();
+      expect(mockedToastError).toHaveBeenCalledTimes(index + 1);
+      expect(mockedToastError).toHaveBeenLastCalledWith(savingFailed(DENIED));
+    }
 
-  it("toasts a refusal that comes after the dialog was dismissed as a refusal, saying what to do and not quoting the server", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPut.mockReturnValueOnce(held.promise);
-    renderSectionOnAppClient();
-
-    const edit = await saveDisabled(user);
+    const request = holdNextPut();
+    const edit = await saveDisabled();
     await within(edit).findByRole("button", { name: "Saving..." });
     await user.keyboard("{Escape}");
     await waitFor(() => {
       expect(edit).not.toBeInTheDocument();
     });
-
-    held.reject(refused());
+    request.reject(refused());
     await waitFor(() => {
       expect(mockedToastError).toHaveBeenCalledWith(SAVING_REFUSED);
     });
-    await flush();
+    await flushInAct();
 
-    expect(mockedToastError).toHaveBeenCalledTimes(1);
+    expect(mockedToastError).toHaveBeenCalledTimes(ways.length + 1);
     expectNoOverride();
     expect(screen.queryByRole("dialog")).toBeNull();
-    // Nothing forced it: there was no one to ask.
-    expect(mockedPut.mock.calls).toEqual([[OWN_URL, DISABLE]]);
+    // Nothing forced any of them: there was no one to ask.
+    expect(mockedPut.mock.calls).toEqual(
+      Array.from({ length: ways.length + 1 }, () => [OWN_URL, DISABLE]),
+    );
+  });
+
+  it("toasts a failure that comes after the page was left, once", async () => {
+    const request = holdNextPut();
+    renderSectionOnAppClient();
+
+    const edit = await saveDisabled();
+    expect(
+      await within(edit).findByRole("button", { name: "Saving..." }),
+    ).toBeDisabled();
+    cleanup();
+    await waitFor(() => {
+      expect(edit).not.toBeInTheDocument();
+    });
+
+    request.reject(denied());
+    await waitFor(() => {
+      expect(mockedToastError).toHaveBeenCalledWith(savingFailed(DENIED));
+    });
+    await flushInAct();
+    expect(mockedToastError).toHaveBeenCalledTimes(1);
+    expect(mockedPut).toHaveBeenCalledTimes(1);
   });
 
   // The live dialog treats a 409 as a refusal to override only for an edit that
   // was not forced: a forced one is past it, and its failure is the form's, in
   // the server's words. A toast for it follows the same rule.
-  it("toasts a 409 to a forced edit whose page was left in the server's words, as the failure it is", async () => {
-    const user = userEvent.setup();
-    const forced = deferred<unknown>();
-    mockedPut
-      .mockRejectedValueOnce(refused())
-      .mockReturnValueOnce(forced.promise);
-    renderSectionOnAppClient();
+  it.each([
+    ["a 409", refused(), savingFailed(REFUSAL)],
+    ["a gateway failure", unreachable(), savingFailed(UNREACHABLE)],
+  ])(
+    "toasts %s to a forced edit whose page was left, as the failure it is",
+    async (_, failure, toasted) => {
+      const forced = deferred<unknown>();
+      mockedPut
+        .mockRejectedValueOnce(refused())
+        .mockReturnValueOnce(forced.promise);
+      renderSectionOnAppClient();
 
-    await saveDisabled(user);
-    const confirm = await typedOverride(user, EDIT_TITLE);
-    await user.click(
-      within(confirm).getByRole("button", { name: "Save Anyway" }),
-    );
-    expect(
-      await within(confirm).findByRole("button", { name: "Working..." }),
-    ).toBeDisabled();
-    cleanup();
+      await saveDisabled();
+      const confirm = await typedOverride(EDIT_TITLE);
+      await user.click(
+        within(confirm).getByRole("button", { name: "Save Anyway" }),
+      );
+      // Nothing on the page can dismiss the override while the forced edit is
+      // out, but leaving the page still takes it away.
+      expect(
+        await within(confirm).findByRole("button", { name: "Working..." }),
+      ).toBeDisabled();
+      cleanup();
 
-    forced.reject(refused());
-    await waitFor(() => {
-      expect(mockedToastError).toHaveBeenCalledWith(savingFailed(REFUSAL));
-    });
-    await flush();
+      forced.reject(failure);
+      await waitFor(() => {
+        expect(mockedToastError).toHaveBeenCalledWith(toasted);
+      });
+      await flushInAct();
 
-    expect(mockedToastError).toHaveBeenCalledTimes(1);
-    expect(mockedPut).toHaveBeenCalledTimes(2);
-  });
-
-  it("toasts the failure of a forced edit whose page was left", async () => {
-    const user = userEvent.setup();
-    const forced = deferred<unknown>();
-    mockedPut
-      .mockRejectedValueOnce(refused())
-      .mockReturnValueOnce(forced.promise);
-    renderSectionOnAppClient();
-
-    await saveDisabled(user);
-    const confirm = await typedOverride(user, EDIT_TITLE);
-    await user.click(
-      within(confirm).getByRole("button", { name: "Save Anyway" }),
-    );
-    // Nothing on the page can dismiss the override while the forced edit is
-    // out, but leaving the page still takes it away.
-    expect(
-      await within(confirm).findByRole("button", { name: "Working..." }),
-    ).toBeDisabled();
-    cleanup();
-
-    forced.reject(unreachable());
-    await waitFor(() => {
-      expect(mockedToastError).toHaveBeenCalledWith(savingFailed(UNREACHABLE));
-    });
-    await flush();
-
-    // The refusal before it, which the override answered, raised none.
-    expect(mockedToastError).toHaveBeenCalledTimes(1);
-    expect(mockedPut).toHaveBeenCalledTimes(2);
-  });
+      // The refusal before it, which the override answered, raised none.
+      expect(mockedToastError).toHaveBeenCalledTimes(1);
+      expect(mockedPut).toHaveBeenCalledTimes(2);
+    },
+  );
 
   /**
    * Saves Nexara's own account with the request held (the caller queues it),
    * dismisses that dialog with Escape, and opens the Edit dialog of another
    * account in its place.
    */
-  async function dismissForAnother(user: UserEvent) {
+  async function dismissForAnother() {
     mockedList.mockImplementation((path: string) =>
       Promise.resolve(
         path === USERS_URL
@@ -981,7 +824,7 @@ describe("a save that settles after its edit dialog is gone", () => {
     });
     const qc = renderSectionOnAppClient();
 
-    const first = await saveDisabled(user);
+    const first = await saveDisabled();
     await within(first).findByRole("button", { name: "Saving..." });
     await user.keyboard("{Escape}");
     await waitFor(() => {
@@ -996,12 +839,10 @@ describe("a save that settles after its edit dialog is gone", () => {
   }
 
   it("does not close the edit dialog opened in its place when it succeeds", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPut.mockReturnValueOnce(held.promise);
-    const { qc, second } = await dismissForAnother(user);
+    const request = holdNextPut();
+    const { qc, second } = await dismissForAnother();
 
-    held.resolve({ status: "ok" });
+    request.resolve({ status: "ok" });
     await waitFor(() => {
       expect(
         qc
@@ -1010,7 +851,7 @@ describe("a save that settles after its edit dialog is gone", () => {
           .map((mutation) => mutation.state.status),
       ).toEqual(["success"]);
     });
-    await flush();
+    await flushInAct();
 
     expect(second).toBeInTheDocument();
     expect(second).toHaveAttribute("data-state", "open");
@@ -1019,18 +860,14 @@ describe("a save that settles after its edit dialog is gone", () => {
   });
 
   it("names the account in the toast when it fails over another account's open dialog, and leaves that dialog alone", async () => {
-    const user = userEvent.setup();
-    const held = deferred<unknown>();
-    mockedPut.mockReturnValueOnce(held.promise);
-    const { second } = await dismissForAnother(user);
+    const request = holdNextPut();
+    const { second } = await dismissForAnother();
 
-    held.reject(
-      new ApiClientError(403, { error: "forbidden", message: DENIED }),
-    );
+    request.reject(denied());
     await waitFor(() => {
       expect(mockedToastError).toHaveBeenCalledWith(savingFailed(DENIED));
     });
-    await flush();
+    await flushInAct();
 
     expect(mockedToastError).toHaveBeenCalledTimes(1);
     // The dialog that is open is the other account's, and this was not its save.
@@ -1049,8 +886,6 @@ describe("a save that settles after its edit dialog is gone", () => {
 // in a session that has since ended reports nowhere
 // (hooks/useSaveOutcome.ts). The same-session cases above are the controls.
 describe("a save that settles after its session ended", () => {
-  const DENIED = "Proxmox API permission denied";
-
   beforeEach(() => {
     signIn();
   });
@@ -1059,7 +894,7 @@ describe("a save that settles after its session ended", () => {
     signOutForGood();
   });
 
-  const GONE: [name: string, leave: (user: UserEvent) => Promise<void>][] = [
+  const GONE: [name: string, leave: () => Promise<void>][] = [
     [
       "the page was left",
       () => {
@@ -1069,7 +904,7 @@ describe("a save that settles after its session ended", () => {
     ],
     [
       "the dialog was dismissed",
-      async (user) => {
+      async () => {
         await user.keyboard("{Escape}");
       },
     ],
@@ -1078,21 +913,17 @@ describe("a save that settles after its session ended", () => {
   it.each(GONE)(
     "control: toasts the failure once, in the same session, when %s",
     async (_, leave) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPut.mockReturnValueOnce(held.promise);
+      const request = holdNextPut();
       renderSectionOnAppClient();
 
-      const edit = await saveDisabled(user);
+      const edit = await saveDisabled();
       await within(edit).findByRole("button", { name: "Saving..." });
-      await leave(user);
-      held.reject(
-        new ApiClientError(403, { error: "forbidden", message: DENIED }),
-      );
+      await leave();
+      request.reject(denied());
       await waitFor(() => {
         expect(mockedToastError).toHaveBeenCalledWith(savingFailed(DENIED));
       });
-      await flush();
+      await flushInAct();
 
       expect(mockedToastError).toHaveBeenCalledTimes(1);
     },
@@ -1103,7 +934,7 @@ describe("a save that settles after its session ended", () => {
       ([ending, end]) =>
         [`${ending}, when ${gone}`, leave, end] as [
           name: string,
-          leave: (user: UserEvent) => Promise<void>,
+          leave: () => Promise<void>,
           end: () => void,
         ],
     ),
@@ -1112,20 +943,16 @@ describe("a save that settles after its session ended", () => {
   it.each(AFTER)(
     "toasts nothing for a failure that comes after %s",
     async (_, leave, end) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPut.mockReturnValueOnce(held.promise);
+      const request = holdNextPut();
       renderSectionOnAppClient();
 
-      const edit = await saveDisabled(user);
+      const edit = await saveDisabled();
       await within(edit).findByRole("button", { name: "Saving..." });
-      await leave(user);
+      await leave();
       end();
-      held.reject(
-        new ApiClientError(403, { error: "forbidden", message: DENIED }),
-      );
-      await flush();
-      await flush();
+      request.reject(denied());
+      await flushInAct();
+      await flushInAct();
 
       expect(mockedToastError).not.toHaveBeenCalled();
       expect(mockedPut).toHaveBeenCalledTimes(1);
@@ -1135,19 +962,15 @@ describe("a save that settles after its session ended", () => {
   it.each(SESSION_ENDINGS)(
     "shows nothing in the form for a failure that comes after %s, with the dialog still there",
     async (_, end) => {
-      const user = userEvent.setup();
-      const held = deferred<unknown>();
-      mockedPut.mockReturnValueOnce(held.promise);
+      const request = holdNextPut();
       renderSectionOnAppClient();
 
-      const edit = await saveDisabled(user);
+      const edit = await saveDisabled();
       await within(edit).findByRole("button", { name: "Saving..." });
       end();
-      held.reject(
-        new ApiClientError(403, { error: "forbidden", message: DENIED }),
-      );
-      await flush();
-      await flush();
+      request.reject(denied());
+      await flushInAct();
+      await flushInAct();
 
       expect(within(edit).queryByText(DENIED)).toBeNull();
       expect(mockedToastError).not.toHaveBeenCalled();
@@ -1156,28 +979,44 @@ describe("a save that settles after its session ended", () => {
 });
 
 describe("an edit sends only what the operator touched", () => {
-  it("sends an e-mail changed alone as that field alone", async () => {
-    const user = userEvent.setup();
+  it("holds Save and sends nothing until a field is touched, then sends an e-mail changed alone as that field alone", async () => {
     renderSection();
 
-    const edit = await openEdit(user);
-    const email = await within(edit).findByRole("textbox", { name: "Email" });
-    await user.type(email, "ops@example.com");
+    const edit = await openEdit();
+    const save = await within(edit).findByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(mockedPut).not.toHaveBeenCalled();
+
+    // A submit that does not go through the disabled Save button, as
+    // form.requestSubmit() does not. The mutation calls the transport a few
+    // microtasks after it is asked to, so let them run before looking.
+    const form = edit.querySelector("form");
+    if (form === null) throw new Error("the edit dialog has no form");
+    fireEvent.submit(form);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockedPut).not.toHaveBeenCalled();
+
+    // The same submit does reach the handler: with a field touched it sends,
+    // and the form showed the comment and an enabled account throughout, and
+    // neither was touched, so neither goes out.
+    const email = within(edit).getByRole("textbox", { name: "Email" });
+    fill(email, "ops@example.com");
     expect(email).toHaveValue("ops@example.com");
-    await user.click(within(edit).getByRole("button", { name: "Save" }));
+    expect(save).toBeEnabled();
+    fireEvent.submit(form);
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
-    // The form showed the comment and an enabled account throughout, and
-    // neither was touched, so neither goes out.
     expect(mockedPut.mock.calls).toStrictEqual([
       [OWN_URL, { email: "ops@example.com" }],
     ]);
   });
 
   it("leaves enable out when only the comment of a disabled account is edited", async () => {
-    const user = userEvent.setup();
     mockedGet.mockImplementation((path: string) =>
       path === OWN_URL
         ? Promise.resolve({
@@ -1189,13 +1028,12 @@ describe("an edit sends only what the operator touched", () => {
     );
     renderSection();
 
-    const edit = await openEdit(user);
+    const edit = await openEdit();
     expect(
       await within(edit).findByRole("checkbox", { name: "Account enabled" }),
     ).not.toBeChecked();
     const comment = within(edit).getByRole("textbox", { name: "Comment" });
-    await user.clear(comment);
-    await user.type(comment, "retired");
+    fill(comment, "retired");
     expect(comment).toHaveValue("retired");
     await user.click(within(edit).getByRole("button", { name: "Save" }));
 
@@ -1206,86 +1044,25 @@ describe("an edit sends only what the operator touched", () => {
       [OWN_URL, { comment: "retired" }],
     ]);
   });
-
-  it("holds Save until a field is touched", async () => {
-    const user = userEvent.setup();
-    renderSection();
-
-    const edit = await openEdit(user);
-    const save = await within(edit).findByRole("button", { name: "Save" });
-    expect(save).toBeDisabled();
-    await user.click(save);
-    expect(mockedPut).not.toHaveBeenCalled();
-
-    await user.type(
-      within(edit).getByRole("textbox", { name: "Comment" }),
-      "!",
-    );
-    expect(save).toBeEnabled();
-  });
-
-  it("sends nothing when the form is submitted with nothing touched", async () => {
-    const user = userEvent.setup();
-    renderSection();
-
-    const edit = await openEdit(user);
-    const comment = await within(edit).findByRole("textbox", {
-      name: "Comment",
-    });
-    const form = edit.querySelector("form");
-    if (form === null) throw new Error("the edit dialog has no form");
-
-    // A submit that does not go through the disabled Save button, as
-    // form.requestSubmit() does not. The mutation calls the transport a few
-    // microtasks after it is asked to, so let them run before looking.
-    fireEvent.submit(form);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(mockedPut).not.toHaveBeenCalled();
-
-    // The same submit does reach the handler: with a field touched it sends,
-    // and it is then the only request there has been.
-    await user.type(comment, "!");
-    fireEvent.submit(form);
-    await waitFor(() => {
-      expect(mockedPut).toHaveBeenCalled();
-    });
-    expect(mockedPut.mock.calls).toStrictEqual([
-      [OWN_URL, { comment: "service account!" }],
-    ]);
-  });
 });
 
 describe("an edit whose read of the account fails or stalls", () => {
-  it.each([
-    ["the server's message", unreachable(), UNREACHABLE],
-    [
-      "a fallback when the failure carries none",
-      new Error("socket hang up"),
-      "Failed to load user",
-    ],
-  ])("shows %s in place of the form", async (_, failure, shown) => {
-    const user = userEvent.setup();
-    mockedGet.mockRejectedValueOnce(failure);
-    renderSection();
-
-    const edit = await openEdit(user);
-
-    expect(await within(edit).findByText(shown)).toBeInTheDocument();
-    // Nothing to save from: no fields, and no Save to send an account of
-    // empty fields with "Account enabled" ticked.
+  // Nothing to save from: no fields, and no Save to send an account of empty
+  // fields with "Account enabled" ticked.
+  function expectNoForm(edit: HTMLElement) {
     expect(within(edit).queryByRole("textbox")).toBeNull();
     expect(within(edit).queryByRole("checkbox")).toBeNull();
     expect(within(edit).queryByRole("button", { name: "Save" })).toBeNull();
-  });
+  }
 
-  it("reads the account again on Retry, then shows the form", async () => {
-    const user = userEvent.setup();
+  it("shows the server's message in place of the form, and reads the account again on Retry", async () => {
     mockedGet.mockRejectedValueOnce(unreachable());
     renderSection();
 
-    const edit = await openEdit(user);
+    const edit = await openEdit();
+
+    expect(await within(edit).findByText(UNREACHABLE)).toBeInTheDocument();
+    expectNoForm(edit);
     await user.click(
       await within(edit).findByRole("button", { name: "Retry" }),
     );
@@ -1297,11 +1074,22 @@ describe("an edit whose read of the account fails or stalls", () => {
     expect(mockedGet).toHaveBeenCalledTimes(2);
   });
 
+  it("shows a fallback in place of the form when the failure carries no message", async () => {
+    mockedGet.mockRejectedValueOnce(new Error("socket hang up"));
+    renderSection();
+
+    const edit = await openEdit();
+
+    expect(
+      await within(edit).findByText("Failed to load user"),
+    ).toBeInTheDocument();
+    expectNoForm(edit);
+  });
+
   it("keeps the form, with a notice, when a later read of an account it already has fails", async () => {
-    const user = userEvent.setup();
     const qc = renderSection();
 
-    const edit = await openEdit(user);
+    const edit = await openEdit();
     await within(edit).findByRole("textbox", { name: "Comment" });
     // Nothing to report while the reads are going well.
     expect(within(edit).queryByRole("status")).toBeNull();
@@ -1320,7 +1108,7 @@ describe("an edit whose read of the account fails or stalls", () => {
     const notice = await within(edit).findByRole("status");
     expect(notice).toHaveTextContent(UNREACHABLE);
     expect(notice).toHaveTextContent("as last read");
-    await user.type(
+    fill(
       within(edit).getByRole("textbox", { name: "Email" }),
       "ops@example.com",
     );
@@ -1335,7 +1123,6 @@ describe("an edit whose read of the account fails or stalls", () => {
   });
 
   it("draws no form while the read is paused, and the form once it resumes", async () => {
-    const user = userEvent.setup();
     const qc = renderSection();
     await screen.findByRole("button", { name: `Edit ${OWN}` });
 
@@ -1345,13 +1132,11 @@ describe("an edit whose read of the account fails or stalls", () => {
       onlineManager.setOnline(false);
     });
     try {
-      const edit = await openEdit(user);
+      const edit = await openEdit();
       await waitFor(() => {
         expect(qc.getQueryState(OWN_KEY)?.fetchStatus).toBe("paused");
       });
-      expect(within(edit).queryByRole("textbox")).toBeNull();
-      expect(within(edit).queryByRole("checkbox")).toBeNull();
-      expect(within(edit).queryByRole("button", { name: "Save" })).toBeNull();
+      expectNoForm(edit);
       expect(mockedGet).not.toHaveBeenCalled();
 
       act(() => {
@@ -1371,7 +1156,6 @@ describe("an edit whose read of the account fails or stalls", () => {
 
 describe("a delete refused as Nexara's own credential", () => {
   it("keeps its own override, which forces the delete", async () => {
-    const user = userEvent.setup();
     mockedDelete.mockRejectedValueOnce(refused());
     renderSection();
 
@@ -1382,7 +1166,7 @@ describe("a delete refused as Nexara's own credential", () => {
       name: `Delete ${OWN}?`,
     });
     await user.click(within(ask).getByRole("button", { name: "Delete User" }));
-    const confirm = await typedOverride(user, DELETE_TITLE);
+    const confirm = await typedOverride(DELETE_TITLE);
     expect(
       within(confirm).queryByRole("button", { name: "Save Anyway" }),
     ).toBeNull();
@@ -1459,12 +1243,12 @@ const HELD = [
 type Held = (typeof HELD)[number];
 
 /** Expands Nexara's own account, when the confirmation is on one of its tokens. */
-async function expandFor(user: UserEvent, held: Held) {
+async function expandFor(held: Held) {
   if (held.needsTokens) await user.click(await screen.findByText(OWN));
 }
 
 /** Opens the confirmation from the button in the table that asks for it. */
-async function openHeld(user: UserEvent, held: Held): Promise<HTMLElement> {
+async function openHeld(held: Held): Promise<HTMLElement> {
   await user.click(await screen.findByRole("button", { name: held.trigger }));
   return screen.findByRole("alertdialog", { name: held.ask });
 }
@@ -1475,7 +1259,7 @@ async function openHeld(user: UserEvent, held: Held): Promise<HTMLElement> {
  * isPending a macrotask after mutate(), so a dismissal in between would close
  * the dialog whatever the guard does. No one presses a key that fast.
  */
-async function sendHeld(user: UserEvent, held: Held, dialog: HTMLElement) {
+async function sendHeld(held: Held, dialog: HTMLElement) {
   await user.click(within(dialog).getByRole("button", { name: held.send }));
   expect(
     await within(dialog).findByRole("button", { name: held.sending }),
@@ -1487,33 +1271,32 @@ describe("a confirmation held while its request is in flight", () => {
     "holds the $name dialog, then the override its refusal opens, until their requests settle",
     async (held) => {
       const { request, other, title, typed, confirm, forced, sent } = held;
-      const user = userEvent.setup();
       const first = deferred<unknown>();
       const second = deferred<unknown>();
       request
         .mockReturnValueOnce(first.promise)
         .mockReturnValueOnce(second.promise);
       renderSection();
-      await expandFor(user, held);
+      await expandFor(held);
 
       // With nothing in flight Cancel and Escape both close it: what the guard
       // must let through before the request is out, and stop after.
-      const byCancel = await openHeld(user, held);
+      const byCancel = await openHeld(held);
       await user.click(
         within(byCancel).getByRole("button", { name: "Cancel" }),
       );
       await waitFor(() => {
         expect(byCancel).not.toBeInTheDocument();
       });
-      const byEscape = await openHeld(user, held);
+      const byEscape = await openHeld(held);
       await user.keyboard("{Escape}");
       await waitFor(() => {
         expect(byEscape).not.toBeInTheDocument();
       });
       expect(request).not.toHaveBeenCalled();
 
-      const dialog = await openHeld(user, held);
-      await sendHeld(user, held, dialog);
+      const dialog = await openHeld(held);
+      await sendHeld(held, dialog);
       expect(
         within(dialog).getByRole("button", { name: "Cancel" }),
       ).toBeDisabled();
@@ -1542,7 +1325,7 @@ describe("a confirmation held while its request is in flight", () => {
       // override that names this action. By element and not by role: under the
       // override, an alert dialog still open would be hidden from a role query.
       first.reject(refused());
-      const override = await typedOverride(user, title, typed);
+      const override = await typedOverride(title, typed);
       expect(within(override).getByText(REFUSAL)).toBeInTheDocument();
       expect(dialog).not.toBeInTheDocument();
 
@@ -1581,14 +1364,13 @@ describe("a confirmation held while its request is in flight", () => {
   it.each(HELD)(
     "sends focus back to the $name button when the override its refusal opens is cancelled",
     async (held) => {
-      const user = userEvent.setup();
       const pending = deferred<unknown>();
       held.request.mockReturnValueOnce(pending.promise);
       renderSection();
-      await expandFor(user, held);
+      await expandFor(held);
       const trigger = await screen.findByRole("button", { name: held.trigger });
-      const dialog = await openHeld(user, held);
-      await sendHeld(user, held, dialog);
+      const dialog = await openHeld(held);
+      await sendHeld(held, dialog);
 
       pending.reject(refused());
       const override = await screen.findByRole("dialog", { name: held.title });
@@ -1608,13 +1390,12 @@ describe("a confirmation held while its request is in flight", () => {
   it.each(HELD)(
     "lets go of the $name dialog when its request succeeds",
     async (held) => {
-      const user = userEvent.setup();
       const pending = deferred<unknown>();
       held.request.mockReturnValueOnce(pending.promise);
       renderSection();
-      await expandFor(user, held);
-      const dialog = await openHeld(user, held);
-      await sendHeld(user, held, dialog);
+      await expandFor(held);
+      const dialog = await openHeld(held);
+      await sendHeld(held, dialog);
 
       pending.resolve(held.forced);
 
@@ -1630,13 +1411,12 @@ describe("a confirmation held while its request is in flight", () => {
   it.each(HELD)(
     "lets go of the $name dialog when its request fails, and reports it without an override",
     async (held) => {
-      const user = userEvent.setup();
       const pending = deferred<unknown>();
       held.request.mockReturnValueOnce(pending.promise);
       renderSection();
-      await expandFor(user, held);
-      const dialog = await openHeld(user, held);
-      await sendHeld(user, held, dialog);
+      await expandFor(held);
+      const dialog = await openHeld(held);
+      await sendHeld(held, dialog);
 
       pending.reject(unreachable());
 

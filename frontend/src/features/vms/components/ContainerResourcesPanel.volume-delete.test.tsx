@@ -3,15 +3,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   act,
   fireEvent,
-  render,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import type { UserEvent } from "@testing-library/user-event";
+import type { QueryClient } from "@tanstack/react-query";
 import { apiClient, ApiClientError } from "@/lib/api-client";
+import { deferred } from "@/test/fake-server";
+import { renderWithProviders } from "@/test/test-utils";
+import { fill, setupUser } from "@/test/user";
 import { ContainerResourcesPanel } from "./ContainerResourcesPanel";
 import panelSource from "./ContainerResourcesPanel.tsx?raw";
 
@@ -20,23 +21,13 @@ import panelSource from "./ContainerResourcesPanel.tsx?raw";
 // leaves the browser, which is the claim a destructive action's test has to
 // make. That is why these tests are not in ContainerResourcesPanel.test.tsx:
 // it replaces the hooks themselves, and a vi.mock applies to a whole file.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      get: vi.fn(),
-      list: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      patch: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({ patch: vi.fn() }),
+);
+
+// Not under test, and its injected stylesheet makes every getComputedStyle
+// call (role queries, Radix Presence, user-event) match against its rules.
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedGet = vi.mocked(apiClient.get);
 const mockedList = vi.mocked(apiClient.list);
@@ -81,14 +72,6 @@ function serverDropsDeletedKeys(_path: string, body?: unknown) {
   return Promise.resolve({ status: "ok" });
 }
 
-function deferred<T>() {
-  let resolve: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
-
 const props = {
   clusterId: CLUSTER,
   ctId: CT,
@@ -96,20 +79,13 @@ const props = {
   nodeName: "pve-01",
 };
 
-// Its own QueryClient rather than renderWithProviders', so a test can refetch
-// the config the way a change made elsewhere would.
+let user: UserEvent;
+
+// The client comes back, so a test can refetch the config the way a change
+// made elsewhere would.
 function renderPanel() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
-  });
-  render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <ContainerResourcesPanel {...props} />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-  return queryClient;
+  return renderWithProviders(<ContainerResourcesPanel {...props} />)
+    .queryClient;
 }
 
 /** The Unused Volumes row whose key label is `key`. */
@@ -133,7 +109,7 @@ function isStaged(key: string): boolean {
   return within(unusedRow(key)).queryByText("removing") !== null;
 }
 
-async function stage(user: ReturnType<typeof userEvent.setup>, key: string) {
+async function stage(key: string) {
   await user.click(
     within(unusedRow(key)).getByRole("button", { name: /^remove$/i }),
   );
@@ -144,7 +120,7 @@ async function stage(user: ReturnType<typeof userEvent.setup>, key: string) {
 async function openPanel() {
   const queryClient = renderPanel();
   await screen.findByText("unused1");
-  const save = screen.getByRole("button", { name: /save changes/i });
+  const save = screen.getByText("Save Changes", { selector: "button" });
   // The fixture opens clean, so Save being enabled later is the staging.
   expect(save).toBeDisabled();
   return { queryClient, save };
@@ -202,8 +178,14 @@ function expectNothingMutated() {
   expect(mockedDelete).not.toHaveBeenCalled();
 }
 
+/** The confirmation's action, and what Save confirms. */
+function deleteAndSave(dialog: HTMLElement): HTMLElement {
+  return within(dialog).getByRole("button", { name: "Delete and Save" });
+}
+
 describe("ContainerResourcesPanel unused volume deletion", () => {
   beforeEach(() => {
+    user = setupUser();
     // reset, not clear: one test's put implementation must not answer the
     // next test's request.
     vi.resetAllMocks();
@@ -216,15 +198,14 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     mockedList.mockResolvedValue([]);
   });
 
-  it("asks before a Save that deletes volumes, listing exactly the staged ones", async () => {
-    const user = userEvent.setup();
+  it("asks before a Save that deletes volumes, listing exactly the staged ones, and Cancel or Escape sends nothing, keeps them staged and gives focus back to Save", async () => {
     const { save } = await openPanel();
     // Staged out of order: the list is sorted by key, as the section is.
-    await stage(user, "unused2");
-    await stage(user, "unused0");
+    await stage("unused2");
+    await stage("unused0");
 
     await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
+    let dialog = await screen.findByRole("alertdialog");
 
     expect(
       within(dialog).getByText("Delete 2 unused volumes?"),
@@ -245,73 +226,54 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     expect(dialog).toHaveTextContent(/cannot be undone/i);
     // Opening the dialog is not the delete.
     expectNothingMutated();
+
+    for (const way of ["Cancel", "Escape"]) {
+      if (way === "Cancel") {
+        await user.click(
+          within(dialog).getByRole("button", { name: "Cancel" }),
+        );
+      } else {
+        await user.keyboard("{Escape}");
+      }
+
+      expect(
+        screen.queryByRole("alertdialog"),
+        `${way} left the dialog up`,
+      ).not.toBeInTheDocument();
+      expectNothingMutated();
+      expect(isStaged("unused0")).toBe(true);
+      expect(isStaged("unused2")).toBe(true);
+      expect(isStaged("unused1")).toBe(false);
+      expect(save).toBeEnabled();
+      // Radix hands focus back on a timer, after the dialog has gone.
+      await waitFor(() => {
+        expect(save).toHaveFocus();
+      });
+
+      // Still staged, not only still drawn that way: Save asks again, for both.
+      await user.click(save);
+      dialog = await screen.findByRole("alertdialog");
+      expect(listedVolumes(dialog)).toEqual([
+        "unused0 store01:vm-200-disk-1",
+        "unused2 store03:vm-200-disk-3",
+      ]);
+      expectNothingMutated();
+    }
   });
 
-  it("sends nothing when cancelled, keeps the volumes staged, and gives focus back to Save", async () => {
-    const user = userEvent.setup();
-    const { save } = await openPanel();
-    await stage(user, "unused0");
-    await stage(user, "unused2");
-
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expectNothingMutated();
-    expect(isStaged("unused0")).toBe(true);
-    expect(isStaged("unused2")).toBe(true);
-    expect(isStaged("unused1")).toBe(false);
-    expect(save).toBeEnabled();
-    // Radix hands focus back on a timer, after the dialog has gone.
-    await waitFor(() => {
-      expect(save).toHaveFocus();
-    });
-
-    // Still staged, not only still drawn that way: Save asks again, for both.
-    await user.click(save);
-    expect(listedVolumes(await screen.findByRole("alertdialog"))).toEqual([
-      "unused0 store01:vm-200-disk-1",
-      "unused2 store03:vm-200-disk-3",
-    ]);
-    expectNothingMutated();
-  });
-
-  it("treats Escape as Cancel", async () => {
-    const user = userEvent.setup();
-    const { save } = await openPanel();
-    await stage(user, "unused2");
-    await user.click(save);
-    await screen.findByRole("alertdialog");
-
-    await user.keyboard("{Escape}");
-
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expectNothingMutated();
-    expect(isStaged("unused2")).toBe(true);
-    expect(save).toBeEnabled();
-    await waitFor(() => {
-      expect(save).toHaveFocus();
-    });
-  });
-
-  it("sends the whole Save as exactly one PUT once confirmed, then closes", async () => {
+  it("sends the whole Save as exactly one PUT once confirmed, by a click, by Enter or by a click that carries no count, then closes", async () => {
     mockedPut.mockImplementation(serverDropsDeletedKeys);
-    const user = userEvent.setup();
+    serverConfig = { ...ctConfig(), unused3: "store04:vm-200-disk-4" };
     const { save } = await openPanel();
+
     // An ordinary edit rides along: the confirmation gates the Save, it does
     // not split the delete out of it.
-    const memory = fieldInput("Memory (MB)");
-    await user.clear(memory);
-    await user.type(memory, "2048");
-    await stage(user, "unused0");
-    await stage(user, "unused2");
-
+    fill(fieldInput("Memory (MB)"), "2048");
+    await stage("unused0");
+    await stage("unused2");
     await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    let dialog = await screen.findByRole("alertdialog");
+    await user.click(deleteAndSave(dialog));
 
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalled();
@@ -322,8 +284,17 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     await waitFor(() => {
       expect(dialog).not.toBeInTheDocument();
     });
+    // Save opened the confirmation, but once the Save lands it has nothing
+    // left to send, so it is disabled and cannot take focus back: the save bar
+    // gets it, not the page.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("group", { name: "Changes" }),
+      );
+    });
+    expect(save).toBeDisabled();
     // Still one once it has settled: the write, then the refetch showing the
-    // two volumes gone and the third kept.
+    // two volumes gone and the others kept.
     await waitFor(() => {
       expect(screen.queryByText("unused0")).not.toBeInTheDocument();
     });
@@ -333,44 +304,56 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     expect(mockedPost).not.toHaveBeenCalled();
     expect(mockedPatch).not.toHaveBeenCalled();
     expect(mockedDelete).not.toHaveBeenCalled();
-  });
 
-  // Save opened the confirmation, but once the Save lands it has nothing left
-  // to send, so it is disabled and cannot take focus back.
-  it("puts focus on the save bar after a confirmed Save, not on the page", async () => {
-    mockedPut.mockImplementation(serverDropsDeletedKeys);
-    const user = userEvent.setup();
-    const { save } = await openPanel();
-    await stage(user, "unused0");
-
+    // From the keyboard: Enter on Delete and Save.
+    await stage("unused1");
     await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
-
+    dialog = await screen.findByRole("alertdialog");
+    deleteAndSave(dialog).focus();
+    await user.keyboard("{Enter}");
     await waitFor(() => {
       expect(dialog).not.toBeInTheDocument();
     });
+    expect(mockedPut.mock.calls[1]).toEqual([
+      CONFIG_URL,
+      { fields: { delete: "unused1" } },
+    ]);
+
+    // From a click that carries no click count, as assistive technology sends.
+    await stage("unused3");
+    await user.click(save);
+    dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(deleteAndSave(dialog), { detail: 0 });
     await waitFor(() => {
-      expect(document.activeElement).toBe(
-        screen.getByRole("group", { name: "Changes" }),
-      );
+      expect(dialog).not.toBeInTheDocument();
     });
-    expect(save).toBeDisabled();
+    expect(mockedPut.mock.calls).toHaveLength(3);
+    expect(mockedPut.mock.calls[2]).toEqual([
+      CONFIG_URL,
+      { fields: { delete: "unused3" } },
+    ]);
   });
 
-  it("holds the dialog, and its buttons, while the Save is in flight", async () => {
+  it("sends one PUT for two clicks on Delete and Save before a render, and holds the dialog and its buttons while the Save is in flight", async () => {
     const pending = deferred<unknown>();
     mockedPut.mockReturnValue(pending.promise);
-    const user = userEvent.setup();
     const { save } = await openPanel();
-    await stage(user, "unused0");
+    await stage("unused0");
     await user.click(save);
     const dialog = await screen.findByRole("alertdialog");
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    const action = deleteAndSave(dialog);
+
+    // Two clicks in one go: TanStack reports the first as pending on a later
+    // tick, so no render has disabled the button when the second arrives, and
+    // only the check at the top of saveChanges is left to refuse it.
+    fireEvent.click(action);
+    expect(action).toBeInTheDocument();
+    expect(action).toBeEnabled();
+    fireEvent.click(action);
+    await waitFor(() => {
+      expect(mockedPut).toHaveBeenCalled();
+    });
+    expect(mockedPut).toHaveBeenCalledTimes(1);
 
     // Still on the page. A dialog that closed would leave this node behind
     // showing whatever it rendered last, "Saving..." included.
@@ -425,15 +408,12 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
       });
     try {
       mockedPut.mockImplementation(() => new Promise(() => undefined));
-      const user = userEvent.setup();
       const { save } = await openPanel();
-      await stage(user, "unused0");
+      await stage("unused0");
       await user.click(save);
       const dialog = await screen.findByRole("alertdialog");
 
-      await user.dblClick(
-        within(dialog).getByRole("button", { name: "Delete and Save" }),
-      );
+      await user.dblClick(deleteAndSave(dialog));
 
       await waitFor(() => {
         expect(mockedPut).toHaveBeenCalled();
@@ -446,41 +426,13 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     }
   });
 
-  it("sends one PUT when Delete and Save is clicked twice before a render", async () => {
-    mockedPut.mockImplementation(() => new Promise(() => undefined));
-    const user = userEvent.setup();
-    const { save } = await openPanel();
-    await stage(user, "unused0");
-    await user.click(save);
-    const action = within(await screen.findByRole("alertdialog")).getByRole(
-      "button",
-      { name: "Delete and Save" },
-    );
-
-    // Two clicks in one go: TanStack reports the first as pending on a later
-    // tick, so no render has disabled the button when the second arrives, and
-    // only the check at the top of saveChanges is left to refuse it.
-    fireEvent.click(action);
-    expect(action).toBeInTheDocument();
-    expect(action).toBeEnabled();
-    fireEvent.click(action);
-
-    await waitFor(() => {
-      expect(mockedPut).toHaveBeenCalled();
-    });
-    expect(mockedPut).toHaveBeenCalledTimes(1);
-  });
-
   // Once a Save settles, the render that re-enables Save comes before the one
   // that lays the result over the config, and until then the fields and the
   // staging still hold what was just sent.
   it("sends nothing more before a render has taken in a settled Save", async () => {
     mockedPut.mockResolvedValue({ status: "ok" });
-    const user = userEvent.setup();
     const { queryClient, save } = await openPanel();
-    const cores = fieldInput("Cores");
-    await user.clear(cores);
-    await user.type(cores, "4");
+    fill(fieldInput("Cores"), "4");
 
     // Settled outside act on purpose, since act would render it, and React
     // says so on console.error; nothing else may be logged there.
@@ -532,25 +484,15 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     mockedPut
       .mockReturnValueOnce(first.promise)
       .mockResolvedValueOnce({ status: "ok" });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: 0 } },
-    });
     const panel = (mode: "visible" | "hidden") => (
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <Activity mode={mode}>
-            <ContainerResourcesPanel {...props} />
-          </Activity>
-        </MemoryRouter>
-      </QueryClientProvider>
+      <Activity mode={mode}>
+        <ContainerResourcesPanel {...props} />
+      </Activity>
     );
-    const user = userEvent.setup();
-    const { rerender } = render(panel("visible"));
+    const { rerender, queryClient } = renderWithProviders(panel("visible"));
     await screen.findByText("unused1");
-    const cores = fieldInput("Cores");
-    await user.clear(cores);
-    await user.type(cores, "4");
-    await user.click(screen.getByRole("button", { name: /save changes/i }));
+    fill(fieldInput("Cores"), "4");
+    await user.click(screen.getByText("Save Changes", { selector: "button" }));
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalledTimes(1);
     });
@@ -571,9 +513,8 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     });
 
     const memory = await waitFor(() => fieldInput("Memory (MB)"));
-    await user.clear(memory);
-    await user.type(memory, "2048");
-    await user.click(screen.getByRole("button", { name: /save changes/i }));
+    fill(memory, "2048");
+    await user.click(screen.getByText("Save Changes", { selector: "button" }));
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalledTimes(2);
     });
@@ -597,15 +538,12 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
           message: "CT is locked (migrate)",
         }),
       );
-    const user = userEvent.setup();
     const { save } = await openPanel();
-    await stage(user, "unused0");
-    await stage(user, "unused2");
+    await stage("unused0");
+    await stage("unused2");
     await user.click(save);
     let dialog = await screen.findByRole("alertdialog");
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    await user.click(deleteAndSave(dialog));
 
     expect(
       await within(dialog).findByText("CT is locked (backup)"),
@@ -616,9 +554,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
 
     // A retry is the same request again, from the same open dialog, and its
     // own failure replaces the first one's.
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    await user.click(deleteAndSave(dialog));
     expect(
       await within(dialog).findByText("CT is locked (migrate)"),
     ).toBeInTheDocument();
@@ -644,34 +580,28 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     expect(mockedPost).not.toHaveBeenCalled();
   });
 
-  it("leaves nothing to send or offer again once a Save succeeds, while its refetch is still out", async () => {
+  // Saves made before the refetch after the first one lands. Each is built on
+  // the one before's afterSave, not on the fetched copy under all of them, or
+  // it would undo that one's changes on screen and offer its deleted volume
+  // again; and each asks only about its own volumes.
+  it("leaves nothing to send or offer again once a Save succeeds, while its refetch is still out, and builds the next Save on it", async () => {
     holdRefetch();
     mockedPut.mockResolvedValue({ status: "ok" });
-    const user = userEvent.setup();
     const { queryClient, save } = await openPanel();
     const memory = fieldInput("Memory (MB)");
-    await user.clear(memory);
-    await user.type(memory, "2048");
+    fill(memory, "2048");
     await user.click(screen.getByRole("button", { name: "Remove NIC" }));
-    await stage(user, "unused0");
+    await stage("unused0");
 
     await user.click(save);
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Delete and Save",
-      }),
-    );
+    await user.click(deleteAndSave(await screen.findByRole("alertdialog")));
     expect(await screen.findByText("Saved")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     });
     // The refetch really is out, unanswered, so what follows is the panel's
     // own doing.
-    expect(
-      queryClient.isFetching({
-        queryKey: CONFIG_KEY,
-      }),
-    ).toBe(1);
+    expect(queryClient.isFetching({ queryKey: CONFIG_KEY })).toBe(1);
 
     // The deleted volume is not offered again: neither staged nor listed.
     expect(screen.queryByText("unused0")).not.toBeInTheDocument();
@@ -686,36 +616,12 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     expect(mockedPut.mock.calls).toEqual([
       [CONFIG_URL, { fields: { memory: "2048", delete: "net0,unused0" } }],
     ]);
-  });
 
-  // Two Saves before the refetch after the first lands: the second is built
-  // on the first's afterSave, not on the fetched copy under both, or it would
-  // undo the first's changes on screen and offer its deleted volume again.
-  it("sends only its own changes on a second Save before the refetch, keeping the first's", async () => {
-    holdRefetch();
-    const user = userEvent.setup();
-    const { save } = await openPanel();
-    mockedPut.mockResolvedValueOnce({ status: "ok" });
-    const memory = fieldInput("Memory (MB)");
-    await user.clear(memory);
-    await user.type(memory, "2048");
-    await stage(user, "unused0");
-    await user.click(save);
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Delete and Save",
-      }),
-    );
-    await screen.findByText("Saved");
-    await waitFor(() => {
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    });
-
+    // A second Save, with no volume staged, sends only its own change.
     const second = deferred<unknown>();
     mockedPut.mockReturnValueOnce(second.promise);
     const cores = fieldInput("Cores");
-    await user.clear(cores);
-    await user.type(cores, "4");
+    fill(cores, "4");
     await user.click(save);
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     await waitFor(() => {
@@ -729,8 +635,6 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
       second.resolve({ status: "ok" });
       await second.promise;
     });
-
-    await screen.findByText("Saved");
     await waitFor(() => {
       expect(save).toBeDisabled();
     });
@@ -738,37 +642,17 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     expect(fieldInput("Cores")).toHaveValue(4);
     expect(screen.queryByText("unused0")).not.toBeInTheDocument();
     expect(screen.queryByText(/\d+ changes?/)).not.toBeInTheDocument();
-  });
 
-  it("asks a second Save before the refetch about its own volume only, and keeps the first's gone", async () => {
-    holdRefetch();
-    mockedPut.mockResolvedValue({ status: "ok" });
-    const user = userEvent.setup();
-    const { save } = await openPanel();
-    await stage(user, "unused0");
-    await user.click(save);
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Delete and Save",
-      }),
-    );
-    await screen.findByText("Saved");
-    await waitFor(() => {
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    });
-    expect(screen.queryByText("unused0")).not.toBeInTheDocument();
-
-    await stage(user, "unused2");
+    // A third Save asks about its own volume only, and keeps the first's gone.
+    await stage("unused2");
     await user.click(save);
     const dialog = await screen.findByRole("alertdialog");
     expect(listedVolumes(dialog)).toEqual(["unused2 store03:vm-200-disk-3"]);
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    await user.click(deleteAndSave(dialog));
     await waitFor(() => {
-      expect(mockedPut).toHaveBeenCalledTimes(2);
+      expect(mockedPut).toHaveBeenCalledTimes(3);
     });
-    expect(mockedPut.mock.calls[1]).toEqual([
+    expect(mockedPut.mock.calls[2]).toEqual([
       CONFIG_URL,
       { fields: { delete: "unused2" } },
     ]);
@@ -789,15 +673,10 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
       serverConfig = { ...serverConfig, unused0: "store04:vm-200-disk-5" };
       return done;
     });
-    const user = userEvent.setup();
     const { save } = await openPanel();
-    await stage(user, "unused0");
+    await stage("unused0");
     await user.click(save);
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Delete and Save",
-      }),
-    );
+    await user.click(deleteAndSave(await screen.findByRole("alertdialog")));
 
     // Read from its row: in the render before the populate effect closes
     // it, the confirmation too lists what unused0 now holds.
@@ -835,13 +714,11 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
           });
     });
     mockedPut.mockResolvedValue({ status: "ok" });
-    const user = userEvent.setup();
     const { queryClient, save } = await openPanel();
     const before = queryClient.getQueryState(CONFIG_KEY);
     const tags = fieldInput("Tags");
     expect(tags).toHaveValue("a;b");
-    await user.clear(tags);
-    await user.type(tags, "b;a");
+    fill(tags, "b;a");
 
     await user.click(save);
 
@@ -865,11 +742,8 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
   it("never lays a Save over an older copy than one fetched while it was out", async () => {
     const put = deferred<unknown>();
     mockedPut.mockReturnValueOnce(put.promise);
-    const user = userEvent.setup();
     const { queryClient, save } = await openPanel();
-    const cores = fieldInput("Cores");
-    await user.clear(cores);
-    await user.type(cores, "4");
+    fill(fieldInput("Cores"), "4");
     await user.click(save);
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalledTimes(1);
@@ -902,11 +776,8 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
   // that list, or on the section having rows, would stop this Save too.
   it("saves at once, with no dialog, when no volume is staged, even with a NIC removal", async () => {
     mockedPut.mockResolvedValue({ status: "ok" });
-    const user = userEvent.setup();
     const { save } = await openPanel();
-    const cores = fieldInput("Cores");
-    await user.clear(cores);
-    await user.type(cores, "4");
+    fill(fieldInput("Cores"), "4");
     await user.click(screen.getByRole("button", { name: "Remove NIC" }));
 
     await user.click(save);
@@ -925,22 +796,31 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
 
   // While the confirmation is open the populate effect waits, so a config
   // that changes under it alters neither the staging nor the list it shows,
-  // the snapshot Delete and Save confirms. The change applies once it closes.
-  it("keeps showing the list it opened on when the config changes under it, and applies the change once closed", async () => {
-    const user = userEvent.setup();
+  // the snapshot Delete and Save confirms. The change applies once it closes,
+  // and Cancel says so, and drops the edits it reloads over.
+  it("keeps showing the list it opened on when the config changes under it, says Cancel will reload, and applies the change once closed", async () => {
     const { queryClient, save } = await openPanel();
-    await stage(user, "unused0");
+    fill(fieldInput("Memory (MB)"), "2048");
+    await stage("unused0");
     await user.click(save);
     const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).queryByText(CHANGED_UNDER)).not.toBeInTheDocument();
 
     await changedElsewhere(
       queryClient,
-      { unused0: "store04:vm-200-disk-5", unused3: "store05:vm-200-disk-6" },
+      {
+        unused0: "store04:vm-200-disk-5",
+        unused3: "store05:vm-200-disk-6",
+        hostname: "linux02",
+      },
       "unused3",
     );
 
     expect(listedVolumes(dialog)).toEqual(["unused0 store01:vm-200-disk-1"]);
     expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+    expect(await within(dialog).findByRole("status")).toHaveTextContent(
+      /cancel reloads it/i,
+    );
     expectNothingMutated();
 
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
@@ -950,15 +830,37 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
       ).toBeInTheDocument();
     });
     expect(isStaged("unused0")).toBe(false);
+    expect(fieldInput("Hostname")).toHaveValue("linux02");
+    expect(fieldInput("Memory (MB)")).toHaveValue(1024);
     expect(save).toBeDisabled();
     expectNothingMutated();
+    // And the next Save is built on the config it reloaded.
+    fill(fieldInput("Cores"), "3");
+    await user.click(save);
+    await waitFor(() => {
+      expect(mockedPut).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedPut.mock.calls).toEqual([
+      [CONFIG_URL, { fields: { cores: "3" } }],
+    ]);
   });
 
-  it("sends nothing when a staged key comes to hold another volume, and asks again on the one it holds now", async () => {
-    mockedPut.mockImplementation(serverDropsDeletedKeys);
-    const user = userEvent.setup();
+  // A key that now holds another volume is asked about again, however the
+  // confirmation arrives, and the notice that asks is mounted afresh each time
+  // so a held Enter, which lands where focus was moved, can neither confirm the
+  // list it has only just shown nor cancel it. Confirmed on what the key holds
+  // by then, it goes out.
+  it("asks again on the volume a staged key holds now, for a double-click and a held Enter, and sends nothing until it is confirmed", async () => {
+    mockedPut
+      .mockRejectedValueOnce(
+        new ApiClientError(400, {
+          error: "bad request",
+          message: "unable to apply pending change",
+        }),
+      )
+      .mockResolvedValue({ status: "ok" });
     const { queryClient, save } = await openPanel();
-    await stage(user, "unused0");
+    await stage("unused0");
     await user.click(save);
     const dialog = await screen.findByRole("alertdialog");
     await changedElsewhere(
@@ -968,40 +870,59 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     );
     expect(listedVolumes(dialog)).toEqual(["unused0 store01:vm-200-disk-1"]);
 
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    // The second click of a double-click does not confirm the list the first
+    // asked again on.
+    await user.dblClick(deleteAndSave(dialog));
 
     expectNothingMutated();
     expect(listedVolumes(dialog)).toEqual(["unused0 store04:vm-200-disk-5"]);
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      /changed.*nothing was deleted/i,
+    const first = within(dialog).getByRole("alert");
+    expect(first).toHaveTextContent(/changed.*nothing was deleted/i);
+
+    // Back on Delete and Save, and the key changes again: the next ask moves
+    // focus to the notice, not a button, so a held Enter neither confirms the
+    // new list nor cancels, and the notice is mounted afresh, so a screen
+    // reader announces it again, though its words are the same.
+    deleteAndSave(dialog).focus();
+    await changedElsewhere(
+      queryClient,
+      { unused0: "store06:vm-200-disk-7", unused4: "store07:vm-200-disk-8" },
+      "unused4",
     );
-    // On the notice, not a button, so a held Enter neither confirms the new
-    // list nor cancels.
+    await user.keyboard("{Enter>3}");
+
+    expectNothingMutated();
+    expect(dialog).toBeInTheDocument();
+    expect(listedVolumes(dialog)).toEqual(["unused0 store06:vm-200-disk-7"]);
+    expect(first).not.toBeInTheDocument();
     expect(within(dialog).getByRole("alert")).toHaveFocus();
 
-    // Confirmed again, on what the key holds now, it goes out once.
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    // Confirmed on what the key holds now, it goes out; the Save's own failure
+    // replaces the notice, which would otherwise claim nothing was deleted.
+    await user.click(deleteAndSave(dialog));
+    expect(
+      await within(dialog).findByText("unable to apply pending change"),
+    ).toBeInTheDocument();
+    expect(mockedPut).toHaveBeenCalledTimes(1);
+    expect(
+      within(dialog).queryByText(/nothing was deleted/i),
+    ).not.toBeInTheDocument();
+    await user.click(deleteAndSave(dialog));
     await waitFor(() => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     });
     expect(mockedPut.mock.calls).toEqual([
       [CONFIG_URL, { fields: { delete: "unused0" } }],
+      [CONFIG_URL, { fields: { delete: "unused0" } }],
     ]);
   });
 
   it("sends nothing for a click that lands after a refetch but before any render shows it", async () => {
-    const user = userEvent.setup();
     const { queryClient, save } = await openPanel();
-    await stage(user, "unused0");
+    await stage("unused0");
     await user.click(save);
     const dialog = await screen.findByRole("alertdialog");
-    const action = within(dialog).getByRole("button", {
-      name: "Delete and Save",
-    });
+    const action = deleteAndSave(dialog);
 
     serverConfig = {
       ...serverConfig,
@@ -1022,148 +943,104 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     expectNothingMutated();
   });
 
-  it.each([
-    ["a sibling appears", { unused3: "store05:vm-200-disk-6" }, "unused3"],
-    [
-      "only what it does not delete changes",
-      { rootfs: "store01:vm-200-disk-0,size=10G" },
-      "10G",
-    ],
-  ])(
-    "sends the one PUT when %s while the confirmation is open",
-    async (_what, change, rendered) => {
-      mockedPut.mockResolvedValue({ status: "ok" });
-      const user = userEvent.setup();
-      const { queryClient, save } = await openPanel();
-      await stage(user, "unused0");
+  it("sends the one PUT when a sibling appears, or only what it does not delete changes, while the confirmation is open", async () => {
+    mockedPut.mockResolvedValue({ status: "ok" });
+    const { queryClient, save } = await openPanel();
+    const cases: [
+      what: string,
+      change: Record<string, unknown>,
+      rendered: string,
+    ][] = [
+      ["a sibling appears", { unused3: "store05:vm-200-disk-6" }, "unused3"],
+      [
+        "only what it does not delete changes",
+        { rootfs: "store01:vm-200-disk-0,size=10G" },
+        "10G",
+      ],
+    ];
+
+    for (const [index, [what, change, rendered]] of cases.entries()) {
+      const key = `unused${String(index)}`;
+      await stage(key);
       await user.click(save);
       const dialog = await screen.findByRole("alertdialog");
 
       await changedElsewhere(queryClient, change, rendered);
-      await user.click(
-        within(dialog).getByRole("button", { name: "Delete and Save" }),
-      );
+      await user.click(deleteAndSave(dialog));
 
       await waitFor(() => {
-        expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+        expect(dialog, `${what}: the dialog stayed up`).not.toBeInTheDocument();
       });
-      expect(mockedPut.mock.calls).toEqual([
-        [CONFIG_URL, { fields: { delete: "unused0" } }],
+      expect(mockedPut.mock.calls).toHaveLength(index + 1);
+      expect(mockedPut.mock.calls[index]).toEqual([
+        CONFIG_URL,
+        { fields: { delete: key } },
       ]);
-    },
-  );
-
-  it("does not let the second click of a double-click confirm the list the first asked again on", async () => {
-    const user = userEvent.setup();
-    const { queryClient, save } = await openPanel();
-    await stage(user, "unused0");
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-    await changedElsewhere(
-      queryClient,
-      { unused0: "store04:vm-200-disk-5", unused3: "store05:vm-200-disk-6" },
-      "unused3",
-    );
-
-    await user.dblClick(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
-
-    expect(listedVolumes(dialog)).toEqual(["unused0 store04:vm-200-disk-5"]);
-    expectNothingMutated();
+    }
   });
 
   // What a Save writes besides its volumes is built on the config the fields
   // were populated from, which a refetch while the dialog is open does not
-  // replace. Sent over a newer value it would undo a change made elsewhere.
-  it("saves nothing when another NIC took the key a new one would use while the confirmation was open", async () => {
-    const user = userEvent.setup();
-    const { queryClient, save } = await openPanel();
-    // net1 is free when the fields are built, so the new NIC gets it.
-    await user.click(
-      screen.getByRole("button", { name: /add network interface/i }),
-    );
-    await stage(user, "unused0");
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-
-    await changedElsewhere(
-      queryClient,
+  // replace. Sent over a newer value it would undo a change made elsewhere. A
+  // NIC the Save removes is checked like any other key it writes: the delete
+  // would otherwise remove whatever NIC now holds that key.
+  it.each([
+    [
+      "another NIC took the key a new one would use",
+      // net1 is free when the fields are built, so the new NIC gets it.
+      async () => {
+        await user.click(
+          screen.getByRole("button", { name: /add network interface/i }),
+        );
+      },
       {
         net1: "name=eth1,bridge=vmbr1,hwaddr=02:00:00:00:00:02,ip=dhcp,type=veth",
       },
-      CHANGED_UNDER,
-    );
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
-
-    expectNothingMutated();
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      /nothing was saved/i,
-    );
-    expect(within(dialog).getByRole("alert")).toHaveFocus();
-    expect(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    ).toBeDisabled();
-  });
-
-  it("saves nothing over a field that changed elsewhere while the confirmation was open", async () => {
-    const user = userEvent.setup();
-    const { queryClient, save } = await openPanel();
-    const memory = fieldInput("Memory (MB)");
-    await user.clear(memory);
-    await user.type(memory, "2048");
-    await stage(user, "unused0");
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-
-    await changedElsewhere(queryClient, { memory: 4096 }, CHANGED_UNDER);
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
-
-    expectNothingMutated();
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      /nothing was saved/i,
-    );
-  });
-
-  // A NIC the Save removes is checked like any other key it writes: the
-  // delete would otherwise remove whatever NIC now holds that key.
-  it("saves nothing when a NIC it removes was replaced elsewhere while the confirmation was open", async () => {
-    const user = userEvent.setup();
-    const { queryClient, save } = await openPanel();
-    await user.click(screen.getByRole("button", { name: "Remove NIC" }));
-    await stage(user, "unused0");
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-
-    await changedElsewhere(
-      queryClient,
+    ],
+    [
+      "a field changed elsewhere",
+      () => {
+        fill(fieldInput("Memory (MB)"), "2048");
+        return Promise.resolve();
+      },
+      { memory: 4096 },
+    ],
+    [
+      "a NIC it removes was replaced elsewhere",
+      async () => {
+        await user.click(screen.getByRole("button", { name: "Remove NIC" }));
+      },
       {
         net0: "name=eth0,bridge=vmbr1,hwaddr=02:00:00:00:00:09,ip=dhcp,type=veth",
       },
-      CHANGED_UNDER,
-    );
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    ],
+  ])(
+    "saves nothing when %s while the confirmation was open",
+    async (_what, edit, change) => {
+      const { queryClient, save } = await openPanel();
+      await edit();
+      await stage("unused0");
+      await user.click(save);
+      const dialog = await screen.findByRole("alertdialog");
 
-    expectNothingMutated();
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      /nothing was saved/i,
-    );
-  });
+      await changedElsewhere(queryClient, change, CHANGED_UNDER);
+      await user.click(deleteAndSave(dialog));
+
+      expectNothingMutated();
+      const alert = within(dialog).getByRole("alert");
+      expect(alert).toHaveTextContent(/nothing was saved/i);
+      expect(alert).toHaveFocus();
+      expect(deleteAndSave(dialog)).toBeDisabled();
+    },
+  );
 
   // A staged key that is gone was removed elsewhere; Proxmox refills the
   // lowest free unusedN, so a delete sent for it could reach another volume.
   it("drops a staged key that is gone and asks again on the rest", async () => {
     mockedPut.mockResolvedValue({ status: "ok" });
-    const user = userEvent.setup();
     const { queryClient, save } = await openPanel();
-    await stage(user, "unused0");
-    await stage(user, "unused2");
+    await stage("unused0");
+    await stage("unused2");
     await user.click(save);
     const dialog = await screen.findByRole("alertdialog");
 
@@ -1172,16 +1049,12 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
       Object.entries(serverConfig).filter(([key]) => key !== "unused0"),
     );
     await changedElsewhere(queryClient, {}, CHANGED_UNDER);
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    await user.click(deleteAndSave(dialog));
 
     expectNothingMutated();
     expect(listedVolumes(dialog)).toEqual(["unused2 store03:vm-200-disk-3"]);
     expect(within(dialog).getByRole("alert")).toHaveFocus();
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    await user.click(deleteAndSave(dialog));
     await waitFor(() => {
       expect(mockedPut).toHaveBeenCalledTimes(1);
     });
@@ -1193,12 +1066,9 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
   // Closing lets the waiting config in, which reloads the panel, so the rest
   // of the Save goes too, and the notice has to say so.
   it("closes, saving nothing, when every staged key is gone, and says the reload discarded the rest", async () => {
-    const user = userEvent.setup();
     const { queryClient, save } = await openPanel();
-    const memory = fieldInput("Memory (MB)");
-    await user.clear(memory);
-    await user.type(memory, "2048");
-    await stage(user, "unused0");
+    fill(fieldInput("Memory (MB)"), "2048");
+    await stage("unused0");
     await user.click(save);
     const dialog = await screen.findByRole("alertdialog");
 
@@ -1207,9 +1077,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
       Object.entries(serverConfig).filter(([key]) => key !== "unused0"),
     );
     await changedElsewhere(queryClient, {}, CHANGED_UNDER);
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    await user.click(deleteAndSave(dialog));
 
     await waitFor(() => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
@@ -1224,181 +1092,6 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     expectNothingMutated();
   });
 
-  it("drops 'nothing was deleted' once a Save goes out, so a failure does not claim it", async () => {
-    mockedPut.mockRejectedValueOnce(
-      new ApiClientError(400, {
-        error: "bad request",
-        message: "unable to apply pending change",
-      }),
-    );
-    const user = userEvent.setup();
-    const { queryClient, save } = await openPanel();
-    await stage(user, "unused0");
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-    await changedElsewhere(
-      queryClient,
-      { unused0: "store04:vm-200-disk-5" },
-      CHANGED_UNDER,
-    );
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      /nothing was deleted/i,
-    );
-
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
-
-    expect(
-      await within(dialog).findByText("unable to apply pending change"),
-    ).toBeInTheDocument();
-    expect(mockedPut).toHaveBeenCalledTimes(1);
-    expect(
-      within(dialog).queryByText(/nothing was deleted/i),
-    ).not.toBeInTheDocument();
-  });
-
-  it("says Cancel will reload once the config has changed under it, and Cancel does", async () => {
-    mockedPut.mockResolvedValue({ status: "ok" });
-    const user = userEvent.setup();
-    const { queryClient, save } = await openPanel();
-    const memory = fieldInput("Memory (MB)");
-    await user.clear(memory);
-    await user.type(memory, "2048");
-    await stage(user, "unused0");
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).queryByText(CHANGED_UNDER)).not.toBeInTheDocument();
-
-    await changedElsewhere(queryClient, { hostname: "linux02" }, CHANGED_UNDER);
-    expect(within(dialog).getByRole("status")).toHaveTextContent(
-      /cancel reloads it/i,
-    );
-
-    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => {
-      expect(fieldInput("Hostname")).toHaveValue("linux02");
-    });
-    expect(fieldInput("Memory (MB)")).toHaveValue(1024);
-    expect(isStaged("unused0")).toBe(false);
-    expect(save).toBeDisabled();
-    // And the next Save is built on the config it reloaded.
-    const cores = fieldInput("Cores");
-    await user.clear(cores);
-    await user.type(cores, "3");
-    await user.click(save);
-    await waitFor(() => {
-      expect(mockedPut).toHaveBeenCalledTimes(1);
-    });
-    expect(mockedPut.mock.calls).toEqual([
-      [CONFIG_URL, { fields: { cores: "3" } }],
-    ]);
-  });
-
-  it("lets a held Enter neither confirm nor cancel once it has asked again", async () => {
-    const user = userEvent.setup();
-    const { queryClient, save } = await openPanel();
-    await stage(user, "unused0");
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-    await changedElsewhere(
-      queryClient,
-      { unused0: "store04:vm-200-disk-5" },
-      CHANGED_UNDER,
-    );
-    within(dialog).getByRole("button", { name: "Delete and Save" }).focus();
-
-    // The first Enter asks again; the repeats land where that moved focus.
-    await user.keyboard("{Enter>3}");
-
-    expectNothingMutated();
-    expect(dialog).toBeInTheDocument();
-    expect(listedVolumes(dialog)).toEqual(["unused0 store04:vm-200-disk-5"]);
-    expect(within(dialog).getByRole("alert")).toHaveFocus();
-  });
-
-  // After one ask again the operator can Tab back to Delete and Save; the next
-  // must move focus again, or a held Enter confirms the list it has only just
-  // shown. The notice is mounted afresh too, so a screen reader announces it
-  // again, though its words are the same.
-  it("moves focus to a notice mounted afresh every time it asks again, not only the first", async () => {
-    const user = userEvent.setup();
-    const { queryClient, save } = await openPanel();
-    await stage(user, "unused0");
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-    const action = () =>
-      within(dialog).getByRole("button", { name: "Delete and Save" });
-    await changedElsewhere(
-      queryClient,
-      { unused0: "store04:vm-200-disk-5" },
-      CHANGED_UNDER,
-    );
-    action().focus();
-    await user.keyboard("{Enter}");
-    const first = within(dialog).getByRole("alert");
-    expect(first).toHaveFocus();
-
-    // Back on Delete and Save, and the key changes again.
-    action().focus();
-    await changedElsewhere(
-      queryClient,
-      { unused0: "store05:vm-200-disk-6", unused3: "store06:vm-200-disk-7" },
-      "unused3",
-    );
-    await user.keyboard("{Enter}");
-
-    expect(listedVolumes(dialog)).toEqual(["unused0 store05:vm-200-disk-6"]);
-    expect(first).not.toBeInTheDocument();
-    expect(within(dialog).getByRole("alert")).toHaveFocus();
-    await user.keyboard("{Enter}");
-    expectNothingMutated();
-    expect(listedVolumes(dialog)).toEqual(["unused0 store05:vm-200-disk-6"]);
-  });
-
-  it("confirms from the keyboard: Enter on Delete and Save sends the one PUT", async () => {
-    mockedPut.mockResolvedValue({ status: "ok" });
-    const user = userEvent.setup();
-    const { save } = await openPanel();
-    await stage(user, "unused0");
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-    within(dialog).getByRole("button", { name: "Delete and Save" }).focus();
-
-    await user.keyboard("{Enter}");
-
-    await waitFor(() => {
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    });
-    expect(mockedPut.mock.calls).toEqual([
-      [CONFIG_URL, { fields: { delete: "unused0" } }],
-    ]);
-  });
-
-  it("confirms from a click that carries no click count, as assistive technology sends", async () => {
-    mockedPut.mockResolvedValue({ status: "ok" });
-    const user = userEvent.setup();
-    const { save } = await openPanel();
-    await stage(user, "unused0");
-    await user.click(save);
-    const dialog = await screen.findByRole("alertdialog");
-
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-      { detail: 0 },
-    );
-
-    await waitFor(() => {
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    });
-    expect(mockedPut.mock.calls).toEqual([
-      [CONFIG_URL, { fields: { delete: "unused0" } }],
-    ]);
-  });
-
   // TanStack stamps dataUpdatedAt with Date.now(), as saveChanges stamps
   // `at`, so one frozen clock puts the load and the write in one millisecond:
   // counted as before the write, that fetch leaves the afterSave in place.
@@ -1407,15 +1100,10 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     try {
       holdRefetch();
       mockedPut.mockResolvedValue({ status: "ok" });
-      const user = userEvent.setup();
       const { save } = await openPanel();
-      await stage(user, "unused0");
+      await stage("unused0");
       await user.click(save);
-      await user.click(
-        within(await screen.findByRole("alertdialog")).getByRole("button", {
-          name: "Delete and Save",
-        }),
-      );
+      await user.click(deleteAndSave(await screen.findByRole("alertdialog")));
       await screen.findByText("Saved");
       await waitFor(() => {
         expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
@@ -1429,9 +1117,8 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
   });
 
   it("keeps an open confirmation through a failed refetch, and still checks it once the config is back", async () => {
-    const user = userEvent.setup();
     const { queryClient, save } = await openPanel();
-    await stage(user, "unused0");
+    await stage("unused0");
     await user.click(save);
     await screen.findByRole("alertdialog");
 
@@ -1452,9 +1139,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     );
     const dialog = screen.getByRole("alertdialog");
     expect(listedVolumes(dialog)).toEqual(["unused0 store01:vm-200-disk-1"]);
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
-    );
+    await user.click(deleteAndSave(dialog));
     expectNothingMutated();
     expect(listedVolumes(dialog)).toEqual(["unused0 store04:vm-200-disk-5"]);
   });

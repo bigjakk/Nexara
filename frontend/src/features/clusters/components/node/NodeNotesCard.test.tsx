@@ -1,11 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  act,
-  fireEvent,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 
@@ -14,6 +8,7 @@ import { createAppQueryClient } from "@/test/app-query-client";
 import { deferred } from "@/test/fake-server";
 import { DENIED, denied, flushInAct } from "@/test/save-outcome-kit";
 import { renderWithProviders } from "@/test/test-utils";
+import { fill } from "@/test/user";
 import type { NodeNotes } from "../../api/node-options-queries";
 import { NodeNotesCard } from "./NodeNotesCard";
 
@@ -120,10 +115,6 @@ async function openDialog(user: UserEvent): Promise<HTMLElement> {
 
 function notesField(dialog: HTMLElement): HTMLTextAreaElement {
   return within(dialog).getByLabelText<HTMLTextAreaElement>("Notes");
-}
-
-function type(dialog: HTMLElement, value: string) {
-  fireEvent.change(notesField(dialog), { target: { value } });
 }
 
 function saveButton(dialog: HTMLElement): HTMLElement {
@@ -434,7 +425,7 @@ describe("editing", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    type(dialog, "sentinel notes\n\nand more\n");
+    fill(notesField(dialog), "sentinel notes\n\nand more\n");
     await user.click(saveButton(dialog));
 
     await waitFor(() => {
@@ -455,7 +446,7 @@ describe("editing", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    type(dialog, "");
+    fill(notesField(dialog), "");
     await user.click(saveButton(dialog));
 
     await waitFor(() => {
@@ -474,11 +465,11 @@ describe("editing", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    type(dialog, "😀".repeat(65536));
+    fill(notesField(dialog), "😀".repeat(65536));
     expect(saveButton(dialog)).toBeEnabled();
     expect(notesField(dialog)).not.toHaveAttribute("aria-invalid");
 
-    type(dialog, "é".repeat(65537));
+    fill(notesField(dialog), "é".repeat(65537));
     expect(saveButton(dialog)).toBeDisabled();
     expect(notesField(dialog)).toHaveAttribute("aria-invalid", "true");
     expect(
@@ -518,7 +509,7 @@ describe("a save the node refuses as stale", () => {
     mockedPut.mockRejectedValueOnce(conflict());
     renderCard();
     const dialog = await openDialog(user);
-    type(dialog, "new notes");
+    fill(notesField(dialog), "new notes");
     if (then instanceof Error) mockedGet.mockRejectedValueOnce(then);
     else mockedGet.mockResolvedValueOnce(then);
     await user.click(saveButton(dialog));
@@ -535,7 +526,7 @@ describe("a save the node refuses as stale", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    type(dialog, "new notes");
+    fill(notesField(dialog), "new notes");
     mockedGet.mockImplementationOnce(() => reread.promise);
     await user.click(saveButton(dialog));
 
@@ -628,7 +619,7 @@ describe("a save the node refuses as stale", () => {
       .mockRejectedValueOnce(conflict());
     renderCard();
     const dialog = await openDialog(user);
-    type(dialog, "new notes");
+    fill(notesField(dialog), "new notes");
     mockedGet.mockResolvedValueOnce({
       description: "someone else's notes\n",
       digest: "d2",
@@ -698,7 +689,7 @@ describe("a save that fails after its dialog was dismissed", () => {
     renderCard();
 
     const dialog = await openDialog(user);
-    type(dialog, "new notes");
+    fill(notesField(dialog), "new notes");
     await user.click(saveButton(dialog));
     await within(dialog).findByRole("button", { name: "Saving..." });
     await user.keyboard("{Escape}");
