@@ -118,20 +118,31 @@ function SheetModal(props: ModalProps) {
   );
 }
 
+// A click handler that sets a boolean state.
+const set = (setter: (value: boolean) => void, value: boolean) => () => {
+  setter(value);
+};
+
 type Modal = (props: ModalProps) => ReactElement;
 
-const KINDS: readonly {
+interface Kind {
   kind: string;
   role: "dialog" | "alertdialog";
   Modal: Modal;
-}[] = [
-  { kind: "Dialog", role: "dialog", Modal: DialogModal },
+}
+
+// The three wrappers wire the shared hooks one by one, so each gets the tests
+// of that wiring; everything the hooks decide is run through Dialog alone.
+const DIALOG: Kind = { kind: "Dialog", role: "dialog", Modal: DialogModal };
+const KINDS: readonly Kind[] = [
+  DIALOG,
   { kind: "AlertDialog", role: "alertdialog", Modal: AlertModal },
   { kind: "Sheet", role: "dialog", Modal: SheetModal },
 ];
 
-// Each case runs plain and under StrictMode, whose double render and effect
-// replay must not record an element inside the dialog as the opener.
+// StrictMode's replay of the root's effect and of the content's ref happens as
+// a dialog mounts already open; it must not record an element inside the
+// dialog as the opener.
 const MODES = [
   { mode: "plain", wrap: (ui: ReactElement) => ui },
   {
@@ -147,26 +158,6 @@ function overlay(): HTMLElement {
   if (el === null) throw new Error("no open overlay");
   return el;
 }
-
-const CLOSES = [
-  {
-    how: "Escape",
-    close: (user: User) => user.keyboard("{Escape}"),
-    alert: true,
-  },
-  {
-    how: "Save",
-    close: (user: User) =>
-      user.click(screen.getByRole("button", { name: "Save" })),
-    alert: true,
-  },
-  // An AlertDialog does not close on an outside click.
-  {
-    how: "an outside click",
-    close: (user: User) => user.click(overlay()),
-    alert: false,
-  },
-];
 
 // Radix returns focus on a timer once the content has gone; long enough for
 // that, and for anything queued behind it.
@@ -187,9 +178,8 @@ function region(name: string): HTMLElement {
 /**
  * An Edit button that opens the dialog, another button, and a card to fall
  * back to. Save closes the dialog by state; `afterSave` says what else it
- * does. `brokenFallback` gives the dialog a fallback that cannot take focus
- * instead: gone, or an element that is not focusable. The rest of the props
- * are for re-rendering the page after a close.
+ * does, `brokenFallback` swaps in a fallback that cannot take focus, and the
+ * other props are for re-rendering the page after a close.
  */
 function Page({
   Modal,
@@ -272,21 +262,31 @@ afterEach(() => {
 });
 
 describe("a dialog opened by state", () => {
-  const cases = KINDS.flatMap((k) =>
-    MODES.flatMap((m) =>
-      CLOSES.filter((c) => k.kind !== "AlertDialog" || c.alert).map((c) => ({
-        ...k,
-        ...m,
-        ...c,
-      })),
-    ),
-  );
+  // Every way of closing ends in the same onCloseAutoFocus, so only Dialog
+  // takes them all; an AlertDialog does not close on an outside click.
+  const closings = [
+    ...KINDS.map((k) => ({
+      ...k,
+      how: "Escape",
+      close: (user: User) => user.keyboard("{Escape}"),
+    })),
+    {
+      ...DIALOG,
+      how: "Save",
+      close: (user: User) => user.click(button("Save")),
+    },
+    {
+      ...DIALOG,
+      how: "an outside click",
+      close: (user: User) => user.click(overlay()),
+    },
+  ];
 
-  it.each(cases)(
-    "$how returns focus to the button that opened the $kind ($mode)",
-    async ({ Modal, role, wrap, close }) => {
+  it.each(closings)(
+    "$how returns focus to the button that opened the $kind",
+    async ({ Modal, role, close }) => {
       const user = userEvent.setup();
-      render(wrap(<Page Modal={Modal} />));
+      render(<Page Modal={Modal} />);
       const opener = button("Edit");
       await user.click(opener);
       expect(screen.getByRole(role)).toContainElement(
@@ -302,58 +302,44 @@ describe("a dialog opened by state", () => {
     },
   );
 
-  const kindModes = KINDS.flatMap((k) => MODES.map((m) => ({ ...k, ...m })));
-
-  function MountedWhileOpen({ Modal }: { Modal: Modal }) {
+  function MountedWhileOpen() {
     const [open, setOpen] = useState(false);
     return (
       <>
-        <button
-          onClick={() => {
-            setOpen(true);
-          }}
-        >
-          Edit
-        </button>
+        <button onClick={set(setOpen, true)}>Edit</button>
         {open && (
-          <Modal open onOpenChange={setOpen}>
-            <button
-              onClick={() => {
-                setOpen(false);
-              }}
-            >
-              Save
-            </button>
-          </Modal>
+          <DialogModal open onOpenChange={setOpen}>
+            <button onClick={set(setOpen, false)}>Save</button>
+          </DialogModal>
         )}
       </>
     );
   }
 
-  it.each(kindModes)(
-    "returns focus when the $kind is mounted only while open ($mode)",
-    async ({ Modal, role, wrap }) => {
+  it.each(MODES)(
+    "returns focus when the Dialog is mounted only while open ($mode)",
+    async ({ wrap }) => {
       const user = userEvent.setup();
-      render(wrap(<MountedWhileOpen Modal={Modal} />));
+      render(wrap(<MountedWhileOpen />));
       const opener = button("Edit");
 
       await user.click(opener);
       await user.keyboard("{Escape}");
-      expect(screen.queryByRole(role)).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       await waitFor(() => {
         expect(document.activeElement).toBe(opener);
       });
 
       await user.click(opener);
       await user.click(button("Save"));
-      expect(screen.queryByRole(role)).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       await waitFor(() => {
         expect(document.activeElement).toBe(opener);
       });
     },
   );
 
-  function TwoOpeners({ Modal }: { Modal: Modal }) {
+  function TwoOpeners() {
     const [open, setOpen] = useState(false);
     return (
       <>
@@ -367,51 +353,45 @@ describe("a dialog opened by state", () => {
             {name}
           </button>
         ))}
-        <Modal open={open} onOpenChange={setOpen} />
+        <DialogModal open={open} onOpenChange={setOpen} />
       </>
     );
   }
 
-  it.each(kindModes)(
-    "records a new opener each time the $kind opens ($mode)",
-    async ({ Modal, wrap }) => {
-      const user = userEvent.setup();
-      render(wrap(<TwoOpeners Modal={Modal} />));
-      const first = button("Edit A");
-      const second = button("Edit B");
-      await user.click(first);
-      await user.keyboard("{Escape}");
-      await waitFor(() => {
-        expect(document.activeElement).toBe(first);
-      });
+  it("records a new opener each time it opens", async () => {
+    const user = userEvent.setup();
+    render(<TwoOpeners />);
+    const first = button("Edit A");
+    const second = button("Edit B");
+    await user.click(first);
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(document.activeElement).toBe(first);
+    });
 
-      await user.click(second);
-      await user.keyboard("{Escape}");
+    await user.click(second);
+    await user.keyboard("{Escape}");
 
-      await waitFor(() => {
-        expect(document.activeElement).toBe(second);
-      });
-    },
-  );
+    await waitFor(() => {
+      expect(document.activeElement).toBe(second);
+    });
+  });
 
   // FocusScope does not dispatch onOpenAutoFocus when focus is already
   // inside the content, which is where an autoFocus input puts it.
-  it.each(kindModes)(
-    "returns focus from a $kind whose input takes focus itself ($mode)",
-    async ({ Modal, wrap }) => {
-      const user = userEvent.setup();
-      render(wrap(<Page Modal={Modal} autoFocusInput />));
-      const opener = button("Edit");
-      await user.click(opener);
-      expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus();
+  it("returns focus from a dialog whose input takes focus itself", async () => {
+    const user = userEvent.setup();
+    render(<Page Modal={DialogModal} autoFocusInput />);
+    const opener = button("Edit");
+    await user.click(opener);
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus();
 
-      await user.keyboard("{Escape}");
+    await user.keyboard("{Escape}");
 
-      await waitFor(() => {
-        expect(document.activeElement).toBe(opener);
-      });
-    },
-  );
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
+  });
 });
 
 describe("when the opener cannot take focus back", () => {
@@ -431,41 +411,35 @@ describe("when the opener cannot take focus back", () => {
     },
   );
 
-  it.each(KINDS)(
-    "puts focus on the fallback when Save removed the opener ($kind)",
-    async ({ Modal }) => {
-      const user = userEvent.setup();
-      render(<Page Modal={Modal} afterSave="remove" withFallback />);
-      const focus = vi.spyOn(region("Card"), "focus");
-      await user.click(button("Edit"));
+  it("puts focus on the fallback when Save removed the opener", async () => {
+    const user = userEvent.setup();
+    render(<Page Modal={DialogModal} afterSave="remove" withFallback />);
+    const focus = vi.spyOn(region("Card"), "focus");
+    await user.click(button("Edit"));
 
-      await user.click(button("Save"));
+    await user.click(button("Save"));
 
-      await waitFor(() => {
-        expect(document.activeElement).toBe(region("Card"));
-      });
-      expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
-      // Scrolled to: it is where the dialog's opener was a moment ago.
-      expect(focus).toHaveBeenCalledWith(undefined);
-    },
-  );
+    await waitFor(() => {
+      expect(document.activeElement).toBe(region("Card"));
+    });
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    // Scrolled to: it is where the dialog's opener was a moment ago.
+    expect(focus).toHaveBeenCalledWith(undefined);
+  });
 
   // A click that does not focus the button it lands on — Safari's, say —
   // leaves no opener to go back to.
-  it.each(KINDS)(
-    "puts focus on the fallback when nothing had focus as the $kind opened",
-    async ({ Modal }) => {
-      const user = userEvent.setup();
-      render(<Page Modal={Modal} withFallback />);
-      fireEvent.click(button("Edit"));
+  it("puts focus on the fallback when nothing had focus as the dialog opened", async () => {
+    const user = userEvent.setup();
+    render(<Page Modal={DialogModal} withFallback />);
+    fireEvent.click(button("Edit"));
 
-      await user.keyboard("{Escape}");
+    await user.keyboard("{Escape}");
 
-      await waitFor(() => {
-        expect(document.activeElement).toBe(region("Card"));
-      });
-    },
-  );
+    await waitFor(() => {
+      expect(document.activeElement).toBe(region("Card"));
+    });
+  });
 
   function InSection(
     props: Partial<Omit<Parameters<typeof Page>[0], "Modal">>,
@@ -571,8 +545,6 @@ describe("when the opener cannot take focus back", () => {
 // The row a confirmed delete removes is usually still there when its dialog
 // closes, and goes a moment later, when the list is read again.
 describe("after focus has gone back to the opener", () => {
-  const kindModes = KINDS.flatMap((k) => MODES.map((m) => ({ ...k, ...m })));
-
   async function closedBackOnOpener(user: User) {
     const opener = button("Edit");
     await user.click(opener);
@@ -582,23 +554,8 @@ describe("after focus has gone back to the opener", () => {
     });
   }
 
-  it.each(kindModes)(
-    "moves focus to the fallback when the opener is then removed ($kind, $mode)",
-    async ({ Modal, wrap }) => {
-      const user = userEvent.setup();
-      const { rerender } = render(wrap(<Page Modal={Modal} withFallback />));
-      await closedBackOnOpener(user);
-
-      rerender(wrap(<Page Modal={Modal} withFallback openerShown={false} />));
-
-      await waitFor(() => {
-        expect(document.activeElement).toBe(region("Card"));
-      });
-    },
-  );
-
-  // The user may have scrolled away from the fallback by then.
-  it("moves focus to the fallback without scrolling to it", async () => {
+  // Without scrolling: the user may have scrolled away from the fallback by then.
+  it("moves focus to the fallback, without scrolling to it, when the opener is then removed", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<Page Modal={DialogModal} withFallback />);
     await closedBackOnOpener(user);
@@ -699,13 +656,7 @@ describe("in a window that does not have focus", () => {
           onOpenChange={setOpen}
           fallbackFocus={() => card.current}
         >
-          <button
-            onClick={() => {
-              setOpen(false);
-            }}
-          >
-            Save
-          </button>
+          <button onClick={set(setOpen, false)}>Save</button>
         </DialogModal>
       </>
     );
@@ -714,42 +665,39 @@ describe("in a window that does not have focus", () => {
   // There focus() fires no focusin, so a watch is not ended by focus moving
   // on; left armed, it would take the focus the next dialog's content drops
   // to <body> as it unmounts.
-  it.each(MODES)(
-    "ends the last dialog's watch when the next one opens ($mode)",
-    async ({ wrap }) => {
-      const swallow = (event: FocusEvent) => {
-        event.stopImmediatePropagation();
-      };
-      window.addEventListener("focusin", swallow, true);
-      try {
-        const user = userEvent.setup();
-        render(wrap(<TwoOpenersWithFallback />));
-        const first = button("Edit A");
-        const second = button("Edit B");
-        await user.click(first);
-        await user.click(button("Save"));
-        await waitFor(() => {
-          expect(document.activeElement).toBe(first);
-        });
+  it("ends the last dialog's watch when the next one opens", async () => {
+    const swallow = (event: FocusEvent) => {
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener("focusin", swallow, true);
+    try {
+      const user = userEvent.setup();
+      render(<TwoOpenersWithFallback />);
+      const first = button("Edit A");
+      const second = button("Edit B");
+      await user.click(first);
+      await user.click(button("Save"));
+      await waitFor(() => {
+        expect(document.activeElement).toBe(first);
+      });
 
-        // By keyboard: a click's pointerdown would end the watch itself.
-        act(() => {
-          second.focus();
-        });
-        await user.keyboard("{Enter}");
-        expect(screen.getByRole("dialog")).toBeInTheDocument();
-        await user.keyboard("{Escape}");
+      // By keyboard: a click's pointerdown would end the watch itself.
+      act(() => {
+        second.focus();
+      });
+      await user.keyboard("{Enter}");
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      await user.keyboard("{Escape}");
 
-        await waitFor(() => {
-          expect(document.activeElement).toBe(second);
-        });
-        await timersRun();
+      await waitFor(() => {
         expect(document.activeElement).toBe(second);
-      } finally {
-        window.removeEventListener("focusin", swallow, true);
-      }
-    },
-  );
+      });
+      await timersRun();
+      expect(document.activeElement).toBe(second);
+    } finally {
+      window.removeEventListener("focusin", swallow, true);
+    }
+  });
 });
 
 describe("focus placed on purpose", () => {
@@ -791,13 +739,7 @@ describe("a non-modal dialog", () => {
     const [open, setOpen] = useState(false);
     return (
       <>
-        <button
-          onClick={() => {
-            setOpen(true);
-          }}
-        >
-          Edit
-        </button>
+        <button onClick={set(setOpen, true)}>Edit</button>
         <p>Outside text</p>
         <Dialog modal={false} open={open} onOpenChange={setOpen}>
           <DialogContent>
@@ -824,19 +766,7 @@ describe("a non-modal dialog", () => {
 });
 
 describe("a dialog opened from a menu", () => {
-  const menuCases = KINDS.slice(0, 2).flatMap((k) =>
-    MODES.flatMap((m) =>
-      (["onSelect", "onClick"] as const).map((via) => ({ ...k, ...m, via })),
-    ),
-  );
-
-  function FromDropdown({
-    Modal,
-    via,
-  }: {
-    Modal: Modal;
-    via: "onSelect" | "onClick";
-  }) {
+  function FromDropdown({ via }: { via: "onSelect" | "onClick" }) {
     const [open, setOpen] = useState(false);
     const openIt = () => {
       setOpen(true);
@@ -857,21 +787,21 @@ describe("a dialog opened from a menu", () => {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Modal open={open} onOpenChange={setOpen} />
+        <DialogModal open={open} onOpenChange={setOpen} />
       </>
     );
   }
 
   // The item goes with the menu; the menu's own button is the one to go back to.
-  it.each(menuCases)(
-    "returns focus to the dropdown's button, not its gone item ($kind, $via, $mode)",
-    async ({ Modal, role, via, wrap }) => {
+  it.each(["onSelect", "onClick"] as const)(
+    "returns focus to the dropdown's button, not its gone item (%s)",
+    async (via) => {
       const user = userEvent.setup();
-      render(wrap(<FromDropdown Modal={Modal} via={via} />));
+      render(<FromDropdown via={via} />);
       const trigger = button("Actions for linux01");
       await user.click(trigger);
       await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
-      expect(await screen.findByRole(role)).toBeInTheDocument();
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
 
       await user.keyboard("{Escape}");
 
@@ -895,11 +825,7 @@ describe("a dialog opened from a menu", () => {
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
-            <ContextMenuItem
-              onClick={() => {
-                setOpen(true);
-              }}
-            >
+            <ContextMenuItem onClick={set(setOpen, true)}>
               Clone
             </ContextMenuItem>
           </ContextMenuContent>
@@ -914,39 +840,44 @@ describe("a dialog opened from a menu", () => {
     );
   }
 
-  it.each(MODES)(
-    "returns focus to the row a context menu was opened on with the mouse ($mode)",
-    async ({ wrap }) => {
+  // Three ways to open the menu, each remembering what it was opened on
+  // differently; all lead back to the row's button.
+  const openings: [how: string, open: (user: User) => unknown][] = [
+    [
+      "with the mouse, on the row's text rather than its button",
+      (user) => {
+        button("Elsewhere").focus();
+        return user.pointer({
+          keys: "[MouseRight]",
+          target: screen.getByText("running"),
+        });
+      },
+    ],
+    // Radix opens on a long touch or pen press, with no contextmenu event.
+    [
+      "by a long press",
+      () => {
+        button("Elsewhere").focus();
+        fireEvent.pointerDown(screen.getByText("running"), {
+          pointerType: "touch",
+        });
+      },
+    ],
+    [
+      "from the keyboard (Shift+F10, the Menu key)",
+      () => {
+        button("linux01").focus();
+        fireEvent.contextMenu(button("linux01"));
+      },
+    ],
+  ];
+
+  it.each(openings)(
+    "returns focus to the row a context menu was opened on %s",
+    async (_how, open) => {
       const user = userEvent.setup();
-      render(wrap(<FromContextMenu />));
-      button("Elsewhere").focus();
-      // On the row's text, not on its button.
-      await user.pointer({
-        keys: "[MouseRight]",
-        target: screen.getByText("running"),
-      });
-      await user.click(await screen.findByRole("menuitem", { name: "Clone" }));
-      expect(await screen.findByRole("dialog")).toBeInTheDocument();
-
-      await user.keyboard("{Escape}");
-
-      await waitFor(() => {
-        expect(document.activeElement).toBe(button("linux01"));
-      });
-    },
-  );
-
-  // Radix opens a context menu on a long touch or pen press, with no
-  // contextmenu event.
-  it.each(MODES)(
-    "returns focus to the row a context menu was opened on by a long press ($mode)",
-    async ({ wrap }) => {
-      const user = userEvent.setup();
-      render(wrap(<FromContextMenu />));
-      button("Elsewhere").focus();
-      fireEvent.pointerDown(screen.getByText("running"), {
-        pointerType: "touch",
-      });
+      render(<FromContextMenu />);
+      await open(user);
       await user.click(
         await screen.findByRole(
           "menuitem",
@@ -963,26 +894,6 @@ describe("a dialog opened from a menu", () => {
       });
     },
   );
-
-  it.each(MODES)(
-    "returns focus to the element a context menu was opened on from the keyboard ($mode)",
-    async ({ wrap }) => {
-      const user = userEvent.setup();
-      render(wrap(<FromContextMenu />));
-      const row = button("linux01");
-      row.focus();
-      // Shift+F10 or the Menu key: contextmenu on the focused element.
-      fireEvent.contextMenu(row);
-      await user.click(await screen.findByRole("menuitem", { name: "Clone" }));
-      expect(await screen.findByRole("dialog")).toBeInTheDocument();
-
-      await user.keyboard("{Escape}");
-
-      await waitFor(() => {
-        expect(document.activeElement).toBe(row);
-      });
-    },
-  );
 });
 
 describe("dialogs opened from other dialogs", () => {
@@ -993,13 +904,7 @@ describe("dialogs opened from other dialogs", () => {
     const [secret, setSecret] = useState(false);
     return (
       <>
-        <button
-          onClick={() => {
-            setForm(true);
-          }}
-        >
-          Create token
-        </button>
+        <button onClick={set(setForm, true)}>Create token</button>
         <Dialog open={form} onOpenChange={setForm}>
           <DialogContent>
             <DialogTitle>Create token</DialogTitle>
@@ -1025,24 +930,21 @@ describe("dialogs opened from other dialogs", () => {
     );
   }
 
-  it.each(MODES)(
-    "returns focus to the first dialog's opener from one opened as it closed ($mode)",
-    async ({ wrap }) => {
-      const user = userEvent.setup();
-      render(wrap(<Chain />));
-      const opener = button("Create token");
-      await user.click(opener);
-      await user.click(button("Create"));
-      const secret = await screen.findByRole("alertdialog");
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  it("returns focus to the first dialog's opener from one opened as it closed", async () => {
+    const user = userEvent.setup();
+    render(<Chain />);
+    const opener = button("Create token");
+    await user.click(opener);
+    await user.click(button("Create"));
+    const secret = await screen.findByRole("alertdialog");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-      await user.click(within(secret).getByRole("button", { name: "Done" }));
+    await user.click(within(secret).getByRole("button", { name: "Done" }));
 
-      await waitFor(() => {
-        expect(document.activeElement).toBe(opener);
-      });
-    },
-  );
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
+  });
 
   // A confirmation that turns into another as it closes: a delete refused
   // for the credential Nexara signs in with, asking again with a warning.
@@ -1051,13 +953,7 @@ describe("dialogs opened from other dialogs", () => {
     const [warning, setWarning] = useState(false);
     return (
       <>
-        <button
-          onClick={() => {
-            setConfirm(true);
-          }}
-        >
-          Delete user
-        </button>
+        <button onClick={set(setConfirm, true)}>Delete user</button>
         <AlertDialog open={confirm} onOpenChange={setConfirm}>
           <AlertDialogContent>
             <AlertDialogTitle>Delete the user?</AlertDialogTitle>
@@ -1083,31 +979,27 @@ describe("dialogs opened from other dialogs", () => {
     );
   }
 
-  it.each(MODES)(
-    "returns focus to a confirmation's opener from a dialog opened as it closed ($mode)",
-    async ({ wrap }) => {
-      const user = userEvent.setup();
-      render(wrap(<ChainFromConfirmation />));
-      const opener = button("Delete user");
-      await user.click(opener);
-      await user.click(button("Delete"));
-      expect(await screen.findByRole("dialog")).toBeInTheDocument();
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  it("returns focus to a confirmation's opener from a dialog opened as it closed", async () => {
+    const user = userEvent.setup();
+    render(<ChainFromConfirmation />);
+    const opener = button("Delete user");
+    await user.click(opener);
+    await user.click(button("Delete"));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
 
-      await user.keyboard("{Escape}");
+    await user.keyboard("{Escape}");
 
-      await waitFor(() => {
-        expect(document.activeElement).toBe(opener);
-      });
-    },
-  );
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
+  });
 
   // A confirmation inside a dialog that stays open, whose row goes once the
-  // change is read back, like RoleAssignDialog's revoke. The page's main
-  // content is behind that dialog, hidden: focus stays in the dialog. The
-  // revoke settles — the dialog re-renders — before the read-back takes the
-  // row away: that re-creates the outer FocusScope's own MutationObserver
-  // after the watch's, so that the watch sees the row go first.
+  // change is read back, like RoleAssignDialog's revoke: focus stays in the
+  // dialog, the page behind it being hidden. The dialog re-renders when the
+  // revoke settles, before the row goes, so the watch sees the row go first
+  // (that re-creates the outer FocusScope's own MutationObserver after it).
   function RolesWithRevoke({
     held,
     note = "",
@@ -1200,25 +1092,13 @@ describe("dialogs opened from other dialogs", () => {
     return (
       <FallbackFocusContext value={[() => main.current]}>
         <main ref={main} tabIndex={-1}>
-          <button
-            onClick={() => {
-              setOuter(true);
-            }}
-          >
-            Roles
-          </button>
+          <button onClick={set(setOuter, true)}>Roles</button>
         </main>
         <Dialog open={outer} onOpenChange={setOuter}>
           <DialogContent>
             <DialogTitle>Roles</DialogTitle>
             <DialogDescription>Who may do what.</DialogDescription>
-            <button
-              onClick={() => {
-                setInner(true);
-              }}
-            >
-              Revoke admin
-            </button>
+            <button onClick={set(setInner, true)}>Revoke admin</button>
             <AlertDialog open={inner} onOpenChange={setInner}>
               <AlertDialogContent>
                 <AlertDialogTitle>Revoke admin?</AlertDialogTitle>
@@ -1248,41 +1128,35 @@ describe("dialogs opened from other dialogs", () => {
 
   // The watch on Revoke admin must not take over when the outer dialog goes
   // and takes that button with it: the outer dialog puts focus back itself.
-  it.each(MODES)(
-    "returns focus into the dialog a nested one was opened from, then out of it ($mode)",
-    async ({ wrap }) => {
-      const user = userEvent.setup();
-      render(wrap(<Nested />));
-      const opener = button("Roles");
-      await backOnRevokeInRoles(user);
+  it("returns focus into the dialog a nested one was opened from, then out of it", async () => {
+    const user = userEvent.setup();
+    render(<Nested />);
+    const opener = button("Roles");
+    await backOnRevokeInRoles(user);
 
-      await user.keyboard("{Escape}");
+    await user.keyboard("{Escape}");
 
-      await waitFor(() => {
-        expect(document.activeElement).toBe(opener);
-      });
-      await timersRun();
+    await waitFor(() => {
       expect(document.activeElement).toBe(opener);
-    },
-  );
+    });
+    await timersRun();
+    expect(document.activeElement).toBe(opener);
+  });
 
-  it.each(MODES)(
-    "returns focus out of the dialog a nested one was opened from when the app closes it ($mode)",
-    async ({ wrap }) => {
-      const user = userEvent.setup();
-      const { rerender } = render(wrap(<Nested />));
-      const opener = button("Roles");
-      await backOnRevokeInRoles(user);
+  it("returns focus out of the dialog a nested one was opened from when the app closes it", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Nested />);
+    const opener = button("Roles");
+    await backOnRevokeInRoles(user);
 
-      rerender(wrap(<Nested closeOuter />));
+    rerender(<Nested closeOuter />);
 
-      await waitFor(() => {
-        expect(document.activeElement).toBe(opener);
-      });
-      await timersRun();
+    await waitFor(() => {
       expect(document.activeElement).toBe(opener);
-    },
-  );
+    });
+    await timersRun();
+    expect(document.activeElement).toBe(opener);
+  });
 
   // Opened from inside a modal that stays open, but rendered beside it:
   // VMContextDialogs, opened from the mobile nav Sheet's tree. The page
@@ -1308,13 +1182,7 @@ describe("dialogs opened from other dialogs", () => {
             <SheetTitle>Navigation</SheetTitle>
             <SheetDescription>Pages and resources.</SheetDescription>
             {shown && (
-              <button
-                onClick={() => {
-                  setConfirm(true);
-                }}
-              >
-                Destroy linux01
-              </button>
+              <button onClick={set(setConfirm, true)}>Destroy linux01</button>
             )}
           </SheetContent>
         </Sheet>
@@ -1367,13 +1235,7 @@ describe("dialogs opened from other dialogs", () => {
           <SheetContent>
             <SheetTitle>Navigation</SheetTitle>
             <SheetDescription>Pages and resources.</SheetDescription>
-            <button
-              onClick={() => {
-                setDetails(true);
-              }}
-            >
-              linux01
-            </button>
+            <button onClick={set(setDetails, true)}>linux01</button>
           </SheetContent>
         </Sheet>
         <Dialog open={details} onOpenChange={setDetails}>
@@ -1381,13 +1243,7 @@ describe("dialogs opened from other dialogs", () => {
             <DialogTitle>linux01</DialogTitle>
             <DialogDescription>Running.</DialogDescription>
             {!destroyed && (
-              <button
-                onClick={() => {
-                  setConfirm(true);
-                }}
-              >
-                Destroy linux01
-              </button>
+              <button onClick={set(setConfirm, true)}>Destroy linux01</button>
             )}
           </DialogContent>
         </Dialog>
@@ -1464,13 +1320,7 @@ describe("dialogs opened from other dialogs", () => {
             <DialogTitle>Details</DialogTitle>
             <DialogDescription>Read only.</DialogDescription>
             {!gone && (
-              <button
-                onClick={() => {
-                  setPending(true);
-                }}
-              >
-                Remove tag
-              </button>
+              <button onClick={set(setPending, true)}>Remove tag</button>
             )}
             <AlertDialog open={pending} onOpenChange={setPending}>
               <AlertDialogContent>
