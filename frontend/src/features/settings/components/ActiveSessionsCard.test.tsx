@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { ActiveSessionsCard } from "./ActiveSessionsCard";
 import { useAuthStore } from "@/stores/auth-store";
 import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
+import { createAppQueryClient } from "@/test/app-query-client";
 import type { UserSession } from "@/types/api";
 
 const USER_A = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -144,7 +145,9 @@ describe("ActiveSessionsCard", () => {
   // this browser read the previous user's device names and IP addresses out of
   // cache with no refetch. The key carries the user id to prevent that.
   it("does not serve one user's sessions to the next user on the same client", async () => {
-    const client = createTestQueryClient({ keepCache: true });
+    // The app's client: a test client with staleTime 0 refetches on remount and
+    // would pass with a shared key.
+    const client = createAppQueryClient();
     listMock.mockResolvedValue([session({ device_name: "A laptop" })]);
     const first = renderCard(client);
     expect(await screen.findByText("A laptop")).toBeInTheDocument();
