@@ -5,16 +5,9 @@ import { apiClient, ApiClientError } from "@/lib/api-client";
 import { VeeamProtectionCard } from "./VeeamProtectionCard";
 import type { VeeamGuestProtection } from "@/features/backup/types/backup";
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: { get: vi.fn() },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedGet = vi.mocked(apiClient.get);
 

@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import type { ReactNode } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import type { QueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
 import { usePBSKeyStore } from "@/stores/pbs-key-store";
+import { renderWithProviders } from "@/test/test-utils";
 import type { User } from "@/types/api";
 import { EditStorageDialog } from "./EditStorageDialog";
 import { PendingPBSKeyDialog } from "./PendingPBSKey";
@@ -98,16 +97,8 @@ function pbsConfig(
  */
 async function openEditor(config: StorageConfigResponse, storageType = "pbs") {
   mockedGet.mockResolvedValue(config);
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>{children}</MemoryRouter>
-    </QueryClientProvider>
-  );
   const user = userEvent.setup();
-  render(
+  const { queryClient } = renderWithProviders(
     <>
       <EditStorageDialog
         clusterId="c1"
@@ -117,7 +108,6 @@ async function openEditor(config: StorageConfigResponse, storageType = "pbs") {
       />
       <PendingPBSKeyDialog />
     </>,
-    { wrapper },
   );
   await user.click(screen.getByRole("button", { name: "Edit" }));
   await screen.findByRole("button", { name: "Save Changes" });

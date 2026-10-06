@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
-import { render } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
+import { renderWithProviders } from "@/test/test-utils";
 import { VMDetailPage } from "./VMDetailPage";
 import type { VMResponse } from "@/types/api";
 
@@ -210,21 +209,17 @@ vi.mock("@/features/storage/api/storage-queries", () => ({
 
 function renderPage(kind: string = "vm", vm: Partial<VMResponse> = {}) {
   mockCurrentVM = { ...mockVM, ...vm };
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
-  });
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/inventory/${kind}/cluster-1/vm-uuid-1`]}>
-        <Routes>
-          <Route
-            path="/inventory/:kind/:clusterId/:vmId"
-            element={<VMDetailPage />}
-          />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+  return renderWithProviders(
+    <Routes>
+      <Route
+        path="/inventory/:kind/:clusterId/:vmId"
+        element={<VMDetailPage />}
+      />
+    </Routes>,
+    {
+      router: { initialEntries: [`/inventory/${kind}/cluster-1/vm-uuid-1`] },
+    },
   );
 }
 

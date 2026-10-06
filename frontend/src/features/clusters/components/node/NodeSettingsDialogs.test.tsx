@@ -51,28 +51,13 @@ import {
 
 // The transport is mocked, not the hooks, so the real queries and mutations
 // run and each test asserts the request that would leave the browser.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      get: vi.fn(),
-      list: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 // The app's mutation-error net toasts through sonner, and so does the Edit
 // button when its read fails, so this one mock sees every toast a run can raise.
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedGet = vi.mocked(apiClient.get);
 const mockedPut = vi.mocked(apiClient.put);

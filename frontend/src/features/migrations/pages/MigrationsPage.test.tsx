@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, render } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { screen } from "@testing-library/react";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import { MigrationsPage } from "./MigrationsPage";
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -34,16 +33,9 @@ vi.mock("../api/migration-queries", () => ({
 }));
 
 function renderPage() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+  return renderWithProviders(<MigrationsPage />, {
+    client: createTestQueryClient({ keepCache: true }),
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <MigrationsPage />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
 }
 
 describe("MigrationsPage", () => {

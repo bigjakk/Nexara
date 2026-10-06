@@ -5,6 +5,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { clearTokens, storeTokens } from "@/lib/api-client";
 import { queryClient } from "@/lib/query-client";
 import { installFakeLocks, removeFakeLocks } from "@/test/fake-lock-manager";
+import { deferred } from "@/test/fake-server";
 import { useAuthStore } from "@/stores/auth-store";
 import type { AuthResponse, SSHCredential, User } from "@/types/api";
 import { useUpsertSSHCredentials } from "./rolling-update-queries";
@@ -48,14 +49,6 @@ const SAVE = "PUT /api/v1/clusters/cluster01/ssh-credentials";
 let answer: { promise: Promise<Response>; resolve: (r: Response) => void };
 /** What the stubbed fetch was asked for, as "METHOD /path", in order. */
 let sent: string[];
-
-function deferredResponse() {
-  let resolve!: (r: Response) => void;
-  const promise = new Promise<Response>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -134,7 +127,7 @@ beforeEach(() => {
     isInitialized: true,
     isLoggingOut: false,
   });
-  answer = deferredResponse();
+  answer = deferred<Response>();
   sent = [];
   vi.stubGlobal(
     "fetch",

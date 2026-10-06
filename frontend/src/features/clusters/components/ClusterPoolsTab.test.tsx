@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 
 import { ClusterPoolsTab } from "./ClusterPoolsTab";
 import { unaddressableHint } from "@/lib/api-path";
-import { expectOnScreen } from "@/test/test-utils";
+import {
+  createTestQueryClient,
+  expectOnScreen,
+  renderWithProviders,
+} from "@/test/test-utils";
 
 const CLUSTER = "cccccccc-0000-0000-0000-000000000003";
 const POOLS_PATH = `/api/v1/clusters/${CLUSTER}/pools`;
@@ -15,38 +17,23 @@ const listMock = vi.fn();
 const getMock = vi.fn();
 const deleteMock = vi.fn();
 
-// Spread the real module: describeError and friends import ApiClientError
-// from here. Only the transport is replaced — the paths the hooks hand it are
-// built by the real apiPath.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      list: (path: string) => listMock(path) as unknown,
-      get: (path: string) => getMock(path) as unknown,
-      delete: (...args: unknown[]) => deleteMock(...args) as unknown,
-      put: vi.fn(),
-      post: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
+    list: (path: string) => listMock(path) as unknown,
+    get: (path: string) => getMock(path) as unknown,
+    delete: (...args: unknown[]) => deleteMock(...args) as unknown,
+  }),
+);
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ canManage: () => true }),
 }));
 
 function renderTab() {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  return renderWithProviders(<ClusterPoolsTab clusterId={CLUSTER} />, {
+    client: createTestQueryClient({ keepCache: true }),
+    router: false,
   });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-  );
-  return render(<ClusterPoolsTab clusterId={CLUSTER} />, { wrapper });
 }
 
 beforeEach(() => {

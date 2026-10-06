@@ -1,15 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import { FirewallRulesTable } from "./FirewallRulesTable";
 import type { FirewallRule } from "../types/network";
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const CLUSTER = "c1";
 const RULES_PATH = `/api/v1/clusters/${CLUSTER}/firewall/rules`;
@@ -71,15 +70,12 @@ afterEach(() => {
 
 async function openDeleteFor(pos: number, rules: FirewallRule[] = RULES) {
   api = stubApi({ [RULES_PATH]: listOf(rules) });
-  qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
+  qc = createTestQueryClient({ keepCache: true });
   const user = userEvent.setup();
-  render(
-    <QueryClientProvider client={qc}>
-      <FirewallRulesTable clusterId={CLUSTER} />
-    </QueryClientProvider>,
-  );
+  renderWithProviders(<FirewallRulesTable clusterId={CLUSTER} />, {
+    client: qc,
+    router: false,
+  });
   await user.click(
     await screen.findByRole("button", { name: `Delete rule ${String(pos)}` }),
   );

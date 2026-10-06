@@ -1,13 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  startTransition,
-  useEffect,
-  useLayoutEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { startTransition, useEffect, useLayoutEffect, useState } from "react";
 import { act, render, renderHook } from "@testing-library/react";
-import { QueryClientProvider, useMutation } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { ApiClientError, clearTokens, storeTokens } from "@/lib/api-client";
@@ -21,6 +15,7 @@ import {
   signIn,
   signOutForGood,
 } from "@/test/save-outcome-kit";
+import { createWrapper } from "@/test/test-utils";
 import { useSaveOutcome, type SaveOutcome } from "./useSaveOutcome";
 
 /**
@@ -32,9 +27,7 @@ import { useSaveOutcome, type SaveOutcome } from "./useSaveOutcome";
  * it, and without which "toasts nothing" proves nothing.
  */
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedToastError = vi.mocked(toast.error);
 
@@ -43,10 +36,7 @@ const CONNECTION_FAILED =
   "The request failed — check your connection and try again.";
 
 function withAppClient() {
-  const qc = createAppQueryClient();
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
-  };
+  return createWrapper({ client: createAppQueryClient(), router: false });
 }
 
 /** A mutation that opted out of the global toast, as the hooks this serves do. */

@@ -9,13 +9,9 @@ import type {
   NodeSensorsResponse,
 } from "../../api/cluster-queries";
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return { ...actual, apiClient: { get: vi.fn() } };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedGet = vi.mocked(apiClient.get);
 

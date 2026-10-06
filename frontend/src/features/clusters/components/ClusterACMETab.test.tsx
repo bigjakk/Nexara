@@ -3,14 +3,12 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import type { QueryClient } from "@tanstack/react-query";
 
 import { ClusterACMETab } from "./ClusterACMETab";
 import { ApiClientError } from "@/lib/api-client";
@@ -36,6 +34,7 @@ import {
   flushInAct as flush,
   waitForSuccess,
 } from "@/test/save-outcome-kit";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import type { NodeACMEConfig } from "@/features/acme/api/acme-queries";
 
 /**
@@ -56,24 +55,13 @@ const listMock = vi.fn();
 const getMock = vi.fn();
 const putMock = vi.fn();
 
-// Spread the real module: api-error.ts imports ApiClientError from here, and a
-// mock that only supplies apiClient makes describeError throw on every render.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      list: (path: string) => listMock(path) as unknown,
-      get: (path: string) => getMock(path) as unknown,
-      put: (path: string, body: unknown) => putMock(path, body) as unknown,
-      post: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
+    list: (path: string) => listMock(path) as unknown,
+    get: (path: string) => getMock(path) as unknown,
+    put: (path: string, body: unknown) => putMock(path, body) as unknown,
+  }),
+);
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ canManage: () => true }),
@@ -82,16 +70,9 @@ vi.mock("@/hooks/useAuth", () => ({
 // The app's mutation-error net toasts through sonner, so this one mock sees every
 // toast a run can raise, of any kind: "toasts nothing" is not satisfied by a
 // success or a warning.
-vi.mock("sonner", () => ({
-  toast: Object.assign(vi.fn(), {
-    success: vi.fn(),
-    info: vi.fn(),
-    warning: vi.fn(),
-    error: vi.fn(),
-    message: vi.fn(),
-    loading: vi.fn(),
-  }),
-}));
+vi.mock("sonner", async () =>
+  (await import("@/test/mocks")).everyKindOfToastMock(),
+);
 
 const NODE_2 = "pve-02";
 const CONFIG_PATH_2 = `/api/v1/clusters/${CLUSTER}/nodes/${NODE_2}/acme-config`;
@@ -130,14 +111,15 @@ const badGateway = () => new ApiClientError(502, { error: "bad", message: "" });
  * with the hook's opt-out removed.
  */
 function renderTab(
-  qc: QueryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  }),
+  qc: QueryClient = createTestQueryClient({ keepCache: true }),
 ) {
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-  );
-  return { qc, ...render(<ClusterACMETab clusterId={CLUSTER} />, { wrapper }) };
+  return {
+    qc,
+    ...renderWithProviders(<ClusterACMETab clusterId={CLUSTER} />, {
+      client: qc,
+      router: false,
+    }),
+  };
 }
 
 /** Opens the edit dialog on the nth configured domain, defaulting to the first. */

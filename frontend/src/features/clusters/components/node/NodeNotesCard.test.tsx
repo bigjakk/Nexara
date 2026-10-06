@@ -2,19 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
   fireEvent,
-  render,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
 import { deferred } from "@/test/fake-server";
 import { DENIED, denied, flushInAct } from "@/test/save-outcome-kit";
+import { renderWithProviders } from "@/test/test-utils";
 import type { NodeNotes } from "../../api/node-options-queries";
 import { NodeNotesCard } from "./NodeNotesCard";
 
@@ -31,26 +30,11 @@ import { NodeNotesCard } from "./NodeNotesCard";
  *     replaces them and the card that shows them is behind the overlay.
  */
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      get: vi.fn(),
-      list: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedGet = vi.mocked(apiClient.get);
 const mockedPut = vi.mocked(apiClient.put);
@@ -100,22 +84,22 @@ function serve(...reads: NodeNotes[]) {
 
 /** Renders the card on the app's own kind of client; `rerender` changes props. */
 function renderCard(over: { online?: boolean; canEdit?: boolean } = {}) {
-  const qc = createAppQueryClient();
   const ui = (online: boolean, canEdit: boolean) => (
-    <QueryClientProvider client={qc}>
-      <NodeNotesCard
-        clusterId={CLUSTER}
-        nodeName={NODE}
-        online={online}
-        canEdit={canEdit}
-      />
-    </QueryClientProvider>
+    <NodeNotesCard
+      clusterId={CLUSTER}
+      nodeName={NODE}
+      online={online}
+      canEdit={canEdit}
+    />
   );
   const online = over.online ?? true;
   const canEdit = over.canEdit ?? true;
-  const view = render(ui(online, canEdit));
+  const view = renderWithProviders(ui(online, canEdit), {
+    client: createAppQueryClient(),
+    router: false,
+  });
   return {
-    qc,
+    qc: view.queryClient,
     rerender: (next: { online?: boolean; canEdit?: boolean }) => {
       view.rerender(ui(next.online ?? online, next.canEdit ?? canEdit));
     },

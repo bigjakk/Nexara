@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createElement, type ReactNode } from "react";
+import { createTestQueryClient, createWrapper } from "@/test/test-utils";
 
 import {
   sameFavorite,
@@ -27,14 +26,10 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-function wrapper(client: QueryClient) {
-  return ({ children }: { children: ReactNode }) =>
-    createElement(QueryClientProvider, { client }, children);
-}
-
-function makeClient() {
-  return new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+function wrapper() {
+  return createWrapper({
+    client: createTestQueryClient({ keepCache: true }),
+    router: false,
   });
 }
 
@@ -114,7 +109,7 @@ describe("useIsFavorite", () => {
           cluster_id: CLUSTER_A,
           ref: "101",
         }),
-      { wrapper: wrapper(makeClient()) },
+      { wrapper: wrapper() },
     );
 
     await waitFor(() => {
@@ -131,7 +126,7 @@ describe("useIsFavorite", () => {
           cluster_id: CLUSTER_A,
           ref: "102",
         }),
-      { wrapper: wrapper(makeClient()) },
+      { wrapper: wrapper() },
     );
 
     await waitFor(() => {
@@ -144,7 +139,7 @@ describe("useIsFavorite", () => {
 describe("useToggleFavorite", () => {
   it("posts the identity triple when starring", async () => {
     const { result } = renderHook(() => useToggleFavorite(), {
-      wrapper: wrapper(makeClient()),
+      wrapper: wrapper(),
     });
 
     act(() => {
@@ -172,7 +167,7 @@ describe("useToggleFavorite", () => {
    */
   it("deletes by ref, not by the resolved row id", async () => {
     const { result } = renderHook(() => useToggleFavorite(), {
-      wrapper: wrapper(makeClient()),
+      wrapper: wrapper(),
     });
 
     act(() => {
@@ -196,7 +191,7 @@ describe("useToggleFavorite", () => {
   // change the query it is spliced into.
   it("encodes a node name that needs escaping", async () => {
     const { result } = renderHook(() => useToggleFavorite(), {
-      wrapper: wrapper(makeClient()),
+      wrapper: wrapper(),
     });
 
     act(() => {

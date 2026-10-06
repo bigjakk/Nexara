@@ -1,11 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 
 import { ActiveSessionsCard } from "./ActiveSessionsCard";
 import { useAuthStore } from "@/stores/auth-store";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import type { UserSession } from "@/types/api";
 
 const USER_A = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -21,22 +20,12 @@ function signIn(id: string) {
 const listMock = vi.fn();
 const deleteMock = vi.fn();
 
-// The real module with only apiClient replaced: the revoke hook takes the session
-// it is made in from sessionScope, and signing out of the current device ends the
-// session through clearTokens.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      list: (path: string) => listMock(path) as unknown,
-      delete: (path: string) => deleteMock(path) as unknown,
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
+    list: (path: string) => listMock(path) as unknown,
+    delete: (path: string) => deleteMock(path) as unknown,
+  }),
+);
 
 function session(overrides: Partial<UserSession> = {}): UserSession {
   return {
@@ -53,17 +42,8 @@ function session(overrides: Partial<UserSession> = {}): UserSession {
   };
 }
 
-function makeClient() {
-  return new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-}
-
-function renderCard(client: QueryClient = makeClient()) {
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  );
-  return { client, ...render(<ActiveSessionsCard />, { wrapper }) };
+function renderCard(client = createTestQueryClient({ keepCache: true })) {
+  return renderWithProviders(<ActiveSessionsCard />, { client, router: false });
 }
 
 beforeEach(() => {
@@ -164,7 +144,7 @@ describe("ActiveSessionsCard", () => {
   // this browser read the previous user's device names and IP addresses out of
   // cache with no refetch. The key carries the user id to prevent that.
   it("does not serve one user's sessions to the next user on the same client", async () => {
-    const client = makeClient();
+    const client = createTestQueryClient({ keepCache: true });
     listMock.mockResolvedValue([session({ device_name: "A laptop" })]);
     const first = renderCard(client);
     expect(await screen.findByText("A laptop")).toBeInTheDocument();

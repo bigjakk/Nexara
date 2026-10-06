@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import {
-  QueryClientProvider,
   QueryObserver,
   type QueryClient,
   type QueryObserverResult,
@@ -11,12 +9,14 @@ import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
+import { deferred } from "@/test/fake-server";
 import {
   SESSION_ENDS,
   settle,
   signInAsAdmin,
   signOutForGood,
 } from "@/test/late-toast-sessions";
+import { createWrapper } from "@/test/test-utils";
 import { nodeOptionsKey, type NodeOptions } from "../api/node-options-queries";
 import { useNodeOptionsSave } from "./useNodeOptionsSave";
 
@@ -28,17 +28,11 @@ import { useNodeOptionsSave } from "./useNodeOptionsSave";
  * (NodeOptionsCard.test.tsx).
  */
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return { ...actual, apiClient: { put: vi.fn(), get: vi.fn() } };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedPut = vi.mocked(apiClient.put);
 const mockedToastError = vi.mocked(toast.error);
@@ -52,16 +46,6 @@ const CHANGED = "This node's configuration changed while this dialog was open.";
 
 function stale(): ApiClientError {
   return new ApiClientError(409, { error: "conflict", message: STALE });
-}
-
-function deferred<T>() {
-  let resolve: (value: T) => void = () => undefined;
-  let reject: (reason: unknown) => void = () => undefined;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
 }
 
 /**
@@ -86,11 +70,7 @@ function setup(
         reread,
         onSaved,
       }),
-    {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-      ),
-    },
+    { wrapper: createWrapper({ client: qc, router: false }) },
   );
   return { ...hook, onSaved };
 }
@@ -367,11 +347,7 @@ describe("useNodeOptionsSave", () => {
 
     release({ digest: "d2" });
     // Let the re-read land, and React draw whatever it set.
-    await act(async () => {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 0);
-      });
-    });
+    await settle();
 
     // It belonged to the first save: no note for it over the second's.
     expect(result.current.conflict).toBeNull();

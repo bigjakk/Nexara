@@ -27,9 +27,7 @@ import { NodeDetailPage } from "./NodeDetailPage";
  * what is under test is how the page wires them.
  */
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 // The whole page renders cold in the first test of this file, and under load
 // that takes longer than the second testing-library waits by default, which is

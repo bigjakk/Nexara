@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createElement, type ReactNode } from "react";
+import { createTestQueryClient, createWrapper } from "@/test/test-utils";
 import { useWebSocketStore } from "@/stores/websocket-store";
 import { useEventInvalidation } from "./useEventInvalidation";
 
@@ -29,19 +28,15 @@ function deliver(channel: string, payload: unknown) {
 
 /** Mounts the hook for both clusters over a cache holding `keys`. */
 function mount(keys: string[][]) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
+  const client = createTestQueryClient({ keepCache: true });
   for (const key of keys) {
     client.setQueryData(key, []);
   }
-  const wrapper = ({ children }: { children: ReactNode }) =>
-    createElement(QueryClientProvider, { client }, children);
   renderHook(
     () => {
       useEventInvalidation([CLUSTER, OTHER_CLUSTER]);
     },
-    { wrapper },
+    { wrapper: createWrapper({ client, router: false }) },
   );
   return client;
 }

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createElement, type ReactNode } from "react";
+import { createTestQueryClient, createWrapper } from "@/test/test-utils";
 
 import { useDeleteDRSRule } from "./drs-queries";
 
@@ -15,17 +14,6 @@ vi.mock("@/lib/api-client", () => ({
     delete: (path: string) => deleteMock(path) as unknown,
   },
 }));
-
-function makeClient() {
-  return new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-}
-
-function wrapper(client: QueryClient) {
-  return ({ children }: { children: ReactNode }) =>
-    createElement(QueryClientProvider, { client }, children);
-}
 
 // The server answers 404 when the rule is already gone — deleted from another
 // tab, or by another operator — or belongs to another cluster. The list that
@@ -44,10 +32,10 @@ describe("useDeleteDRSRule", () => {
       } else {
         deleteMock.mockRejectedValue(new Error("DRS rule not found"));
       }
-      const client = makeClient();
+      const client = createTestQueryClient({ keepCache: true });
       const invalidate = vi.spyOn(client, "invalidateQueries");
       const { result } = renderHook(() => useDeleteDRSRule(CLUSTER), {
-        wrapper: wrapper(client),
+        wrapper: createWrapper({ client, router: false }),
       });
 
       act(() => {

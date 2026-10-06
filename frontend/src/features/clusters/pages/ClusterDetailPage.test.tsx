@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { ClusterDetailPage } from "./ClusterDetailPage";
 
@@ -123,16 +121,9 @@ describe("ClusterDetailPage", () => {
       error: null,
     });
 
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    renderWithProviders(<ClusterDetailPage />, {
+      router: { initialEntries: ["/clusters/test-cluster-id?tab=nodes"] },
     });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/clusters/test-cluster-id?tab=nodes"]}>
-          <ClusterDetailPage />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
 
     expect(
       screen.getByRole("tab", { name: "Overview", selected: true }),

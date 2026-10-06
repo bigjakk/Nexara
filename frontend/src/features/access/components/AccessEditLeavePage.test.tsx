@@ -6,13 +6,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { act, render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
-import { createAppQueryClient } from "@/test/app-query-client";
+import { deferred } from "@/test/fake-server";
+import { flushInAct, renderOnAppClient } from "@/test/save-outcome-kit";
 import type { AccessCapabilities } from "../api/access-queries";
 import { AccessUsersSection } from "./AccessUsersSection";
 
@@ -35,30 +35,15 @@ import { AccessUsersSection } from "./AccessUsersSection";
  * the only thing that decides the outcome.
  */
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      get: vi.fn(),
-      list: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ canManage: () => true }),
 }));
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 // The dialog as plain elements, for the reason above: an open one shows its
 // content, and no primitive underneath it schedules anything when it unmounts.
@@ -104,25 +89,6 @@ const capabilities: AccessCapabilities = {
   canModifyRealms: true,
   canModifyACL: true,
 };
-
-function deferred<T>() {
-  let resolve: (value: T) => void = () => undefined;
-  let reject: (reason: unknown) => void = () => undefined;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-/** Lets whatever is already queued run, and React draw what it set. */
-async function flush(): Promise<void> {
-  await act(async () => {
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
-  });
-}
 
 /**
  * What replaces the page once it has been left. It reports the two moments of
@@ -224,31 +190,29 @@ describe("a save that settles in the gap after the commit that removed its dialo
       seen.toastedBeforePassive = !seen.passive;
       return "toast-id";
     });
-    render(
-      <QueryClientProvider client={createAppQueryClient()}>
-        <LeavablePage
-          onReady={(leave) => {
-            seen.leave = leave;
-          }}
-          onLayout={() => {
-            // The first time only, should a layout effect ever run twice.
-            seen.atSettle ??= {
-              dialogOnPage:
-                screen.queryByRole("dialog", { hidden: true }) !== null,
-              passive: seen.passive,
-            };
-            // Settled here, in the commit, so that the handlers of the
-            // rejection run before the task that flushes the passive effects.
-            held.reject(
-              new ApiClientError(403, { error: "forbidden", message: DENIED }),
-            );
-          }}
-          onPassive={() => {
-            seen.passive = true;
-            passiveEffectsRan.resolve(undefined);
-          }}
-        />
-      </QueryClientProvider>,
+    renderOnAppClient(
+      <LeavablePage
+        onReady={(leave) => {
+          seen.leave = leave;
+        }}
+        onLayout={() => {
+          // The first time only, should a layout effect ever run twice.
+          seen.atSettle ??= {
+            dialogOnPage:
+              screen.queryByRole("dialog", { hidden: true }) !== null,
+            passive: seen.passive,
+          };
+          // Settled here, in the commit, so that the handlers of the
+          // rejection run before the task that flushes the passive effects.
+          held.reject(
+            new ApiClientError(403, { error: "forbidden", message: DENIED }),
+          );
+        }}
+        onPassive={() => {
+          seen.passive = true;
+          passiveEffectsRan.resolve(undefined);
+        }}
+      />,
     );
 
     await user.click(
@@ -268,7 +232,7 @@ describe("a save that settles in the gap after the commit that removed its dialo
       leave();
       await passiveEffectsRan.promise;
     });
-    await flush();
+    await flushInAct();
 
     // The gap itself, not merely some time after it: what the run reached.
     expect(seen.atSettle).toEqual({ dialogOnPage: false, passive: false });

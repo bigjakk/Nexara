@@ -18,16 +18,9 @@ import {
 
 // The transport is mocked, not the hooks, so the real queries and mutations
 // run and each test asserts the request that would leave the browser.
-vi.mock("@/lib/api-client", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/api-client")>()),
-  apiClient: {
-    get: vi.fn(),
-    list: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-  },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedGet = vi.mocked(apiClient.get);
 const mockedList = vi.mocked(apiClient.list);

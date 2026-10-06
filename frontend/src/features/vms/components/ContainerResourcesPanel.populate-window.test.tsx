@@ -25,30 +25,15 @@ const commitListeners = vi.hoisted(() => {
   return listeners;
 });
 
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
 import { apiClient } from "@/lib/api-client";
+import { renderWithProviders } from "@/test/test-utils";
 import { ContainerResourcesPanel } from "./ContainerResourcesPanel";
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      get: vi.fn(),
-      list: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      patch: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({ patch: vi.fn() }),
+);
 
 const mockedGet = vi.mocked(apiClient.get);
 const mockedList = vi.mocked(apiClient.list);
@@ -110,20 +95,13 @@ describe("ContainerResourcesPanel between a Save's result and the reload after i
     });
     mockedList.mockResolvedValue([]);
     mockedPut.mockResolvedValue({ status: "ok" });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: 0 } },
-    });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <ContainerResourcesPanel
-            clusterId={CLUSTER}
-            ctId={CT}
-            ctStatus="stopped"
-            nodeName="pve-01"
-          />
-        </MemoryRouter>
-      </QueryClientProvider>,
+    renderWithProviders(
+      <ContainerResourcesPanel
+        clusterId={CLUSTER}
+        ctId={CT}
+        ctStatus="stopped"
+        nodeName="pve-01"
+      />,
     );
     const user = userEvent.setup();
     await screen.findByText("unused1");

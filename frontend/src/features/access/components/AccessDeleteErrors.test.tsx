@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReactElement } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
-import { createAppQueryClient } from "@/test/app-query-client";
+import { renderOnAppClient } from "@/test/save-outcome-kit";
 import type { AccessCapabilities } from "../api/access-queries";
 import { AccessGroupsSection } from "./AccessGroupsSection";
 import { AccessRolesSection } from "./AccessRolesSection";
@@ -25,22 +23,9 @@ import { AccessRolesSection } from "./AccessRolesSection";
  * has none: nothing toasts on it, whatever a hook does.
  */
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      get: vi.fn(),
-      list: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ canManage: () => true }),
@@ -48,9 +33,7 @@ vi.mock("@/hooks/useAuth", () => ({
 
 // The app's mutation-error net toasts through sonner, so this one mock sees
 // every toast a run can raise.
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedList = vi.mocked(apiClient.list);
 const mockedDelete = vi.mocked(apiClient.delete);
@@ -72,14 +55,6 @@ const capabilities: AccessCapabilities = {
 
 function denied(): ApiClientError {
   return new ApiClientError(403, { error: "forbidden", message: DENIED });
-}
-
-function renderOnAppClient(ui: ReactElement) {
-  return render(
-    <QueryClientProvider client={createAppQueryClient()}>
-      {ui}
-    </QueryClientProvider>,
-  );
 }
 
 beforeEach(() => {

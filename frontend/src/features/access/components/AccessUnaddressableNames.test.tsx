@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import type { ReactElement } from "react";
 
 import { AccessGroupsSection } from "./AccessGroupsSection";
 import { AccessRolesSection } from "./AccessRolesSection";
 import type { AccessCapabilities } from "../api/access-queries";
 import { unaddressableHint } from "@/lib/api-path";
-import { expectOnScreen } from "@/test/test-utils";
+import {
+  createTestQueryClient,
+  expectOnScreen,
+  renderWithProviders,
+} from "@/test/test-utils";
 
 /**
  * Proxmox's own group and role id formats (verify_groupname and
@@ -23,22 +26,12 @@ const ACCESS = `/api/v1/clusters/${CLUSTER}/access`;
 const listMock = vi.fn();
 const getMock = vi.fn();
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      list: (path: string) => listMock(path) as unknown,
-      get: (path: string) => getMock(path) as unknown,
-      put: vi.fn(),
-      post: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
+    list: (path: string) => listMock(path) as unknown,
+    get: (path: string) => getMock(path) as unknown,
+  }),
+);
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ canManage: () => true }),
@@ -52,11 +45,11 @@ const capabilities: AccessCapabilities = {
   canModifyRealms: true,
 };
 
-function wrap(node: ReactNode) {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+function wrap(node: ReactElement) {
+  return renderWithProviders(node, {
+    client: createTestQueryClient({ keepCache: true }),
+    router: false,
   });
-  return render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>);
 }
 
 function reasonFor(name: string): string {

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 
 import { createAppQueryClient } from "@/test/app-query-client";
+import { createWrapper } from "@/test/test-utils";
 import type { BackupJobRunResult } from "../types/backup";
 import {
   deferred,
@@ -34,9 +34,7 @@ import { useRunBackupJob } from "./backup-queries";
  * the same answer toasts when the session goes on.
  */
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const CLUSTER = "cluster01";
 const JOB = "backup-job01";
@@ -64,9 +62,7 @@ async function submitted(): Promise<{
 }> {
   const qc = createAppQueryClient();
   const { result } = renderHook(() => useRunBackupJob(), {
-    wrapper: ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-    ),
+    wrapper: createWrapper({ client: qc, router: false }),
   });
   let outcome!: Promise<"succeeded" | "failed">;
   await act(async () => {
@@ -180,9 +176,7 @@ describe("the handler of a backup run, called by hand", () => {
   async function settledMutation() {
     const qc = createAppQueryClient();
     const { result } = renderHook(() => useRunBackupJob(), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-      ),
+      wrapper: createWrapper({ client: qc, router: false }),
     });
     held.resolve(runStarted());
     await act(async () => {

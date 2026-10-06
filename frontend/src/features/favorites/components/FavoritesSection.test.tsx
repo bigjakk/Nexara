@@ -1,13 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
-import type { ReactNode } from "react";
 
 import { FavoritesSection } from "./FavoritesSection";
 import { useAuthStore } from "@/stores/auth-store";
 import { useSidebarStore } from "@/stores/sidebar-store";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import type { Favorite } from "@/types/api";
 
 const USER_A = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -76,21 +74,8 @@ function serveFavorites(rows: Favorite[]) {
   );
 }
 
-function renderSection(client?: QueryClient) {
-  const qc =
-    client ??
-    new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>
-      <MemoryRouter>{children}</MemoryRouter>
-    </QueryClientProvider>
-  );
-  return { client: qc, ...render(<FavoritesSection />, { wrapper }) };
+function renderSection(client = createTestQueryClient({ keepCache: true })) {
+  return renderWithProviders(<FavoritesSection />, { client });
 }
 
 beforeEach(() => {
@@ -218,9 +203,7 @@ describe("FavoritesSection", () => {
    * browser. Same class of leak the sessions list had to be keyed for.
    */
   it("does not serve one user's favorites to the next", async () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const client = createTestQueryClient({ keepCache: true });
 
     serveFavorites([favorite({ name: "secret-guest" })]);
     const first = renderSection(client);

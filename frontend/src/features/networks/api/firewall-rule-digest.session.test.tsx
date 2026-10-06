@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 
 import { createAppQueryClient } from "@/test/app-query-client";
 import {
@@ -17,6 +16,7 @@ import {
   signOutForGood,
   toastsRaised,
 } from "@/test/late-toast-sessions";
+import { createWrapper } from "@/test/test-utils";
 import { useDeleteNodeFirewallRule } from "@/features/clusters/api/cluster-queries";
 import { onRuleWriteError } from "./firewall-rule-digest";
 import {
@@ -39,9 +39,7 @@ import {
  * same answer is reported, and the list reloaded, when the session goes on.
  */
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const CLUSTER = "cluster01";
 const DIGEST = "0123456789abcdef0123456789abcdef01234567";
@@ -63,12 +61,6 @@ interface Case {
   mount: (qc: QueryClient) => () => Promise<"succeeded" | "failed">;
 }
 
-function wrapperFor(qc: QueryClient) {
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
-  };
-}
-
 function settledAs(write: Promise<unknown>): Promise<"succeeded" | "failed"> {
   return write.then(
     () => "succeeded" as const,
@@ -85,7 +77,7 @@ const CASES: Case[] = [
     mount: (qc) => {
       const { result } = renderHook(
         () => useUpdateClusterFirewallRule(CLUSTER),
-        { wrapper: wrapperFor(qc) },
+        { wrapper: createWrapper({ client: qc, router: false }) },
       );
       return () =>
         settledAs(
@@ -105,7 +97,7 @@ const CASES: Case[] = [
     mount: (qc) => {
       const { result } = renderHook(
         () => useDeleteClusterFirewallRule(CLUSTER),
-        { wrapper: wrapperFor(qc) },
+        { wrapper: createWrapper({ client: qc, router: false }) },
       );
       return () =>
         settledAs(result.current.mutateAsync({ pos: 4, digest: DIGEST }));
@@ -119,7 +111,7 @@ const CASES: Case[] = [
     mount: (qc) => {
       const { result } = renderHook(
         () => useDeleteVMFirewallRule(CLUSTER, "101"),
-        { wrapper: wrapperFor(qc) },
+        { wrapper: createWrapper({ client: qc, router: false }) },
       );
       return () =>
         settledAs(result.current.mutateAsync({ pos: 4, digest: DIGEST }));
@@ -133,7 +125,7 @@ const CASES: Case[] = [
     mount: (qc) => {
       const { result } = renderHook(
         () => useDeleteNodeFirewallRule(CLUSTER, "pve-01"),
-        { wrapper: wrapperFor(qc) },
+        { wrapper: createWrapper({ client: qc, router: false }) },
       );
       return () =>
         settledAs(result.current.mutateAsync({ pos: 4, digest: DIGEST }));

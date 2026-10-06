@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClientProvider } from "@tanstack/react-query";
 
 import { ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
+import { createWrapper } from "@/test/test-utils";
 import {
   deferred,
   installFakeServer,
@@ -33,9 +32,7 @@ import { useUpdateVirtioWinMirror } from "./virtio-win-queries";
  * the control that the same answer is reported when the session goes on.
  */
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const SAVE = "PUT /api/v1/virtio-win/mirror";
 const REFUSED = "The mirror at mirror.example.com could not be reached.";
@@ -51,9 +48,7 @@ let held: ReturnType<typeof deferred<Response>>;
 async function submitted() {
   const qc = createAppQueryClient();
   const { result } = renderHook(() => useUpdateVirtioWinMirror(), {
-    wrapper: ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-    ),
+    wrapper: createWrapper({ client: qc, router: false }),
   });
   let outcome!: Promise<"succeeded" | "failed">;
   await act(async () => {
@@ -150,9 +145,7 @@ describe("the handler of a virtio-win source save, called by hand", () => {
   async function settledMutation() {
     const qc = createAppQueryClient();
     const { result } = renderHook(() => useUpdateVirtioWinMirror(), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-      ),
+      wrapper: createWrapper({ client: qc, router: false }),
     });
     held.resolve(json({ base_url: "", effective_url: "", upstream_url: "" }));
     await act(async () => {

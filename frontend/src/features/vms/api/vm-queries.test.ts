@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createElement, type ReactNode } from "react";
+import { createTestQueryClient, createWrapper } from "@/test/test-utils";
 
 import { useDetachDisk } from "./vm-queries";
 
@@ -17,17 +16,6 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-function makeClient() {
-  return new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-}
-
-function wrapper(client: QueryClient) {
-  return ({ children }: { children: ReactNode }) =>
-    createElement(QueryClientProvider, { client }, children);
-}
-
 // A detach can free a storage volume — an unusedN or vmstate key, or a
 // cloud-init drive — so it leaves the same views stale that a disk move does.
 //
@@ -42,7 +30,7 @@ describe("useDetachDisk", () => {
 
   it("marks the VM's config, the storage views and the resource lists stale, and nothing else", async () => {
     postMock.mockResolvedValue({ upid: "", status: "completed" });
-    const client = makeClient();
+    const client = createTestQueryClient({ keepCache: true });
     const stale = {
       "the VM's config": ["clusters", CLUSTER, "vms", VM, "config"],
       "the storage list": ["clusters", CLUSTER, "storage"],
@@ -66,7 +54,7 @@ describe("useDetachDisk", () => {
       client.setQueryData(key, {});
     }
     const { result } = renderHook(() => useDetachDisk(), {
-      wrapper: wrapper(client),
+      wrapper: createWrapper({ client, router: false }),
     });
 
     act(() => {

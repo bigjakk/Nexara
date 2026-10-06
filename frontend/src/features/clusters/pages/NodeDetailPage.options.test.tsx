@@ -31,9 +31,7 @@ import { NodeDetailPage } from "./NodeDetailPage";
  * tested in components/node/Node{Options,Notes}Card.test.tsx.
  */
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 // The whole page renders cold in the first test of the file.
 configure({ asyncUtilTimeout: PATIENCE_MS });

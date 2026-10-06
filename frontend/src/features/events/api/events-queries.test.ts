@@ -1,7 +1,6 @@
 import { describe, expect, expectTypeOf, it, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createElement, type ReactNode } from "react";
+import { createTestQueryClient, createWrapper } from "@/test/test-utils";
 
 import {
   useSyslogConfig,
@@ -47,11 +46,10 @@ function grant(held: string[]) {
 }
 
 function wrapper() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+  return createWrapper({
+    client: createTestQueryClient({ keepCache: true }),
+    router: false,
   });
-  return ({ children }: { children: ReactNode }) =>
-    createElement(QueryClientProvider, { client }, children);
 }
 
 describe("useSyslogConfig", () => {

@@ -1,10 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 
 import { ClusterHATab } from "./ClusterHATab";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import type { HAGroup, HAResource } from "@/features/ha/api/ha-queries";
 
 const CLUSTER = "cccccccc-0000-0000-0000-000000000003";
@@ -14,22 +13,14 @@ const getMock = vi.fn();
 const putMock = vi.fn();
 const postMock = vi.fn();
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      list: (path: string) => listMock(path) as unknown,
-      get: (path: string) => getMock(path) as unknown,
-      put: (path: string, body: unknown) => putMock(path, body) as unknown,
-      post: (path: string, body: unknown) => postMock(path, body) as unknown,
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
+    list: (path: string) => listMock(path) as unknown,
+    get: (path: string) => getMock(path) as unknown,
+    put: (path: string, body: unknown) => putMock(path, body) as unknown,
+    post: (path: string, body: unknown) => postMock(path, body) as unknown,
+  }),
+);
 
 // Whether the signed-in user may manage HA: the state column is a select for
 // a manager and a badge for everyone else.
@@ -118,15 +109,10 @@ async function openResources(
 ) {
   serve(resources, groups);
   const user = userEvent.setup();
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  renderWithProviders(
+    <ClusterHATab clusterId={CLUSTER} pveVersion={pveVersion} />,
+    { client: createTestQueryClient({ keepCache: true }), router: false },
   );
-  render(<ClusterHATab clusterId={CLUSTER} pveVersion={pveVersion} />, {
-    wrapper,
-  });
   await user.click(screen.getByRole("tab", { name: "Resources" }));
   await screen.findByText("vm:101");
   return user;

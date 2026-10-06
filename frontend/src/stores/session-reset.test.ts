@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MutationObserver } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
+import { deferred } from "@/test/fake-server";
 import {
   emptyPerSessionStores,
   PER_SESSION_STORES,
@@ -17,14 +18,6 @@ import { resetSessionState } from "./session-reset";
 import { useSidebarStore } from "./sidebar-store";
 import { useTaskLogStore } from "./task-log-store";
 import { useThemeStore } from "./theme-store";
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
 
 // Synthetic key file, as in PendingPBSKey.test.tsx.
 const PBS_KEY =

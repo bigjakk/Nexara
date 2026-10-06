@@ -7,22 +7,9 @@ import type { CephPool } from "../types/ceph";
 import { unaddressableHint } from "@/lib/api-path";
 import { expectOnScreen } from "@/test/test-utils";
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      list: vi.fn(),
-      get: vi.fn(),
-      put: vi.fn(),
-      post: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 function pool(name: string, id: number): CephPool {
   return {

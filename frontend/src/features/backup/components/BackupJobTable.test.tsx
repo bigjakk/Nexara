@@ -10,9 +10,7 @@ import type { BackupJob } from "../types/backup";
 
 // The app's mutation-error net (lib/query-client.ts) toasts through sonner too,
 // so this one mock sees every toast a run can raise.
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const CLUSTER = "c1";
 const JOB_ID = "backup-1a2b3c4d";

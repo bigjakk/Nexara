@@ -13,11 +13,10 @@ import { ADMIN, VIEWER, authResponse, sleep } from "@/test/fake-server";
  * What the tests of a save that settles after its dialog is gone share
  * (hooks/useSaveOutcome.ts, and every dialog and page that uses it).
  *
- * A test file that uses this mocks `@/lib/api-client` WITH the real module
- * spread in — `{ ...actual, apiClient: {...} }` — so that the session
+ * A test file that uses this mocks `@/lib/api-client` and `sonner` with
+ * test/mocks.ts: apiClientMock keeps the real module, so the session
  * (clearTokens, storeTokens, sessionScope) is the real one and only the
- * transport is stubbed, and mocks `sonner`, whose `toast.error` is where a
- * late failure ends up.
+ * transport is stubbed, and `toast.error` is where a late failure ends up.
  */
 
 /** The server's refusal, as a 403 carries it. */

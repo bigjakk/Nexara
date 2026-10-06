@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 
 import { ClusterReplicationTab } from "./ClusterReplicationTab";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import type { ReplicationJob } from "@/features/replication/api/replication-queries";
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -71,13 +70,10 @@ afterEach(() => {
 });
 
 async function openDialog() {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  renderWithProviders(<ClusterReplicationTab clusterId={CLUSTER} />, {
+    client: createTestQueryClient({ keepCache: true }),
+    router: false,
   });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-  );
-  render(<ClusterReplicationTab clusterId={CLUSTER} />, { wrapper });
   const user = userEvent.setup();
   // The second row, so a delete aimed at the first row would show.
   await user.click(

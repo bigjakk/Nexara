@@ -9,22 +9,9 @@ import type { VMResponse } from "@/types/api";
 
 // The real hooks run against a mocked transport, so what these tests read is
 // the body the edit form actually hands to PUT .../ha/resources/:sid.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      put: vi.fn(),
-      post: vi.fn(),
-      list: vi.fn(),
-      get: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedPut = vi.mocked(apiClient.put);
 const mockedPost = vi.mocked(apiClient.post);

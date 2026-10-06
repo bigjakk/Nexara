@@ -8,9 +8,7 @@ import {
   useUpdateClusterFirewallRule,
 } from "./network-queries";
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 // The two rule-write hooks no page uses yet. Whoever wires them up gets the
 // digest by construction: it is part of what they take, and they send it.

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import type { ButtonHTMLAttributes, ReactElement } from "react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider } from "@tanstack/react-query";
 
 import { apiClient } from "@/lib/api-client";
-import { createAppQueryClient } from "@/test/app-query-client";
+import { deferred } from "@/test/fake-server";
+import { flushInAct, renderOnAppClient } from "@/test/save-outcome-kit";
 import type {
   NodeDNSResponse,
   NodeTimeResponse,
@@ -52,26 +52,11 @@ vi.mock("@/components/ui/button", async () => {
   return { ...actual, Button };
 });
 
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      get: vi.fn(),
-      list: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedGet = vi.mocked(apiClient.get);
 const mockedPut = vi.mocked(apiClient.put);
@@ -80,7 +65,7 @@ const CLUSTER = "cccccccc-0000-0000-0000-000000000009";
 const NODE = "pve-01";
 
 interface Kind {
-  ui: ReactNode;
+  ui: ReactElement;
   url: string;
   button: string;
   dialog: string;
@@ -125,22 +110,6 @@ const KINDS: [name: string, kind: Kind][] = [
   ],
 ];
 
-function deferred<T>() {
-  let resolve: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
-
-async function flush(): Promise<void> {
-  await act(async () => {
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
-  });
-}
-
 /** How many times `url` was read. */
 function reads(url: string): number {
   return mockedGet.mock.calls.filter(([path]) => path === url).length;
@@ -161,11 +130,7 @@ describe.each(KINDS)(
           ? Promise.resolve(kind.stored)
           : Promise.reject(new Error(`unexpected GET ${path}`)),
       );
-      render(
-        <QueryClientProvider client={createAppQueryClient()}>
-          {kind.ui}
-        </QueryClientProvider>,
-      );
+      renderOnAppClient(kind.ui);
     }
 
     it("starts no second read for a press while its read is out", async () => {
@@ -181,7 +146,7 @@ describe.each(KINDS)(
       expect(edit).toBeEnabled();
       expect(reads(kind.url)).toBe(2);
       await user.click(edit);
-      await flush();
+      await flushInAct();
 
       expect(reads(kind.url)).toBe(2);
       held.resolve(kind.stored);
@@ -217,7 +182,7 @@ describe.each(KINDS)(
       expect(edit).toBeEnabled();
       const before = reads(kind.url);
       await user.click(edit);
-      await flush();
+      await flushInAct();
 
       expect(reads(kind.url)).toBe(before);
       expect(screen.queryByRole("dialog")).toBeNull();

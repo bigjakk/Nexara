@@ -14,9 +14,7 @@ import type { ResourcePoolDetail } from "@/features/pools/api/pool-queries";
 
 // The app's mutation-error net (lib/query-client.ts) toasts through sonner, so
 // this mock sees every toast a removal can raise.
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ canManage: () => true }),

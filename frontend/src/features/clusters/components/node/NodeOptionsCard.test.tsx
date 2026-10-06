@@ -1,23 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import {
   act,
   cleanup,
   fireEvent,
-  render,
   renderHook,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider, useMutation } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
 import { deferred } from "@/test/fake-server";
 import { DENIED, denied, flushInAct } from "@/test/save-outcome-kit";
+import { createWrapper, renderWithProviders } from "@/test/test-utils";
 import type { NodeOptions } from "../../api/node-options-queries";
 import { NodeOptionsCard } from "./NodeOptionsCard";
 
@@ -31,28 +30,13 @@ import { NodeOptionsCard } from "./NodeOptionsCard";
 
 // The transport is mocked, not the hooks, so the real queries and mutations
 // run and each test asserts the request that would leave the browser.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      get: vi.fn(),
-      list: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 // The app's mutation-error net (lib/query-client.ts) toasts through sonner, so
 // this one mock sees every toast a run can raise.
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-}));
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedGet = vi.mocked(apiClient.get);
 const mockedPut = vi.mocked(apiClient.put);
@@ -158,21 +142,21 @@ interface CardProps {
 
 /** Renders the card on the app's own kind of client; `rerender` changes props. */
 function renderCard(over: Partial<CardProps> = {}) {
-  const qc = createAppQueryClient();
   const props: CardProps = {
     pveVersion: CURRENT,
     online: true,
     canEdit: true,
     ...over,
   };
-  const ui = (p: CardProps): ReactNode => (
-    <QueryClientProvider client={qc}>
-      <NodeOptionsCard clusterId={CLUSTER} nodeName={NODE} {...p} />
-    </QueryClientProvider>
+  const ui = (p: CardProps) => (
+    <NodeOptionsCard clusterId={CLUSTER} nodeName={NODE} {...p} />
   );
-  const view = render(ui(props));
+  const view = renderWithProviders(ui(props), {
+    client: createAppQueryClient(),
+    router: false,
+  });
   return {
-    qc,
+    qc: view.queryClient,
     rerender: (next: Partial<CardProps>) => {
       view.rerender(ui({ ...props, ...next }));
     },
@@ -1239,11 +1223,7 @@ describe("a save that fails is reported once, not also as a toast", () => {
     const qc = createAppQueryClient();
     const { result } = renderHook(
       () => useMutation({ mutationFn: () => Promise.reject(new Error(PROBE)) }),
-      {
-        wrapper: ({ children }: { children: ReactNode }) => (
-          <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-        ),
-      },
+      { wrapper: createWrapper({ client: qc, router: false }) },
     );
 
     await act(async () => {

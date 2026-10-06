@@ -1,11 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
-import type { ReactNode } from "react";
 
 import { NodeUpdatePanel } from "./NodeUpdatePanel";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import type { AptPackage } from "@/types/api";
 
 const CLUSTER = "cccccccc-0000-0000-0000-000000000001";
@@ -17,22 +15,13 @@ const listMock = vi.fn();
 const getMock = vi.fn();
 const postMock = vi.fn();
 
-// Spread the real module: api-error.ts imports ApiClientError from here, and a
-// mock that only supplies apiClient makes describeError throw on every render.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      list: (path: string) => listMock(path) as unknown,
-      get: (path: string) => getMock(path) as unknown,
-      post: (path: string, body: unknown) => postMock(path, body) as unknown,
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
+    list: (path: string) => listMock(path) as unknown,
+    get: (path: string) => getMock(path) as unknown,
+    post: (path: string, body: unknown) => postMock(path, body) as unknown,
+  }),
+);
 
 let canManage = true;
 vi.mock("@/hooks/useAuth", () => ({
@@ -55,17 +44,10 @@ function pkg(name: string, overrides: Partial<AptPackage> = {}): AptPackage {
 }
 
 function renderPanel() {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>
-      <MemoryRouter>{children}</MemoryRouter>
-    </QueryClientProvider>
+  return renderWithProviders(
+    <NodeUpdatePanel clusterId={CLUSTER} nodeName={NODE} />,
+    { client: createTestQueryClient({ keepCache: true }) },
   );
-  return render(<NodeUpdatePanel clusterId={CLUSTER} nodeName={NODE} />, {
-    wrapper,
-  });
 }
 
 /** Two pending packages and SSH configured — the state the button needs. */

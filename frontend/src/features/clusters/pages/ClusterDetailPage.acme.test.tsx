@@ -7,6 +7,8 @@ import { toast } from "sonner";
 
 import { ApiClientError } from "@/lib/api-client";
 import { createAppQueryClient } from "@/test/app-query-client";
+import { deferred } from "@/test/fake-server";
+import { flushInAct } from "@/test/save-outcome-kit";
 import { useAuthStore } from "@/stores/auth-store";
 import type { NodeACMEConfig } from "@/features/acme/api/acme-queries";
 import type { ClusterResponse } from "@/types/api";
@@ -26,37 +28,19 @@ const listMock = vi.fn();
 const getMock = vi.fn();
 const putMock = vi.fn();
 
-// Spread the real module: api-error.ts imports ApiClientError from here, and a
-// mock that only supplies apiClient makes describeError throw on every render.
-vi.mock("@/lib/api-client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api-client")>(
-      "@/lib/api-client",
-    );
-  return {
-    ...actual,
-    apiClient: {
-      list: (path: string) => listMock(path) as unknown,
-      get: (path: string) => getMock(path) as unknown,
-      put: (path: string, body: unknown) => putMock(path, body) as unknown,
-      post: vi.fn(),
-      delete: vi.fn(),
-    },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock({
+    list: (path: string) => listMock(path) as unknown,
+    get: (path: string) => getMock(path) as unknown,
+    put: (path: string, body: unknown) => putMock(path, body) as unknown,
+  }),
+);
 
 // The app's mutation-error net toasts through sonner, so this one mock sees
 // every toast a run can raise, of any kind.
-vi.mock("sonner", () => ({
-  toast: Object.assign(vi.fn(), {
-    success: vi.fn(),
-    info: vi.fn(),
-    warning: vi.fn(),
-    error: vi.fn(),
-    message: vi.fn(),
-    loading: vi.fn(),
-  }),
-}));
+vi.mock("sonner", async () =>
+  (await import("@/test/mocks")).everyKindOfToastMock(),
+);
 
 // Tabs this page imports and these tests never show.
 vi.mock("../components/ClusterCephTab", () => ({
@@ -169,25 +153,6 @@ function serve(nodes: { a: string[]; b: string[] }) {
 
 function reads(path: string): number {
   return getMock.mock.calls.filter((c) => c[0] === path).length;
-}
-
-function deferred<T>() {
-  let resolve: (value: T) => void = () => undefined;
-  let reject: (reason: unknown) => void = () => undefined;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-/** Lets whatever is already queued run, and React draw what it set. */
-async function flush(): Promise<void> {
-  await act(async () => {
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
-  });
 }
 
 /** Hands the router's navigate to the test, to move the page from one cluster to another. */
@@ -334,7 +299,7 @@ describe("the Certificates tab when the page moves to another cluster", () => {
           `error: Saving the ACME domain ${saved} on ${node} failed: ${DENIED}`,
         ]);
       });
-      await flush();
+      await flushInAct();
       expect(toastsRaised()).toHaveLength(1);
       // The second cluster's card is its own: its domain, and none of the first's failure.
       expect(screen.getByText(theirs)).toBeInTheDocument();
@@ -364,7 +329,7 @@ describe("the Certificates tab when the page moves to another cluster", () => {
           invalidations.mock.calls.map((c) => c[0]?.queryKey),
         ).toContainEqual(["clusters", CLUSTER_A, "nodes", node]);
       });
-      await flush();
+      await flushInAct();
       expect(
         invalidations.mock.calls.map((c) => c[0]?.queryKey),
       ).not.toContainEqual(["clusters", CLUSTER_B, "nodes", node]);
@@ -381,7 +346,7 @@ describe("the Certificates tab when the page moves to another cluster", () => {
 
     await goToClusterB();
     await openNodeCertificates(user, "seven.example.com");
-    await flush();
+    await flushInAct();
 
     // The control: the second cluster's own node is read, so that the absence
     // below is not a tab that read nothing.

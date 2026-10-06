@@ -9,13 +9,9 @@ import type { ApiError } from "@/types/api";
 // ApiClientError is kept real: the dialog branches on `instanceof`, so a stub
 // class would make every error fall through to the default message and the
 // tests below would pass without exercising anything.
-vi.mock("@/lib/api-client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api-client")>();
-  return {
-    ...actual,
-    apiClient: { post: vi.fn(), list: vi.fn(), put: vi.fn(), delete: vi.fn() },
-  };
-});
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedPost = vi.mocked(apiClient.post);
 

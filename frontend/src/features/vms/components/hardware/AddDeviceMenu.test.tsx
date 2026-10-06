@@ -20,10 +20,9 @@ import { AddDeviceMenu } from "./AddDeviceMenu";
 
 // The transport is mocked, not the hooks, so the real mapping queries run and
 // each test asserts the request that would leave the browser.
-vi.mock("@/lib/api-client", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/api-client")>()),
-  apiClient: { get: vi.fn(), list: vi.fn(), post: vi.fn(), put: vi.fn() },
-}));
+vi.mock("@/lib/api-client", async () =>
+  (await import("@/test/mocks")).apiClientMock(),
+);
 
 const mockedList = vi.mocked(apiClient.list);
 const mockedPost = vi.mocked(apiClient.post);

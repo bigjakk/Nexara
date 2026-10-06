@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 
 import { ClusterHATab } from "./ClusterHATab";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import type {
   HAGroup,
   HAResource,
@@ -102,15 +101,10 @@ afterEach(() => {
 });
 
 function renderTab(pveVersion: string) {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  renderWithProviders(
+    <ClusterHATab clusterId={CLUSTER} pveVersion={pveVersion} />,
+    { client: createTestQueryClient({ keepCache: true }), router: false },
   );
-  render(<ClusterHATab clusterId={CLUSTER} pveVersion={pveVersion} />, {
-    wrapper,
-  });
   return userEvent.setup();
 }
 

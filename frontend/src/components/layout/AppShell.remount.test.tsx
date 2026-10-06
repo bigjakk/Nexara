@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, useParams } from "react-router-dom";
 
 import { AppRoot } from "@/components/AppRoot";
 import { useWebSocketStore } from "@/stores/websocket-store";
-import { createAppQueryClient } from "@/test/app-query-client";
 import { installFakeServer } from "@/test/fake-server";
+import { renderOnAppClient } from "@/test/save-outcome-kit";
 import { AppShell } from "./AppShell";
 
 /**
@@ -55,11 +54,7 @@ function renderShell(initial: string) {
     ],
     { initialEntries: [initial] },
   );
-  render(
-    <QueryClientProvider client={createAppQueryClient()}>
-      <AppRoot router={router} />
-    </QueryClientProvider>,
-  );
+  renderOnAppClient(<AppRoot router={router} />);
   return router;
 }
 
