@@ -127,6 +127,7 @@ func TestExtractVMMetric(t *testing.T) {
 // A VM rule is judged on percent CPU over the readings in its window, and a
 // memory rule never on the host's view of the VM: that sits near 100 %
 // whatever the guest uses. A reading with no recorded source keeps its say.
+// A counter rule is judged on rates; a running guest's zero is unreported.
 func TestVMRuleOutcome(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
@@ -140,6 +141,9 @@ func TestVMRuleOutcome(t *testing.T) {
 	}
 	own, host := true, false
 	cpu := func(ago time.Duration, ratio float64) db.GetVMRecentMetricsRow { return reading(ago, ratio, 50, &host) }
+	disk := func(agoSeconds int, read int64, cpu float64, mem int64) db.GetVMRecentMetricsRow {
+		return db.GetVMRecentMetricsRow{Bucket: now.Add(-time.Duration(agoSeconds) * time.Second), DiskRead: read, CpuUsage: cpu, MemUsed: mem}
+	}
 	tests := []struct {
 		name       string
 		metric     string
@@ -159,6 +163,9 @@ func TestVMRuleOutcome(t *testing.T) {
 		{"a reading with no source is judged on its figure", "mem_percent", 60, []db.GetVMRecentMetricsRow{reading(10*time.Second, 0.1, 96, nil)}, true, true, 96},
 		{"a lapse in the guest's own figure holds the alert", "mem_percent", 0, []db.GetVMRecentMetricsRow{reading(10*time.Second, 0.1, 101, &host), reading(40*time.Second, 0.1, 96, &own)}, false, false, 0},
 		{"no readings", "mem_percent", 60, nil, false, false, 0},
+		{"a disk counter is judged as a rate", "disk_read", 0, []db.GetVMRecentMetricsRow{disk(10, 3000, 0.1, 1<<30), disk(30, 1000, 0.1, 1<<30)}, true, true, 100},
+		{"a zero counter on a guest showing memory or CPU is no baseline", "disk_read", 0, []db.GetVMRecentMetricsRow{disk(10, 5100, 0, 1<<30), disk(30, 0, 0, 1<<30), disk(50, 0, 0.1, 0)}, false, false, 0},
+		{"a stopped guest's zeros are readings", "disk_read", 0, []db.GetVMRecentMetricsRow{disk(10, 0, 0, 0), disk(30, 0, 0, 0)}, false, true, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -169,6 +176,98 @@ func TestVMRuleOutcome(t *testing.T) {
 				t.Errorf("vmRuleOutcome = (%v, %v, %v), want (%v, %v, %v)", met, latest, ok, tt.met, tt.wantLatest, tt.ok)
 			}
 		})
+	}
+}
+
+// A counter metric is judged on the rates between its readings, derived from
+// the whole fetch so a reading before the window still serves as a baseline.
+// A dip is measured from the level it fell from, an unreported reading is no
+// baseline, and the rule holds while the newest reading has no rate.
+func TestCounterOutcome(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	type sample struct {
+		ago        time.Duration
+		bytes      float64
+		unreported bool
+	}
+	s := func(agoSeconds int, bytes float64) sample {
+		return sample{ago: time.Duration(agoSeconds) * time.Second, bytes: bytes}
+	}
+	u := func(agoSeconds int) sample {
+		return sample{ago: time.Duration(agoSeconds) * time.Second, unreported: true}
+	}
+	tests := []struct {
+		name       string
+		duration   int32
+		readings   []sample // newest first, as fetched
+		met, ok    bool
+		wantLatest float64
+	}{
+		{"duration 0 judges the newest rate alone", 0, []sample{s(10, 3000), s(30, 1000), s(50, 1000)}, true, true, 100},
+		{"the window's first rate is measured from the reading before it", 30, []sample{s(10, 2000), s(40, 500), s(70, 0)}, true, true, 50},
+		{"a fall holds until the counter is back at its level", 60, []sample{s(10, 1100), s(30, 100), s(50, 9000), s(70, 7000)}, false, false, 0},
+		{"a dip is measured from the level it fell from", 0, []sample{s(10, 5100), s(30, 4000), s(50, 5000)}, false, true, 2.5},
+		{"an unreported reading is no baseline", 0, []sample{s(10, 5100), u(30)}, false, false, 0},
+		{"an unreported newest reading holds", 0, []sample{u(10), s(30, 3000), s(50, 1000)}, false, false, 0},
+		{"readings at one instant have no rate between them", 0, []sample{s(10, 3000), s(10, 3000), s(30, 1000)}, true, true, 100},
+		{"no readings", 0, nil, false, false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rule := db.AlertRule{Metric: "net_in", Operator: ">", Threshold: 40, DurationSeconds: tt.duration}
+			met, latest, ok := counterOutcome(rule, tt.readings, now,
+				func(r sample) time.Time { return now.Add(-r.ago) },
+				func(r sample) (float64, bool) { return r.bytes, !r.unreported })
+			if met != tt.met || ok != tt.ok || latest != tt.wantLatest {
+				t.Errorf("counterOutcome = (%v, %v, %v), want (%v, %v, %v)", met, latest, ok, tt.met, tt.wantLatest, tt.ok)
+			}
+		})
+	}
+}
+
+// A node rule judges a level metric on its readings and a counter metric on
+// the rate between them, not on the counter.
+func TestNodeRuleOutcome(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	rows := []db.GetNodeRecentMetricsRow{
+		{Bucket: now.Add(-10 * time.Second), CpuUsage: 0.95, NetIn: 3000},
+		{Bucket: now.Add(-30 * time.Second), CpuUsage: 0.95, NetIn: 1000},
+	}
+	for _, tt := range []struct {
+		metric     string
+		wantLatest float64
+	}{
+		{"cpu_usage", 95},
+		{"net_in", 100},
+	} {
+		t.Run(tt.metric, func(t *testing.T) {
+			t.Parallel()
+			rule := db.AlertRule{Metric: tt.metric, Operator: ">", Threshold: 90, DurationSeconds: 60}
+			met, latest, ok := nodeRuleOutcome(rule, rows, now)
+			if !met || !ok || latest != tt.wantLatest {
+				t.Errorf("nodeRuleOutcome = (%v, %v, %v), want (true, %v, true)", met, latest, ok, tt.wantLatest)
+			}
+		})
+	}
+}
+
+// A counter metric's fetch reaches past its window for the reading the
+// window's oldest rate is measured from; a level metric's does not.
+func TestMetricLookback(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		metric string
+		want   time.Duration
+	}{
+		{"cpu_usage", 5 * time.Minute},
+		{"net_in", 15 * time.Minute},
+	} {
+		if got := metricLookback(db.AlertRule{Metric: tt.metric, DurationSeconds: 300}); got != tt.want {
+			t.Errorf("metricLookback(%s, 300s) = %v, want %v", tt.metric, got, tt.want)
+		}
 	}
 }
 

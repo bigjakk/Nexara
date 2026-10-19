@@ -135,6 +135,15 @@ describe("AlertRuleForm", () => {
     });
   });
 
+  it("starts a disk or network rule at a bytes/s threshold", async () => {
+    const user = await openForm();
+    // 90, the percent metrics' default, fires on any I/O as bytes/s.
+    await pickOption(user, "Metric", "Disk Read (bytes/s)");
+    expect(screen.getByLabelText("Threshold")).toHaveValue(104857600);
+    await pickOption(user, "Metric", "Network Out (bytes/s)");
+    expect(screen.getByLabelText("Threshold")).toHaveValue(104857600);
+  });
+
   it("drops the chosen node when the cluster changes", async () => {
     const user = await openForm();
     await pickOption(user, "Cluster", "Lab");

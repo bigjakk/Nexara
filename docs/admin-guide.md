@@ -1052,6 +1052,8 @@ Navigate to **Alerts** from the sidebar.
      | Snapshot Age | **days** | cluster, VM |
 
      **Snapshot Age (days)** reads the guest snapshot inventory rather than the metrics history, so it behaves differently from the rest: the value is the age of the oldest dated snapshot in scope, node scope is not offered (picking the metric switches a node-scoped rule to cluster scope), and snapshots whose creation time Proxmox does not report are excluded rather than counted as ancient. With no dated snapshots in scope the condition is false, so the alert auto-resolves once the offenders are cleaned up.
+
+     **Disk Read/Write** and **Network In/Out** are rates in bytes/s, measured between samples. Proxmox at times reports 0 for a running guest's counter, under load; such a sample is skipped, the rule holds — neither firing nor resolving — while the newest sample is one, and the rate is measured across it once a reported sample follows. A counter Proxmox never reports while the guest runs (network on a VM without a NIC, say) is never judged, so a `<` rule on it never fires. When a counter falls — a guest restarted, stopped or moved off the node, or a node's guests went unreported — the rule holds until the counter is back at its earlier level or that sample is older than the rule's duration plus ten minutes. A node's figure can still read as a burst when its guests stay unreported past that, as several at once can under load, so give node- and cluster-scope disk and network rules a duration rather than `0`.
    - **Condition** — threshold and comparison (e.g., CPU > 90%)
    - **Duration** — how long the condition must persist before firing; `0` fires on the first breaching sample
    - **Severity** — info, warning, critical

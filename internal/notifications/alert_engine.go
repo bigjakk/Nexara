@@ -418,8 +418,7 @@ func (e *Engine) evaluateNodeRule(ctx context.Context, rule db.AlertRule, nodeID
 		return fmt.Errorf("get node metrics: %w", err)
 	}
 
-	window := inWindow(rule, metrics, time.Now(), func(m db.GetNodeRecentMetricsRow) time.Time { return m.Bucket })
-	allMatch, latestValue, ok := judge(rule, window, func(m db.GetNodeRecentMetricsRow) float64 { return extractNodeMetric(m, rule.Metric) })
+	allMatch, latestValue, ok := nodeRuleOutcome(rule, metrics, time.Now())
 	if !ok {
 		return nil // No data in the window — can't evaluate.
 	}
@@ -491,6 +490,89 @@ func judge[T any](rule db.AlertRule, rows []T, value func(T) float64) (met bool,
 	return true, latest, true
 }
 
+// isCounterMetric reports whether a metric is stored as a cumulative byte
+// counter — PVE's since the guest started; a node's is the sum of its guests'
+// — while a rule's threshold is a rate ("Disk Read (bytes/s)").
+func isCounterMetric(metric string) bool {
+	switch metric {
+	case "disk_read", "disk_write", "net_in", "net_out":
+		return true
+	}
+	return false
+}
+
+// rateReading is a counter's rate in bytes/s, stamped with the newer of the
+// two readings it was measured between.
+type rateReading struct {
+	at  time.Time
+	bps float64
+}
+
+// counterReach is how far before a rule's window a counter metric's fetch
+// reaches: back to the reading the window's first rate is measured from, and
+// to the level a node's counter fell from while PVE left guests unreported,
+// which can last minutes. Reaching further bridges longer dips but holds a
+// rule longer after a real fall; replaying a week of a test cluster's
+// counters put the balance near ten minutes for the form's 300 s duration.
+const counterReach = 10 * time.Minute
+
+// counterRates turns a newest-first fetch of counter readings into
+// newest-first rates, (newer − older) / seconds between them, leaving out
+// readings the counter reports unreported. Each reading is measured from the
+// newest one before it at the highest level reached so far, and one below
+// that level has no rate: the counter fell because a guest restarted, stopped
+// or left the node, or a node's guest went unreported. Measuring from that
+// level keeps the guest's return from counting its lifetime of bytes as one
+// sample's, for as long as the level is in the fetch.
+func counterRates[T any](rows []T, at func(T) time.Time, counter func(T) (bytes float64, reported bool)) []rateReading {
+	rates := make([]rateReading, 0, len(rows))
+	var (
+		peak   float64
+		peakAt time.Time
+		based  bool
+	)
+	for i := len(rows) - 1; i >= 0; i-- {
+		v, reported := counter(rows[i])
+		if !reported {
+			continue
+		}
+		t := at(rows[i])
+		if based {
+			if v < peak {
+				continue
+			}
+			if dt := t.Sub(peakAt).Seconds(); dt > 0 {
+				rates = append(rates, rateReading{at: t, bps: (v - peak) / dt})
+			}
+		}
+		peak, peakAt, based = v, t, true
+	}
+	slices.Reverse(rates)
+	return rates
+}
+
+// counterOutcome judges a counter metric on its rates in the rule's window,
+// derived from the whole fetch, which reaches before the window
+// (metricLookback). While the newest reading has no rate it holds — ok is
+// false — rather than judge the rates before it as if they were current.
+func counterOutcome[T any](rule db.AlertRule, rows []T, now time.Time, at func(T) time.Time, counter func(T) (float64, bool)) (met bool, latest float64, ok bool) {
+	rates := counterRates(rows, at, counter)
+	if len(rates) == 0 || !rates[0].at.Equal(at(rows[0])) {
+		return false, 0, false
+	}
+	return judge(rule, inWindow(rule, rates, now, func(r rateReading) time.Time { return r.at }), func(r rateReading) float64 { return r.bps })
+}
+
+// nodeRuleOutcome judges a node's readings in the rule's window.
+func nodeRuleOutcome(rule db.AlertRule, rows []db.GetNodeRecentMetricsRow, now time.Time) (met bool, latest float64, ok bool) {
+	at := func(r db.GetNodeRecentMetricsRow) time.Time { return r.Bucket }
+	value := func(r db.GetNodeRecentMetricsRow) float64 { return extractNodeMetric(r, rule.Metric) }
+	if isCounterMetric(rule.Metric) {
+		return counterOutcome(rule, rows, now, at, func(r db.GetNodeRecentMetricsRow) (float64, bool) { return value(r), true })
+	}
+	return judge(rule, inWindow(rule, rows, now, at), value)
+}
+
 // vmRuleOutcome judges a VM's readings in the rule's window. A memory rule
 // drops those known to be the host's view of the VM (mem_guest FALSE), which
 // sits near 100 % once its RAM has been touched and says nothing about
@@ -499,10 +581,22 @@ func judge[T any](rule db.AlertRule, rows []T, value func(T) float64) (met bool,
 // alone leaves the rule unmet, resolving an alert raised on host memory —
 // unless the rest of the fetch holds a figure it can judge (the guest's own,
 // or one with no recorded source): that is a lapse, and it holds the alert.
+//
+// A counter metric is judged on its rates, and a zero counter on a guest that
+// shows CPU or memory is one PVE left unreported, as it at times does under
+// load; a stopped guest's zeros are readings.
 func vmRuleOutcome(rule db.AlertRule, rows []db.GetVMRecentMetricsRow, now time.Time) (met bool, latest float64, ok bool) {
+	at := func(r db.GetVMRecentMetricsRow) time.Time { return r.Bucket }
+	value := func(r db.GetVMRecentMetricsRow) float64 { return extractVMMetric(r, rule.Metric) }
+	if isCounterMetric(rule.Metric) {
+		return counterOutcome(rule, rows, now, at, func(r db.GetVMRecentMetricsRow) (float64, bool) {
+			v := value(r)
+			return v, v != 0 || (r.CpuUsage == 0 && r.MemUsed == 0)
+		})
+	}
 	judgeable := func(r db.GetVMRecentMetricsRow) bool { return !r.MemGuest.Valid || r.MemGuest.Bool }
 	fetched := rows
-	rows = inWindow(rule, rows, now, func(r db.GetVMRecentMetricsRow) time.Time { return r.Bucket })
+	rows = inWindow(rule, rows, now, at)
 	if rule.Metric == "mem_percent" {
 		judged := make([]db.GetVMRecentMetricsRow, 0, len(rows))
 		for _, r := range rows {
@@ -518,7 +612,7 @@ func vmRuleOutcome(rule db.AlertRule, rows []db.GetVMRecentMetricsRow, now time.
 		}
 		rows = judged
 	}
-	return judge(rule, rows, func(r db.GetVMRecentMetricsRow) float64 { return extractVMMetric(r, rule.Metric) })
+	return judge(rule, rows, value)
 }
 
 // metricLookback floors the metrics fetch window at two collection ticks.
@@ -527,9 +621,14 @@ func vmRuleOutcome(rule db.AlertRule, rows []db.GetVMRecentMetricsRow, now time.
 // window that matched nothing, meaning such rules never fired at all. The
 // evaluators trim the floored fetch back to the configured duration so
 // longer windows keep their sustained-condition semantics.
+//
+// A counter metric's fetch reaches counterReach before its window instead.
 func metricLookback(rule db.AlertRule) time.Duration {
 	const minLookback = 2 * time.Minute
 	lookback := time.Duration(rule.DurationSeconds) * time.Second
+	if isCounterMetric(rule.Metric) {
+		return lookback + counterReach
+	}
 	if lookback < minLookback {
 		return minLookback
 	}
@@ -1096,7 +1195,8 @@ func compareValue(value float64, operator string, threshold float64) bool {
 // rule's threshold is written in ("CPU Usage (%)"), as the metrics API does.
 func cpuPercent(ratio float64) float64 { return ratio * 100 }
 
-// extractNodeMetric extracts the named metric from a node metrics row.
+// extractNodeMetric extracts the named metric from a node metrics row; for a
+// counter metric that is the counter, which counterRates makes a rate.
 func extractNodeMetric(m db.GetNodeRecentMetricsRow, metric string) float64 {
 	switch metric {
 	case "cpu_usage":
@@ -1119,7 +1219,8 @@ func extractNodeMetric(m db.GetNodeRecentMetricsRow, metric string) float64 {
 	}
 }
 
-// extractVMMetric extracts the named metric from a VM metrics row.
+// extractVMMetric extracts the named metric from a VM metrics row; for a
+// counter metric that is the counter, which counterRates makes a rate.
 func extractVMMetric(m db.GetVMRecentMetricsRow, metric string) float64 {
 	switch metric {
 	case "cpu_usage":
