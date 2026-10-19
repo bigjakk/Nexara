@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -47,9 +48,10 @@ func TestCompareValue(t *testing.T) {
 	}
 }
 
+// CpuUsage is stored as PVE's 0–1 ratio; a rule's threshold is a percentage.
 func TestExtractNodeMetric(t *testing.T) {
 	row := db.GetNodeRecentMetricsRow{
-		CpuUsage:  75.5,
+		CpuUsage:  0.755,
 		MemUsed:   4 * 1024 * 1024 * 1024, // 4 GB
 		MemTotal:  8 * 1024 * 1024 * 1024, // 8 GB
 		DiskRead:  1000,
@@ -91,7 +93,7 @@ func TestExtractNodeMetric_ZeroMemTotal(t *testing.T) {
 
 func TestExtractVMMetric(t *testing.T) {
 	row := db.GetVMRecentMetricsRow{
-		CpuUsage:  30.0,
+		CpuUsage:  0.25,
 		MemUsed:   2 * 1024 * 1024 * 1024,
 		MemTotal:  4 * 1024 * 1024 * 1024,
 		DiskRead:  500,
@@ -104,7 +106,7 @@ func TestExtractVMMetric(t *testing.T) {
 		metric string
 		want   float64
 	}{
-		{"cpu_usage", 30.0},
+		{"cpu_usage", 25.0},
 		{"mem_percent", 50.0},
 		{"disk_read", 500},
 		{"disk_write", 600},
@@ -117,6 +119,54 @@ func TestExtractVMMetric(t *testing.T) {
 			got := extractVMMetric(row, tt.metric)
 			if got != tt.want {
 				t.Errorf("extractVMMetric(%q) = %v, want %v", tt.metric, got, tt.want)
+			}
+		})
+	}
+}
+
+// A VM rule is judged on percent CPU over the readings in its window, and a
+// memory rule never on the host's view of the VM: that sits near 100 %
+// whatever the guest uses. A reading with no recorded source keeps its say.
+func TestVMRuleOutcome(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	// A 100 MiB allocation, so usedPct MiB is exactly usedPct %.
+	reading := func(ago time.Duration, cpu float64, usedPct int64, guest *bool) db.GetVMRecentMetricsRow {
+		r := db.GetVMRecentMetricsRow{Bucket: now.Add(-ago), CpuUsage: cpu, MemUsed: usedPct << 20, MemTotal: 100 << 20}
+		if guest != nil {
+			r.MemGuest = pgtype.Bool{Bool: *guest, Valid: true}
+		}
+		return r
+	}
+	own, host := true, false
+	cpu := func(ago time.Duration, ratio float64) db.GetVMRecentMetricsRow { return reading(ago, ratio, 50, &host) }
+	tests := []struct {
+		name       string
+		metric     string
+		duration   int32
+		rows       []db.GetVMRecentMetricsRow
+		met, ok    bool
+		wantLatest float64
+	}{
+		{"cpu ratio judged as percent, host-view VM", "cpu_usage", 60, []db.GetVMRecentMetricsRow{cpu(10*time.Second, 0.95)}, true, true, 95},
+		{"zero duration judges the latest alone", "cpu_usage", 0, []db.GetVMRecentMetricsRow{cpu(10*time.Second, 0.95), cpu(50*time.Second, 0.10)}, true, true, 95},
+		{"every reading in the window must meet it", "cpu_usage", 60, []db.GetVMRecentMetricsRow{cpu(10*time.Second, 0.95), cpu(30*time.Second, 0.50)}, false, true, 95},
+		{"a reading before the window is not judged", "cpu_usage", 60, []db.GetVMRecentMetricsRow{cpu(10*time.Second, 0.95), cpu(90*time.Second, 0.10)}, true, true, 95},
+		{"nothing in the window", "cpu_usage", 60, []db.GetVMRecentMetricsRow{cpu(90*time.Second, 0.95)}, false, false, 0},
+		{"guest's own memory", "mem_percent", 60, []db.GetVMRecentMetricsRow{reading(10*time.Second, 0.1, 96, &own), reading(30*time.Second, 0.1, 96, &own)}, true, true, 96},
+		{"host memory only: unmet, not unjudged", "mem_percent", 60, []db.GetVMRecentMetricsRow{reading(10*time.Second, 0.1, 101, &host)}, false, true, 0},
+		{"a boot's host reading is skipped", "mem_percent", 60, []db.GetVMRecentMetricsRow{reading(10*time.Second, 0.1, 101, &host), reading(30*time.Second, 0.1, 96, &own)}, true, true, 96},
+		{"a reading with no source is judged on its figure", "mem_percent", 60, []db.GetVMRecentMetricsRow{reading(10*time.Second, 0.1, 96, nil)}, true, true, 96},
+		{"a lapse in the guest's own figure holds the alert", "mem_percent", 0, []db.GetVMRecentMetricsRow{reading(10*time.Second, 0.1, 101, &host), reading(40*time.Second, 0.1, 96, &own)}, false, false, 0},
+		{"no readings", "mem_percent", 60, nil, false, false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rule := db.AlertRule{Metric: tt.metric, Operator: ">", Threshold: 90, DurationSeconds: tt.duration}
+			met, latest, ok := vmRuleOutcome(rule, tt.rows, now)
+			if met != tt.met || ok != tt.ok || latest != tt.wantLatest {
+				t.Errorf("vmRuleOutcome = (%v, %v, %v), want (%v, %v, %v)", met, latest, ok, tt.met, tt.wantLatest, tt.ok)
 			}
 		})
 	}

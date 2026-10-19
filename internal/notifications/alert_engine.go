@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -417,41 +418,10 @@ func (e *Engine) evaluateNodeRule(ctx context.Context, rule db.AlertRule, nodeID
 		return fmt.Errorf("get node metrics: %w", err)
 	}
 
-	if len(metrics) == 0 {
-		return nil // No data — can't evaluate.
-	}
-
-	// Trim the floored fetch back to the rule's own duration window
-	// (rows are ordered newest-first).
-	if rule.DurationSeconds == 0 {
-		metrics = metrics[:1]
-	} else {
-		cutoff := time.Now().Add(-time.Duration(rule.DurationSeconds) * time.Second)
-		n := 0
-		for _, m := range metrics {
-			if !m.Bucket.Before(cutoff) {
-				metrics[n] = m
-				n++
-			}
-		}
-		metrics = metrics[:n]
-		if len(metrics) == 0 {
-			return nil
-		}
-	}
-
-	// Check if ALL data points within the window satisfy the condition.
-	allMatch := true
-	var latestValue float64
-	for i, m := range metrics {
-		val := extractNodeMetric(m, rule.Metric)
-		if i == 0 {
-			latestValue = val
-		}
-		if !compareValue(val, rule.Operator, rule.Threshold) {
-			allMatch = false
-			break
-		}
+	window := inWindow(rule, metrics, time.Now(), func(m db.GetNodeRecentMetricsRow) time.Time { return m.Bucket })
+	allMatch, latestValue, ok := judge(rule, window, func(m db.GetNodeRecentMetricsRow) float64 { return extractNodeMetric(m, rule.Metric) })
+	if !ok {
+		return nil // No data in the window — can't evaluate.
 	}
 
 	// Get resource name for the alert message.
@@ -475,40 +445,9 @@ func (e *Engine) evaluateVMRule(ctx context.Context, rule db.AlertRule, vmID uui
 		return fmt.Errorf("get vm metrics: %w", err)
 	}
 
-	if len(metrics) == 0 {
+	allMatch, latestValue, ok := vmRuleOutcome(rule, metrics, time.Now())
+	if !ok {
 		return nil
-	}
-
-	// Trim the floored fetch back to the rule's own duration window
-	// (rows are ordered newest-first).
-	if rule.DurationSeconds == 0 {
-		metrics = metrics[:1]
-	} else {
-		cutoff := time.Now().Add(-time.Duration(rule.DurationSeconds) * time.Second)
-		n := 0
-		for _, m := range metrics {
-			if !m.Bucket.Before(cutoff) {
-				metrics[n] = m
-				n++
-			}
-		}
-		metrics = metrics[:n]
-		if len(metrics) == 0 {
-			return nil
-		}
-	}
-
-	allMatch := true
-	var latestValue float64
-	for i, m := range metrics {
-		val := extractVMMetric(m, rule.Metric)
-		if i == 0 {
-			latestValue = val
-		}
-		if !compareValue(val, rule.Operator, rule.Threshold) {
-			allMatch = false
-			break
-		}
 	}
 
 	resourceName := vmID.String()
@@ -519,6 +458,67 @@ func (e *Engine) evaluateVMRule(ctx context.Context, rule db.AlertRule, vmID uui
 
 	vmIDPg := pgtype.UUID{Bytes: vmID, Valid: true}
 	return e.handleRuleResult(ctx, rule, allMatch, latestValue, resourceName, pgtype.UUID{}, vmIDPg)
+}
+
+// inWindow keeps the readings a level rule judges from a newest-first fetch:
+// the latest alone at a zero duration, else those inside the rule's duration.
+func inWindow[T any](rule db.AlertRule, rows []T, now time.Time, at func(T) time.Time) []T {
+	if rule.DurationSeconds == 0 {
+		return rows[:min(1, len(rows))]
+	}
+	cutoff := now.Add(-time.Duration(rule.DurationSeconds) * time.Second)
+	kept := make([]T, 0, len(rows))
+	for _, r := range rows {
+		if !at(r).Before(cutoff) {
+			kept = append(kept, r)
+		}
+	}
+	return kept
+}
+
+// judge reports whether every reading meets the rule's condition and the
+// newest value; ok is false when there is nothing to judge.
+func judge[T any](rule db.AlertRule, rows []T, value func(T) float64) (met bool, latest float64, ok bool) {
+	if len(rows) == 0 {
+		return false, 0, false
+	}
+	latest = value(rows[0])
+	for _, r := range rows {
+		if !compareValue(value(r), rule.Operator, rule.Threshold) {
+			return false, latest, true
+		}
+	}
+	return true, latest, true
+}
+
+// vmRuleOutcome judges a VM's readings in the rule's window. A memory rule
+// drops those known to be the host's view of the VM (mem_guest FALSE), which
+// sits near 100 % once its RAM has been touched and says nothing about
+// pressure inside it; a reading with no recorded source (stopped, or older
+// than the column) is judged on its figure as before. A window of host views
+// alone leaves the rule unmet, resolving an alert raised on host memory —
+// unless the rest of the fetch holds a figure it can judge (the guest's own,
+// or one with no recorded source): that is a lapse, and it holds the alert.
+func vmRuleOutcome(rule db.AlertRule, rows []db.GetVMRecentMetricsRow, now time.Time) (met bool, latest float64, ok bool) {
+	judgeable := func(r db.GetVMRecentMetricsRow) bool { return !r.MemGuest.Valid || r.MemGuest.Bool }
+	fetched := rows
+	rows = inWindow(rule, rows, now, func(r db.GetVMRecentMetricsRow) time.Time { return r.Bucket })
+	if rule.Metric == "mem_percent" {
+		judged := make([]db.GetVMRecentMetricsRow, 0, len(rows))
+		for _, r := range rows {
+			if judgeable(r) {
+				judged = append(judged, r)
+			}
+		}
+		if len(rows) > 0 && len(judged) == 0 {
+			if slices.ContainsFunc(fetched, judgeable) {
+				return false, 0, false
+			}
+			return false, 0, true
+		}
+		rows = judged
+	}
+	return judge(rule, rows, func(r db.GetVMRecentMetricsRow) float64 { return extractVMMetric(r, rule.Metric) })
 }
 
 // metricLookback floors the metrics fetch window at two collection ticks.
@@ -588,8 +588,8 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 		}
 
 		// Create new pending alert.
-		msg := fmt.Sprintf("%s %s %s %.2f on %s (current: %.2f)",
-			rule.Metric, rule.Operator, formatThreshold(rule.Threshold), rule.Threshold, resourceName, value)
+		msg := fmt.Sprintf("%s %s %s on %s (current: %.2f)",
+			rule.Metric, rule.Operator, formatThreshold(rule.Threshold), resourceName, value)
 
 		// Get the first escalation channel if any.
 		var channelID pgtype.UUID
@@ -1092,11 +1092,15 @@ func compareValue(value float64, operator string, threshold float64) bool {
 	}
 }
 
+// cpuPercent turns the stored CPU figure, PVE's 0–1 ratio, into the percent a
+// rule's threshold is written in ("CPU Usage (%)"), as the metrics API does.
+func cpuPercent(ratio float64) float64 { return ratio * 100 }
+
 // extractNodeMetric extracts the named metric from a node metrics row.
 func extractNodeMetric(m db.GetNodeRecentMetricsRow, metric string) float64 {
 	switch metric {
 	case "cpu_usage":
-		return m.CpuUsage
+		return cpuPercent(m.CpuUsage)
 	case "mem_percent":
 		if m.MemTotal == 0 {
 			return 0
@@ -1119,7 +1123,7 @@ func extractNodeMetric(m db.GetNodeRecentMetricsRow, metric string) float64 {
 func extractVMMetric(m db.GetVMRecentMetricsRow, metric string) float64 {
 	switch metric {
 	case "cpu_usage":
-		return m.CpuUsage
+		return cpuPercent(m.CpuUsage)
 	case "mem_percent":
 		if m.MemTotal == 0 {
 			return 0

@@ -254,7 +254,8 @@ SELECT
     disk_read,
     disk_write,
     net_in,
-    net_out
+    net_out,
+    mem_guest
 FROM vm_metrics
 WHERE vm_id = $1 AND time >= $2
 ORDER BY time DESC;
