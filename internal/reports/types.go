@@ -135,7 +135,7 @@ type MetaItem struct {
 type KPI struct {
 	Label string `json:"label"`
 	Value string `json:"value"`
-	// Unit is rendered small beside the value ("%", "TB").
+	// Unit is rendered small beside the value ("%", "TiB").
 	Unit   string `json:"unit,omitempty"`
 	Detail string `json:"detail,omitempty"`
 	Tone   string `json:"tone,omitempty"`

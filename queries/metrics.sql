@@ -63,6 +63,10 @@ GROUP BY date_trunc('day', m.bucket), m.vm_id
 ORDER BY day;
 
 -- name: GetVMIODailyRate :many
+-- Per day, the guest's disk and network rates from its counters and, from the
+-- same rows rather than a second scan, its memory readings by source
+-- (vm_metrics.mem_guest) with the guest's own ones summed. A reading with no
+-- source (guest not running, or the row predates the column) is neither.
 SELECT
   date_trunc('day', time)::timestamptz AS day,
   vm_id,
@@ -77,7 +81,11 @@ SELECT
     ELSE 0 END)::double precision AS net_in_rate,
   (CASE WHEN EXTRACT(EPOCH FROM max(time) - min(time)) > 0
     THEN GREATEST(max(net_out) - min(net_out), 0)::double precision / EXTRACT(EPOCH FROM max(time) - min(time))
-    ELSE 0 END)::double precision AS net_out_rate
+    ELSE 0 END)::double precision AS net_out_rate,
+  count(*) FILTER (WHERE mem_guest)::bigint                                AS guest_samples,
+  count(*) FILTER (WHERE NOT mem_guest)::bigint                            AS host_samples,
+  COALESCE(sum(mem_used) FILTER (WHERE mem_guest), 0)::double precision    AS guest_mem_used,
+  COALESCE(sum(mem_total) FILTER (WHERE mem_guest), 0)::double precision   AS guest_mem_total
 FROM vm_metrics
 WHERE vm_id = $1 AND time >= $2
 GROUP BY date_trunc('day', time), vm_id

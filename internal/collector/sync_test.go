@@ -517,6 +517,7 @@ func newTestSyncer(queries SyncQueries) *Syncer {
 // --- Tests ---
 
 func TestSyncCluster_Success(t *testing.T) {
+	balloon := &proxmox.BalloonInfo{TotalMem: json.RawMessage("8217534464"), FreeMem: json.RawMessage("3922567168")}
 	srv := newTestServer(t, map[string]http.HandlerFunc{
 		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.NodeListEntry{
@@ -553,7 +554,8 @@ func TestSyncCluster_Success(t *testing.T) {
 		"/api2/json/nodes/pve2/qemu": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.VirtualMachine{
 				{VMID: 101, Name: "db-server", Status: "running", CPUs: 8, MaxMem: 8589934592, MaxDisk: 107374182400, Template: 0,
-					CPU: 0.8, Mem: 4294967296, NetIn: 5000, NetOut: 6000, DiskRead: 7000, DiskWrite: 8000},
+					CPU: 0.8, Mem: 4294967296, NetIn: 5000, NetOut: 6000, DiskRead: 7000, DiskWrite: 8000,
+					BalloonInfo: balloon},
 			})
 		},
 		"/api2/json/nodes/pve1/lxc": func(w http.ResponseWriter, _ *http.Request) {
@@ -690,6 +692,15 @@ func TestSyncCluster_Success(t *testing.T) {
 	}
 	if result.VMMetrics[2].CPUUsage != 0.8 {
 		t.Errorf("VM 101 CPUUsage = %f, want 0.8", result.VMMetrics[2].CPUUsage)
+	}
+	// Whose memory figure each reading is: VM 100 has no balloon statistics,
+	// VM 101 does, and a container's is always its own.
+	for i, want := range []bool{false, true, true} {
+		if got := result.VMMetrics[i].MemGuest; got == nil {
+			t.Errorf("VMMetrics[%d].MemGuest = nil, want %v", i, want)
+		} else if *got != want {
+			t.Errorf("VMMetrics[%d].MemGuest = %v, want %v", i, *got, want)
+		}
 	}
 }
 
@@ -1066,9 +1077,12 @@ func TestSyncCluster_MetricSnapshots(t *testing.T) {
 	if result.VMMetrics[0].MemUsed != 2147483648 {
 		t.Errorf("VM1 MemUsed = %d, want 2147483648", result.VMMetrics[0].MemUsed)
 	}
-	// VM2 (stopped).
+	// VM2 (stopped): no reading, so no memory source either.
 	if result.VMMetrics[1].CPUUsage != 0 {
 		t.Errorf("VM2 CPUUsage = %f, want 0", result.VMMetrics[1].CPUUsage)
+	}
+	if result.VMMetrics[1].MemGuest != nil {
+		t.Errorf("VM2 MemGuest = %v, want nil for a stopped guest", *result.VMMetrics[1].MemGuest)
 	}
 	// CT1.
 	if result.VMMetrics[2].CPUUsage != 0.20 {

@@ -24,6 +24,15 @@ type fakeQuerier struct {
 	veeamErr   error
 	pbsMetErr  error
 	veeamReads int
+
+	// The resource reports' inputs. Unset nodes and pools fall back to the
+	// single node and PBS pool the backup tests use.
+	nodes     []db.Node
+	pools     []db.StoragePool
+	vms       []db.Vm
+	nodeDaily map[uuid.UUID][]db.GetNodeMetricsDailyAvgRow
+	vmDaily   map[uuid.UUID][]db.GetVMMetricsDailyAvgRow
+	vmIO      map[uuid.UUID][]db.GetVMIODailyRateRow
 }
 
 var (
@@ -47,7 +56,25 @@ func (f *fakeQuerier) ListClusters(context.Context) ([]db.Cluster, error) {
 	return []db.Cluster{f.cluster}, nil
 }
 func (f *fakeQuerier) ListStoragePoolsByCluster(context.Context, uuid.UUID) ([]db.StoragePool, error) {
+	if f.pools != nil {
+		return f.pools, nil
+	}
 	return []db.StoragePool{{ClusterID: testCluster, NodeID: testNode, Storage: "store01", Type: "pbs"}}, nil
+}
+func (f *fakeQuerier) ListVMsByCluster(context.Context, uuid.UUID) ([]db.Vm, error) {
+	return f.vms, nil
+}
+func (f *fakeQuerier) GetNodeMetricsDailyAvg(_ context.Context, p db.GetNodeMetricsDailyAvgParams) ([]db.GetNodeMetricsDailyAvgRow, error) {
+	return f.nodeDaily[p.NodeID], nil
+}
+func (f *fakeQuerier) GetNodeIODailyRate(context.Context, db.GetNodeIODailyRateParams) ([]db.GetNodeIODailyRateRow, error) {
+	return nil, nil
+}
+func (f *fakeQuerier) GetVMMetricsDailyAvg(_ context.Context, p db.GetVMMetricsDailyAvgParams) ([]db.GetVMMetricsDailyAvgRow, error) {
+	return f.vmDaily[p.VmID], nil
+}
+func (f *fakeQuerier) GetVMIODailyRate(_ context.Context, p db.GetVMIODailyRateParams) ([]db.GetVMIODailyRateRow, error) {
+	return f.vmIO[p.VmID], nil
 }
 func (f *fakeQuerier) ListPBSServers(context.Context) ([]db.PbsServer, error) {
 	return []db.PbsServer{{ID: testPBS, Name: "pbs01"}}, nil
@@ -66,6 +93,9 @@ func (f *fakeQuerier) ListVeeamInfrastructureGuestsForCluster(context.Context, u
 	return nil, nil
 }
 func (f *fakeQuerier) ListNodesByCluster(context.Context, uuid.UUID) ([]db.Node, error) {
+	if f.nodes != nil {
+		return f.nodes, nil
+	}
 	return []db.Node{{ID: testNode, ClusterID: testCluster, Name: "pve-01", Status: "online"}}, nil
 }
 func (f *fakeQuerier) GetLatestPBSDatastoreMetrics(context.Context, uuid.UUID) ([]db.PbsDatastoreMetric, error) {
@@ -122,6 +152,27 @@ func hasSection(d *ReportData, title string) bool {
 		}
 	}
 	return false
+}
+
+// sectionTable is the table block titled block in section ("" for untitled).
+func sectionTable(d *ReportData, section, block string) *Table {
+	for _, s := range d.Sections {
+		for _, b := range s.Blocks {
+			if s.Title == section && b.Kind == BlockTable && b.Title == block {
+				return b.Table
+			}
+		}
+	}
+	return nil
+}
+
+func generate(t *testing.T, q *fakeQuerier, rt ReportType) *ReportData {
+	t.Helper()
+	data, err := newTestGenerator(q, nil).Generate(context.Background(), Request{Type: string(rt), ClusterID: testCluster, TimeRangeHours: 168})
+	if err != nil {
+		t.Fatalf("Generate %s: %v", rt, err)
+	}
+	return data
 }
 
 func TestGenerate_VeeamRequiresTheRequestersGrant(t *testing.T) {
@@ -240,5 +291,172 @@ func TestNormalizeParams(t *testing.T) {
 	}
 	if _, _, err := NormalizeParams([]byte(`{"top_n": 0.5}`)); err == nil {
 		t.Error("a non-integer top_n must be rejected")
+	}
+}
+
+// The rollups hold PVE's 0–1 CPU ratio; every resource report must print it as
+// percent. 0.33 shown as "0.3", and every running guest counted idle, was the bug.
+func TestResourceReports_CPUIsPercent(t *testing.T) {
+	t.Parallel()
+	vm := uuid.MustParse("00000000-0000-0000-0000-0000000000b1")
+	day := func(daysAgo int) time.Time { return testNow.Add(-time.Duration(daysAgo) * 24 * time.Hour) }
+	q := &fakeQuerier{
+		cluster: db.Cluster{ID: testCluster, Name: "cluster01"},
+		vms:     []db.Vm{{ID: vm, NodeID: testNode, Vmid: 101, Name: "linux01", Type: "qemu", Status: "running", CpuCount: 4}},
+		nodeDaily: map[uuid.UUID][]db.GetNodeMetricsDailyAvgRow{testNode: {
+			{Day: day(2), Cpu: 0.33, CpuMax: 0.5, MemUsed: 4 << 30, MemTotal: 16 << 30},
+			{Day: day(1), Cpu: 0.33, CpuMax: 0.5, MemUsed: 4 << 30, MemTotal: 16 << 30},
+		}},
+		vmDaily: map[uuid.UUID][]db.GetVMMetricsDailyAvgRow{vm: {{Day: day(1), Cpu: 0.33, CpuMax: 0.5, MemUsed: 1 << 30, MemTotal: 4 << 30}}},
+	}
+	cases := []struct {
+		report  ReportType
+		section string
+		want    map[int]string // column → first row's cell
+	}{
+		{TypeResourceUtilization, "Nodes", map[int]string{2: "33.0", 3: "50.0"}},
+		{TypeVMResourceUsage, "All guests", map[int]string{6: "33.0"}},
+		{TypeCapacityForecast, "Node forecast", map[int]string{2: "33.0%"}},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.report), func(t *testing.T) {
+			t.Parallel()
+			data := generate(t, q, tc.report)
+			table := sectionTable(data, tc.section, "")
+			if table == nil || len(table.Rows) == 0 {
+				t.Fatalf("no %q table", tc.section)
+			}
+			for col, want := range tc.want {
+				if got := table.Rows[0][col].Text; got != want {
+					t.Errorf("column %d = %q, want %q", col, got, want)
+				}
+			}
+			if tc.report == TypeVMResourceUsage {
+				if k := kpiByLabel(data, "Idle while running"); k == nil || k.Value != "0" {
+					t.Errorf("idle KPI = %+v, want 0 for a guest at 33 %% CPU", k)
+				}
+			}
+		})
+	}
+}
+
+// The swap warning reads only the guest's own figure, averaged over its own
+// readings: a VM without balloon statistics holds its whole allocation on the
+// host, and a period average blends that in from before a driver reported.
+func TestVMResourceUsage_SwapWarningNeedsTheGuestsOwnFigure(t *testing.T) {
+	t.Parallel()
+	own, host, late := uuid.MustParse("00000000-0000-0000-0000-0000000000b1"), uuid.MustParse("00000000-0000-0000-0000-0000000000b2"), uuid.MustParse("00000000-0000-0000-0000-0000000000b3")
+	day := testNow.Add(-24 * time.Hour)
+	q := &fakeQuerier{
+		cluster: db.Cluster{ID: testCluster, Name: "cluster01"},
+		vms: []db.Vm{
+			{ID: own, NodeID: testNode, Vmid: 101, Name: "linux01", Type: "qemu", Status: "running"},
+			{ID: host, NodeID: testNode, Vmid: 102, Name: "linux02", Type: "qemu", Status: "running"},
+			{ID: late, NodeID: testNode, Vmid: 103, Name: "linux03", Type: "qemu", Status: "running"},
+		},
+		vmDaily: map[uuid.UUID][]db.GetVMMetricsDailyAvgRow{
+			own:  {{Day: day, Cpu: 0.05, MemUsed: 0.96 * (8 << 30), MemTotal: 8 << 30}},
+			host: {{Day: day, Cpu: 0.05, MemUsed: 1.004 * (24 << 30), MemTotal: 24 << 30}},
+			late: {{Day: day, Cpu: 0.05, MemUsed: 0.979 * (16 << 30), MemTotal: 16 << 30}},
+		},
+		vmIO: map[uuid.UUID][]db.GetVMIODailyRateRow{
+			own:  {{Day: day, GuestSamples: 2016, HostSamples: 3, GuestMemUsed: 2016 * 0.96 * (8 << 30), GuestMemTotal: 2016 * (8 << 30)}},
+			host: {{Day: day, HostSamples: 2016}},
+			late: {{Day: day, GuestSamples: 1900, HostSamples: 116, GuestMemUsed: 1900 * 0.6 * (16 << 30), GuestMemTotal: 1900 * (16 << 30)}},
+		},
+	}
+	data := generate(t, q, TypeVMResourceUsage)
+	if !hasFinding(data, SevWarning, "linux01 (101) averaged 96 % of its memory") {
+		t.Errorf("no swap warning for the balloon-reported 96 %%: %v", findingLeads(data))
+	}
+	if hasFinding(data, SevWarning, "linux02") || hasFinding(data, SevWarning, "linux03") {
+		t.Errorf("a figure that is not the guest's own raised a warning: %v", findingLeads(data))
+	}
+	ownTable, other := sectionTable(data, "Top memory consumers", ""), sectionTable(data, "Top memory consumers", "Not reported by the guest")
+	if ownTable == nil || len(ownTable.Rows) != 2 || ownTable.Rows[0][0].Text != "linux01" || ownTable.Rows[1][0].Text != "linux03" || ownTable.Rows[1][3].Text != "60.0" || ownTable.Rows[1][4].Text != "9.6 GiB" {
+		t.Errorf("guest-reported table = %+v, want linux01, then linux03 at its own 60.0 (9.6 GiB)", ownTable)
+	}
+	if other == nil || len(other.Rows) != 1 || other.Rows[0][0].Text != "linux02" || other.Rows[0][3].Text != "100.4" || other.Rows[0][6].Text != "host RSS" {
+		t.Errorf("host table = %+v, want linux02 at 100.4 labelled host RSS", other)
+	}
+	if all := sectionTable(data, "All guests", ""); all == nil || len(all.Rows) != 3 || all.Rows[1][8].Text != "host RSS" {
+		t.Errorf("All guests = %+v, want linux02's mem source as host RSS", all)
+	}
+}
+
+// Shared pools are one pool however many nodes report them; local and
+// local-lvm are one per node. Keying every pool on its name kept one node's.
+func TestCapacityForecast_StoragePoolsPerNodeUnlessShared(t *testing.T) {
+	t.Parallel()
+	nodes := []db.Node{
+		{ID: uuid.MustParse("00000000-0000-0000-0000-0000000000a1"), Name: "pve-01", Status: "online"},
+		{ID: uuid.MustParse("00000000-0000-0000-0000-0000000000a2"), Name: "pve-02", Status: "online"},
+		{ID: uuid.MustParse("00000000-0000-0000-0000-0000000000a3"), Name: "pve-03", Status: "online"},
+	}
+	pools := make([]db.StoragePool, 0, 4*len(nodes))
+	for i, n := range nodes {
+		used := int64(i+1) << 30
+		if n.Name == "pve-02" {
+			used = 92 << 30
+		}
+		pools = append(pools,
+			db.StoragePool{NodeID: n.ID, Storage: "local", Type: "dir", Enabled: true, Total: 100 << 30, Used: used},
+			db.StoragePool{NodeID: n.ID, Storage: "local-lvm", Type: "lvmthin", Enabled: true, Total: 500 << 30, Used: int64(i+1) << 32},
+			db.StoragePool{NodeID: n.ID, Storage: "store01", Type: "rbd", Enabled: true, Shared: true, Total: 4 << 40, Used: int64(10+i) << 37},
+			db.StoragePool{NodeID: n.ID, Storage: "store02", Type: "pbs", Enabled: true, Shared: true, Total: 8 << 40, Used: 2 << 40},
+		)
+	}
+	q := &fakeQuerier{cluster: db.Cluster{ID: testCluster, Name: "cluster01"}, nodes: nodes, pools: pools}
+	data := generate(t, q, TypeCapacityForecast)
+
+	var meters []Meter
+	for _, s := range data.Sections {
+		for _, b := range s.Blocks {
+			if s.Title == "Storage pools" && b.Kind == BlockMeters {
+				meters = b.Meters
+			}
+		}
+	}
+	got := map[string]int{}
+	for _, m := range meters {
+		got[m.Name]++
+		if m.Name == "store01" && m.Used != float64(int64(12)<<37) {
+			t.Errorf("store01 used = %v, want the highest node's reading", m.Used)
+		}
+	}
+	if len(meters) != 8 || got["local"] != 3 || got["local-lvm"] != 3 || got["store01"] != 1 || got["store02"] != 1 {
+		t.Errorf("meters = %v (%d), want local and local-lvm per node and each shared pool once", got, len(meters))
+	}
+	if meters[0].Detail != "dir · pve-02" {
+		t.Errorf("fullest meter detail = %q, want dir · pve-02", meters[0].Detail)
+	}
+	if !hasFinding(data, SevCritical, "Storage pool local on pve-02 is 92 % full.") {
+		t.Errorf("findings = %v, want the full local pool named with its node", findingLeads(data))
+	}
+	if k := kpiByLabel(data, "Fullest storage pool"); k == nil || k.Detail != "local on pve-02" {
+		t.Errorf("fullest pool KPI = %+v, want local on pve-02", k)
+	}
+}
+
+// The sizes are binary multiples and are labelled so, matching the UI's numbers.
+func TestFormatBytes_LabelsBinaryUnits(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in          float64
+		bytes, rate string
+	}{
+		{512, "512 B", "512 B/s"},
+		{1536, "1.5 KiB", "1.5 KiB/s"},
+		{3 << 19, "1.5 MiB", "1.5 MiB/s"},
+		{24 << 30, "24.0 GiB", "24.0 GiB/s"},
+		{3 << 39, "1.5 TiB", "1536.0 GiB/s"},
+	}
+	for _, c := range cases {
+		if got := formatBytes(c.in); got != c.bytes {
+			t.Errorf("formatBytes(%v) = %q, want %q", c.in, got, c.bytes)
+		}
+		if got := formatBytesRate(c.in); got != c.rate {
+			t.Errorf("formatBytesRate(%v) = %q, want %q", c.in, got, c.rate)
+		}
 	}
 }

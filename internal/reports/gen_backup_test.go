@@ -123,7 +123,7 @@ func TestBuildBackupCompliance_CountsAndFindings(t *testing.T) {
 		{SevSerious, "Veeam's last run failed for 1 guest: win05 (116)"},
 		{SevWarning, "1 of 4 backup runs failed this period (backup-daily)"},
 		{SevWarning, "1 guest is linked to a Veeam backup by name only: win02 (109)"},
-		{SevInfo, "84.0 GB of Veeam restore points belong to 1 guest that no longer exist on this cluster: linux99"},
+		{SevInfo, "84.0 GiB of Veeam restore points belong to 1 guest that no longer exist on this cluster: linux99"},
 	}
 	for _, c := range checks {
 		if !hasFinding(data, c.sev, c.substr) {

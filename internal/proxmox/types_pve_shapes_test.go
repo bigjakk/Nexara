@@ -169,3 +169,39 @@ func TestFlexIntAcceptsPaddedNumericStrings(t *testing.T) {
 		})
 	}
 }
+
+// TestVirtualMachineGuestReportsMemory decodes the three ballooninfo shapes a
+// running VM's full status takes (PVE's query-balloon extension) and pins
+// qemu-server's rule: mem is the guest's own figure only when both total_mem
+// and free_mem are present.
+func TestVirtualMachineGuestReportsMemory(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{"driver statistics", `{"vmid": 101, "status": "running", "mem": 6442450944, "maxmem": 8589934592,
+			"ballooninfo": {"actual": 8589934592, "max_mem": 8589934592, "total_mem": 8217534464,
+			 "free_mem": 1775083520, "mem_swapped_in": 0, "mem_swapped_out": 0,
+			 "major_page_faults": 1406, "minor_page_faults": 51022387, "last_update": 1760870400}}`, true},
+		{"balloon device, no driver statistics", `{"vmid": 102, "status": "running", "mem": 8657043456,
+			"maxmem": 8589934592, "ballooninfo": {"actual": 8589934592, "max_mem": 8589934592}}`, false},
+		{"no balloon device", `{"vmid": 103, "status": "running", "mem": 4425015296, "maxmem": 4294967296}`, false},
+		{"null is not defined", `{"vmid": 104, "ballooninfo": {"total_mem": null, "free_mem": null}}`, false},
+		{"an odd type still decodes", `{"vmid": 105, "ballooninfo": {"total_mem": 8.2e9, "free_mem": "1775083520"}}`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var vm VirtualMachine
+			if err := json.Unmarshal([]byte(tt.payload), &vm); err != nil {
+				t.Fatalf("decoding PVE's VM status: %v", err)
+			}
+			if got := vm.GuestReportsMemory(); got != tt.want {
+				t.Errorf("GuestReportsMemory() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

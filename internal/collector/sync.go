@@ -1118,6 +1118,7 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 			DiskWrite: vm.DiskWrite,
 			NetIn:     vm.NetIn,
 			NetOut:    vm.NetOut,
+			MemGuest:  memGuest(vm.Status == "running", vm.GuestReportsMemory()),
 		})
 	}
 
@@ -1233,6 +1234,8 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 			DiskWrite: ct.DiskWrite,
 			NetIn:     ct.NetIn,
 			NetOut:    ct.NetOut,
+			// A container's mem is its own cgroup's usage, page cache excluded.
+			MemGuest: memGuest(ct.Status == "running", true),
 		})
 	}
 
