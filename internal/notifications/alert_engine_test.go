@@ -144,6 +144,7 @@ func TestVMRuleOutcome(t *testing.T) {
 	disk := func(agoSeconds int, read int64, cpu float64, mem int64) db.GetVMRecentMetricsRow {
 		return db.GetVMRecentMetricsRow{Bucket: now.Add(-time.Duration(agoSeconds) * time.Second), DiskRead: read, CpuUsage: cpu, MemUsed: mem}
 	}
+	carried := func(r db.GetVMRecentMetricsRow) db.GetVMRecentMetricsRow { r.DiskUnreported = true; return r }
 	tests := []struct {
 		name       string
 		metric     string
@@ -166,6 +167,8 @@ func TestVMRuleOutcome(t *testing.T) {
 		{"a disk counter is judged as a rate", "disk_read", 0, []db.GetVMRecentMetricsRow{disk(10, 3000, 0.1, 1<<30), disk(30, 1000, 0.1, 1<<30)}, true, true, 100},
 		{"a zero counter on a guest showing memory or CPU is no baseline", "disk_read", 0, []db.GetVMRecentMetricsRow{disk(10, 5100, 0, 1<<30), disk(30, 0, 0, 1<<30), disk(50, 0, 0.1, 0)}, false, false, 0},
 		{"a stopped guest's zeros are readings", "disk_read", 0, []db.GetVMRecentMetricsRow{disk(10, 0, 0, 0), disk(30, 0, 0, 0)}, false, true, 0},
+		{"a carried sample is no reading", "disk_read", 0, []db.GetVMRecentMetricsRow{carried(disk(10, 5000, 0.1, 1<<30)), disk(30, 5000, 0.1, 1<<30), disk(50, 3000, 0.1, 1<<30)}, false, false, 0},
+		{"its network counters still are", "net_in", 0, []db.GetVMRecentMetricsRow{{Bucket: now.Add(-10 * time.Second), NetIn: 3000, CpuUsage: 0.1, MemUsed: 1 << 30, DiskUnreported: true}, {Bucket: now.Add(-30 * time.Second), NetIn: 1000, CpuUsage: 0.1, MemUsed: 1 << 30}}, true, true, 100},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -228,7 +231,9 @@ func TestCounterOutcome(t *testing.T) {
 }
 
 // A node rule judges a level metric on its readings and a counter metric on
-// the rate between them, not on the counter.
+// the rate between them, not on the counter. A disk rule holds while the
+// newest sample is one the collector marks disk_unreported; a network rule
+// does not, its sums being real.
 func TestNodeRuleOutcome(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
@@ -236,19 +241,25 @@ func TestNodeRuleOutcome(t *testing.T) {
 		{Bucket: now.Add(-10 * time.Second), CpuUsage: 0.95, NetIn: 3000},
 		{Bucket: now.Add(-30 * time.Second), CpuUsage: 0.95, NetIn: 1000},
 	}
+	carried := append([]db.GetNodeRecentMetricsRow{{Bucket: now.Add(-5 * time.Second), CpuUsage: 0.95, NetIn: 3500, DiskUnreported: true}}, rows...)
 	for _, tt := range []struct {
+		name       string
 		metric     string
+		rows       []db.GetNodeRecentMetricsRow
+		met, ok    bool
 		wantLatest float64
 	}{
-		{"cpu_usage", 95},
-		{"net_in", 100},
+		{"cpu as percent", "cpu_usage", rows, true, true, 95},
+		{"net_in as a rate", "net_in", rows, true, true, 100},
+		{"a carried disk sample holds a disk rule", "disk_write", carried, false, false, 0},
+		{"but not a network rule", "net_in", carried, true, true, 100},
 	} {
-		t.Run(tt.metric, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			rule := db.AlertRule{Metric: tt.metric, Operator: ">", Threshold: 90, DurationSeconds: 60}
-			met, latest, ok := nodeRuleOutcome(rule, rows, now)
-			if !met || !ok || latest != tt.wantLatest {
-				t.Errorf("nodeRuleOutcome = (%v, %v, %v), want (true, %v, true)", met, latest, ok, tt.wantLatest)
+			met, latest, ok := nodeRuleOutcome(rule, tt.rows, now)
+			if met != tt.met || ok != tt.ok || latest != tt.wantLatest {
+				t.Errorf("nodeRuleOutcome = (%v, %v, %v), want (%v, %v, %v)", met, latest, ok, tt.met, tt.wantLatest, tt.ok)
 			}
 		})
 	}

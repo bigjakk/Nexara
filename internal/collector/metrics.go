@@ -18,6 +18,10 @@ type nodeMetricSnapshot struct {
 	DiskWrite int64     `json:"disk_write"`
 	NetIn     int64     `json:"net_in"`
 	NetOut    int64     `json:"net_out"`
+	// DiskUnreported is node_metrics.disk_unreported: the disk sums include a
+	// guest whose disk counters are carried forward, or miss guests that could
+	// not be listed.
+	DiskUnreported bool `json:"disk_unreported"`
 }
 
 // vmMetricSnapshot holds metric data collected from a VM or container.
@@ -33,6 +37,9 @@ type vmMetricSnapshot struct {
 	// MemGuest is vm_metrics.mem_guest: whether MemUsed is the guest's own
 	// figure or the host's view of it, nil when the guest is not running.
 	MemGuest *bool `json:"mem_guest"`
+	// DiskUnreported is vm_metrics.disk_unreported: PVE left the disk counters
+	// unreported and they are carried forward (see diskCarry).
+	DiskUnreported bool `json:"disk_unreported"`
 }
 
 // memGuest is a reading's MemGuest: nil when the guest is not running, so

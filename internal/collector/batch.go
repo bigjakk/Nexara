@@ -16,12 +16,12 @@ type CopyFromer interface {
 
 var nodeMetricColumns = []string{
 	"time", "node_id", "cpu_usage", "mem_used", "mem_total",
-	"disk_read", "disk_write", "net_in", "net_out",
+	"disk_read", "disk_write", "net_in", "net_out", "disk_unreported",
 }
 
 var vmMetricColumns = []string{
 	"time", "vm_id", "cpu_usage", "mem_used", "mem_total",
-	"disk_read", "disk_write", "net_in", "net_out", "mem_guest",
+	"disk_read", "disk_write", "net_in", "net_out", "mem_guest", "disk_unreported",
 }
 
 func batchInsertNodeMetrics(ctx context.Context, copier CopyFromer, ts time.Time, snapshots []nodeMetricSnapshot) (int64, error) {
@@ -31,7 +31,7 @@ func batchInsertNodeMetrics(ctx context.Context, copier CopyFromer, ts time.Time
 
 	src := pgx.CopyFromSlice(len(snapshots), func(i int) ([]any, error) {
 		s := snapshots[i]
-		return []any{ts, s.NodeID, s.CPUUsage, s.MemUsed, s.MemTotal, s.DiskRead, s.DiskWrite, s.NetIn, s.NetOut}, nil
+		return []any{ts, s.NodeID, s.CPUUsage, s.MemUsed, s.MemTotal, s.DiskRead, s.DiskWrite, s.NetIn, s.NetOut, s.DiskUnreported}, nil
 	})
 
 	n, err := copier.CopyFrom(ctx, pgx.Identifier{"node_metrics"}, nodeMetricColumns, src)
@@ -48,7 +48,7 @@ func batchInsertVMMetrics(ctx context.Context, copier CopyFromer, ts time.Time, 
 
 	src := pgx.CopyFromSlice(len(snapshots), func(i int) ([]any, error) {
 		s := snapshots[i]
-		return []any{ts, s.VMID, s.CPUUsage, s.MemUsed, s.MemTotal, s.DiskRead, s.DiskWrite, s.NetIn, s.NetOut, s.MemGuest}, nil
+		return []any{ts, s.VMID, s.CPUUsage, s.MemUsed, s.MemTotal, s.DiskRead, s.DiskWrite, s.NetIn, s.NetOut, s.MemGuest, s.DiskUnreported}, nil
 	})
 
 	n, err := copier.CopyFrom(ctx, pgx.Identifier{"vm_metrics"}, vmMetricColumns, src)

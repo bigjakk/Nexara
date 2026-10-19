@@ -336,7 +336,8 @@ SELECT
     disk_read,
     disk_write,
     net_in,
-    net_out
+    net_out,
+    disk_unreported
 FROM node_metrics
 WHERE node_id = $1 AND time >= $2
 ORDER BY time DESC
@@ -348,14 +349,15 @@ type GetNodeRecentMetricsParams struct {
 }
 
 type GetNodeRecentMetricsRow struct {
-	Bucket    time.Time `json:"bucket"`
-	CpuUsage  float64   `json:"cpu_usage"`
-	MemUsed   int64     `json:"mem_used"`
-	MemTotal  int64     `json:"mem_total"`
-	DiskRead  int64     `json:"disk_read"`
-	DiskWrite int64     `json:"disk_write"`
-	NetIn     int64     `json:"net_in"`
-	NetOut    int64     `json:"net_out"`
+	Bucket         time.Time `json:"bucket"`
+	CpuUsage       float64   `json:"cpu_usage"`
+	MemUsed        int64     `json:"mem_used"`
+	MemTotal       int64     `json:"mem_total"`
+	DiskRead       int64     `json:"disk_read"`
+	DiskWrite      int64     `json:"disk_write"`
+	NetIn          int64     `json:"net_in"`
+	NetOut         int64     `json:"net_out"`
+	DiskUnreported bool      `json:"disk_unreported"`
 }
 
 // Metric queries for alert evaluation
@@ -377,6 +379,7 @@ func (q *Queries) GetNodeRecentMetrics(ctx context.Context, arg GetNodeRecentMet
 			&i.DiskWrite,
 			&i.NetIn,
 			&i.NetOut,
+			&i.DiskUnreported,
 		); err != nil {
 			return nil, err
 		}
@@ -438,7 +441,8 @@ SELECT
     disk_write,
     net_in,
     net_out,
-    mem_guest
+    mem_guest,
+    disk_unreported
 FROM vm_metrics
 WHERE vm_id = $1 AND time >= $2
 ORDER BY time DESC
@@ -450,15 +454,16 @@ type GetVMRecentMetricsParams struct {
 }
 
 type GetVMRecentMetricsRow struct {
-	Bucket    time.Time   `json:"bucket"`
-	CpuUsage  float64     `json:"cpu_usage"`
-	MemUsed   int64       `json:"mem_used"`
-	MemTotal  int64       `json:"mem_total"`
-	DiskRead  int64       `json:"disk_read"`
-	DiskWrite int64       `json:"disk_write"`
-	NetIn     int64       `json:"net_in"`
-	NetOut    int64       `json:"net_out"`
-	MemGuest  pgtype.Bool `json:"mem_guest"`
+	Bucket         time.Time   `json:"bucket"`
+	CpuUsage       float64     `json:"cpu_usage"`
+	MemUsed        int64       `json:"mem_used"`
+	MemTotal       int64       `json:"mem_total"`
+	DiskRead       int64       `json:"disk_read"`
+	DiskWrite      int64       `json:"disk_write"`
+	NetIn          int64       `json:"net_in"`
+	NetOut         int64       `json:"net_out"`
+	MemGuest       pgtype.Bool `json:"mem_guest"`
+	DiskUnreported bool        `json:"disk_unreported"`
 }
 
 func (q *Queries) GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetricsParams) ([]GetVMRecentMetricsRow, error) {
@@ -480,6 +485,7 @@ func (q *Queries) GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetrics
 			&i.NetIn,
 			&i.NetOut,
 			&i.MemGuest,
+			&i.DiskUnreported,
 		); err != nil {
 			return nil, err
 		}

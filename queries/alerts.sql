@@ -240,7 +240,8 @@ SELECT
     disk_read,
     disk_write,
     net_in,
-    net_out
+    net_out,
+    disk_unreported
 FROM node_metrics
 WHERE node_id = $1 AND time >= $2
 ORDER BY time DESC;
@@ -255,7 +256,8 @@ SELECT
     disk_write,
     net_in,
     net_out,
-    mem_guest
+    mem_guest,
+    disk_unreported
 FROM vm_metrics
 WHERE vm_id = $1 AND time >= $2
 ORDER BY time DESC;

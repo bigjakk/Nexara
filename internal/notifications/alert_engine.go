@@ -501,6 +501,15 @@ func isCounterMetric(metric string) bool {
 	return false
 }
 
+// diskUnreported reports whether a sample's figure for metric is one the
+// collector marks disk_unreported. Only disk counters are marked: a VM's
+// network counters are always PVE's reading, and a node's network sums that
+// miss the guests of a failed list fall unmarked, for counterRates to treat
+// as any fall.
+func diskUnreported(metric string, marked bool) bool {
+	return marked && (metric == "disk_read" || metric == "disk_write")
+}
+
 // rateReading is a counter's rate in bytes/s, stamped with the newer of the
 // two readings it was measured between.
 type rateReading struct {
@@ -510,10 +519,12 @@ type rateReading struct {
 
 // counterReach is how far before a rule's window a counter metric's fetch
 // reaches: back to the reading the window's first rate is measured from, and
-// to the level a node's counter fell from while PVE left guests unreported,
-// which can last minutes. Reaching further bridges longer dips but holds a
-// rule longer after a real fall; replaying a week of a test cluster's
-// counters put the balance near ten minutes for the form's 300 s duration.
+// to the level a node's counter fell from while PVE left guests unreported in
+// samples the collector did not mark (before disk_unreported, just after it
+// restarted, or once a carry gave up). Reaching further bridges longer dips
+// but holds a rule longer after a real fall; replaying a week of a test
+// cluster's counters put the balance near ten minutes for the form's 300 s
+// duration.
 const counterReach = 10 * time.Minute
 
 // counterRates turns a newest-first fetch of counter readings into
@@ -521,9 +532,10 @@ const counterReach = 10 * time.Minute
 // readings the counter reports unreported. Each reading is measured from the
 // newest one before it at the highest level reached so far, and one below
 // that level has no rate: the counter fell because a guest restarted, stopped
-// or left the node, or a node's guest went unreported. Measuring from that
-// level keeps the guest's return from counting its lifetime of bytes as one
-// sample's, for as long as the level is in the fetch.
+// or left the node, a node's guest list could not be read, or a node's guest
+// went unreported in an unmarked sample.
+// Measuring from that level keeps the guest's return from counting its
+// lifetime of bytes as one sample's, for as long as the level is in the fetch.
 func counterRates[T any](rows []T, at func(T) time.Time, counter func(T) (bytes float64, reported bool)) []rateReading {
 	rates := make([]rateReading, 0, len(rows))
 	var (
@@ -563,12 +575,17 @@ func counterOutcome[T any](rule db.AlertRule, rows []T, now time.Time, at func(T
 	return judge(rule, inWindow(rule, rates, now, func(r rateReading) time.Time { return r.at }), func(r rateReading) float64 { return r.bps })
 }
 
-// nodeRuleOutcome judges a node's readings in the rule's window.
+// nodeRuleOutcome judges a node's readings in the rule's window. A counter
+// metric is judged on its rates, a disk one leaving out the samples the
+// collector marks disk_unreported: the node's disk sums then include a guest
+// PVE did not report, or miss guests whose list could not be read.
 func nodeRuleOutcome(rule db.AlertRule, rows []db.GetNodeRecentMetricsRow, now time.Time) (met bool, latest float64, ok bool) {
 	at := func(r db.GetNodeRecentMetricsRow) time.Time { return r.Bucket }
 	value := func(r db.GetNodeRecentMetricsRow) float64 { return extractNodeMetric(r, rule.Metric) }
 	if isCounterMetric(rule.Metric) {
-		return counterOutcome(rule, rows, now, at, func(r db.GetNodeRecentMetricsRow) (float64, bool) { return value(r), true })
+		return counterOutcome(rule, rows, now, at, func(r db.GetNodeRecentMetricsRow) (float64, bool) {
+			return value(r), !diskUnreported(rule.Metric, r.DiskUnreported)
+		})
 	}
 	return judge(rule, inWindow(rule, rows, now, at), value)
 }
@@ -582,16 +599,18 @@ func nodeRuleOutcome(rule db.AlertRule, rows []db.GetNodeRecentMetricsRow, now t
 // unless the rest of the fetch holds a figure it can judge (the guest's own,
 // or one with no recorded source): that is a lapse, and it holds the alert.
 //
-// A counter metric is judged on its rates, and a zero counter on a guest that
-// shows CPU or memory is one PVE left unreported, as it at times does under
-// load; a stopped guest's zeros are readings.
+// A counter metric is judged on its rates. A disk sample the collector marks
+// disk_unreported is no reading — PVE left the disk counters unreported, as it
+// at times does under load, and they are carried forward — nor is a zero
+// counter on a guest that shows CPU or memory: such a sample before that
+// column, or a counter PVE never reports. A stopped guest's zeros are readings.
 func vmRuleOutcome(rule db.AlertRule, rows []db.GetVMRecentMetricsRow, now time.Time) (met bool, latest float64, ok bool) {
 	at := func(r db.GetVMRecentMetricsRow) time.Time { return r.Bucket }
 	value := func(r db.GetVMRecentMetricsRow) float64 { return extractVMMetric(r, rule.Metric) }
 	if isCounterMetric(rule.Metric) {
 		return counterOutcome(rule, rows, now, at, func(r db.GetVMRecentMetricsRow) (float64, bool) {
 			v := value(r)
-			return v, v != 0 || (r.CpuUsage == 0 && r.MemUsed == 0)
+			return v, !diskUnreported(rule.Metric, r.DiskUnreported) && (v != 0 || (r.CpuUsage == 0 && r.MemUsed == 0))
 		})
 	}
 	judgeable := func(r db.GetVMRecentMetricsRow) bool { return !r.MemGuest.Valid || r.MemGuest.Bool }
