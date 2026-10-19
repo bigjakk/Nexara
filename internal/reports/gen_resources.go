@@ -32,6 +32,51 @@ func (g *Generator) generateResourceUtilization(ctx context.Context, gc genCtx, 
 	return nil
 }
 
+// dailyUsage is one day of a node's or guest's hourly rollups, CPU in percent.
+// The rollups hold PVE's 0–1 ratio (the metrics API scales it the same way);
+// converting here, where the report layer loads them, keeps every consumer —
+// the tables, findings, trend, forecast and digest — on one scale.
+type dailyUsage struct {
+	day                           time.Time
+	cpuPct, cpuMaxPct             float64
+	memUsed, memUsedMax, memTotal float64
+}
+
+func newDailyUsage(day time.Time, cpu, cpuMax, memUsed, memUsedMax, memTotal float64) dailyUsage {
+	return dailyUsage{day: day, cpuPct: cpu * 100, cpuMaxPct: cpuMax * 100, memUsed: memUsed, memUsedMax: memUsedMax, memTotal: memTotal}
+}
+
+func (d dailyUsage) memPct() float64 {
+	if d.memTotal > 0 {
+		return d.memUsed / d.memTotal * 100
+	}
+	return 0
+}
+
+func (g *Generator) nodeDailyUsage(ctx context.Context, nodeID uuid.UUID, since time.Time) ([]dailyUsage, error) {
+	rows, err := g.queries.GetNodeMetricsDailyAvg(ctx, db.GetNodeMetricsDailyAvgParams{NodeID: nodeID, Bucket: since})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dailyUsage, len(rows))
+	for i, r := range rows {
+		out[i] = newDailyUsage(r.Day, r.Cpu, r.CpuMax, r.MemUsed, r.MemUsedMax, r.MemTotal)
+	}
+	return out, nil
+}
+
+func (g *Generator) vmDailyUsage(ctx context.Context, vmID uuid.UUID, since time.Time) ([]dailyUsage, error) {
+	rows, err := g.queries.GetVMMetricsDailyAvg(ctx, db.GetVMMetricsDailyAvgParams{VmID: vmID, Bucket: since})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dailyUsage, len(rows))
+	for i, r := range rows {
+		out[i] = newDailyUsage(r.Day, r.Cpu, r.CpuMax, r.MemUsed, r.MemUsedMax, r.MemTotal)
+	}
+	return out, nil
+}
+
 // fetchNodeUsage reads every node's daily averages and IO rates for the
 // period. Shared with the cluster digest.
 func (g *Generator) fetchNodeUsage(ctx context.Context, gc genCtx) ([]nodeUsage, error) {
@@ -44,7 +89,7 @@ func (g *Generator) fetchNodeUsage(ctx context.Context, gc genCtx) ([]nodeUsage,
 		u := nodeUsage{name: node.Name, status: node.Status}
 		// A query error is a failed report, never a node that "reported no
 		// metrics": that sentence is a finding, and it must be true.
-		metrics, mErr := g.queries.GetNodeMetricsDailyAvg(ctx, db.GetNodeMetricsDailyAvgParams{NodeID: node.ID, Bucket: gc.since})
+		metrics, mErr := g.nodeDailyUsage(ctx, node.ID, gc.since)
 		if mErr != nil {
 			return nil, fmt.Errorf("daily metrics for %s: %w", node.Name, mErr)
 		}
@@ -54,18 +99,14 @@ func (g *Generator) fetchNodeUsage(ctx context.Context, gc genCtx) ([]nodeUsage,
 		}
 		var cpuSum, memUsedSum, memUsedMax, memTotalSum float64
 		for _, m := range metrics {
-			cpuSum += m.Cpu
-			u.cpuMax = maxf(u.cpuMax, m.CpuMax)
-			memUsedSum += m.MemUsed
-			memUsedMax = maxf(memUsedMax, m.MemUsedMax)
-			memTotalSum += m.MemTotal
-			u.dailyKeys = append(u.dailyKeys, m.Day.Format("2006-01-02"))
-			u.dailyCPU = append(u.dailyCPU, m.Cpu)
-			if m.MemTotal > 0 {
-				u.dailyMem = append(u.dailyMem, m.MemUsed/m.MemTotal*100)
-			} else {
-				u.dailyMem = append(u.dailyMem, 0)
-			}
+			cpuSum += m.cpuPct
+			u.cpuMax = maxf(u.cpuMax, m.cpuMaxPct)
+			memUsedSum += m.memUsed
+			memUsedMax = maxf(memUsedMax, m.memUsedMax)
+			memTotalSum += m.memTotal
+			u.dailyKeys = append(u.dailyKeys, m.day.Format("2006-01-02"))
+			u.dailyCPU = append(u.dailyCPU, m.cpuPct)
+			u.dailyMem = append(u.dailyMem, m.memPct())
 		}
 		if n := float64(len(metrics)); n > 0 {
 			u.days = len(metrics)
@@ -260,19 +301,15 @@ func (g *Generator) generateCapacityForecast(ctx context.Context, gc genCtx, dat
 	}
 	series := make([]nodeSeries, 0, len(nodes))
 	for _, node := range nodes {
-		metrics, mErr := g.queries.GetNodeMetricsDailyAvg(ctx, db.GetNodeMetricsDailyAvgParams{NodeID: node.ID, Bucket: gc.since})
+		metrics, mErr := g.nodeDailyUsage(ctx, node.ID, gc.since)
 		if mErr != nil {
 			return fmt.Errorf("daily metrics for %s: %w", node.Name, mErr)
 		}
 		ns := nodeSeries{name: node.Name, samples: len(metrics)}
 		for _, m := range metrics {
-			ns.times = append(ns.times, m.Day)
-			ns.cpu = append(ns.cpu, m.Cpu)
-			if m.MemTotal > 0 {
-				ns.mem = append(ns.mem, m.MemUsed/m.MemTotal*100)
-			} else {
-				ns.mem = append(ns.mem, 0)
-			}
+			ns.times = append(ns.times, m.day)
+			ns.cpu = append(ns.cpu, m.cpuPct)
+			ns.mem = append(ns.mem, m.memPct())
 		}
 		series = append(series, ns)
 	}
@@ -333,39 +370,67 @@ func (g *Generator) generateCapacityForecast(ctx context.Context, gc genCtx, dat
 		forecastRow(ns.name, "Memory %", ns.times, ns.mem)
 	}
 
-	// Storage pools: today's fill, deduplicated across nodes for shared pools.
-	byName := map[string]db.StoragePool{}
+	// Storage pools: today's fill. A shared pool is one pool however many nodes
+	// report it, counted once at the highest reading; a node's own pool (local,
+	// local-lvm) exists once per node, so it is keyed on the node as well.
+	type poolKey struct {
+		storage string
+		node    uuid.UUID
+	}
+	type poolFill struct {
+		pool                db.StoragePool
+		pct                 float64
+		name, label, detail string
+	}
+	var fills []poolFill
+	at := map[poolKey]int{}
 	for _, p := range pools {
 		if p.Total <= 0 || !p.Enabled {
 			continue
 		}
-		if cur, ok := byName[p.Storage]; !ok || p.Used > cur.Used {
-			byName[p.Storage] = p
+		k := poolKey{storage: p.Storage}
+		if !p.Shared {
+			k.node = p.NodeID
+		}
+		if i, ok := at[k]; !ok {
+			at[k] = len(fills)
+			fills = append(fills, poolFill{pool: p})
+		} else if p.Used > fills[i].pool.Used {
+			fills[i].pool = p
 		}
 	}
-	meters := make([]Meter, 0, len(byName))
+	for i := range fills {
+		f := &fills[i]
+		f.pct = float64(f.pool.Used) / float64(f.pool.Total) * 100
+		f.name, f.label, f.detail = f.pool.Storage, f.pool.Storage, f.pool.Type
+		if f.pool.Shared {
+			f.detail += " · shared"
+		} else if n, ok := nodeNames[f.pool.NodeID]; ok {
+			f.label += " on " + n
+			f.detail += " · " + n
+		}
+	}
+	sort.SliceStable(fills, func(i, j int) bool {
+		if fills[i].pct != fills[j].pct {
+			return fills[i].pct > fills[j].pct
+		}
+		return fills[i].label < fills[j].label
+	})
+	meters := make([]Meter, 0, len(fills))
 	var fullestPool string
 	var fullestPct float64
-	for _, p := range byName {
-		pct := float64(p.Used) / float64(p.Total) * 100
-		detail := p.Type
-		if p.Shared {
-			detail += " · shared"
-		} else if n, ok := nodeNames[p.NodeID]; ok {
-			detail += " · " + n
+	for _, f := range fills {
+		meters = append(meters, Meter{Name: f.name, Detail: f.detail, Used: float64(f.pool.Used), Total: float64(f.pool.Total), Tone: capacityTone(f.pct),
+			UsedText: fmt.Sprintf("%s of %s", formatBytes(float64(f.pool.Used)), formatBytes(float64(f.pool.Total))), Projection: "Today's fill; pool history is not yet sampled"})
+		if f.pct > fullestPct {
+			fullestPct, fullestPool = f.pct, f.label
 		}
-		meters = append(meters, Meter{Name: p.Storage, Detail: detail, Used: float64(p.Used), Total: float64(p.Total), Tone: capacityTone(pct),
-			UsedText: fmt.Sprintf("%s of %s", formatBytes(float64(p.Used)), formatBytes(float64(p.Total))), Projection: "Today's fill; pool history is not yet sampled"})
-		if pct > fullestPct {
-			fullestPct, fullestPool = pct, p.Storage
-		}
-		if pct >= 90 {
-			data.addFinding(SevCritical, fmt.Sprintf("Storage pool %s is %.0f %% full.", p.Storage, pct), "", "Storage pools")
-		} else if pct >= 80 {
-			data.addFinding(SevWarning, fmt.Sprintf("Storage pool %s is %.0f %% full.", p.Storage, pct), "", "Storage pools")
+		if f.pct >= 90 {
+			data.addFinding(SevCritical, fmt.Sprintf("Storage pool %s is %.0f %% full.", f.label, f.pct), "", "Storage pools")
+		} else if f.pct >= 80 {
+			data.addFinding(SevWarning, fmt.Sprintf("Storage pool %s is %.0f %% full.", f.label, f.pct), "", "Storage pools")
 		}
 	}
-	sort.Slice(meters, func(i, j int) bool { return meters[i].Used/meters[i].Total > meters[j].Used/meters[j].Total })
 
 	kpis := []KPI{}
 	if soonest.days >= 0 {
@@ -385,7 +450,7 @@ func (g *Generator) generateCapacityForecast(ctx context.Context, gc genCtx, dat
 	data.Notes = []NoteGroup{{Title: "How this report was computed", Items: []string{
 		"Node trends are fitted to the period's daily averages; a fit needs at least two days.",
 		"Storage pool figures are the collector's latest reading; growth is not projected until pool history is sampled.",
-		"Shared pools are counted once, at the highest reading any node reports.",
+		"Shared pools are counted once, at the highest reading any node reports; a node's own pools, such as local, are listed per node.",
 	}}}
 	return nil
 }
@@ -398,11 +463,51 @@ type vmReportStats struct {
 	cpuAvg, cpuMax                 float64
 	memUsed, memTotal              float64
 	memPct                         float64
+	memSource                      memSource
 	diskRead, diskWrite            float64
 	netIn, netOut                  float64
 	cpuCount                       int
 	diskTotal                      int64
 	hasMetrics                     bool
+}
+
+// memSource is whose view a guest's memory figure is (vm_metrics.mem_guest).
+type memSource int
+
+const (
+	memSourceUnknown memSource = iota // no reading in the period records one
+	memSourceGuest                    // the guest's own: balloon statistics, or a container's cgroup
+	memSourceHost                     // the host's view of a VM without balloon statistics
+	memSourceMixed                    // a real share of both
+)
+
+func (m memSource) String() string {
+	switch m {
+	case memSourceGuest:
+		return "guest"
+	case memSourceHost:
+		return "host RSS"
+	case memSourceMixed:
+		return "guest and host RSS"
+	}
+	return "not recorded"
+}
+
+// memSourceOf judges a figure from its readings' sources. A few host readings
+// among a VM's own are normal — PVE has no balloon statistics until the
+// guest's driver loads after a boot — so nine in ten decide it. ownPct is the
+// average of the guest's own readings; past the allocation it is not one.
+func memSourceOf(guest, host int64, ownPct float64) memSource {
+	total := guest + host
+	switch {
+	case total == 0:
+		return memSourceUnknown
+	case guest*10 >= total*9 && ownPct <= 100:
+		return memSourceGuest
+	case host*10 >= total*9:
+		return memSourceHost
+	}
+	return memSourceMixed
 }
 
 func (g *Generator) generateVMResourceUsage(ctx context.Context, gc genCtx, data *ReportData) error {
@@ -425,7 +530,7 @@ func (g *Generator) generateVMResourceUsage(ctx context.Context, gc genCtx, data
 			continue
 		}
 		s := vmReportStats{name: vm.Name, nodeName: nodeNames[vm.NodeID], vmType: vm.Type, status: vm.Status, vmid: int(vm.Vmid), cpuCount: int(vm.CpuCount), diskTotal: vm.DiskTotal}
-		metrics, mErr := g.queries.GetVMMetricsDailyAvg(ctx, db.GetVMMetricsDailyAvgParams{VmID: vm.ID, Bucket: gc.since})
+		metrics, mErr := g.vmDailyUsage(ctx, vm.ID, gc.since)
 		if mErr != nil {
 			return fmt.Errorf("daily metrics for guest %d: %w", vm.Vmid, mErr)
 		}
@@ -433,10 +538,10 @@ func (g *Generator) generateVMResourceUsage(ctx context.Context, gc genCtx, data
 			s.hasMetrics = true
 			var cpuSum, memUsedSum, memTotalSum float64
 			for _, m := range metrics {
-				cpuSum += m.Cpu
-				s.cpuMax = maxf(s.cpuMax, m.CpuMax)
-				memUsedSum += m.MemUsed
-				memTotalSum += m.MemTotal
+				cpuSum += m.cpuPct
+				s.cpuMax = maxf(s.cpuMax, m.cpuMaxPct)
+				memUsedSum += m.memUsed
+				memTotalSum += m.memTotal
 			}
 			n := float64(len(metrics))
 			s.cpuAvg = cpuSum / n
@@ -450,6 +555,8 @@ func (g *Generator) generateVMResourceUsage(ctx context.Context, gc genCtx, data
 		if ioErr != nil {
 			return fmt.Errorf("IO rates for guest %d: %w", vm.Vmid, ioErr)
 		}
+		var guestN, hostN int64
+		var guestUsed, guestTotal float64
 		if len(ioRates) > 0 {
 			n := float64(len(ioRates))
 			for _, io := range ioRates {
@@ -457,6 +564,20 @@ func (g *Generator) generateVMResourceUsage(ctx context.Context, gc genCtx, data
 				s.diskWrite += io.DiskWriteRate / n
 				s.netIn += io.NetInRate / n
 				s.netOut += io.NetOutRate / n
+				guestN, hostN = guestN+io.GuestSamples, hostN+io.HostSamples
+				guestUsed, guestTotal = guestUsed+io.GuestMemUsed, guestTotal+io.GuestMemTotal
+			}
+		}
+		if s.hasMetrics {
+			// The guest's own figure is averaged over its own readings alone, in
+			// the raw window their source is kept for: the period average can
+			// blend in host readings from before its driver reported.
+			ownPct := 0.0
+			if guestTotal > 0 {
+				ownPct = guestUsed / guestTotal * 100
+			}
+			if s.memSource = memSourceOf(guestN, hostN, ownPct); s.memSource == memSourceGuest {
+				s.memUsed, s.memTotal, s.memPct = guestUsed/float64(guestN), guestTotal/float64(guestN), ownPct
 			}
 		}
 		stats = append(stats, s)
@@ -503,17 +624,25 @@ func buildVMResourceUsage(gc genCtx, stats []vmReportStats, data *ReportData) {
 		data.addFinding(SevInfo, fmt.Sprintf("%s idle for the whole period while running:", pluralWere(idle, "guest")), nameList(idleNames, 6)+". They hold memory and vCPUs that could be reclaimed.", "All guests")
 	}
 	for _, s := range stats {
-		if s.hasMetrics && s.memPct >= 95 && s.status == "running" {
-			data.addFinding(SevWarning, fmt.Sprintf("%s (%d) averaged %.0f %% of its memory", s.name, s.vmid, s.memPct), "over the period; it may be swapping or about to.", "Top memory consumers")
+		// Only the guest's own figure says anything about pressure inside it:
+		// the host's view of a VM sits near 100 % once its RAM has been touched.
+		if s.hasMetrics && s.memSource == memSourceGuest && s.memPct >= 95 && s.status == "running" {
+			// A container's figure leaves page cache out; a VM's is total minus
+			// free, and only a Linux guest's free leaves its page cache out too.
+			text := "by its own count; it may be swapping or about to."
+			if s.vmType == "qemu" {
+				text = "by its own count, which for a Linux guest includes page cache; it may be swapping or about to, so check inside the guest."
+			}
+			data.addFinding(SevWarning, fmt.Sprintf("%s (%d) averaged %.0f %% of its memory", s.name, s.vmid, s.memPct), text, "Top memory consumers")
 		}
 		if s.hasMetrics && s.cpuAvg >= 90 && s.status == "running" {
 			data.addFinding(SevWarning, fmt.Sprintf("%s (%d) averaged %.0f %% CPU", s.name, s.vmid, s.cpuAvg), "over the period; it is CPU-bound.", "Top CPU consumers")
 		}
 	}
 
-	top := func(key func(vmReportStats) float64) []vmReportStats {
-		out := make([]vmReportStats, len(stats))
-		copy(out, stats)
+	top := func(from []vmReportStats, key func(vmReportStats) float64) []vmReportStats {
+		out := make([]vmReportStats, len(from))
+		copy(out, from)
 		sort.SliceStable(out, func(i, j int) bool { return key(out[i]) > key(out[j]) })
 		if len(out) > topN {
 			out = out[:topN]
@@ -540,14 +669,43 @@ func buildVMResourceUsage(gc genCtx, stats []vmReportStats, data *ReportData) {
 	netKey := func(s vmReportStats) float64 { return s.netIn + s.netOut }
 	diskKey := func(s vmReportStats) float64 { return s.diskRead + s.diskWrite }
 
-	topCPU, topMem, topNet, topDisk := top(cpuKey), top(memKey), top(netKey), top(diskKey)
+	// Memory is ranked only among the guests' own figures; the host's view of
+	// a VM is listed apart.
+	var ownMem, otherMem []vmReportStats
+	for _, s := range stats {
+		if s.memSource == memSourceGuest {
+			ownMem = append(ownMem, s)
+		} else {
+			otherMem = append(otherMem, s)
+		}
+	}
+	topCPU, topMem, topOtherMem, topNet, topDisk := top(stats, cpuKey), top(ownMem, memKey), top(otherMem, memKey), top(stats, netKey), top(stats, diskKey)
 	cpuRows := make([][]Cell, 0, len(topCPU))
 	for _, s := range topCPU {
 		cpuRows = append(cpuRows, []Cell{strong(s.name), idCell(s.vmid), text(s.nodeName), num(s.cpuCount), num(fmt.Sprintf("%.1f", s.cpuAvg)), num(fmt.Sprintf("%.1f", s.cpuMax))})
 	}
+	memRow := func(s vmReportStats) []Cell {
+		return []Cell{strong(s.name), idCell(s.vmid), text(s.nodeName), num(fmt.Sprintf("%.1f", s.memPct)), num(formatBytes(s.memUsed)), num(formatBytes(s.memTotal))}
+	}
 	memRows := make([][]Cell, 0, len(topMem))
 	for _, s := range topMem {
-		memRows = append(memRows, []Cell{strong(s.name), idCell(s.vmid), text(s.nodeName), num(fmt.Sprintf("%.1f", s.memPct)), num(formatBytes(s.memUsed)), num(formatBytes(s.memTotal))})
+		memRows = append(memRows, memRow(s))
+	}
+	otherMemRows := make([][]Cell, 0, len(topOtherMem))
+	for _, s := range topOtherMem {
+		otherMemRows = append(otherMemRows, append(memRow(s), text(s.memSource.String())))
+	}
+	memColumns := func(extra ...Column) []Column {
+		return append([]Column{nowrapCol("Guest"), nowrapCol("VMID"), col("Node"), numCol("Mem avg %"), numCol("Mem used"), numCol("Mem total")}, extra...)
+	}
+	memBlocks := []Block{
+		barChart("Memory avg %", topMem, memKey, FormatPercent),
+		tableBlock("", "", &Table{Columns: memColumns(), Rows: memRows}, "No guest reported its own memory use in the period."),
+	}
+	if len(otherMemRows) > 0 {
+		memBlocks = append(memBlocks, tableBlock("Not reported by the guest",
+			"Without balloon statistics from its driver, a VM's figure is the memory the host holds for it (host RSS): it nears or passes 100 % once the guest has touched its allocation, and says nothing about pressure inside it.",
+			&Table{Columns: memColumns(col("Source")), Rows: otherMemRows}, ""))
 	}
 	netRows := make([][]Cell, 0, len(topNet))
 	for _, s := range topNet {
@@ -560,9 +718,7 @@ func buildVMResourceUsage(gc genCtx, stats []vmReportStats, data *ReportData) {
 	data.addSection("Top CPU consumers", fmt.Sprintf("Period average CPU %% per guest, top %d.", topN),
 		barChart("CPU avg %", topCPU, cpuKey, FormatPercent),
 		tableBlock("", "", &Table{Columns: []Column{nowrapCol("Guest"), nowrapCol("VMID"), col("Node"), numCol("vCPUs"), numCol("CPU avg %"), numCol("CPU peak %")}, Rows: cpuRows}, "No guest metrics in the period."))
-	data.addSection("Top memory consumers", fmt.Sprintf("Period average memory %% of each guest's own allocation, top %d.", topN),
-		barChart("Memory avg %", topMem, memKey, FormatPercent),
-		tableBlock("", "", &Table{Columns: []Column{nowrapCol("Guest"), nowrapCol("VMID"), col("Node"), numCol("Mem avg %"), numCol("Mem used"), numCol("Mem total")}, Rows: memRows}, "No guest metrics in the period."))
+	data.addSection("Top memory consumers", fmt.Sprintf("Average memory %% of each guest's own allocation as the guest itself reports it (its balloon driver, or a container's cgroup), top %d.", topN), memBlocks...)
 	data.addSection("Top network consumers", fmt.Sprintf("Average in plus out, top %d.", topN),
 		barChart("Network in+out", topNet, netKey, FormatRate),
 		tableBlock("", "", &Table{Columns: []Column{nowrapCol("Guest"), nowrapCol("VMID"), col("Node"), numCol("In/s"), numCol("Out/s"), numCol("Total/s")}, Rows: netRows}, "No guest I/O in the period."))
@@ -579,18 +735,21 @@ func buildVMResourceUsage(gc genCtx, stats []vmReportStats, data *ReportData) {
 		if s.vmType == "lxc" {
 			kind = "CT"
 		}
-		cpu, mem := mute("—"), mute("—")
+		cpu, mem, memSrc := mute("—"), mute("—"), mute("—")
 		if s.hasMetrics {
 			cpu = num(fmt.Sprintf("%.1f", s.cpuAvg))
 			mem = num(fmt.Sprintf("%.1f", s.memPct))
+			memSrc = text(s.memSource.String())
 		}
-		all = append(all, []Cell{idCell(s.vmid), strong(s.name), chips(Chip{Text: kind, Kind: ChipType}), text(s.nodeName), statusPill(s.status), num(s.cpuCount), cpu, mem, num(formatBytes(float64(s.diskTotal))), num(formatBytesRate(s.netIn)), num(formatBytesRate(s.netOut))})
+		all = append(all, []Cell{idCell(s.vmid), strong(s.name), chips(Chip{Text: kind, Kind: ChipType}), text(s.nodeName), statusPill(s.status), num(s.cpuCount), cpu, mem, memSrc, num(formatBytes(float64(s.diskTotal))), num(formatBytesRate(s.netIn)), num(formatBytesRate(s.netOut))})
 	}
-	data.addSection("All guests", "", wideTable("", &Table{Columns: []Column{nowrapCol("VMID"), nowrapCol("Guest"), col("Type"), col("Node"), col("Status"), numCol("vCPUs"), numCol("CPU avg %"), numCol("Mem avg %"), numCol("Disk alloc"), numCol("Net in/s"), numCol("Net out/s")}, Rows: all}, "No guests on this cluster."))
+	data.addSection("All guests", "", wideTable("", &Table{Columns: []Column{nowrapCol("VMID"), nowrapCol("Guest"), col("Type"), col("Node"), col("Status"), numCol("vCPUs"), numCol("CPU avg %"), numCol("Mem avg %"), col("Mem source"), numCol("Disk alloc"), numCol("Net in/s"), numCol("Net out/s")}, Rows: all}, "No guests on this cluster."))
 	data.Notes = []NoteGroup{{Title: "How this report was computed", Items: []string{
-		"Averages are over the hourly guest metric rollups within the period; a guest with no rollups shows a dash.",
-		"Memory % is of the guest's own allocation, not of the node.",
-		"A guest counts as idle when it was running with under 2 % average CPU, under 10 KB/s of network and under 50 KB/s of disk I/O for the whole period.",
+		"Averages are over the hourly guest metric rollups within the period, except a guest's own memory figure (below); a guest with no rollups shows a dash.",
+		"CPU % is of the guest's own vCPUs; memory % is of its own allocation, not of the node.",
+		"Memory is the guest's own figure when its balloon driver sends statistics (total minus free, where a Linux guest counts its page cache as used) and, for a container, its cgroup's usage without page cache. Otherwise it is the host's view (host RSS), and no memory warning is raised from it.",
+		"A figure counts as the guest's own when nine in ten of its readings that record a source are, and is then averaged over those readings alone. Raw readings are kept for 30 days, so on a longer period it covers the last 30.",
+		"A guest counts as idle when it was running with under 2 % average CPU, under 10 KiB/s of network and under 50 KiB/s of disk I/O for the whole period.",
 		"Templates are excluded.",
 	}}}
 }

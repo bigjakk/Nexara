@@ -30,6 +30,18 @@ type vmMetricSnapshot struct {
 	DiskWrite int64     `json:"disk_write"`
 	NetIn     int64     `json:"net_in"`
 	NetOut    int64     `json:"net_out"`
+	// MemGuest is vm_metrics.mem_guest: whether MemUsed is the guest's own
+	// figure or the host's view of it, nil when the guest is not running.
+	MemGuest *bool `json:"mem_guest"`
+}
+
+// memGuest is a reading's MemGuest: nil when the guest is not running, so
+// there is no reading, else guestsOwn.
+func memGuest(running, guestsOwn bool) *bool {
+	if !running {
+		return nil
+	}
+	return &guestsOwn
 }
 
 // nodeCollectionResult holds all data collected from syncing a single node.

@@ -875,6 +875,10 @@ type Querier interface {
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
 	GetVMFolder(ctx context.Context, id uuid.UUID) (VmFolder, error)
+	// Per day, the guest's disk and network rates from its counters and, from the
+	// same rows rather than a second scan, its memory readings by source
+	// (vm_metrics.mem_guest) with the guest's own ones summed. A reading with no
+	// source (guest not running, or the row predates the column) is neither.
 	GetVMIODailyRate(ctx context.Context, arg GetVMIODailyRateParams) ([]GetVMIODailyRateRow, error)
 	GetVMImportJob(ctx context.Context, id uuid.UUID) (VmImportJob, error)
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)

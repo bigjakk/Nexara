@@ -1386,6 +1386,8 @@ type VmMetric struct {
 	DiskWrite int64     `json:"disk_write"`
 	NetIn     int64     `json:"net_in"`
 	NetOut    int64     `json:"net_out"`
+	// TRUE when mem_used is the guest's own figure (balloon statistics, or a container's cgroup), FALSE when it is the host's view of a VM without balloon statistics (memory the QEMU process holds, can exceed mem_total), NULL when there was no reading (guest not running, or the row predates the column)
+	MemGuest pgtype.Bool `json:"mem_guest"`
 }
 
 type VmMetrics1h struct {

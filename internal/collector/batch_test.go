@@ -109,6 +109,7 @@ func TestBatchInsertNodeMetrics(t *testing.T) {
 }
 
 func TestBatchInsertVMMetrics(t *testing.T) {
+	guest := true
 	tests := []struct {
 		name      string
 		snapshots []vmMetricSnapshot
@@ -122,7 +123,7 @@ func TestBatchInsertVMMetrics(t *testing.T) {
 		{
 			name: "single VM",
 			snapshots: []vmMetricSnapshot{
-				{VMID: uuid.New(), CPUUsage: 0.8, MemUsed: 4096, MemTotal: 8192, DiskRead: 500, DiskWrite: 600, NetIn: 700, NetOut: 800},
+				{VMID: uuid.New(), CPUUsage: 0.8, MemUsed: 4096, MemTotal: 8192, DiskRead: 500, DiskWrite: 600, NetIn: 700, NetOut: 800, MemGuest: &guest},
 			},
 			wantCount: 1,
 		},
@@ -153,6 +154,15 @@ func TestBatchInsertVMMetrics(t *testing.T) {
 				call := copier.calls[0]
 				if call.tableName[0] != "vm_metrics" {
 					t.Errorf("table = %v, want [vm_metrics]", call.tableName)
+				}
+				// The memory source travels with each reading, NULL included.
+				if call.columnNames[9] != "mem_guest" {
+					t.Errorf("columns = %v, want mem_guest tenth", call.columnNames)
+				}
+				for i, row := range call.rows {
+					if row[9] != any(tt.snapshots[i].MemGuest) {
+						t.Errorf("row %d mem_guest = %v, want %v", i, row[9], tt.snapshots[i].MemGuest)
+					}
 				}
 			}
 		})

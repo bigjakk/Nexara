@@ -243,14 +243,17 @@ func plural(n int, one, many string) string {
 
 // --- Formatting ---
 
+// formatBytesRate and formatBytes write binary multiples under their own
+// names (1 GiB = 1024 MiB): the numbers the UI shows, which divides by 1024
+// too.
 func formatBytesRate(b float64) string {
 	switch {
 	case b >= 1<<30:
-		return fmt.Sprintf("%.1f GB/s", b/float64(1<<30))
+		return fmt.Sprintf("%.1f GiB/s", b/float64(1<<30))
 	case b >= 1<<20:
-		return fmt.Sprintf("%.1f MB/s", b/float64(1<<20))
+		return fmt.Sprintf("%.1f MiB/s", b/float64(1<<20))
 	case b >= 1<<10:
-		return fmt.Sprintf("%.1f KB/s", b/float64(1<<10))
+		return fmt.Sprintf("%.1f KiB/s", b/float64(1<<10))
 	default:
 		return fmt.Sprintf("%.0f B/s", b)
 	}
@@ -259,13 +262,13 @@ func formatBytesRate(b float64) string {
 func formatBytes(b float64) string {
 	switch {
 	case b >= 1<<40:
-		return fmt.Sprintf("%.1f TB", b/float64(1<<40))
+		return fmt.Sprintf("%.1f TiB", b/float64(1<<40))
 	case b >= 1<<30:
-		return fmt.Sprintf("%.1f GB", b/float64(1<<30))
+		return fmt.Sprintf("%.1f GiB", b/float64(1<<30))
 	case b >= 1<<20:
-		return fmt.Sprintf("%.1f MB", b/float64(1<<20))
+		return fmt.Sprintf("%.1f MiB", b/float64(1<<20))
 	case b >= 1<<10:
-		return fmt.Sprintf("%.1f KB", b/float64(1<<10))
+		return fmt.Sprintf("%.1f KiB", b/float64(1<<10))
 	default:
 		return fmt.Sprintf("%.0f B", b)
 	}

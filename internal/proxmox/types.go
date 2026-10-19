@@ -297,6 +297,28 @@ type VirtualMachine struct {
 	PID       int     `json:"pid"`
 	Template  int     `json:"template"`
 	Tags      string  `json:"tags"`
+	// BalloonInfo is present only in a running VM's full status
+	// (qemu?full=1, status/current) when it has a balloon device.
+	BalloonInfo *BalloonInfo `json:"ballooninfo,omitempty"`
+}
+
+// BalloonInfo is the balloon device's part of a VM's full status. TotalMem and
+// FreeMem are the guest driver's own statistics: absent until the driver
+// sends them, and never sent by a guest without one. They stay raw because
+// only their presence is read, and a value of an unexpected type must not
+// fail the whole VM list that sync, DRS and rolling updates decode.
+type BalloonInfo struct {
+	TotalMem json.RawMessage `json:"total_mem,omitempty"`
+	FreeMem  json.RawMessage `json:"free_mem,omitempty"`
+}
+
+// GuestReportsMemory reports whether Mem is the guest's own figure. PVE sets
+// it to total_mem minus free_mem exactly when both are defined (qemu-server
+// vmstatus); otherwise Mem is the host's view, the memory the QEMU process
+// holds on the node, which can exceed MaxMem.
+func (vm VirtualMachine) GuestReportsMemory() bool {
+	defined := func(raw json.RawMessage) bool { return len(raw) > 0 && string(raw) != "null" }
+	return vm.BalloonInfo != nil && defined(vm.BalloonInfo.TotalMem) && defined(vm.BalloonInfo.FreeMem)
 }
 
 // EffectiveStatus returns the real VM status by checking qmpstatus.

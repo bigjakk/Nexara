@@ -139,3 +139,102 @@ func TestBuildClusterDigest_LiftsFindingsAndFigures(t *testing.T) {
 		}
 	}
 }
+
+// Each node CPU finding at its boundary, in the percent the loaders produce.
+func TestBuildResourceUtilization_CPUFindingBoundaries(t *testing.T) {
+	t.Parallel()
+	node := func(name string, cpu float64) nodeUsage {
+		return nodeUsage{name: name, status: "online", days: 7, cpuAvg: cpu, cpuMax: cpu}
+	}
+	cases := []struct {
+		name  string
+		nodes []nodeUsage
+		want  []string
+	}{
+		{"80 % is serious", []nodeUsage{node("pve-01", 80)}, []string{"serious: pve-01 averaged 80 % CPU"}},
+		{"under 80 % is a warning", []nodeUsage{node("pve-01", 79.4)}, []string{"warning: pve-01 averaged 79 % CPU"}},
+		{"60 % is a warning", []nodeUsage{node("pve-01", 60)}, []string{"warning: pve-01 averaged 60 % CPU"}},
+		{"under 60 % is nothing", []nodeUsage{node("pve-01", 59.9)}, nil},
+		{"over twice the cluster average", []nodeUsage{node("pve-01", 30), node("pve-02", 5), node("pve-03", 5)},
+			[]string{"info: pve-01 carries twice the cluster's average CPU load"}},
+		{"exactly twice is not", []nodeUsage{node("pve-01", 20), node("pve-02", 5), node("pve-03", 5)}, nil},
+		{"not on a cluster averaging 5 % or less", []nodeUsage{node("pve-01", 12), node("pve-02", 1.5), node("pve-03", 1.5)}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			data := &ReportData{}
+			buildResourceUtilization(testCtx(), tc.nodes, data)
+			var got []string
+			for _, f := range data.Findings {
+				if strings.Contains(f.Lead, "CPU") {
+					got = append(got, f.Severity+": "+f.Lead)
+				}
+			}
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Errorf("CPU findings = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The guest CPU-bound finding and the idle test at their boundaries, in percent.
+func TestBuildVMResourceUsage_CPUBoundAndIdleBoundaries(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		cpu            float64
+		cpuBound, idle bool
+	}{
+		{90, true, false},
+		{89.9, false, false},
+		{2, false, false},
+		{1.9, false, true},
+	}
+	for _, c := range cases {
+		data := &ReportData{}
+		buildVMResourceUsage(testCtx(), []vmReportStats{{name: "linux01", vmid: 101, vmType: "qemu", status: "running", hasMetrics: true, cpuAvg: c.cpu}}, data)
+		if got := hasFinding(data, SevWarning, "it is CPU-bound"); got != c.cpuBound {
+			t.Errorf("cpu %v: CPU-bound finding = %v, want %v", c.cpu, got, c.cpuBound)
+		}
+		if got := kpiByLabel(data, "Idle while running").Value == "1"; got != c.idle {
+			t.Errorf("cpu %v: idle = %v, want %v", c.cpu, got, c.idle)
+		}
+	}
+}
+
+// The swap warning names page cache only where the figure counts it: a Linux
+// VM's own total-minus-free does, a container's cgroup usage does not.
+func TestBuildVMResourceUsage_SwapWarningWordingFollowsTheGuestType(t *testing.T) {
+	t.Parallel()
+	data := &ReportData{}
+	buildVMResourceUsage(testCtx(), []vmReportStats{
+		{name: "linux01", vmid: 101, vmType: "qemu", status: "running", hasMetrics: true, cpuAvg: 5, memPct: 96, memSource: memSourceGuest},
+		{name: "linux02", vmid: 102, vmType: "lxc", status: "running", hasMetrics: true, cpuAvg: 5, memPct: 96, memSource: memSourceGuest},
+	}, data)
+	if !hasFinding(data, SevWarning, "linux01 (101) averaged 96 % of its memory by its own count, which for a Linux guest includes page cache") ||
+		!hasFinding(data, SevWarning, "linux02 (102) averaged 96 % of its memory by its own count; it may be swapping") {
+		t.Errorf("swap warnings = %v", findingLeads(data))
+	}
+}
+
+func TestMemSourceOf(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		guest, host int64
+		pct         float64
+		want        memSource
+	}{
+		{"no reading records a source", 0, 0, 50, memSourceUnknown},
+		{"all the guest's own", 100, 0, 96, memSourceGuest},
+		{"a boot's host readings among the guest's", 90, 10, 60, memSourceGuest},
+		{"more than one in ten from the host", 89, 11, 60, memSourceMixed},
+		{"all the host's", 0, 100, 100.4, memSourceHost},
+		{"an own figure past its allocation is not the guest's", 95, 5, 100.2, memSourceMixed},
+	}
+	for _, c := range cases {
+		if got := memSourceOf(c.guest, c.host, c.pct); got != c.want {
+			t.Errorf("%s: memSourceOf(%d, %d, %v) = %v, want %v", c.name, c.guest, c.host, c.pct, got, c.want)
+		}
+	}
+}
