@@ -22,7 +22,7 @@ describe("StatsOverview", () => {
     expect(screen.getByText("5")).toBeInTheDocument();
     expect(screen.getByText("23")).toBeInTheDocument();
     expect(screen.getByText("/30")).toBeInTheDocument();
-    expect(screen.getByText("1.0 TB")).toBeInTheDocument();
+    expect(screen.getByText("1.0 TiB")).toBeInTheDocument();
   });
 
   it("renders status sublines", () => {
@@ -104,7 +104,7 @@ describe("StatsOverview", () => {
 
     expect(screen.getByText("12.5%")).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument();
-    expect(screen.getByText("32.0 GB of 64.0 GB used")).toBeInTheDocument();
+    expect(screen.getByText("32.0 GiB of 64.0 GiB used")).toBeInTheDocument();
   });
 
   it("shows skeletons when loading", () => {

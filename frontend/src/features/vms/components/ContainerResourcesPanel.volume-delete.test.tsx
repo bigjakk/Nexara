@@ -268,7 +268,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
 
     // An ordinary edit rides along: the confirmation gates the Save, it does
     // not split the delete out of it.
-    fill(fieldInput("Memory (MB)"), "2048");
+    fill(fieldInput("Memory (MiB)"), "2048");
     await stage("unused0");
     await stage("unused2");
     await user.click(save);
@@ -512,7 +512,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
       expect(queryClient.isFetching({ queryKey: CONFIG_KEY })).toBe(0);
     });
 
-    const memory = await waitFor(() => fieldInput("Memory (MB)"));
+    const memory = await waitFor(() => fieldInput("Memory (MiB)"));
     fill(memory, "2048");
     await user.click(screen.getByText("Save Changes", { selector: "button" }));
     await waitFor(() => {
@@ -588,7 +588,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     holdRefetch();
     mockedPut.mockResolvedValue({ status: "ok" });
     const { queryClient, save } = await openPanel();
-    const memory = fieldInput("Memory (MB)");
+    const memory = fieldInput("Memory (MiB)");
     fill(memory, "2048");
     await user.click(screen.getByRole("button", { name: "Remove NIC" }));
     await stage("unused0");
@@ -638,7 +638,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     await waitFor(() => {
       expect(save).toBeDisabled();
     });
-    expect(fieldInput("Memory (MB)")).toHaveValue(2048);
+    expect(fieldInput("Memory (MiB)")).toHaveValue(2048);
     expect(fieldInput("Cores")).toHaveValue(4);
     expect(screen.queryByText("unused0")).not.toBeInTheDocument();
     expect(screen.queryByText(/\d+ changes?/)).not.toBeInTheDocument();
@@ -800,7 +800,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
   // and Cancel says so, and drops the edits it reloads over.
   it("keeps showing the list it opened on when the config changes under it, says Cancel will reload, and applies the change once closed", async () => {
     const { queryClient, save } = await openPanel();
-    fill(fieldInput("Memory (MB)"), "2048");
+    fill(fieldInput("Memory (MiB)"), "2048");
     await stage("unused0");
     await user.click(save);
     const dialog = await screen.findByRole("alertdialog");
@@ -831,7 +831,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     });
     expect(isStaged("unused0")).toBe(false);
     expect(fieldInput("Hostname")).toHaveValue("linux02");
-    expect(fieldInput("Memory (MB)")).toHaveValue(1024);
+    expect(fieldInput("Memory (MiB)")).toHaveValue(1024);
     expect(save).toBeDisabled();
     expectNothingMutated();
     // And the next Save is built on the config it reloaded.
@@ -1000,7 +1000,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     [
       "a field changed elsewhere",
       () => {
-        fill(fieldInput("Memory (MB)"), "2048");
+        fill(fieldInput("Memory (MiB)"), "2048");
         return Promise.resolve();
       },
       { memory: 4096 },
@@ -1067,7 +1067,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
   // of the Save goes too, and the notice has to say so.
   it("closes, saving nothing, when every staged key is gone, and says the reload discarded the rest", async () => {
     const { queryClient, save } = await openPanel();
-    fill(fieldInput("Memory (MB)"), "2048");
+    fill(fieldInput("Memory (MiB)"), "2048");
     await stage("unused0");
     await user.click(save);
     const dialog = await screen.findByRole("alertdialog");
@@ -1086,7 +1086,7 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
       /no longer on this container, so nothing was saved, and the panel reloaded, discarding any other unsaved changes/i,
     );
     await waitFor(() => {
-      expect(fieldInput("Memory (MB)")).toHaveValue(1024);
+      expect(fieldInput("Memory (MiB)")).toHaveValue(1024);
     });
     expect(save).toBeDisabled();
     expectNothingMutated();

@@ -462,9 +462,9 @@ func (h *SettingsHandler) UploadLogo(c fiber.Ctx, _ *apischema.Params) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Logo file is required")
 	}
 
-	// Validate file size (max 2MB)
+	// Validate file size (max 2 MiB)
 	if file.Size > 2*1024*1024 {
-		return fiber.NewError(fiber.StatusBadRequest, "Logo file too large (max 2MB)")
+		return fiber.NewError(fiber.StatusBadRequest, "Logo file too large (max 2 MiB)")
 	}
 
 	// Validate content type
@@ -491,7 +491,7 @@ func (h *SettingsHandler) UploadLogo(c fiber.Ctx, _ *apischema.Params) error {
 		return fmt.Errorf("read uploaded file: %w", err)
 	}
 	if int64(len(content)) > 2*1024*1024 {
-		return fiber.NewError(fiber.StatusBadRequest, "Logo file too large (max 2MB)")
+		return fiber.NewError(fiber.StatusBadRequest, "Logo file too large (max 2 MiB)")
 	}
 
 	if err := validateImageUpload(content, ext); err != nil {
@@ -556,9 +556,9 @@ func (h *SettingsHandler) UploadFavicon(c fiber.Ctx, _ *apischema.Params) error 
 		return fiber.NewError(fiber.StatusBadRequest, "Favicon file is required")
 	}
 
-	// Validate file size (max 512KB)
+	// Validate file size (max 512 KiB)
 	if file.Size > 512*1024 {
-		return fiber.NewError(fiber.StatusBadRequest, "Favicon file too large (max 512KB)")
+		return fiber.NewError(fiber.StatusBadRequest, "Favicon file too large (max 512 KiB)")
 	}
 
 	ext := strings.ToLower(filepath.Ext(file.Filename))
@@ -577,7 +577,7 @@ func (h *SettingsHandler) UploadFavicon(c fiber.Ctx, _ *apischema.Params) error 
 		return fmt.Errorf("read uploaded file: %w", err)
 	}
 	if int64(len(content)) > 512*1024 {
-		return fiber.NewError(fiber.StatusBadRequest, "Favicon file too large (max 512KB)")
+		return fiber.NewError(fiber.StatusBadRequest, "Favicon file too large (max 512 KiB)")
 	}
 
 	if err := validateImageUpload(content, ext); err != nil {

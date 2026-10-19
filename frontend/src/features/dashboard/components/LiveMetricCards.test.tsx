@@ -30,15 +30,15 @@ describe("LiveMetricCards", () => {
     expect(screen.getByText("Memory Usage")).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument();
     expect(screen.getByText("Disk I/O")).toBeInTheDocument();
-    expect(screen.getByText("1.0 MB/s / 2.0 MB/s")).toBeInTheDocument();
+    expect(screen.getByText("1.0 MiB/s / 2.0 MiB/s")).toBeInTheDocument();
     expect(screen.getByText("Network")).toBeInTheDocument();
-    expect(screen.getByText("512.0 KB/s / 256.0 KB/s")).toBeInTheDocument();
+    expect(screen.getByText("512.0 KiB/s / 256.0 KiB/s")).toBeInTheDocument();
   });
 
   it("shows used/total bytes under the memory card", () => {
     renderWithProviders(<LiveMetricCards metrics={metrics} />);
 
-    expect(screen.getByText("32.0 GB of 64.0 GB used")).toBeInTheDocument();
+    expect(screen.getByText("32.0 GiB of 64.0 GiB used")).toBeInTheDocument();
   });
 
   it("renders a sparkline per card once history has 2+ points", () => {

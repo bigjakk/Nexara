@@ -152,7 +152,7 @@ export function BrandingPage() {
               Logo
             </CardTitle>
             <CardDescription>
-              Upload a custom logo (PNG, JPG, SVG, or WebP, max 2MB).
+              Upload a custom logo (PNG, JPG, SVG, or WebP, max 2 MiB).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -202,7 +202,7 @@ export function BrandingPage() {
               Favicon
             </CardTitle>
             <CardDescription>
-              Upload a custom favicon (.ico, .png, or .svg, max 512KB).
+              Upload a custom favicon (.ico, .png, or .svg, max 512 KiB).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

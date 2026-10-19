@@ -54,7 +54,7 @@ describe("ClusterCard", () => {
     expect(screen.getByText("3 nodes")).toBeInTheDocument();
     expect(screen.getByText("12 VMs")).toBeInTheDocument();
     expect(screen.getByText("5 CTs")).toBeInTheDocument();
-    expect(screen.getByText("5.0 TB")).toBeInTheDocument();
+    expect(screen.getByText("5.0 TiB")).toBeInTheDocument();
   });
 
   it("uses singular form for count of 1", () => {
@@ -105,7 +105,7 @@ describe("ClusterCard", () => {
         }}
       />,
     );
-    expect(screen.getByText("32.0 GB of 64.0 GB used")).toBeInTheDocument();
+    expect(screen.getByText("32.0 GiB of 64.0 GiB used")).toBeInTheDocument();
   });
 
   it("renders a PVE version chip when version is known", () => {

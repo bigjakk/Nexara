@@ -34,7 +34,7 @@ interface MetricChartProps {
   color: string;
   formatValue?: (value: number) => string;
   timeRange?: TimeRange;
-  /** Extra context shown next to the current value (e.g. "65.2 GB of 125.7 GB"). */
+  /** Extra context shown next to the current value (e.g. "65.2 GiB of 125.7 GiB"). */
   headerDetail?: string | undefined;
 }
 

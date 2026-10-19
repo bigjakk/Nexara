@@ -115,7 +115,7 @@ interface VirtioWinScheduleFieldsProps {
  * The "when does this check" half of the config card.
  *
  * What is being scheduled is not really the upstream lookup — that is one small
- * request — but the ~840 MB fetch a lookup can dispatch, which is why an
+ * request — but the ~840 MiB fetch a lookup can dispatch, which is why an
  * operator wants it aimed at a window rather than at whenever the container
  * last restarted.
  */

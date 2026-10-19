@@ -998,7 +998,7 @@ The card shows **Last checked** and **Next check**, and lets you say when the ne
 | `Daily at HH:MM` | One check a day, at that time |
 | `Weekly on <day> at HH:MM` | One check a week |
 
-What is really being scheduled is not the upstream lookup — that is one small request — but the **~840 MB fetch** a lookup can dispatch, which is why the timed options exist: point them at a maintenance window.
+What is really being scheduled is not the upstream lookup — that is one small request — but the **~840 MiB fetch** a lookup can dispatch, which is why the timed options exist: point them at a maintenance window.
 
 For the timed options, set the **time zone** as well. Left on `Server time` the hour is read in the container's own zone, which is almost always UTC.
 

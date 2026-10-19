@@ -2656,7 +2656,7 @@ export function HardwarePanel({
             </div>
             {vgaType === "qxl" ? (
               <div className="space-y-1">
-                <Label className="text-xs">QXL Memory (MB)</Label>
+                <Label className="text-xs">QXL Memory (MiB)</Label>
                 <Input
                   type="number"
                   min={0}
@@ -3133,7 +3133,7 @@ export function HardwarePanel({
                 </select>
               </div>
               <div className="space-y-0.5">
-                <Label className="text-[10px]">Size (GB)</Label>
+                <Label className="text-[10px]">Size (GiB)</Label>
                 <Input
                   type="number"
                   min={1}

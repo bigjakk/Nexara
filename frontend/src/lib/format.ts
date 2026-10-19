@@ -1,15 +1,34 @@
-const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"] as const;
+import { usePreferencesStore } from "@/stores/preferences-store";
+
+const BINARY_UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"] as const;
+const DECIMAL_UNITS = ["B", "kB", "MB", "GB", "TB", "PB"] as const;
+
+/**
+ * Scales a byte count in the unit system chosen under Settings → Appearance:
+ * binary (the default) divides by 1024 and says so — "GiB", the figures the
+ * server-rendered reports print — and decimal divides by 1000 ("GB").
+ */
+function scaleBytes(
+  bytes: number,
+): { value: number; unit: string; index: number } | undefined {
+  const decimal =
+    usePreferencesStore.getState().preferences.byteUnit === "decimal";
+  const base = decimal ? 1000 : 1024;
+  const units = decimal ? DECIMAL_UNITS : BINARY_UNITS;
+  // Use Math.abs in the log to support negative values (network deltas,
+  // diff displays). Original sign is preserved through the division below.
+  const i = Math.floor(Math.log(Math.abs(bytes)) / Math.log(base));
+  const index = Math.min(Math.max(i, 0), units.length - 1);
+  const unit = units[index];
+  if (unit === undefined) return undefined;
+  return { value: bytes / Math.pow(base, index), unit, index };
+}
 
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
-  // Use Math.abs in the log to support negative values (network deltas,
-  // diff displays). Original sign is preserved through the division below.
-  const i = Math.floor(Math.log(Math.abs(bytes)) / Math.log(1024));
-  const index = Math.min(Math.max(i, 0), BYTE_UNITS.length - 1);
-  const unit = BYTE_UNITS[index];
-  if (unit === undefined) return `${String(bytes)} B`;
-  const value = bytes / Math.pow(1024, index);
-  return `${value.toFixed(index === 0 ? 0 : 1)} ${unit}`;
+  const scaled = scaleBytes(bytes);
+  if (scaled === undefined) return `${String(bytes)} B`;
+  return `${scaled.value.toFixed(scaled.index === 0 ? 0 : 1)} ${scaled.unit}`;
 }
 
 // formatUptime renders a positive seconds value as a compact "Xd Yh" /
@@ -33,12 +52,9 @@ export function formatPercent(value: number): string {
 
 export function formatBytesPerSecond(bytesPerSec: number): string {
   if (bytesPerSec === 0) return "0 B/s";
-  const i = Math.floor(Math.log(Math.abs(bytesPerSec)) / Math.log(1024));
-  const index = Math.min(Math.max(i, 0), BYTE_UNITS.length - 1);
-  const unit = BYTE_UNITS[index];
-  if (unit === undefined) return `${String(bytesPerSec)} B/s`;
-  const value = bytesPerSec / Math.pow(1024, index);
-  return `${value.toFixed(index === 0 ? 0 : 1)} ${unit}/s`;
+  const scaled = scaleBytes(bytesPerSec);
+  if (scaled === undefined) return `${String(bytesPerSec)} B/s`;
+  return `${scaled.value.toFixed(scaled.index === 0 ? 0 : 1)} ${scaled.unit}/s`;
 }
 
 /** Zero-pads to two digits, for the clock and calendar fields below. */
