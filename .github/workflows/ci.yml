@@ -88,6 +88,36 @@ jobs:
       - name: Build unified binary
         run: CGO_ENABLED=0 go build -o /dev/null ./cmd/nexara
 
+  govulncheck:
+    # Runs in the Dockerfile's go-builder image, pulled fresh as the image
+    # build pulls it, so it checks the standard library the shipped binary is
+    # built with. setup-go's Go is not that: it resolves go.mod's `go` line
+    # from its own manifest, and both it and the golang image can trail a Go
+    # patch release (v1.15.0 was built on go1.27.1 after 1.27.2 was out).
+    # Dependabot reports no standard-library advisories at all.
+    #
+    # Exit status 3 is a reachable vulnerability. A module one is fixed by a
+    # bump. A standard-library one needs a golang image carrying the fixed Go,
+    # which can trail the Go release by days; docker-library publishes the
+    # patch tag together with the floating one, so pinning gains nothing.
+    # Wait, or move FROM to a newer minor once this one is out of support.
+    #
+    # release.yml carries a copy that gates the image push. Keep them in sync.
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: govulncheck
+        run: |
+          GO_IMAGE=$(sed -n 's/^FROM \(golang:[^ ]*\) AS go-builder$/\1/p' docker/nexara/Dockerfile)
+          if [ -z "$GO_IMAGE" ]; then
+            echo "::error::no 'FROM golang:... AS go-builder' line in docker/nexara/Dockerfile"
+            exit 1
+          fi
+          docker run --rm --pull=always -e CGO_ENABLED=0 \
+            -v "$PWD:/src:ro" -w /src "$GO_IMAGE" \
+            sh -c 'go version && go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 && govulncheck ./...'
+
   frontend-ci:
     runs-on: ubuntu-26.04
     defaults:

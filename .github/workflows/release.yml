@@ -69,6 +69,26 @@ jobs:
       - name: Build unified binary
         run: CGO_ENABLED=0 go build -o /dev/null ./cmd/nexara
 
+  govulncheck:
+    # Mirrors the govulncheck job in ci.yml, which explains it, and is needed
+    # here for the same reason as go-ci's database block: a v* tag does not run
+    # ci.yml. The release job needs it, so an image whose Go or modules carry a
+    # reachable vulnerability is never pushed.
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: govulncheck
+        run: |
+          GO_IMAGE=$(sed -n 's/^FROM \(golang:[^ ]*\) AS go-builder$/\1/p' docker/nexara/Dockerfile)
+          if [ -z "$GO_IMAGE" ]; then
+            echo "::error::no 'FROM golang:... AS go-builder' line in docker/nexara/Dockerfile"
+            exit 1
+          fi
+          docker run --rm --pull=always -e CGO_ENABLED=0 \
+            -v "$PWD:/src:ro" -w /src "$GO_IMAGE" \
+            sh -c 'go version && go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 && govulncheck ./...'
+
   frontend-ci:
     runs-on: ubuntu-26.04
     defaults:
@@ -100,7 +120,7 @@ jobs:
 
   release:
     runs-on: ubuntu-26.04
-    needs: [go-ci, frontend-ci]
+    needs: [go-ci, frontend-ci, govulncheck]
     steps:
       - uses: actions/checkout@v7
         with:
