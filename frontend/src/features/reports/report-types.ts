@@ -97,8 +97,12 @@ export const REPORT_TYPES: readonly ReportTypeInfo[] = [
     value: "capacity_forecast",
     label: "Capacity forecast",
     blurb:
-      "Where the period's trend takes CPU and memory per node, and how full each storage pool is.",
-    sections: ["Node forecasts to 100 %", "Storage pool fill"],
+      "Where the period's trend takes CPU and memory per node, how much room each node's memory has to grow, and how full each storage pool is.",
+    sections: [
+      "Node forecasts to 100 %",
+      "Memory headroom from each node's DIMM layout",
+      "Storage pool fill",
+    ],
     windowed: true,
     params: [],
     optionalSections: [],

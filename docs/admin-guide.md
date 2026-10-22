@@ -1426,7 +1426,7 @@ Every report shares one layout: a masthead with the period and the sources consu
 | **Resource utilisation** | CPU, memory, disk and network per node and per day, with sustained-pressure findings | — |
 | **VM resource usage** | Top consumers per resource, idle guests, every guest's period averages | top N |
 | **Rightsizing** | Per guest, p95/p99/peak CPU over the time it ran with busy vCPUs, its own memory use against its allocation, and how much of the time it ran; flags clearly over- and under-sized guests. Covers at most the last 30 days | — |
-| **Capacity forecast** | Where the period's trend takes CPU and memory per node; how full each storage pool is | — |
+| **Capacity forecast** | Where the period's trend takes CPU and memory per node; how much room each node's memory has to grow, from its DIMM layout; how full each storage pool is | — |
 | **Snapshot inventory** | Every guest snapshot by age, and the ones most likely forgotten | snapshot age |
 | **Patch status** | The latest vulnerability scan per node, known-exploited CVEs first | — |
 | **Uptime summary** | Which nodes are up, for how long, and which rebooted in the period | — |

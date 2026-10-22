@@ -2,6 +2,7 @@ package reports
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -321,8 +322,16 @@ func (g *Generator) generateCapacityForecast(ctx context.Context, gc genCtx, dat
 	for _, n := range nodes {
 		nodeNames[n.ID] = n.Name
 	}
+	memInv, err := g.queries.ListNodeMemoryInventoryByCluster(ctx, gc.cluster.ID)
+	if err != nil {
+		return fmt.Errorf("node memory inventory: %w", err)
+	}
+	headroom := make(map[string]memoryHeadroom, len(memInv))
+	for _, m := range memInv {
+		headroom[m.NodeName] = memoryHeadroomOf(m)
+	}
 
-	data.Subtitle = "Where the period's trend takes CPU and memory per node, and how full each storage pool is today."
+	data.Subtitle = "Where the period's trend takes CPU and memory per node, how much room each node's memory has to grow, and how full each storage pool is today."
 	data.addMeta("Scope", fmt.Sprintf("%s · %s", plural(len(nodes), "node", "nodes"), plural(len(pools), "storage pool reading", "storage pool readings")))
 
 	rows := [][]Cell{}
@@ -353,10 +362,16 @@ func (g *Generator) generateCapacityForecast(ctx context.Context, gc genCtx, dat
 				if soonest.days < 0 || *days < soonest.days {
 					soonest.node, soonest.metric, soonest.days = name, metric, *days
 				}
+				// Where memory is what runs out, the node's DIMM layout says
+				// how much room an upgrade has.
+				more := ""
+				if h, ok := headroom[name]; ok && metric == "Memory %" {
+					more = " " + h.sentence()
+				}
 				if *days < 30 {
-					data.addFinding(SevCritical, fmt.Sprintf("%s %s reaches 100 %% in about %.0f days", name, metric, *days), fmt.Sprintf("(%s) at the period's trend of %+.2f %% a day.", date.Format("2006-01-02"), slope), "Node forecast")
+					data.addFinding(SevCritical, fmt.Sprintf("%s %s reaches 100 %% in about %.0f days", name, metric, *days), fmt.Sprintf("(%s) at the period's trend of %+.2f %% a day.%s", date.Format("2006-01-02"), slope, more), "Node forecast")
 				} else if *days < 90 {
-					data.addFinding(SevWarning, fmt.Sprintf("%s %s reaches 100 %% in about %.0f days", name, metric, *days), fmt.Sprintf("(%s) at the period's trend.", date.Format("2006-01-02")), "Node forecast")
+					data.addFinding(SevWarning, fmt.Sprintf("%s %s reaches 100 %% in about %.0f days", name, metric, *days), fmt.Sprintf("(%s) at the period's trend.%s", date.Format("2006-01-02"), more), "Node forecast")
 				}
 			} else {
 				row[4] = mute("not projected")
@@ -446,13 +461,64 @@ func (g *Generator) generateCapacityForecast(ctx context.Context, gc genCtx, dat
 
 	data.addSection("Node forecast", "A least-squares line through each node's daily average, projected to 100 %. Days to exhaust is blank when the trend is flat or falling.",
 		wideTable("", &Table{Columns: []Column{nowrapCol("Node"), col("Metric"), numCol("Current"), numCol("Trend / day"), numCol("Days to exhaust"), col("Exhaustion date")}, Rows: rows}, "No nodes with two or more days of metrics."))
+	if len(memInv) > 0 {
+		memRows := make([][]Cell, 0, len(memInv))
+		for _, m := range memInv {
+			h := headroom[m.NodeName]
+			maxCell, largestCell := mute("—"), mute("—")
+			if h.max > 0 {
+				maxCell = num(formatBytes(float64(h.max)))
+			}
+			if h.largest > 0 {
+				largestCell = num(formatBytes(float64(h.largest)))
+			}
+			memRows = append(memRows, []Cell{strong(m.NodeName), num(formatBytes(float64(h.installed))), num(fmt.Sprintf("%d of %d", h.used, h.total)), num(h.total - h.used), largestCell, maxCell, text(ts(h.readAt))})
+		}
+		data.addSection("Memory headroom", "Each node's memory sockets from its last DIMM read: what an upgrade has room for.",
+			wideTable("", &Table{Columns: []Column{nowrapCol("Node"), numCol("Installed"), numCol("Slots used"), numCol("Free slots"), numCol("Largest module"), numCol("Firmware maximum"), col("Read (UTC)")}, Rows: memRows}, ""))
+	}
 	data.addSection("Storage pools", "", metersBlock("", "", meters, "No storage pools report a size."))
-	data.Notes = []NoteGroup{{Title: "How this report was computed", Items: []string{
+	notes := []string{
 		"Node trends are fitted to the period's daily averages; a fit needs at least two days.",
 		"Storage pool figures are the collector's latest reading; growth is not projected until pool history is sampled.",
 		"Shared pools are counted once, at the highest reading any node reports; a node's own pools, such as local, are listed per node.",
-	}}}
+	}
+	if len(memInv) > 0 {
+		notes = append(notes, "Memory headroom is each node's last memory DIMM read, taken with dmidecode over the cluster's SSH credentials. The firmware maximum is the board's own figure, which boards often misstate.")
+	}
+	data.Notes = []NoteGroup{{Title: "How this report was computed", Items: notes}}
 	return nil
+}
+
+// memoryHeadroom is what a node's last DIMM read says about room to grow.
+type memoryHeadroom struct {
+	installed, max, largest int64
+	used, total             int32
+	readAt                  time.Time
+}
+
+func memoryHeadroomOf(m db.ListNodeMemoryInventoryByClusterRow) memoryHeadroom {
+	h := memoryHeadroom{installed: m.InstalledBytes, max: m.MaxCapacityBytes, used: m.SlotsUsed, total: m.SlotsTotal, readAt: m.ReadAt.Time}
+	var modules []struct {
+		SizeBytes int64 `json:"size_bytes"`
+	}
+	// A row that does not decode still gives its totals; only the largest
+	// module is lost.
+	_ = json.Unmarshal(m.Modules, &modules)
+	for _, mod := range modules {
+		h.largest = max(h.largest, mod.SizeBytes)
+	}
+	return h
+}
+
+// sentence says it for a memory finding.
+func (h memoryHeadroom) sentence() string {
+	free := h.total - h.used
+	s := fmt.Sprintf("Its memory: %s installed, %s free of %d.", formatBytes(float64(h.installed)), plural(int(free), "slot", "slots"), h.total)
+	if h.max > h.installed {
+		s += fmt.Sprintf(" The firmware allows up to %s.", formatBytes(float64(h.max)))
+	}
+	return s
 }
 
 // --- VM resource usage ---
