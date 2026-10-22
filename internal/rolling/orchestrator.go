@@ -974,7 +974,7 @@ func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Cli
 		Port:      sshCreds.Port,
 	})
 	if pinErr != nil {
-		o.failNode(ctx, job, node, fmt.Sprintf("SSH host key not pinned for %s. Visit Settings → SSH Credentials, run Test Connection, and confirm the fingerprint to pin it.", sshHost))
+		o.failNode(ctx, job, node, fmt.Sprintf("SSH host key not pinned for %s. Visit Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint to pin it.", sshHost))
 		return
 	}
 	knownKey, parseErr := sshpkg.ParseAuthorizedKey(pinned.PublicKey)

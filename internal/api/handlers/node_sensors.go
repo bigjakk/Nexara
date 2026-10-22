@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"math"
 	"path"
@@ -292,7 +291,7 @@ func (h *NodeHandler) readNodeSensors(ctx context.Context, clusterID uuid.UUID, 
 
 	result, err := rolling.RunNodeCommand(sshCtx, h.queries, h.encryptionKey, clusterID, nodeName, nodeSensorsCommand)
 	if err != nil {
-		reason, classified := sensorsUnavailableReason(err)
+		reason, classified := rolling.UnavailableReason(err, "hardware temperatures")
 		if !classified {
 			// Unclassified failures carry node IPs, host-key fingerprints and
 			// decrypt detail in their message, so the operator gets the generic
@@ -313,26 +312,6 @@ func (h *NodeHandler) readNodeSensors(ctx context.Context, clusterID uuid.UUID, 
 	}
 
 	return availableSensors(parseHwmonTemps(result.Stdout))
-}
-
-// sensorsUnavailableReason maps a RunNodeCommand failure to a sentence for the
-// operator, and reports whether it recognised the cause.
-//
-// The recognised cases are the ones the operator can act on, and their text is
-// written here rather than reused from the error so nothing internal leaks into
-// an API response. Anything else gets the generic sentence, and the caller logs
-// the original.
-func sensorsUnavailableReason(err error) (reason string, classified bool) {
-	switch {
-	case errors.Is(err, rolling.ErrSSHNotConfigured):
-		return "SSH is not configured for this cluster. Add credentials under Settings → SSH Credentials to read hardware temperatures.", true
-	case errors.Is(err, rolling.ErrHostKeyNotPinned):
-		return "This node's SSH host key is not pinned. Open Settings → SSH Credentials, run Test Connection, and confirm the fingerprint.", true
-	case errors.Is(err, rolling.ErrNodeAddressUnknown):
-		return "No IP address is known for this node yet — the collector has not reported one.", true
-	default:
-		return "Could not read sensors over SSH from this node.", false
-	}
 }
 
 func unavailableSensors(reason string) nodeSensorsResponse {
