@@ -37,6 +37,10 @@ type nodeMemoryResponse struct {
 	SlotsTotal       int32      `json:"slots_total"`
 	MaxCapacityBytes int64      `json:"max_capacity_bytes"`
 	ECC              string     `json:"ecc,omitempty"`
+	// NodeMemTotal is the memory the node's kernel reports. A firmware table
+	// that lists less is incomplete: a virtual node's hot-plugged memory is in
+	// no DIMM table.
+	NodeMemTotal int64 `json:"node_mem_total"`
 	// AutoRead says whether the background pass reads nodes; when false, only
 	// Read now does.
 	AutoRead bool `json:"auto_read"`
@@ -53,11 +57,11 @@ func (h *NodeHandler) GetNodeMemoryModules(c fiber.Ctx, p *apischema.Params) err
 	if err != nil {
 		return err
 	}
-	nodeID, err := h.nodeIDByName(c.Context(), clusterID, nodeName)
+	node, err := h.nodeByName(c.Context(), clusterID, nodeName)
 	if err != nil {
 		return err
 	}
-	resp, err := h.nodeMemoryState(c.Context(), nodeID)
+	resp, err := h.nodeMemoryState(c.Context(), node)
 	if err != nil {
 		return err
 	}
@@ -75,17 +79,17 @@ func (h *NodeHandler) RefreshNodeMemoryModules(c fiber.Ctx, p *apischema.Params)
 	if h.memory == nil {
 		return fiber.NewError(fiber.StatusServiceUnavailable, "Node memory reads are not available on this server")
 	}
-	nodeID, err := h.nodeIDByName(c.Context(), clusterID, nodeName)
+	node, err := h.nodeByName(c.Context(), clusterID, nodeName)
 	if err != nil {
 		return err
 	}
 	// c.Context() is Background; the reader bounds the read itself.
-	readErr := h.memory.ReadNode(c.Context(), clusterID, nodeID, nodeName)
+	readErr := h.memory.ReadNode(c.Context(), clusterID, node.ID, nodeName)
 	if errors.Is(readErr, nodememory.ErrReadTooSoon) {
 		c.Set(fiber.HeaderRetryAfter, "60")
 		return fiber.NewError(fiber.StatusTooManyRequests, "This node was read less than a minute ago")
 	}
-	resp, stateErr := h.nodeMemoryState(c.Context(), nodeID)
+	resp, stateErr := h.nodeMemoryState(c.Context(), node)
 	// Audited whatever came of it: a root session may have been opened even
 	// when storing its outcome failed.
 	status := resp.Status
@@ -104,29 +108,31 @@ func (h *NodeHandler) RefreshNodeMemoryModules(c fiber.Ctx, p *apischema.Params)
 	return c.JSON(resp)
 }
 
-func (h *NodeHandler) nodeIDByName(ctx context.Context, clusterID uuid.UUID, nodeName string) (uuid.UUID, error) {
+func (h *NodeHandler) nodeByName(ctx context.Context, clusterID uuid.UUID, nodeName string) (db.Node, error) {
 	node, err := h.queries.GetNodeByClusterAndName(ctx, db.GetNodeByClusterAndNameParams{ClusterID: clusterID, Name: nodeName})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, fiber.NewError(fiber.StatusNotFound, "Node not found in this cluster")
+		return db.Node{}, fiber.NewError(fiber.StatusNotFound, "Node not found in this cluster")
 	}
 	if err != nil {
-		return uuid.Nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to look up the node")
+		return db.Node{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to look up the node")
 	}
-	return node.ID, nil
+	return node, nil
 }
 
-func (h *NodeHandler) nodeMemoryState(ctx context.Context, nodeID uuid.UUID) (nodeMemoryResponse, error) {
+func (h *NodeHandler) nodeMemoryState(ctx context.Context, node db.Node) (nodeMemoryResponse, error) {
 	autoRead := h.memory != nil && h.memory.Interval() > 0
-	row, err := h.queries.GetNodeMemoryInventory(ctx, nodeID)
+	row, err := h.queries.GetNodeMemoryInventory(ctx, node.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return neverReadMemory(autoRead), nil
+		resp := neverReadMemory(autoRead)
+		resp.NodeMemTotal = node.MemTotal
+		return resp, nil
 	}
 	if err != nil {
 		return nodeMemoryResponse{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to read the node's memory inventory")
 	}
-	resp, err := nodeMemoryResponseFrom(row, autoRead)
+	resp, err := nodeMemoryResponseFrom(row, node.MemTotal, autoRead)
 	if err != nil {
-		slog.Warn("decode node memory modules", "node_id", nodeID, "error", err)
+		slog.Warn("decode node memory modules", "node_id", node.ID, "error", err)
 		return nodeMemoryResponse{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to read the node's memory inventory")
 	}
 	return resp, nil
@@ -142,7 +148,7 @@ func neverReadMemory(autoRead bool) nodeMemoryResponse {
 
 // nodeMemoryResponseFrom renders a stored read. A failed attempt keeps the
 // last good read, so its reason sits beside the modules that read found.
-func nodeMemoryResponseFrom(row db.NodeMemoryInventory, autoRead bool) (nodeMemoryResponse, error) {
+func nodeMemoryResponseFrom(row db.NodeMemoryInventory, nodeMemTotal int64, autoRead bool) (nodeMemoryResponse, error) {
 	modules, err := nodeMemoryModules(row.Modules)
 	if err != nil {
 		return nodeMemoryResponse{}, err
@@ -158,6 +164,7 @@ func nodeMemoryResponseFrom(row db.NodeMemoryInventory, autoRead bool) (nodeMemo
 		SlotsTotal:       row.SlotsTotal,
 		MaxCapacityBytes: row.MaxCapacityBytes,
 		ECC:              row.Ecc,
+		NodeMemTotal:     nodeMemTotal,
 		AutoRead:         autoRead,
 	}
 	if row.ReadAt.Valid {

@@ -35,8 +35,10 @@ ON CONFLICT (node_id) DO UPDATE SET
 SELECT * FROM node_memory_inventory WHERE node_id = $1;
 
 -- name: ListNodeMemoryInventoryByCluster :many
--- The nodes of a cluster with a good memory read, for the capacity forecast.
-SELECT n.name AS node_name, i.installed_bytes, i.slots_used, i.slots_total,
+-- The nodes of a cluster with a good memory read, for the capacity forecast,
+-- with the memory the node's kernel reports: a firmware table that lists less
+-- (a virtual node's hot-plugged memory) is incomplete.
+SELECT n.name AS node_name, n.mem_total AS node_mem_total, i.installed_bytes, i.slots_used, i.slots_total,
        i.max_capacity_bytes, i.modules, i.read_at
 FROM node_memory_inventory i
 JOIN nodes n ON n.id = i.node_id

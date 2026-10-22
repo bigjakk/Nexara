@@ -28,12 +28,13 @@ func TestNodeMemoryResponse(t *testing.T) {
 		ReadAt:         pgtype.Timestamptz{Time: read, Valid: true},
 		InstalledBytes: 32 << 30, SlotsUsed: 1, SlotsTotal: 2, MaxCapacityBytes: 1 << 40, Ecc: "Multi-bit ECC",
 		Modules: json.RawMessage(`[{"locator":"A1","size_bytes":34359738368,"type":"DDR4"},{"locator":"A2","size_bytes":0}]`),
-	}, false)
+	}, 31<<30, false)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if resp.Status != "error" || resp.Reason == "" || resp.ReadAt == nil || !resp.ReadAt.Equal(read) || !resp.AttemptedAt.Equal(failed) ||
-		resp.Total != 2 || resp.Items[0].Locator != "A1" || resp.Items[0].SizeBytes != 32<<30 || resp.Items[1].SizeBytes != 0 || resp.AutoRead {
+		resp.Total != 2 || resp.Items[0].Locator != "A1" || resp.Items[0].SizeBytes != 32<<30 || resp.Items[1].SizeBytes != 0 || resp.AutoRead ||
+		resp.NodeMemTotal != 31<<30 {
 		t.Errorf("failed attempt after a good read = %+v", resp)
 	}
 }

@@ -129,6 +129,14 @@ function Body({ data }: { data: NodeMemoryModulesResponse }) {
           · read {formatRelativeTime(data.read_at)}
         </span>
       </p>
+      {data.node_mem_total > data.installed_bytes && (
+        <Note>
+          The firmware lists {formatBytes(data.installed_bytes)}, but the node
+          has {formatBytes(data.node_mem_total)}: memory hot-plugged into a
+          virtual node, modules the firmware leaves out, or memory added since
+          this read are missing from this table.
+        </Note>
+      )}
       <Table>
         <TableHeader>
           <TableRow>

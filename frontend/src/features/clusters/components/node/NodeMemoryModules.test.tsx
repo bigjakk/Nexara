@@ -25,6 +25,7 @@ const notRead: NodeMemoryModulesResponse = {
   slots_used: 0,
   slots_total: 0,
   max_capacity_bytes: 0,
+  node_mem_total: 31 * 2 ** 30,
   auto_read: true,
 };
 
@@ -51,6 +52,7 @@ const goodRead: NodeMemoryModulesResponse = {
   slots_total: 2,
   max_capacity_bytes: 2 ** 40,
   ecc: "Multi-bit ECC",
+  node_mem_total: 31 * 2 ** 30,
   auto_read: true,
 };
 
@@ -87,6 +89,11 @@ describe("NodeMemoryModules", () => {
       "SSH is not configured for this cluster.",
     ],
     ["a good read", goodRead, "installed in 1 of 2 slots"],
+    [
+      "a firmware table that lists less than the node has",
+      { ...goodRead, node_mem_total: 64 * 2 ** 30 },
+      "but the node has 64.0 GiB",
+    ],
     [
       "a failed read after a good one, which stays on show",
       { ...goodRead, status: "error", reason: "dmidecode failed on this node." },

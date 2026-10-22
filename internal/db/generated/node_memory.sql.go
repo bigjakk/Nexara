@@ -38,7 +38,7 @@ func (q *Queries) GetNodeMemoryInventory(ctx context.Context, nodeID uuid.UUID) 
 }
 
 const listNodeMemoryInventoryByCluster = `-- name: ListNodeMemoryInventoryByCluster :many
-SELECT n.name AS node_name, i.installed_bytes, i.slots_used, i.slots_total,
+SELECT n.name AS node_name, n.mem_total AS node_mem_total, i.installed_bytes, i.slots_used, i.slots_total,
        i.max_capacity_bytes, i.modules, i.read_at
 FROM node_memory_inventory i
 JOIN nodes n ON n.id = i.node_id
@@ -48,6 +48,7 @@ ORDER BY n.name
 
 type ListNodeMemoryInventoryByClusterRow struct {
 	NodeName         string             `json:"node_name"`
+	NodeMemTotal     int64              `json:"node_mem_total"`
 	InstalledBytes   int64              `json:"installed_bytes"`
 	SlotsUsed        int32              `json:"slots_used"`
 	SlotsTotal       int32              `json:"slots_total"`
@@ -56,7 +57,9 @@ type ListNodeMemoryInventoryByClusterRow struct {
 	ReadAt           pgtype.Timestamptz `json:"read_at"`
 }
 
-// The nodes of a cluster with a good memory read, for the capacity forecast.
+// The nodes of a cluster with a good memory read, for the capacity forecast,
+// with the memory the node's kernel reports: a firmware table that lists less
+// (a virtual node's hot-plugged memory) is incomplete.
 func (q *Queries) ListNodeMemoryInventoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListNodeMemoryInventoryByClusterRow, error) {
 	rows, err := q.db.Query(ctx, listNodeMemoryInventoryByCluster, clusterID)
 	if err != nil {
@@ -68,6 +71,7 @@ func (q *Queries) ListNodeMemoryInventoryByCluster(ctx context.Context, clusterI
 		var i ListNodeMemoryInventoryByClusterRow
 		if err := rows.Scan(
 			&i.NodeName,
+			&i.NodeMemTotal,
 			&i.InstalledBytes,
 			&i.SlotsUsed,
 			&i.SlotsTotal,

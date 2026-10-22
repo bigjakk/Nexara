@@ -1292,7 +1292,9 @@ type Querier interface {
 	// so the clusters list can attach a generic issues[] without per-cluster calls.
 	// Offline nodes and HA-fenced nodes.
 	ListNodeHealthProblems(ctx context.Context) ([]ListNodeHealthProblemsRow, error)
-	// The nodes of a cluster with a good memory read, for the capacity forecast.
+	// The nodes of a cluster with a good memory read, for the capacity forecast,
+	// with the memory the node's kernel reports: a firmware table that lists less
+	// (a virtual node's hot-plugged memory) is incomplete.
 	ListNodeMemoryInventoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListNodeMemoryInventoryByClusterRow, error)
 	// Every node of an active cluster with when its memory was last tried and how
 	// that went, for the daily pass. A paused cluster (is_active false) is the

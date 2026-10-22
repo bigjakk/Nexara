@@ -1048,6 +1048,9 @@ export interface NodeMemoryModulesResponse {
   /** The firmware's own figure, which boards often misstate. */
   max_capacity_bytes: number;
   ecc?: string;
+  /** The memory the node's kernel reports. A firmware table listing less is
+   * incomplete: a virtual node's hot-plugged memory is in no DIMM table. */
+  node_mem_total: number;
   /** Whether the server reads nodes daily; when false only Read now does. */
   auto_read: boolean;
 }

@@ -484,14 +484,15 @@ func TestFormatBytes_LabelsBinaryUnits(t *testing.T) {
 
 // Where memory runs out, a node's DIMM layout says how much room an upgrade
 // has: in the finding, and in its own section, from which a node that was
-// never read is left out.
+// never read is left out. A table listing less than the node has (a virtual
+// node's hot-plugged memory) is called incomplete rather than read as headroom.
 func TestCapacityForecast_MemoryHeadroom(t *testing.T) {
 	t.Parallel()
 	day := func(daysAgo int) time.Time { return testNow.Add(-time.Duration(daysAgo) * 24 * time.Hour) }
-	read, unread := uuid.MustParse("00000000-0000-0000-0000-0000000000a1"), uuid.MustParse("00000000-0000-0000-0000-0000000000a2")
+	read, unread, virtual := uuid.MustParse("00000000-0000-0000-0000-0000000000a1"), uuid.MustParse("00000000-0000-0000-0000-0000000000a2"), uuid.MustParse("00000000-0000-0000-0000-0000000000a3")
 	q := &fakeQuerier{
 		cluster: db.Cluster{ID: testCluster, Name: "cluster01"},
-		nodes:   []db.Node{{ID: read, Name: "pve-01", Status: "online"}, {ID: unread, Name: "pve-02", Status: "online"}},
+		nodes:   []db.Node{{ID: read, Name: "pve-01", Status: "online"}, {ID: unread, Name: "pve-02", Status: "online"}, {ID: virtual, Name: "pve-03", Status: "online"}},
 		pools:   []db.StoragePool{},
 		nodeDaily: map[uuid.UUID][]db.GetNodeMetricsDailyAvgRow{read: {
 			{Day: day(3), Cpu: 0.1, MemUsed: 70, MemTotal: 100},
@@ -499,8 +500,12 @@ func TestCapacityForecast_MemoryHeadroom(t *testing.T) {
 			{Day: day(1), Cpu: 0.1, MemUsed: 80, MemTotal: 100},
 		}},
 		memInv: []db.ListNodeMemoryInventoryByClusterRow{{
-			NodeName: "pve-01", InstalledBytes: 64 << 30, SlotsUsed: 2, SlotsTotal: 8, MaxCapacityBytes: 1 << 40,
+			NodeName: "pve-01", NodeMemTotal: 63 << 30, InstalledBytes: 64 << 30, SlotsUsed: 2, SlotsTotal: 8, MaxCapacityBytes: 1 << 40,
 			Modules: json.RawMessage(`[{"locator":"A1","size_bytes":34359738368},{"locator":"A2","size_bytes":34359738368},{"locator":"A3","size_bytes":0}]`),
+			ReadAt:  pgtype.Timestamptz{Time: day(1), Valid: true},
+		}, {
+			NodeName: "pve-03", NodeMemTotal: 16 << 30, InstalledBytes: 1 << 30, SlotsUsed: 1, SlotsTotal: 1, MaxCapacityBytes: 1 << 30,
+			Modules: json.RawMessage(`[{"locator":"DIMM 0","size_bytes":1073741824}]`),
 			ReadAt:  pgtype.Timestamptz{Time: day(1), Valid: true},
 		}},
 	}
@@ -509,7 +514,10 @@ func TestCapacityForecast_MemoryHeadroom(t *testing.T) {
 		t.Errorf("the memory finding lacks the node's headroom: %v", findingLeads(data))
 	}
 	table := sectionTable(data, "Memory headroom", "")
-	if table == nil || len(table.Rows) != 1 || table.Rows[0][0].Text != "pve-01" || table.Rows[0][3].Text != "6" || table.Rows[0][4].Text != "32.0 GiB" {
-		t.Errorf("Memory headroom = %+v, want pve-01 alone with 6 free slots and 32.0 GiB modules", table)
+	if table == nil || len(table.Rows) != 2 || table.Rows[0][0].Text != "pve-01" || table.Rows[0][3].Text != "6" || table.Rows[0][4].Text != "32.0 GiB" || table.Rows[0][1].Sub != "" {
+		t.Errorf("Memory headroom = %+v, want pve-01 with 6 free slots and 32.0 GiB modules, then pve-03", table)
+	}
+	if table != nil && len(table.Rows) == 2 && table.Rows[1][1].Sub != "the node has 16.0 GiB: the table is incomplete" {
+		t.Errorf("pve-03's installed cell = %+v, want it called incomplete", table.Rows[1][1])
 	}
 }

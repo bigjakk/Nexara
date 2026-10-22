@@ -177,6 +177,7 @@ Proxmox has no API for this, so Nexara reads it with `/usr/sbin/dmidecode -t 16 
 - **Read now.** The card's **Read now** button (`manage:node`) reads the node at once, and is audited. It works once a minute per node: each read is a root login, and repeated rejected logins get Nexara's address banned by fail2ban.
 - **A failed read keeps the last good one.** The card shows why the newest read failed above the last good read, for example *Reading the memory layout needs root* when the SSH user is not root, or a warning when the node's host key no longer matches the pinned one.
 - **What is not stored.** Serial numbers and asset tags are skipped and never kept. The firmware's maximum is the board's own figure, which boards often misstate.
+- **Virtual nodes.** A node that is itself a VM lists only the memory it booted with; memory hot-plugged later is in no DIMM table. When the firmware lists less than the node has, the card says so, and the capacity forecast calls that node's table incomplete rather than reading its headroom from it.
 
 ---
 

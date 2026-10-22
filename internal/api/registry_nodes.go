@@ -775,7 +775,8 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 		Method: fiber.MethodGet,
 		Path:   nodeScope + "/:node_name/memory-modules",
 		Description: "Read a node's last memory DIMM inventory: each slot with its module's size, type, speed and part number, " +
-			"the installed total and the firmware's maximum. Never dials the node: reads happen in the background pass " +
+			"the installed total, the firmware's maximum, and the memory the node's kernel reports (node_mem_total; a table listing " +
+			"less is incomplete). Never dials the node: reads happen in the background pass " +
 			"(NODE_MEMORY_READ_INTERVAL) and on the refresh route. status is never, ok, unavailable or error, with a reason; " +
 			"a failed read keeps the last good one.",
 		Group:       "Nodes",

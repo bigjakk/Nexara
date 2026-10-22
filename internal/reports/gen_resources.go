@@ -472,7 +472,11 @@ func (g *Generator) generateCapacityForecast(ctx context.Context, gc genCtx, dat
 			if h.largest > 0 {
 				largestCell = num(formatBytes(float64(h.largest)))
 			}
-			memRows = append(memRows, []Cell{strong(m.NodeName), num(formatBytes(float64(h.installed))), num(fmt.Sprintf("%d of %d", h.used, h.total)), num(h.total - h.used), largestCell, maxCell, text(ts(h.readAt))})
+			installed := num(formatBytes(float64(h.installed)))
+			if h.incomplete() {
+				installed = textSub(formatBytes(float64(h.installed)), "the node has "+formatBytes(float64(h.nodeMem))+": the table is incomplete")
+			}
+			memRows = append(memRows, []Cell{strong(m.NodeName), installed, num(fmt.Sprintf("%d of %d", h.used, h.total)), num(h.total - h.used), largestCell, maxCell, text(ts(h.readAt))})
 		}
 		data.addSection("Memory headroom", "Each node's memory sockets from its last DIMM read: what an upgrade has room for.",
 			wideTable("", &Table{Columns: []Column{nowrapCol("Node"), numCol("Installed"), numCol("Slots used"), numCol("Free slots"), numCol("Largest module"), numCol("Firmware maximum"), col("Read (UTC)")}, Rows: memRows}, ""))
@@ -484,7 +488,8 @@ func (g *Generator) generateCapacityForecast(ctx context.Context, gc genCtx, dat
 		"Shared pools are counted once, at the highest reading any node reports; a node's own pools, such as local, are listed per node.",
 	}
 	if len(memInv) > 0 {
-		notes = append(notes, "Memory headroom is each node's last memory DIMM read, taken with dmidecode over the cluster's SSH credentials. The firmware maximum is the board's own figure, which boards often misstate.")
+		notes = append(notes, "Memory headroom is each node's last memory DIMM read, taken with dmidecode over the cluster's SSH credentials. The firmware maximum is the board's own figure, which boards often misstate.",
+			"A firmware table that lists less memory than the node has (a virtual node's hot-plugged memory, or memory added since the read) is incomplete, and its headroom is not judged.")
 	}
 	data.Notes = []NoteGroup{{Title: "How this report was computed", Items: notes}}
 	return nil
@@ -493,12 +498,17 @@ func (g *Generator) generateCapacityForecast(ctx context.Context, gc genCtx, dat
 // memoryHeadroom is what a node's last DIMM read says about room to grow.
 type memoryHeadroom struct {
 	installed, max, largest int64
+	nodeMem                 int64 // what the node's kernel reports
 	used, total             int32
 	readAt                  time.Time
 }
 
+// incomplete says the firmware lists less memory than the node has: memory
+// hot-plugged into a virtual node is in no DIMM table.
+func (h memoryHeadroom) incomplete() bool { return h.nodeMem > h.installed }
+
 func memoryHeadroomOf(m db.ListNodeMemoryInventoryByClusterRow) memoryHeadroom {
-	h := memoryHeadroom{installed: m.InstalledBytes, max: m.MaxCapacityBytes, used: m.SlotsUsed, total: m.SlotsTotal, readAt: m.ReadAt.Time}
+	h := memoryHeadroom{installed: m.InstalledBytes, max: m.MaxCapacityBytes, nodeMem: m.NodeMemTotal, used: m.SlotsUsed, total: m.SlotsTotal, readAt: m.ReadAt.Time}
 	var modules []struct {
 		SizeBytes int64 `json:"size_bytes"`
 	}
@@ -513,6 +523,9 @@ func memoryHeadroomOf(m db.ListNodeMemoryInventoryByClusterRow) memoryHeadroom {
 
 // sentence says it for a memory finding.
 func (h memoryHeadroom) sentence() string {
+	if h.incomplete() {
+		return fmt.Sprintf("Its firmware lists only %s of the node's %s, so its DIMM table cannot show the headroom.", formatBytes(float64(h.installed)), formatBytes(float64(h.nodeMem)))
+	}
 	free := h.total - h.used
 	s := fmt.Sprintf("Its memory: %s installed, %s free of %d.", formatBytes(float64(h.installed)), plural(int(free), "slot", "slots"), h.total)
 	if h.max > h.installed {
