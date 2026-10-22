@@ -24,6 +24,7 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/reports"
 	"github.com/bigjakk/nexara/internal/rolling"
+	"github.com/bigjakk/nexara/internal/safeconv"
 	"github.com/bigjakk/nexara/internal/scanner"
 	"github.com/bigjakk/nexara/internal/virtiowin"
 )
@@ -1277,6 +1278,8 @@ func (s *Scheduler) generateScheduledReport(ctx context.Context, sched db.Report
 		ReportData: dataJSON,
 		ReportHtml: pgtype.Text{String: htmlOutput, Valid: true},
 		ReportCsv:  pgtype.Text{String: csvOutput, Valid: true},
+		// The window the report covered, which can be shorter than the one asked for.
+		TimeRangeHours: safeconv.Int32(data.TimeRange.Hours),
 	}); err != nil {
 		s.logger.Error("failed to save report", "run_id", run.ID, "error", err)
 	}

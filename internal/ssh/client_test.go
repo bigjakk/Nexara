@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +22,20 @@ import (
 // The host key is generated fresh per call. The returned address points at
 // 127.0.0.1:<random-port>. Closing the listener stops the server.
 func newTestServer(t *testing.T) (addr string, hostKey ssh.PublicKey, stop func()) {
+	t.Helper()
+	return newTestServerWith(t, testServerOpts{})
+}
+
+// testServerOpts varies newTestServer's exec handler. With received set it
+// signals as a command arrives and waits for release before it replies; stream
+// writes without end until a write fails.
+type testServerOpts struct {
+	received chan<- struct{}
+	release  <-chan struct{}
+	stream   bool
+}
+
+func newTestServerWith(t *testing.T, opts testServerOpts) (addr string, hostKey ssh.PublicKey, stop func()) {
 	t.Helper()
 
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -55,7 +70,7 @@ func newTestServer(t *testing.T) (addr string, hostKey ssh.PublicKey, stop func(
 			if err != nil {
 				return
 			}
-			go serveOne(conn, cfg)
+			go serveOne(conn, cfg, opts)
 		}
 	}()
 
@@ -66,7 +81,7 @@ func newTestServer(t *testing.T) (addr string, hostKey ssh.PublicKey, stop func(
 	return ln.Addr().String(), signer.PublicKey(), stop
 }
 
-func serveOne(rawConn net.Conn, cfg *ssh.ServerConfig) {
+func serveOne(rawConn net.Conn, cfg *ssh.ServerConfig, opts testServerOpts) {
 	defer func() { _ = rawConn.Close() }()
 	sshConn, chans, reqs, err := ssh.NewServerConn(rawConn, cfg)
 	if err != nil {
@@ -90,6 +105,18 @@ func serveOne(rawConn net.Conn, cfg *ssh.ServerConfig) {
 				case "exec":
 					if req.WantReply {
 						_ = req.Reply(true, nil)
+					}
+					if opts.received != nil {
+						opts.received <- struct{}{}
+						<-opts.release
+					}
+					if opts.stream {
+						chunk := []byte(strings.Repeat("x", 1024))
+						for {
+							if _, err := ch.Write(chunk); err != nil {
+								return
+							}
+						}
 					}
 					_, _ = io.WriteString(ch, "ok\n")
 					_, _ = ch.SendRequest("exit-status", false, []byte{0, 0, 0, 0})
@@ -246,5 +273,191 @@ func TestParseAuthorizedKey_roundTrip(t *testing.T) {
 	}
 	if FingerprintSHA256(decoded) != FingerprintSHA256(pk) {
 		t.Fatal("round-trip fingerprint mismatch")
+	}
+}
+
+// stalledListener accepts TCP connections and never writes to them, like a
+// wedged sshd or a forwarder whose backend is dead. Accepted conns arrive on
+// the channel; any the test does not take are closed at cleanup.
+func stalledListener(t *testing.T) (host string, port int, accepted <-chan net.Conn) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ch := make(chan net.Conn, 4)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			ch <- c
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		for {
+			select {
+			case c := <-ch:
+				_ = c.Close()
+			default:
+				return
+			}
+		}
+	})
+	host, port = splitHostPort(t, ln.Addr().String())
+	return host, port, ch
+}
+
+// A host that accepts TCP and never speaks SSH must release the caller when its
+// context ends, and when the setup deadline passes: an HTTP handler's ctx is
+// Background, so the deadline is its only bound. x/crypto applies
+// ClientConfig.Timeout only inside ssh.Dial, which neither function uses.
+func TestStalledHostReleasesTheCaller(t *testing.T) {
+	t.Parallel()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	pinned, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatalf("public key: %v", err)
+	}
+	execCall := func(ctx context.Context, host string, port int, setup time.Duration) error {
+		cfg := Config{Host: host, Port: port, Username: "test-user", Password: "test-pass", KnownHostKey: pinned}
+		_, err := execute(ctx, cfg, "true", setup, defaultMaxOutput)
+		return err
+	}
+	scanCall := func(ctx context.Context, host string, port int, setup time.Duration) error {
+		_, err := scanHostKey(ctx, host, port, setup)
+		return err
+	}
+
+	tests := []struct {
+		name   string
+		call   func(context.Context, string, int, time.Duration) error
+		cancel bool // end the context; otherwise only the setup deadline can
+	}{
+		{"Execute, context ends", execCall, true},
+		{"Execute, setup deadline passes", execCall, false},
+		{"ScanHostKey, context ends", scanCall, true},
+		{"ScanHostKey, setup deadline passes", scanCall, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			host, port, accepted := stalledListener(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			setup := time.Hour
+			released := func(err error) bool { return errors.Is(err, context.Canceled) }
+			if !tt.cancel {
+				setup = 50 * time.Millisecond
+				released = func(err error) bool {
+					var ne net.Error
+					return errors.As(err, &ne) && ne.Timeout()
+				}
+			}
+
+			done := make(chan error, 1)
+			go func() { done <- tt.call(ctx, host, port, setup) }()
+			if tt.cancel {
+				// Cancel once the caller is connected, so it is past the dial.
+				select {
+				case c := <-accepted:
+					t.Cleanup(func() { _ = c.Close() })
+				case err := <-done:
+					t.Fatalf("returned before connecting: %v", err)
+				}
+				cancel()
+			}
+			select {
+			case err := <-done:
+				if !released(err) {
+					t.Fatalf("err = %v, want the bound's error", err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("still blocked 10s after its bound ended")
+			}
+		})
+	}
+}
+
+// The setup bound is lifted before the command runs: a rolling update's apt
+// run outlives it by minutes. The server holds its reply until a stalled scan
+// with the same bound has timed out, so the command provably outlasts it.
+func TestExecute_commandMayOutliveTheSetupBound(t *testing.T) {
+	t.Parallel()
+	const bound = 2 * time.Second
+	received, release := make(chan struct{}, 1), make(chan struct{})
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseOnce)
+	addr, hostKey, stop := newTestServerWith(t, testServerOpts{received: received, release: release})
+	defer stop()
+	host, port := splitHostPort(t, addr)
+
+	done := make(chan error, 1)
+	go func() {
+		cfg := Config{Host: host, Port: port, Username: "test-user", Password: "test-pass", KnownHostKey: hostKey}
+		_, err := execute(context.Background(), cfg, "true", bound, defaultMaxOutput)
+		done <- err
+	}()
+	select {
+	case <-received:
+	case err := <-done:
+		t.Fatalf("returned before the command ran: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the command never reached the server")
+	}
+	sHost, sPort, _ := stalledListener(t)
+	scanned := make(chan error, 1)
+	go func() {
+		_, err := scanHostKey(context.Background(), sHost, sPort, bound)
+		scanned <- err
+	}()
+	select {
+	case err := <-scanned:
+		var ne net.Error
+		if !errors.As(err, &ne) || !ne.Timeout() {
+			t.Fatalf("the stalled scan ended with %v, not on its bound", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the stalled scan outlived its bound by 8s")
+	}
+	releaseOnce()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("a command that outlived the setup bound failed: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no result 10s after the reply was released")
+	}
+}
+
+// A command's output is capped, so a node that streams without end cannot grow
+// Nexara's memory with it, and the session is closed at the cap: this server
+// never stops writing, so a client that only stopped reading would wait for an
+// exit status that never comes.
+func TestExecute_outputIsCapped(t *testing.T) {
+	t.Parallel()
+	addr, hostKey, stop := newTestServerWith(t, testServerOpts{stream: true})
+	defer stop()
+	host, port := splitHostPort(t, addr)
+
+	done := make(chan error, 1)
+	go func() {
+		cfg := Config{Host: host, Port: port, Username: "test-user", Password: "test-pass", KnownHostKey: hostKey}
+		_, err := execute(context.Background(), cfg, "true", execSetupTimeout, 1024)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrOutputTooLarge) {
+			t.Fatalf("err = %v, want ErrOutputTooLarge", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("still reading 10s after the output passed the cap")
 	}
 }

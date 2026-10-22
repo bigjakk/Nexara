@@ -36,7 +36,7 @@ function UtilBar({
   label: string;
   percent: number | null;
   barClass: string;
-  /** Optional exact-amount line rendered under the bar (e.g. "210 GB of 361 GB"). */
+  /** Optional exact-amount line rendered under the bar (e.g. "210.0 GiB of 361.0 GiB"). */
   detail?: string | null | undefined;
 }) {
   const clamped = percent === null ? null : Math.min(100, Math.max(0, percent));

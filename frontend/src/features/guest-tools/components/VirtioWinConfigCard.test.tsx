@@ -353,7 +353,7 @@ describe("VirtioWinConfigCard", () => {
   });
 
   it("offers no check to run when automatic downloads are off", () => {
-    // There is no cycle to trigger, and running one would dispatch an ~840 MB
+    // There is no cycle to trigger, and running one would dispatch an ~840 MiB
     // fetch the operator has just switched off. The API refuses it too.
     mockHooks({ ...baseConfig, enabled: false });
     renderWithProviders(<VirtioWinConfigCard clusterId="c1" />);

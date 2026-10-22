@@ -1560,7 +1560,7 @@ export function ContainerResourcesPanel({
         <Section title="Memory">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Memory (MB)</Label>
+              <Label className="text-xs">Memory (MiB)</Label>
               <Input
                 type="number"
                 min={16}
@@ -1573,7 +1573,7 @@ export function ContainerResourcesPanel({
               />
             </div>
             <div>
-              <Label className="text-xs">Swap (MB)</Label>
+              <Label className="text-xs">Swap (MiB)</Label>
               <Input
                 type="number"
                 min={0}

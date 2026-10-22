@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { formatBytes } from "@/lib/format";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { useUploadFile } from "../api/storage-queries";
 
@@ -159,8 +160,7 @@ export function UploadDialog({
           </div>
           {selectedFile && !isBusy && (
             <p className="text-xs text-muted-foreground">
-              {selectedFile.name} (
-              {(selectedFile.size / 1024 / 1024).toFixed(1)} MB)
+              {selectedFile.name} ({formatBytes(selectedFile.size)})
             </p>
           )}
 

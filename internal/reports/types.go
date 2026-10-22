@@ -14,16 +14,19 @@ const (
 	TypeVMResourceUsage     ReportType = "vm_resource_usage"
 	TypeSnapshotInventory   ReportType = "snapshot_inventory"
 	TypeClusterDigest       ReportType = "cluster_digest"
+	TypeRightsizing         ReportType = "rightsizing"
 )
 
 // AllTypes lists every report type the generator implements, in catalogue
-// order. The report_schedules CHECK constraint (migrations/000103) and the
-// frontend catalogue must agree with it.
+// order. The report_schedules CHECK constraint (re-created by each migration
+// that adds a type, most recently 000111) and the frontend catalogue must
+// agree with it; TestReportScheduleTypeCheckMatchesTheCatalogue pins the CHECK.
 var AllTypes = []ReportType{
 	TypeClusterDigest,
 	TypeBackupCompliance,
 	TypeResourceUtilization,
 	TypeVMResourceUsage,
+	TypeRightsizing,
 	TypeCapacityForecast,
 	TypeSnapshotInventory,
 	TypePatchStatus,
@@ -60,6 +63,8 @@ func (t ReportType) Name() string {
 		return "Snapshot inventory"
 	case TypeClusterDigest:
 		return "Cluster digest"
+	case TypeRightsizing:
+		return "Rightsizing"
 	}
 	return string(t)
 }
@@ -135,7 +140,7 @@ type MetaItem struct {
 type KPI struct {
 	Label string `json:"label"`
 	Value string `json:"value"`
-	// Unit is rendered small beside the value ("%", "TB").
+	// Unit is rendered small beside the value ("%", "TiB").
 	Unit   string `json:"unit,omitempty"`
 	Detail string `json:"detail,omitempty"`
 	Tone   string `json:"tone,omitempty"`

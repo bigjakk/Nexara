@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"math"
 	"path"
@@ -43,17 +42,17 @@ const (
 	// sessions per visit into one per node per minute.
 	nodeSensorsTTL = 60 * time.Second
 
-	// nodeSensorsTimeout bounds the parts of the SSH round trip that honour a
-	// context: the TCP dial and the command itself. Reading a handful of sysfs
-	// files is near-instant; this exists for the unreachable-host case.
-	//
-	// It does NOT bound the whole call. golang.org/x/crypto/ssh's handshake
-	// (ssh.NewClientConn) takes no context and is capped only by the hardcoded
-	// 30s ssh.ClientConfig.Timeout in internal/ssh, so a host that accepts TCP
-	// and then stalls the banner — sshd past its MaxStartups limit does exactly
-	// this — holds a request for ~30s regardless of the value here. That is the
-	// window the singleflight below exists to keep from multiplying.
+	// nodeSensorsTimeout bounds the whole SSH round trip: the TCP dial, the
+	// handshake and session open (internal/ssh closes the conn when the context
+	// ends), and the command itself. Reading a handful of sysfs files is
+	// near-instant; this exists for the unreachable or stalled host, such as a
+	// wedged sshd that accepts TCP and never sends its banner. The singleflight
+	// below keeps concurrent misses from multiplying that wait.
 	nodeSensorsTimeout = 20 * time.Second
+
+	// nodeSensorsMaxOutput caps what a read keeps of the hwmon listing, a few
+	// KiB on any real host, so a hostile node cannot balloon one request.
+	nodeSensorsMaxOutput = 1 << 20
 )
 
 // nodeSensorsCommand reads every hwmon temperature the kernel exposes in one
@@ -209,10 +208,9 @@ func (c *nodeSensorsCache) put(key string, resp nodeSensorsResponse, ttl time.Du
 // Without this the cache would deduplicate only *completed* reads: K requests
 // arriving on a cold key all miss, and all open their own SSH session to the
 // same node. That is not a narrow race. A node that accepts TCP and stalls the
-// banner holds each request for the handshake timeout (~30s, see
-// nodeSensorsTimeout), and every request arriving in that window is another
-// miss — so the pile-up is self-reinforcing, and it is bounded only by the
-// general rate limiter. Exhausting sshd's unauthenticated-connection slots
+// banner holds each request for up to nodeSensorsTimeout, and every request
+// arriving in that window is another miss — so the pile-up is
+// self-reinforcing, and it is bounded only by the general rate limiter. Exhausting sshd's unauthenticated-connection slots
 // would then starve the other users of this path, node maintenance and the
 // rolling-update orchestrator, which is a much worse outcome than a slow panel.
 //
@@ -295,9 +293,9 @@ func (h *NodeHandler) readNodeSensors(ctx context.Context, clusterID uuid.UUID, 
 	sshCtx, cancel := context.WithTimeout(ctx, nodeSensorsTimeout)
 	defer cancel()
 
-	result, err := rolling.RunNodeCommand(sshCtx, h.queries, h.encryptionKey, clusterID, nodeName, nodeSensorsCommand)
+	result, err := rolling.RunNodeCommandLimited(sshCtx, h.queries, h.encryptionKey, clusterID, nodeName, nodeSensorsCommand, nodeSensorsMaxOutput)
 	if err != nil {
-		reason, classified := sensorsUnavailableReason(err)
+		reason, classified := rolling.UnavailableReason(err, "hardware temperatures")
 		if !classified {
 			// Unclassified failures carry node IPs, host-key fingerprints and
 			// decrypt detail in their message, so the operator gets the generic
@@ -318,26 +316,6 @@ func (h *NodeHandler) readNodeSensors(ctx context.Context, clusterID uuid.UUID, 
 	}
 
 	return availableSensors(parseHwmonTemps(result.Stdout))
-}
-
-// sensorsUnavailableReason maps a RunNodeCommand failure to a sentence for the
-// operator, and reports whether it recognised the cause.
-//
-// The recognised cases are the ones the operator can act on, and their text is
-// written here rather than reused from the error so nothing internal leaks into
-// an API response. Anything else gets the generic sentence, and the caller logs
-// the original.
-func sensorsUnavailableReason(err error) (reason string, classified bool) {
-	switch {
-	case errors.Is(err, rolling.ErrSSHNotConfigured):
-		return "SSH is not configured for this cluster. Add credentials under Settings → SSH Credentials to read hardware temperatures.", true
-	case errors.Is(err, rolling.ErrHostKeyNotPinned):
-		return "This node's SSH host key is not pinned. Open Settings → SSH Credentials, run Test Connection, and confirm the fingerprint.", true
-	case errors.Is(err, rolling.ErrNodeAddressUnknown):
-		return "No IP address is known for this node yet — the collector has not reported one.", true
-	default:
-		return "Could not read sensors over SSH from this node.", false
-	}
 }
 
 func unavailableSensors(reason string) nodeSensorsResponse {

@@ -128,19 +128,20 @@ func syslogTimeParam(description string) apischema.Property {
 	return optString(64, "<YYYY-MM-DD[ HH:MM[:SS]]|-1h|30m ago|unix seconds>", description)
 }
 
-// registerNodeEndpoints declares the 41 node routes served by NodeHandler.
+// registerNodeEndpoints declares the 43 node routes served by NodeHandler.
 //
 // Every one of them is the uniform shape: resolve the cluster from the
-// path, then one static requireClusterPerm. So all 41 declare a plain
+// path, then one static requireClusterPerm. So all 43 declare a plain
 // cluster-scoped Check and every hand-placed call is gone from the handler
 // bodies — nothing here is Deferred, Advisory, Public or SelfService, and
 // nothing is global: a node belongs to exactly one cluster, and that
 // cluster is the first placeholder in every path.
 //
-// 38 of the 41 were migrated from hand-placed checks. The last three, the node
-// options and notes routes, were born declared: there is no handler check of
-// theirs to compare against, so registry_nodes_test.go records them apart from
-// that historical table (nodeAddedPermissions).
+// 38 of the 43 were migrated from hand-placed checks. The other five, the node
+// options and notes routes and the two memory-module routes, were born
+// declared: there is no handler check of theirs to compare against, so
+// registry_nodes_test.go records them apart from that historical table
+// (nodeAddedPermissions).
 //
 // Two permission choices are worth naming because they are not the
 // obvious one:
@@ -769,6 +770,31 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 		Permissions: clusterCheck("view", "node"),
 		Parameters:  nodeParams(nil),
 		Handler:     h.GetNodeSensors,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodGet,
+		Path:   nodeScope + "/:node_name/memory-modules",
+		Description: "Read a node's last memory DIMM inventory: each slot with its module's size, type, speed and part number, " +
+			"the installed total, the firmware's maximum, and the memory the node's kernel reports (node_mem_total; a table listing " +
+			"less is incomplete). Never dials the node: reads happen in the background pass " +
+			"(NODE_MEMORY_READ_INTERVAL) and on the refresh route. status is never, ok, unavailable or error, with a reason; " +
+			"a failed read keeps the last good one.",
+		Group:       "Nodes",
+		Permissions: clusterCheck("view", "node"),
+		Parameters:  nodeParams(nil),
+		Handler:     h.GetNodeMemoryModules,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPost,
+		Path:   nodeScope + "/:node_name/memory-modules/refresh",
+		Description: "Read a node's memory DIMM layout now with dmidecode over the cluster's SSH credentials (it needs root), " +
+			"store it and return it as the GET does. manage:node, and audited, because it opens a root SSH session on the node. " +
+			"A failed read still answers 200, with status unavailable or error and a reason. Within a minute of the node's " +
+			"last read that dialed it, 429 with Retry-After: each read is a root login, and repeated rejected ones get Nexara banned by fail2ban.",
+		Group:       "Nodes",
+		Permissions: clusterCheck("manage", "node"),
+		Parameters:  nodeParams(nil),
+		Handler:     h.RefreshNodeMemoryModules,
 	})
 
 	// ── Firewall ──────────────────────────────────────────────────────

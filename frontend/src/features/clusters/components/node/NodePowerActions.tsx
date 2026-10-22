@@ -293,7 +293,7 @@ export function NodePowerActions({
           size="sm"
           className="gap-1.5"
           disabled
-          title="Configure SSH credentials (Settings → SSH Credentials) to use node maintenance, or use Evacuate."
+          title="Configure SSH credentials (Security → Rolling Updates → SSH Credentials) to use node maintenance, or use Evacuate."
         >
           <Wrench className="h-4 w-4" />
           Maintenance

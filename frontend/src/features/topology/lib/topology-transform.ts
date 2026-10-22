@@ -317,7 +317,5 @@ export function getGuestStatusColor(status: string): string {
 }
 
 // Re-exported from the canonical lib for the topology nodes that import
-// it from this file. Topology previously used IEC binary suffixes
-// (KiB / MiB / TiB); we standardised on the rest-of-app KB / MB / TB
-// nomenclature in Phase 5.4.
+// it from this file, so topology follows the app-wide byte-unit preference.
 export { formatBytes } from "@/lib/format";

@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatBytes } from "@/lib/format";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   useClusterNodes,
@@ -383,12 +384,6 @@ export function CreateCTDialog({
     }
   })();
 
-  function formatSize(bytes: number): string {
-    if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
-    if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
-    return `${String(bytes)} B`;
-  }
-
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl">
@@ -535,7 +530,7 @@ export function CreateCTDialog({
                       <option value="">Select template</option>
                       {templates.map((t) => (
                         <option key={t.volid} value={t.volid}>
-                          {extractFilename(t.volid)} ({formatSize(t.size)})
+                          {extractFilename(t.volid)} ({formatBytes(t.size)})
                           {looksLikeOCI(t.volid) ? "  — OCI (preview)" : ""}
                         </option>
                       ))}
@@ -602,7 +597,7 @@ export function CreateCTDialog({
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Disk Size (GB)</Label>
+                  <Label>Disk Size (GiB)</Label>
                   <Input
                     type="number"
                     min={1}
@@ -673,7 +668,7 @@ export function CreateCTDialog({
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Memory (MB)</Label>
+                  <Label>Memory (MiB)</Label>
                   <Input
                     type="number"
                     min={64}
@@ -685,7 +680,7 @@ export function CreateCTDialog({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Swap (MB)</Label>
+                  <Label>Swap (MiB)</Label>
                   <Input
                     type="number"
                     min={0}
@@ -1053,7 +1048,7 @@ export function CreateCTDialog({
                   <span className="truncate">{selectedTemplate}</span>
                   <span className="text-muted-foreground">Root Disk</span>
                   <span>
-                    {diskSize} GB
+                    {diskSize} GiB
                     {rootStorageName ? ` on ${rootStorageName}` : ""}
                   </span>
                 </div>
@@ -1077,9 +1072,9 @@ export function CreateCTDialog({
                     </>
                   )}
                   <span className="text-muted-foreground">Memory</span>
-                  <span>{memory} MB</span>
+                  <span>{memory} MiB</span>
                   <span className="text-muted-foreground">Swap</span>
-                  <span>{swap} MB</span>
+                  <span>{swap} MiB</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border p-3">

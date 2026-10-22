@@ -87,7 +87,7 @@ describe("ClusterDetailPage", () => {
     expect(screen.getByText("Test Cluster")).toBeInTheDocument();
     expect(screen.getByText("pve-node-1")).toBeInTheDocument();
     expect(screen.getByText("16")).toBeInTheDocument();
-    expect(screen.getByText("64.0 GB")).toBeInTheDocument();
+    expect(screen.getByText("64.0 GiB")).toBeInTheDocument();
     expect(screen.getByText("8.1.3")).toBeInTheDocument();
     expect(screen.getByText("10d 0h")).toBeInTheDocument();
 

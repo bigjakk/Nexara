@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 
+import { usePreferencesStore } from "@/stores/preferences-store";
 import {
   formatBytes,
   formatBytesPerSecond,
@@ -10,6 +11,10 @@ import {
 } from "./format";
 
 describe("formatBytes", () => {
+  afterEach(() => {
+    usePreferencesStore.getState().setPreferences({ byteUnit: "binary" });
+  });
+
   it("returns 0 B for zero", () => {
     expect(formatBytes(0)).toBe("0 B");
   });
@@ -18,38 +23,46 @@ describe("formatBytes", () => {
     expect(formatBytes(512)).toBe("512 B");
   });
 
-  it("formats KB with 1 decimal", () => {
-    expect(formatBytes(1024)).toBe("1.0 KB");
-    expect(formatBytes(2048)).toBe("2.0 KB");
+  // Binary is the default: divided by 1024 and labelled so, as the reports are.
+  it.each([
+    [1024, "1.0 KiB"],
+    [2048, "2.0 KiB"],
+    [1024 ** 3, "1.0 GiB"],
+    [1024 ** 3 * 1.5, "1.5 GiB"],
+    [1024 ** 6, "1024.0 PiB"],
+    [-1024, "-1.0 KiB"],
+    [-1, "-1 B"],
+  ])("formats %d bytes as %s", (bytes, want) => {
+    expect(formatBytes(bytes)).toBe(want);
   });
 
-  it("formats GB scale", () => {
-    expect(formatBytes(1024 * 1024 * 1024)).toBe("1.0 GB");
-    expect(formatBytes(1024 * 1024 * 1024 * 1.5)).toBe("1.5 GB");
-  });
-
-  it("clamps to PB at the high end", () => {
-    const oneEB = 1024 ** 6;
-    expect(formatBytes(oneEB)).toBe("1024.0 PB");
-  });
-
-  it("handles negative values for chart deltas", () => {
-    expect(formatBytes(-1024)).toBe("-1.0 KB");
-    expect(formatBytes(-1)).toBe("-1 B");
+  // The Appearance preference's decimal choice divides by 1000.
+  it.each([
+    [1000, "1.0 kB"],
+    [1024 ** 3, "1.1 GB"],
+    [1e15, "1.0 PB"],
+  ])("formats %d bytes as %s under the decimal preference", (bytes, want) => {
+    usePreferencesStore.getState().setPreferences({ byteUnit: "decimal" });
+    expect(formatBytes(bytes)).toBe(want);
   });
 });
 
 describe("formatBytesPerSecond", () => {
+  afterEach(() => {
+    usePreferencesStore.getState().setPreferences({ byteUnit: "binary" });
+  });
+
   it("returns 0 B/s for zero", () => {
     expect(formatBytesPerSecond(0)).toBe("0 B/s");
   });
 
-  it("formats KB/s scale", () => {
-    expect(formatBytesPerSecond(1024)).toBe("1.0 KB/s");
-  });
-
-  it("handles negatives", () => {
-    expect(formatBytesPerSecond(-2048)).toBe("-2.0 KB/s");
+  it.each([
+    ["binary", 1024, "1.0 KiB/s"],
+    ["binary", -2048, "-2.0 KiB/s"],
+    ["decimal", 2_500_000, "2.5 MB/s"],
+  ] as const)("formats %s %d as %s", (byteUnit, rate, want) => {
+    usePreferencesStore.getState().setPreferences({ byteUnit });
+    expect(formatBytesPerSecond(rate)).toBe(want);
   });
 });
 

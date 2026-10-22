@@ -569,6 +569,22 @@ type NodeDisk struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// Each node's last memory DIMM read (dmidecode over SSH). A failed read updates status, reason and attempted_at and keeps the last good read.
+type NodeMemoryInventory struct {
+	NodeID         uuid.UUID          `json:"node_id"`
+	Status         string             `json:"status"`
+	Reason         string             `json:"reason"`
+	AttemptedAt    time.Time          `json:"attempted_at"`
+	ReadAt         pgtype.Timestamptz `json:"read_at"`
+	InstalledBytes int64              `json:"installed_bytes"`
+	SlotsUsed      int32              `json:"slots_used"`
+	SlotsTotal     int32              `json:"slots_total"`
+	// The firmware's own Maximum Capacity, summed over the system memory arrays; boards often misstate it
+	MaxCapacityBytes int64           `json:"max_capacity_bytes"`
+	Ecc              string          `json:"ecc"`
+	Modules          json.RawMessage `json:"modules"`
+}
+
 type NodeMetric struct {
 	Time      time.Time `json:"time"`
 	NodeID    uuid.UUID `json:"node_id"`
@@ -579,6 +595,8 @@ type NodeMetric struct {
 	DiskWrite int64     `json:"disk_write"`
 	NetIn     int64     `json:"net_in"`
 	NetOut    int64     `json:"net_out"`
+	// TRUE when the node's disk sums include a guest whose disk counters PVE did not report this sample (carried forward), or miss guests whose list could not be read; FALSE when they are this sample's reading, or the row predates the column
+	DiskUnreported bool `json:"disk_unreported"`
 }
 
 type NodeMetrics1h struct {
@@ -1386,6 +1404,10 @@ type VmMetric struct {
 	DiskWrite int64     `json:"disk_write"`
 	NetIn     int64     `json:"net_in"`
 	NetOut    int64     `json:"net_out"`
+	// TRUE when mem_used is the guest's own figure (balloon statistics, or a container's cgroup), FALSE when it is the host's view of a VM without balloon statistics (memory the QEMU process holds, can exceed mem_total), NULL when there was no reading (guest not running, or the row predates the column)
+	MemGuest pgtype.Bool `json:"mem_guest"`
+	// TRUE when PVE did not report the guest's disk counters this sample and they are its last reported ones, carried forward; FALSE when they are this sample's reading, or the row predates the column
+	DiskUnreported bool `json:"disk_unreported"`
 }
 
 type VmMetrics1h struct {

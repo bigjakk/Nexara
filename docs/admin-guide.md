@@ -167,6 +167,20 @@ A node's own settings are on its page, in the **Options** and **Notes** cards. T
 
 ---
 
+## Memory Modules
+
+A node's page shows its memory DIMM layout in the **Memory modules** card on the Summary tab: every slot, the module in it (size, type, the speed the board runs it at against its rating, manufacturer and part number), and the totals: installed memory, slots used, the firmware's maximum and ECC. The same layout feeds the **Memory headroom** section of the capacity forecast report.
+
+Proxmox has no API for this, so Nexara reads it with `/usr/sbin/dmidecode -t 16 -t 17` over the cluster's **SSH credentials** (Security → Rolling Updates → SSH Credentials). That needs root.
+
+- **Daily.** The collector reads each online node of every active cluster once its last read is older than `NODE_MEMORY_READ_INTERVAL` (default `24h`; `0` turns it off). That is one root SSH login per node per day, recorded in the audit log as the system user. A cluster without SSH credentials, or a node whose host key is not pinned, is never dialed.
+- **Read now.** The card's **Read now** button (`manage:node`) reads the node at once, and is audited. It works once a minute per node: each read is a root login, and repeated rejected logins get Nexara's address banned by fail2ban.
+- **A failed read keeps the last good one.** The card shows why the newest read failed above the last good read, for example *Reading the memory layout needs root* when the SSH user is not root, or a warning when the node's host key no longer matches the pinned one.
+- **What is not stored.** Serial numbers and asset tags are skipped and never kept. The firmware's maximum is the board's own figure, which boards often misstate.
+- **Virtual nodes.** A node that is itself a VM lists only the memory it booted with; memory hot-plugged later is in no DIMM table. When the firmware lists less than the node has, the card says so, and the capacity forecast calls that node's table incomplete rather than reading its headroom from it.
+
+---
+
 ## User Management
 
 Navigate to **Admin > Users** to manage user accounts.
@@ -998,7 +1012,7 @@ The card shows **Last checked** and **Next check**, and lets you say when the ne
 | `Daily at HH:MM` | One check a day, at that time |
 | `Weekly on <day> at HH:MM` | One check a week |
 
-What is really being scheduled is not the upstream lookup — that is one small request — but the **~840 MB fetch** a lookup can dispatch, which is why the timed options exist: point them at a maintenance window.
+What is really being scheduled is not the upstream lookup — that is one small request — but the **~840 MiB fetch** a lookup can dispatch, which is why the timed options exist: point them at a maintenance window.
 
 For the timed options, set the **time zone** as well. Left on `Server time` the hour is read in the container's own zone, which is almost always UTC.
 
@@ -1052,6 +1066,8 @@ Navigate to **Alerts** from the sidebar.
      | Snapshot Age | **days** | cluster, VM |
 
      **Snapshot Age (days)** reads the guest snapshot inventory rather than the metrics history, so it behaves differently from the rest: the value is the age of the oldest dated snapshot in scope, node scope is not offered (picking the metric switches a node-scoped rule to cluster scope), and snapshots whose creation time Proxmox does not report are excluded rather than counted as ancient. With no dated snapshots in scope the condition is false, so the alert auto-resolves once the offenders are cleaned up.
+
+     **Disk Read/Write** and **Network In/Out** are rates in bytes/s, measured between samples. Under load Proxmox at times leaves a running VM's disk counters unreported (it reads them as 0). Nexara then keeps the last reported figures, for up to six hours, and marks the sample — for a node, any sample in which one of its guests was unreported or a guest list could not be read. A disk rule skips marked samples, holding (neither firing nor resolving) while the newest sample is one, and measures the rate across them once a reported sample follows. A counter Proxmox never reports while the guest runs (network on a VM without a NIC, say) is never judged, so a `<` rule on it never fires. When a counter falls — a guest restarted, stopped or moved off the node, or a node's guest list could not be read — the rule holds until the counter is back at its earlier level or that sample is older than the rule's duration plus ten minutes. A dip Nexara could not mark — one already under way when it started, or one past six hours — can still read as a burst, so give node- and cluster-scope disk rules a duration rather than `0`.
    - **Condition** — threshold and comparison (e.g., CPU > 90%)
    - **Duration** — how long the condition must persist before firing; `0` fires on the first breaching sample
    - **Severity** — info, warning, critical
@@ -1410,10 +1426,13 @@ Every report shares one layout: a masthead with the period and the sources consu
 | **Backup compliance** | Every guest against **Proxmox Backup Server and Veeam**: coverage by state, recovery-point age, backup runs and failures in the period, datastore and repository capacity with days-to-full, malware verdicts and orphaned Veeam objects | stale hours; the runs section can be switched off |
 | **Resource utilisation** | CPU, memory, disk and network per node and per day, with sustained-pressure findings | — |
 | **VM resource usage** | Top consumers per resource, idle guests, every guest's period averages | top N |
-| **Capacity forecast** | Where the period's trend takes CPU and memory per node; how full each storage pool is | — |
+| **Rightsizing** | Per guest, p95/p99/peak CPU over the time it ran with busy vCPUs, its own memory use against its allocation, and how much of the time it ran; flags clearly over- and under-sized guests. Covers at most the last 30 days | — |
+| **Capacity forecast** | Where the period's trend takes CPU and memory per node; how much room each node's memory has to grow, from its DIMM layout; how full each storage pool is | — |
 | **Snapshot inventory** | Every guest snapshot by age, and the ones most likely forgotten | snapshot age |
 | **Patch status** | The latest vulnerability scan per node, known-exploited CVEs first | — |
 | **Uptime summary** | Which nodes are up, for how long, and which rebooted in the period | — |
+
+**Rightsizing.** Its figures come from the raw guest readings, which Nexara keeps for 30 days, so a longer period is clamped to the last 30 days and the masthead says so. CPU is measured only over the readings taken while the guest ran, so time spent stopped does not read as idle. Memory is the guest's own figure: a VM's balloon statistics (a Linux guest counts its page cache as used) or a container's cgroup usage. A VM without balloon statistics is measured only from the host, which says nothing about use inside it, so the report says it cannot tell rather than inventing a figure. Flags: CPU over-allocated (a VM with 2 or more vCPUs under 25 % at p95), CPU-bound (90 % or more at p95), memory over-allocated (its own p95 under 50 %), memory tight (a container's own p95 at 90 % or more), and running under 10 % of the time. A guest that ran under an hour in the window is never flagged.
 
 **Backup compliance and Veeam.** The report shares its verdict with the Backup page's coverage view, so the two never disagree: a guest is *current* when its newest restore point from **either** provider is younger than the stale threshold (default 24 h), *stale* otherwise, and has *no backup* when neither provider holds a point. PBS snapshots are matched through the datastores the cluster actually mounts, so a same-numbered guest on another cluster never counts. Veeam objects are matched on the guest's SMBIOS UUID; a name-only match is flagged. Veeam's own worker appliances and backup server are listed but excluded from every percentage.
 

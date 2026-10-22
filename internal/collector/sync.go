@@ -296,6 +296,7 @@ type Syncer struct {
 	fastSyncInFlight     atomic.Bool             // re-entrancy guard for SyncAllResources
 	snapshotSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllGuestSnapshots
 	smbiosSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestSmbios
+	disk                 diskCarry               // VMs' last reported disk counters
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.
@@ -1047,8 +1048,11 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		}
 	}
 
-	// Sum VM/CT disk and network I/O into the node metric snapshot.
+	// Sum VM/CT disk and network I/O into the node metric snapshot. The disk
+	// sums are unreported when a guest's disk counters are, or when a guest
+	// list failed and the sums miss its guests.
 	var nodeDiskRead, nodeDiskWrite, nodeNetIn, nodeNetOut int64
+	diskUnreported := vmErr != nil || ctErr != nil
 	allVMSnapshots := make([]vmMetricSnapshot, 0, len(vmSnapshots)+len(ctSnapshots))
 	allVMSnapshots = append(allVMSnapshots, vmSnapshots...)
 	allVMSnapshots = append(allVMSnapshots, ctSnapshots...)
@@ -1057,19 +1061,21 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		nodeDiskWrite += vm.DiskWrite
 		nodeNetIn += vm.NetIn
 		nodeNetOut += vm.NetOut
+		diskUnreported = diskUnreported || vm.DiskUnreported
 	}
 
 	return &nodeCollectionResult{
 		Node: dbNode.ID,
 		NodeMetric: nodeMetricSnapshot{
-			NodeID:    dbNode.ID,
-			CPUUsage:  cpuUsage,
-			MemUsed:   memUsed,
-			MemTotal:  memTotal,
-			DiskRead:  nodeDiskRead,
-			DiskWrite: nodeDiskWrite,
-			NetIn:     nodeNetIn,
-			NetOut:    nodeNetOut,
+			NodeID:         dbNode.ID,
+			CPUUsage:       cpuUsage,
+			MemUsed:        memUsed,
+			MemTotal:       memTotal,
+			DiskRead:       nodeDiskRead,
+			DiskWrite:      nodeDiskWrite,
+			NetIn:          nodeNetIn,
+			NetOut:         nodeNetOut,
+			DiskUnreported: diskUnreported,
 		},
 		VMMetrics:    allVMSnapshots,
 		StorageAdded: storageAdded,
@@ -1109,15 +1115,18 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 
 		s.refreshOSType(ctx, client, dbVM, nodeName, vm.VMID, "qemu", vm.EffectiveStatus())
 
+		diskRead, diskWrite, carried := s.disk.counters(clusterID, vm)
 		snapshots = append(snapshots, vmMetricSnapshot{
-			VMID:      dbVM.ID,
-			CPUUsage:  vm.CPU,
-			MemUsed:   vm.Mem,
-			MemTotal:  vm.MaxMem,
-			DiskRead:  vm.DiskRead,
-			DiskWrite: vm.DiskWrite,
-			NetIn:     vm.NetIn,
-			NetOut:    vm.NetOut,
+			VMID:           dbVM.ID,
+			CPUUsage:       vm.CPU,
+			MemUsed:        vm.Mem,
+			MemTotal:       vm.MaxMem,
+			DiskRead:       diskRead,
+			DiskWrite:      diskWrite,
+			NetIn:          vm.NetIn,
+			NetOut:         vm.NetOut,
+			MemGuest:       memGuest(vm.Status == "running", vm.GuestReportsMemory()),
+			DiskUnreported: carried,
 		})
 	}
 
@@ -1233,6 +1242,8 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 			DiskWrite: ct.DiskWrite,
 			NetIn:     ct.NetIn,
 			NetOut:    ct.NetOut,
+			// A container's mem is its own cgroup's usage, page cache excluded.
+			MemGuest: memGuest(ct.Status == "running", true),
 		})
 	}
 

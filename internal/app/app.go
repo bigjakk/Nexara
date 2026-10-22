@@ -33,6 +33,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -42,11 +43,13 @@ import (
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/guesttools"
+	"github.com/bigjakk/nexara/internal/nodememory"
 	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/reports"
 	"github.com/bigjakk/nexara/internal/rolling"
 	"github.com/bigjakk/nexara/internal/scanner"
+	sshpkg "github.com/bigjakk/nexara/internal/ssh"
 	"github.com/bigjakk/nexara/internal/virtiowin"
 )
 
@@ -86,6 +89,7 @@ type App struct {
 	ReportGen      *reports.Generator
 	VirtioWin      *virtiowin.Engine
 	GuestTools     *guesttools.Engine
+	NodeMemory     *nodememory.Reader
 }
 
 // New builds every singleton in dependency order. shutdownCtx is the
@@ -176,6 +180,12 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 
 		a.VirtioWin = virtiowin.NewEngine(a.Queries, cfg.EncryptionKey, logger.With("component", "virtio-win"))
 		a.GuestTools = guesttools.NewEngine(a.Queries, cfg.EncryptionKey, logger.With("component", "guest-tools"))
+		// One reader for the daily pass and a node page's Read now, so its
+		// per-node singleflight covers both.
+		queries, encKey := a.Queries, cfg.EncryptionKey
+		a.NodeMemory = nodememory.NewReader(func(ctx context.Context, clusterID uuid.UUID, nodeName, command string) (*sshpkg.ExecResult, error) {
+			return rolling.RunNodeCommandLimited(ctx, queries, encKey, clusterID, nodeName, command, nodememory.MaxOutput)
+		}, a.Queries, cfg.NodeMemoryReadInterval, logger.With("component", "node-memory"))
 
 		// Nil-safe on every setter; a keyless or DB-less install simply leaves
 		// the engines building clients per call.

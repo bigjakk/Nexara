@@ -880,6 +880,8 @@ leaves provenance intact.
 | GET | `/clusters/:id/nodes/:node_id/disks` | List node disks (model, size, health, wearout) |
 | GET | `/clusters/:id/nodes/:node_id/network-interfaces` | List node network interfaces |
 | GET | `/clusters/:id/nodes/:node_id/pci-devices` | List node PCI devices |
+| GET | `/clusters/:id/nodes/:node/memory-modules` | The node's last memory DIMM read: each slot's size, type, speed and part number, the installed total, the firmware's maximum and ECC, the memory the node's kernel reports (`node_mem_total`; a table listing less is incomplete), with `status` (`never`, `ok`, `unavailable`, `error`) and `reason`. A failed read keeps the last good one. Never dials the node |
+| POST | `/clusters/:id/nodes/:node/memory-modules/refresh` | Read the DIMM layout now with `dmidecode` over the cluster's SSH credentials (needs root) and return it as the GET does; a failed read answers 200 with its reason, and a read within a minute of the last one that dialed the node answers 429 with `Retry-After` (`manage:node`, audited) |
 | GET | `/clusters/:id/nodes/:node/dns` | Get node DNS config |
 | PUT | `/clusters/:id/nodes/:node/dns` | Set node DNS config |
 | GET | `/clusters/:id/nodes/:node/time` | Get node time and timezone |
@@ -1821,9 +1823,9 @@ Failed notification deliveries land here for inspection, retry, or dismissal.
 | DELETE | `/reports/runs/:id` | Delete a run and its stored renderings (`manage:report`) |
 | POST | `/reports/runs/:id/email` | Email a finished run through an email channel (`generate:report`). Body: `{"channel_id": "…", "recipients": ["…"], "with_csv": false}`; empty `recipients` uses the channel's own list |
 
-Report types: `cluster_digest`, `backup_compliance`, `resource_utilization`, `vm_resource_usage`, `capacity_forecast`, `snapshot_inventory`, `patch_status`, `uptime_summary`.
+Report types: `cluster_digest`, `backup_compliance`, `resource_utilization`, `vm_resource_usage`, `rightsizing`, `capacity_forecast`, `snapshot_inventory`, `patch_status`, `uptime_summary`.
 
-`POST /reports/generate` and the schedule endpoints accept a `parameters` object, also returned on every run and schedule. Every key has a server-side default, so `{}` is the report as documented: `stale_after_hours` (1–8760, default 24 — backup compliance and the digest), `top_n` (1–100, default 10 — VM resource usage), `snapshot_warn_days` (1–3650, default 7 — snapshot inventory and the digest), and `sections` (`{"runs": false}` switches an optional section off). Values outside these ranges are rejected with 400.
+`POST /reports/generate` and the schedule endpoints accept a `parameters` object, also returned on every run and schedule. Every key has a server-side default, so `{}` is the report as documented: `stale_after_hours` (1–8760, default 24 — backup compliance and the digest), `top_n` (1–100, default 10 — VM resource usage), `snapshot_warn_days` (1–3650, default 7 — snapshot inventory and the digest), and `sections` (`{"runs": false}` switches an optional section off). Values outside these ranges are rejected with 400. `rightsizing` covers at most the last 720 hours, the raw readings Nexara keeps; a longer `time_range_hours` is clamped and the run says so.
 
 Every schedule carries `run_as`: the user whose grants its runs read under, stamped with whoever last saved it (`created_by` never changes). A run refuses to start while that user is deactivated.
 

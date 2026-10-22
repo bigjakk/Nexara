@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -9,8 +8,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/bigjakk/nexara/internal/rolling"
 )
 
 // ptr is a local helper for the pointer-valued threshold fields.
@@ -206,79 +203,6 @@ func formatReadings(readings []nodeSensorReading) string {
 		parts = append(parts, part)
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
-}
-
-func TestSensorsUnavailableReason(t *testing.T) {
-	tests := []struct {
-		name           string
-		err            error
-		wantClassified bool
-		wantContains   string
-	}{
-		{
-			name:           "missing credentials points at the settings page",
-			err:            fmt.Errorf("%w: no rows in result set", rolling.ErrSSHNotConfigured),
-			wantClassified: true,
-			wantContains:   "SSH Credentials",
-		},
-		{
-			name:           "unpinned host key asks for Test Connection",
-			err:            fmt.Errorf("%w (192.0.2.10) — open Settings", rolling.ErrHostKeyNotPinned),
-			wantClassified: true,
-			wantContains:   "Test Connection",
-		},
-		{
-			name:           "unknown node address blames the collector",
-			err:            fmt.Errorf("%w (node %q)", rolling.ErrNodeAddressUnknown, "pve-01"),
-			wantClassified: true,
-			wantContains:   "collector",
-		},
-		{
-			name:           "anything else is generic",
-			err:            errors.New("dial 192.0.2.10:22: connect: connection refused"),
-			wantClassified: false,
-			wantContains:   "Could not read sensors",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			reason, classified := sensorsUnavailableReason(tt.err)
-			if classified != tt.wantClassified {
-				t.Errorf("classified = %v, want %v", classified, tt.wantClassified)
-			}
-			if !strings.Contains(reason, tt.wantContains) {
-				t.Errorf("reason %q does not contain %q", reason, tt.wantContains)
-			}
-		})
-	}
-}
-
-// TestSensorsUnavailableReasonLeaksNothing is the security half of the
-// classification: RunNodeCommand errors embed node IPs, host-key fingerprints
-// and decrypt detail, and none of that may reach an API response. The reasons
-// are written by hand precisely so that a future edit cannot slip `err.Error()`
-// into one without this failing.
-func TestSensorsUnavailableReasonLeaksNothing(t *testing.T) {
-	secrets := []string{
-		"192.0.2.10",
-		"SHA256:0DwGkQ1kQ0N3Xd0Z7xk8h1tGq0mB2v9c4tE6yLp3sVk",
-		"cipher: message authentication failed",
-	}
-	errs := []error{
-		fmt.Errorf("%w: %s", rolling.ErrSSHNotConfigured, secrets[2]),
-		fmt.Errorf("%w (%s) fingerprint %s", rolling.ErrHostKeyNotPinned, secrets[0], secrets[1]),
-		fmt.Errorf("%w (node %q at %s)", rolling.ErrNodeAddressUnknown, "pve-01", secrets[0]),
-		fmt.Errorf("SSH handshake with %s: %s", secrets[0], secrets[1]),
-	}
-	for _, err := range errs {
-		reason, _ := sensorsUnavailableReason(err)
-		for _, secret := range secrets {
-			if strings.Contains(reason, secret) {
-				t.Errorf("reason %q leaked %q from error %v", reason, secret, err)
-			}
-		}
-	}
 }
 
 func TestNodeSensorsCache(t *testing.T) {

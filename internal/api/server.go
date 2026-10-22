@@ -397,6 +397,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 		s.vmHandler = handlers.NewVMHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.containerHandler = handlers.NewContainerHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.nodeHandler = handlers.NewNodeHandler(d.queries, d.encryptionKey, d.eventPub)
+		s.nodeHandler.SetNodeMemoryReader(d.app.NodeMemory)
 		s.storageHandler = handlers.NewStorageHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.virtioWinHandler = handlers.NewVirtioWinHandler(d.queries, d.eventPub, d.app.VirtioWin)
 		s.guestToolsHandler = handlers.NewGuestToolsHandler(d.queries, d.eventPub, d.app.GuestTools)

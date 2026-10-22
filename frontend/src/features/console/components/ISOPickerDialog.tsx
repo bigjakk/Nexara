@@ -8,17 +8,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { formatBytes } from "@/lib/format";
 import { useNodeISOs, useMountISO } from "../api/console-queries";
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1_073_741_824) {
-    return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
-  }
-  if (bytes >= 1_048_576) {
-    return `${(bytes / 1_048_576).toFixed(0)} MB`;
-  }
-  return `${(bytes / 1024).toFixed(0)} KB`;
-}
 
 interface ISOPickerDialogProps {
   open: boolean;
@@ -129,7 +120,7 @@ export function ISOPickerDialog({
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{iso.name}</div>
                   <div className="text-xs text-muted-foreground">
-                    {iso.storage} &middot; {formatSize(iso.size)}
+                    {iso.storage} &middot; {formatBytes(iso.size)}
                   </div>
                 </div>
               </button>

@@ -567,6 +567,37 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 			}()
 		}
 
+		// Node memory DIMM loop: reads each online node's layout with dmidecode
+		// over its cluster's SSH credentials once NODE_MEMORY_READ_INTERVAL has
+		// passed. Ticks hourly so credentials added later are picked up within
+		// the hour; nodes without credentials are never dialed. Leader-gated
+		// like the loops above, and each read's write uses this ctx, so a lost
+		// leadership cannot land a late result.
+		if application.NodeMemory != nil && cfg.NodeMemoryReadInterval > 0 {
+			memoryTick := min(cfg.NodeMemoryReadInterval, time.Hour)
+			if memoryTick < time.Minute {
+				memoryTick = time.Minute
+			}
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("node memory loop panicked", "panic", r)
+					}
+				}()
+				application.NodeMemory.RunDue(ctx)
+				memoryTicker := time.NewTicker(memoryTick)
+				defer memoryTicker.Stop()
+				for {
+					select {
+					case <-memoryTicker.C:
+						application.NodeMemory.RunDue(ctx)
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+		}
+
 		// Veeam inventory + session loops. Leader-gated on the same ctx as the
 		// loops above, so a follower never polls a VBR server and a lost
 		// leadership tears both down with everything else.

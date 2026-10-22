@@ -1255,7 +1255,7 @@ export function CreateVMDialog({
                         </select>
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Size (GB)</Label>
+                        <Label className="text-xs">Size (GiB)</Label>
                         <Input
                           type="number"
                           min={1}
@@ -1723,7 +1723,7 @@ export function CreateVMDialog({
                           {devName.toUpperCase()}
                         </span>
                         <span>
-                          {disk.size} GB
+                          {disk.size} GiB
                           {disk.storage ? ` on ${disk.storage}` : ""} (
                           {disk.format}){disk.discard ? " +discard" : ""}
                           {disk.ssd ? " +ssd" : ""}

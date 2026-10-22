@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -517,6 +518,7 @@ func newTestSyncer(queries SyncQueries) *Syncer {
 // --- Tests ---
 
 func TestSyncCluster_Success(t *testing.T) {
+	balloon := &proxmox.BalloonInfo{TotalMem: json.RawMessage("8217534464"), FreeMem: json.RawMessage("3922567168")}
 	srv := newTestServer(t, map[string]http.HandlerFunc{
 		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.NodeListEntry{
@@ -553,7 +555,8 @@ func TestSyncCluster_Success(t *testing.T) {
 		"/api2/json/nodes/pve2/qemu": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.VirtualMachine{
 				{VMID: 101, Name: "db-server", Status: "running", CPUs: 8, MaxMem: 8589934592, MaxDisk: 107374182400, Template: 0,
-					CPU: 0.8, Mem: 4294967296, NetIn: 5000, NetOut: 6000, DiskRead: 7000, DiskWrite: 8000},
+					CPU: 0.8, Mem: 4294967296, NetIn: 5000, NetOut: 6000, DiskRead: 7000, DiskWrite: 8000,
+					BalloonInfo: balloon},
 			})
 		},
 		"/api2/json/nodes/pve1/lxc": func(w http.ResponseWriter, _ *http.Request) {
@@ -690,6 +693,15 @@ func TestSyncCluster_Success(t *testing.T) {
 	}
 	if result.VMMetrics[2].CPUUsage != 0.8 {
 		t.Errorf("VM 101 CPUUsage = %f, want 0.8", result.VMMetrics[2].CPUUsage)
+	}
+	// Whose memory figure each reading is: VM 100 has no balloon statistics,
+	// VM 101 does, and a container's is always its own.
+	for i, want := range []bool{false, true, true} {
+		if got := result.VMMetrics[i].MemGuest; got == nil {
+			t.Errorf("VMMetrics[%d].MemGuest = nil, want %v", i, want)
+		} else if *got != want {
+			t.Errorf("VMMetrics[%d].MemGuest = %v, want %v", i, *got, want)
+		}
 	}
 }
 
@@ -939,6 +951,12 @@ func TestSyncCluster_PartialNodeFailure(t *testing.T) {
 	if prune.GraceSeconds != int32(staleVMGrace.Seconds()) {
 		t.Errorf("prune GraceSeconds = %d, want %d (staleVMGrace)", prune.GraceSeconds, int32(staleVMGrace.Seconds()))
 	}
+	// pve2's guest lists failed, so its disk sums miss its guests: marked.
+	for _, nm := range result.NodeMetrics {
+		if want := nm.NodeID == pve2ID; nm.DiskUnreported != want {
+			t.Errorf("node %v DiskUnreported = %v, want %v", nm.NodeID, nm.DiskUnreported, want)
+		}
+	}
 }
 
 func TestSyncCluster_DecryptFailure(t *testing.T) {
@@ -1066,9 +1084,12 @@ func TestSyncCluster_MetricSnapshots(t *testing.T) {
 	if result.VMMetrics[0].MemUsed != 2147483648 {
 		t.Errorf("VM1 MemUsed = %d, want 2147483648", result.VMMetrics[0].MemUsed)
 	}
-	// VM2 (stopped).
+	// VM2 (stopped): no reading, so no memory source either.
 	if result.VMMetrics[1].CPUUsage != 0 {
 		t.Errorf("VM2 CPUUsage = %f, want 0", result.VMMetrics[1].CPUUsage)
+	}
+	if result.VMMetrics[1].MemGuest != nil {
+		t.Errorf("VM2 MemGuest = %v, want nil for a stopped guest", *result.VMMetrics[1].MemGuest)
 	}
 	// CT1.
 	if result.VMMetrics[2].CPUUsage != 0.20 {
@@ -1076,6 +1097,55 @@ func TestSyncCluster_MetricSnapshots(t *testing.T) {
 	}
 	if result.VMMetrics[2].MemUsed != 536870912 {
 		t.Errorf("CT1 MemUsed = %d, want 536870912", result.VMMetrics[2].MemUsed)
+	}
+}
+
+// A VM whose disk counters PVE leaves unreported is stored at its last
+// reported ones and marked, and so is its node's sum, which no longer dips by
+// the guest's lifetime of bytes.
+func TestSyncCluster_CarriesUnreportedDiskCounters(t *testing.T) {
+	t.Parallel()
+	var cycle atomic.Int32
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.NodeListEntry{{Node: "pve1", Status: "online", MaxCPU: 4, MaxMem: 8589934592}})
+		},
+		"/api2/json/nodes/pve1/status": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, proxmox.NodeStatus{Node: "pve1", CPUInfo: proxmox.CPUInfo{CPUs: 4}, Memory: proxmox.Memory{Total: 8589934592}})
+		},
+		"/api2/json/nodes/pve1/qemu": func(w http.ResponseWriter, _ *http.Request) {
+			vm := proxmox.VirtualMachine{VMID: 100, Name: "linux01", Status: "running", PID: 4242, CPU: 0.5, Mem: 1 << 30, MaxMem: 2 << 30, NetIn: 300, NetOut: 400}
+			if cycle.Load() == 0 {
+				vm.DiskRead, vm.DiskWrite = 5000, 7000
+			}
+			jsonResponse(w, []proxmox.VirtualMachine{vm})
+		},
+		"/api2/json/nodes/pve1/lxc": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.Container{})
+		},
+		"/api2/json/nodes/pve1/storage": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.StoragePool{})
+		},
+	})
+	defer srv.Close()
+
+	syncer := newTestSyncer(newMockQueries())
+	cluster := makeCluster(t, srv.URL)
+	if _, err := syncer.SyncCluster(context.Background(), cluster); err != nil {
+		t.Fatalf("SyncCluster: %v", err)
+	}
+	cycle.Store(1)
+	result, err := syncer.SyncCluster(context.Background(), cluster)
+	if err != nil {
+		t.Fatalf("SyncCluster: %v", err)
+	}
+
+	vm, node := result.VMMetrics[0], result.NodeMetrics[0]
+	if vm.DiskRead != 5000 || vm.DiskWrite != 7000 || !vm.DiskUnreported {
+		t.Errorf("VM disk = %d/%d unreported %v, want 5000/7000 unreported", vm.DiskRead, vm.DiskWrite, vm.DiskUnreported)
+	}
+	if node.DiskRead != 5000 || node.DiskWrite != 7000 || !node.DiskUnreported {
+		t.Errorf("node disk = %d/%d unreported %v, want 5000/7000 unreported", node.DiskRead, node.DiskWrite, node.DiskUnreported)
 	}
 }
 

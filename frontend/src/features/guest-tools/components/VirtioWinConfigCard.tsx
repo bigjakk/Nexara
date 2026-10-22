@@ -217,7 +217,7 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
         <p className="text-sm text-muted-foreground">
           Keeps a virtio-win ISO on this cluster&apos;s storage so Windows
           guests have drivers and the QEMU guest agent available. The Proxmox
-          node fetches it directly &mdash; roughly 840&nbsp;MB per release.
+          node fetches it directly &mdash; roughly 840&nbsp;MiB per release.
         </p>
 
         {config?.last_error ? (

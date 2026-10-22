@@ -761,6 +761,7 @@ type Querier interface {
 	GetNodeAddressByName(ctx context.Context, arg GetNodeAddressByNameParams) (string, error)
 	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
 	GetNodeIODailyRate(ctx context.Context, arg GetNodeIODailyRateParams) ([]GetNodeIODailyRateRow, error)
+	GetNodeMemoryInventory(ctx context.Context, nodeID uuid.UUID) (NodeMemoryInventory, error)
 	GetNodeMetrics1h(ctx context.Context, arg GetNodeMetrics1hParams) ([]GetNodeMetrics1hRow, error)
 	GetNodeMetrics5m(ctx context.Context, arg GetNodeMetrics5mParams) ([]GetNodeMetrics5mRow, error)
 	GetNodeMetricsDailyAvg(ctx context.Context, arg GetNodeMetricsDailyAvgParams) ([]GetNodeMetricsDailyAvgRow, error)
@@ -875,12 +876,26 @@ type Querier interface {
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
 	GetVMFolder(ctx context.Context, id uuid.UUID) (VmFolder, error)
+	// Per day, the guest's disk and network rates from its counters and, from the
+	// same rows rather than a second scan, its memory readings by source
+	// (vm_metrics.mem_guest) with the guest's own ones summed. A reading with no
+	// source (guest not running, or the row predates the column) is neither.
 	GetVMIODailyRate(ctx context.Context, arg GetVMIODailyRateParams) ([]GetVMIODailyRateRow, error)
 	GetVMImportJob(ctx context.Context, id uuid.UUID) (VmImportJob, error)
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
 	GetVMMetricsDailyAvg(ctx context.Context, arg GetVMMetricsDailyAvgParams) ([]GetVMMetricsDailyAvgRow, error)
 	GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetricsParams) ([]GetVMRecentMetricsRow, error)
+	// Per guest of one cluster, its raw readings since @since: how many there are,
+	// how many were taken while it ran, CPU over those, and the guest's own memory
+	// readings. A reading counts as running when it records a memory source
+	// (mem_guest is set only while running, since 000107) or any memory in use; a
+	// stopped guest's readings are zeros. A reading is the guest's own when
+	// mem_guest says so, or when it is a container's from before 000107: a
+	// container's figure was always its own cgroup's, a VM's source is unknown
+	// before then. Every FILTERed aggregate is COALESCEd because sqlc scans it into
+	// a non-null float: the counts say whether a figure is real.
+	GetVMRightsizingStats(ctx context.Context, arg GetVMRightsizingStatsParams) ([]GetVMRightsizingStatsRow, error)
 	// GetVMSnapshotAgeStats is the vm-scoped counterpart of
 	// GetClusterSnapshotAgeStats; same snap_time > 0 and ErrNoRows semantics.
 	GetVMSnapshotAgeStats(ctx context.Context, arg GetVMSnapshotAgeStatsParams) (GetVMSnapshotAgeStatsRow, error)
@@ -1277,6 +1292,14 @@ type Querier interface {
 	// so the clusters list can attach a generic issues[] without per-cluster calls.
 	// Offline nodes and HA-fenced nodes.
 	ListNodeHealthProblems(ctx context.Context) ([]ListNodeHealthProblemsRow, error)
+	// The nodes of a cluster with a good memory read, for the capacity forecast,
+	// with the memory the node's kernel reports: a firmware table that lists less
+	// (a virtual node's hot-plugged memory) is incomplete.
+	ListNodeMemoryInventoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListNodeMemoryInventoryByClusterRow, error)
+	// Every node of an active cluster with when its memory was last tried and how
+	// that went, for the daily pass. A paused cluster (is_active false) is the
+	// operator saying "leave it alone": the collector skips it, and so does this.
+	ListNodeMemoryReadState(ctx context.Context) ([]ListNodeMemoryReadStateRow, error)
 	ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeNetworkInterface, error)
 	ListNodePCIDevicesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodePciDevice, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
@@ -1747,6 +1770,8 @@ type Querier interface {
 	// exit_status out of the column is the job of the caller's read
 	// (ListRunningTaskHistoryByCluster above), not of this predicate.
 	ReconcileTaskHistory(ctx context.Context, arg ReconcileTaskHistoryParams) (int64, error)
+	// A failed read records why and when, and keeps the last good read.
+	RecordNodeMemoryFailure(ctx context.Context, arg RecordNodeMemoryFailureParams) error
 	RemoveFavorite(ctx context.Context, arg RemoveFavoriteParams) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) (VmFolder, error)
@@ -2016,6 +2041,9 @@ type Querier interface {
 	// check matches nothing either. The caller treats 0 rows as "nothing was
 	// changed" and rolls back.
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) (int64, error)
+	// time_range_hours becomes the window the report covered, which a type with a
+	// longest window (rightsizing) can make shorter than the one requested. A
+	// caller that passes no window (0) leaves the requested one in place.
 	UpdateReportRunCompleted(ctx context.Context, arg UpdateReportRunCompletedParams) error
 	UpdateReportRunFailed(ctx context.Context, arg UpdateReportRunFailedParams) error
 	UpdateReportRunStarted(ctx context.Context, id uuid.UUID) error
@@ -2122,6 +2150,8 @@ type Querier interface {
 	// The batch arrives as one jsonb array rather than N parallel array parameters
 	// because sqlc cannot parse multi-argument unnest(...).
 	UpsertNodeDisks(ctx context.Context, arg UpsertNodeDisksParams) error
+	// A good read replaces the node's row.
+	UpsertNodeMemoryRead(ctx context.Context, arg UpsertNodeMemoryReadParams) error
 	// One statement — and therefore one transaction and at most one WAL flush —
 	// for a whole node's network inventory, instead of one implicit transaction
 	// per interface. See UpsertNodePCIDevices for the full rationale.

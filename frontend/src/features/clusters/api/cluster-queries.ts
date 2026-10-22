@@ -1014,3 +1014,84 @@ export function useNodeSensors(
     refetchInterval: 60_000,
   });
 }
+
+/** One memory socket as the node's firmware describes it (dmidecode type 17). */
+export interface NodeMemoryModule {
+  locator: string;
+  bank_locator?: string;
+  /** 0 when the socket is empty. */
+  size_bytes: number;
+  type?: string;
+  form_factor?: string;
+  /** The module's rated speed. */
+  speed_mts?: number;
+  /** The speed the board runs it at. */
+  configured_speed_mts?: number;
+  manufacturer?: string;
+  part_number?: string;
+  rank?: number;
+}
+
+export interface NodeMemoryModulesResponse {
+  items: NodeMemoryModule[];
+  total: number;
+  /** "never" before the first read, else what the newest attempt found. A
+   * failed attempt keeps the last good read, so read_at and items can sit
+   * beside "unavailable" or "error", with reason saying what went wrong. */
+  status: "never" | "ok" | "unavailable" | "error";
+  reason?: string;
+  attempted_at?: string;
+  read_at?: string;
+  installed_bytes: number;
+  slots_used: number;
+  slots_total: number;
+  /** The firmware's own figure, which boards often misstate. */
+  max_capacity_bytes: number;
+  ecc?: string;
+  /** The memory the node's kernel reports. A firmware table listing less is
+   * incomplete: a virtual node's hot-plugged memory is in no DIMM table. */
+  node_mem_total: number;
+  /** Whether the server reads nodes daily; when false only Read now does. */
+  auto_read: boolean;
+}
+
+const nodeMemoryKey = (clusterId: string, nodeName: string) => [
+  "clusters",
+  clusterId,
+  "nodes",
+  nodeName,
+  "memory-modules",
+];
+
+/**
+ * A node's last memory DIMM read. Fetching it never dials the node: the server
+ * reads each node daily and on Read now. apiClient.get, not .list: the envelope
+ * carries the read's summary and state on top of the items.
+ */
+export function useNodeMemoryModules(clusterId: string, nodeName: string) {
+  return useQuery({
+    queryKey: nodeMemoryKey(clusterId, nodeName),
+    queryFn: () =>
+      apiClient.get<NodeMemoryModulesResponse>(
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/memory-modules`,
+      ),
+    enabled: clusterId.length > 0 && nodeName.length > 0,
+  });
+}
+
+/** Reads the node's memory layout now, over SSH as root, and stores it. */
+export function useRefreshNodeMemoryModules(
+  clusterId: string,
+  nodeName: string,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiClient.post<NodeMemoryModulesResponse>(
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/memory-modules/refresh`,
+      ),
+    onSuccess: (data) => {
+      queryClient.setQueryData(nodeMemoryKey(clusterId, nodeName), data);
+    },
+  });
+}

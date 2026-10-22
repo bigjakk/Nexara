@@ -7,15 +7,21 @@ import (
 	"github.com/google/uuid"
 )
 
-// entityCounter stores the cumulative I/O counters and the timestamp at which
-// they were sampled. Used to derive bytes-per-second rates against the next
-// successive sample for the same entity.
+// counterPair is a pair of cumulative counters (disk read and write, or
+// network in and out), the time they were sampled — zero before the first —
+// and the bytes-per-second rates last derived from them.
+type counterPair struct {
+	a, b       int64
+	ts         time.Time
+	aBps, bBps float64
+}
+
+// entityCounter stores an entity's disk and network counters, each pair a
+// baseline of its own: PVE can leave a VM's disk counters unreported while
+// its network ones are real. Used to derive bytes-per-second rates against
+// the next successive sample for the same entity.
 type entityCounter struct {
-	diskRead  int64
-	diskWrite int64
-	netIn     int64
-	netOut    int64
-	ts        time.Time
+	disk, net counterPair
 }
 
 // clusterRates partitions per-entity counters by cluster so a cluster delete
@@ -58,32 +64,55 @@ func (rs *rateState) Apply(
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 
-	prev := rs.perCluster[clusterID]
+	var prevNodes, prevVMs map[uuid.UUID]entityCounter
+	if prev := rs.perCluster[clusterID]; prev != nil {
+		prevNodes, prevVMs = prev.nodes, prev.vms
+	}
 	nodeRates = make(map[uuid.UUID]entityRates, len(nodes))
 	vmRates = make(map[uuid.UUID]entityRates, len(vms))
 
 	nextNodes := make(map[uuid.UUID]entityCounter, len(nodes))
 	for _, n := range nodes {
-		if prev != nil {
-			if p, ok := prev.nodes[n.NodeID]; ok {
-				nodeRates[n.NodeID] = derive(p, n.DiskRead, n.DiskWrite, n.NetIn, n.NetOut, now)
-			}
+		p := prevNodes[n.NodeID]
+		next := entityCounter{
+			disk: p.disk.advance(n.DiskRead, n.DiskWrite, now, n.DiskUnreported),
+			net:  p.net.advance(n.NetIn, n.NetOut, now, false),
 		}
-		nextNodes[n.NodeID] = entityCounter{n.DiskRead, n.DiskWrite, n.NetIn, n.NetOut, now}
+		nextNodes[n.NodeID] = next
+		nodeRates[n.NodeID] = next.rates()
 	}
 
 	nextVMs := make(map[uuid.UUID]entityCounter, len(vms))
 	for _, v := range vms {
-		if prev != nil {
-			if p, ok := prev.vms[v.VMID]; ok {
-				vmRates[v.VMID] = derive(p, v.DiskRead, v.DiskWrite, v.NetIn, v.NetOut, now)
-			}
+		p := prevVMs[v.VMID]
+		next := entityCounter{
+			disk: p.disk.advance(v.DiskRead, v.DiskWrite, now, v.DiskUnreported),
+			net:  p.net.advance(v.NetIn, v.NetOut, now, false),
 		}
-		nextVMs[v.VMID] = entityCounter{v.DiskRead, v.DiskWrite, v.NetIn, v.NetOut, now}
+		nextVMs[v.VMID] = next
+		vmRates[v.VMID] = next.rates()
 	}
 
 	rs.perCluster[clusterID] = &clusterRates{nodes: nextNodes, vms: nextVMs}
 	return nodeRates, vmRates
+}
+
+// advance returns the pair after a sample. An unreported sample leaves it as
+// it was, baseline and rates, so the next reported one is measured across the
+// gap instead of bunching the gap's bytes into one rate.
+func (p counterPair) advance(a, b int64, now time.Time, unreported bool) counterPair {
+	if unreported {
+		return p
+	}
+	next := counterPair{a: a, b: b, ts: now}
+	if dt := now.Sub(p.ts).Seconds(); !p.ts.IsZero() && dt > 0 {
+		next.aBps, next.bBps = perSecond(p.a, a, dt), perSecond(p.b, b, dt)
+	}
+	return next
+}
+
+func (c entityCounter) rates() entityRates {
+	return entityRates{DiskReadBps: c.disk.aBps, DiskWriteBps: c.disk.bBps, NetInBps: c.net.aBps, NetOutBps: c.net.bBps}
 }
 
 // Forget drops cached counters for a cluster. Safe to call for an unknown id.
@@ -91,19 +120,6 @@ func (rs *rateState) Forget(clusterID uuid.UUID) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	delete(rs.perCluster, clusterID)
-}
-
-func derive(prev entityCounter, diskRead, diskWrite, netIn, netOut int64, now time.Time) entityRates {
-	dt := now.Sub(prev.ts).Seconds()
-	if dt <= 0 {
-		return entityRates{}
-	}
-	return entityRates{
-		DiskReadBps:  perSecond(prev.diskRead, diskRead, dt),
-		DiskWriteBps: perSecond(prev.diskWrite, diskWrite, dt),
-		NetInBps:     perSecond(prev.netIn, netIn, dt),
-		NetOutBps:    perSecond(prev.netOut, netOut, dt),
-	}
 }
 
 // perSecond floors at 0 to absorb counter resets (e.g. node reboot, Proxmox

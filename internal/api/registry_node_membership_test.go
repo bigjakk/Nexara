@@ -35,7 +35,7 @@ import (
 // Pinned rather than derived, so that a declaration that stops being recognised moves
 // a number somebody has to update deliberately.
 const (
-	nodeNamePathRouteCount  = 62
+	nodeNamePathRouteCount  = 64
 	nodeNameQueryRouteCount = 6
 )
 

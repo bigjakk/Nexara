@@ -95,3 +95,29 @@ func TestDecideReboot_InPlaceNeverRebootsUnverified(t *testing.T) {
 		}
 	}
 }
+
+// A reboot check that could not run is not a "no": straight after a kernel
+// update the SSH setup bound or a dropped link can fail it, and a "no" marked
+// the node done on its old kernel.
+func TestRebootOwed(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		stdout string
+		err    error
+		want   bool
+	}{
+		{"apt left the marker", "REBOOT_NEEDED\n", nil, true},
+		{"no marker", "NO_REBOOT\n", nil, false},
+		{"the check could not run", "", errors.New("SSH handshake: i/o timeout"), true},
+		{"the check ran but gave no answer", "This account is currently not available.\n", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := rebootOwed(tt.stdout, tt.err); got != tt.want {
+				t.Errorf("rebootOwed(%q, %v) = %v, want %v", tt.stdout, tt.err, got, tt.want)
+			}
+		})
+	}
+}

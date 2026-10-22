@@ -71,9 +71,17 @@ func (g *Generator) Generate(ctx context.Context, req Request) (*ReportData, err
 	if err != nil {
 		return nil, fmt.Errorf("get cluster: %w", err)
 	}
+	rt := ReportType(req.Type)
 	hours := req.TimeRangeHours
 	if hours <= 0 {
 		hours = 168
+	}
+	requested := hours
+	// The rightsizing figures exist only in raw readings, which are kept for 30
+	// days. Clamped here, before newReport, so the masthead and the CSV state
+	// the window the report covers rather than the one asked for.
+	if rt == TypeRightsizing && hours > rightsizingMaxHours {
+		hours = rightsizingMaxHours
 	}
 	params := req.Params.WithDefaults()
 	now := g.now().UTC()
@@ -86,8 +94,10 @@ func (g *Generator) Generate(ctx context.Context, req Request) (*ReportData, err
 		user:    req.RequestedBy,
 	}
 
-	rt := ReportType(req.Type)
 	data := g.newReport(rt, gc)
+	if hours != requested {
+		data.addMeta("Requested", fmt.Sprintf("%d h; raw readings are kept for 30 days, so this covers the last %d h", requested, hours))
+	}
 
 	switch rt {
 	case TypeBackupCompliance:
@@ -98,6 +108,8 @@ func (g *Generator) Generate(ctx context.Context, req Request) (*ReportData, err
 		err = g.generateCapacityForecast(ctx, gc, data)
 	case TypeVMResourceUsage:
 		err = g.generateVMResourceUsage(ctx, gc, data)
+	case TypeRightsizing:
+		err = g.generateRightsizing(ctx, gc, data)
 	case TypeSnapshotInventory:
 		err = g.generateSnapshotInventory(ctx, gc, data)
 	case TypePatchStatus:
@@ -243,14 +255,17 @@ func plural(n int, one, many string) string {
 
 // --- Formatting ---
 
+// formatBytesRate and formatBytes write binary multiples under their own
+// names (1 GiB = 1024 MiB): the numbers the UI shows, which divides by 1024
+// too.
 func formatBytesRate(b float64) string {
 	switch {
 	case b >= 1<<30:
-		return fmt.Sprintf("%.1f GB/s", b/float64(1<<30))
+		return fmt.Sprintf("%.1f GiB/s", b/float64(1<<30))
 	case b >= 1<<20:
-		return fmt.Sprintf("%.1f MB/s", b/float64(1<<20))
+		return fmt.Sprintf("%.1f MiB/s", b/float64(1<<20))
 	case b >= 1<<10:
-		return fmt.Sprintf("%.1f KB/s", b/float64(1<<10))
+		return fmt.Sprintf("%.1f KiB/s", b/float64(1<<10))
 	default:
 		return fmt.Sprintf("%.0f B/s", b)
 	}
@@ -259,13 +274,13 @@ func formatBytesRate(b float64) string {
 func formatBytes(b float64) string {
 	switch {
 	case b >= 1<<40:
-		return fmt.Sprintf("%.1f TB", b/float64(1<<40))
+		return fmt.Sprintf("%.1f TiB", b/float64(1<<40))
 	case b >= 1<<30:
-		return fmt.Sprintf("%.1f GB", b/float64(1<<30))
+		return fmt.Sprintf("%.1f GiB", b/float64(1<<30))
 	case b >= 1<<20:
-		return fmt.Sprintf("%.1f MB", b/float64(1<<20))
+		return fmt.Sprintf("%.1f MiB", b/float64(1<<20))
 	case b >= 1<<10:
-		return fmt.Sprintf("%.1f KB", b/float64(1<<10))
+		return fmt.Sprintf("%.1f KiB", b/float64(1<<10))
 	default:
 		return fmt.Sprintf("%.0f B", b)
 	}

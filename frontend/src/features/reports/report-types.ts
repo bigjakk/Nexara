@@ -80,11 +80,29 @@ export const REPORT_TYPES: readonly ReportTypeInfo[] = [
     optionalSections: [],
   },
   {
+    value: "rightsizing",
+    label: "Rightsizing",
+    blurb:
+      "Each guest's p95 and p99 CPU, its own memory use against its allocation, and how much of the time it ran, with clear over- and under-sized guests flagged. Covers at most the last 30 days.",
+    sections: [
+      "CPU per guest: average, p95, p99 and peak over running time, busy vCPUs, uptime",
+      "Memory per guest: its own use against its allocation",
+      "Flags for clearly over- and under-sized guests",
+    ],
+    windowed: true,
+    params: [],
+    optionalSections: [],
+  },
+  {
     value: "capacity_forecast",
     label: "Capacity forecast",
     blurb:
-      "Where the period's trend takes CPU and memory per node, and how full each storage pool is.",
-    sections: ["Node forecasts to 100 %", "Storage pool fill"],
+      "Where the period's trend takes CPU and memory per node, how much room each node's memory has to grow, and how full each storage pool is.",
+    sections: [
+      "Node forecasts to 100 %",
+      "Memory headroom from each node's DIMM layout",
+      "Storage pool fill",
+    ],
     windowed: true,
     params: [],
     optionalSections: [],

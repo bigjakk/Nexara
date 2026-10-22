@@ -542,6 +542,7 @@ export type ReportType =
   | "backup_compliance"
   | "resource_utilization"
   | "vm_resource_usage"
+  | "rightsizing"
   | "capacity_forecast"
   | "snapshot_inventory"
   | "patch_status"

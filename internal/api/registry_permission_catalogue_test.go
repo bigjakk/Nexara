@@ -230,7 +230,7 @@ func TestParsePermissionInsertsHandlesTheAwkwardSQL(t *testing.T) {
 		{
 			name: "parentheses in a description do not split the tuple",
 			sql: `INSERT INTO permissions (action, resource, description) VALUES
-			    ('console', 'node', 'Open node shell consoles (root shell on the host)'),
+			    ('console', 'node', 'Open node shell consoles (a login prompt on the host)'),
 			    ('console', 'vm',   'Open VM consoles');`,
 			want: []string{"console:node", "console:vm"},
 		},

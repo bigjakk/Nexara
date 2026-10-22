@@ -615,6 +615,8 @@ func (h *ReportHandler) GenerateReport(c fiber.Ctx, p *apischema.Params) error {
 		ReportData: dataJSON,
 		ReportHtml: pgtype.Text{String: htmlOutput, Valid: true},
 		ReportCsv:  pgtype.Text{String: csvOutput, Valid: true},
+		// The window the report covered, which can be shorter than the one asked for.
+		TimeRangeHours: safeconv.Int32(data.TimeRange.Hours),
 	}); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to save report")
 	}

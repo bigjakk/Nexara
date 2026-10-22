@@ -91,6 +91,11 @@ function scopesFor(metric: string): string[] {
  * what stops that being the easiest thing to create.
  */
 const METRIC_DEFAULT_THRESHOLD: Record<string, string> = {
+  // Rates in bytes/s, where 90 fires on any I/O at all: 100 MiB/s.
+  disk_read: "104857600",
+  disk_write: "104857600",
+  net_in: "104857600",
+  net_out: "104857600",
   snapshot_age_days: "30",
   veeam_rpo_hours: "24",
   // >= 2 catches Suspicious and worse. Veeam's inline encryption detection
@@ -476,6 +481,13 @@ export function AlertRuleForm() {
               <p className="text-xs text-muted-foreground">
                 Proxmox VMID of the guest to watch
               </p>
+              {metric === "mem_percent" && (
+                <p className="text-xs text-muted-foreground">
+                  Memory is judged on the guest&apos;s own figure: a
+                  container&apos;s always, a VM&apos;s only while its balloon
+                  driver reports it. A VM without one never fires on memory.
+                </p>
+              )}
             </div>
           )}
 

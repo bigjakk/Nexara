@@ -36,6 +36,34 @@ var (
 	ErrHostKeyNotPinned = errors.New("the SSH host key for this node is not pinned")
 )
 
+// UnavailableReason maps a RunNodeCommand failure to a sentence for the
+// operator that names what could not be read ("hardware temperatures", "the
+// memory layout"), and reports whether it recognised the cause.
+//
+// The recognised causes are the ones the operator can act on, and each stops
+// before anything is dialed. Their text is written here rather than taken from
+// the error, which carries node IPs, host-key fingerprints and decrypt detail
+// that must not reach an API response. Anything else gets the generic
+// sentence, and the caller logs the error.
+//
+// A changed host key gets its own sentence but stays unclassified, so the
+// caller still logs it: it is the one failure that may be an interception.
+func UnavailableReason(err error, what string) (reason string, classified bool) {
+	var mismatch *sshpkg.HostKeyMismatchError
+	switch {
+	case errors.Is(err, ErrSSHNotConfigured):
+		return "SSH is not configured for this cluster. Add credentials under Security → Rolling Updates → SSH Credentials to read " + what + ".", true
+	case errors.Is(err, ErrHostKeyNotPinned):
+		return "This node's SSH host key is not pinned. Open Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint.", true
+	case errors.Is(err, ErrNodeAddressUnknown):
+		return "No IP address is known for this node yet — the collector has not reported one.", true
+	case errors.As(err, &mismatch):
+		return "This node presented an SSH host key that does not match the pinned one. If it was not reinstalled, treat this as a possible interception; otherwise re-pin it under Security → Rolling Updates → SSH Credentials.", false
+	default:
+		return "Could not read " + what + " over SSH from this node.", false
+	}
+}
+
 // RunNodeCommand runs a shell command on a cluster node over SSH using the
 // cluster's stored SSH credentials and pinned host key. It returns descriptive
 // errors when SSH credentials or the pinned host key are missing so callers can
@@ -45,6 +73,13 @@ var (
 // for its remote apt upgrades, centralized so node-maintenance (and future
 // callers) don't duplicate it.
 func RunNodeCommand(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName, command string) (*sshpkg.ExecResult, error) {
+	return RunNodeCommandLimited(ctx, queries, encryptionKey, clusterID, nodeName, command, 0)
+}
+
+// RunNodeCommandLimited is RunNodeCommand keeping at most maxOutput bytes of
+// the command's stdout and of its stderr (sshpkg.ExecuteLimited); 0 keeps
+// Execute's default cap.
+func RunNodeCommandLimited(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName, command string, maxOutput int) (*sshpkg.ExecResult, error) {
 	creds, err := queries.GetClusterSSHCredentials(ctx, clusterID)
 	if err != nil {
 		// Only a genuinely absent row means "not configured". A database
@@ -94,7 +129,7 @@ func RunNodeCommand(ctx context.Context, queries *db.Queries, encryptionKey stri
 		if !errors.Is(pinErr, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("look up pinned host key for %s: %w", sshHost, pinErr)
 		}
-		return nil, fmt.Errorf("%w (%s) — open Settings → SSH Credentials, run Test Connection, and confirm the fingerprint", ErrHostKeyNotPinned, sshHost)
+		return nil, fmt.Errorf("%w (%s) — open Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint", ErrHostKeyNotPinned, sshHost)
 	}
 	knownKey, parseErr := sshpkg.ParseAuthorizedKey(pinned.PublicKey)
 	if parseErr != nil {
@@ -108,6 +143,9 @@ func RunNodeCommand(ctx context.Context, queries *db.Queries, encryptionKey stri
 		Password:     password,
 		PrivateKey:   privateKey,
 		KnownHostKey: knownKey,
+	}
+	if maxOutput > 0 {
+		return sshpkg.ExecuteLimited(ctx, cfg, command, maxOutput)
 	}
 	return sshpkg.Execute(ctx, cfg, command)
 }

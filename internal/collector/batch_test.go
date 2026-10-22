@@ -64,7 +64,7 @@ func TestBatchInsertNodeMetrics(t *testing.T) {
 		{
 			name: "single node",
 			snapshots: []nodeMetricSnapshot{
-				{NodeID: uuid.New(), CPUUsage: 0.5, MemUsed: 1024, MemTotal: 2048, DiskRead: 100, DiskWrite: 200, NetIn: 300, NetOut: 400},
+				{NodeID: uuid.New(), CPUUsage: 0.5, MemUsed: 1024, MemTotal: 2048, DiskRead: 100, DiskWrite: 200, NetIn: 300, NetOut: 400, DiskUnreported: true},
 			},
 			wantCount: 1,
 		},
@@ -100,8 +100,14 @@ func TestBatchInsertNodeMetrics(t *testing.T) {
 				if call.tableName[0] != "node_metrics" {
 					t.Errorf("table = %v, want [node_metrics]", call.tableName)
 				}
-				if len(call.columnNames) != 9 {
-					t.Errorf("columns = %d, want 9", len(call.columnNames))
+				// The unreported-disk flag travels with each reading.
+				if len(call.columnNames) != 10 || call.columnNames[9] != "disk_unreported" {
+					t.Errorf("columns = %v, want disk_unreported tenth and last", call.columnNames)
+				}
+				for i, row := range call.rows {
+					if row[9] != any(tt.snapshots[i].DiskUnreported) {
+						t.Errorf("row %d disk_unreported = %v, want %v", i, row[9], tt.snapshots[i].DiskUnreported)
+					}
 				}
 			}
 		})
@@ -109,6 +115,7 @@ func TestBatchInsertNodeMetrics(t *testing.T) {
 }
 
 func TestBatchInsertVMMetrics(t *testing.T) {
+	guest := true
 	tests := []struct {
 		name      string
 		snapshots []vmMetricSnapshot
@@ -122,7 +129,7 @@ func TestBatchInsertVMMetrics(t *testing.T) {
 		{
 			name: "single VM",
 			snapshots: []vmMetricSnapshot{
-				{VMID: uuid.New(), CPUUsage: 0.8, MemUsed: 4096, MemTotal: 8192, DiskRead: 500, DiskWrite: 600, NetIn: 700, NetOut: 800},
+				{VMID: uuid.New(), CPUUsage: 0.8, MemUsed: 4096, MemTotal: 8192, DiskRead: 500, DiskWrite: 600, NetIn: 700, NetOut: 800, MemGuest: &guest, DiskUnreported: true},
 			},
 			wantCount: 1,
 		},
@@ -153,6 +160,16 @@ func TestBatchInsertVMMetrics(t *testing.T) {
 				call := copier.calls[0]
 				if call.tableName[0] != "vm_metrics" {
 					t.Errorf("table = %v, want [vm_metrics]", call.tableName)
+				}
+				// The memory source and the unreported-disk flag travel with
+				// each reading, NULL included.
+				if call.columnNames[9] != "mem_guest" || call.columnNames[10] != "disk_unreported" {
+					t.Errorf("columns = %v, want mem_guest tenth and disk_unreported eleventh", call.columnNames)
+				}
+				for i, row := range call.rows {
+					if row[9] != any(tt.snapshots[i].MemGuest) || row[10] != any(tt.snapshots[i].DiskUnreported) {
+						t.Errorf("row %d mem_guest, disk_unreported = %v, %v, want %v, %v", i, row[9], row[10], tt.snapshots[i].MemGuest, tt.snapshots[i].DiskUnreported)
+					}
 				}
 			}
 		})

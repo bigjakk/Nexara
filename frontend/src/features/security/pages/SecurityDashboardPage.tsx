@@ -263,7 +263,9 @@ export function SecurityDashboardPage() {
               <h3 className="text-sm font-semibold">SSH Credentials</h3>
               <p className="text-xs text-muted-foreground">
                 Configure SSH access for automated <code>apt dist-upgrade</code>{" "}
-                on nodes.
+                on nodes. Nexara also uses it, once a day, to read each node's
+                memory layout with <code>dmidecode</code> (set{" "}
+                <code>NODE_MEMORY_READ_INTERVAL=0</code> to turn that off).
               </p>
               <SSHCredentialsForm clusterId={activeClusterId} />
             </div>

@@ -310,6 +310,5 @@ describe("getGuestStatusColor", () => {
   });
 });
 
-// formatBytes coverage now lives in src/lib/format.test.ts; topology
-// re-exports it from there as of Phase 5.4 (KB / MB / TB nomenclature
-// matching the rest of the app, not IEC binary suffixes).
+// formatBytes coverage lives in src/lib/format.test.ts; topology re-exports
+// it from there, so it follows the app-wide byte-unit preference.
