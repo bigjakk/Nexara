@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -163,10 +164,41 @@ func FingerprintSHA256(key ssh.PublicKey) string {
 // surfaced to callers.
 var errCaptureDone = errors.New("nexara/ssh: host key captured")
 
+const (
+	// execSetupTimeout bounds Execute's TCP connect, and then its handshake and
+	// session open together.
+	execSetupTimeout = 30 * time.Second
+	// scanTimeout bounds ScanHostKey's TCP connect, and then its handshake.
+	scanTimeout = 15 * time.Second
+)
+
+// boundSetup bounds SSH connection setup on conn by deadline and by ctx. The
+// returned func disarms both bounds, and reports false when ctx has already
+// ended and the conn is being closed.
+//
+// x/crypto reads ssh.ClientConfig.Timeout only inside ssh.Dial. Execute and
+// ScanHostKey dial through the SSRF guard and hand the conn to NewClientConn,
+// so without this a host that accepts TCP and then stalls holds them forever.
+// An HTTP handler's ctx is Background (Fiber's c.Context()), so for those
+// callers the deadline is the only bound.
+func boundSetup(ctx context.Context, conn net.Conn, deadline time.Time) (disarm func() bool) {
+	_ = conn.SetDeadline(deadline)
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	return func() bool {
+		stopped := stop()
+		_ = conn.SetDeadline(time.Time{})
+		return stopped
+	}
+}
+
 // ScanHostKey opens a TCP connection long enough to capture the remote host
 // key, then closes it without attempting authentication. The caller pins
 // the returned key after confirming its fingerprint with the user.
 func ScanHostKey(ctx context.Context, host string, port int) (ssh.PublicKey, error) {
+	return scanHostKey(ctx, host, port, scanTimeout)
+}
+
+func scanHostKey(ctx context.Context, host string, port int, timeout time.Duration) (ssh.PublicKey, error) {
 	if host == "" {
 		return nil, fmt.Errorf("scan SSH host key: host is empty")
 	}
@@ -187,16 +219,17 @@ func ScanHostKey(ctx context.Context, host string, port int) (ssh.PublicKey, err
 		User:            "nexara-scan",
 		Auth:            []ssh.AuthMethod{},
 		HostKeyCallback: cb,
-		Timeout:         15 * time.Second,
 	}
 
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
-	dialer := net.Dialer{Control: netguard.DialControlSSRFGuard}
+	dialer := net.Dialer{Timeout: timeout, Control: netguard.DialControlSSRFGuard}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
 	defer func() { _ = conn.Close() }()
+	disarm := boundSetup(ctx, conn, time.Now().Add(timeout))
+	defer disarm()
 
 	// We expect NewClientConn to return errCaptureDone (propagated from our
 	// callback). Any other error — or a successful handshake (which would
@@ -204,6 +237,9 @@ func ScanHostKey(ctx context.Context, host string, port int) (ssh.PublicKey, err
 	// not exit via our captured-key path, so we must NOT trust `captured`.
 	_, _, _, handshakeErr := ssh.NewClientConn(conn, addr, cfg)
 	if !errors.Is(handshakeErr, errCaptureDone) {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("scan SSH host key: %w", ctxErr)
+		}
 		if handshakeErr != nil {
 			return nil, fmt.Errorf("scan SSH host key: handshake failed: %w", handshakeErr)
 		}
@@ -216,8 +252,16 @@ func ScanHostKey(ctx context.Context, host string, port int) (ssh.PublicKey, err
 }
 
 // Execute runs a command on a remote host via SSH.
-// The context controls the overall timeout including connection and execution.
+//
+// The context bounds the whole call. Whatever the context, connecting is capped
+// at 30 s, and then the handshake and session open together at another 30 s,
+// so a host that stalls cannot hold a caller whose context never ends. The
+// command itself is bounded by the context alone.
 func Execute(ctx context.Context, cfg Config, command string) (*ExecResult, error) {
+	return execute(ctx, cfg, command, execSetupTimeout)
+}
+
+func execute(ctx context.Context, cfg Config, command string, setupTimeout time.Duration) (*ExecResult, error) {
 	if cfg.KnownHostKey == nil {
 		return nil, fmt.Errorf("SSH host key not pinned for %s — pin the key before connecting", cfg.Host)
 	}
@@ -244,7 +288,6 @@ func Execute(ctx context.Context, cfg Config, command string) (*ExecResult, erro
 				PresentedPublicKey:   MarshalAuthorizedKey(presented),
 			}
 		},
-		Timeout: 30 * time.Second,
 	}
 
 	addr := net.JoinHostPort(cfg.Host, fmt.Sprintf("%d", cfg.Port))
@@ -252,19 +295,25 @@ func Execute(ctx context.Context, cfg Config, command string) (*ExecResult, erro
 	// Dial with context-aware timeout. Control hook hard-blocks cloud
 	// metadata, multicast, broadcast, Class E, and unspecified IPs so a
 	// rebinding-style DNS poisoning cannot redirect us mid-connect.
-	dialer := net.Dialer{Control: netguard.DialControlSSRFGuard}
+	dialer := net.Dialer{Timeout: setupTimeout, Control: netguard.DialControlSSRFGuard}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
+	setupDeadline := time.Now().Add(setupTimeout)
+	disarm := boundSetup(ctx, conn, setupDeadline)
 
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, sshCfg)
 	if err != nil {
+		disarm()
 		_ = conn.Close()
 		// Preserve the typed mismatch error so callers can prompt the user.
 		var mismatch *HostKeyMismatchError
 		if errors.As(err, &mismatch) {
 			return nil, mismatch
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("SSH handshake with %s: %w", addr, ctxErr)
 		}
 		return nil, fmt.Errorf("SSH handshake with %s: %w", addr, err)
 	}
@@ -273,9 +322,25 @@ func Execute(ctx context.Context, cfg Config, command string) (*ExecResult, erro
 
 	session, err := client.NewSession()
 	if err != nil {
+		disarm()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("create SSH session: %w", ctxErr)
+		}
+		if !time.Now().Before(setupDeadline) {
+			// The deadline kills the mux under NewSession, which then reports only
+			// "unexpected packet in response to channel open".
+			return nil, fmt.Errorf("create SSH session: setup took longer than %s: %w", setupTimeout, os.ErrDeadlineExceeded)
+		}
 		return nil, fmt.Errorf("create SSH session: %w", err)
 	}
 	defer func() { _ = session.Close() }()
+
+	// From here the command is bounded by ctx alone (the select below), so a
+	// long run such as a rolling update's apt upgrade is not cut off by the
+	// setup deadline.
+	if !disarm() {
+		return nil, fmt.Errorf("SSH command timed out: %w", ctx.Err())
+	}
 
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout

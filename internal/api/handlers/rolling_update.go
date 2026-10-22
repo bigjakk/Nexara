@@ -965,7 +965,11 @@ func (h *RollingUpdateHandler) TestSSHConnection(c fiber.Ctx, p *apischema.Param
 		KnownHostKey: knownKey,
 	}
 
-	if err := sshpkg.TestConnection(c.Context(), sshCfg); err != nil {
+	// c.Context() is Background, so once the session is open this is the only
+	// bound on the test command.
+	testCtx, cancel := context.WithTimeout(c.Context(), 45*time.Second)
+	defer cancel()
+	if err := sshpkg.TestConnection(testCtx, sshCfg); err != nil {
 		var mismatch *sshpkg.HostKeyMismatchError
 		if errors.As(err, &mismatch) {
 			return c.JSON(fiber.Map{
