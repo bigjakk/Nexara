@@ -93,8 +93,12 @@ LIMIT $2 OFFSET $3;
 UPDATE report_runs SET status = 'running', started_at = now() WHERE id = $1;
 
 -- name: UpdateReportRunCompleted :exec
+-- time_range_hours becomes the window the report covered, which a type with a
+-- longest window (rightsizing) can make shorter than the one requested. A
+-- caller that passes no window (0) leaves the requested one in place.
 UPDATE report_runs
-SET status = 'completed', report_data = $2, report_html = $3, report_csv = $4, completed_at = now()
+SET status = 'completed', report_data = $2, report_html = $3, report_csv = $4, completed_at = now(),
+    time_range_hours = COALESCE(NULLIF(sqlc.arg(time_range_hours)::int, 0), time_range_hours)
 WHERE id = $1;
 
 -- name: UpdateReportRunFailed :exec

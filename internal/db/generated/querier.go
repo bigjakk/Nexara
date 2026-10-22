@@ -885,6 +885,16 @@ type Querier interface {
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
 	GetVMMetricsDailyAvg(ctx context.Context, arg GetVMMetricsDailyAvgParams) ([]GetVMMetricsDailyAvgRow, error)
 	GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetricsParams) ([]GetVMRecentMetricsRow, error)
+	// Per guest of one cluster, its raw readings since @since: how many there are,
+	// how many were taken while it ran, CPU over those, and the guest's own memory
+	// readings. A reading counts as running when it records a memory source
+	// (mem_guest is set only while running, since 000107) or any memory in use; a
+	// stopped guest's readings are zeros. A reading is the guest's own when
+	// mem_guest says so, or when it is a container's from before 000107: a
+	// container's figure was always its own cgroup's, a VM's source is unknown
+	// before then. Every FILTERed aggregate is COALESCEd because sqlc scans it into
+	// a non-null float: the counts say whether a figure is real.
+	GetVMRightsizingStats(ctx context.Context, arg GetVMRightsizingStatsParams) ([]GetVMRightsizingStatsRow, error)
 	// GetVMSnapshotAgeStats is the vm-scoped counterpart of
 	// GetClusterSnapshotAgeStats; same snap_time > 0 and ErrNoRows semantics.
 	GetVMSnapshotAgeStats(ctx context.Context, arg GetVMSnapshotAgeStatsParams) (GetVMSnapshotAgeStatsRow, error)
@@ -2020,6 +2030,9 @@ type Querier interface {
 	// check matches nothing either. The caller treats 0 rows as "nothing was
 	// changed" and rolls back.
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) (int64, error)
+	// time_range_hours becomes the window the report covered, which a type with a
+	// longest window (rightsizing) can make shorter than the one requested. A
+	// caller that passes no window (0) leaves the requested one in place.
 	UpdateReportRunCompleted(ctx context.Context, arg UpdateReportRunCompletedParams) error
 	UpdateReportRunFailed(ctx context.Context, arg UpdateReportRunFailedParams) error
 	UpdateReportRunStarted(ctx context.Context, id uuid.UUID) error

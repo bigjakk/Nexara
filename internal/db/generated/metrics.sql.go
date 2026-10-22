@@ -714,6 +714,97 @@ func (q *Queries) GetVMMetricsDailyAvg(ctx context.Context, arg GetVMMetricsDail
 	return items, nil
 }
 
+const getVMRightsizingStats = `-- name: GetVMRightsizingStats :many
+SELECT
+  m.vm_id,
+  count(*)::bigint AS samples,
+  count(*) FILTER (WHERE m.mem_guest IS NOT NULL OR m.mem_used > 0)::bigint AS running_samples,
+  min(m.time)::timestamptz AS first_sample,
+  COALESCE(avg(m.cpu_usage) FILTER (WHERE m.mem_guest IS NOT NULL OR m.mem_used > 0), 0)::double precision AS cpu_avg,
+  COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY m.cpu_usage) FILTER (WHERE m.mem_guest IS NOT NULL OR m.mem_used > 0), 0)::double precision AS cpu_p95,
+  COALESCE(percentile_cont(0.99) WITHIN GROUP (ORDER BY m.cpu_usage) FILTER (WHERE m.mem_guest IS NOT NULL OR m.mem_used > 0), 0)::double precision AS cpu_p99,
+  COALESCE(max(m.cpu_usage) FILTER (WHERE m.mem_guest IS NOT NULL OR m.mem_used > 0), 0)::double precision AS cpu_max,
+  count(*) FILTER (WHERE (m.mem_guest OR (m.mem_guest IS NULL AND v.type = 'lxc' AND m.mem_used > 0)))::bigint AS guest_samples,
+  count(*) FILTER (WHERE NOT m.mem_guest)::bigint AS host_samples,
+  COALESCE(avg(m.mem_used::double precision / NULLIF(m.mem_total, 0)) FILTER (WHERE (m.mem_guest OR (m.mem_guest IS NULL AND v.type = 'lxc' AND m.mem_used > 0))), 0)::double precision AS guest_mem_avg_ratio,
+  COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY m.mem_used::double precision / NULLIF(m.mem_total, 0)) FILTER (WHERE (m.mem_guest OR (m.mem_guest IS NULL AND v.type = 'lxc' AND m.mem_used > 0)) AND m.mem_total > 0), 0)::double precision AS guest_mem_p95_ratio,
+  COALESCE(max(m.mem_used::double precision / NULLIF(m.mem_total, 0)) FILTER (WHERE (m.mem_guest OR (m.mem_guest IS NULL AND v.type = 'lxc' AND m.mem_used > 0))), 0)::double precision AS guest_mem_max_ratio,
+  COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY m.mem_used) FILTER (WHERE (m.mem_guest OR (m.mem_guest IS NULL AND v.type = 'lxc' AND m.mem_used > 0))), 0)::double precision AS guest_mem_p95,
+  COALESCE(max(m.mem_used) FILTER (WHERE (m.mem_guest OR (m.mem_guest IS NULL AND v.type = 'lxc' AND m.mem_used > 0))), 0)::double precision AS guest_mem_max
+FROM vm_metrics m
+JOIN vms v ON v.id = m.vm_id
+WHERE v.cluster_id = $1 AND NOT v.template AND m.time >= $2
+GROUP BY m.vm_id
+`
+
+type GetVMRightsizingStatsParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Since     time.Time `json:"since"`
+}
+
+type GetVMRightsizingStatsRow struct {
+	VmID             uuid.UUID `json:"vm_id"`
+	Samples          int64     `json:"samples"`
+	RunningSamples   int64     `json:"running_samples"`
+	FirstSample      time.Time `json:"first_sample"`
+	CpuAvg           float64   `json:"cpu_avg"`
+	CpuP95           float64   `json:"cpu_p95"`
+	CpuP99           float64   `json:"cpu_p99"`
+	CpuMax           float64   `json:"cpu_max"`
+	GuestSamples     int64     `json:"guest_samples"`
+	HostSamples      int64     `json:"host_samples"`
+	GuestMemAvgRatio float64   `json:"guest_mem_avg_ratio"`
+	GuestMemP95Ratio float64   `json:"guest_mem_p95_ratio"`
+	GuestMemMaxRatio float64   `json:"guest_mem_max_ratio"`
+	GuestMemP95      float64   `json:"guest_mem_p95"`
+	GuestMemMax      float64   `json:"guest_mem_max"`
+}
+
+// Per guest of one cluster, its raw readings since @since: how many there are,
+// how many were taken while it ran, CPU over those, and the guest's own memory
+// readings. A reading counts as running when it records a memory source
+// (mem_guest is set only while running, since 000107) or any memory in use; a
+// stopped guest's readings are zeros. A reading is the guest's own when
+// mem_guest says so, or when it is a container's from before 000107: a
+// container's figure was always its own cgroup's, a VM's source is unknown
+// before then. Every FILTERed aggregate is COALESCEd because sqlc scans it into
+// a non-null float: the counts say whether a figure is real.
+func (q *Queries) GetVMRightsizingStats(ctx context.Context, arg GetVMRightsizingStatsParams) ([]GetVMRightsizingStatsRow, error) {
+	rows, err := q.db.Query(ctx, getVMRightsizingStats, arg.ClusterID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetVMRightsizingStatsRow{}
+	for rows.Next() {
+		var i GetVMRightsizingStatsRow
+		if err := rows.Scan(
+			&i.VmID,
+			&i.Samples,
+			&i.RunningSamples,
+			&i.FirstSample,
+			&i.CpuAvg,
+			&i.CpuP95,
+			&i.CpuP99,
+			&i.CpuMax,
+			&i.GuestSamples,
+			&i.HostSamples,
+			&i.GuestMemAvgRatio,
+			&i.GuestMemP95Ratio,
+			&i.GuestMemMaxRatio,
+			&i.GuestMemP95,
+			&i.GuestMemMax,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markNodeOffline = `-- name: MarkNodeOffline :exec
 UPDATE nodes SET status = 'offline' WHERE id = $1 AND status != 'offline'
 `

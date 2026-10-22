@@ -598,23 +598,29 @@ func (q *Queries) ListReportSchedulesByCluster(ctx context.Context, arg ListRepo
 
 const updateReportRunCompleted = `-- name: UpdateReportRunCompleted :exec
 UPDATE report_runs
-SET status = 'completed', report_data = $2, report_html = $3, report_csv = $4, completed_at = now()
+SET status = 'completed', report_data = $2, report_html = $3, report_csv = $4, completed_at = now(),
+    time_range_hours = COALESCE(NULLIF($5::int, 0), time_range_hours)
 WHERE id = $1
 `
 
 type UpdateReportRunCompletedParams struct {
-	ID         uuid.UUID   `json:"id"`
-	ReportData []byte      `json:"report_data"`
-	ReportHtml pgtype.Text `json:"report_html"`
-	ReportCsv  pgtype.Text `json:"report_csv"`
+	ID             uuid.UUID   `json:"id"`
+	ReportData     []byte      `json:"report_data"`
+	ReportHtml     pgtype.Text `json:"report_html"`
+	ReportCsv      pgtype.Text `json:"report_csv"`
+	TimeRangeHours int32       `json:"time_range_hours"`
 }
 
+// time_range_hours becomes the window the report covered, which a type with a
+// longest window (rightsizing) can make shorter than the one requested. A
+// caller that passes no window (0) leaves the requested one in place.
 func (q *Queries) UpdateReportRunCompleted(ctx context.Context, arg UpdateReportRunCompletedParams) error {
 	_, err := q.db.Exec(ctx, updateReportRunCompleted,
 		arg.ID,
 		arg.ReportData,
 		arg.ReportHtml,
 		arg.ReportCsv,
+		arg.TimeRangeHours,
 	)
 	return err
 }

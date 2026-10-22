@@ -33,6 +33,7 @@ type fakeQuerier struct {
 	nodeDaily map[uuid.UUID][]db.GetNodeMetricsDailyAvgRow
 	vmDaily   map[uuid.UUID][]db.GetVMMetricsDailyAvgRow
 	vmIO      map[uuid.UUID][]db.GetVMIODailyRateRow
+	rightsize []db.GetVMRightsizingStatsRow
 }
 
 var (
@@ -75,6 +76,9 @@ func (f *fakeQuerier) GetVMMetricsDailyAvg(_ context.Context, p db.GetVMMetricsD
 }
 func (f *fakeQuerier) GetVMIODailyRate(_ context.Context, p db.GetVMIODailyRateParams) ([]db.GetVMIODailyRateRow, error) {
 	return f.vmIO[p.VmID], nil
+}
+func (f *fakeQuerier) GetVMRightsizingStats(context.Context, db.GetVMRightsizingStatsParams) ([]db.GetVMRightsizingStatsRow, error) {
+	return f.rightsize, nil
 }
 func (f *fakeQuerier) ListPBSServers(context.Context) ([]db.PbsServer, error) {
 	return []db.PbsServer{{ID: testPBS, Name: "pbs01"}}, nil
@@ -307,7 +311,8 @@ func TestResourceReports_CPUIsPercent(t *testing.T) {
 			{Day: day(2), Cpu: 0.33, CpuMax: 0.5, MemUsed: 4 << 30, MemTotal: 16 << 30},
 			{Day: day(1), Cpu: 0.33, CpuMax: 0.5, MemUsed: 4 << 30, MemTotal: 16 << 30},
 		}},
-		vmDaily: map[uuid.UUID][]db.GetVMMetricsDailyAvgRow{vm: {{Day: day(1), Cpu: 0.33, CpuMax: 0.5, MemUsed: 1 << 30, MemTotal: 4 << 30}}},
+		vmDaily:   map[uuid.UUID][]db.GetVMMetricsDailyAvgRow{vm: {{Day: day(1), Cpu: 0.33, CpuMax: 0.5, MemUsed: 1 << 30, MemTotal: 4 << 30}}},
+		rightsize: []db.GetVMRightsizingStatsRow{{VmID: vm, Samples: 2880, RunningSamples: 2880, FirstSample: day(2), CpuAvg: 0.33, CpuP95: 0.33, CpuP99: 0.4, CpuMax: 0.5}},
 	}
 	cases := []struct {
 		report  ReportType
@@ -317,6 +322,7 @@ func TestResourceReports_CPUIsPercent(t *testing.T) {
 		{TypeResourceUtilization, "Nodes", map[int]string{2: "33.0", 3: "50.0"}},
 		{TypeVMResourceUsage, "All guests", map[int]string{6: "33.0"}},
 		{TypeCapacityForecast, "Node forecast", map[int]string{2: "33.0%"}},
+		{TypeRightsizing, "CPU", map[int]string{5: "33.0", 6: "33.0", 8: "50.0"}},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.report), func(t *testing.T) {
@@ -334,6 +340,16 @@ func TestResourceReports_CPUIsPercent(t *testing.T) {
 			if tc.report == TypeVMResourceUsage {
 				if k := kpiByLabel(data, "Idle while running"); k == nil || k.Value != "0" {
 					t.Errorf("idle KPI = %+v, want 0 for a guest at 33 %% CPU", k)
+				}
+			}
+			if tc.report == TypeRightsizing {
+				// A year asked for is the 30 days the raw readings cover, in the masthead too.
+				long, err := newTestGenerator(q, nil).Generate(context.Background(), Request{Type: string(tc.report), ClusterID: testCluster, TimeRangeHours: 8760})
+				if err != nil {
+					t.Fatalf("Generate a year: %v", err)
+				}
+				if long.TimeRange.Hours != rightsizingMaxHours || !strings.Contains(long.Title, "30 days") {
+					t.Errorf("a year's request covers %d h, titled %q; want %d h, 30 days", long.TimeRange.Hours, long.Title, rightsizingMaxHours)
 				}
 			}
 		})

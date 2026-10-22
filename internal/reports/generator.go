@@ -71,9 +71,17 @@ func (g *Generator) Generate(ctx context.Context, req Request) (*ReportData, err
 	if err != nil {
 		return nil, fmt.Errorf("get cluster: %w", err)
 	}
+	rt := ReportType(req.Type)
 	hours := req.TimeRangeHours
 	if hours <= 0 {
 		hours = 168
+	}
+	requested := hours
+	// The rightsizing figures exist only in raw readings, which are kept for 30
+	// days. Clamped here, before newReport, so the masthead and the CSV state
+	// the window the report covers rather than the one asked for.
+	if rt == TypeRightsizing && hours > rightsizingMaxHours {
+		hours = rightsizingMaxHours
 	}
 	params := req.Params.WithDefaults()
 	now := g.now().UTC()
@@ -86,8 +94,10 @@ func (g *Generator) Generate(ctx context.Context, req Request) (*ReportData, err
 		user:    req.RequestedBy,
 	}
 
-	rt := ReportType(req.Type)
 	data := g.newReport(rt, gc)
+	if hours != requested {
+		data.addMeta("Requested", fmt.Sprintf("%d h; raw readings are kept for 30 days, so this covers the last %d h", requested, hours))
+	}
 
 	switch rt {
 	case TypeBackupCompliance:
@@ -98,6 +108,8 @@ func (g *Generator) Generate(ctx context.Context, req Request) (*ReportData, err
 		err = g.generateCapacityForecast(ctx, gc, data)
 	case TypeVMResourceUsage:
 		err = g.generateVMResourceUsage(ctx, gc, data)
+	case TypeRightsizing:
+		err = g.generateRightsizing(ctx, gc, data)
 	case TypeSnapshotInventory:
 		err = g.generateSnapshotInventory(ctx, gc, data)
 	case TypePatchStatus:

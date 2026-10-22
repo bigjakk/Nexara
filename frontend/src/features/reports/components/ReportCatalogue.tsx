@@ -35,7 +35,7 @@ export function ReportCatalogue({
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {REPORT_TYPES.map((info) => (
         <CatalogueCard
           key={info.value}
