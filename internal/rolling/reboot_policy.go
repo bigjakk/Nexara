@@ -1,6 +1,23 @@
 package rolling
 
-import db "github.com/bigjakk/nexara/internal/db/generated"
+import (
+	"strings"
+
+	db "github.com/bigjakk/nexara/internal/db/generated"
+)
+
+// rebootCheckCommand asks a node whether its upgrade left a reboot owed:
+// Debian and Proxmox create /var/run/reboot-required when one is.
+const rebootCheckCommand = "test -f /var/run/reboot-required && echo REBOOT_NEEDED || echo NO_REBOOT"
+
+// rebootOwed reads the answer to rebootCheckCommand: a reboot is owed unless
+// the node said NO_REBOOT. A check that could not run, or ran and gave no
+// answer, is not a "no": straight after a kernel update the SSH setup bound or
+// a dropped link can fail it, and a "no" would mark the node done on its old
+// kernel. decideReboot then treats "owed" exactly as it does when apt asks.
+func rebootOwed(stdout string, err error) bool {
+	return err != nil || !strings.Contains(stdout, "NO_REBOOT")
+}
 
 // rebootAction is what to do when an upgrade has finished and a reboot is
 // wanted: take it, put it off, or treat the situation as a failed node.

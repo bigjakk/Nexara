@@ -1139,12 +1139,22 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 	}
 
 	// Check if a reboot is actually required (kernel update, etc.).
-	// Debian/Proxmox creates /var/run/reboot-required when a reboot is needed.
 	needsReboot := job.RebootAfterUpdate
 	if !needsReboot {
-		rebootCheck, rebootErr := sshpkg.Execute(ctx, sshCfg, "test -f /var/run/reboot-required && echo REBOOT_NEEDED || echo NO_REBOOT")
-		if rebootErr == nil && strings.Contains(rebootCheck.Stdout, "REBOOT_NEEDED") {
-			o.logger.Info("reboot required after upgrade (kernel/critical update detected)", "node", node.NodeName)
+		rebootCheck, rebootErr := sshpkg.Execute(ctx, sshCfg, rebootCheckCommand)
+		var stdout string
+		switch {
+		case rebootErr == nil:
+			stdout = rebootCheck.Stdout
+		case o.interrupted(rebootErr):
+			o.logger.Info("reboot check interrupted by shutdown; next leader will resume", "node", node.NodeName)
+			return
+		default:
+			o.logger.Warn("could not check whether the upgrade left a reboot owed; treating it as owed",
+				"node", node.NodeName, "error", rebootErr)
+		}
+		if rebootOwed(stdout, rebootErr) {
+			o.logger.Info("reboot required after upgrade (kernel/critical update detected, or the check failed)", "node", node.NodeName)
 			needsReboot = true
 		}
 	}
