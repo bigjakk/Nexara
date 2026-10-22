@@ -23,13 +23,19 @@ import (
 // 127.0.0.1:<random-port>. Closing the listener stops the server.
 func newTestServer(t *testing.T) (addr string, hostKey ssh.PublicKey, stop func()) {
 	t.Helper()
-	return newHoldingTestServer(t, nil, nil)
+	return newTestServerWith(t, testServerOpts{})
 }
 
-// newHoldingTestServer is newTestServer whose exec handler, when the channels
-// are set, signals received as a command arrives and waits for release before
-// it replies.
-func newHoldingTestServer(t *testing.T, received chan<- struct{}, release <-chan struct{}) (addr string, hostKey ssh.PublicKey, stop func()) {
+// testServerOpts varies newTestServer's exec handler. With received set it
+// signals as a command arrives and waits for release before it replies; stream
+// writes without end until a write fails.
+type testServerOpts struct {
+	received chan<- struct{}
+	release  <-chan struct{}
+	stream   bool
+}
+
+func newTestServerWith(t *testing.T, opts testServerOpts) (addr string, hostKey ssh.PublicKey, stop func()) {
 	t.Helper()
 
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -64,7 +70,7 @@ func newHoldingTestServer(t *testing.T, received chan<- struct{}, release <-chan
 			if err != nil {
 				return
 			}
-			go serveOne(conn, cfg, received, release)
+			go serveOne(conn, cfg, opts)
 		}
 	}()
 
@@ -75,7 +81,7 @@ func newHoldingTestServer(t *testing.T, received chan<- struct{}, release <-chan
 	return ln.Addr().String(), signer.PublicKey(), stop
 }
 
-func serveOne(rawConn net.Conn, cfg *ssh.ServerConfig, received chan<- struct{}, release <-chan struct{}) {
+func serveOne(rawConn net.Conn, cfg *ssh.ServerConfig, opts testServerOpts) {
 	defer func() { _ = rawConn.Close() }()
 	sshConn, chans, reqs, err := ssh.NewServerConn(rawConn, cfg)
 	if err != nil {
@@ -100,9 +106,17 @@ func serveOne(rawConn net.Conn, cfg *ssh.ServerConfig, received chan<- struct{},
 					if req.WantReply {
 						_ = req.Reply(true, nil)
 					}
-					if received != nil {
-						received <- struct{}{}
-						<-release
+					if opts.received != nil {
+						opts.received <- struct{}{}
+						<-opts.release
+					}
+					if opts.stream {
+						chunk := []byte(strings.Repeat("x", 1024))
+						for {
+							if _, err := ch.Write(chunk); err != nil {
+								return
+							}
+						}
 					}
 					_, _ = io.WriteString(ch, "ok\n")
 					_, _ = ch.SendRequest("exit-status", false, []byte{0, 0, 0, 0})
@@ -312,7 +326,7 @@ func TestStalledHostReleasesTheCaller(t *testing.T) {
 	}
 	execCall := func(ctx context.Context, host string, port int, setup time.Duration) error {
 		cfg := Config{Host: host, Port: port, Username: "test-user", Password: "test-pass", KnownHostKey: pinned}
-		_, err := execute(ctx, cfg, "true", setup)
+		_, err := execute(ctx, cfg, "true", setup, defaultMaxOutput)
 		return err
 	}
 	scanCall := func(ctx context.Context, host string, port int, setup time.Duration) error {
@@ -379,14 +393,14 @@ func TestExecute_commandMayOutliveTheSetupBound(t *testing.T) {
 	received, release := make(chan struct{}, 1), make(chan struct{})
 	releaseOnce := sync.OnceFunc(func() { close(release) })
 	t.Cleanup(releaseOnce)
-	addr, hostKey, stop := newHoldingTestServer(t, received, release)
+	addr, hostKey, stop := newTestServerWith(t, testServerOpts{received: received, release: release})
 	defer stop()
 	host, port := splitHostPort(t, addr)
 
 	done := make(chan error, 1)
 	go func() {
 		cfg := Config{Host: host, Port: port, Username: "test-user", Password: "test-pass", KnownHostKey: hostKey}
-		_, err := execute(context.Background(), cfg, "true", bound)
+		_, err := execute(context.Background(), cfg, "true", bound, defaultMaxOutput)
 		done <- err
 	}()
 	select {
@@ -419,5 +433,31 @@ func TestExecute_commandMayOutliveTheSetupBound(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("no result 10s after the reply was released")
+	}
+}
+
+// A command's output is capped, so a node that streams without end cannot grow
+// Nexara's memory with it, and the session is closed at the cap: this server
+// never stops writing, so a client that only stopped reading would wait for an
+// exit status that never comes.
+func TestExecute_outputIsCapped(t *testing.T) {
+	t.Parallel()
+	addr, hostKey, stop := newTestServerWith(t, testServerOpts{stream: true})
+	defer stop()
+	host, port := splitHostPort(t, addr)
+
+	done := make(chan error, 1)
+	go func() {
+		cfg := Config{Host: host, Port: port, Username: "test-user", Password: "test-pass", KnownHostKey: hostKey}
+		_, err := execute(context.Background(), cfg, "true", execSetupTimeout, 1024)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrOutputTooLarge) {
+			t.Fatalf("err = %v, want ErrOutputTooLarge", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("still reading 10s after the output passed the cap")
 	}
 }

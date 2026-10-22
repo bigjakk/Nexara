@@ -16,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -164,6 +165,35 @@ func FingerprintSHA256(key ssh.PublicKey) string {
 // surfaced to callers.
 var errCaptureDone = errors.New("nexara/ssh: host key captured")
 
+// ErrOutputTooLarge reports a command whose stdout or stderr passed the
+// caller's limit. The session is closed at that point rather than read on.
+var ErrOutputTooLarge = errors.New("ssh: command output exceeded the limit")
+
+// defaultMaxOutput caps what Execute keeps of a command's stdout, and of its
+// stderr. The largest output any caller reads is apt's, a few MiB at most; the
+// cap exists so a compromised node cannot stream Nexara out of memory.
+const defaultMaxOutput = 64 << 20
+
+// cappedBuffer keeps at most max bytes of one output stream. Past that it
+// refuses the write, which stops the session's copy, and calls overflow. The
+// buffer is a named field, not embedded: an embedded bytes.Buffer would promote
+// ReadFrom, and io.Copy would use that and never call Write.
+type cappedBuffer struct {
+	buf      bytes.Buffer
+	max      int
+	overflow func()
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if b.buf.Len()+len(p) > b.max {
+		b.overflow()
+		return 0, ErrOutputTooLarge
+	}
+	return b.buf.Write(p)
+}
+
+func (b *cappedBuffer) String() string { return b.buf.String() }
+
 const (
 	// execSetupTimeout bounds Execute's TCP connect, and then its handshake and
 	// session open together.
@@ -258,10 +288,17 @@ func scanHostKey(ctx context.Context, host string, port int, timeout time.Durati
 // so a host that stalls cannot hold a caller whose context never ends. The
 // command itself is bounded by the context alone.
 func Execute(ctx context.Context, cfg Config, command string) (*ExecResult, error) {
-	return execute(ctx, cfg, command, execSetupTimeout)
+	return execute(ctx, cfg, command, execSetupTimeout, defaultMaxOutput)
 }
 
-func execute(ctx context.Context, cfg Config, command string, setupTimeout time.Duration) (*ExecResult, error) {
+// ExecuteLimited is Execute keeping at most maxOutput bytes of the command's
+// stdout, and of its stderr. Past that it closes the session and fails with
+// ErrOutputTooLarge.
+func ExecuteLimited(ctx context.Context, cfg Config, command string, maxOutput int) (*ExecResult, error) {
+	return execute(ctx, cfg, command, execSetupTimeout, maxOutput)
+}
+
+func execute(ctx context.Context, cfg Config, command string, setupTimeout time.Duration, maxOutput int) (*ExecResult, error) {
 	if cfg.KnownHostKey == nil {
 		return nil, fmt.Errorf("SSH host key not pinned for %s — pin the key before connecting", cfg.Host)
 	}
@@ -342,9 +379,18 @@ func execute(ctx context.Context, cfg Config, command string, setupTimeout time.
 		return nil, fmt.Errorf("SSH command timed out: %w", ctx.Err())
 	}
 
-	var stdout, stderr bytes.Buffer
-	session.Stdout = &stdout
-	session.Stderr = &stderr
+	var exceeded atomic.Bool
+	overflow := func() {
+		if exceeded.CompareAndSwap(false, true) {
+			// Closing ends Run now, instead of leaving the remote blocked on a
+			// full window until ctx expires.
+			go func() { _ = session.Close() }()
+		}
+	}
+	stdout := &cappedBuffer{max: maxOutput, overflow: overflow}
+	stderr := &cappedBuffer{max: maxOutput, overflow: overflow}
+	session.Stdout = stdout
+	session.Stderr = stderr
 
 	// Run the command with context cancellation.
 	done := make(chan error, 1)
@@ -357,6 +403,9 @@ func execute(ctx context.Context, cfg Config, command string, setupTimeout time.
 		_ = session.Signal(ssh.SIGTERM)
 		return nil, fmt.Errorf("SSH command timed out: %w", ctx.Err())
 	case err := <-done:
+		if exceeded.Load() {
+			return nil, fmt.Errorf("%w (%d bytes)", ErrOutputTooLarge, maxOutput)
+		}
 		result := &ExecResult{
 			Stdout:   stdout.String(),
 			Stderr:   stderr.String(),

@@ -73,6 +73,13 @@ func UnavailableReason(err error, what string) (reason string, classified bool) 
 // for its remote apt upgrades, centralized so node-maintenance (and future
 // callers) don't duplicate it.
 func RunNodeCommand(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName, command string) (*sshpkg.ExecResult, error) {
+	return RunNodeCommandLimited(ctx, queries, encryptionKey, clusterID, nodeName, command, 0)
+}
+
+// RunNodeCommandLimited is RunNodeCommand keeping at most maxOutput bytes of
+// the command's stdout and of its stderr (sshpkg.ExecuteLimited); 0 keeps
+// Execute's default cap.
+func RunNodeCommandLimited(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName, command string, maxOutput int) (*sshpkg.ExecResult, error) {
 	creds, err := queries.GetClusterSSHCredentials(ctx, clusterID)
 	if err != nil {
 		// Only a genuinely absent row means "not configured". A database
@@ -136,6 +143,9 @@ func RunNodeCommand(ctx context.Context, queries *db.Queries, encryptionKey stri
 		Password:     password,
 		PrivateKey:   privateKey,
 		KnownHostKey: knownKey,
+	}
+	if maxOutput > 0 {
+		return sshpkg.ExecuteLimited(ctx, cfg, command, maxOutput)
 	}
 	return sshpkg.Execute(ctx, cfg, command)
 }

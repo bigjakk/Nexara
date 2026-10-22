@@ -49,6 +49,10 @@ const (
 	// wedged sshd that accepts TCP and never sends its banner. The singleflight
 	// below keeps concurrent misses from multiplying that wait.
 	nodeSensorsTimeout = 20 * time.Second
+
+	// nodeSensorsMaxOutput caps what a read keeps of the hwmon listing, a few
+	// KiB on any real host, so a hostile node cannot balloon one request.
+	nodeSensorsMaxOutput = 1 << 20
 )
 
 // nodeSensorsCommand reads every hwmon temperature the kernel exposes in one
@@ -289,7 +293,7 @@ func (h *NodeHandler) readNodeSensors(ctx context.Context, clusterID uuid.UUID, 
 	sshCtx, cancel := context.WithTimeout(ctx, nodeSensorsTimeout)
 	defer cancel()
 
-	result, err := rolling.RunNodeCommand(sshCtx, h.queries, h.encryptionKey, clusterID, nodeName, nodeSensorsCommand)
+	result, err := rolling.RunNodeCommandLimited(sshCtx, h.queries, h.encryptionKey, clusterID, nodeName, nodeSensorsCommand, nodeSensorsMaxOutput)
 	if err != nil {
 		reason, classified := rolling.UnavailableReason(err, "hardware temperatures")
 		if !classified {
