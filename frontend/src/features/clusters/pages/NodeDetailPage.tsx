@@ -112,6 +112,7 @@ import { NodeMetricsPanel } from "../components/node/NodeMetricsPanel";
 import { NodeNotesCard } from "../components/node/NodeNotesCard";
 import { NodeOptionsCard } from "../components/node/NodeOptionsCard";
 import { NodeTemperatures } from "../components/node/NodeTemperatures";
+import { NodeMemoryModules } from "../components/node/NodeMemoryModules";
 import {
   DNSReadNote,
   EditDNSDialog,
@@ -439,6 +440,13 @@ export function NodeDetailPage() {
               clusterId={clusterId}
               nodeName={node.name}
               online={node.status === "online"}
+              className="sm:col-span-2 lg:col-span-4"
+            />
+            <NodeMemoryModules
+              clusterId={clusterId}
+              nodeName={node.name}
+              online={node.status === "online"}
+              canRead={canManage("node")}
               className="sm:col-span-2 lg:col-span-4"
             />
           </div>

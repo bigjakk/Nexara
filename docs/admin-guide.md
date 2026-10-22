@@ -167,6 +167,19 @@ A node's own settings are on its page, in the **Options** and **Notes** cards. T
 
 ---
 
+## Memory Modules
+
+A node's page shows its memory DIMM layout in the **Memory modules** card on the Summary tab: every slot, the module in it (size, type, the speed the board runs it at against its rating, manufacturer and part number), and the totals: installed memory, slots used, the firmware's maximum and ECC. The same layout feeds the **Memory headroom** section of the capacity forecast report.
+
+Proxmox has no API for this, so Nexara reads it with `/usr/sbin/dmidecode -t 16 -t 17` over the cluster's **SSH credentials** (Security → Rolling Updates → SSH Credentials). That needs root.
+
+- **Daily.** The collector reads each online node of every active cluster once its last read is older than `NODE_MEMORY_READ_INTERVAL` (default `24h`; `0` turns it off). That is one root SSH login per node per day, recorded in the audit log as the system user. A cluster without SSH credentials, or a node whose host key is not pinned, is never dialed.
+- **Read now.** The card's **Read now** button (`manage:node`) reads the node at once, and is audited. It works once a minute per node: each read is a root login, and repeated rejected logins get Nexara's address banned by fail2ban.
+- **A failed read keeps the last good one.** The card shows why the newest read failed above the last good read, for example *Reading the memory layout needs root* when the SSH user is not root, or a warning when the node's host key no longer matches the pinned one.
+- **What is not stored.** Serial numbers and asset tags are skipped and never kept. The firmware's maximum is the board's own figure, which boards often misstate.
+
+---
+
 ## User Management
 
 Navigate to **Admin > Users** to manage user accounts.
