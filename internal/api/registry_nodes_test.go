@@ -26,9 +26,10 @@ import (
 // of per-domain constants rather than one number.
 //
 // It is the 38 routes migrated from hand-placed checks
-// (nodeLegacyPermissions) plus the 3 node options and notes routes, declared
-// from the start (nodeAddedPermissions).
-const nodeRouteCount = 41
+// (nodeLegacyPermissions) plus the 5 routes declared from the start
+// (nodeAddedPermissions): the node options and notes routes and the two
+// memory-module routes.
+const nodeRouteCount = 43
 
 const (
 	testNodeRowID = "5c4b3a29-1817-4655-9443-000000000038"
@@ -160,6 +161,14 @@ var nodeAddedPermissions = map[string]struct {
 		"manage:node",
 		"a node's notes can hold credentials and every built-in Viewer holds view:node, so they are read " +
 			"with the permission that writes them",
+	},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/memory-modules": {
+		"view:node",
+		"the stored DIMM inventory is hardware telemetry like the node's disks and PCI devices, and reading it dials nothing",
+	},
+	"POST /api/v1/clusters/:cluster_id/nodes/:node_name/memory-modules/refresh": {
+		"manage:node",
+		"it opens a root SSH session on the node to run dmidecode, so it sits with the operator actions like the support bundle",
 	},
 }
 

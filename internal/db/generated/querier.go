@@ -761,6 +761,7 @@ type Querier interface {
 	GetNodeAddressByName(ctx context.Context, arg GetNodeAddressByNameParams) (string, error)
 	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
 	GetNodeIODailyRate(ctx context.Context, arg GetNodeIODailyRateParams) ([]GetNodeIODailyRateRow, error)
+	GetNodeMemoryInventory(ctx context.Context, nodeID uuid.UUID) (NodeMemoryInventory, error)
 	GetNodeMetrics1h(ctx context.Context, arg GetNodeMetrics1hParams) ([]GetNodeMetrics1hRow, error)
 	GetNodeMetrics5m(ctx context.Context, arg GetNodeMetrics5mParams) ([]GetNodeMetrics5mRow, error)
 	GetNodeMetricsDailyAvg(ctx context.Context, arg GetNodeMetricsDailyAvgParams) ([]GetNodeMetricsDailyAvgRow, error)
@@ -1291,6 +1292,12 @@ type Querier interface {
 	// so the clusters list can attach a generic issues[] without per-cluster calls.
 	// Offline nodes and HA-fenced nodes.
 	ListNodeHealthProblems(ctx context.Context) ([]ListNodeHealthProblemsRow, error)
+	// The nodes of a cluster with a good memory read, for the capacity forecast.
+	ListNodeMemoryInventoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListNodeMemoryInventoryByClusterRow, error)
+	// Every node of an active cluster with when its memory was last tried and how
+	// that went, for the daily pass. A paused cluster (is_active false) is the
+	// operator saying "leave it alone": the collector skips it, and so does this.
+	ListNodeMemoryReadState(ctx context.Context) ([]ListNodeMemoryReadStateRow, error)
 	ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeNetworkInterface, error)
 	ListNodePCIDevicesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodePciDevice, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
@@ -1761,6 +1768,8 @@ type Querier interface {
 	// exit_status out of the column is the job of the caller's read
 	// (ListRunningTaskHistoryByCluster above), not of this predicate.
 	ReconcileTaskHistory(ctx context.Context, arg ReconcileTaskHistoryParams) (int64, error)
+	// A failed read records why and when, and keeps the last good read.
+	RecordNodeMemoryFailure(ctx context.Context, arg RecordNodeMemoryFailureParams) error
 	RemoveFavorite(ctx context.Context, arg RemoveFavoriteParams) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) (VmFolder, error)
@@ -2139,6 +2148,8 @@ type Querier interface {
 	// The batch arrives as one jsonb array rather than N parallel array parameters
 	// because sqlc cannot parse multi-argument unnest(...).
 	UpsertNodeDisks(ctx context.Context, arg UpsertNodeDisksParams) error
+	// A good read replaces the node's row.
+	UpsertNodeMemoryRead(ctx context.Context, arg UpsertNodeMemoryReadParams) error
 	// One statement — and therefore one transaction and at most one WAL flush —
 	// for a whole node's network inventory, instead of one implicit transaction
 	// per interface. See UpsertNodePCIDevices for the full rationale.

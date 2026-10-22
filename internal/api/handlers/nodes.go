@@ -19,6 +19,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/nodememory"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/rolling"
 )
@@ -33,6 +34,10 @@ type NodeHandler struct {
 	// See node_sensors.go. Nil-safe: a handler built without the constructor
 	// simply does not cache.
 	sensors *nodeSensorsCache
+
+	// memory reads nodes' memory DIMM layouts; shared with the daily pass. Nil
+	// leaves Read now unavailable and the stored reads still readable.
+	memory *nodememory.Reader
 }
 
 // NewNodeHandler creates a new node handler.

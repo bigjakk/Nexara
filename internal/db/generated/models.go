@@ -569,6 +569,22 @@ type NodeDisk struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// Each node's last memory DIMM read (dmidecode over SSH). A failed read updates status, reason and attempted_at and keeps the last good read.
+type NodeMemoryInventory struct {
+	NodeID         uuid.UUID          `json:"node_id"`
+	Status         string             `json:"status"`
+	Reason         string             `json:"reason"`
+	AttemptedAt    time.Time          `json:"attempted_at"`
+	ReadAt         pgtype.Timestamptz `json:"read_at"`
+	InstalledBytes int64              `json:"installed_bytes"`
+	SlotsUsed      int32              `json:"slots_used"`
+	SlotsTotal     int32              `json:"slots_total"`
+	// The firmware's own Maximum Capacity, summed over the system memory arrays; boards often misstate it
+	MaxCapacityBytes int64           `json:"max_capacity_bytes"`
+	Ecc              string          `json:"ecc"`
+	Modules          json.RawMessage `json:"modules"`
+}
+
 type NodeMetric struct {
 	Time      time.Time `json:"time"`
 	NodeID    uuid.UUID `json:"node_id"`

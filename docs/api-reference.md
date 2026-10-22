@@ -880,6 +880,8 @@ leaves provenance intact.
 | GET | `/clusters/:id/nodes/:node_id/disks` | List node disks (model, size, health, wearout) |
 | GET | `/clusters/:id/nodes/:node_id/network-interfaces` | List node network interfaces |
 | GET | `/clusters/:id/nodes/:node_id/pci-devices` | List node PCI devices |
+| GET | `/clusters/:id/nodes/:node/memory-modules` | The node's last memory DIMM read: each slot's size, type, speed and part number, the installed total, the firmware's maximum and ECC, with `status` (`never`, `ok`, `unavailable`, `error`) and `reason`. A failed read keeps the last good one. Never dials the node |
+| POST | `/clusters/:id/nodes/:node/memory-modules/refresh` | Read the DIMM layout now with `dmidecode` over the cluster's SSH credentials (needs root) and return it as the GET does; a failed read answers 200 with its reason, and a read within a minute of the last one that dialed the node answers 429 with `Retry-After` (`manage:node`, audited) |
 | GET | `/clusters/:id/nodes/:node/dns` | Get node DNS config |
 | PUT | `/clusters/:id/nodes/:node/dns` | Set node DNS config |
 | GET | `/clusters/:id/nodes/:node/time` | Get node time and timezone |

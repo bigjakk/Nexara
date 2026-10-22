@@ -233,6 +233,7 @@ All settings are environment variables. `docker-compose.yml` injects a curated s
 | `API_PORT` | `8080` | Listen port *inside* the container. Compose maps host `80` → `8080`; to move the port, change the compose mapping, not this (unless you run the binary directly) |
 | `METRICS_COLLECT_INTERVAL` | `30s` | How often to poll Proxmox for metrics (Docker deployments set `10s`) |
 | `SNAPSHOT_SYNC_INTERVAL` | `5m` | How often the guest snapshot inventory (central Snapshots page + snapshot-age alerts) refreshes. One Proxmox call per guest per pass; floored at `60s`, `0` disables |
+| `NODE_MEMORY_READ_INTERVAL` | `24h` | How often each node's memory DIMM layout is re-read with `dmidecode` over the cluster's SSH credentials (as root). Clusters without SSH credentials are never dialed; `0` disables the background read |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `PUID` / `PGID` | `1000` | Container user/group ID |
 | `DATA_DIR` | Docker volume | Custom data path (e.g. NFS mount) |

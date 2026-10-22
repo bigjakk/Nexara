@@ -64,6 +64,12 @@ type Config struct {
 	// 60s in the collector; 0 disables collection entirely (the central
 	// page then only refreshes via per-guest resyncs).
 	SnapshotSyncInterval time.Duration `envconfig:"SNAPSHOT_SYNC_INTERVAL" default:"5m"`
+	// NodeMemoryReadInterval is how old a node's memory DIMM read may get
+	// before the background pass reads it again with dmidecode over the
+	// cluster's SSH credentials (as root); a read that failed after reaching
+	// the node waits as long. 0 turns the pass off, and a node page's Read now
+	// still works. Clusters without SSH credentials are never dialed.
+	NodeMemoryReadInterval time.Duration `envconfig:"NODE_MEMORY_READ_INTERVAL" default:"24h"`
 	// VeeamSyncInterval drives the Veeam inventory pass — repositories and
 	// their capacity sample, job states, backup objects and the restore
 	// points of any object whose point count moved. Floored at 60s in the
