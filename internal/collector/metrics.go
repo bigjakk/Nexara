@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // nodeMetricSnapshot holds metric data collected from a Proxmox node.
@@ -40,6 +42,23 @@ type vmMetricSnapshot struct {
 	// DiskUnreported is vm_metrics.disk_unreported: PVE left the disk counters
 	// unreported and they are carried forward (see diskCarry).
 	DiskUnreported bool `json:"disk_unreported"`
+	// Pressure is vm_metrics.pressure_*: the guest's pressure stall figures,
+	// each nil when PVE did not report it.
+	Pressure guestPressure `json:"-"`
+}
+
+// guestPressure is a guest's pressure stall figures, percent of the last ten
+// seconds, in vm_metrics' column order.
+type guestPressure struct {
+	CPUSome, CPUFull, IOSome, IOFull, MemSome, MemFull *float64
+}
+
+func pressureOf(p proxmox.GuestPressure) guestPressure {
+	return guestPressure{
+		CPUSome: p.PressureCPUSome.Ptr(), CPUFull: p.PressureCPUFull.Ptr(),
+		IOSome: p.PressureIOSome.Ptr(), IOFull: p.PressureIOFull.Ptr(),
+		MemSome: p.PressureMemorySome.Ptr(), MemFull: p.PressureMemoryFull.Ptr(),
+	}
 }
 
 // memGuest is a reading's MemGuest: nil when the guest is not running, so

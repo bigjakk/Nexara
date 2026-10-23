@@ -28,6 +28,23 @@ func (c *Client) GetNodeStatus(ctx context.Context, node string) (*NodeStatus, e
 	return &status, nil
 }
 
+// GetNodeRRDData returns the node's RRD steps over timeframe ("hour", "day",
+// ...), consolidated with cf ("AVERAGE" or "MAX"). The API node answers from
+// its own rrdcached, which holds every node's RRD, so the call is not proxied.
+func (c *Client) GetNodeRRDData(ctx context.Context, node, timeframe, cf string) ([]NodeRRDEntry, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	q := url.Values{}
+	q.Set("timeframe", timeframe)
+	q.Set("cf", cf)
+	var steps []NodeRRDEntry
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/rrddata?"+q.Encode(), &steps); err != nil {
+		return nil, fmt.Errorf("get node %s rrddata: %w", node, err)
+	}
+	return steps, nil
+}
+
 // GetNodeReport returns the node's system report: the same bundle `pvereport`
 // assembles, as one plain-text document. Proxmox sends it as a single JSON
 // string rather than a structured object, so the destination is a string.

@@ -816,6 +816,21 @@ export type TimeRange = "live" | "1h" | "6h" | "24h" | "7d";
 /** A stored-history point, as the metrics routes return it. */
 export type HistoricalMetricPoint = MetricSeriesPoint;
 
+/**
+ * A pressure stall point: per series, the peak in its interval of the share
+ * of time tasks waited (percent). Null where none was recorded — a stopped
+ * guest, Proxmox VE 8, or a node's CPU "full", which its RRD does not keep.
+ */
+export interface PressurePoint {
+  timestamp: number;
+  cpuSome: number | null;
+  cpuFull: number | null;
+  ioSome: number | null;
+  ioFull: number | null;
+  memSome: number | null;
+  memFull: number | null;
+}
+
 export interface StorageResponse {
   id: string;
   cluster_id: string;

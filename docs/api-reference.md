@@ -1321,6 +1321,8 @@ group list.
 | GET | `/clusters/:id/metrics` | Get cluster historical metrics |
 | GET | `/clusters/:id/vms/:vm_id/metrics` | Get VM historical metrics |
 | GET | `/clusters/:id/nodes/:node_id/metrics` | Get node historical metrics |
+| GET | `/clusters/:id/vms/:vm_id/pressure` | Get VM pressure stall history (Proxmox VE 9) |
+| GET | `/clusters/:id/nodes/:node_id/pressure` | Get node pressure stall history (Proxmox VE 9) |
 
 ### Ceph
 

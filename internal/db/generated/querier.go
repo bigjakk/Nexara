@@ -767,6 +767,14 @@ type Querier interface {
 	GetLatestPBSDatastoreMetrics(ctx context.Context, pbsServerID uuid.UUID) ([]PbsDatastoreMetric, error)
 	GetMaintenanceWindow(ctx context.Context, id uuid.UUID) (MaintenanceWindow, error)
 	GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJob, error)
+	// Pressure stall information (PSI): guests' in vm_metrics, written with the
+	// other metrics each cycle; nodes' in node_pressure, copied from each node's
+	// RRD by the collector's pressure pass.
+	// The newest step stored for the node, for the pressure pass to resume after.
+	// ORDER BY ... LIMIT 1 rather than max(time): sqlc types an aggregate NOT
+	// NULL, and a node with no steps yet would scan a NULL into a time.Time
+	// instead of answering no rows.
+	GetNewestNodePressureTime(ctx context.Context, nodeID uuid.UUID) (time.Time, error)
 	GetNextPendingNode(ctx context.Context, jobID uuid.UUID) (RollingUpdateNode, error)
 	GetNode(ctx context.Context, id uuid.UUID) (Node, error)
 	GetNodeAddressByName(ctx context.Context, arg GetNodeAddressByNameParams) (string, error)
@@ -776,6 +784,12 @@ type Querier interface {
 	GetNodeMetrics1h(ctx context.Context, arg GetNodeMetrics1hParams) ([]GetNodeMetrics1hRow, error)
 	GetNodeMetrics5m(ctx context.Context, arg GetNodeMetrics5mParams) ([]GetNodeMetrics5mRow, error)
 	GetNodeMetricsDailyAvg(ctx context.Context, arg GetNodeMetricsDailyAvgParams) ([]GetNodeMetricsDailyAvgRow, error)
+	// A node's pressure from @since in buckets of @bucket_seconds, the peak of
+	// each series per bucket: a stall is a short spike an average would flatten.
+	// The peaks come through a LEFT JOIN to a CTE because that is how sqlc types
+	// an aggregate as nullable (see ListVeeamOrphanedObjects): a bucket where a
+	// series has no value scans as NULL instead of failing the request.
+	GetNodePressure(ctx context.Context, arg GetNodePressureParams) ([]GetNodePressureRow, error)
 	// Metric queries for alert evaluation
 	GetNodeRecentMetrics(ctx context.Context, arg GetNodeRecentMetricsParams) ([]GetNodeRecentMetricsRow, error)
 	GetNotificationChannel(ctx context.Context, id uuid.UUID) (NotificationChannel, error)
@@ -896,6 +910,11 @@ type Querier interface {
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
 	GetVMMetricsDailyAvg(ctx context.Context, arg GetVMMetricsDailyAvgParams) ([]GetVMMetricsDailyAvgRow, error)
+	// A guest's pressure from @since in buckets of @bucket_seconds, the peak of
+	// each series per bucket, shaped as GetNodePressure is and for the same
+	// reason. A sample taken while the guest was stopped has no pressure, so a
+	// bucket of those reads NULL throughout.
+	GetVMPressure(ctx context.Context, arg GetVMPressureParams) ([]GetVMPressureRow, error)
 	GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetricsParams) ([]GetVMRecentMetricsRow, error)
 	// Per guest of one cluster, its raw readings since @since: how many there are,
 	// how many were taken while it ran, CPU over those, and the guest's own memory
@@ -1006,6 +1025,9 @@ type Querier interface {
 	InsertExternalTaskHistory(ctx context.Context, arg InsertExternalTaskHistoryParams) error
 	// Maintenance Windows
 	InsertMaintenanceWindow(ctx context.Context, arg InsertMaintenanceWindowParams) (MaintenanceWindow, error)
+	// One RRD step. A step already stored is left as it is: the pass rereads the
+	// last hour each time, and a completed RRD step does not change.
+	InsertNodePressure(ctx context.Context, arg InsertNodePressureParams) error
 	// Notification Channels
 	InsertNotificationChannel(ctx context.Context, arg InsertNotificationChannelParams) (NotificationChannel, error)
 	// Notification Dead-Letter Queue

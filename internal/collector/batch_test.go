@@ -2,12 +2,16 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // mockCopyFromer records CopyFrom calls for testing.
@@ -116,6 +120,13 @@ func TestBatchInsertNodeMetrics(t *testing.T) {
 
 func TestBatchInsertVMMetrics(t *testing.T) {
 	guest := true
+	// A guest list entry as PVE 9 sends it, each pressure figure distinct, so
+	// a misspelled tag or a swapped field on the way to its column shows.
+	var listed proxmox.VirtualMachine
+	if err := json.Unmarshal([]byte(`{"vmid":100,"pressurecpusome":1,"pressurecpufull":2,"pressureiosome":3,`+
+		`"pressureiofull":4,"pressurememorysome":5,"pressurememoryfull":"6"}`), &listed); err != nil {
+		t.Fatalf("decode guest: %v", err)
+	}
 	tests := []struct {
 		name      string
 		snapshots []vmMetricSnapshot
@@ -129,7 +140,8 @@ func TestBatchInsertVMMetrics(t *testing.T) {
 		{
 			name: "single VM",
 			snapshots: []vmMetricSnapshot{
-				{VMID: uuid.New(), CPUUsage: 0.8, MemUsed: 4096, MemTotal: 8192, DiskRead: 500, DiskWrite: 600, NetIn: 700, NetOut: 800, MemGuest: &guest, DiskUnreported: true},
+				{VMID: uuid.New(), CPUUsage: 0.8, MemUsed: 4096, MemTotal: 8192, DiskRead: 500, DiskWrite: 600, NetIn: 700, NetOut: 800, MemGuest: &guest, DiskUnreported: true,
+					Pressure: pressureOf(listed.GuestPressure)},
 			},
 			wantCount: 1,
 		},
@@ -169,6 +181,19 @@ func TestBatchInsertVMMetrics(t *testing.T) {
 				for i, row := range call.rows {
 					if row[9] != any(tt.snapshots[i].MemGuest) || row[10] != any(tt.snapshots[i].DiskUnreported) {
 						t.Errorf("row %d mem_guest, disk_unreported = %v, %v, want %v, %v", i, row[9], row[10], tt.snapshots[i].MemGuest, tt.snapshots[i].DiskUnreported)
+					}
+				}
+				// So do the pressure figures, each in its own column.
+				wantColumns := []string{"pressure_cpu_some", "pressure_cpu_full", "pressure_io_some",
+					"pressure_io_full", "pressure_mem_some", "pressure_mem_full"}
+				if !slices.Equal(call.columnNames[11:], wantColumns) {
+					t.Errorf("pressure columns = %v, want %v", call.columnNames[11:], wantColumns)
+				}
+				if tt.name == "single VM" {
+					for i, v := range call.rows[0][11:] {
+						if got, ok := v.(*float64); !ok || got == nil || *got != float64(i+1) {
+							t.Errorf("%s = %v, want %d", wantColumns[i], v, i+1)
+						}
 					}
 				}
 			}

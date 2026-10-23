@@ -667,6 +667,16 @@ type NodePciDevice struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
+type NodePressure struct {
+	Time    time.Time     `json:"time"`
+	NodeID  uuid.UUID     `json:"node_id"`
+	CpuSome pgtype.Float4 `json:"cpu_some"`
+	IoSome  pgtype.Float4 `json:"io_some"`
+	IoFull  pgtype.Float4 `json:"io_full"`
+	MemSome pgtype.Float4 `json:"mem_some"`
+	MemFull pgtype.Float4 `json:"mem_full"`
+}
+
 type NotificationChannel struct {
 	ID              uuid.UUID `json:"id"`
 	Name            string    `json:"name"`
@@ -1408,6 +1418,18 @@ type VmMetric struct {
 	MemGuest pgtype.Bool `json:"mem_guest"`
 	// TRUE when PVE did not report the guest's disk counters this sample and they are its last reported ones, carried forward; FALSE when they are this sample's reading, or the row predates the column
 	DiskUnreported bool `json:"disk_unreported"`
+	// Percent of the last 10 s in which at least one of the guest's tasks waited for CPU (PSI some avg10); NULL when there was no reading
+	PressureCpuSome pgtype.Float4 `json:"pressure_cpu_some"`
+	// Percent of the last 10 s in which all of the guest's non-idle tasks waited for CPU (PSI full avg10); NULL when there was no reading
+	PressureCpuFull pgtype.Float4 `json:"pressure_cpu_full"`
+	// Percent of the last 10 s in which at least one of the guest's tasks waited for IO (PSI some avg10); NULL when there was no reading
+	PressureIoSome pgtype.Float4 `json:"pressure_io_some"`
+	// Percent of the last 10 s in which all of the guest's non-idle tasks waited for IO (PSI full avg10); NULL when there was no reading
+	PressureIoFull pgtype.Float4 `json:"pressure_io_full"`
+	// Percent of the last 10 s in which at least one of the guest's tasks waited for memory (PSI some avg10); NULL when there was no reading
+	PressureMemSome pgtype.Float4 `json:"pressure_mem_some"`
+	// Percent of the last 10 s in which all of the guest's non-idle tasks waited for memory (PSI full avg10); NULL when there was no reading
+	PressureMemFull pgtype.Float4 `json:"pressure_mem_full"`
 }
 
 type VmMetrics1h struct {

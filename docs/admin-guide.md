@@ -8,6 +8,8 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 - [Infrastructure Health](#infrastructure-health)
 - [Topology Map](#topology-map)
 - [Node Options](#node-options)
+- [Memory Modules](#memory-modules)
+- [Metric History and Pressure](#metric-history-and-pressure)
 - [User Management](#user-management)
 - [RBAC Setup](#rbac-setup)
 - [Proxmox Access Control](#proxmox-access-control)
@@ -178,6 +180,24 @@ Proxmox has no API for this, so Nexara reads it with `/usr/sbin/dmidecode -t 16 
 - **A failed read keeps the last good one.** The card shows why the newest read failed above the last good read, for example *Reading the memory layout needs root* when the SSH user is not root, or a warning when the node's host key no longer matches the pinned one.
 - **What is not stored.** Serial numbers and asset tags are skipped and never kept. The firmware's maximum is the board's own figure, which boards often misstate.
 - **Virtual nodes.** A node that is itself a VM lists only the memory it booted with; memory hot-plugged later is in no DIMM table. When the firmware lists less than the node has, the card says so, and the capacity forecast calls that node's table incomplete rather than reading its headroom from it.
+
+---
+
+## Metric History and Pressure
+
+The CPU, memory, disk and network charts on the dashboard, a node's page and a guest's page read Nexara's stored samples, one per `METRICS_COLLECT_INTERVAL`, kept for 30 days.
+
+- **Resolution.** **1h** shows the samples themselves, in 10-second buckets; **6h** one-minute buckets; **24h** five-minute and **7d** hourly averages.
+- **Live** shows the last hour of stored samples, refreshed every minute, followed by the newest ticks.
+- **A break in a line means nothing was measured:** Nexara took no sample (for example while a collection pass stalled), a counter fell (a guest restarted or moved), or Proxmox left it unreported. A drop to zero is a real zero.
+- **A cluster's charts** show the total disk and network throughput of its nodes, the average of their CPU, and memory as a share of the cluster's total.
+
+**Pressure.** Below those charts, the **Pressure** card shows Linux pressure stall information (PSI): the share of time tasks waited for CPU, memory or IO. The area is time at least one task waited ("some"); the dashed line is time every non-idle task waited at once ("full"). A storage stall shows here even when throughput only dips, because the tasks wait. Each point is the highest value in its interval.
+
+- **Proxmox VE 9 or later.** A node or guest on Proxmox VE 8 shows no pressure data. A node's RRD keeps no CPU "full", so a node's card has no dashed CPU line.
+- **Guests** report pressure with every metrics cycle.
+- **Nodes** keep it in their RRD, at one-minute steps for a day. A background pass copies new steps every `NODE_PRESSURE_SYNC_INTERVAL` (default `5m`; `0` turns it off), so a node's pressure survives a Nexara outage of up to a day.
+- Pressure is kept as long as the other raw metrics, 30 days.
 
 ---
 

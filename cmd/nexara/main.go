@@ -602,6 +602,32 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 			}()
 		}
 
+		// Node pressure loop: copies each online node's pressure stall steps
+		// from its RRD, which keeps a day of them, so the pass can run well
+		// below the metrics cadence and a restart loses nothing. Leader-gated
+		// like the loops above. Floored at 60s; 0 disables.
+		if cfg.NodePressureSyncInterval > 0 {
+			pressureInterval := max(cfg.NodePressureSyncInterval, time.Minute)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("node pressure loop panicked", "panic", r)
+					}
+				}()
+				syncer.SyncAllNodePressure(ctx)
+				pressureTicker := time.NewTicker(pressureInterval)
+				defer pressureTicker.Stop()
+				for {
+					select {
+					case <-pressureTicker.C:
+						syncer.SyncAllNodePressure(ctx)
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+		}
+
 		// Veeam inventory + session loops. Leader-gated on the same ctx as the
 		// loops above, so a follower never polls a VBR server and a lost
 		// leadership tears both down with everything else.

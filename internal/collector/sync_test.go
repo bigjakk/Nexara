@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -76,6 +77,11 @@ type mockQueries struct {
 	guestSmbiosByCluster []db.GuestSmbios
 	smbiosUpserts        []db.UpsertGuestSmbiosParams
 	smbiosVanishedCalls  []db.DeleteGuestSmbiosForVanishedGuestsParams
+
+	// Node pressure: the newest stored step per node (none: no rows), and the
+	// steps inserted.
+	nodePressureNewest  map[uuid.UUID]time.Time
+	nodePressureInserts []db.InsertNodePressureParams
 }
 
 func newMockQueries() *mockQueries {
@@ -84,6 +90,18 @@ func newMockQueries() *mockQueries {
 		vms:          make(map[string]db.Vm),
 		storagePools: make(map[string]db.StoragePool),
 	}
+}
+
+func (m *mockQueries) GetNewestNodePressureTime(_ context.Context, nodeID uuid.UUID) (time.Time, error) {
+	if t, ok := m.nodePressureNewest[nodeID]; ok {
+		return t, nil
+	}
+	return time.Time{}, pgx.ErrNoRows
+}
+
+func (m *mockQueries) InsertNodePressure(_ context.Context, arg db.InsertNodePressureParams) error {
+	m.nodePressureInserts = append(m.nodePressureInserts, arg)
+	return nil
 }
 
 func (m *mockQueries) ListActiveClusters(_ context.Context) ([]db.Cluster, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/handlers"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -107,6 +109,12 @@ func TestMetricRangesReadTheirSource(t *testing.T) {
 			func(m *handlers.MetricsHandler) Handler { return m.GetVMHistorical },
 			map[string]string{"1h": "GetVMRecentMetrics", "6h": "GetVMRecentMetrics",
 				"24h": "GetVMMetrics5m", "7d": "GetVMMetrics1h"}},
+		{clusterScope + "/nodes/:node_id/pressure",
+			func(m *handlers.MetricsHandler) Handler { return m.GetNodePressure },
+			map[string]string{"1h": "GetNodePressure", "7d": "GetNodePressure"}},
+		{clusterScope + "/vms/:vm_id/pressure",
+			func(m *handlers.MetricsHandler) Handler { return m.GetVMPressure },
+			map[string]string{"1h": "GetVMPressure", "7d": "GetVMPressure"}},
 	}
 	for _, r := range routes {
 		for rng, want := range r.source {
@@ -183,5 +191,46 @@ func TestGuestSeriesIsRatedOldestFirstAsAGuest(t *testing.T) {
 	d.mu.Unlock()
 	if reach := time.Until(since); reach > -(time.Hour + 10*time.Minute) {
 		t.Errorf("the raw fetch starts %v before now, want at least 1h10m: counterReach before the window", -reach)
+	}
+}
+
+// TestPressureSeriesMapsEachFigure drives both pressure routes with one row
+// whose figures are all distinct, so a figure answered in another's field
+// shows.
+func TestPressureSeriesMapsEachFigure(t *testing.T) {
+	t.Parallel()
+	f := func(v float32) pgtype.Float4 { return pgtype.Float4{Float32: v, Valid: true} }
+	at := time.Now().Add(-time.Minute)
+	for _, tt := range []struct {
+		path, query string
+		handler     func(*handlers.MetricsHandler) Handler
+		row         any
+		want        string
+	}{
+		{clusterScope + "/nodes/:node_id/pressure", "GetNodePressure",
+			func(m *handlers.MetricsHandler) Handler { return m.GetNodePressure },
+			db.GetNodePressureRow{Bucket: at, CpuSome: f(1), IoSome: f(3), IoFull: f(4), MemSome: f(5), MemFull: f(6)},
+			`"cpuSome":1,"cpuFull":null,"ioSome":3,"ioFull":4,"memSome":5,"memFull":6`},
+		{clusterScope + "/vms/:vm_id/pressure", "GetVMPressure",
+			func(m *handlers.MetricsHandler) Handler { return m.GetVMPressure },
+			db.GetVMPressureRow{Bucket: at, CpuSome: f(1), CpuFull: f(2), IoSome: f(3), IoFull: f(4), MemSome: f(5), MemFull: f(6)},
+			`"cpuSome":1,"cpuFull":2,"ioSome":3,"ioFull":4,"memSome":5,"memFull":6`},
+	} {
+		d := &metricsSeriesDB{clusterID: uuid.MustParse(testClusterID), series: map[string][]any{tt.query: {tt.row}}}
+		e := declaredEndpoint(t, fiber.MethodGet, tt.path)
+		e.Handler = tt.handler(handlers.NewMetricsHandler(db.New(d)))
+		e.Permissions = Permissions{SelfService: "series fixture; authorization is exercised separately"}
+		app := newRegistryApp(t, noAuth(), e)
+
+		target := strings.NewReplacer(":cluster_id", testClusterID, ":node_id", uuid.NewString(), ":vm_id", uuid.NewString()).Replace(tt.path)
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, target+"?range=1h", nil))
+		if err != nil {
+			t.Fatalf("app.Test: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if !strings.Contains(string(body), tt.want) {
+			t.Errorf("%s answered %s, want the figures %s", tt.path, body, tt.want)
+		}
 	}
 }

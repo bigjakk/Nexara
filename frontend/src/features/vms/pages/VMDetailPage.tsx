@@ -21,7 +21,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/features/inventory/components/StatusBadge";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
-import { useVMHistoricalMetrics } from "@/features/dashboard/api/historical-queries";
+import {
+  useVMHistoricalMetrics,
+  useVMPressure,
+} from "@/features/dashboard/api/historical-queries";
+import { PressureChart } from "@/features/dashboard/components/PressureChart";
 import { useLiveSeries } from "@/features/dashboard/hooks/useLiveSeries";
 import { latestValue } from "@/lib/metric-series";
 import { useConsoleStore } from "@/stores/console-store";
@@ -713,6 +717,7 @@ function VMMetricsPanel({
   );
 
   const chartData = useLiveSeries(historicalData, liveMetric, isLive);
+  const pressure = useVMPressure(clusterId, vmId, timeRange);
 
   const lastMemPercent = latestValue(chartData, "memPercent");
   const memDetail =
@@ -807,6 +812,12 @@ function VMMetricsPanel({
           />
         </div>
       </div>
+      <PressureChart
+        data={pressure.data}
+        timeRange={timeRange}
+        isLoading={pressure.isLoading}
+        isError={pressure.isError}
+      />
     </div>
   );
 }

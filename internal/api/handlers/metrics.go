@@ -7,14 +7,16 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
-// All three routes are declared in internal/api/registry_metrics.go, which
-// states their cluster-scoped permission (view:cluster, view:vm, view:node
-// respectively) and their parameters; nothing below re-checks either.
+// The routes are declared in internal/api/registry_metrics.go, which states
+// their cluster-scoped permission (view:cluster, view:vm or view:node) and
+// their parameters; nothing below re-checks either.
 //
 // What stays here is what the declaration cannot see: the per-guest and
 // per-node queries key on the GUEST's or NODE's row id alone, so each handler
@@ -161,7 +163,7 @@ func (h *MetricsHandler) GetClusterHistorical(c fiber.Ctx, p *apischema.Params) 
 		width = rollup1h
 	}
 
-	return RespondItems(c, withGaps(bucketSamples(mergeNodes(perNode), since, width)))
+	return RespondItems(c, metricGaps(bucketSamples(mergeNodes(perNode), since, width)))
 }
 
 // GetVMHistorical handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics.
@@ -238,7 +240,7 @@ func (h *MetricsHandler) GetVMHistorical(c fiber.Ctx, p *apischema.Params) error
 		width = rollup1h
 	}
 
-	return RespondItems(c, withGaps(bucketSamples(rated, since, width)))
+	return RespondItems(c, metricGaps(bucketSamples(rated, since, width)))
 }
 
 // GetNodeHistorical handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/metrics.
@@ -313,5 +315,129 @@ func (h *MetricsHandler) GetNodeHistorical(c fiber.Ctx, p *apischema.Params) err
 		width = rollup1h
 	}
 
-	return RespondItems(c, withGaps(bucketSamples(rated, since, width)))
+	return RespondItems(c, metricGaps(bucketSamples(rated, since, width)))
+}
+
+// pressurePoint is one point of a pressure series: the peak in its bucket of
+// each pressure stall figure, percent of time. Nil where none was recorded —
+// the guest was stopped, the node or guest runs Proxmox VE 8, or (CPUFull) a
+// node, whose RRD does not keep that series.
+type pressurePoint struct {
+	Timestamp int64    `json:"timestamp"`
+	CPUSome   *float64 `json:"cpuSome"`
+	CPUFull   *float64 `json:"cpuFull"`
+	IOSome    *float64 `json:"ioSome"`
+	IOFull    *float64 `json:"ioFull"`
+	MemSome   *float64 `json:"memSome"`
+	MemFull   *float64 `json:"memFull"`
+}
+
+// Pressure buckets are window/seriesPoints, but no finer than the series is
+// recorded: a node's steps are a minute apart (its RRD), a guest's samples
+// one collector cycle.
+const (
+	nodePressureStep  = time.Minute
+	guestPressureStep = 10 * time.Second
+)
+
+func pressureBucket(window, step time.Duration) time.Duration {
+	return max(window/seriesPoints, step)
+}
+
+func pct(v pgtype.Float4) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	return roundTo(float64(v.Float32), 2)
+}
+
+// GetNodePressure handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/pressure.
+func (h *MetricsHandler) GetNodePressure(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+	nodeID, err := parseParamUUID(p.String("node_id"))
+	if err != nil {
+		return err
+	}
+	// Verify the node belongs to the authorized cluster (query keys on node_id).
+	if node, nErr := h.queries.GetNode(c.Context(), nodeID); nErr != nil || node.ClusterID != clusterID {
+		return fiber.NewError(fiber.StatusNotFound, "Node not found")
+	}
+	window, err := metricWindow(p.String("range"))
+	if err != nil {
+		return err
+	}
+	width := pressureBucket(window, nodePressureStep)
+	rows, err := h.queries.GetNodePressure(c.Context(), db.GetNodePressureParams{
+		BucketSeconds: safeconv.Int32(int(width / time.Second)),
+		NodeID:        nodeID,
+		Since:         time.Now().Add(-window),
+	})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to query node pressure")
+	}
+	points := make([]pressurePoint, len(rows))
+	for i, r := range rows {
+		points[i] = pressurePoint{
+			Timestamp: r.Bucket.UnixMilli(),
+			CPUSome:   pct(r.CpuSome),
+			IOSome:    pct(r.IoSome),
+			IOFull:    pct(r.IoFull),
+			MemSome:   pct(r.MemSome),
+			MemFull:   pct(r.MemFull),
+		}
+	}
+	return RespondItems(c, pressureGaps(points))
+}
+
+// GetVMPressure handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/pressure.
+func (h *MetricsHandler) GetVMPressure(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, err := parseParamUUID(p.String("cluster_id"))
+	if err != nil {
+		return err
+	}
+	vmID, err := parseParamUUID(p.String("vm_id"))
+	if err != nil {
+		return err
+	}
+	// The pressure query keys on vm_id alone, so verify the VM actually belongs
+	// to the authorized cluster (see GetVMHistorical).
+	if vm, vErr := h.queries.GetVM(c.Context(), vmID); vErr != nil || vm.ClusterID != clusterID {
+		return fiber.NewError(fiber.StatusNotFound, "VM not found")
+	}
+	window, err := metricWindow(p.String("range"))
+	if err != nil {
+		return err
+	}
+	width := pressureBucket(window, guestPressureStep)
+	rows, err := h.queries.GetVMPressure(c.Context(), db.GetVMPressureParams{
+		BucketSeconds: safeconv.Int32(int(width / time.Second)),
+		VmID:          vmID,
+		Since:         time.Now().Add(-window),
+	})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to query VM pressure")
+	}
+	points := make([]pressurePoint, len(rows))
+	for i, r := range rows {
+		points[i] = pressurePoint{
+			Timestamp: r.Bucket.UnixMilli(),
+			CPUSome:   pct(r.CpuSome),
+			CPUFull:   pct(r.CpuFull),
+			IOSome:    pct(r.IoSome),
+			IOFull:    pct(r.IoFull),
+			MemSome:   pct(r.MemSome),
+			MemFull:   pct(r.MemFull),
+		}
+	}
+	return RespondItems(c, pressureGaps(points))
+}
+
+// pressureGaps is withGaps for a pressure series.
+func pressureGaps(points []pressurePoint) []pressurePoint {
+	return withGaps(points,
+		func(p pressurePoint) int64 { return p.Timestamp },
+		func(ts int64) pressurePoint { return pressurePoint{Timestamp: ts} })
 }

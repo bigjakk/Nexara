@@ -348,24 +348,32 @@ func bucketSamples(samples []ratedSample, since time.Time, width time.Duration) 
 // withGaps inserts a point with no values wherever two consecutive points are
 // further apart than 2.5 times the series' median spacing, so a chart breaks
 // its line where nothing was sampled instead of drawing a ramp across the gap.
-func withGaps(points []metricPoint) []metricPoint {
+// at reads a point's time; empty makes a point with no values at a time.
+func withGaps[P any](points []P, at func(P) int64, empty func(int64) P) []P {
 	if len(points) < 3 {
 		return points
 	}
 	spacing := make([]int64, len(points)-1)
 	for i := 1; i < len(points); i++ {
-		spacing[i-1] = points[i].Timestamp - points[i-1].Timestamp
+		spacing[i-1] = at(points[i]) - at(points[i-1])
 	}
 	slices.Sort(spacing)
 	limit := spacing[len(spacing)/2] * 5 / 2
-	out := make([]metricPoint, 0, len(points))
+	out := make([]P, 0, len(points))
 	for i, p := range points {
-		if i > 0 && p.Timestamp-points[i-1].Timestamp > limit {
-			out = append(out, metricPoint{Timestamp: (points[i-1].Timestamp + p.Timestamp) / 2})
+		if i > 0 && at(p)-at(points[i-1]) > limit {
+			out = append(out, empty((at(points[i-1])+at(p))/2))
 		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// metricGaps is withGaps for a metric series.
+func metricGaps(points []metricPoint) []metricPoint {
+	return withGaps(points,
+		func(p metricPoint) int64 { return p.Timestamp },
+		func(ts int64) metricPoint { return metricPoint{Timestamp: ts} })
 }
 
 func roundTo(v float64, places int) *float64 {

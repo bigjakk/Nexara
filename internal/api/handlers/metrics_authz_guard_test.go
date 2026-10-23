@@ -7,11 +7,11 @@ import (
 )
 
 // TestGuard_MetricsHistoricalCheckClusterMembership enforces the half of the cross-cluster IDOR defence
-// that lives in this package. The GATE moved out: all three routes declare a cluster-scoped Check in
+// that lives in this package. The GATE moved out: every metrics route declares a cluster-scoped Check in
 // registry_metrics.go, and TestMetricsRoutesDeclareTheSamePermissionTheyEnforced compares the action
 // AND resource of each (the earlier version searched for a requireClusterPerm call and could not see
 // which permission it named). What a declaration cannot express is the half the IDOR turns on:
-// GetVMHistorical and GetNodeHistorical query the time-series tables by the guest's or node's row id
+// the per-guest and per-node handlers query the time-series tables by the guest's or node's row id
 // alone, so a caller authorized on cluster A can name a row in cluster B. Each has to re-read the row and
 // compare its ClusterID against the one the gate authorized. This is that comparison.
 func TestGuard_MetricsHistoricalCheckClusterMembership(t *testing.T) {
@@ -27,6 +27,8 @@ func TestGuard_MetricsHistoricalCheckClusterMembership(t *testing.T) {
 	want := map[string]bool{
 		"GetVMHistorical":   false,
 		"GetNodeHistorical": false,
+		"GetVMPressure":     false,
+		"GetNodePressure":   false,
 	}
 
 	for _, decl := range f.Decls {

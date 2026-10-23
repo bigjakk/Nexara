@@ -182,13 +182,13 @@ func TestSeriesShaping(t *testing.T) {
 			}
 			return out
 		}
-		got := withGaps(points(0, 10, 20, 100, 110))
+		got := metricGaps(points(0, 10, 20, 100, 110))
 		if len(got) != 6 || got[3].CPUPercent != nil || got[3].Timestamp != seriesAt(60).UnixMilli() {
-			t.Fatalf("withGaps = %+v, want one empty point at 60 s between 20 s and 100 s", got)
+			t.Fatalf("metricGaps = %+v, want one empty point at 60 s between 20 s and 100 s", got)
 		}
 		// Samples 30 s apart in 10 s buckets: their own spacing, not a gap.
-		if got := withGaps(points(0, 30, 60, 90, 120)); len(got) != 5 {
-			t.Errorf("withGaps on an even 30 s series added %d points", len(got)-5)
+		if got := metricGaps(points(0, 30, 60, 90, 120)); len(got) != 5 {
+			t.Errorf("metricGaps on an even 30 s series added %d points", len(got)-5)
 		}
 	})
 }

@@ -1,7 +1,11 @@
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
-import type { TimeRange, HistoricalMetricPoint } from "@/types/api";
+import type {
+  TimeRange,
+  HistoricalMetricPoint,
+  PressurePoint,
+} from "@/types/api";
 import type { MetricSeriesPoint } from "@/types/ws";
 
 /**
@@ -133,5 +137,51 @@ export function useVMHistoricalMetrics(
     enabled: range !== "live" && clusterId.length > 0 && vmId.length > 0,
     staleTime: 60_000,
     refetchInterval: seedsLive ? LIVE_SEED_REFETCH_MS : false,
+  });
+}
+
+/** How often a live panel's pressure chart refetches its last hour. */
+const LIVE_PRESSURE_REFETCH_MS = 30_000;
+
+/**
+ * A node's pressure stall history for `range`; in live mode, the last hour,
+ * refetched while the panel is open.
+ */
+export function useNodePressure(
+  clusterId: string,
+  nodeId: string,
+  range: TimeRange,
+) {
+  const live = range === "live";
+  const span = live ? "1h" : range;
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeId, "pressure", span],
+    queryFn: () =>
+      apiClient.list<PressurePoint>(
+        apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeId}/pressure?range=${span}`,
+      ),
+    enabled: clusterId.length > 0 && nodeId.length > 0,
+    staleTime: 60_000,
+    refetchInterval: live ? LIVE_PRESSURE_REFETCH_MS : false,
+  });
+}
+
+/** A guest's pressure stall history for `range`; live as for a node's. */
+export function useVMPressure(
+  clusterId: string,
+  vmId: string,
+  range: TimeRange,
+) {
+  const live = range === "live";
+  const span = live ? "1h" : range;
+  return useQuery({
+    queryKey: ["clusters", clusterId, "vms", vmId, "pressure", span],
+    queryFn: () =>
+      apiClient.list<PressurePoint>(
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/pressure?range=${span}`,
+      ),
+    enabled: clusterId.length > 0 && vmId.length > 0,
+    staleTime: 60_000,
+    refetchInterval: live ? LIVE_PRESSURE_REFETCH_MS : false,
   });
 }

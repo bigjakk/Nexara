@@ -70,6 +70,11 @@ type Config struct {
 	// the node waits as long. 0 turns the pass off, and a node page's Read now
 	// still works. Clusters without SSH credentials are never dialed.
 	NodeMemoryReadInterval time.Duration `envconfig:"NODE_MEMORY_READ_INTERVAL" default:"24h"`
+	// NodePressureSyncInterval drives the pass that copies each online node's
+	// pressure stall steps from its RRD (Proxmox VE 9 keeps a day of them at
+	// one-minute steps): one read per node per pass, of the last hour, or the
+	// day after a gap. Floored at 60s in the collector; 0 turns it off.
+	NodePressureSyncInterval time.Duration `envconfig:"NODE_PRESSURE_SYNC_INTERVAL" default:"5m"`
 	// VeeamSyncInterval drives the Veeam inventory pass — repositories and
 	// their capacity sample, job states, backup objects and the restore
 	// points of any object whose point count moved. Floored at 60s in the

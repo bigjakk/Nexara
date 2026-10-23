@@ -205,12 +205,16 @@ type SyncQueries interface {
 	DeleteStaleNodeNetworkInterfaces(ctx context.Context, arg db.DeleteStaleNodeNetworkInterfacesParams) error
 	UpsertNodePCIDevices(ctx context.Context, arg db.UpsertNodePCIDevicesParams) error
 	DeleteStaleNodePCIDevices(ctx context.Context, arg db.DeleteStaleNodePCIDevicesParams) error
+	// Node pressure (copied from each node's RRD)
+	GetNewestNodePressureTime(ctx context.Context, nodeID uuid.UUID) (time.Time, error)
+	InsertNodePressure(ctx context.Context, arg db.InsertNodePressureParams) error
 }
 
 // ProxmoxClient defines the Proxmox API methods needed by the Syncer.
 type ProxmoxClient interface {
 	GetNodes(ctx context.Context) ([]proxmox.NodeListEntry, error)
 	GetNodeStatus(ctx context.Context, node string) (*proxmox.NodeStatus, error)
+	GetNodeRRDData(ctx context.Context, node, timeframe, cf string) ([]proxmox.NodeRRDEntry, error)
 	GetNodeDNS(ctx context.Context, node string) (*proxmox.NodeDNS, error)
 	GetNodeTime(ctx context.Context, node string) (*proxmox.NodeTime, error)
 	GetNodeSubscription(ctx context.Context, node string) (*proxmox.NodeSubscription, error)
@@ -296,6 +300,7 @@ type Syncer struct {
 	fastSyncInFlight     atomic.Bool             // re-entrancy guard for SyncAllResources
 	snapshotSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllGuestSnapshots
 	smbiosSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestSmbios
+	nodePressureInFlight atomic.Bool             // re-entrancy guard for SyncAllNodePressure
 	disk                 diskCarry               // VMs' last reported disk counters
 }
 
@@ -1134,6 +1139,7 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 			NetOut:         vm.NetOut,
 			MemGuest:       memGuest(vm.Status == "running", vm.GuestReportsMemory()),
 			DiskUnreported: carried,
+			Pressure:       pressureOf(vm.GuestPressure),
 		})
 	}
 
@@ -1251,6 +1257,7 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 			NetOut:    ct.NetOut,
 			// A container's mem is its own cgroup's usage, page cache excluded.
 			MemGuest: memGuest(ct.Status == "running", true),
+			Pressure: pressureOf(ct.GuestPressure),
 		})
 	}
 

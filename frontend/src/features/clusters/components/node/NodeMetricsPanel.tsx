@@ -3,7 +3,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/format";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
-import { useNodeHistoricalMetrics } from "@/features/dashboard/api/historical-queries";
+import {
+  useNodeHistoricalMetrics,
+  useNodePressure,
+} from "@/features/dashboard/api/historical-queries";
+import { PressureChart } from "@/features/dashboard/components/PressureChart";
 import { useLiveSeries } from "@/features/dashboard/hooks/useLiveSeries";
 import { latestValue } from "@/lib/metric-series";
 import type { TimeRange } from "@/types/api";
@@ -41,6 +45,7 @@ export function NodeMetricsPanel({
   );
 
   const chartData = useLiveSeries(historicalData, liveMetric, isLive);
+  const pressure = useNodePressure(clusterId, nodeId, timeRange);
 
   const lastMemPercent = latestValue(chartData, "memPercent");
   const memDetail =
@@ -135,6 +140,12 @@ export function NodeMetricsPanel({
           />
         </div>
       </div>
+      <PressureChart
+        data={pressure.data}
+        timeRange={timeRange}
+        isLoading={pressure.isLoading}
+        isError={pressure.isError}
+      />
     </div>
   );
 }

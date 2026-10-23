@@ -22,6 +22,8 @@ var nodeMetricColumns = []string{
 var vmMetricColumns = []string{
 	"time", "vm_id", "cpu_usage", "mem_used", "mem_total",
 	"disk_read", "disk_write", "net_in", "net_out", "mem_guest", "disk_unreported",
+	"pressure_cpu_some", "pressure_cpu_full", "pressure_io_some",
+	"pressure_io_full", "pressure_mem_some", "pressure_mem_full",
 }
 
 func batchInsertNodeMetrics(ctx context.Context, copier CopyFromer, ts time.Time, snapshots []nodeMetricSnapshot) (int64, error) {
@@ -48,7 +50,9 @@ func batchInsertVMMetrics(ctx context.Context, copier CopyFromer, ts time.Time, 
 
 	src := pgx.CopyFromSlice(len(snapshots), func(i int) ([]any, error) {
 		s := snapshots[i]
-		return []any{ts, s.VMID, s.CPUUsage, s.MemUsed, s.MemTotal, s.DiskRead, s.DiskWrite, s.NetIn, s.NetOut, s.MemGuest, s.DiskUnreported}, nil
+		p := s.Pressure
+		return []any{ts, s.VMID, s.CPUUsage, s.MemUsed, s.MemTotal, s.DiskRead, s.DiskWrite, s.NetIn, s.NetOut, s.MemGuest, s.DiskUnreported,
+			p.CPUSome, p.CPUFull, p.IOSome, p.IOFull, p.MemSome, p.MemFull}, nil
 	})
 
 	n, err := copier.CopyFrom(ctx, pgx.Identifier{"vm_metrics"}, vmMetricColumns, src)

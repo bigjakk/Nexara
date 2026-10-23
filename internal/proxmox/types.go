@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -300,6 +301,7 @@ type VirtualMachine struct {
 	// BalloonInfo is present only in a running VM's full status
 	// (qemu?full=1, status/current) when it has a balloon device.
 	BalloonInfo *BalloonInfo `json:"ballooninfo,omitempty"`
+	GuestPressure
 }
 
 // BalloonInfo is the balloon device's part of a VM's full status. TotalMem and
@@ -352,6 +354,7 @@ type Container struct {
 	PID       int     `json:"pid"`
 	Template  int     `json:"template"`
 	Tags      string  `json:"tags"`
+	GuestPressure
 }
 
 // ClusterResource represents a resource from GET /cluster/resources.
@@ -450,6 +453,91 @@ func (fb *FlexBool) UnmarshalJSON(b []byte) error {
 		return nil
 	}
 	return fmt.Errorf("FlexBool: cannot unmarshal %s", string(b))
+}
+
+// OptFloat is a Proxmox number that may be absent, arrive as a JSON number, or
+// arrive as a numeric string: the pressure stall figures are regex captures on
+// PVE's side and serialize either way. Set is false for a missing or null
+// value and for anything that is not a finite number — one odd figure must not
+// fail the VM list that sync, DRS and rolling updates all decode, and a NaN
+// stored in a REAL column would make every later max() over it unencodable.
+type OptFloat struct {
+	Value float64
+	Set   bool
+}
+
+func (f *OptFloat) UnmarshalJSON(b []byte) error {
+	*f = OptFloat{}
+	if string(b) == "null" {
+		return nil
+	}
+	var n float64
+	if err := json.Unmarshal(b, &n); err != nil {
+		var s string
+		if json.Unmarshal(b, &s) != nil {
+			return nil
+		}
+		if n, err = strconv.ParseFloat(strings.TrimSpace(s), 64); err != nil {
+			return nil
+		}
+	}
+	if !math.IsNaN(n) && !math.IsInf(n, 0) {
+		*f = OptFloat{Value: n, Set: true}
+	}
+	return nil
+}
+
+// MarshalJSON writes the number, or null when unset. A value receiver, so a
+// struct holding one marshals it the same whether or not it is addressable —
+// collector tests serve marshalled guest lists as their fake PVE.
+func (f OptFloat) MarshalJSON() ([]byte, error) {
+	if !f.Set {
+		return []byte("null"), nil
+	}
+	return json.Marshal(f.Value)
+}
+
+// Ptr is the value, or nil when unset.
+func (f OptFloat) Ptr() *float64 {
+	if !f.Set {
+		return nil
+	}
+	v := f.Value
+	return &v
+}
+
+// GuestPressure is a guest's pressure stall information (PSI) as Proxmox VE 9
+// reports it in the guest lists: the percent of the last ten seconds in which
+// the guest's tasks waited on CPU, IO or memory — "some" when at least one task
+// waited, "full" when every non-idle task did. Unset on Proxmox VE 8 and for a
+// stopped guest. The LXC list's schema leaves CPU "full" out, but PVE sends it
+// for containers too.
+type GuestPressure struct {
+	PressureCPUSome    OptFloat `json:"pressurecpusome"`
+	PressureCPUFull    OptFloat `json:"pressurecpufull"`
+	PressureIOSome     OptFloat `json:"pressureiosome"`
+	PressureIOFull     OptFloat `json:"pressureiofull"`
+	PressureMemorySome OptFloat `json:"pressurememorysome"`
+	PressureMemoryFull OptFloat `json:"pressurememoryfull"`
+}
+
+// NodeRRDEntry is one step of GET /nodes/{node}/rrddata: the node's RRD
+// averaged (or maxed, per cf) over the step ending at Time. Only the pressure
+// stall series are read; PVE leaves a key out for a step with no value, and
+// Proxmox VE 8's RRD has no pressure series at all.
+type NodeRRDEntry struct {
+	Time               float64  `json:"time"`
+	PressureCPUSome    OptFloat `json:"pressurecpusome"`
+	PressureIOSome     OptFloat `json:"pressureiosome"`
+	PressureIOFull     OptFloat `json:"pressureiofull"`
+	PressureMemorySome OptFloat `json:"pressurememorysome"`
+	PressureMemoryFull OptFloat `json:"pressurememoryfull"`
+}
+
+// HasPressure reports whether the step carries any pressure value.
+func (e NodeRRDEntry) HasPressure() bool {
+	return e.PressureCPUSome.Set || e.PressureIOSome.Set || e.PressureIOFull.Set ||
+		e.PressureMemorySome.Set || e.PressureMemoryFull.Set
 }
 
 // TermProxyResponse holds the response from a termproxy or vncproxy POST request.

@@ -18,25 +18,26 @@ import (
 // metricsRouteCount is how many endpoints registerMetricsEndpoints declares.
 // See vmRouteCount in registry_vms_test.go for why the registry total is a sum
 // of per-domain constants rather than one number.
-const metricsRouteCount = 3
+const metricsRouteCount = 5
 
-// metricsLegacyPermissions is the permission each handler checked with a
-// hand-placed requireClusterPerm call BEFORE Phase 6j, transcribed from
-// `git show HEAD:internal/api/handlers/metrics.go` at commit eaeafa7 — three
-// handlers, three calls, every one cluster-scoped and every one on a DIFFERENT
-// resource.
+// metricsLegacyPermissions is the permission each metrics route gates on. The
+// first three are what each handler checked with a hand-placed
+// requireClusterPerm call BEFORE Phase 6j, transcribed from
+// `git show HEAD:internal/api/handlers/metrics.go` at commit eaeafa7; the two
+// pressure routes, added later, gate as the series of the same resource do.
 //
-// The three resources are the point of the tally: gating all three on
-// view:cluster would have been the obvious simplification and would have handed
-// a cluster viewer a guest's and a node's series without the grants that own
-// them.
+// The resources are the point of the tally: gating everything on view:cluster
+// would have been the obvious simplification and would have handed a cluster
+// viewer a guest's and a node's series without the grants that own them.
 var metricsLegacyPermissions = map[string]string{
-	"GET /api/v1/clusters/:cluster_id/metrics":                "view:cluster",
-	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics":     "view:vm",
-	"GET /api/v1/clusters/:cluster_id/nodes/:node_id/metrics": "view:node",
+	"GET /api/v1/clusters/:cluster_id/metrics":                 "view:cluster",
+	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics":      "view:vm",
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_id/metrics":  "view:node",
+	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/pressure":     "view:vm",
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_id/pressure": "view:node",
 }
 
-// declaredMetricsEndpoints returns the three declarations by "METHOD path".
+// declaredMetricsEndpoints returns the metrics declarations by "METHOD path".
 func declaredMetricsEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
 	return declaredEndpointsWhere(t, keyedIn(metricsLegacyPermissions))
