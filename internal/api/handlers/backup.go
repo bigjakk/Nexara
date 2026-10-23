@@ -718,9 +718,9 @@ func (h *BackupHandler) ListVerifyJobs(c fiber.Ctx, p *apischema.Params) error {
 // datastoreMetricsTimeframes pairs each supported timeframe with its history
 // window and the bucket width the query downsamples to.
 //
-// The two are chosen together on purpose. Samples land once per
-// METRICS_COLLECT_INTERVAL — 10s in docker-compose.yml and .env.example — so
-// an un-bucketed 7-day window runs to tens of thousands of rows per datastore:
+// The two are chosen together on purpose. Samples land once per PBS sync —
+// every METRICS_COLLECT_INTERVAL, but no more often than every 30s — so an
+// un-bucketed 7-day window runs to some twenty thousand rows per datastore:
 // megabytes of JSON, and a browser main thread that stops answering while it
 // parses and lays them out. Every pairing here holds window/bucket to a couple
 // of hundred points, already finer than the pixels available to draw them.

@@ -468,9 +468,13 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 
 	mc := collector.NewMetricCollector(application.Pool, publisher, logger)
 
+	// PBS servers sync on a loop of their own (below), floored at 30s.
+	pbsInterval := max(cfg.MetricsCollectInterval, 30*time.Second)
+
 	runWithLeaderRetry(ctx, application.Pool, "collector", logger, func(ctx context.Context) {
 		logger.Info("collector started",
 			"metrics_interval", cfg.MetricsCollectInterval,
+			"pbs_interval", pbsInterval,
 			"resource_sync_interval", cfg.ResourceSyncInterval,
 			"snapshot_sync_interval", cfg.SnapshotSyncInterval)
 
@@ -672,19 +676,40 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 			}()
 		}
 
+		// PBS loop. Leader-gated like the loops above, and apart from the
+		// metrics tick so a slow or unreachable PBS server — each failing call
+		// waits out its dial — cannot stretch the interval between PVE samples.
+		// Floored at 30s: every pass upserts each datastore's snapshot rows and
+		// publishes a pbs_change event that every open tab refetches on, and
+		// datastore usage moves far slower than guest I/O.
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("PBS sync loop panicked", "panic", r)
+				}
+			}()
+			mc.ProcessPBSResults(ctx, syncer.SyncAllPBS(ctx))
+			pbsTicker := time.NewTicker(pbsInterval)
+			defer pbsTicker.Stop()
+			for {
+				select {
+				case <-pbsTicker.C:
+					mc.ProcessPBSResults(ctx, syncer.SyncAllPBS(ctx))
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+
 		// Run initial sync immediately.
 		results := syncer.SyncAll(ctx)
 		mc.ProcessResults(ctx, results)
-		pbsResults := syncer.SyncAllPBS(ctx)
-		mc.ProcessPBSResults(ctx, pbsResults)
 
 		for {
 			select {
 			case <-ticker.C:
 				results := syncer.SyncAll(ctx)
 				mc.ProcessResults(ctx, results)
-				pbsResults := syncer.SyncAllPBS(ctx)
-				mc.ProcessPBSResults(ctx, pbsResults)
 			case <-ctx.Done():
 				logger.Info("collector stopped")
 				return

@@ -86,7 +86,7 @@ All configuration is via environment variables.
 | `API_PORT` | No | `8080` | API server listen port |
 | `JWT_SECRET` | No | auto-generated | Secret for signing JWT tokens (min 16 chars) |
 | `ENCRYPTION_KEY` | No | auto-generated | 32-byte hex key for AES-256-GCM encryption of secrets at rest |
-| `METRICS_COLLECT_INTERVAL` | No | `30s` (Docker deployments set `10s`) | How often metrics are collected from Proxmox |
+| `METRICS_COLLECT_INTERVAL` | No | `30s` (Docker deployments set `10s`) | How often metrics are collected from Proxmox VE. PBS servers are synced on a loop of their own at the same interval, but no more often than every `30s`, so a slow PBS server never delays the Proxmox VE samples |
 | `RESOURCE_SYNC_INTERVAL` | No | `5s` | How often the fast inventory loop runs — one `GET /cluster/resources` per cluster per tick, so guest add/remove/move, status flips, renames and node status converge in seconds. Floored at `2s`; `0` disables the fast loop and leaves all freshness to `METRICS_COLLECT_INTERVAL` |
 | `SNAPSHOT_SYNC_INTERVAL` | No | `5m` | How often the guest snapshot inventory is collected (feeds the central Snapshots page and `snapshot_age_days` alerts). One Proxmox listing per guest per pass, so it runs well below the metrics cadence; floored at `60s`, `0` disables collection |
 | `NODE_MEMORY_READ_INTERVAL` | No | `24h` | How old a node's memory DIMM read may get before the background pass reads it again with `dmidecode` over the cluster's SSH credentials, as root. Only clusters with SSH credentials and a pinned host key are dialed; a read that reached the node and failed waits as long. `0` turns the pass off, and a node page's **Read now** still works |

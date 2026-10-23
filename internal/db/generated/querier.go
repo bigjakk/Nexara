@@ -772,9 +772,9 @@ type Querier interface {
 	GetNotificationDLQ(ctx context.Context, id uuid.UUID) (NotificationDlq, error)
 	GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, error)
 	// Downsampled in the database, deliberately. The raw hypertable holds one row
-	// per datastore per METRICS_COLLECT_INTERVAL — 10s in docker-compose.yml and
-	// .env.example, so a 7-day window runs to tens of thousands of rows per
-	// datastore. That is megabytes of JSON the
+	// per datastore per PBS sync — every METRICS_COLLECT_INTERVAL, but no more
+	// often than every 30s — so a 7-day window runs to some twenty thousand rows
+	// per datastore. That is megabytes of JSON the
 	// browser then parses, formats and lays out on its only thread. The caller
 	// derives bucket_seconds from the timeframe so every window comes back at
 	// chart resolution (~60-170 points per datastore) instead. Averaging is the
@@ -783,7 +783,7 @@ type Querier interface {
 	// The GROUP BY and ORDER BY ordinals are load-bearing — do not "clarify" them
 	// to `GROUP BY time`. PostgreSQL resolves an ambiguous GROUP BY name to the
 	// INPUT column, so that spelling would group by the raw per-sample timestamp,
-	// silently restoring one group per row and the whole 60k-row response, with no
+	// silently restoring one group per row and the whole 20k-row response, with no
 	// error to notice. (ORDER BY resolves the other way, preferring the output
 	// alias; the ordinals sidestep the asymmetry.)
 	// datastore breaks the tie: every datastore shares a bucket key, and the
