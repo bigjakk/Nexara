@@ -42,10 +42,12 @@ func oldestFirst[R any](rows []R, sample func(R) rawSample) []rawSample {
 }
 
 // ratedSample is a sample with its counters turned into rates. A nil rate is
-// no measurement: the counter fell, was unreported, or has no reading before it.
+// no measurement: the counter fell, was unreported, or has no reading before
+// it. A nil cpu is no reading either (see rateSamples).
 type ratedSample struct {
 	at                                             time.Time
-	cpu, memUsed, memTotal                         float64
+	cpu                                            *float64
+	memUsed, memTotal                              float64
 	diskReadBps, diskWriteBps, netInBps, netOutBps *float64
 }
 
@@ -115,22 +117,34 @@ func (c *counterTrack) highest() counterReading {
 
 // rateSamples turns one entity's samples, oldest first, into rated samples.
 // Disk counters flagged disk_unreported are no readings: PVE left them
-// unreported and the collector carried the last ones forward. For a guest
-// (zeroUnreported), neither is a zero counter on a sample showing CPU or
-// memory — PVE's unreported reading before that flag existed, or after the
-// collector restarts and has no carry to apply. A stopped guest's zeros are
-// readings.
-func rateSamples(samples []rawSample, zeroUnreported bool) []ratedSample {
+// unreported and the collector carried the last ones forward.
+//
+// For a guest, neither is a zero counter on a sample showing CPU or memory —
+// PVE's unreported reading before that flag existed, or after the collector
+// restarts and has no carry to apply. A stopped guest's zeros are readings.
+//
+// For a running node, a CPU reading of exactly 0 is none: a pveproxy worker
+// answers its first node status call with 0, having no earlier /proc/stat
+// reading to measure from (PVE::ProcFSTools::read_proc_stat), and workers are
+// recycled often enough that a node reads 0 several times an hour. A running
+// node never measures exactly 0, and charted, that reading is a stall that
+// never was. An offline node's 0 — no memory either — is its reading.
+func rateSamples(samples []rawSample, guest bool) []ratedSample {
 	var dr, dw, ni, no counterTrack
 	out := make([]ratedSample, len(samples))
 	for i, s := range samples {
 		live := s.cpu != 0 || s.memUsed != 0
 		reported := func(v float64, flagged bool) bool {
-			return !flagged && (!zeroUnreported || v != 0 || !live)
+			return !flagged && (!guest || v != 0 || !live)
+		}
+		var cpu *float64
+		if guest || s.cpu != 0 || s.memUsed == 0 {
+			v := s.cpu
+			cpu = &v
 		}
 		out[i] = ratedSample{
 			at:           s.at,
-			cpu:          s.cpu,
+			cpu:          cpu,
 			memUsed:      s.memUsed,
 			memTotal:     s.memTotal,
 			diskReadBps:  dr.next(s.diskRead, s.at, reported(s.diskRead, s.diskUnreported)),
@@ -158,7 +172,7 @@ func rollupSamples(rows []rollupRow) []ratedSample {
 	var prev *rollupRow
 	for i := range rows {
 		r := &rows[i]
-		s := ratedSample{at: r.bucket, cpu: r.cpu, memUsed: r.memUsed, memTotal: r.memTotal}
+		s := ratedSample{at: r.bucket, cpu: &r.cpu, memUsed: r.memUsed, memTotal: r.memTotal}
 		if prev != nil {
 			elapsed := r.bucket.Sub(prev.bucket).Seconds()
 			s.diskReadBps = ioRate(r.diskRead, prev.diskRead, elapsed)
@@ -182,8 +196,8 @@ func ioRate(cur, prev, elapsed float64) *float64 {
 
 // mergeNodes combines a cluster's per-node rated samples into one series per
 // collection cycle — every node of a cycle shares one timestamp — with CPU
-// averaged and memory as the sum of used over the sum of total across the
-// nodes present, and each rate the cluster's total: the sum of the nodes'
+// averaged over the nodes that read it and memory as the sum of used over the
+// sum of total across the nodes present, and each rate the cluster's total: the sum of the nodes'
 // rates, as the live view shows it. A total is left out at a timestamp where a
 // node whose series spans it has no rate there, or no sample at all, so one
 // node's unreported sample or missed cycle cannot dip the line.
@@ -191,7 +205,7 @@ func mergeNodes(perNode map[uuid.UUID][]ratedSample) []ratedSample {
 	type span struct{ first, last int64 }
 	type acc struct {
 		at                     time.Time
-		n                      int
+		n, cpuN                int
 		cpu, memUsed, memTotal float64
 		rates                  [4]float64
 		missing                [4]bool
@@ -211,7 +225,10 @@ func mergeNodes(perNode map[uuid.UUID][]ratedSample) []ratedSample {
 				byTime[key] = a
 			}
 			a.n++
-			a.cpu += s.cpu
+			if s.cpu != nil {
+				a.cpu += *s.cpu
+				a.cpuN++
+			}
 			a.memUsed += s.memUsed
 			a.memTotal += s.memTotal
 			for i, r := range [4]*float64{s.diskReadBps, s.diskWriteBps, s.netInBps, s.netOutBps} {
@@ -238,9 +255,14 @@ func mergeNodes(perNode map[uuid.UUID][]ratedSample) []ratedSample {
 			v := a.rates[i]
 			return &v
 		}
+		var cpu *float64
+		if a.cpuN > 0 {
+			mean := a.cpu / float64(a.cpuN)
+			cpu = &mean
+		}
 		out = append(out, ratedSample{
 			at:           a.at,
-			cpu:          a.cpu / float64(a.n),
+			cpu:          cpu,
 			memUsed:      a.memUsed,
 			memTotal:     a.memTotal,
 			diskReadBps:  total(0),
@@ -264,6 +286,7 @@ func bucketSamples(samples []ratedSample, since time.Time, width time.Duration) 
 		n      int
 		atSum  int64
 		cpu    float64
+		cpuN   int
 		memPct float64
 		memN   int
 		sums   [4]float64
@@ -281,7 +304,10 @@ func bucketSamples(samples []ratedSample, since time.Time, width time.Duration) 
 		b := buckets[len(buckets)-1]
 		b.n++
 		b.atSum += s.at.UnixMilli()
-		b.cpu += s.cpu
+		if s.cpu != nil {
+			b.cpu += *s.cpu
+			b.cpuN++
+		}
 		if s.memTotal > 0 {
 			b.memPct += s.memUsed / s.memTotal * 100
 			b.memN++
@@ -303,11 +329,13 @@ func bucketSamples(samples []ratedSample, since time.Time, width time.Duration) 
 		}
 		p := metricPoint{
 			Timestamp:    b.atSum / int64(b.n),
-			CPUPercent:   roundTo(b.cpu/float64(b.n)*100, 2),
 			DiskReadBps:  avg(0),
 			DiskWriteBps: avg(1),
 			NetInBps:     avg(2),
 			NetOutBps:    avg(3),
+		}
+		if b.cpuN > 0 {
+			p.CPUPercent = roundTo(b.cpu/float64(b.cpuN)*100, 2)
 		}
 		if b.memN > 0 {
 			p.MemPercent = roundTo(b.memPct/float64(b.memN), 2)

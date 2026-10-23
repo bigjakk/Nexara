@@ -85,6 +85,18 @@ func TestRateSamples(t *testing.T) {
 	if got := readRates(rated[len(rated)-1:])[0]; got != 101.0 {
 		t.Errorf("after counterReach: rate = %v, want 101 — the high it fell from must be forgotten", got)
 	}
+
+	// A running node's 0% CPU is a fresh pveproxy worker's, not a reading; an
+	// offline node's (no memory either) and a stopped guest's are readings.
+	zero := readSeries(0, 10, 20)
+	zero[1].cpu = 0
+	if got := rateSamples(zero, false); got[1].cpu != nil || *got[0].cpu != 0.5 || *got[2].cpu != 0.5 {
+		t.Errorf("a running node's zero CPU = %v, want none, with its neighbours' readings kept", got[1].cpu)
+	}
+	zero[1].memUsed = 0
+	if node, guest := rateSamples(zero, false)[1].cpu, rateSamples(zero, true)[1].cpu; node == nil || guest == nil {
+		t.Errorf("zero CPU without memory: node %v, guest %v, want both kept as readings", node, guest)
+	}
 }
 
 // TestSeriesShaping pins what reaches the chart: the window starts at since,
@@ -95,7 +107,7 @@ func TestSeriesShaping(t *testing.T) {
 	t.Parallel()
 	f := func(v float64) *float64 { return &v }
 	sample := func(s int, cpu float64, rate *float64) ratedSample {
-		return ratedSample{at: seriesAt(s), cpu: cpu, memUsed: 1, memTotal: 4,
+		return ratedSample{at: seriesAt(s), cpu: f(cpu), memUsed: 1, memTotal: 4,
 			diskReadBps: rate, diskWriteBps: rate, netInBps: rate, netOutBps: rate}
 	}
 
@@ -103,7 +115,7 @@ func TestSeriesShaping(t *testing.T) {
 		t.Parallel()
 		samples := []ratedSample{
 			sample(-10, 1, f(999)), // before since
-			sample(0, 0.2, f(10)), sample(30, 0.4, nil), sample(60, 0.6, f(30)),
+			sample(0, 0.2, f(10)), {at: seriesAt(30), memUsed: 1, memTotal: 4}, sample(60, 0.6, f(30)),
 			sample(130, 0.1, f(5)),
 		}
 		got := bucketSamples(samples, seriesAt(0), 2*time.Minute)
@@ -111,7 +123,7 @@ func TestSeriesShaping(t *testing.T) {
 			t.Fatalf("%d buckets, want 2", len(got))
 		}
 		if *got[0].CPUPercent != 40 || *got[0].DiskReadBps != 20 || *got[0].MemPercent != 25 {
-			t.Errorf("first bucket = cpu %v disk %v mem %v, want 40, 20 (nulls skipped), 25",
+			t.Errorf("first bucket = cpu %v disk %v mem %v, want 40, 20 (values not read skipped), 25",
 				*got[0].CPUPercent, *got[0].DiskReadBps, *got[0].MemPercent)
 		}
 		if got[0].Timestamp != seriesAt(30).UnixMilli() || got[1].Timestamp != seriesAt(130).UnixMilli() {
@@ -125,14 +137,17 @@ func TestSeriesShaping(t *testing.T) {
 		a, b, c := uuid.New(), uuid.New(), uuid.New()
 		merged := mergeNodes(map[uuid.UUID][]ratedSample{
 			a: {sample(0, 0.25, f(10)), sample(10, 0.25, f(10)), sample(20, 0.25, f(10))},
-			b: {{at: seriesAt(0), cpu: 0.75, memUsed: 3, memTotal: 4, diskReadBps: f(30), diskWriteBps: f(30), netInBps: f(30), netOutBps: f(30)},
-				{at: seriesAt(10), cpu: 0.75, memUsed: 3, memTotal: 4, diskReadBps: f(30), diskWriteBps: f(1), netInBps: f(1), netOutBps: f(1)},
-				{at: seriesAt(20), cpu: 0.75, memUsed: 3, memTotal: 4, diskReadBps: nil, diskWriteBps: f(1), netInBps: f(1), netOutBps: f(1)}},
+			b: {{at: seriesAt(0), cpu: f(0.75), memUsed: 3, memTotal: 4, diskReadBps: f(30), diskWriteBps: f(30), netInBps: f(30), netOutBps: f(30)},
+				{at: seriesAt(10), cpu: f(0.75), memUsed: 3, memTotal: 4, diskReadBps: f(30), diskWriteBps: f(1), netInBps: f(1), netOutBps: f(1)},
+				{at: seriesAt(20), cpu: nil, memUsed: 3, memTotal: 4, diskReadBps: nil, diskWriteBps: f(1), netInBps: f(1), netOutBps: f(1)}},
 			// c missed the 10 s cycle.
 			c: {sample(0, 0.5, f(5)), sample(20, 0.5, f(5))},
 		})
-		if len(merged) != 3 || merged[0].cpu != 0.5 || merged[0].memUsed != 5 || merged[0].memTotal != 12 {
+		if len(merged) != 3 || *merged[0].cpu != 0.5 || merged[0].memUsed != 5 || merged[0].memTotal != 12 {
 			t.Fatalf("merged[0] = %+v, want mean CPU 0.5 and summed memory 5 of 12", merged[0])
+		}
+		if *merged[2].cpu != 0.375 {
+			t.Errorf("merged CPU at 20 s = %v, want the mean of the nodes that read it", *merged[2].cpu)
 		}
 		if *merged[0].diskReadBps != 45 {
 			t.Errorf("merged disk read = %v, want the nodes' total, 45", *merged[0].diskReadBps)
