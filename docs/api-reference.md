@@ -1017,6 +1017,7 @@ A node's firewall rule routes are listed with the other rule sets under [Firewal
 | GET | `/clusters/:id/vms/:vm_id/config` | Get VM configuration |
 | PUT | `/clusters/:id/vms/:vm_id/config` | Update VM configuration |
 | GET | `/clusters/:id/vms/:vm_id/agent` | Get QEMU guest agent info |
+| GET | `/clusters/:id/vms/:vm_id/block-jobs` | Get a running VM's QEMU block jobs |
 | POST | `/clusters/:id/vms/:vm_id/disks/resize` | Resize a disk |
 | POST | `/clusters/:id/vms/:vm_id/disks/move` | Move a disk to another storage |
 | POST | `/clusters/:id/vms/:vm_id/disks/attach` | Allocate and attach a disk. Omit `index` to take the lowest free slot on the bus; an occupied slot, or one the VM boots from, is refused. `size` takes `500`, `"500"`, `"500G"`, `"512M"` or `"1T"` and may not exceed the target pool's total capacity |

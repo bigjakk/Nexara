@@ -10,6 +10,7 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 - [Node Options](#node-options)
 - [Memory Modules](#memory-modules)
 - [Metric History and Pressure](#metric-history-and-pressure)
+- [Block Jobs](#block-jobs)
 - [User Management](#user-management)
 - [RBAC Setup](#rbac-setup)
 - [Proxmox Access Control](#proxmox-access-control)
@@ -198,6 +199,16 @@ The CPU, memory, disk and network charts on the dashboard, a node's page and a g
 - **Guests** report pressure with every metrics cycle.
 - **Nodes** keep it in their RRD, at one-minute steps for a day. A background pass copies new steps every `NODE_PRESSURE_SYNC_INTERVAL` (default `5m`; `0` turns it off), so a node's pressure survives a Nexara outage of up to a day.
 - Pressure is kept as long as the other raw metrics, 30 days.
+
+---
+
+## Block Jobs
+
+A running VM's Overview tab has a **Block jobs** card listing the QEMU block jobs working on its disks: a mirror while a disk moves, a live migration copies local disks, or a running VM is cloned; a stream during a live restore from Proxmox Backup Server, or while a snapshot is removed on Proxmox VE 9's volume-chain storage; a backup. Each shows how far it has got, its speed limit, and the rate and time left, worked out between refreshes. The card refreshes every 3 seconds while a job runs, every 15 seconds otherwise, and every minute after a failed read.
+
+- It needs `view:vm`. Nexara reads the jobs through Proxmox's QEMU monitor with one fixed, read-only command (`info block-jobs`). For that the cluster's API token needs `Sys.Audit` on the VM on Proxmox VE 9, or `VM.Monitor` on Proxmox VE 8.
+- A QEMU too stuck to answer (a hung storage backend, say) shows that as the card's message: Proxmox waits up to 25 seconds for QEMU, and Nexara up to 30 for Proxmox. Several people watching the same VM share one read.
+- A line QEMU prints in a shape Nexara does not recognise is shown as printed rather than dropped.
 
 ---
 

@@ -166,6 +166,12 @@ vi.mock("../api/vm-queries", () => ({
     data: { running: false },
     isLoading: false,
   }),
+  useBlockJobs: () => ({
+    data: { running: true, jobs: [], unparsed: [] },
+    isLoading: false,
+    error: null,
+    dataUpdatedAt: 0,
+  }),
   useConvertToTemplate: () => ({
     mutate: vi.fn(),
     isPending: false,

@@ -375,7 +375,7 @@ var routesOutsideTheClusterCheckShape = func() map[string]string {
 // later migration adding its own routes cannot make this number drift
 // without saying so: a single total would be a number anyone could raise
 // to make the test pass again.
-const vmRouteCount = 45
+const vmRouteCount = 46
 
 // registryDomainRouteCounts names every migrated domain and how many
 // routes it declares, keyed by the function that declares them.

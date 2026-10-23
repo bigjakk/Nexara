@@ -825,6 +825,55 @@ export function useGuestAgentInfo(
   });
 }
 
+// --- Block Jobs ---
+
+/** One of a running VM's QEMU block jobs, as its monitor lists it. */
+export interface BlockJob {
+  type: string;
+  device: string;
+  completed: number;
+  total: number;
+  speed_limit: number;
+}
+
+export interface BlockJobsResponse {
+  running: boolean;
+  jobs: BlockJob[];
+  /** Lines QEMU printed in a shape Nexara does not know, verbatim. */
+  unparsed: string[];
+}
+
+/**
+ * How often the block jobs are reread: often while one runs, else slowly, and
+ * rarely after a failed read — a QEMU that did not answer holds one of the
+ * node's few pvedaemon workers for as long as PVE waits on it.
+ */
+const BLOCK_JOBS_ACTIVE_MS = 3_000;
+const BLOCK_JOBS_IDLE_MS = 15_000;
+const BLOCK_JOBS_FAILED_MS = 60_000;
+
+export function useBlockJobs(
+  clusterId: string,
+  vmId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "vms", vmId, "block-jobs"],
+    queryFn: () =>
+      apiClient.get<BlockJobsResponse>(
+        apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/block-jobs`,
+      ),
+    enabled: enabled && clusterId.length > 0 && vmId.length > 0,
+    refetchInterval: (query) => {
+      if (query.state.status === "error") return BLOCK_JOBS_FAILED_MS;
+      return (query.state.data?.jobs.length ?? 0) > 0
+        ? BLOCK_JOBS_ACTIVE_MS
+        : BLOCK_JOBS_IDLE_MS;
+    },
+    retry: false,
+  });
+}
+
 // --- Disk Move ---
 
 interface MoveDiskParams {

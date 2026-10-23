@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -27,6 +29,9 @@ type VMHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	// blockJobs shares one monitor read among the requests for a VM's block
+	// jobs that arrive while it runs (see GetBlockJobs).
+	blockJobs singleflight.Group
 }
 
 // NewVMHandler creates a new VM handler.
@@ -1755,6 +1760,67 @@ func (h *VMHandler) GetGuestAgentInfo(c fiber.Ctx, p *apischema.Params) error {
 		OSInfo:            osInfo,
 		NetworkInterfaces: ifaces,
 	})
+}
+
+// --- Block Jobs ---
+
+// blockJobsTimeout bounds the monitor read, above the 25 s PVE itself waits
+// on QEMU: a stuck QEMU — on a hung storage backend, say — is then answered by
+// PVE's own timeout, and Nexara never gives up on a pvedaemon worker that is
+// still waiting and asks again, which with every worker tied up would stall
+// the node's API.
+const blockJobsTimeout = 30 * time.Second
+
+// errBlockJobsUnanswered is a monitor read that outran blockJobsTimeout.
+var errBlockJobsUnanswered = errors.New("block jobs read unanswered")
+
+// blockJobsResponse is a VM's QEMU block jobs, or running=false when PVE says
+// the VM is not running.
+type blockJobsResponse struct {
+	Running  bool               `json:"running"`
+	Jobs     []proxmox.BlockJob `json:"jobs"`
+	Unparsed []string           `json:"unparsed"`
+}
+
+// GetBlockJobs handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/block-jobs.
+// It sends QEMU's monitor one fixed, read-only command (see
+// proxmox.Client.GetBlockJobs); nothing the caller sends reaches it.
+func (h *VMHandler) GetBlockJobs(c fiber.Ctx, p *apischema.Params) error {
+	clusterID, vmID, err := guestIDs(p)
+	if err != nil {
+		return err
+	}
+
+	vm, node, _, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+	if vm.Type != "qemu" {
+		return fiber.NewError(fiber.StatusBadRequest, "Only a QEMU VM has block jobs")
+	}
+
+	// Every viewer of the VM polls; while one read is out, the others wait for
+	// it rather than each taking a pvedaemon worker of their own.
+	v, err, _ := h.blockJobs.Do(clusterID.String()+"/"+strconv.Itoa(int(vm.Vmid)), func() (any, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), blockJobsTimeout)
+		defer cancel()
+		jobs, err := pxClient.GetBlockJobs(ctx, node.Name, int(vm.Vmid))
+		if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, errBlockJobsUnanswered
+		}
+		return jobs, err
+	})
+	switch {
+	case err == nil:
+		jobs, _ := v.(proxmox.BlockJobs)
+		return c.JSON(blockJobsResponse{Running: true, Jobs: jobs.Jobs, Unparsed: jobs.Unparsed})
+	case proxmox.IsGuestNotRunningError(err):
+		return c.JSON(blockJobsResponse{Jobs: []proxmox.BlockJob{}, Unparsed: []string{}})
+	case errors.Is(err, errBlockJobsUnanswered):
+		return fiber.NewError(fiber.StatusBadGateway,
+			fmt.Sprintf("Proxmox did not answer within %s.", blockJobsTimeout))
+	}
+	return mapProxmoxError(err)
 }
 
 // --- ISO Listing ---

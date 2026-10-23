@@ -610,6 +610,15 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler, mappingUsageLimit
 		Handler:     h.GetGuestAgentInfo,
 	})
 	reg.Register(Endpoint{
+		Method:      fiber.MethodGet,
+		Path:        clusterScope + "/vms/:vm_id/block-jobs",
+		Description: "Read a running VM's QEMU block jobs (disk mirrors, snapshot streams and commits, backups) from its monitor, with progress and speed limit. Answers running=false when the VM is not running, and refuses a container. Lines QEMU prints in a shape Nexara does not know come back verbatim in unparsed.",
+		Group:       "Virtual Machines",
+		Permissions: clusterCheck("view", "vm"),
+		Parameters:  vmParams(nil),
+		Handler:     h.GetBlockJobs,
+	})
+	reg.Register(Endpoint{
 		Method:      fiber.MethodPost,
 		Path:        clusterScope + "/vms/:vm_id/media",
 		Description: "Mount an ISO on the VM's CD-ROM device, or eject it with volid=none.",

@@ -56,6 +56,7 @@ import { ContainerResourcesPanel } from "../components/ContainerResourcesPanel";
 import { SchedulePanel } from "../components/SchedulePanel";
 import { BackupPanel } from "../components/BackupPanel";
 import { VeeamProtectionCard } from "../components/VeeamProtectionCard";
+import { BlockJobsCard } from "../components/BlockJobsCard";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 import type { TimeRange } from "@/types/api";
@@ -435,6 +436,11 @@ export function VMDetailPage() {
               configOstype={vm.config_ostype}
               ostype={vm.ostype}
             />
+          )}
+
+          {/* Block jobs — QEMU VMs only, when running */}
+          {kind === "vm" && normalizedStatus === "running" && (
+            <BlockJobsCard clusterId={clusterId} vmId={vmId} />
           )}
 
           {/* Metrics */}
