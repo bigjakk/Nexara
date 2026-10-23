@@ -633,9 +633,20 @@ type Querier interface {
 	// reads as the complete list, and an operator works three and never learns
 	// about the other five.
 	GetClusterFailedTaskStats(ctx context.Context, arg GetClusterFailedTaskStatsParams) (GetClusterFailedTaskStatsRow, error)
-	GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error)
-	GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics5mParams) ([]GetClusterMetrics5mRow, error)
 	GetClusterMetricsDailyAvg(ctx context.Context, arg GetClusterMetricsDailyAvgParams) ([]GetClusterMetricsDailyAvgRow, error)
+	// Every node's hourly rollup rows in the cluster; see GetClusterNodeMetrics5m.
+	GetClusterNodeMetrics1h(ctx context.Context, arg GetClusterNodeMetrics1hParams) ([]GetClusterNodeMetrics1hRow, error)
+	// Every node's 5-minute rollup rows in the cluster. The handler rates each
+	// node's counters on its own and sums the nodes per bucket, as it does for the
+	// raw samples (GetClusterNodeMetricsRaw): averaging or summing the counters
+	// across nodes first jumps whenever a node is missing from a bucket.
+	GetClusterNodeMetrics5m(ctx context.Context, arg GetClusterNodeMetrics5mParams) ([]GetClusterNodeMetrics5mRow, error)
+	// The raw samples of every node in the cluster, for the short chart ranges.
+	// The handler rates each node's counters on its own and sums the nodes per
+	// collection cycle, whose rows all share one timestamp: combining the
+	// counters across nodes first dips whenever one node's sample is missing or
+	// unreported.
+	GetClusterNodeMetricsRaw(ctx context.Context, arg GetClusterNodeMetricsRawParams) ([]GetClusterNodeMetricsRawRow, error)
 	GetClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) (ClusterSshCredential, error)
 	GetClusterSecuritySummary(ctx context.Context, clusterID uuid.UUID) (GetClusterSecuritySummaryRow, error)
 	// GetClusterSnapshotAgeStats backs the snapshot_age_days alert metric for

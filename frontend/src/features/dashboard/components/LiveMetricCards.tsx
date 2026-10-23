@@ -6,7 +6,26 @@ import { Cpu, MemoryStick, HardDrive, Network } from "lucide-react";
 import { formatBytes, formatPercent, formatBytesPerSecond } from "@/lib/format";
 import { Sparkline } from "@/components/Sparkline";
 import { useSeedMetrics } from "../api/historical-queries";
-import type { AggregatedMetrics } from "@/types/ws";
+import { sparklineSeries } from "@/lib/metric-series";
+import type { AggregatedMetrics, MetricSeriesPoint } from "@/types/ws";
+
+/** A sparkline's values: the points that measured it, the rest left out. */
+function measured(
+  history: readonly MetricSeriesPoint[],
+  value: (p: MetricSeriesPoint) => number | null,
+): number[] {
+  const out: number[] = [];
+  for (const p of history) {
+    const v = value(p);
+    if (v !== null) out.push(v);
+  }
+  return out;
+}
+
+/** The sum of two rates, or nothing when either was not measured. */
+function sum(a: number | null, b: number | null): number | null {
+  return a === null || b === null ? null : a + b;
+}
 
 interface LiveMetricCardsProps {
   metrics: AggregatedMetrics | undefined;
@@ -21,17 +40,10 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
   const { t } = useTranslation("dashboard");
   const seed = useSeedMetrics(clusterId ?? "");
   const liveHistory = metrics?.history;
-  // Seed buckets are 5-minute, live ticks are per refresh interval; the
-  // sparkline spaces points by index, so the live tail renders wider than its
-  // wall-clock share — acceptable for an axis-less trend strip.
-  const history = useMemo(() => {
-    const live = liveHistory ?? [];
-    const seeded = seed ?? [];
-    if (live.length === 0) return seeded;
-    if (seeded.length === 0) return live;
-    const firstLiveTs = live[0]?.timestamp ?? 0;
-    return [...seeded.filter((p) => p.timestamp < firstLiveTs), ...live];
-  }, [seed, liveHistory]);
+  const history = useMemo(
+    () => sparklineSeries(seed ?? [], liveHistory ?? []),
+    [seed, liveHistory],
+  );
   const cards = [
     {
       key: "cpu",
@@ -39,7 +51,7 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
       icon: Cpu,
       value: metrics ? formatPercent(metrics.cpuPercent) : null,
       sub: null,
-      spark: history.map((p) => p.cpuPercent),
+      spark: measured(history, (p) => p.cpuPercent),
       sparkClass: "text-sky-400",
     },
     {
@@ -54,7 +66,7 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
               total: formatBytes(metrics.memTotal),
             })
           : null,
-      spark: history.map((p) => p.memPercent),
+      spark: measured(history, (p) => p.memPercent),
       sparkClass: "text-violet-400",
     },
     {
@@ -65,7 +77,7 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
         ? `${formatBytesPerSecond(metrics.diskReadBps)} / ${formatBytesPerSecond(metrics.diskWriteBps)}`
         : null,
       sub: null,
-      spark: history.map((p) => p.diskReadBps + p.diskWriteBps),
+      spark: measured(history, (p) => sum(p.diskReadBps, p.diskWriteBps)),
       sparkClass: "text-amber-500",
     },
     {
@@ -76,7 +88,7 @@ export function LiveMetricCards({ metrics, clusterId }: LiveMetricCardsProps) {
         ? `${formatBytesPerSecond(metrics.netInBps)} / ${formatBytesPerSecond(metrics.netOutBps)}`
         : null,
       sub: null,
-      spark: history.map((p) => p.netInBps + p.netOutBps),
+      spark: measured(history, (p) => sum(p.netInBps, p.netOutBps)),
       sparkClass: "text-emerald-500",
     },
   ] as const;

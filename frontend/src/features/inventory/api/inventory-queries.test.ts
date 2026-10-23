@@ -160,6 +160,7 @@ describe("buildInventoryRows", () => {
   it("merges live metrics into rows", () => {
     const c = cluster("c1", "good");
     const live: VmLiveMetric = {
+      collectedAt: 1700000000000,
       cpuPercent: 42,
       memPercent: 60,
       diskReadBps: 1,

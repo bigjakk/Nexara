@@ -41,7 +41,7 @@ describe("LiveMetricCards", () => {
     expect(screen.getByText("32.0 GiB of 64.0 GiB used")).toBeInTheDocument();
   });
 
-  it("renders a sparkline per card once history has 2+ points", () => {
+  it("renders a sparkline per card once history spans 2+ minutes", () => {
     const point = {
       timestamp: 0,
       cpuPercent: 10,
@@ -55,7 +55,7 @@ describe("LiveMetricCards", () => {
       <LiveMetricCards
         metrics={{
           ...metrics,
-          history: [point, { ...point, timestamp: 1, cpuPercent: 20 }],
+          history: [point, { ...point, timestamp: 60_000, cpuPercent: 20 }],
         }}
       />,
     );

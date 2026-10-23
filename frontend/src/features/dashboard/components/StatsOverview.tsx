@@ -7,7 +7,8 @@ import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AnimatedNumber } from "@/components/AnimatedNumber";
 import { Sparkline } from "@/components/Sparkline";
-import type { AggregatedMetrics, MetricDataPoint } from "@/types/ws";
+import type { AggregatedMetrics, MetricSeriesPoint } from "@/types/ws";
+import { sparklineSeries } from "@/lib/metric-series";
 
 interface StatsOverviewProps {
   totalNodes: number;
@@ -22,7 +23,7 @@ interface StatsOverviewProps {
   /** Live per-cluster metrics; drives the datacenter CPU card and sparkline. */
   metrics?: Map<string, AggregatedMetrics> | undefined;
   /** Stored 1h history per cluster, so sparklines are full on page load. */
-  seeds?: Map<string, MetricDataPoint[]> | undefined;
+  seeds?: Map<string, MetricSeriesPoint[]> | undefined;
 }
 
 /** Same card chrome as LiveMetricCards, so dashboard and cluster cards match. */
@@ -92,28 +93,24 @@ export function StatsOverview({
   const memTotal = clusterMetrics.reduce((s, m) => s + m.memTotal, 0);
   const memNow = memTotal > 0 ? (memUsed / memTotal) * 100 : null;
   const [cpuSeries, memSeries] = useMemo(() => {
-    // Seeded 1h history + live ticks per cluster, then averaged point-wise
-    // across clusters (aligned from the newest point backwards).
+    // Each cluster's last hour, history plus live ticks in minute buckets,
+    // then averaged point-wise across clusters (aligned from the newest point
+    // backwards).
     const ids = new Set([...(metrics?.keys() ?? []), ...(seeds?.keys() ?? [])]);
-    const hists: MetricDataPoint[][] = [];
+    const hists: MetricSeriesPoint[][] = [];
     for (const id of ids) {
-      const live = metrics?.get(id)?.history ?? [];
-      const seed = seeds?.get(id) ?? [];
-      let merged: MetricDataPoint[];
-      if (live.length === 0) merged = seed;
-      else if (seed.length === 0) merged = live;
-      else {
-        const firstLiveTs = live[0]?.timestamp ?? 0;
-        merged = [...seed.filter((p) => p.timestamp < firstLiveTs), ...live];
-      }
+      const merged = sparklineSeries(
+        seeds?.get(id) ?? [],
+        metrics?.get(id)?.history ?? [],
+      );
       if (merged.length > 1) hists.push(merged);
     }
     if (hists.length === 0) return [[], []];
     // A cluster whose seed hasn't loaded yet has only a couple of live ticks;
     // don't let it collapse the whole strip to that length while others have
-    // a full hour. (Series are index-aligned from the newest point backwards —
-    // 5m seed buckets and per-tick live points share the x-axis evenly, which
-    // is fine for an axis-less sparkline.)
+    // a full hour. (Series are index-aligned from the newest point backwards;
+    // their minute buckets keep that even in time.) A point no cluster
+    // measured is left out rather than drawn as 0%.
     const longest = Math.max(...hists.map((h) => h.length));
     const usable = hists.filter((h) => h.length >= Math.min(5, longest));
     const n = Math.min(90, ...usable.map((h) => h.length));
@@ -121,13 +118,22 @@ export function StatsOverview({
     const mem: number[] = [];
     for (let i = 0; i < n; i++) {
       let cpuSum = 0;
+      let cpuCount = 0;
       let memSum = 0;
+      let memCount = 0;
       for (const h of usable) {
-        cpuSum += h[h.length - n + i]?.cpuPercent ?? 0;
-        memSum += h[h.length - n + i]?.memPercent ?? 0;
+        const p = h[h.length - n + i];
+        if (p?.cpuPercent !== null && p?.cpuPercent !== undefined) {
+          cpuSum += p.cpuPercent;
+          cpuCount++;
+        }
+        if (p?.memPercent !== null && p?.memPercent !== undefined) {
+          memSum += p.memPercent;
+          memCount++;
+        }
       }
-      cpu.push(cpuSum / usable.length);
-      mem.push(memSum / usable.length);
+      if (cpuCount > 0) cpu.push(cpuSum / cpuCount);
+      if (memCount > 0) mem.push(memSum / memCount);
     }
     return [cpu, mem];
   }, [metrics, seeds]);

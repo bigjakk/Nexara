@@ -2,11 +2,19 @@ import { useQuery, useQueries } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { TimeRange, HistoricalMetricPoint } from "@/types/api";
-import type { MetricDataPoint } from "@/types/ws";
+import type { MetricSeriesPoint } from "@/types/ws";
 
-export function toMetricDataPoints(
+/**
+ * How often a live chart's stored-history seed is refetched. The live buffers
+ * hold a limited number of ticks, so a seed fetched once would leave a stretch
+ * between its end and the oldest tick kept, drawn as a straight line on the
+ * time axis.
+ */
+const LIVE_SEED_REFETCH_MS = 60_000;
+
+export function toSeriesPoints(
   points: HistoricalMetricPoint[],
-): MetricDataPoint[] {
+): MetricSeriesPoint[] {
   return points.map((p) => ({
     timestamp: p.timestamp,
     cpuPercent: p.cpuPercent,
@@ -25,7 +33,7 @@ export function useHistoricalMetrics(clusterId: string, range: TimeRange) {
       const data = await apiClient.list<HistoricalMetricPoint>(
         apiPath`/api/v1/clusters/${clusterId}/metrics?range=${range}`,
       );
-      return toMetricDataPoints(data);
+      return toSeriesPoints(data);
     },
     enabled: range !== "live" && clusterId.length > 0,
     staleTime: 60_000,
@@ -33,8 +41,8 @@ export function useHistoricalMetrics(clusterId: string, range: TimeRange) {
 }
 
 /**
- * Fetch recent 1h historical data to seed live charts so they aren't empty on load.
- * This runs once and caches — live WS data takes over once it starts arriving.
+ * Fetch recent 1h historical data to seed live charts so they aren't empty on
+ * load, refetched while mounted so the seed keeps reaching the live ticks.
  */
 export function useSeedMetrics(clusterId: string) {
   const query = useQuery({
@@ -43,10 +51,11 @@ export function useSeedMetrics(clusterId: string) {
       const data = await apiClient.list<HistoricalMetricPoint>(
         apiPath`/api/v1/clusters/${clusterId}/metrics?range=1h`,
       );
-      return toMetricDataPoints(data);
+      return toSeriesPoints(data);
     },
     enabled: clusterId.length > 0,
     staleTime: 5 * 60_000,
+    refetchInterval: LIVE_SEED_REFETCH_MS,
   });
   return query.data;
 }
@@ -57,7 +66,7 @@ export function useSeedMetrics(clusterId: string) {
  */
 export function useSeedMetricsForClusters(
   clusterIds: string[],
-): Map<string, MetricDataPoint[]> {
+): Map<string, MetricSeriesPoint[]> {
   return useQueries({
     queries: clusterIds.map((id) => ({
       queryKey: ["clusters", id, "metrics", "seed"],
@@ -65,13 +74,14 @@ export function useSeedMetricsForClusters(
         const data = await apiClient.list<HistoricalMetricPoint>(
           apiPath`/api/v1/clusters/${id}/metrics?range=1h`,
         );
-        return toMetricDataPoints(data);
+        return toSeriesPoints(data);
       },
       enabled: id.length > 0,
       staleTime: 5 * 60_000,
+      refetchInterval: LIVE_SEED_REFETCH_MS,
     })),
     combine: (results) => {
-      const map = new Map<string, MetricDataPoint[]>();
+      const map = new Map<string, MetricSeriesPoint[]>();
       clusterIds.forEach((id, i) => {
         const data = results[i]?.data;
         if (data) map.set(id, data);
@@ -81,10 +91,15 @@ export function useSeedMetricsForClusters(
   });
 }
 
+/**
+ * A node's stored history for `range`. With `seedsLive`, it is the seed of a
+ * live chart, refetched while mounted so it keeps reaching the live ticks.
+ */
 export function useNodeHistoricalMetrics(
   clusterId: string,
   nodeId: string,
   range: TimeRange,
+  seedsLive = false,
 ) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeId, "metrics", range],
@@ -92,17 +107,20 @@ export function useNodeHistoricalMetrics(
       const data = await apiClient.list<HistoricalMetricPoint>(
         apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeId}/metrics?range=${range}`,
       );
-      return toMetricDataPoints(data);
+      return toSeriesPoints(data);
     },
     enabled: range !== "live" && clusterId.length > 0 && nodeId.length > 0,
     staleTime: 60_000,
+    refetchInterval: seedsLive ? LIVE_SEED_REFETCH_MS : false,
   });
 }
 
+/** A guest's stored history for `range`; `seedsLive` as for a node's. */
 export function useVMHistoricalMetrics(
   clusterId: string,
   vmId: string,
   range: TimeRange,
+  seedsLive = false,
 ) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vms", vmId, "metrics", range],
@@ -110,9 +128,10 @@ export function useVMHistoricalMetrics(
       const data = await apiClient.list<HistoricalMetricPoint>(
         apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/metrics?range=${range}`,
       );
-      return toMetricDataPoints(data);
+      return toSeriesPoints(data);
     },
     enabled: range !== "live" && clusterId.length > 0 && vmId.length > 0,
     staleTime: 60_000,
+    refetchInterval: seedsLive ? LIVE_SEED_REFETCH_MS : false,
   });
 }

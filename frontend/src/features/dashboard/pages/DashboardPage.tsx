@@ -37,7 +37,8 @@ import {
   useUpsertSetting,
 } from "@/features/settings/api/settings-queries";
 import type { TimeRange } from "@/types/api";
-import type { AggregatedMetrics } from "@/types/ws";
+import type { AggregatedMetrics, MetricSeriesPoint } from "@/types/ws";
+import { LIVE_WINDOW_MS, spliceLive } from "@/lib/metric-series";
 
 function ConnectionDot({
   status,
@@ -484,19 +485,18 @@ function ClusterChart({
   chartType,
 }: ClusterChartProps) {
   const historicalQuery = useHistoricalMetrics(summary.cluster.id, timeRange);
-  const seedData = useSeedMetrics(summary.cluster.id);
   const isLive = timeRange === "live";
+  // The seed is only drawn in live mode; an empty id leaves it unfetched.
+  const seedData = useSeedMetrics(isLive ? summary.cluster.id : "");
 
   const liveHistory = liveMetrics?.history;
-  const chartData = useMemo(() => {
+  const chartData = useMemo<MetricSeriesPoint[]>(() => {
     if (!isLive) return historicalQuery.data ?? [];
-    const seed = seedData ?? [];
-    const live = liveHistory ?? [];
-    if (live.length === 0) return seed;
-    if (seed.length === 0) return live;
-    const firstLiveTs = live[0]?.timestamp ?? 0;
-    const seedBefore = seed.filter((p) => p.timestamp < firstLiveTs);
-    return [...seedBefore, ...live];
+    return spliceLive<MetricSeriesPoint>(
+      seedData ?? [],
+      liveHistory ?? [],
+      LIVE_WINDOW_MS,
+    );
   }, [isLive, liveHistory, seedData, historicalQuery.data]);
 
   const chartConfigs = {

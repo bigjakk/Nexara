@@ -85,8 +85,26 @@ export interface MetricDataPoint {
   netOutBps: number;
 }
 
+/**
+ * A point of a chart series: a live tick, or a sample from stored history.
+ * History is null where nothing was measured — no sample was taken, or a
+ * counter fell or went unreported — so a chart breaks its line there instead
+ * of plotting a zero that would read as a stall.
+ */
+export interface MetricSeriesPoint {
+  timestamp: number;
+  cpuPercent: number | null;
+  memPercent: number | null;
+  diskReadBps: number | null;
+  diskWriteBps: number | null;
+  netInBps: number | null;
+  netOutBps: number | null;
+}
+
 /** Per-VM live metric snapshot (CPU/mem percent + disk/net rates). */
 export interface VmLiveMetric {
+  /** When the collector took the sample (ms), as stamped on stored history. */
+  collectedAt: number;
   cpuPercent: number;
   memPercent: number;
   diskReadBps: number;

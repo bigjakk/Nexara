@@ -14,18 +14,18 @@ import (
 // metricRangeParam is the time window all three historical-metric routes take.
 //
 // The Enum is the handler's own rangeDurations map, restated: the value also
-// SELECTS THE HYPERTABLE (1h and 6h read the 5-minute continuous aggregate, 24h
-// and 7d the hourly one), so an unlisted value is not a slower query but a
-// switch statement that matches nothing and returns an empty series. The
-// handler answered 400 for that already; the Enum moves the same answer one
-// layer earlier and puts the accepted set in the documentation.
+// SELECTS THE SOURCE (1h and 6h read the raw samples, 24h the 5-minute
+// continuous aggregate, 7d the hourly one), so an unlisted value is not a
+// slower query but a switch statement that matches nothing and returns an
+// empty series. The handler answered 400 for that already; the Enum moves the
+// same answer one layer earlier and puts the accepted set in the documentation.
 var metricRangeParam = apischema.Property{
 	Type:        apischema.String,
 	Optional:    true,
 	Default:     "1h",
 	Enum:        []string{"1h", "6h", "24h", "7d"},
 	Typetext:    "<1h|6h|24h|7d>",
-	Description: "Window to report, ending now. 1h and 6h are served at 5-minute resolution, 24h and 7d hourly.",
+	Description: "Window to report, ending now. 1h is served in 10-second buckets and 6h in 1-minute buckets, both from the raw samples (one per METRICS_COLLECT_INTERVAL); 24h at 5-minute resolution and 7d hourly. A value is null where nothing was measured: no sample, or a counter that fell or went unreported.",
 }
 
 // registerMetricsEndpoints declares MetricsHandler's three routes.
@@ -43,7 +43,7 @@ func registerMetricsEndpoints(reg *Registry, h *handlers.MetricsHandler) {
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,
 		Path:        clusterScope + "/metrics",
-		Description: "Return the cluster's historical CPU, memory and I/O series, with I/O counters differenced into per-second rates.",
+		Description: "Return the cluster's historical CPU, memory and I/O series: CPU averaged over its nodes; memory, and the I/O counters differenced into per-second rates, as the cluster's totals.",
 		Group:       "Metrics",
 		Permissions: clusterCheck("view", "cluster"),
 		Parameters:  clusterParams(apischema.Properties{"range": metricRangeParam}),

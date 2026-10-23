@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { formatBytes } from "@/lib/format";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
 import { useNodeHistoricalMetrics } from "@/features/dashboard/api/historical-queries";
+import { useLiveSeries } from "@/features/dashboard/hooks/useLiveSeries";
+import { latestValue } from "@/lib/metric-series";
 import type { TimeRange } from "@/types/api";
-import type { MetricDataPoint, VmLiveMetric } from "@/types/ws";
+import type { VmLiveMetric } from "@/types/ws";
 
 const TIME_RANGES: { label: string; value: TimeRange }[] = [
   { label: "Live", value: "live" },
@@ -14,8 +16,6 @@ const TIME_RANGES: { label: string; value: TimeRange }[] = [
   { label: "24h", value: "24h" },
   { label: "7d", value: "7d" },
 ];
-
-const MAX_LIVE_POINTS = 60;
 
 export function NodeMetricsPanel({
   clusterId,
@@ -37,44 +37,12 @@ export function NodeMetricsPanel({
     clusterId,
     nodeId,
     isLive ? "1h" : timeRange,
+    isLive,
   );
 
-  // Accumulate per-node live ticks locally — the WS store only keeps the
-  // latest snapshot per node, not a history. The ref guards against the same
-  // snapshot being appended twice (StrictMode's dev double-mount).
-  const [liveHistory, setLiveHistory] = useState<MetricDataPoint[]>([]);
-  const lastAppendedRef = useRef<VmLiveMetric | undefined>(undefined);
-  useEffect(() => {
-    if (!liveMetric || liveMetric === lastAppendedRef.current) return;
-    lastAppendedRef.current = liveMetric;
-    setLiveHistory((prev) => {
-      const next = [
-        ...prev,
-        {
-          timestamp: Date.now(),
-          cpuPercent: liveMetric.cpuPercent,
-          memPercent: liveMetric.memPercent,
-          diskReadBps: liveMetric.diskReadBps,
-          diskWriteBps: liveMetric.diskWriteBps,
-          netInBps: liveMetric.netInBps,
-          netOutBps: liveMetric.netOutBps,
-        },
-      ];
-      return next.length > MAX_LIVE_POINTS
-        ? next.slice(next.length - MAX_LIVE_POINTS)
-        : next;
-    });
-  }, [liveMetric]);
+  const chartData = useLiveSeries(historicalData, liveMetric, isLive);
 
-  const chartData = useMemo(() => {
-    const seed = historicalData ?? [];
-    if (!isLive) return seed;
-    if (liveHistory.length === 0) return seed;
-    const firstLiveTs = liveHistory[0]?.timestamp ?? 0;
-    return [...seed.filter((p) => p.timestamp < firstLiveTs), ...liveHistory];
-  }, [isLive, historicalData, liveHistory]);
-
-  const lastMemPercent = chartData[chartData.length - 1]?.memPercent;
+  const lastMemPercent = latestValue(chartData, "memPercent");
   const memDetail =
     lastMemPercent !== undefined &&
     memTotalBytes !== undefined &&

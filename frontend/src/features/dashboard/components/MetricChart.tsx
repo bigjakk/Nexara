@@ -9,15 +9,11 @@ import {
   Tooltip,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  formatTimestamp,
-  formatTimestampShort,
-  formatTimestampLong,
-  formatPercent,
-  formatBytesPerSecond,
-} from "@/lib/format";
-import type { MetricDataPoint } from "@/types/ws";
+import { formatPercent, formatBytesPerSecond } from "@/lib/format";
+import type { MetricSeriesPoint } from "@/types/ws";
 import type { TimeRange } from "@/types/api";
+import { latestValue } from "@/lib/metric-series";
+import { getTimestampFormatter, timeAxisProps } from "./time-axis";
 
 type MetricField =
   | "cpuPercent"
@@ -29,20 +25,13 @@ type MetricField =
 
 interface MetricChartProps {
   title: string;
-  data: MetricDataPoint[];
+  data: MetricSeriesPoint[];
   dataKey: MetricField;
   color: string;
   formatValue?: (value: number) => string;
   timeRange?: TimeRange;
   /** Extra context shown next to the current value (e.g. "65.2 GiB of 125.7 GiB"). */
   headerDetail?: string | undefined;
-}
-
-function getTimestampFormatter(timeRange?: TimeRange): (ts: number) => string {
-  if (timeRange === "7d") return formatTimestampLong;
-  if (timeRange === "1h" || timeRange === "6h" || timeRange === "24h")
-    return formatTimestampShort;
-  return formatTimestamp;
 }
 
 function ChartHeader({
@@ -126,9 +115,9 @@ export function MetricChart({
     );
   }
 
-  const lastPoint = data[data.length - 1];
+  const lastValue = latestValue(data, dataKey);
   const currentValue =
-    lastPoint !== undefined ? formatter(lastPoint[dataKey]) : undefined;
+    lastValue !== undefined ? formatter(lastValue) : undefined;
 
   return (
     <Card className="flex h-full flex-col">
@@ -161,15 +150,7 @@ export function MetricChart({
               className="stroke-border"
               vertical={false}
             />
-            <XAxis
-              dataKey="timestamp"
-              tickFormatter={getTimestampFormatter(timeRange)}
-              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-              axisLine={false}
-              tickLine={false}
-              minTickGap={48}
-              tickMargin={6}
-            />
+            <XAxis {...timeAxisProps(timeRange)} />
             <YAxis
               tickFormatter={formatter}
               tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}

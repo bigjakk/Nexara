@@ -4,21 +4,47 @@ UPDATE nodes SET status = 'offline' WHERE id = $1 AND status != 'offline';
 -- name: MarkNodeOnline :exec
 UPDATE nodes SET status = 'online' WHERE id = $1 AND status = 'offline';
 
--- name: GetClusterMetrics5m :many
+-- name: GetClusterNodeMetrics5m :many
+-- Every node's 5-minute rollup rows in the cluster. The handler rates each
+-- node's counters on its own and sums the nodes per bucket, as it does for the
+-- raw samples (GetClusterNodeMetricsRaw): averaging or summing the counters
+-- across nodes first jumps whenever a node is missing from a bucket.
 SELECT
+  m.node_id,
   m.bucket::timestamptz                   AS bucket,
-  avg(m.avg_cpu_usage)::double precision  AS cpu,
-  avg(m.avg_mem_used)::double precision   AS mem_used,
-  avg(m.avg_mem_total)::double precision  AS mem_total,
-  avg(m.avg_disk_read)::double precision  AS disk_read,
-  avg(m.avg_disk_write)::double precision AS disk_write,
-  avg(m.avg_net_in)::double precision     AS net_in,
-  avg(m.avg_net_out)::double precision    AS net_out
+  m.avg_cpu_usage::double precision       AS cpu,
+  m.avg_mem_used::double precision        AS mem_used,
+  m.avg_mem_total::double precision       AS mem_total,
+  m.avg_disk_read::double precision       AS disk_read,
+  m.avg_disk_write::double precision      AS disk_write,
+  m.avg_net_in::double precision          AS net_in,
+  m.avg_net_out::double precision         AS net_out
 FROM node_metrics_5m m
 JOIN nodes n ON n.id = m.node_id
-WHERE n.cluster_id = $1 AND m.bucket >= $2
-GROUP BY m.bucket
-ORDER BY m.bucket;
+WHERE n.cluster_id = @cluster_id AND m.bucket >= @since
+ORDER BY m.node_id, m.bucket;
+
+-- name: GetClusterNodeMetricsRaw :many
+-- The raw samples of every node in the cluster, for the short chart ranges.
+-- The handler rates each node's counters on its own and sums the nodes per
+-- collection cycle, whose rows all share one timestamp: combining the
+-- counters across nodes first dips whenever one node's sample is missing or
+-- unreported.
+SELECT
+  m.node_id,
+  m.time,
+  m.cpu_usage,
+  m.mem_used,
+  m.mem_total,
+  m.disk_read,
+  m.disk_write,
+  m.net_in,
+  m.net_out,
+  m.disk_unreported
+FROM node_metrics m
+JOIN nodes n ON n.id = m.node_id
+WHERE n.cluster_id = @cluster_id AND m.time >= @since
+ORDER BY m.node_id, m.time;
 
 -- name: GetVMMetrics5m :many
 SELECT
@@ -207,18 +233,19 @@ WHERE n.cluster_id = $1 AND m.bucket >= $2
 GROUP BY date_trunc('day', m.bucket)
 ORDER BY day;
 
--- name: GetClusterMetrics1h :many
+-- name: GetClusterNodeMetrics1h :many
+-- Every node's hourly rollup rows in the cluster; see GetClusterNodeMetrics5m.
 SELECT
+  m.node_id,
   m.bucket::timestamptz                   AS bucket,
-  avg(m.avg_cpu_usage)::double precision  AS cpu,
-  avg(m.avg_mem_used)::double precision   AS mem_used,
-  avg(m.avg_mem_total)::double precision  AS mem_total,
-  avg(m.avg_disk_read)::double precision  AS disk_read,
-  avg(m.avg_disk_write)::double precision AS disk_write,
-  avg(m.avg_net_in)::double precision     AS net_in,
-  avg(m.avg_net_out)::double precision    AS net_out
+  m.avg_cpu_usage::double precision       AS cpu,
+  m.avg_mem_used::double precision        AS mem_used,
+  m.avg_mem_total::double precision       AS mem_total,
+  m.avg_disk_read::double precision       AS disk_read,
+  m.avg_disk_write::double precision      AS disk_write,
+  m.avg_net_in::double precision          AS net_in,
+  m.avg_net_out::double precision         AS net_out
 FROM node_metrics_1h m
 JOIN nodes n ON n.id = m.node_id
-WHERE n.cluster_id = $1 AND m.bucket >= $2
-GROUP BY m.bucket
-ORDER BY m.bucket;
+WHERE n.cluster_id = @cluster_id AND m.bucket >= @since
+ORDER BY m.node_id, m.bucket;

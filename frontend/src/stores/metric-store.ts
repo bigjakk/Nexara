@@ -107,8 +107,14 @@ export const useMetricStore = create<MetricState & MetricActions>()(
       const memPercent =
         totalMemTotal > 0 ? (totalMemUsed / totalMemTotal) * 100 : 0;
 
+      // Stamped with the collector's sample time, not the browser's clock,
+      // so live ticks join stored history (which carries the same stamp)
+      // exactly, whatever the browser clock says.
+      const parsed = Date.parse(payload.collected_at);
+      const collectedAt = Number.isNaN(parsed) ? now : parsed;
+
       const dataPoint: MetricDataPoint = {
-        timestamp: now,
+        timestamp: collectedAt,
         cpuPercent: avgCpu,
         memPercent,
         diskReadBps,
@@ -129,6 +135,7 @@ export const useMetricStore = create<MetricState & MetricActions>()(
       const vmMetrics = new Map<string, VmLiveMetric>();
       for (const vm of payload.vms) {
         vmMetrics.set(vm.vm_id, {
+          collectedAt,
           cpuPercent: vm.cpu_usage * 100,
           memPercent: vm.mem_total > 0 ? (vm.mem_used / vm.mem_total) * 100 : 0,
           diskReadBps: vm.disk_read_bps,
@@ -141,6 +148,7 @@ export const useMetricStore = create<MetricState & MetricActions>()(
       const nodeMetrics = new Map<string, VmLiveMetric>();
       for (const nd of payload.nodes) {
         nodeMetrics.set(nd.node_id, {
+          collectedAt,
           cpuPercent: nd.cpu_usage * 100,
           memPercent: nd.mem_total > 0 ? (nd.mem_used / nd.mem_total) * 100 : 0,
           diskReadBps: nd.disk_read_bps,

@@ -1,3 +1,5 @@
+import type { MetricSeriesPoint } from "./ws";
+
 export interface User {
   id: string;
   email: string;
@@ -811,15 +813,8 @@ export interface VMResponse {
 
 export type TimeRange = "live" | "1h" | "6h" | "24h" | "7d";
 
-export interface HistoricalMetricPoint {
-  timestamp: number;
-  cpuPercent: number;
-  memPercent: number;
-  diskReadBps: number;
-  diskWriteBps: number;
-  netInBps: number;
-  netOutBps: number;
-}
+/** A stored-history point, as the metrics routes return it. */
+export type HistoricalMetricPoint = MetricSeriesPoint;
 
 export interface StorageResponse {
   id: string;

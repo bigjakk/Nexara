@@ -2,11 +2,11 @@ package handlers
 
 import (
 	"maps"
-	"math"
 	"slices"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -31,14 +31,17 @@ func NewMetricsHandler(queries *db.Queries) *MetricsHandler {
 	return &MetricsHandler{queries: queries}
 }
 
+// metricPoint is one point of a chart series. A nil value is no measurement —
+// nothing was sampled there, or a counter fell or went unreported — so a chart
+// breaks its line instead of drawing a zero that would read as a stall.
 type metricPoint struct {
-	Timestamp    int64   `json:"timestamp"`
-	CPUPercent   float64 `json:"cpuPercent"`
-	MemPercent   float64 `json:"memPercent"`
-	DiskReadBps  float64 `json:"diskReadBps"`
-	DiskWriteBps float64 `json:"diskWriteBps"`
-	NetInBps     float64 `json:"netInBps"`
-	NetOutBps    float64 `json:"netOutBps"`
+	Timestamp    int64    `json:"timestamp"`
+	CPUPercent   *float64 `json:"cpuPercent"`
+	MemPercent   *float64 `json:"memPercent"`
+	DiskReadBps  *float64 `json:"diskReadBps"`
+	DiskWriteBps *float64 `json:"diskWriteBps"`
+	NetInBps     *float64 `json:"netInBps"`
+	NetOutBps    *float64 `json:"netOutBps"`
 }
 
 // rangeDurations is the accepted ?range= vocabulary and the window each
@@ -74,67 +77,16 @@ func metricWindow(rangeParam string) (time.Duration, error) {
 	return d, nil
 }
 
-// rawRow is a generic container for rows from any metric query.
-type rawRow struct {
-	bucket                                                     time.Time
-	cpu, memUsed, memTotal, diskRead, diskWrite, netIn, netOut float64
-}
+// The two short ranges are served from the raw samples, bucketed to
+// window/seriesPoints (1h at 10 s, 6h at 1 minute), so a stall of a minute or
+// two shows; 24h reads the 5-minute rollup and 7d the hourly one.
+const (
+	rollup5m = 5 * time.Minute
+	rollup1h = time.Hour
+)
 
-// computeRates converts cumulative I/O counters into per-second rates
-// by computing deltas between consecutive time-ordered points.
-// CPU and memory are passed through unchanged.
-func computeRates(rows []rawRow) []metricPoint {
-	if len(rows) == 0 {
-		return nil
-	}
-
-	points := make([]metricPoint, len(rows))
-
-	// First point has no predecessor — emit zero I/O rates.
-	points[0] = toMetricPoint(rows[0], 0, 0, 0, 0)
-
-	for i := 1; i < len(rows); i++ {
-		elapsed := rows[i].bucket.Sub(rows[i-1].bucket).Seconds()
-
-		drBps := ioRate(rows[i].diskRead, rows[i-1].diskRead, elapsed)
-		dwBps := ioRate(rows[i].diskWrite, rows[i-1].diskWrite, elapsed)
-		niBps := ioRate(rows[i].netIn, rows[i-1].netIn, elapsed)
-		noBps := ioRate(rows[i].netOut, rows[i-1].netOut, elapsed)
-
-		points[i] = toMetricPoint(rows[i], drBps, dwBps, niBps, noBps)
-	}
-
-	return points
-}
-
-// ioRate computes (cur - prev) / elapsed, clamped to zero on counter reset or reboot.
-func ioRate(cur, prev, elapsed float64) float64 {
-	if elapsed <= 0 {
-		return 0
-	}
-	delta := cur - prev
-	if delta < 0 {
-		// Counter reset (reboot) — return zero rather than a negative spike.
-		return 0
-	}
-	return math.Max(delta/elapsed, 0)
-}
-
-func toMetricPoint(r rawRow, diskReadBps, diskWriteBps, netInBps, netOutBps float64) metricPoint {
-	var memPercent float64
-	if r.memTotal > 0 {
-		memPercent = (r.memUsed / r.memTotal) * 100
-	}
-	return metricPoint{
-		Timestamp:    r.bucket.UnixMilli(),
-		CPUPercent:   r.cpu * 100,
-		MemPercent:   memPercent,
-		DiskReadBps:  diskReadBps,
-		DiskWriteBps: diskWriteBps,
-		NetInBps:     netInBps,
-		NetOutBps:    netOutBps,
-	}
-}
+// rawWidth is a raw-sample range's bucket width.
+func rawWidth(window time.Duration) time.Duration { return window / seriesPoints }
 
 // GetClusterHistorical handles GET /api/v1/clusters/:cluster_id/metrics.
 func (h *MetricsHandler) GetClusterHistorical(c fiber.Ctx, p *apischema.Params) error {
@@ -150,36 +102,66 @@ func (h *MetricsHandler) GetClusterHistorical(c fiber.Ctx, p *apischema.Params) 
 	}
 	since := time.Now().Add(-window)
 
-	var rows []rawRow
+	// Each node is rated on its own, then the nodes merged: see mergeNodes.
+	perNode := map[uuid.UUID][]ratedSample{}
+	var width time.Duration
 
 	switch rangeParam {
 	case "1h", "6h":
-		dbRows, qErr := h.queries.GetClusterMetrics5m(c.Context(), db.GetClusterMetrics5mParams{
+		dbRows, qErr := h.queries.GetClusterNodeMetricsRaw(c.Context(), db.GetClusterNodeMetricsRawParams{
 			ClusterID: clusterID,
-			Bucket:    since,
+			Since:     rawFetchSince(since),
 		})
 		if qErr != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query metrics")
 		}
-		rows = make([]rawRow, len(dbRows))
-		for i, r := range dbRows {
-			rows[i] = rawRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut}
+		samples := map[uuid.UUID][]rawSample{}
+		for _, r := range dbRows {
+			samples[r.NodeID] = append(samples[r.NodeID], rawSample{
+				at: r.Time, cpu: r.CpuUsage, memUsed: float64(r.MemUsed), memTotal: float64(r.MemTotal),
+				diskRead: float64(r.DiskRead), diskWrite: float64(r.DiskWrite),
+				netIn: float64(r.NetIn), netOut: float64(r.NetOut), diskUnreported: r.DiskUnreported,
+			})
 		}
-	case "24h", "7d":
-		dbRows, qErr := h.queries.GetClusterMetrics1h(c.Context(), db.GetClusterMetrics1hParams{
+		for id, s := range samples {
+			perNode[id] = rateSamples(s, false)
+		}
+		width = rawWidth(window)
+	case "24h":
+		dbRows, qErr := h.queries.GetClusterNodeMetrics5m(c.Context(), db.GetClusterNodeMetrics5mParams{
 			ClusterID: clusterID,
-			Bucket:    since,
+			Since:     since,
 		})
 		if qErr != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query metrics")
 		}
-		rows = make([]rawRow, len(dbRows))
-		for i, r := range dbRows {
-			rows[i] = rawRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut}
+		rows := map[uuid.UUID][]rollupRow{}
+		for _, r := range dbRows {
+			rows[r.NodeID] = append(rows[r.NodeID], rollupRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut})
 		}
+		for id, r := range rows {
+			perNode[id] = rollupSamples(r)
+		}
+		width = rollup5m
+	case "7d":
+		dbRows, qErr := h.queries.GetClusterNodeMetrics1h(c.Context(), db.GetClusterNodeMetrics1hParams{
+			ClusterID: clusterID,
+			Since:     since,
+		})
+		if qErr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query metrics")
+		}
+		rows := map[uuid.UUID][]rollupRow{}
+		for _, r := range dbRows {
+			rows[r.NodeID] = append(rows[r.NodeID], rollupRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut})
+		}
+		for id, r := range rows {
+			perNode[id] = rollupSamples(r)
+		}
+		width = rollup1h
 	}
 
-	return RespondItems(c, computeRates(rows))
+	return RespondItems(c, withGaps(bucketSamples(mergeNodes(perNode), since, width)))
 }
 
 // GetVMHistorical handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics.
@@ -206,10 +188,27 @@ func (h *MetricsHandler) GetVMHistorical(c fiber.Ctx, p *apischema.Params) error
 	}
 	since := time.Now().Add(-window)
 
-	var rows []rawRow
+	var rated []ratedSample
+	var width time.Duration
 
 	switch rangeParam {
 	case "1h", "6h":
+		dbRows, qErr := h.queries.GetVMRecentMetrics(c.Context(), db.GetVMRecentMetricsParams{
+			VmID: vmID,
+			Time: rawFetchSince(since),
+		})
+		if qErr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query VM metrics")
+		}
+		rated = rateSamples(oldestFirst(dbRows, func(r db.GetVMRecentMetricsRow) rawSample {
+			return rawSample{
+				at: r.Bucket, cpu: r.CpuUsage, memUsed: float64(r.MemUsed), memTotal: float64(r.MemTotal),
+				diskRead: float64(r.DiskRead), diskWrite: float64(r.DiskWrite),
+				netIn: float64(r.NetIn), netOut: float64(r.NetOut), diskUnreported: r.DiskUnreported,
+			}
+		}), true)
+		width = rawWidth(window)
+	case "24h":
 		dbRows, qErr := h.queries.GetVMMetrics5m(c.Context(), db.GetVMMetrics5mParams{
 			VmID:   vmID,
 			Bucket: since,
@@ -217,11 +216,13 @@ func (h *MetricsHandler) GetVMHistorical(c fiber.Ctx, p *apischema.Params) error
 		if qErr != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query VM metrics")
 		}
-		rows = make([]rawRow, len(dbRows))
+		rows := make([]rollupRow, len(dbRows))
 		for i, r := range dbRows {
-			rows[i] = rawRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut}
+			rows[i] = rollupRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut}
 		}
-	case "24h", "7d":
+		rated = rollupSamples(rows)
+		width = rollup5m
+	case "7d":
 		dbRows, qErr := h.queries.GetVMMetrics1h(c.Context(), db.GetVMMetrics1hParams{
 			VmID:   vmID,
 			Bucket: since,
@@ -229,13 +230,15 @@ func (h *MetricsHandler) GetVMHistorical(c fiber.Ctx, p *apischema.Params) error
 		if qErr != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query VM metrics")
 		}
-		rows = make([]rawRow, len(dbRows))
+		rows := make([]rollupRow, len(dbRows))
 		for i, r := range dbRows {
-			rows[i] = rawRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut}
+			rows[i] = rollupRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut}
 		}
+		rated = rollupSamples(rows)
+		width = rollup1h
 	}
 
-	return RespondItems(c, computeRates(rows))
+	return RespondItems(c, withGaps(bucketSamples(rated, since, width)))
 }
 
 // GetNodeHistorical handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/metrics.
@@ -260,10 +263,27 @@ func (h *MetricsHandler) GetNodeHistorical(c fiber.Ctx, p *apischema.Params) err
 	}
 	since := time.Now().Add(-window)
 
-	var rows []rawRow
+	var rated []ratedSample
+	var width time.Duration
 
 	switch rangeParam {
 	case "1h", "6h":
+		dbRows, qErr := h.queries.GetNodeRecentMetrics(c.Context(), db.GetNodeRecentMetricsParams{
+			NodeID: nodeID,
+			Time:   rawFetchSince(since),
+		})
+		if qErr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query node metrics")
+		}
+		rated = rateSamples(oldestFirst(dbRows, func(r db.GetNodeRecentMetricsRow) rawSample {
+			return rawSample{
+				at: r.Bucket, cpu: r.CpuUsage, memUsed: float64(r.MemUsed), memTotal: float64(r.MemTotal),
+				diskRead: float64(r.DiskRead), diskWrite: float64(r.DiskWrite),
+				netIn: float64(r.NetIn), netOut: float64(r.NetOut), diskUnreported: r.DiskUnreported,
+			}
+		}), false)
+		width = rawWidth(window)
+	case "24h":
 		dbRows, qErr := h.queries.GetNodeMetrics5m(c.Context(), db.GetNodeMetrics5mParams{
 			NodeID: nodeID,
 			Bucket: since,
@@ -271,11 +291,13 @@ func (h *MetricsHandler) GetNodeHistorical(c fiber.Ctx, p *apischema.Params) err
 		if qErr != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query node metrics")
 		}
-		rows = make([]rawRow, len(dbRows))
+		rows := make([]rollupRow, len(dbRows))
 		for i, r := range dbRows {
-			rows[i] = rawRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut}
+			rows[i] = rollupRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut}
 		}
-	case "24h", "7d":
+		rated = rollupSamples(rows)
+		width = rollup5m
+	case "7d":
 		dbRows, qErr := h.queries.GetNodeMetrics1h(c.Context(), db.GetNodeMetrics1hParams{
 			NodeID: nodeID,
 			Bucket: since,
@@ -283,11 +305,13 @@ func (h *MetricsHandler) GetNodeHistorical(c fiber.Ctx, p *apischema.Params) err
 		if qErr != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query node metrics")
 		}
-		rows = make([]rawRow, len(dbRows))
+		rows := make([]rollupRow, len(dbRows))
 		for i, r := range dbRows {
-			rows[i] = rawRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut}
+			rows[i] = rollupRow{r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut}
 		}
+		rated = rollupSamples(rows)
+		width = rollup1h
 	}
 
-	return RespondItems(c, computeRates(rows))
+	return RespondItems(c, withGaps(bucketSamples(rated, since, width)))
 }

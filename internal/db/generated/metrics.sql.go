@@ -12,130 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const getClusterMetrics1h = `-- name: GetClusterMetrics1h :many
-SELECT
-  m.bucket::timestamptz                   AS bucket,
-  avg(m.avg_cpu_usage)::double precision  AS cpu,
-  avg(m.avg_mem_used)::double precision   AS mem_used,
-  avg(m.avg_mem_total)::double precision  AS mem_total,
-  avg(m.avg_disk_read)::double precision  AS disk_read,
-  avg(m.avg_disk_write)::double precision AS disk_write,
-  avg(m.avg_net_in)::double precision     AS net_in,
-  avg(m.avg_net_out)::double precision    AS net_out
-FROM node_metrics_1h m
-JOIN nodes n ON n.id = m.node_id
-WHERE n.cluster_id = $1 AND m.bucket >= $2
-GROUP BY m.bucket
-ORDER BY m.bucket
-`
-
-type GetClusterMetrics1hParams struct {
-	ClusterID uuid.UUID   `json:"cluster_id"`
-	Bucket    interface{} `json:"bucket"`
-}
-
-type GetClusterMetrics1hRow struct {
-	Bucket    time.Time `json:"bucket"`
-	Cpu       float64   `json:"cpu"`
-	MemUsed   float64   `json:"mem_used"`
-	MemTotal  float64   `json:"mem_total"`
-	DiskRead  float64   `json:"disk_read"`
-	DiskWrite float64   `json:"disk_write"`
-	NetIn     float64   `json:"net_in"`
-	NetOut    float64   `json:"net_out"`
-}
-
-func (q *Queries) GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error) {
-	rows, err := q.db.Query(ctx, getClusterMetrics1h, arg.ClusterID, arg.Bucket)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetClusterMetrics1hRow{}
-	for rows.Next() {
-		var i GetClusterMetrics1hRow
-		if err := rows.Scan(
-			&i.Bucket,
-			&i.Cpu,
-			&i.MemUsed,
-			&i.MemTotal,
-			&i.DiskRead,
-			&i.DiskWrite,
-			&i.NetIn,
-			&i.NetOut,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getClusterMetrics5m = `-- name: GetClusterMetrics5m :many
-SELECT
-  m.bucket::timestamptz                   AS bucket,
-  avg(m.avg_cpu_usage)::double precision  AS cpu,
-  avg(m.avg_mem_used)::double precision   AS mem_used,
-  avg(m.avg_mem_total)::double precision  AS mem_total,
-  avg(m.avg_disk_read)::double precision  AS disk_read,
-  avg(m.avg_disk_write)::double precision AS disk_write,
-  avg(m.avg_net_in)::double precision     AS net_in,
-  avg(m.avg_net_out)::double precision    AS net_out
-FROM node_metrics_5m m
-JOIN nodes n ON n.id = m.node_id
-WHERE n.cluster_id = $1 AND m.bucket >= $2
-GROUP BY m.bucket
-ORDER BY m.bucket
-`
-
-type GetClusterMetrics5mParams struct {
-	ClusterID uuid.UUID   `json:"cluster_id"`
-	Bucket    interface{} `json:"bucket"`
-}
-
-type GetClusterMetrics5mRow struct {
-	Bucket    time.Time `json:"bucket"`
-	Cpu       float64   `json:"cpu"`
-	MemUsed   float64   `json:"mem_used"`
-	MemTotal  float64   `json:"mem_total"`
-	DiskRead  float64   `json:"disk_read"`
-	DiskWrite float64   `json:"disk_write"`
-	NetIn     float64   `json:"net_in"`
-	NetOut    float64   `json:"net_out"`
-}
-
-func (q *Queries) GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics5mParams) ([]GetClusterMetrics5mRow, error) {
-	rows, err := q.db.Query(ctx, getClusterMetrics5m, arg.ClusterID, arg.Bucket)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetClusterMetrics5mRow{}
-	for rows.Next() {
-		var i GetClusterMetrics5mRow
-		if err := rows.Scan(
-			&i.Bucket,
-			&i.Cpu,
-			&i.MemUsed,
-			&i.MemTotal,
-			&i.DiskRead,
-			&i.DiskWrite,
-			&i.NetIn,
-			&i.NetOut,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getClusterMetricsDailyAvg = `-- name: GetClusterMetricsDailyAvg :many
 SELECT
   date_trunc('day', m.bucket)::timestamptz AS day,
@@ -193,6 +69,211 @@ func (q *Queries) GetClusterMetricsDailyAvg(ctx context.Context, arg GetClusterM
 			&i.DiskWrite,
 			&i.NetIn,
 			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getClusterNodeMetrics1h = `-- name: GetClusterNodeMetrics1h :many
+SELECT
+  m.node_id,
+  m.bucket::timestamptz                   AS bucket,
+  m.avg_cpu_usage::double precision       AS cpu,
+  m.avg_mem_used::double precision        AS mem_used,
+  m.avg_mem_total::double precision       AS mem_total,
+  m.avg_disk_read::double precision       AS disk_read,
+  m.avg_disk_write::double precision      AS disk_write,
+  m.avg_net_in::double precision          AS net_in,
+  m.avg_net_out::double precision         AS net_out
+FROM node_metrics_1h m
+JOIN nodes n ON n.id = m.node_id
+WHERE n.cluster_id = $1 AND m.bucket >= $2
+ORDER BY m.node_id, m.bucket
+`
+
+type GetClusterNodeMetrics1hParams struct {
+	ClusterID uuid.UUID   `json:"cluster_id"`
+	Since     interface{} `json:"since"`
+}
+
+type GetClusterNodeMetrics1hRow struct {
+	NodeID    uuid.UUID `json:"node_id"`
+	Bucket    time.Time `json:"bucket"`
+	Cpu       float64   `json:"cpu"`
+	MemUsed   float64   `json:"mem_used"`
+	MemTotal  float64   `json:"mem_total"`
+	DiskRead  float64   `json:"disk_read"`
+	DiskWrite float64   `json:"disk_write"`
+	NetIn     float64   `json:"net_in"`
+	NetOut    float64   `json:"net_out"`
+}
+
+// Every node's hourly rollup rows in the cluster; see GetClusterNodeMetrics5m.
+func (q *Queries) GetClusterNodeMetrics1h(ctx context.Context, arg GetClusterNodeMetrics1hParams) ([]GetClusterNodeMetrics1hRow, error) {
+	rows, err := q.db.Query(ctx, getClusterNodeMetrics1h, arg.ClusterID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetClusterNodeMetrics1hRow{}
+	for rows.Next() {
+		var i GetClusterNodeMetrics1hRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.Bucket,
+			&i.Cpu,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getClusterNodeMetrics5m = `-- name: GetClusterNodeMetrics5m :many
+SELECT
+  m.node_id,
+  m.bucket::timestamptz                   AS bucket,
+  m.avg_cpu_usage::double precision       AS cpu,
+  m.avg_mem_used::double precision        AS mem_used,
+  m.avg_mem_total::double precision       AS mem_total,
+  m.avg_disk_read::double precision       AS disk_read,
+  m.avg_disk_write::double precision      AS disk_write,
+  m.avg_net_in::double precision          AS net_in,
+  m.avg_net_out::double precision         AS net_out
+FROM node_metrics_5m m
+JOIN nodes n ON n.id = m.node_id
+WHERE n.cluster_id = $1 AND m.bucket >= $2
+ORDER BY m.node_id, m.bucket
+`
+
+type GetClusterNodeMetrics5mParams struct {
+	ClusterID uuid.UUID   `json:"cluster_id"`
+	Since     interface{} `json:"since"`
+}
+
+type GetClusterNodeMetrics5mRow struct {
+	NodeID    uuid.UUID `json:"node_id"`
+	Bucket    time.Time `json:"bucket"`
+	Cpu       float64   `json:"cpu"`
+	MemUsed   float64   `json:"mem_used"`
+	MemTotal  float64   `json:"mem_total"`
+	DiskRead  float64   `json:"disk_read"`
+	DiskWrite float64   `json:"disk_write"`
+	NetIn     float64   `json:"net_in"`
+	NetOut    float64   `json:"net_out"`
+}
+
+// Every node's 5-minute rollup rows in the cluster. The handler rates each
+// node's counters on its own and sums the nodes per bucket, as it does for the
+// raw samples (GetClusterNodeMetricsRaw): averaging or summing the counters
+// across nodes first jumps whenever a node is missing from a bucket.
+func (q *Queries) GetClusterNodeMetrics5m(ctx context.Context, arg GetClusterNodeMetrics5mParams) ([]GetClusterNodeMetrics5mRow, error) {
+	rows, err := q.db.Query(ctx, getClusterNodeMetrics5m, arg.ClusterID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetClusterNodeMetrics5mRow{}
+	for rows.Next() {
+		var i GetClusterNodeMetrics5mRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.Bucket,
+			&i.Cpu,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getClusterNodeMetricsRaw = `-- name: GetClusterNodeMetricsRaw :many
+SELECT
+  m.node_id,
+  m.time,
+  m.cpu_usage,
+  m.mem_used,
+  m.mem_total,
+  m.disk_read,
+  m.disk_write,
+  m.net_in,
+  m.net_out,
+  m.disk_unreported
+FROM node_metrics m
+JOIN nodes n ON n.id = m.node_id
+WHERE n.cluster_id = $1 AND m.time >= $2
+ORDER BY m.node_id, m.time
+`
+
+type GetClusterNodeMetricsRawParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Since     time.Time `json:"since"`
+}
+
+type GetClusterNodeMetricsRawRow struct {
+	NodeID         uuid.UUID `json:"node_id"`
+	Time           time.Time `json:"time"`
+	CpuUsage       float64   `json:"cpu_usage"`
+	MemUsed        int64     `json:"mem_used"`
+	MemTotal       int64     `json:"mem_total"`
+	DiskRead       int64     `json:"disk_read"`
+	DiskWrite      int64     `json:"disk_write"`
+	NetIn          int64     `json:"net_in"`
+	NetOut         int64     `json:"net_out"`
+	DiskUnreported bool      `json:"disk_unreported"`
+}
+
+// The raw samples of every node in the cluster, for the short chart ranges.
+// The handler rates each node's counters on its own and sums the nodes per
+// collection cycle, whose rows all share one timestamp: combining the
+// counters across nodes first dips whenever one node's sample is missing or
+// unreported.
+func (q *Queries) GetClusterNodeMetricsRaw(ctx context.Context, arg GetClusterNodeMetricsRawParams) ([]GetClusterNodeMetricsRawRow, error) {
+	rows, err := q.db.Query(ctx, getClusterNodeMetricsRaw, arg.ClusterID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetClusterNodeMetricsRawRow{}
+	for rows.Next() {
+		var i GetClusterNodeMetricsRawRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.Time,
+			&i.CpuUsage,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+			&i.DiskUnreported,
 		); err != nil {
 			return nil, err
 		}

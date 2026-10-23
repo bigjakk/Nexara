@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { toMetricDataPoints } from "./historical-queries";
+import { toSeriesPoints } from "./historical-queries";
 import type { HistoricalMetricPoint } from "@/types/api";
 
-describe("toMetricDataPoints", () => {
-  it("converts API response to MetricDataPoint array", () => {
+describe("toSeriesPoints", () => {
+  it("converts API response to chart points", () => {
     const input: HistoricalMetricPoint[] = [
       {
         timestamp: 1700000000000,
@@ -16,7 +16,7 @@ describe("toMetricDataPoints", () => {
       },
     ];
 
-    const result = toMetricDataPoints(input);
+    const result = toSeriesPoints(input);
 
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
@@ -31,6 +31,6 @@ describe("toMetricDataPoints", () => {
   });
 
   it("returns empty array for empty input", () => {
-    expect(toMetricDataPoints([])).toEqual([]);
+    expect(toSeriesPoints([])).toEqual([]);
   });
 });
