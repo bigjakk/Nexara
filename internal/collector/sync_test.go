@@ -522,7 +522,7 @@ func TestSyncCluster_Success(t *testing.T) {
 	srv := newTestServer(t, map[string]http.HandlerFunc{
 		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.NodeListEntry{
-				{Node: "pve1", Status: "online", MaxCPU: 8, MaxMem: 17179869184, MaxDisk: 107374182400, Uptime: 86400, SSLFingerprint: "abc123"},
+				{Node: "pve1", Status: "online", CPU: 0.25, MaxCPU: 8, MaxMem: 17179869184, MaxDisk: 107374182400, Uptime: 86400, SSLFingerprint: "abc123"},
 				{Node: "pve2", Status: "online", MaxCPU: 16, MaxMem: 34359738368, MaxDisk: 214748364800, Uptime: 172800},
 			})
 		},
@@ -531,7 +531,7 @@ func TestSyncCluster_Success(t *testing.T) {
 				Node:       "pve1",
 				PVEVersion: "pve-manager/8.1.3",
 				CPUInfo:    proxmox.CPUInfo{CPUs: 8},
-				CPU:        0.25,
+				CPU:        0, // a fresh pveproxy worker's first answer; the list's 0.25 is the reading
 				Memory:     proxmox.Memory{Total: 17179869184, Used: 8589934592},
 				RootFS:     proxmox.RootFS{Total: 107374182400},
 			})

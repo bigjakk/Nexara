@@ -852,6 +852,13 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 			loadAvg = strings.Join(status.LoadAvg, ", ")
 		}
 	}
+	// A fresh pveproxy worker answers its first status call with CPU 0, having
+	// no earlier /proc/stat reading to measure from (PVE::ProcFSTools::
+	// read_proc_stat), and workers are recycled often. The node list carries
+	// pvestatd's figure, which can lag but has no such zero.
+	if cpuUsage == 0 && node.CPU > 0 {
+		cpuUsage = node.CPU
+	}
 
 	// Fetch DNS configuration.
 	var dnsServers, dnsSearch string
