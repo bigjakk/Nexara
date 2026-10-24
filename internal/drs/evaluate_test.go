@@ -67,6 +67,7 @@ const (
 	node1VMCfgPath  = "/api2/json/nodes/pve-01/qemu/101/config"
 	node2QemuPath   = "/api2/json/nodes/pve-02/qemu"
 	node2LxcPath    = "/api2/json/nodes/pve-02/lxc"
+	resourcesPath   = "/api2/json/cluster/resources"
 	evalThreshold   = 0.15
 	evalGuestVMID   = 101
 	evalGuestName   = "linux01"
@@ -123,6 +124,9 @@ func evaluateHandlers() map[string]http.HandlerFunc {
 		},
 		haRulesPath: func(w http.ResponseWriter, _ *http.Request) {
 			haData(w, []proxmox.HARuleEntry{})
+		},
+		resourcesPath: func(w http.ResponseWriter, _ *http.Request) {
+			haData(w, []proxmox.ClusterResource{{Type: "qemu", VMID: evalGuestVMID, CPU: 0.5}})
 		},
 	}
 }
@@ -349,4 +353,36 @@ func TestEvaluate_CompletesWhenEveryListingReads(t *testing.T) {
 		t.Errorf("imbalance = %v, want above the %v threshold so the planner is reached", result.Imbalance, evalThreshold)
 	}
 	assertOnlyReadEndpoints(t, hit, handlers)
+}
+
+// A fresh pveproxy worker lists every running guest's CPU as 0, which scores
+// the node CPU-idle and can make it the planner's preferred target. pvestatd's
+// /cluster/resources figure stands in, for the VM and the container alike.
+func TestEvaluate_ScoresGuestCPUFromResourcesWhenTheListReadsZero(t *testing.T) {
+	t.Parallel()
+	handlers := evaluateHandlers()
+	handlers[node1QemuPath] = func(w http.ResponseWriter, _ *http.Request) {
+		haData(w, []proxmox.VirtualMachine{{
+			VMID: evalGuestVMID, Name: evalGuestName, Status: "running",
+			CPU: 0, CPUs: 4, Mem: evalGuestMemory, MaxMem: evalGuestMemory,
+		}})
+	}
+	handlers[node1LxcPath] = func(w http.ResponseWriter, _ *http.Request) {
+		haData(w, []proxmox.Container{{VMID: 151, Name: "linux151", Status: "running", CPU: 0, CPUs: 2}})
+	}
+	handlers[resourcesPath] = func(w http.ResponseWriter, _ *http.Request) {
+		haData(w, []proxmox.ClusterResource{
+			{Type: "qemu", VMID: evalGuestVMID, CPU: 0.5}, {Type: "lxc", VMID: 151, CPU: 0.5},
+		})
+	}
+
+	e, _, _ := newEvaluateEngine(t, handlers)
+	result, err := e.Evaluate(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	// (0.5 of VM 101's 4 CPUs + 0.5 of CT 151's 2) over pve-01's 8.
+	if got := result.NodeScores["pve-01"].CPULoad; got != 0.375 {
+		t.Errorf("pve-01 CPULoad = %v, want 0.375 from /cluster/resources", got)
+	}
 }

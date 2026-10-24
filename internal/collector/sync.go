@@ -248,7 +248,7 @@ type ClientFactory func(apiURL, tokenID, tokenSecret, tlsFingerprint string) (Pr
 type vmExtraFields struct {
 	HAState string
 	Pool    string
-	CPU     float64 // pvestatd's figure, see guestCPU
+	CPU     float64 // pvestatd's figure, see proxmox.GuestCPU
 }
 
 // PBSProxmoxClient defines the PBS API methods needed by the Syncer.
@@ -1132,7 +1132,7 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 		diskRead, diskWrite, carried := s.disk.counters(clusterID, vm)
 		snapshots = append(snapshots, vmMetricSnapshot{
 			VMID:           dbVM.ID,
-			CPUUsage:       guestCPU(vm.Status == "running", vm.CPU, extra.CPU),
+			CPUUsage:       proxmox.GuestCPU(vm.Status == "running", vm.CPU, extra.CPU),
 			MemUsed:        vm.Mem,
 			MemTotal:       vm.MaxMem,
 			DiskRead:       diskRead,
@@ -1250,7 +1250,7 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 
 		snapshots = append(snapshots, vmMetricSnapshot{
 			VMID:      dbVM.ID,
-			CPUUsage:  guestCPU(ct.Status == "running", ct.CPU, extra.CPU),
+			CPUUsage:  proxmox.GuestCPU(ct.Status == "running", ct.CPU, extra.CPU),
 			MemUsed:   ct.Mem,
 			MemTotal:  ct.MaxMem,
 			DiskRead:  ct.DiskRead,

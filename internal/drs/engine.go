@@ -211,6 +211,19 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 		return nil, err
 	}
 
+	// pvestatd's guest CPU, for the 0 a fresh pveproxy worker lists (see
+	// proxmox.GuestCPU). Best-effort, like the native-CRS read: without it the
+	// lists' figures stand as before, and the 0 it corrects moves only the CPU term.
+	resourceCPU := make(map[int]float64)
+	if resources, resErr := client.GetClusterResources(ctx, "vm"); resErr == nil {
+		for _, r := range resources {
+			resourceCPU[r.VMID] = r.CPU
+		}
+	} else {
+		e.logger.Warn("DRS: could not read cluster resources for guest CPU",
+			"cluster_id", clusterID, "error", resErr)
+	}
+
 	// Collect workloads per node.
 	//
 	// When include_containers is false, containers still count toward node load
@@ -271,7 +284,7 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 		}
 		eligible++
 
-		wl, err := collectNodeWorkloads(ctx, client, n.Node, includeContainers)
+		wl, err := collectNodeWorkloads(ctx, client, n.Node, includeContainers, resourceCPU)
 		if err != nil {
 			unreadable++
 			lastListErr = err
@@ -418,7 +431,7 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 //
 // Returning early on the VM listing also preserves the old behaviour of not
 // issuing the container request for a node already known to be unreadable.
-func collectNodeWorkloads(ctx context.Context, client *proxmox.Client, node string, includeContainers bool) ([]Workload, error) {
+func collectNodeWorkloads(ctx context.Context, client *proxmox.Client, node string, includeContainers bool, resourceCPU map[int]float64) ([]Workload, error) {
 	vms, err := client.GetVMs(ctx, node)
 	if err != nil {
 		return nil, fmt.Errorf("list VMs: %w", err)
@@ -438,7 +451,7 @@ func collectNodeWorkloads(ctx context.Context, client *proxmox.Client, node stri
 			Name:     vm.Name,
 			Type:     "qemu",
 			Node:     node,
-			CPUUsage: vm.CPU,
+			CPUUsage: proxmox.GuestCPU(vm.Status == "running", vm.CPU, resourceCPU[vm.VMID]),
 			CPUs:     vm.CPUs,
 			Mem:      vm.Mem,
 			MaxMem:   vm.MaxMem,
@@ -456,7 +469,7 @@ func collectNodeWorkloads(ctx context.Context, client *proxmox.Client, node stri
 			Name:     ct.Name,
 			Type:     "lxc",
 			Node:     node,
-			CPUUsage: ct.CPU,
+			CPUUsage: proxmox.GuestCPU(ct.Status == "running", ct.CPU, resourceCPU[ct.VMID]),
 			CPUs:     ct.CPUs,
 			Mem:      ct.Mem,
 			MaxMem:   ct.MaxMem,

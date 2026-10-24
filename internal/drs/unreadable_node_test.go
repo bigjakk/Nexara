@@ -121,6 +121,8 @@ func unreadableNodeHandlers() map[string]http.HandlerFunc {
 		haRulesPath: func(w http.ResponseWriter, _ *http.Request) {
 			haData(w, []proxmox.HARuleEntry{})
 		},
+		// No pvestatd figures, so every listed CPU stands.
+		resourcesPath: empty,
 	}
 }
 

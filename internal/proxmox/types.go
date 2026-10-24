@@ -382,6 +382,17 @@ type ClusterResource struct {
 	PluginType string  `json:"plugintype,omitempty"`
 }
 
+// GuestCPU is a guest's CPU: the list's reading, or resources (pvestatd's
+// /cluster/resources figure) when a running guest lists exactly 0, as every
+// running guest does from a fresh pveproxy worker with no earlier reading in
+// vmstatus's cache. resources lags, so a stopped guest's can predate the stop.
+func GuestCPU(running bool, listed, resources float64) float64 {
+	if running && listed == 0 && resources > 0 {
+		return resources
+	}
+	return listed
+}
+
 // StoragePool represents a storage pool from GET /nodes/{node}/storage.
 type StoragePool struct {
 	Storage  string  `json:"storage"`
