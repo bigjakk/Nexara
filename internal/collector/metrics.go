@@ -70,6 +70,17 @@ func memGuest(running, guestsOwn bool) *bool {
 	return &guestsOwn
 }
 
+// guestCPU is a reading's CPUUsage. A fresh pveproxy worker lists every
+// running guest at 0, having no earlier reading in vmstatus's cache to
+// measure from, and workers are recycled often. /cluster/resources carries
+// pvestatd's figure, which can lag but has no such zero.
+func guestCPU(running bool, listed, resources float64) float64 {
+	if running && listed == 0 && resources > 0 {
+		return resources
+	}
+	return listed
+}
+
 // nodeCollectionResult holds all data collected from syncing a single node.
 type nodeCollectionResult struct {
 	Node         uuid.UUID

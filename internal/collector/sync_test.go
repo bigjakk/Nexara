@@ -596,6 +596,10 @@ func TestSyncCluster_Success(t *testing.T) {
 				{Storage: "local-lvm", Type: "lvmthin", Content: "images", Active: 1, Enabled: 1, Shared: 0, Total: 214748364800, Used: 42949672960, Avail: 171798691840},
 			})
 		},
+		// pvestatd's figure, which lags: the list's live 0.5 is the reading.
+		"/api2/json/cluster/resources": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.ClusterResource{{Type: "qemu", VMID: 100, CPU: 0.9}})
+		},
 	})
 	defer srv.Close()
 
@@ -1039,7 +1043,7 @@ func TestSyncCluster_MetricSnapshots(t *testing.T) {
 		"/api2/json/nodes/pve1/qemu": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.VirtualMachine{
 				{VMID: 100, Name: "vm1", Status: "running", CPUs: 2, MaxMem: 4294967296,
-					CPU: 0.50, Mem: 2147483648, DiskRead: 100, DiskWrite: 200, NetIn: 300, NetOut: 400},
+					CPU: 0, Mem: 2147483648, DiskRead: 100, DiskWrite: 200, NetIn: 300, NetOut: 400},
 				{VMID: 101, Name: "vm2", Status: "stopped", CPUs: 1, MaxMem: 2147483648,
 					CPU: 0, Mem: 0, DiskRead: 0, DiskWrite: 0, NetIn: 0, NetOut: 0},
 			})
@@ -1047,7 +1051,15 @@ func TestSyncCluster_MetricSnapshots(t *testing.T) {
 		"/api2/json/nodes/pve1/lxc": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.Container{
 				{VMID: 200, Name: "ct1", Status: "running", CPUs: 1, MaxMem: 1073741824,
-					CPU: 0.20, Mem: 536870912, DiskRead: 50, DiskWrite: 60, NetIn: 70, NetOut: 80},
+					CPU: 0, Mem: 536870912, DiskRead: 50, DiskWrite: 60, NetIn: 70, NetOut: 80},
+			})
+		},
+		// The lists come from a fresh pveproxy worker, which reads every running
+		// guest's CPU as 0. These are pvestatd's figures; VM 101's is from before
+		// it stopped.
+		"/api2/json/cluster/resources": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.ClusterResource{
+				{Type: "qemu", VMID: 100, CPU: 0.50}, {Type: "qemu", VMID: 101, CPU: 0.40}, {Type: "lxc", VMID: 200, CPU: 0.20},
 			})
 		},
 		"/api2/json/nodes/pve1/storage": func(w http.ResponseWriter, _ *http.Request) {
