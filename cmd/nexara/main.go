@@ -571,6 +571,28 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 			}()
 		}
 
+		// Guest OS loop: refreshes each guest's detected OS once a minute, off
+		// the metrics pass, which a guest agent that never answers used to hold
+		// up for 3 s per VM (see collector.OSTypeSyncInterval).
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("guest os type sync loop panicked", "panic", r)
+				}
+			}()
+			syncer.SyncAllGuestOSTypes(ctx)
+			osTypeTicker := time.NewTicker(collector.OSTypeSyncInterval)
+			defer osTypeTicker.Stop()
+			for {
+				select {
+				case <-osTypeTicker.C:
+					syncer.SyncAllGuestOSTypes(ctx)
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+
 		// Node memory DIMM loop: reads each online node's layout with dmidecode
 		// over its cluster's SSH credentials once NODE_MEMORY_READ_INTERVAL has
 		// passed. Ticks hourly so credentials added later are picked up within

@@ -301,6 +301,7 @@ type Syncer struct {
 	fastSyncInFlight     atomic.Bool             // re-entrancy guard for SyncAllResources
 	snapshotSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllGuestSnapshots
 	smbiosSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestSmbios
+	osTypeSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestOSTypes
 	nodePressureInFlight atomic.Bool             // re-entrancy guard for SyncAllNodePressure
 	disk                 diskCarry               // VMs' last reported disk counters
 }
@@ -1127,8 +1128,6 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 			return nil, fmt.Errorf("upsert VM %d on %s: %w", vm.VMID, nodeName, err)
 		}
 
-		s.refreshOSType(ctx, client, dbVM, nodeName, vm.VMID, "qemu", vm.EffectiveStatus())
-
 		diskRead, diskWrite, carried := s.disk.counters(clusterID, vm)
 		snapshots = append(snapshots, vmMetricSnapshot{
 			VMID:           dbVM.ID,
@@ -1146,74 +1145,6 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 	}
 
 	return snapshots, nil
-}
-
-// refreshOSType detects the current OS for a guest and persists it. Tracks
-// two fields:
-//
-//   - ostype: the "best detected" value — guest-agent ID when available
-//     (e.g. "ubuntu", "home-assistant"), else the Proxmox config setting.
-//   - config_ostype: the Proxmox config setting (e.g. "l26", "win11") used
-//     as a UI fallback when the guest-agent value isn't a known distro and
-//     we still want to render a family icon.
-//
-// Best-effort — a failure is logged but never propagated, since this is a
-// cosmetic OS detection path.
-func (s *Syncer) refreshOSType(ctx context.Context, client ProxmoxClient, dbVM db.Vm, nodeName string, vmid int, kind, status string) {
-	// Always fetch the Proxmox config first — its ostype value is the
-	// fallback we display when the guest-agent reports something the UI
-	// doesn't recognize.
-	var (
-		config proxmox.VMConfig
-		err    error
-	)
-	switch kind {
-	case "qemu":
-		config, err = client.GetVMConfig(ctx, nodeName, vmid)
-	case "lxc":
-		config, err = client.GetCTConfig(ctx, nodeName, vmid)
-	default:
-		return
-	}
-	if err != nil {
-		s.logger.Debug("ostype fetch failed",
-			"vmid", vmid, "node", nodeName, "kind", kind, "error", err)
-		return
-	}
-	rawConfigOS, _ := config["ostype"].(string)
-	configOSType := strings.ToLower(rawConfigOS)
-
-	if configOSType != "" && configOSType != dbVM.ConfigOstype {
-		if err := s.queries.SetVMConfigOSType(ctx, db.SetVMConfigOSTypeParams{ID: dbVM.ID, ConfigOstype: configOSType}); err != nil {
-			s.logger.Debug("config_ostype persist failed",
-				"vmid", vmid, "kind", kind, "error", err)
-		}
-	}
-
-	// Prefer the guest-agent reported OS when QEMU and running — it's more
-	// specific (distro name vs. generic "l26") and handles the case where
-	// the Proxmox config says "other" but the guest is really Linux.
-	detected := ""
-	if kind == "qemu" && status == "running" {
-		if info, err := client.GetGuestAgentOSInfo(ctx, nodeName, vmid); err == nil && info != nil {
-			if info.ID != "" {
-				detected = strings.ToLower(info.ID)
-			} else if info.Name != "" {
-				detected = strings.ToLower(info.Name)
-			}
-		}
-	}
-	if detected == "" {
-		detected = configOSType
-	}
-
-	if detected == "" || detected == dbVM.Ostype {
-		return
-	}
-	if err := s.queries.SetVMOSType(ctx, db.SetVMOSTypeParams{ID: dbVM.ID, Ostype: detected}); err != nil {
-		s.logger.Debug("ostype persist failed",
-			"vmid", vmid, "kind", kind, "error", err)
-	}
 }
 
 func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string, vmExtra map[int32]vmExtraFields) ([]vmMetricSnapshot, error) {
@@ -1245,8 +1176,6 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 		if err != nil {
 			return nil, fmt.Errorf("upsert container %d on %s: %w", ct.VMID, nodeName, err)
 		}
-
-		s.refreshOSType(ctx, client, dbVM, nodeName, ct.VMID, "lxc", ct.Status)
 
 		snapshots = append(snapshots, vmMetricSnapshot{
 			VMID:      dbVM.ID,

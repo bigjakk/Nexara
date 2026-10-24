@@ -24,8 +24,8 @@ const fastSyncTimeout = 30 * time.Second
 // DB, with the same events the full sync publishes. It is the fast half of
 // the fast/slow collector split — guest existence, placement, status, and
 // identity converge within one fast tick (seconds), while the heavy
-// per-node enrichment (metrics, hardware, ostype, Ceph, tasks) stays on the
-// slow SyncAll cadence.
+// per-node enrichment (metrics, hardware, Ceph, tasks) stays on the slow
+// SyncAll cadence and OS detection on its own loop (SyncAllGuestOSTypes).
 //
 // Re-entrancy-guarded: if a pass is still running when the next tick fires,
 // the tick is skipped rather than queued.
