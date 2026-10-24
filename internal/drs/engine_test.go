@@ -175,11 +175,14 @@ func TestPlanProducesMigrations(t *testing.T) {
 func TestPlanRejectsSingleVMThrashing(t *testing.T) {
 	weights := DefaultWeights()
 
-	// 1 VM on 3 nodes — moving it just relocates the imbalance, shouldn't produce recommendations.
+	// 1 VM on 3 nodes — moving it just relocates the imbalance (√2 wherever it
+	// sits), so it shouldn't produce recommendations. node2/node3 are bigger on
+	// purpose: equal 16e9 nodes happen to make this guest's tie exact, while these
+	// make float rounding score the move as a sliver of improvement in every order.
 	nodeEntries := map[string]proxmox.NodeListEntry{
 		"node1": {Node: "node1", Status: "online", MaxCPU: 8, MaxMem: 16e9},
-		"node2": {Node: "node2", Status: "online", MaxCPU: 8, MaxMem: 16e9},
-		"node3": {Node: "node3", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+		"node2": {Node: "node2", Status: "online", MaxCPU: 8, MaxMem: 48e9},
+		"node3": {Node: "node3", Status: "online", MaxCPU: 8, MaxMem: 48e9},
 	}
 
 	nodeWorkloads := map[string][]Workload{
@@ -198,6 +201,16 @@ func TestPlanRejectsSingleVMThrashing(t *testing.T) {
 	imbalance := CalculateImbalance(scores)
 	if imbalance <= 0.25 {
 		t.Fatalf("expected imbalanced cluster, got %f", imbalance)
+	}
+	// Anti-vacuity: the fixture must still present the rounding "gain" the margin
+	// exists to refuse; an exact tie would let this test pass for nothing.
+	onNode2 := map[string]NodeScore{
+		"node1": ScoreNode(nodeEntries["node1"], nil, weights),
+		"node2": ScoreNode(nodeEntries["node2"], nodeWorkloads["node1"], weights),
+		"node3": scores["node3"],
+	}
+	if gain := imbalance - CalculateImbalance(onNode2); gain <= 0 || gain >= minImprovement {
+		t.Fatalf("moving the VM to node2 gains %g; pick node sizes whose rounding gain is in (0, %g)", gain, minImprovement)
 	}
 
 	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25, slog.Default())

@@ -3,10 +3,17 @@ package drs
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
+
+// minImprovement is the least drop in imbalance a simulated move must make to
+// count. A lone guest has the same imbalance wherever it sits (√2 on three
+// nodes), yet map order and unequal node sizes can score one placement a few
+// ULPs lower; taking that as a gain live-migrates the guest for nothing.
+const minImprovement = 1e-9
 
 // Plan generates migration recommendations using a greedy approach:
 // move VMs from the most-loaded node to the least-loaded until imbalance < threshold.
@@ -123,8 +130,9 @@ func Plan(
 
 				scoreAfter := CalculateImbalance(currentScores)
 
-				if scoreAfter >= scoreBefore {
-					logger.Info("DRS planner: move worsens balance, reverting",
+				// A NaN gain (+Inf imbalance on both sides, from absurd weights) reverts too.
+				if gain := scoreBefore - scoreAfter; math.IsNaN(gain) || gain < minImprovement {
+					logger.Info("DRS planner: move does not improve balance, reverting",
 						"vmid", w.VMID,
 						"name", w.Name,
 						"source", source,
@@ -225,8 +233,8 @@ func collapseHops(recs []Recommendation) []Recommendation {
 
 // findSourceTargetPairs returns candidate source→target pairs ordered by priority.
 // Pairs are all combinations where source score > target score, ordered by
-// score difference (largest gap first). The scoreAfter >= scoreBefore check
-// in the main loop prevents bad moves, so we cast a wide net here.
+// score difference (largest gap first). The minImprovement check in the main
+// loop prevents bad moves, so we cast a wide net here.
 func findSourceTargetPairs(scores map[string]NodeScore) [][2]string {
 	if len(scores) < 2 {
 		return nil
