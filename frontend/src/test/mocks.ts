@@ -20,10 +20,12 @@ type Verb = "get" | "list" | "post" | "put" | "patch" | "delete";
  * session (clearTokens, storeTokens, sessionScope) stays the real one.
  * apiClient gets get, list, post, put and delete as bare vi.fn()s; `verbs`
  * replaces one of them, or adds patch, e.g. to hand a request to a mock the
- * file holds.
+ * file holds. `overrides` replaces other exports of the module, e.g. a session
+ * call a hook makes.
  */
 export async function apiClientMock(
   verbs: Partial<Record<Verb, (...args: never[]) => unknown>> = {},
+  overrides: Partial<typeof import("@/lib/api-client")> = {},
 ) {
   const actual =
     await vi.importActual<typeof import("@/lib/api-client")>(
@@ -31,6 +33,7 @@ export async function apiClientMock(
     );
   return {
     ...actual,
+    ...overrides,
     apiClient: {
       get: vi.fn(),
       list: vi.fn(),

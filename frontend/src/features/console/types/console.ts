@@ -45,3 +45,6 @@ export interface ConsoleTab {
   /** Whether this is a VM or container. */
   kind?: ConsoleResourceKind;
 }
+
+/** What a console connects to: a tab before it has an id or a connection. */
+export type ConsoleTarget = Omit<ConsoleTab, "id" | "status" | "reconnectKey">;

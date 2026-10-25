@@ -40,16 +40,24 @@ interface AuthState {
   // bring someone whose session EXPIRED back to where they were, and after a
   // sign-out it would hand that page to whoever signs in next.
   signedOutByUser: boolean;
+  // When the session this tab holds began here, by Date.now(): its sign-in, or
+  // a hand-over to another user — or, for the one a page resumes, the page's
+  // load. A sign-out note older than that was about an earlier session
+  // (useSignOutFromOtherTabs).
+  sessionBeganAt: number;
 }
 
 interface AuthActions {
   login: (req: LoginRequest) => Promise<void>;
   register: (req: RegisterRequest) => Promise<void>;
-  logout: () => Promise<void>;
+  logout: (options?: SignOutOptions) => Promise<void>;
   logoutAll: () => Promise<void>;
   initialize: () => Promise<void>;
-  /** `byUser`: the user asked for this, rather than the session failing. */
-  clearAuth: (options?: { byUser?: boolean }) => void;
+  /**
+   * `byUser`: the user asked for this, rather than the session failing.
+   * `keepStoredUser`: see clearTokens.
+   */
+  clearAuth: (options?: { byUser?: boolean; keepStoredUser?: boolean }) => void;
   setAuthFromResponse: (res: AuthResponse) => void;
   verifyTotp: (code: string) => Promise<void>;
   verifyTotpRecovery: (recoveryCode: string) => Promise<void>;
@@ -106,6 +114,78 @@ function cookieIsAnotherUsers(mine: Pick<User, "id"> | null): boolean {
 }
 
 /**
+ * Where a sign-out made here is told to the browser's other tabs, just before
+ * the stored user goes (useSignOutFromOtherTabs): whose it was, whether the
+ * server revoked it, and when. Without it they cannot tell it from a resume
+ * elsewhere that only could not reach the server, which removes the stored
+ * user too — and asking the server, as they do then, would find a session
+ * whose revoke failed still alive and write it back.
+ */
+export const SIGNED_OUT_KEY = "nexara-signed-out";
+
+/**
+ * `announce: false` for a sign-out that is itself following another tab's
+ * (useSignOutFromOtherTabs): that one has been told, and a note of its own
+ * would set the other tabs off again.
+ */
+export interface SignOutOptions {
+  announce?: boolean;
+}
+
+/**
+ * A sign-out, as the other tabs read it. `at` makes each one a change, and
+ * says which session it can be about and whether it is still fresh.
+ */
+export interface SignedOutNote {
+  user: string;
+  revoked: boolean;
+  at: number;
+}
+
+function noteSignOut(held: User | null, revoked: boolean): void {
+  if (held === null) return;
+  const note: SignedOutNote = { user: held.id, revoked, at: Date.now() };
+  try {
+    localStorage.setItem(SIGNED_OUT_KEY, JSON.stringify(note));
+  } catch {
+    // A full quota: the other tabs then ask the server instead.
+  }
+}
+
+/** How far ahead of the clock a note may be dated: Date.now() is coarsened. */
+const NOTE_CLOCK_SLACK_MS = 2_000;
+
+/**
+ * Whether a sign-out note is about `user`'s session that began at `since`:
+ * theirs, and written since. Not one dated well ahead of the clock, either:
+ * written before the clock was set back, it would read as current, and fresh,
+ * until the clock caught up.
+ */
+export function signOutNoteApplies(
+  note: Partial<SignedOutNote> | null,
+  user: string,
+  since: number,
+  now = Date.now(),
+): note is Partial<SignedOutNote> & Pick<SignedOutNote, "user" | "at"> {
+  return (
+    note?.user === user &&
+    typeof note.at === "number" &&
+    note.at >= since &&
+    note.at <= now + NOTE_CLOCK_SLACK_MS
+  );
+}
+
+function storedSignOutNote(): Partial<SignedOutNote> | null {
+  try {
+    return JSON.parse(
+      localStorage.getItem(SIGNED_OUT_KEY) ?? "null",
+    ) as Partial<SignedOutNote> | null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The last step of Sign out and Sign out everywhere, once the server has been
  * asked: the session they were for ends here.
  *
@@ -139,11 +219,13 @@ function finishSignOut(
   get: () => Pick<AuthState, "user">,
   epoch: number,
   held: User | null,
+  { revoked, announce }: { revoked: boolean; announce: boolean },
 ): void {
   if (currentSessionEpoch() !== epoch && get().user !== held) {
     set({ isLoggingOut: false });
     return;
   }
+  if (announce) noteSignOut(held, revoked);
   clearTokens();
   endSession(() => {
     set({
@@ -179,6 +261,8 @@ function finishSignOut(
  * has not settled — means nothing for this one, and would hold back the
  * rehydration of every refresh they get until a reload. The same user again
  * keeps theirs: a flag up then is a sign-out they have begun.
+ *
+ * Whoever begins here also sets sessionBeganAt; the same user again does not.
  */
 function adoptIdentity(
   set: SetAuth,
@@ -194,7 +278,7 @@ function adoptIdentity(
     permissions: res.permissions,
     isAuthenticated: true,
     signedOutByUser: false,
-    ...(begins ? { isLoggingOut: false } : {}),
+    ...(begins ? { isLoggingOut: false, sessionBeganAt: Date.now() } : {}),
     ...extra,
   });
 }
@@ -209,6 +293,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   totpPendingToken: null,
   isLoggingOut: false,
   signedOutByUser: false,
+  sessionBeganAt: Date.now(),
 
   initialize: async () => {
     // Register callback for forced logout on auth failure first so any
@@ -222,10 +307,11 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       //
       // It can still arrive with no session to end: a request made before
       // initialize() below has settled, on a page that came up with a stored
-      // user, tries the refresh cookie too, and the server may refuse it while
-      // the resume is still out. Ending a session that is not there would wipe
-      // the cache and every store for nobody, so only a store that is signed in
-      // has one to end.
+      // user, would try the refresh cookie too (none is made today, and the
+      // boot's sign-out check relies on that), and the server may refuse it
+      // while the resume is still out. Ending a session that is not there
+      // would wipe the cache and every store for nobody, so only a store that
+      // is signed in has one to end.
       if (!get().isAuthenticated) return;
       get().clearAuth();
     });
@@ -263,6 +349,8 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     // is out — someone signs in from the login page while it is slow — its
     // answer is not applied over theirs (see sessionEpoch in api-client).
     const epoch = currentSessionEpoch();
+    // And when it began: this page's load, whatever happens while it waits.
+    const since = get().sessionBeganAt;
 
     // The page goes to them instead. What the stores rehydrated for the stored
     // user is theirs only if the stored user is who signed in: otherwise it is
@@ -301,6 +389,27 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       const res = await resumeSessionPatiently(epoch);
       if (currentSessionEpoch() !== epoch) {
         releaseToTheNewSession();
+        return;
+      }
+      // Their user signed out in another tab while this page loaded, and the
+      // resume reached the server first, or the sign-out never did. It is not
+      // taken up here, nor is the stored user that sign-out removed written
+      // back: a reload, or the next tab, would resume what they signed out of.
+      // The stored user is left as it is, as no refresh here has written it:
+      // nothing outside ProtectedRoute sends an authenticated request before
+      // this settles.
+      if (signOutNoteApplies(storedSignOutNote(), res.user.id, since)) {
+        clearTokens({ keepStoredUser: true });
+        endSession(() => {
+          set({
+            user: null,
+            permissions: [],
+            isAuthenticated: false,
+            isLoading: false,
+            isInitialized: true,
+            signedOutByUser: true,
+          });
+        });
         return;
       }
       storeTokens(res);
@@ -434,11 +543,12 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     }
   },
 
-  logout: async () => {
+  logout: async (options) => {
     set({ isLoggingOut: true });
     // The session this sign-out is for, which is all it may end (finishSignOut).
     const epoch = currentSessionEpoch();
     const held = get().user;
+    let revoked = false;
     // Whose cookie is in the jar decides whether there is anything to send. If
     // another tab has signed someone else in, nexara_user names them and the
     // cookie is theirs: this tab's own session was orphaned when theirs replaced
@@ -464,27 +574,33 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       // out.
       try {
         await signOutRequest();
+        revoked = true;
       } catch {
         // Proceed with local cleanup even if server logout fails
       }
     }
-    finishSignOut(set, get, epoch, held);
+    finishSignOut(set, get, epoch, held, {
+      revoked,
+      announce: options?.announce !== false,
+    });
   },
 
   logoutAll: async () => {
     set({ isLoggingOut: true });
     const epoch = currentSessionEpoch();
     const held = get().user;
+    let revoked = false;
     try {
       await apiClient.post(apiPath`/api/v1/auth/logout-all`);
+      revoked = true;
     } catch {
       // Proceed with local cleanup even if server call fails
     }
-    finishSignOut(set, get, epoch, held);
+    finishSignOut(set, get, epoch, held, { revoked, announce: true });
   },
 
   clearAuth: (options) => {
-    clearTokens();
+    clearTokens({ keepStoredUser: options?.keepStoredUser === true });
     endSession(() => {
       set({
         user: null,

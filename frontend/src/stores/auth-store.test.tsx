@@ -22,7 +22,7 @@ import {
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useCreateStorage } from "@/features/storage/api/storage-queries";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, getStoredUser, USER_KEY } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { queryClient } from "@/lib/query-client";
 import {
@@ -46,7 +46,12 @@ import {
   server,
   installAuthStoreHarness,
 } from "@/test/api-client-harness";
-import { useAuthStore } from "./auth-store";
+import {
+  SIGNED_OUT_KEY,
+  signOutNoteApplies,
+  useAuthStore,
+  type SignedOutNote,
+} from "./auth-store";
 import { usePBSKeyStore } from "./pbs-key-store";
 
 /**
@@ -78,13 +83,16 @@ function withClient(ui: ReactNode) {
 }
 
 describe("every path that ends a session", () => {
-  it.each<[name: string, end: () => Promise<void>]>([
+  // `revoked`: what the sign-out note says, or null for an end that is no
+  // sign-out and leaves none.
+  it.each<[name: string, end: () => Promise<void>, revoked: boolean | null]>([
     [
       "logout",
       async () => {
         server.routes[LOGOUT] = signedOut;
         await useAuthStore.getState().logout();
       },
+      true,
     ],
     [
       "logout, with the server call failing",
@@ -93,6 +101,7 @@ describe("every path that ends a session", () => {
           json({ error: "internal", message: "unavailable" }, 500);
         await useAuthStore.getState().logout();
       },
+      false,
     ],
     [
       "logoutAll",
@@ -100,6 +109,16 @@ describe("every path that ends a session", () => {
         server.routes[LOGOUT_ALL] = signedOut;
         await useAuthStore.getState().logoutAll();
       },
+      true,
+    ],
+    [
+      "logoutAll, with the server call failing",
+      async () => {
+        server.routes[LOGOUT_ALL] = () =>
+          json({ error: "internal", message: "unavailable" }, 500);
+        await useAuthStore.getState().logoutAll();
+      },
+      false,
     ],
     [
       "clearAuth",
@@ -107,6 +126,7 @@ describe("every path that ends a session", () => {
         useAuthStore.getState().clearAuth();
         return Promise.resolve();
       },
+      null,
     ],
     // The callback initialize() registers with api-client: a request is
     // answered 401 and the refresh that follows is refused too.
@@ -117,10 +137,11 @@ describe("every path that ends a session", () => {
           json({ error: "unauthorized", message: "expired" }, 401);
         await apiClient.get(apiPath`/api/v1/probe`).catch(() => undefined);
       },
+      null,
     ],
   ])(
-    "%s empties the query cache and every store that belongs to the session, and leaves a waiting PBS key",
-    async (_name, endTheSession) => {
+    "%s empties the query cache and every store that belongs to the session, leaves a waiting PBS key, and notes only a sign-out for the other tabs",
+    async (_name, endTheSession, revoked) => {
       server.routes["GET /api/v1/reader"] = (init) =>
         json({ owner: callerOf(init) });
       await signInAs(ADMIN);
@@ -149,6 +170,7 @@ describe("every path that ends a session", () => {
         expect(probe.holdsData(), file).toBe(true);
       }
       expect(usePBSKeyStore.getState().pending).toHaveLength(1);
+      const before = Date.now();
 
       await act(endTheSession);
 
@@ -161,8 +183,75 @@ describe("every path that ends a session", () => {
       // Owner-scoped, not session-scoped: waiting for its owner to sign back in.
       expect(usePBSKeyStore.getState().pending).toHaveLength(1);
       expect(usePBSKeyStore.getState().pending[0]?.keyText).toBe(PBS_KEY);
+      // useSignOutFromOtherTabs tells a sign-out from a resume that only could
+      // not reach the server by it, and goes by its `at`.
+      const note = JSON.parse(
+        localStorage.getItem(SIGNED_OUT_KEY) ?? "null",
+      ) as Partial<SignedOutNote> | null;
+      expect(
+        note && {
+          user: note.user,
+          revoked: note.revoked,
+          stamped:
+            typeof note.at === "number" &&
+            note.at >= before &&
+            note.at <= Date.now(),
+        },
+      ).toEqual(
+        revoked === null ? null : { user: ADMIN.id, revoked, stamped: true },
+      );
     },
   );
+});
+
+describe("a sign-out another tab follows", () => {
+  it("says nothing of a sign-out that is following another tab's", async () => {
+    await signInAs(ADMIN);
+    server.routes[LOGOUT] = signedOut;
+
+    await act(() => useAuthStore.getState().logout({ announce: false }));
+
+    expect(localStorage.getItem(SIGNED_OUT_KEY)).toBeNull();
+  });
+
+  it("lets a tab that follows one end its session and leave the stored user to it", async () => {
+    // A revoked sign-out removes it itself; here it may be a newer session's.
+    await signInAs(ADMIN);
+    expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
+
+    act(() => {
+      useAuthStore.getState().clearAuth({ byUser: true, keepStoredUser: true });
+    });
+
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    expect(getStoredUser()).toMatchObject({ id: ADMIN.id });
+  });
+
+  // A note older than it is about an earlier session: after a sign-in on a
+  // console tab's login page, the console comes back in that same page.
+  it.each<[string, () => Promise<void>, boolean]>([
+    [
+      "a sign-in marks when this tab's session began",
+      () => signInAs(ADMIN),
+      true,
+    ],
+    [
+      "control: a resume of the stored user does not, as notes from while the page loaded are about that session",
+      async () => {
+        localStorage.setItem(USER_KEY, JSON.stringify(ADMIN));
+        server.routes[REFRESH] = () => json(authResponse(ADMIN));
+        await useAuthStore.getState().initialize();
+      },
+      false,
+    ],
+  ])("%s", async (_name, begin, marked) => {
+    const before = Date.now();
+
+    await begin();
+
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
+    expect(useAuthStore.getState().sessionBeganAt >= before).toBe(marked);
+  });
 });
 
 describe("a fetch in flight when the session ends", () => {
@@ -552,6 +641,49 @@ describe("localStorage refusing a write while the session ends", () => {
   });
 });
 
+describe("signOutNoteApplies", () => {
+  const since = 1_000_000;
+  const now = 2_000_000;
+  it.each<[string, Partial<SignedOutNote> | null, boolean]>([
+    [
+      "takes one written as the session began",
+      { user: ADMIN.id, at: since },
+      true,
+    ],
+    ["takes one written while it ran", { user: ADMIN.id, at: now }, true],
+    // About an earlier session.
+    [
+      "does not take one written before it began",
+      { user: ADMIN.id, at: since - 1 },
+      false,
+    ],
+    // Browsers coarsen and jitter Date.now(), tab by tab.
+    [
+      "takes one dated within the clock's slack",
+      { user: ADMIN.id, at: now + 2_000 },
+      true,
+    ],
+    // Written before the clock was set back: it would read as fresh until the
+    // clock caught up.
+    [
+      "does not take one dated further ahead",
+      { user: ADMIN.id, at: now + 2_001 },
+      false,
+    ],
+    [
+      "does not take one whose time is not a number",
+      JSON.parse(
+        `{"user":"${ADMIN.id}","at":"1500000"}`,
+      ) as Partial<SignedOutNote>,
+      false,
+    ],
+    ["does not take another user's", { user: VIEWER.id, at: now }, false],
+    ["does not take a missing note", null, false],
+  ])("%s", (_name, note, applies) => {
+    expect(signOutNoteApplies(note, ADMIN.id, since, now)).toBe(applies);
+  });
+});
+
 describe("initialize", () => {
   // The two stores whose persisted copy a page rehydrates for the stored user.
   const rehydrated = [
@@ -587,6 +719,58 @@ describe("initialize", () => {
     await useAuthStore.getState().initialize();
 
     expect(useAuthStore.getState().isAuthenticated).toBe(resumes);
+    for (const probe of rehydrated) expect(probe?.holdsData()).toBe(resumes);
+  });
+
+  // The resume reached the server first, or the sign-out never did: writing
+  // the stored user back would let the next load resume it. One written since
+  // is a newer session's, and is not this tab's to remove.
+  it.each<[string, number, boolean, boolean, string | null]>([
+    [
+      "does not take up a session its user signed out of in another tab while the page loaded, nor write the stored user back",
+      1,
+      false,
+      false,
+      null,
+    ],
+    [
+      "does not take it up when a newer session has written the stored user since either, and leaves that",
+      1,
+      true,
+      false,
+      ADMIN.id,
+    ],
+    [
+      "control: takes it up when the sign-out was before the page loaded",
+      -1,
+      false,
+      true,
+      ADMIN.id,
+    ],
+  ])("%s", async (_name, sinceLoad, signedInAgain, resumes, stored) => {
+    const loadedAt = Date.now() - 60_000;
+    useAuthStore.setState({ sessionBeganAt: loadedAt });
+    localStorage.setItem(USER_KEY, JSON.stringify(ADMIN));
+    server.routes[REFRESH] = () => {
+      localStorage.removeItem(USER_KEY);
+      localStorage.setItem(
+        SIGNED_OUT_KEY,
+        JSON.stringify({
+          user: ADMIN.id,
+          revoked: false,
+          at: loadedAt + sinceLoad,
+        }),
+      );
+      if (signedInAgain) localStorage.setItem(USER_KEY, JSON.stringify(ADMIN));
+      return json(authResponse(ADMIN));
+    };
+    for (const probe of rehydrated) probe?.dirty();
+
+    await useAuthStore.getState().initialize();
+
+    expect(useAuthStore.getState().isAuthenticated).toBe(resumes);
+    expect(getStoredUser()?.id ?? null).toBe(stored);
+    // What the stores rehydrated is the dead session's, as at a refusal.
     for (const probe of rehydrated) expect(probe?.holdsData()).toBe(resumes);
   });
 });

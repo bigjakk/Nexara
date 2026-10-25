@@ -7,7 +7,7 @@ import {
   vi,
   type MockInstance,
 } from "vitest";
-import { useConsoleStore } from "./console-store";
+import { createConsoleSessionStore, useConsoleStore } from "./console-store";
 import { apiClient } from "@/lib/api-client";
 
 vi.mock("@/lib/api-client", () => ({
@@ -467,5 +467,44 @@ describe("console-store", () => {
       expect(useConsoleStore.getState().activeTabId).toBeNull();
       expect(useConsoleStore.getState().windowMode).toBe("hidden");
     });
+  });
+});
+
+describe("a console tab's own store", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // A console in a browser tab of its own runs its session on this store. The
+  // floating console's saved copy is another tab's: a write from here would
+  // replace its tabs with this session, which its next reload would dial.
+  it("keeps its session out of the floating console and its saved copy", () => {
+    useConsoleStore.setState({ tabs: [], activeTabId: null });
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const writes = () =>
+      setItem.mock.calls.filter(([key]) => key === "nexara-console-tabs");
+    const session = createConsoleSessionStore({
+      clusterID: "cluster01",
+      node: "pve-01",
+      type: "node_shell",
+      label: "Shell: pve-01",
+    });
+    const id = session.getState().activeTabId ?? "";
+
+    session.getState().updateTabStatus(id, "connected");
+    session.getState().reconnectTab(id);
+
+    expect(session.getState().tabs[0]?.reconnectKey).toBe(1);
+    expect(writes()).toEqual([]);
+    expect(useConsoleStore.getState().tabs).toEqual([]);
+
+    // Control: the floating console's own store does save, so the spy sees it.
+    useConsoleStore.getState().addTab({
+      clusterID: "cluster01",
+      node: "pve-01",
+      type: "node_shell",
+      label: "Shell: pve-01",
+    });
+    expect(writes()).toHaveLength(1);
   });
 });

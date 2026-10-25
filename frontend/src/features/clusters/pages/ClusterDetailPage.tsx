@@ -16,7 +16,8 @@ import { ArrowLeft, Terminal, Layers } from "lucide-react";
 import { DetailChip } from "@/components/DetailChip";
 import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
 import { Button } from "@/components/ui/button";
-import { useConsoleStore } from "@/stores/console-store";
+import { openConsole } from "@/features/console/lib/open-console";
+import type { ConsoleClickKeys } from "@/features/console/lib/console-session";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCluster, useClusterNodes } from "../api/cluster-queries";
 import { formatBytes, formatUptime } from "@/lib/format";
@@ -80,8 +81,6 @@ export function ClusterDetailPage() {
   );
   const nodes = nodesQuery.data ?? [];
 
-  const addTab = useConsoleStore((s) => s.addTab);
-  const showConsole = useConsoleStore((s) => s.showConsole);
   const { canConsole } = usePermissions();
 
   const clusterMetrics = useClusterMetrics(clusterId ?? "");
@@ -89,14 +88,11 @@ export function ClusterDetailPage() {
   const isLoading = clusterQuery.isLoading || nodesQuery.isLoading;
   const error = clusterQuery.error ?? nodesQuery.error;
 
-  function openNodeShell(nodeName: string) {
-    addTab({
-      clusterID: clusterId ?? "",
-      node: nodeName,
-      type: "node_shell",
-      label: `Shell: ${nodeName}`,
-    });
-    showConsole();
+  function openNodeShell(nodeName: string, keys: ConsoleClickKeys) {
+    openConsole(
+      { clusterID: clusterId ?? "", node: nodeName, type: "node_shell" },
+      keys,
+    );
   }
 
   return (
@@ -294,8 +290,8 @@ export function ClusterDetailPage() {
                                     size="sm"
                                     className="h-7 gap-1 px-2 text-xs"
                                     title="Open Shell"
-                                    onClick={() => {
-                                      openNodeShell(node.name);
+                                    onClick={(e) => {
+                                      openNodeShell(node.name, e);
                                     }}
                                   >
                                     <Terminal className="h-3.5 w-3.5" />

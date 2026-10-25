@@ -106,6 +106,7 @@ function leaveNothingBehind() {
       refreshInterval: 30,
       accentColor: "default",
       language: "en",
+      consoleOpenMode: "floating",
     },
   });
   useSidebarStore.setState({

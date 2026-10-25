@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MAX_CONSOLE_AUTO_RETRIES, type ConsoleTab } from "../types/console";
-import { useConsoleStore } from "@/stores/console-store";
+import { useConsoleSession, useConsoleStoreApi } from "@/stores/console-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMAction } from "@/features/vms/api/vm-queries";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
@@ -25,14 +25,21 @@ import {
 interface VNCViewerProps {
   tab: ConsoleTab;
   visible: boolean;
+  /** Show the toolbar's maximize/restore for the floating window (default). */
+  windowControls?: boolean;
 }
 
-export function VNCViewer({ tab, visible }: VNCViewerProps) {
+export function VNCViewer({
+  tab,
+  visible,
+  windowControls = true,
+}: VNCViewerProps) {
   const { id: tabId, clusterID, node, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
-  const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
-  const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
+  const store = useConsoleStoreApi();
+  const updateTabStatus = useConsoleSession((s) => s.updateTabStatus);
+  const resolveAndReconnect = useConsoleSession((s) => s.resolveAndReconnect);
   const [rfb, setRfb] = useState<RFB | null>(null);
   const retryCountRef = useRef(0);
 
@@ -65,10 +72,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     // Restored tabs rehydrate as "idle"; flip to connecting now that we are
     // actually dialling. Any other status is left alone — notably the parked
     // "guest-stopped", which connect() below deliberately declines to reopen.
-    if (
-      useConsoleStore.getState().tabs.find((t) => t.id === tabId)?.status ===
-      "idle"
-    ) {
+    if (store.getState().tabs.find((t) => t.id === tabId)?.status === "idle") {
       updateTabStatus(tabId, "connecting");
     }
 
@@ -91,7 +95,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const tabIsParked = () =>
-      useConsoleStore.getState().tabs.find((t) => t.id === tabId)?.status ===
+      store.getState().tabs.find((t) => t.id === tabId)?.status ===
       "guest-stopped";
 
     // Single funnel for auto-reconnects. Both the RFB disconnect event and
@@ -282,6 +286,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     reconnectKey,
     activated,
     mintToken,
+    store,
     updateTabStatus,
     resolveAndReconnect,
   ]);
@@ -289,10 +294,10 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
   // Declared after the connect effect on purpose — see the hook.
   useIdleTabOnUnmount(tabId);
 
-  const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
+  const isMinimized = useConsoleSession((s) => s.windowMode) === "minimized";
 
   function handleManualReconnect() {
-    useConsoleStore.getState().reconnectTab(tabId);
+    store.getState().reconnectTab(tabId);
   }
 
   return (
@@ -300,7 +305,9 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       className="flex h-full flex-col"
       style={{ display: visible ? "flex" : "none" }}
     >
-      {!isMinimized && <VNCToolbar rfb={rfb} tab={tab} />}
+      {!isMinimized && (
+        <VNCToolbar rfb={rfb} tab={tab} windowControls={windowControls} />
+      )}
       <div className="relative flex-1 overflow-hidden">
         <div
           ref={containerRef}

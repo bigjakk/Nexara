@@ -103,7 +103,8 @@ import {
   interfacePorts,
   interfaceTypeLabel,
 } from "@/features/networks/components/interface-fields";
-import { useConsoleStore } from "@/stores/console-store";
+import { openConsole } from "@/features/console/lib/open-console";
+import type { ConsoleClickKeys } from "@/features/console/lib/console-session";
 import { usePermissions } from "@/hooks/usePermissions";
 import { NodeAptRepositories } from "../components/NodeAptRepositories";
 import { NodePowerActions } from "../components/node/NodePowerActions";
@@ -164,19 +165,14 @@ export function NodeDetailPage() {
     );
   }, [clusterVMs, inventoryRows, clusterId, nodeId]);
   const liveMetric = clusterMetrics?.nodeMetrics.get(nodeId);
-  const addTab = useConsoleStore((s) => s.addTab);
-  const showConsole = useConsoleStore((s) => s.showConsole);
   const { canConsole, canManage } = usePermissions();
 
-  function openShell() {
+  function openShell(keys: ConsoleClickKeys) {
     if (!node) return;
-    addTab({
-      clusterID: clusterId,
-      node: node.name,
-      type: "node_shell",
-      label: `Shell: ${node.name}`,
-    });
-    showConsole();
+    openConsole(
+      { clusterID: clusterId, node: node.name, type: "node_shell" },
+      keys,
+    );
   }
 
   if (isLoading) {

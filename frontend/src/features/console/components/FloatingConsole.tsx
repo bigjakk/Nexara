@@ -7,10 +7,12 @@ import {
   Minimize2,
   Maximize,
   TerminalSquare,
+  ExternalLink,
 } from "lucide-react";
 import { useConsoleStore } from "@/stores/console-store";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/lib/utils";
+import { popOutConsoleTab } from "../lib/open-console";
 import { ConsoleTabBar } from "./ConsoleTabBar";
 import { QuickConnect } from "./QuickConnect";
 import { VNCViewer } from "./VNCViewer";
@@ -23,11 +25,14 @@ function TitleBar({
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  onPopOut,
   title,
 }: {
   onPointerDown: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: (e: React.PointerEvent) => void;
+  /** Moves the active session to a browser tab; absent with none open. */
+  onPopOut: (() => void) | undefined;
   title: string;
 }) {
   const windowMode = useConsoleStore((s) => s.windowMode);
@@ -57,6 +62,27 @@ function TitleBar({
       {/* Window controls — touch-sized on mobile; maximize is meaningless
           there (the console is always a full-screen takeover) */}
       <div className="flex items-center gap-1">
+        {onPopOut && (
+          <button
+            className={cn(
+              "flex items-center justify-center rounded hover:bg-accent",
+              isMobile ? "h-8 w-8" : "h-6 w-6",
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              // Once per click sequence: the next tab's button takes its place.
+              if (e.detail > 1) return;
+              onPopOut();
+            }}
+            // Nor does a double-click maximize the window under it.
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+            }}
+            title="Open in new tab"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           className={cn(
             "flex items-center justify-center rounded hover:bg-accent",
@@ -276,6 +302,11 @@ export function FloatingConsole() {
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
   const activeLabel = activeTab?.label ?? "Console";
+  const popOut = activeTab
+    ? () => {
+        popOutConsoleTab(activeTab.id);
+      }
+    : undefined;
 
   // Every window mode renders ONE tree, with the console content always in
   // the same slot. Minimize used to return a separate picture-in-picture
@@ -336,6 +367,7 @@ export function FloatingConsole() {
           onPointerDown={handleDragDown}
           onPointerMove={handleDragMove}
           onPointerUp={handleDragUp}
+          onPopOut={popOut}
           title={activeLabel}
         />
       )}
@@ -399,6 +431,18 @@ export function FloatingConsole() {
                   : "opacity-0 transition-opacity group-hover:opacity-100",
               )}
             >
+              {popOut && (
+                <button
+                  className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-white/25 hover:text-white"
+                  onClick={(e) => {
+                    if (e.detail > 1) return;
+                    popOut();
+                  }}
+                  title="Open in new tab"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </button>
+              )}
               <button
                 className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-white/25 hover:text-white"
                 onClick={showConsole}

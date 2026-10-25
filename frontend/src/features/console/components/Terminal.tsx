@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { MAX_CONSOLE_AUTO_RETRIES, type ConsoleTab } from "../types/console";
-import { useConsoleStore } from "@/stores/console-store";
+import { useConsoleSession, useConsoleStoreApi } from "@/stores/console-store";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import { useIdleTabOnUnmount } from "../hooks/useIdleTabOnUnmount";
 import {
@@ -15,6 +15,17 @@ import {
 interface TerminalProps {
   tab: ConsoleTab;
   visible: boolean;
+}
+
+/**
+ * Opens a link the guest printed in a tab of its own, with no opener and no
+ * referrer. Opened from this page, as xterm's and the addon's own handlers do,
+ * it would share this tab's browsing context group — and start with a copy of
+ * its sessionStorage, where a console tab keeps who it runs for — and carry
+ * Nexara's address as its referrer.
+ */
+function openGuestLink(uri: string) {
+  window.open(uri, "_blank", "noopener,noreferrer");
 }
 
 function buildConsoleWsUrl(
@@ -44,8 +55,9 @@ export function Terminal({ tab, visible }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
-  const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
+  const store = useConsoleStoreApi();
+  const updateTabStatus = useConsoleSession((s) => s.updateTabStatus);
+  const resolveAndReconnect = useConsoleSession((s) => s.resolveAndReconnect);
   const retryCountRef = useRef(0);
 
   // Reuses a still-valid scoped token across this tab's reconnect cycle
@@ -70,7 +82,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
   useGuestPowerSync(tab);
 
   // Minimizing must not resize the guest's pty — see the ResizeObserver below.
-  const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
+  const isMinimized = useConsoleSession((s) => s.windowMode) === "minimized";
 
   useEffect(() => {
     if (!activated) return;
@@ -79,10 +91,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
     // Restored tabs rehydrate as "idle"; flip to connecting now that we are
     // actually dialling. Any other status is left alone — notably the parked
     // "guest-stopped", which connect() below deliberately declines to reopen.
-    if (
-      useConsoleStore.getState().tabs.find((t) => t.id === tabId)?.status ===
-      "idle"
-    ) {
+    if (store.getState().tabs.find((t) => t.id === tabId)?.status === "idle") {
       updateTabStatus(tabId, "connecting");
     }
 
@@ -103,10 +112,36 @@ export function Terminal({ tab, visible }: TerminalProps) {
       },
       scrollback: 5000,
       convertEol: true,
+      // OSC 8 links, whose text need not be where they go: asked first, as
+      // xterm's own handler does, but naming the host the parser finds, so a
+      // user part before it cannot pass for it and a lookalike shows as
+      // punycode, and then the whole URL as the parser reads it (anything
+      // hidden in the rest percent-encoded). xterm passes only http(s) ones,
+      // and so does this, should that change.
+      linkHandler: {
+        activate: (_event, uri) => {
+          let url: URL;
+          try {
+            url = new URL(uri);
+          } catch {
+            return;
+          }
+          if (url.protocol !== "http:" && url.protocol !== "https:") return;
+          if (
+            confirm(
+              `Do you want to navigate to ${url.host}?\n\n${url.href}\n\nWARNING: This link could potentially be dangerous`,
+            )
+          ) {
+            openGuestLink(url.href);
+          }
+        },
+      },
     });
 
     const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
+    const webLinksAddon = new WebLinksAddon((_event, uri) => {
+      openGuestLink(uri);
+    });
 
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
@@ -142,7 +177,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
     let observer: ResizeObserver | null = null;
 
     const tabIsParked = () =>
-      useConsoleStore.getState().tabs.find((t) => t.id === tabId)?.status ===
+      store.getState().tabs.find((t) => t.id === tabId)?.status ===
       "guest-stopped";
 
     const connect = async () => {
@@ -291,7 +326,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
           // re-fit when the window comes back (the effect below). This never
           // mattered before, because minimizing used to destroy the terminal
           // and dial a brand-new shell.
-          if (useConsoleStore.getState().windowMode === "minimized") return;
+          if (store.getState().windowMode === "minimized") return;
           try {
             fitAddon.fit();
           } catch {
@@ -326,6 +361,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
     reconnectKey,
     activated,
     mintToken,
+    store,
     updateTabStatus,
     resolveAndReconnect,
   ]);

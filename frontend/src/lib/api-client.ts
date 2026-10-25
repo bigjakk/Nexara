@@ -11,8 +11,9 @@ import {
 // show "Welcome, alice" before /auth/refresh resolves. Shared by every tab of
 // the browser, as the refresh cookie is, so it also names whose session that
 // cookie belongs to (auth-store's logout() reads it for that, and clearTokens()
-// leaves another user's alone).
-const USER_KEY = "nexara_user";
+// leaves another user's alone). Another tab sees each change to it as a
+// `storage` event on this key (useSignOutFromOtherTabs).
+export const USER_KEY = "nexara_user";
 
 // Legacy localStorage keys used by builds before the cookie migration. We
 // purge any value at these keys on storeTokens / clearTokens so existing
@@ -173,7 +174,16 @@ export function storeTokens(res: AuthResponse) {
   writeTokens(res);
 }
 
-export function clearTokens() {
+/**
+ * `keepStoredUser`: the record is not this session's to remove. A tab following
+ * another tab's sign-out that the server revoked (useSignOutFromOtherTabs)
+ * passes it, as a revoked session's refresh writes none, and so does a boot
+ * that will not take up a session signed out while it loaded, which has written
+ * none yet. That sign-out removes the record itself, so one that names this
+ * user here is on its way out, a newer session's, or written back by a tab
+ * still signed in — none of them this tab's.
+ */
+export function clearTokens({ keepStoredUser = false } = {}) {
   // Whose token this tab holds, taken before it is dropped: it is what tells the
   // record that goes, below, from the one that stays.
   const mine = accessTokenUserId;
@@ -203,7 +213,7 @@ export function clearTokens() {
   // it is the boot's (nothing resumed, or a resume that failed) or stale, and
   // goes as it always did. So does one that names no one — a corrupt value is
   // no session's.
-  if (mine === null || !storedUserIsAnotherUsers(mine)) {
+  if (!keepStoredUser && (mine === null || !storedUserIsAnotherUsers(mine))) {
     localStorage.removeItem(USER_KEY);
   }
   purgeLegacyTokenKeys();
@@ -1076,6 +1086,26 @@ async function tokenFromRefresh(courtesy: boolean): Promise<string | null> {
     throw err;
   }
   return refreshed.access_token;
+}
+
+/**
+ * Asks the server whether the session this tab holds is still live, as a
+ * refresh that is needed does (tokenFromRefresh): a refusal ends it here the
+ * way every refusal does, and an answer rotates it and writes the stored user
+ * back (one naming someone else begins their session here, as any refresh's
+ * would). A failure to ask leaves the session as it was, behind the usual
+ * refresh back-off. For a tab with reason to doubt its session and no request
+ * of its own to find out with: another tab took the stored user away without a
+ * sign-out to explain it (useSignOutFromOtherTabs).
+ */
+export async function confirmSession(): Promise<void> {
+  if (signedOut || accessTokenInMemory === null) return;
+  try {
+    await tokenFromRefresh(false);
+  } catch {
+    // Could not ask (no network, a 5xx, a session that changed hands
+    // meanwhile): nothing is known that was not known before.
+  }
 }
 
 /**

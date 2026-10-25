@@ -221,6 +221,21 @@ describe("the login page a signed-out user is sent to", () => {
     expect(router.state.location.search).toBe("?returnTo=%2Fclusters");
   });
 
+  it("carries the page's query too: a console tab's page is named by nothing else", async () => {
+    signedIn();
+    const router = renderApp("/clusters?tab=nodes");
+    expect(await screen.findByText("clusters page")).toBeInTheDocument();
+
+    act(() => {
+      useAuthStore.getState().clearAuth();
+    });
+
+    expect(await screen.findByText("login page")).toBeInTheDocument();
+    expect(router.state.location.search).toBe(
+      "?returnTo=%2Fclusters%3Ftab%3Dnodes",
+    );
+  });
+
   it("still carries the page for someone who arrives without a session: a page load, with nothing signed out in it", async () => {
     // A bookmark or an address typed into the bar is a full page load, which
     // starts the in-memory store with nothing signed out.

@@ -44,6 +44,7 @@ import {
   ApiClientError,
   apiFetch,
   clearTokens,
+  confirmSession,
   currentSessionEpoch,
   getStoredUser,
   setAuthRefreshCallback,
@@ -1118,5 +1119,24 @@ describe("through the auth store: what the user is left with", () => {
     for (const [file, probe] of Object.entries(PER_SESSION_STORES)) {
       expect(probe.holdsData(), file).toBe(false);
     }
+  });
+});
+
+describe("confirmSession", () => {
+  // Asked when another tab took the stored user away, which a sign-out does,
+  // and so does a resume there that only could not reach the server: only a
+  // refusal may end this tab's session.
+  it.each([
+    ["ends a session the server refuses", expired, 900, 1],
+    // A token run out makes the refresh's failure throw: it must not escape.
+    ["keeps a session the server cannot be asked about", down, -3_600, 0],
+  ])("%s", async (_, answer, expiresIn, failures) => {
+    storeTokens(authResponse(ADMIN, { expiresIn }));
+    server.routes[REFRESH] = answer;
+
+    await confirmSession();
+
+    expect(server.times(REFRESH)).toBe(1);
+    expect(onFailure).toHaveBeenCalledTimes(failures);
   });
 });

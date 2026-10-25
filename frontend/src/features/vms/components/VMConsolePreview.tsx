@@ -11,7 +11,8 @@ interface VMConsolePreviewProps {
   clusterId: string;
   node: string;
   vmid: number;
-  onOpen: () => void;
+  /** Gets the click, whose Ctrl/⌘ asks for the console in a new tab. */
+  onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }
 
 type PreviewStatus = "connecting" | "connected" | "paused" | "error";

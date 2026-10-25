@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type RFB from "@novnc/novnc";
 import type { ConsoleTab } from "../types/console";
-import { useConsoleStore } from "@/stores/console-store";
+import { useConsoleSession } from "@/stores/console-store";
 import { useVM, useVMAction, useVMConfig } from "@/features/vms/api/vm-queries";
 import { lifecycleActions } from "@/features/vms/lib/vm-action-defs";
 import type { VMAction } from "@/features/vms/types/vm";
@@ -76,11 +76,20 @@ function describeChar(ch: string): string {
 interface VNCToolbarProps {
   rfb: RFB | null;
   tab: ConsoleTab;
+  /**
+   * The floating window's maximize/restore. A console in a browser tab of its
+   * own has no window to size; its page offers fullscreen instead.
+   */
+  windowControls?: boolean;
 }
 
-export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
-  const windowMode = useConsoleStore((s) => s.windowMode);
-  const setWindowMode = useConsoleStore((s) => s.setWindowMode);
+export function VNCToolbar({
+  rfb,
+  tab,
+  windowControls = true,
+}: VNCToolbarProps) {
+  const windowMode = useConsoleSession((s) => s.windowMode);
+  const setWindowMode = useConsoleSession((s) => s.setWindowMode);
   const isMaximized = windowMode === "maximized";
   const [scaleMode, setScaleMode] = useState<"scale" | "resize">("scale");
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -404,19 +413,21 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
       </Button>
 
       {/* Maximize / Restore (console window, not browser) */}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={handleToggleMaximize}
-        title={isMaximized ? "Restore" : "Maximize"}
-        className="h-7 px-2"
-      >
-        {isMaximized ? (
-          <Minimize2 className="h-3.5 w-3.5" />
-        ) : (
-          <Maximize2 className="h-3.5 w-3.5" />
-        )}
-      </Button>
+      {windowControls && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleToggleMaximize}
+          title={isMaximized ? "Restore" : "Maximize"}
+          className="h-7 px-2"
+        >
+          {isMaximized ? (
+            <Minimize2 className="h-3.5 w-3.5" />
+          ) : (
+            <Maximize2 className="h-3.5 w-3.5" />
+          )}
+        </Button>
+      )}
 
       {/* Scale toggle */}
       <Button

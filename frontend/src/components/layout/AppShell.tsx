@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { Toaster } from "sonner";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import {
   Info,
@@ -30,13 +29,11 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useEventInvalidation } from "@/hooks/useEventInvalidation";
-import { useWebSocketStore } from "@/stores/websocket-store";
+import { useLiveUpdates } from "@/hooks/useLiveUpdates";
+import { useLoadBranding } from "@/hooks/useLoadBranding";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useBranding } from "@/features/settings/api/settings-queries";
 import { useBrandingStore } from "@/stores/branding-store";
 import { useChangelogStore } from "@/stores/changelog-store";
-import { useThemeStore } from "@/stores/theme-store";
 import {
   extractBaseVersion,
   getEntriesToShow,
@@ -50,6 +47,7 @@ import { TaskProgressDialog } from "./TaskProgressDialog";
 import { ThemeToggle } from "./ThemeToggle";
 import { ChangelogDialog } from "./ChangelogDialog";
 import { AboutDialog } from "./AboutDialog";
+import { AppToaster } from "./AppToaster";
 import { FloatingConsole } from "@/features/console/components/FloatingConsole";
 import { PendingPBSKeyNavigationGuard } from "@/features/storage/components/PendingPBSKey";
 import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
@@ -73,25 +71,8 @@ export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout, logoutAll } = useAuth();
-  const wsConnect = useWebSocketStore((s) => s.connect);
-  const wsDisconnect = useWebSocketStore((s) => s.disconnect);
   const { data: clusters } = useClusters();
-  const brandingQuery = useBranding();
-  const loadBranding = useBrandingStore((s) => s.loadFromBranding);
-
-  useEffect(() => {
-    wsConnect();
-    return () => {
-      wsDisconnect();
-    };
-  }, [wsConnect, wsDisconnect]);
-
-  // Load branding settings on mount
-  useEffect(() => {
-    if (brandingQuery.data) {
-      loadBranding(brandingQuery.data);
-    }
-  }, [brandingQuery.data, loadBranding]);
+  const brandingQuery = useLoadBranding();
 
   // For dev builds, append "-Dev" to the browser tab title
   const { data: versionInfo } = useQuery({
@@ -165,7 +146,7 @@ export function AppShell() {
     () => (clusters ?? []).map((c) => c.id),
     [clusters],
   );
-  useEventInvalidation(clusterIds);
+  useLiveUpdates(clusterIds);
 
   const isMobile = useIsMobile();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -175,8 +156,6 @@ export function AppShell() {
   useEffect(() => {
     setMobileNavOpen(false);
   }, [location, isMobile]);
-
-  const themeMode = useThemeStore((s) => s.mode);
 
   const handleLogout = () => {
     void logout();
@@ -316,7 +295,7 @@ export function AppShell() {
         <PendingPBSKeyNavigationGuard />
       </div>
       <FloatingConsole />
-      <Toaster position="top-right" richColors closeButton theme={themeMode} />
+      <AppToaster />
       <ChangelogDialog
         open={changelogOpen}
         onOpenChange={handleChangelogOpenChange}

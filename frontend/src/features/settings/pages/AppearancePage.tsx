@@ -1,6 +1,14 @@
 import { useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Sun, Moon, Monitor, Check, Palette, Globe } from "lucide-react";
+import {
+  Sun,
+  Moon,
+  Monitor,
+  Check,
+  Palette,
+  Globe,
+  TerminalSquare,
+} from "lucide-react";
 import { supportedLanguages } from "@/lib/i18n";
 
 import { Button } from "@/components/ui/button";
@@ -23,6 +31,7 @@ import { useThemeStore } from "@/stores/theme-store";
 import {
   usePreferencesStore,
   type ByteUnit,
+  type ConsoleOpenMode,
   type DateFormat,
 } from "@/stores/preferences-store";
 import {
@@ -112,6 +121,11 @@ const dateFormatOptions: {
   { value: "relative", labelKey: "relative", exampleKey: "relativeExample" },
   { value: "iso", labelKey: "iso8601", exampleKey: "isoExample" },
   { value: "locale", labelKey: "local", exampleKey: "localeExample" },
+];
+
+const consoleOpenModeOptions: { value: ConsoleOpenMode; labelKey: string }[] = [
+  { value: "floating", labelKey: "consoleFloatingWindow" },
+  { value: "tab", labelKey: "consoleNewTab" },
 ];
 
 const refreshIntervalOptions = [
@@ -334,6 +348,39 @@ export function AppearancePage() {
               <SelectContent>
                 {refreshIntervalOptions.map((opt) => (
                   <SelectItem key={opt.value} value={String(opt.value)}>
+                    {t(opt.labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Console */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TerminalSquare className="h-5 w-5" />
+            {t("console")}
+          </CardTitle>
+          <CardDescription>{t("consoleOpenDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <Label>{t("openConsolesIn")}</Label>
+            <Select
+              value={preferences.consoleOpenMode}
+              onValueChange={(v) => {
+                savePreferences({ consoleOpenMode: v as ConsoleOpenMode });
+              }}
+            >
+              <SelectTrigger className="w-full max-w-80">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {consoleOpenModeOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
                     {t(opt.labelKey)}
                   </SelectItem>
                 ))}

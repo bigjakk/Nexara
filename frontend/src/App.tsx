@@ -3,8 +3,10 @@ import { createBrowserRouter } from "react-router-dom";
 import { AppRoot } from "@/components/AppRoot";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { RequirePermission } from "@/components/auth/RequirePermission";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppShell } from "@/components/layout/AppShell";
 import { PageLoader } from "@/components/PageLoader";
+import { CONSOLE_SESSION_PATH } from "@/features/console/lib/console-session";
 import { LoginPage } from "@/features/auth/pages/LoginPage";
 import { RegisterPage } from "@/features/auth/pages/RegisterPage";
 import { DashboardPage } from "@/features/dashboard/pages/DashboardPage";
@@ -69,6 +71,11 @@ const EventsPage = lazy(() =>
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
     default: m.ConsolePage,
+  })),
+);
+const ConsoleSessionPage = lazy(() =>
+  import("@/features/console/pages/ConsoleSessionPage").then((m) => ({
+    default: m.ConsoleSessionPage,
   })),
 );
 const UsersPage = lazy(() =>
@@ -420,6 +427,18 @@ const router = createBrowserRouter([
             ),
           },
         ],
+      },
+      {
+        // A console in a browser tab of its own: signed in, but outside the
+        // shell. Its own boundary, as AppShell gives every page one.
+        path: CONSOLE_SESSION_PATH,
+        element: (
+          <ErrorBoundary>
+            <LazyPage>
+              <ConsoleSessionPage />
+            </LazyPage>
+          </ErrorBoundary>
+        ),
       },
     ],
   },

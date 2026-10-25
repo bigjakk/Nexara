@@ -49,7 +49,8 @@ import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
  * that was never dismissed (Observer.subscribe replays getActiveToasts(), sonner
  * 2.0.8; a toast on screen when its Toaster unmounted, and one raised while none
  * was mounted, were both shown by the next Toaster in jsdom with the real
- * library). The Toaster is AppShell's, and ProtectedRoute remounts AppShell with
+ * library). The Toaster is AppShell's (or a console tab's, ConsoleSessionPage),
+ * and ProtectedRoute remounts either with
  * everything under it on every path that ends or hands over a session, so what
  * the previous user had on screen — a failure naming a node, in the server's
  * words — would be shown again to the next one once they are in. toast.dismiss()
@@ -110,7 +111,8 @@ import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
  *   would destroy a key its owner has not saved yet. It drops a key itself,
  *   when a different user signs in. It must not be imported from here, either:
  *   it imports auth-store, which imports this. websocket-store is not reset
- *   here: AppShell disconnects it when it unmounts.
+ *   here: AppShell, or a console tab, disconnects it when it unmounts
+ *   (useLiveUpdates).
  *
  * A new store has to be classified in stores/session-reset.test.ts, which
  * fails until it is: one that belongs to the session gets a probe in

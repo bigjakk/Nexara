@@ -5,12 +5,16 @@ import { EmptyState } from "@/components/EmptyState";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { useConsoleStore } from "@/stores/console-store";
+import { usePreferencesStore } from "@/stores/preferences-store";
 import { QuickConnect } from "../components/QuickConnect";
 
 export function ConsolePage() {
   const { t: td } = useTranslation("dashboard");
   const setWindowMode = useConsoleStore((s) => s.setWindowMode);
   const tabs = useConsoleStore((s) => s.tabs);
+  const opensInTab = usePreferencesStore(
+    (s) => s.preferences.consoleOpenMode === "tab",
+  );
   const { data: clusters } = useClusters();
   const hasClusters = (clusters?.length ?? 0) > 0;
 
@@ -37,7 +41,11 @@ export function ConsolePage() {
     <div className="flex h-full items-center justify-center text-muted-foreground">
       <div className="space-y-2 text-center">
         <TerminalSquare className="mx-auto h-12 w-12 opacity-30" />
-        <p>Console sessions run in the floating window.</p>
+        <p>
+          {opensInTab
+            ? "Consoles open in a new browser tab."
+            : "Console sessions run in the floating window."}
+        </p>
         {tabs.length === 0 && (
           <div className="flex justify-center pt-2">
             <QuickConnect />

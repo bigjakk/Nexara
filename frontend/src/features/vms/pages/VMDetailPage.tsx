@@ -29,6 +29,8 @@ import { PressureChart } from "@/features/dashboard/components/PressureChart";
 import { useLiveSeries } from "@/features/dashboard/hooks/useLiveSeries";
 import { latestValue } from "@/lib/metric-series";
 import { useConsoleStore } from "@/stores/console-store";
+import { openConsole } from "@/features/console/lib/open-console";
+import type { ConsoleClickKeys } from "@/features/console/lib/console-session";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterMetrics } from "@/hooks/useMetrics";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -101,8 +103,6 @@ export function VMDetailPage() {
   const liveMetric = clusterMetrics?.vmMetrics.get(vmId);
 
   const { data: nodes } = useClusterNodes(clusterId);
-  const addTab = useConsoleStore((s) => s.addTab);
-  const showConsole = useConsoleStore((s) => s.showConsole);
   const { canConsole } = usePermissions();
   const updateTabNode = useConsoleStore((s) => s.updateTabNode);
 
@@ -165,30 +165,21 @@ export function VMDetailPage() {
     classifyOS(vm.config_ostype) === "windows" ||
     classifyOS(vm.ostype) === "windows";
 
-  function openConsole(type: "terminal" | "vnc") {
+  function openGuestConsole(type: "terminal" | "vnc", keys: ConsoleClickKeys) {
     if (!vm) return;
-    if (type === "vnc") {
-      addTab({
+    openConsole(
+      {
         clusterID: clusterId,
         node: nodeName,
         vmid: vm.vmid,
-        type: "vm_vnc",
-        label: `VNC: ${vm.name}`,
+        type:
+          type === "vnc" ? "vm_vnc" : kind === "ct" ? "ct_vnc" : "vm_serial",
         resourceId: vmId,
         kind,
-      });
-    } else {
-      addTab({
-        clusterID: clusterId,
-        node: nodeName,
-        vmid: vm.vmid,
-        type: kind === "ct" ? "ct_vnc" : "vm_serial",
-        label: `${kind === "ct" ? "CT" : "Serial"}: ${vm.name}`,
-        resourceId: vmId,
-        kind,
-      });
-    }
-    showConsole();
+        guestName: vm.name,
+      },
+      keys,
+    );
   }
 
   return (
@@ -206,8 +197,8 @@ export function VMDetailPage() {
               clusterId={clusterId}
               node={nodeName}
               vmid={vm.vmid}
-              onOpen={() => {
-                openConsole("vnc");
+              onOpen={(e) => {
+                openGuestConsole("vnc", e);
               }}
             />
           </div>
@@ -327,8 +318,8 @@ export function VMDetailPage() {
             variant="outline"
             size="sm"
             className="gap-1.5"
-            onClick={() => {
-              openConsole("vnc");
+            onClick={(e) => {
+              openGuestConsole("vnc", e);
             }}
             disabled={vm.template}
           >
@@ -341,8 +332,8 @@ export function VMDetailPage() {
             variant="outline"
             size="sm"
             className="gap-1.5"
-            onClick={() => {
-              openConsole("terminal");
+            onClick={(e) => {
+              openGuestConsole("terminal", e);
             }}
             disabled={vm.template}
           >

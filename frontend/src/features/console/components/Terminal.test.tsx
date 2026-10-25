@@ -3,7 +3,11 @@ import { act, waitFor } from "@testing-library/react";
 // useGuestPowerSync → useVM needs a QueryClientProvider.
 import { renderWithProviders } from "@/test/test-utils";
 import { Terminal } from "./Terminal";
-import { useConsoleStore } from "@/stores/console-store";
+import {
+  ConsoleStoreContext,
+  createConsoleSessionStore,
+  useConsoleStore,
+} from "@/stores/console-store";
 import { shellTab } from "../console.fixtures";
 import {
   MockWebSocket,
@@ -28,8 +32,19 @@ vi.mock("../api/console-queries", async (importOriginal) => {
 });
 
 // Mock xterm.js with class implementations
+const { termOptions } = vi.hoisted(() => ({
+  termOptions: {
+    current: null as {
+      linkHandler?: { activate: (e: MouseEvent, uri: string) => void };
+    } | null,
+  },
+}));
+
 vi.mock("@xterm/xterm", () => {
   class MockTerminal {
+    constructor(options: typeof termOptions.current) {
+      termOptions.current = options;
+    }
     loadAddon = vi.fn();
     open = vi.fn();
     write = vi.fn();
@@ -53,8 +68,19 @@ vi.mock("@xterm/addon-fit", () => {
   return { FitAddon: MockFitAddon };
 });
 
+type LinkActivate = (e: MouseEvent, uri: string) => void;
+
+const { linkHandler } = vi.hoisted(() => ({
+  linkHandler: {
+    current: null as ((e: MouseEvent, uri: string) => void) | null,
+  },
+}));
+
 vi.mock("@xterm/addon-web-links", () => {
   class MockWebLinksAddon {
+    constructor(handler?: (e: MouseEvent, uri: string) => void) {
+      linkHandler.current = handler ?? null;
+    }
     dispose = vi.fn();
   }
   return { WebLinksAddon: MockWebLinksAddon };
@@ -73,6 +99,8 @@ class MockResizeObserver {
 Object.assign(globalThis, { ResizeObserver: MockResizeObserver });
 
 beforeEach(() => {
+  linkHandler.current = null;
+  termOptions.current = null;
   installMockWebSocket();
   lastResizeCallback = null;
   fitSpy.mockClear();
@@ -83,6 +111,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const tab = shellTab();
@@ -111,6 +141,77 @@ describe("Terminal", () => {
       "nexara.token",
       "nexara.token.scoped-test-token",
     ]);
+  });
+
+  it("keeps its status in the console store it is given", async () => {
+    // A console in a browser tab of its own runs this on a store of its own
+    // (ConsoleStoreContext). Written to the floating console's instead, its
+    // status would never reach the page, which would spin on "Connecting".
+    const session = createConsoleSessionStore(shellTab());
+    const own = session.getState().tabs[0] ?? shellTab();
+    renderWithProviders(
+      <ConsoleStoreContext value={session}>
+        <Terminal tab={own} visible={true} />
+      </ConsoleStoreContext>,
+    );
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    act(() => {
+      MockWebSocket.instances[0]?.deliverConnected();
+    });
+
+    expect(session.getState().tabs[0]?.status).toBe("connected");
+  });
+
+  const spoof = "https://nexara.example.com@xn--nxara-zwe.example.com/";
+  it.each<[string, () => LinkActivate | null, string, string | null, string[]]>(
+    [
+      [
+        "opens a URL the guest prints with no opener and no referrer",
+        () => linkHandler.current,
+        "https://example.com/",
+        "https://example.com/",
+        [],
+      ],
+      // OSC 8: its text need not be where it goes. The host is the parser's:
+      // not the user part before it, and a lookalike (U+0435, a Cyrillic "e",
+      // here) as punycode.
+      [
+        "asks before opening an OSC 8 link, naming the host the parser finds",
+        () => termOptions.current?.linkHandler?.activate ?? null,
+        "https://nexara.example.com@n\u0435xara.example.com/",
+        spoof,
+        [
+          `Do you want to navigate to xn--nxara-zwe.example.com?\n\n${spoof}\n\nWARNING: This link could potentially be dangerous`,
+        ],
+      ],
+      [
+        "does not open an OSC 8 link to another scheme",
+        () => termOptions.current?.linkHandler?.activate ?? null,
+        "file:///etc/passwd",
+        null,
+        [],
+      ],
+    ],
+  )("%s", async (_, handler, printed, opened, asked) => {
+    // Opened from this page it would share this tab's browsing context
+    // group, and with it a copy of its sessionStorage.
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const confirm = vi.fn<(message?: string) => boolean>(() => true);
+    vi.stubGlobal("confirm", confirm);
+    renderWithProviders(<Terminal tab={tab} visible={true} />);
+    await waitFor(() => {
+      expect(handler()).not.toBeNull();
+    });
+
+    handler()?.(new MouseEvent("click"), printed);
+
+    expect(confirm.mock.calls.map(([message]) => message)).toEqual(asked);
+    expect(open.mock.calls).toEqual(
+      opened === null ? [] : [[opened, "_blank", "noopener,noreferrer"]],
+    );
   });
 
   it("does not dial a background tab until it is first shown", async () => {

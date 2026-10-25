@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useConsoleStore } from "@/stores/console-store";
+import { useConsoleStoreApi } from "@/stores/console-store";
 import type { ConsoleStatus } from "../types/console";
 
 /**
@@ -23,10 +23,11 @@ const LIVE_STATUSES: ReadonlySet<ConsoleStatus> = new Set<ConsoleStatus>([
  *
  * Two things about the shape are load-bearing:
  *
- * - **Empty deps, tabId read through a ref.** The cleanup must run exactly
- *   once, at unmount. Listing tabId would make it fire on every id change
- *   instead — harmless today, since the viewers are keyed by tab id and so a
- *   new id is a new component, but it is not what this is for.
+ * - **Empty deps, tabId and the store read through refs.** The cleanup must
+ *   run exactly once, at unmount. Listing tabId would make it fire on every id
+ *   change instead — harmless today, since the floating console keys its
+ *   viewers by tab id and a console page's tab id never changes, but it is not
+ *   what this is for.
  * - **Call it after the connect effect.** React runs cleanups in the order the
  *   effects were defined, so this one lands after the socket teardown and
  *   synchronously before any replacement mounts, and cannot stamp "idle" on
@@ -35,11 +36,14 @@ const LIVE_STATUSES: ReadonlySet<ConsoleStatus> = new Set<ConsoleStatus>([
 export function useIdleTabOnUnmount(tabId: string) {
   const tabIdRef = useRef(tabId);
   tabIdRef.current = tabId;
+  const store = useConsoleStoreApi();
+  const storeRef = useRef(store);
+  storeRef.current = store;
 
   useEffect(
     () => () => {
       const id = tabIdRef.current;
-      const { tabs, updateTabStatus } = useConsoleStore.getState();
+      const { tabs, updateTabStatus } = storeRef.current.getState();
       const status = tabs.find((t) => t.id === id)?.status;
       if (status !== undefined && LIVE_STATUSES.has(status)) {
         updateTabStatus(id, "idle");

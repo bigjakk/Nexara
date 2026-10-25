@@ -122,7 +122,7 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 - **Maintenance** — per-node HA enter/exit and cluster-wide HA arm/disarm (PVE 9.2+), with maintenance indicators in the tree and node views
 
 ### Consoles
-- **Floating console** — detachable, draggable iLO/iDRAC-style window with power controls, keyboard macros, screenshots, and virtual-media (ISO) mounting
+- **Floating console** — detachable, draggable iLO/iDRAC-style window with power controls, keyboard macros, screenshots, and virtual-media (ISO) mounting — or a browser tab of its own per console, with fullscreen
 - **VNC** — browser-based graphical console (noVNC)
 - **Serial** — xterm.js terminal for headless systems
 - **Node shell** — direct Proxmox node access

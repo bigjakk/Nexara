@@ -10,6 +10,7 @@ const defaultPreferences: UserPreferences = {
   refreshInterval: 30,
   accentColor: "default",
   language: "en",
+  consoleOpenMode: "floating",
 };
 
 describe("preferences-store — defaults", () => {
@@ -187,6 +188,7 @@ describe("preferences-store — loadFromJSON", () => {
       refreshInterval: 5,
       accentColor: "red",
       language: "en",
+      consoleOpenMode: "tab",
     };
     usePreferencesStore.getState().loadFromJSON(full);
     expect(usePreferencesStore.getState().preferences).toEqual(full);

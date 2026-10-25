@@ -19,7 +19,8 @@ import {
   type VMContextTarget,
 } from "@/stores/vm-context-menu-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
-import { useConsoleStore } from "@/stores/console-store";
+import { openConsole } from "@/features/console/lib/open-console";
+import type { ConsoleClickKeys } from "@/features/console/lib/console-session";
 import { usePermissions } from "@/hooks/usePermissions";
 import { FavoriteContextItem } from "@/features/favorites/components/FavoriteMenuItem";
 import type { VMAction } from "../types/vm";
@@ -51,8 +52,6 @@ export function VMContextMenu({
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
   const actionMutation = useVMAction();
-  const addTab = useConsoleStore((s) => s.addTab);
-  const showConsole = useConsoleStore((s) => s.showConsole);
   const { canConsole } = usePermissions();
 
   const normalizedStatus = target.status.toLowerCase();
@@ -107,21 +106,22 @@ export function VMContextMenu({
     if (action === "destroy") openDestroy(target);
   }
 
-  function handleOpenConsole() {
+  // onClick rather than onSelect: Radix hands onSelect an event without the
+  // click's modifier keys.
+  function handleOpenConsole(keys: ConsoleClickKeys) {
     onAction?.();
-    const type =
-      target.kind === "ct" ? ("ct_vnc" as const) : ("vm_vnc" as const);
-    const labelPrefix = target.kind === "ct" ? "CT" : "VNC";
-    addTab({
-      clusterID: target.clusterId,
-      node: target.currentNode,
-      vmid: target.vmid,
-      type,
-      label: `${labelPrefix}: ${target.name}`,
-      resourceId: target.resourceId,
-      kind: target.kind,
-    });
-    showConsole();
+    openConsole(
+      {
+        clusterID: target.clusterId,
+        node: target.currentNode,
+        vmid: target.vmid,
+        type: target.kind === "ct" ? "ct_vnc" : "vm_vnc",
+        resourceId: target.resourceId,
+        kind: target.kind,
+        guestName: target.name,
+      },
+      keys,
+    );
   }
 
   return (

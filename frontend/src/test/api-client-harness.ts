@@ -118,6 +118,7 @@ export const SIGNED_OUT = {
   totpPendingToken: null,
   isLoggingOut: false,
   signedOutByUser: false,
+  sessionBeganAt: 0,
 };
 
 /**

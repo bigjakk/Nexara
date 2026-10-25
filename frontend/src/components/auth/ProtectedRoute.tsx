@@ -18,17 +18,18 @@ export function ProtectedRoute() {
 
   if (!isAuthenticated) {
     // returnTo brings someone whose session EXPIRED back to the page they were
-    // on. After a sign-out the user asked for it would hand that page to
-    // whoever signs in next, so that one leads to the bare login page. The flag
-    // is in memory, so it is clear for a visitor who arrives without a session —
-    // a bookmark, an address typed into the bar, is a page load — and that one
-    // still gets theirs.
+    // on — its query too, which is all a console tab's page has to say which
+    // console it is. After a sign-out the user asked for it would hand that
+    // page to whoever signs in next, so that one leads to the bare login page.
+    // The flag is in memory, so it is clear for a visitor who arrives without a
+    // session — a bookmark, an address typed into the bar, is a page load — and
+    // that one still gets theirs.
     return (
       <Navigate
         to={
           signedOutByUser
             ? "/login"
-            : `/login?returnTo=${encodeURIComponent(location.pathname)}`
+            : `/login?returnTo=${encodeURIComponent(location.pathname + location.search)}`
         }
         replace
       />

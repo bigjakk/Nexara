@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { useConsoleStore } from "@/stores/console-store";
 import type { ConsoleStatus } from "../types/console";
 
-function StatusIcon({ status }: { status: ConsoleStatus }) {
+export function StatusIcon({ status }: { status: ConsoleStatus }) {
   switch (status) {
     // Restored tab that hasn't been opened yet — it connects on first click.
     case "idle":

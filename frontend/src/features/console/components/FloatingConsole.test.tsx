@@ -5,6 +5,7 @@ import { FloatingConsole } from "./FloatingConsole";
 import { useConsoleStore } from "@/stores/console-store";
 import type { ConsoleTab } from "../types/console";
 import { vncTab } from "../console.fixtures";
+import { consoleSessionHref } from "../lib/console-session";
 
 // These tests are about the shape of the tree FloatingConsole returns, not
 // about what a viewer does with a socket, so both viewers are stubbed down to
@@ -124,5 +125,25 @@ describe("FloatingConsole window modes", () => {
     });
 
     expect(content()).toBeNull();
+  });
+});
+
+describe("FloatingConsole Open in new tab", () => {
+  it("moves the active session to a browser tab of its own", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const { getByTitle } = renderWithProviders(<FloatingConsole />);
+
+    act(() => {
+      getByTitle("Open in new tab").click();
+    });
+
+    expect(open).toHaveBeenCalledWith(
+      consoleSessionHref(tab),
+      "_blank",
+      "noopener",
+    );
+    // Moved, not copied: the floating copy's socket goes with its tab.
+    expect(useConsoleStore.getState().tabs).toEqual([]);
+    open.mockRestore();
   });
 });

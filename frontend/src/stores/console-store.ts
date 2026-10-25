@@ -1,9 +1,17 @@
-import { create } from "zustand";
+import { createContext, useContext } from "react";
+import {
+  create,
+  createStore,
+  useStore,
+  type StateCreator,
+  type StoreApi,
+} from "zustand";
 import { persist } from "zustand/middleware";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type {
   ConsoleTab,
+  ConsoleTarget,
   ConsoleStatus,
   ConsoleType,
 } from "@/features/console/types/console";
@@ -19,7 +27,7 @@ interface ConsoleState {
 }
 
 interface ConsoleActions {
-  addTab: (tab: Omit<ConsoleTab, "id" | "status" | "reconnectKey">) => string;
+  addTab: (tab: ConsoleTarget) => string;
   removeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   updateTabStatus: (id: string, status: ConsoleStatus) => void;
@@ -42,6 +50,8 @@ interface ConsoleActions {
    */
   resetSession: () => void;
 }
+
+type ConsoleStore = ConsoleState & ConsoleActions;
 
 const PERSIST_KEY = "nexara-console-tabs";
 
@@ -83,250 +93,290 @@ function persistedCopyIsAtDefaults(): boolean {
   }
 }
 
-export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
-  persist(
-    (set, get) => ({
-      tabs: [],
-      activeTabId: null,
-      windowMode: "hidden",
-      windowPosition: defaultPosition(),
-      windowSize: { width: 800, height: 500 },
+/**
+ * The state and actions every console store has: the floating console's
+ * (useConsoleStore, saved) and each console tab's (createConsoleSessionStore,
+ * saved nowhere). `savedCopyIsAtDefaults` is resetSession's question about
+ * the saved copy, which only the floating console's has.
+ */
+function consoleStore(
+  savedCopyIsAtDefaults: () => boolean,
+): StateCreator<ConsoleStore> {
+  return (set, get) => ({
+    tabs: [],
+    activeTabId: null,
+    windowMode: "hidden",
+    windowPosition: defaultPosition(),
+    windowSize: { width: 800, height: 500 },
 
-      addTab: (tab) => {
-        const state = get();
+    addTab: (tab) => {
+      const state = get();
 
-        // If a tab already exists for the same console target, focus it instead of duplicating
-        const existing = state.tabs.find(
-          (t) =>
-            t.clusterID === tab.clusterID &&
-            t.node === tab.node &&
-            t.type === tab.type &&
-            t.vmid === tab.vmid,
-        );
-        if (existing) {
-          const newWindowMode =
-            state.windowMode === "hidden"
-              ? ("floating" as WindowMode)
-              : state.windowMode;
-          set({ activeTabId: existing.id, windowMode: newWindowMode });
-          return existing.id;
-        }
-
-        const id = generateTabId(tab.type, tab.node, tab.vmid);
-        const newTab: ConsoleTab = {
-          ...tab,
-          id,
-          status: "connecting",
-          reconnectKey: 0,
-        };
+      // If a tab already exists for the same console target, focus it instead of duplicating
+      const existing = state.tabs.find(
+        (t) =>
+          t.clusterID === tab.clusterID &&
+          t.node === tab.node &&
+          t.type === tab.type &&
+          t.vmid === tab.vmid,
+      );
+      if (existing) {
         const newWindowMode =
           state.windowMode === "hidden"
             ? ("floating" as WindowMode)
             : state.windowMode;
-        set({
-          tabs: [...state.tabs, newTab],
-          activeTabId: id,
-          windowMode: newWindowMode,
-        });
-        return id;
-      },
+        set({ activeTabId: existing.id, windowMode: newWindowMode });
+        return existing.id;
+      }
 
-      removeTab: (id) => {
-        set((state) => {
-          const filtered = state.tabs.filter((t) => t.id !== id);
-          let newActiveId = state.activeTabId;
-          if (state.activeTabId === id) {
-            const lastTab = filtered[filtered.length - 1];
-            newActiveId = lastTab !== undefined ? lastTab.id : null;
-          }
-          const newWindowMode =
-            filtered.length === 0 ? ("hidden" as WindowMode) : state.windowMode;
-          return {
-            tabs: filtered,
-            activeTabId: newActiveId,
-            windowMode: newWindowMode,
-          };
-        });
-      },
-
-      setActiveTab: (id) => {
-        set({ activeTabId: id });
-      },
-
-      updateTabStatus: (id, status) => {
-        set((state) => ({
-          tabs: state.tabs.map((t) => (t.id === id ? { ...t, status } : t)),
-        }));
-      },
-
-      reconnectTab: (id) => {
-        set((state) => ({
-          tabs: state.tabs.map((t) =>
-            t.id === id
-              ? { ...t, status: "connecting", reconnectKey: t.reconnectKey + 1 }
-              : t,
-          ),
-        }));
-      },
-
-      updateTabNode: (clusterID, vmid, newNode) => {
-        set((state) => ({
-          tabs: state.tabs.map((t) => {
-            if (
-              t.clusterID !== clusterID ||
-              t.vmid !== vmid ||
-              t.node === newNode
-            ) {
-              return t;
-            }
-            // A never-opened tab is retargeted silently. Bumping reconnectKey
-            // would activate it, dialling a console the user hasn't opened.
-            if (t.status === "idle") {
-              return { ...t, node: newNode };
-            }
-            return {
-              ...t,
-              node: newNode,
-              status: "connecting" as const,
-              reconnectKey: t.reconnectKey + 1,
-            };
-          }),
-        }));
-      },
-
-      resolveAndReconnect: async (id) => {
-        const state = get();
-        const tab = state.tabs.find((t) => t.id === id);
-        if (!tab) return;
-
-        // For VM/CT tabs with a resourceId, resolve the current node before reconnecting.
-        // This handles DRS migrations where the VM has moved to a different node.
-        if (tab.vmid !== undefined && tab.resourceId && tab.kind) {
-          try {
-            const vmEndpoint =
-              tab.kind === "ct"
-                ? apiPath`/api/v1/clusters/${tab.clusterID}/containers/${tab.resourceId}`
-                : apiPath`/api/v1/clusters/${tab.clusterID}/vms/${tab.resourceId}`;
-            const vm = await apiClient.get<{
-              node_id: string;
-              status?: string;
-            }>(vmEndpoint);
-
-            // Guest is powered off — park instead of reconnect-looping against
-            // a dead guest. useGuestPowerSync resumes the tab when it starts.
-            if ((vm.status ?? "").toLowerCase() === "stopped") {
-              get().updateTabStatus(id, "guest-stopped");
-              return;
-            }
-
-            const nodesEndpoint = apiPath`/api/v1/clusters/${tab.clusterID}/nodes`;
-            const nodes = await apiClient.list<{ id: string; name: string }>(
-              nodesEndpoint,
-            );
-            const resolved = nodes.find((n) => n.id === vm.node_id);
-
-            if (resolved && resolved.name !== tab.node) {
-              // Node changed (migration) — update node and reconnect
-              set((s) => ({
-                tabs: s.tabs.map((t) =>
-                  t.id === id
-                    ? {
-                        ...t,
-                        node: resolved.name,
-                        status: "connecting",
-                        reconnectKey: t.reconnectKey + 1,
-                      }
-                    : t,
-                ),
-              }));
-              return;
-            }
-          } catch {
-            // Failed to resolve — reconnect with current node
-          }
-        }
-
-        // Same node or node_shell — just reconnect
-        set((s) => ({
-          tabs: s.tabs.map((t) =>
-            t.id === id
-              ? { ...t, status: "connecting", reconnectKey: t.reconnectKey + 1 }
-              : t,
-          ),
-        }));
-      },
-
-      setWindowMode: (mode) => {
-        set({ windowMode: mode });
-      },
-
-      setWindowPosition: (pos) => {
-        set({ windowPosition: pos });
-      },
-
-      setWindowSize: (size) => {
-        set({
-          windowSize: {
-            width: Math.max(400, size.width),
-            height: Math.max(300, size.height),
-          },
-        });
-      },
-
-      showConsole: () => {
-        const state = get();
-        if (state.windowMode === "hidden" || state.windowMode === "minimized") {
-          set({ windowMode: "floating" });
-        }
-      },
-
-      resetSession: () => {
-        // Nothing to forget, here or in storage: persist writes the store to
-        // localStorage on every set, changed or not, and a signed-out boot would
-        // otherwise write a window position derived from the viewport — and fail,
-        // if the quota is full — to forget nothing.
-        const state = get();
-        if (
-          state.tabs.length === 0 &&
-          state.activeTabId === null &&
-          state.windowMode === "hidden" &&
-          persistedCopyIsAtDefaults()
-        ) {
-          return;
-        }
-        set({ tabs: [], activeTabId: null, windowMode: "hidden" });
-      },
-    }),
-    {
-      name: PERSIST_KEY,
-      // v1 persists tabs as "idle" rather than "connecting". Tabs written by
-      // v0 come back mid-flight ("connecting"/"connected") even though no
-      // socket survived the reload, which would leave a restored background
-      // tab spinning forever now that connecting is lazy — so reset them.
-      version: 1,
-      migrate: (persisted) => {
-        const state = persisted as Partial<ConsoleState> | undefined;
-        if (!state?.tabs) return state as ConsoleState & ConsoleActions;
-        const tabs: ConsoleTab[] = state.tabs.map((t) => ({
-          ...t,
-          status: "idle",
-          reconnectKey: 0,
-        }));
-        return { ...state, tabs } as ConsoleState & ConsoleActions;
-      },
-      partialize: (state) => ({
-        tabs: state.tabs.map((t) => ({
-          ...t,
-          // Nothing is connected on rehydrate; the active tab dials on mount
-          // and the rest stay idle until you switch to them.
-          status: "idle",
-          reconnectKey: 0,
-        })),
-        activeTabId: state.activeTabId,
-        windowMode: state.tabs.length > 0 ? state.windowMode : "hidden",
-        windowPosition: state.windowPosition,
-        windowSize: state.windowSize,
-      }),
+      const id = generateTabId(tab.type, tab.node, tab.vmid);
+      const newTab: ConsoleTab = {
+        ...tab,
+        id,
+        status: "connecting",
+        reconnectKey: 0,
+      };
+      const newWindowMode =
+        state.windowMode === "hidden"
+          ? ("floating" as WindowMode)
+          : state.windowMode;
+      set({
+        tabs: [...state.tabs, newTab],
+        activeTabId: id,
+        windowMode: newWindowMode,
+      });
+      return id;
     },
-  ),
+
+    removeTab: (id) => {
+      set((state) => {
+        const filtered = state.tabs.filter((t) => t.id !== id);
+        let newActiveId = state.activeTabId;
+        if (state.activeTabId === id) {
+          const lastTab = filtered[filtered.length - 1];
+          newActiveId = lastTab !== undefined ? lastTab.id : null;
+        }
+        const newWindowMode =
+          filtered.length === 0 ? ("hidden" as WindowMode) : state.windowMode;
+        return {
+          tabs: filtered,
+          activeTabId: newActiveId,
+          windowMode: newWindowMode,
+        };
+      });
+    },
+
+    setActiveTab: (id) => {
+      set({ activeTabId: id });
+    },
+
+    updateTabStatus: (id, status) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === id ? { ...t, status } : t)),
+      }));
+    },
+
+    reconnectTab: (id) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === id
+            ? { ...t, status: "connecting", reconnectKey: t.reconnectKey + 1 }
+            : t,
+        ),
+      }));
+    },
+
+    updateTabNode: (clusterID, vmid, newNode) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => {
+          if (
+            t.clusterID !== clusterID ||
+            t.vmid !== vmid ||
+            t.node === newNode
+          ) {
+            return t;
+          }
+          // A never-opened tab is retargeted silently. Bumping reconnectKey
+          // would activate it, dialling a console the user hasn't opened.
+          if (t.status === "idle") {
+            return { ...t, node: newNode };
+          }
+          return {
+            ...t,
+            node: newNode,
+            status: "connecting" as const,
+            reconnectKey: t.reconnectKey + 1,
+          };
+        }),
+      }));
+    },
+
+    resolveAndReconnect: async (id) => {
+      const state = get();
+      const tab = state.tabs.find((t) => t.id === id);
+      if (!tab) return;
+
+      // For VM/CT tabs with a resourceId, resolve the current node before reconnecting.
+      // This handles DRS migrations where the VM has moved to a different node.
+      if (tab.vmid !== undefined && tab.resourceId && tab.kind) {
+        try {
+          const vmEndpoint =
+            tab.kind === "ct"
+              ? apiPath`/api/v1/clusters/${tab.clusterID}/containers/${tab.resourceId}`
+              : apiPath`/api/v1/clusters/${tab.clusterID}/vms/${tab.resourceId}`;
+          const vm = await apiClient.get<{
+            node_id: string;
+            status?: string;
+          }>(vmEndpoint);
+
+          // Guest is powered off — park instead of reconnect-looping against
+          // a dead guest. useGuestPowerSync resumes the tab when it starts.
+          if ((vm.status ?? "").toLowerCase() === "stopped") {
+            get().updateTabStatus(id, "guest-stopped");
+            return;
+          }
+
+          const nodesEndpoint = apiPath`/api/v1/clusters/${tab.clusterID}/nodes`;
+          const nodes = await apiClient.list<{ id: string; name: string }>(
+            nodesEndpoint,
+          );
+          const resolved = nodes.find((n) => n.id === vm.node_id);
+
+          if (resolved && resolved.name !== tab.node) {
+            // Node changed (migration) — update node and reconnect
+            set((s) => ({
+              tabs: s.tabs.map((t) =>
+                t.id === id
+                  ? {
+                      ...t,
+                      node: resolved.name,
+                      status: "connecting",
+                      reconnectKey: t.reconnectKey + 1,
+                    }
+                  : t,
+              ),
+            }));
+            return;
+          }
+        } catch {
+          // Failed to resolve — reconnect with current node
+        }
+      }
+
+      // Same node or node_shell — just reconnect
+      set((s) => ({
+        tabs: s.tabs.map((t) =>
+          t.id === id
+            ? { ...t, status: "connecting", reconnectKey: t.reconnectKey + 1 }
+            : t,
+        ),
+      }));
+    },
+
+    setWindowMode: (mode) => {
+      set({ windowMode: mode });
+    },
+
+    setWindowPosition: (pos) => {
+      set({ windowPosition: pos });
+    },
+
+    setWindowSize: (size) => {
+      set({
+        windowSize: {
+          width: Math.max(400, size.width),
+          height: Math.max(300, size.height),
+        },
+      });
+    },
+
+    showConsole: () => {
+      const state = get();
+      if (state.windowMode === "hidden" || state.windowMode === "minimized") {
+        set({ windowMode: "floating" });
+      }
+    },
+
+    resetSession: () => {
+      // Nothing to forget, here or in storage: persist writes the store to
+      // localStorage on every set, changed or not, and a signed-out boot would
+      // otherwise write a window position derived from the viewport — and fail,
+      // if the quota is full — to forget nothing.
+      const state = get();
+      if (
+        state.tabs.length === 0 &&
+        state.activeTabId === null &&
+        state.windowMode === "hidden" &&
+        savedCopyIsAtDefaults()
+      ) {
+        return;
+      }
+      set({ tabs: [], activeTabId: null, windowMode: "hidden" });
+    },
+  });
+}
+
+export const useConsoleStore = create<ConsoleStore>()(
+  persist(consoleStore(persistedCopyIsAtDefaults), {
+    name: PERSIST_KEY,
+    // v1 persists tabs as "idle" rather than "connecting". Tabs written by
+    // v0 come back mid-flight ("connecting"/"connected") even though no
+    // socket survived the reload, which would leave a restored background
+    // tab spinning forever now that connecting is lazy — so reset them.
+    version: 1,
+    migrate: (persisted) => {
+      const state = persisted as Partial<ConsoleState> | undefined;
+      if (!state?.tabs) return state as ConsoleState & ConsoleActions;
+      const tabs: ConsoleTab[] = state.tabs.map((t) => ({
+        ...t,
+        status: "idle",
+        reconnectKey: 0,
+      }));
+      return { ...state, tabs } as ConsoleState & ConsoleActions;
+    },
+    partialize: (state) => ({
+      tabs: state.tabs.map((t) => ({
+        ...t,
+        // Nothing is connected on rehydrate; the active tab dials on mount
+        // and the rest stay idle until you switch to them.
+        status: "idle",
+        reconnectKey: 0,
+      })),
+      activeTabId: state.activeTabId,
+      windowMode: state.tabs.length > 0 ? state.windowMode : "hidden",
+      windowPosition: state.windowPosition,
+      windowSize: state.windowSize,
+    }),
+  }),
 );
+
+/**
+ * The store of a console in a browser tab of its own (ConsoleSessionPage): that
+ * one session, saved nowhere. The tab's URL is all a reload needs, and the
+ * floating console's saved copy is another tab's — this one never reads it
+ * (it would dial its tabs, or come up minimized) nor writes over it.
+ */
+export function createConsoleSessionStore(
+  target: ConsoleTarget,
+): StoreApi<ConsoleStore> {
+  const store = createStore<ConsoleStore>()(consoleStore(() => true));
+  store.getState().addTab(target);
+  return store;
+}
+
+/**
+ * The console store the viewers below read and write: the floating console's,
+ * unless a console page provides its session's (createConsoleSessionStore).
+ */
+export const ConsoleStoreContext =
+  createContext<StoreApi<ConsoleStore>>(useConsoleStore);
+
+/** The console store this component belongs to (see ConsoleStoreContext). */
+export function useConsoleStoreApi(): StoreApi<ConsoleStore> {
+  return useContext(ConsoleStoreContext);
+}
+
+/** A selector on the console store this component belongs to. */
+export function useConsoleSession<T>(selector: (state: ConsoleStore) => T): T {
+  return useStore(useConsoleStoreApi(), selector);
+}

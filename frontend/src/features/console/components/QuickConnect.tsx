@@ -12,9 +12,10 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useConsoleStore } from "@/stores/console-store";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { VMResponse, NodeResponse } from "@/types/api";
+import type { ConsoleClickKeys } from "../lib/console-session";
+import { openConsole } from "../lib/open-console";
 
 interface VMEntry {
   clusterId: string;
@@ -29,8 +30,6 @@ interface VMEntry {
 
 export function QuickConnect() {
   const [open, setOpen] = useState(false);
-  const addTab = useConsoleStore((s) => s.addTab);
-  const showConsole = useConsoleStore((s) => s.showConsole);
   const { canConsole } = usePermissions();
 
   const { data: clusters } = useClusters();
@@ -92,7 +91,11 @@ export function QuickConnect() {
     return entries.sort((a, b) => a.vmid - b.vmid);
   }, [clusters, nodeQueries, vmQueries, canConsole]);
 
-  function openConsole(vm: VMEntry, consoleType: "vnc" | "serial" | "attach") {
+  function openGuest(
+    vm: VMEntry,
+    consoleType: "vnc" | "serial" | "attach",
+    keys: ConsoleClickKeys,
+  ) {
     const type =
       consoleType === "vnc"
         ? ("vm_vnc" as const)
@@ -100,23 +103,18 @@ export function QuickConnect() {
           ? ("ct_vnc" as const)
           : ("vm_serial" as const);
 
-    const labelPrefix =
-      consoleType === "vnc"
-        ? "VNC"
-        : consoleType === "attach"
-          ? "CT"
-          : "Serial";
-
-    addTab({
-      clusterID: vm.clusterId,
-      node: vm.nodeName,
-      vmid: vm.vmid,
-      type,
-      label: `${labelPrefix}: ${vm.name}`,
-      resourceId: vm.resourceId,
-      kind: vm.type === "qemu" ? "vm" : "ct",
-    });
-    showConsole();
+    openConsole(
+      {
+        clusterID: vm.clusterId,
+        node: vm.nodeName,
+        vmid: vm.vmid,
+        type,
+        resourceId: vm.resourceId,
+        kind: vm.type === "qemu" ? "vm" : "ct",
+        guestName: vm.name,
+      },
+      keys,
+    );
     setOpen(false);
   }
 
@@ -184,8 +182,8 @@ export function QuickConnect() {
                             className="h-7 gap-1 px-2 text-xs"
                             disabled={!isRunning}
                             title="VNC Console"
-                            onClick={() => {
-                              openConsole(vm, "vnc");
+                            onClick={(e) => {
+                              openGuest(vm, "vnc", e);
                             }}
                           >
                             <Monitor className="h-3.5 w-3.5" />
@@ -198,8 +196,8 @@ export function QuickConnect() {
                             className="h-7 gap-1 px-2 text-xs"
                             disabled={!isRunning}
                             title="Container Attach"
-                            onClick={() => {
-                              openConsole(vm, "attach");
+                            onClick={(e) => {
+                              openGuest(vm, "attach", e);
                             }}
                           >
                             <TerminalSquare className="h-3.5 w-3.5" />

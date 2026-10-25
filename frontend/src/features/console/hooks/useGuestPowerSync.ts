@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useVM } from "@/features/vms/api/vm-queries";
-import { useConsoleStore } from "@/stores/console-store";
+import { useConsoleStoreApi } from "@/stores/console-store";
 import type { ConsoleTab } from "../types/console";
 
 /**
@@ -21,10 +21,11 @@ export function useGuestPowerSync(tab: ConsoleTab): string {
   const guestStatus = data?.status.toLowerCase() ?? "";
   const { id: tabId, status: tabStatus } = tab;
   const hasResource = tab.resourceId !== undefined && tab.kind !== undefined;
+  const consoleStore = useConsoleStoreApi();
 
   useEffect(() => {
     if (!hasResource) return;
-    const store = useConsoleStore.getState();
+    const store = consoleStore.getState();
     if (tabStatus === "guest-stopped" && guestStatus === "running") {
       // resolveAndReconnect re-checks status and re-resolves the node, so a
       // guest that started on a different node reconnects correctly.
@@ -35,7 +36,7 @@ export function useGuestPowerSync(tab: ConsoleTab): string {
     ) {
       store.updateTabStatus(tabId, "guest-stopped");
     }
-  }, [hasResource, tabStatus, guestStatus, tabId]);
+  }, [hasResource, tabStatus, guestStatus, tabId, consoleStore]);
 
   return guestStatus;
 }
