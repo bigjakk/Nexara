@@ -29,6 +29,7 @@ const CONFIG_URL = `/api/v1/clusters/${CLUSTER}/vms/${VM}/config`;
 const DETACH_URL = `/api/v1/clusters/${CLUSTER}/vms/${VM}/disks/detach`;
 const RESIZE_URL = `/api/v1/clusters/${CLUSTER}/vms/${VM}/disks/resize`;
 const STORAGE_URL = `/api/v1/clusters/${CLUSTER}/storage`;
+const BRIDGES_URL = `/api/v1/clusters/${CLUSTER}/nodes/pve-01/bridges`;
 
 // The live disk and the unused one sit on DIFFERENT storages, so an assertion
 // naming the unused volume cannot be satisfied by the live disk's.
@@ -451,8 +452,11 @@ describe("HardwarePanel dirty check", () => {
     const save = await renderPanel(nicVM());
     expect(save).toBeDisabled();
     const vga = control(document.body, "VGA");
-    // No vga line reads as Proxmox's default, not as a type it may not be.
+    // No vga line reads as Proxmox's default, not as a type it may not be;
+    // no scsihw and no ostype read as the ones Proxmox runs.
     expect(vga).toHaveValue("");
+    expect(control(document.body, "SCSI Controller")).toHaveValue("lsi");
+    expect(control(document.body, "OS Type")).toHaveValue("other");
 
     moveNet0ToVmbr1();
     fill(vga, "qxl");
@@ -560,17 +564,37 @@ describe("HardwarePanel dirty check", () => {
   // of the list: it can be picked back, and is then no change at all. React
   // would otherwise show the FIRST option of a select whose value matches none.
   it("keeps a stored value it has no option for as the current one: shown on open, offered after another is picked, and never sent with another edit", async () => {
+    // The node's bridges, so that a NIC's Bridge is a select.
+    mockedList.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === STORAGE_URL
+          ? [imageStorage]
+          : path === BRIDGES_URL
+            ? [{ iface: "vmbr0" }, { iface: "vmbr1" }]
+            : [],
+      ),
+    );
     const save = await renderPanel(
       nicVM({
-        net2: "pcnet=02:00:00:00:00:03,bridge=vmbr0",
+        net2: "pcnet=02:00:00:00:00:03,bridge=vmbr9",
+        // No bridge: qemu's user-mode network, which no bridge stands for.
+        net3: "virtio=02:00:00:00:00:04",
         vga: "qxl2",
         keyboard: "ko",
         audio0: "device=ich9-intel-hda,driver=none",
         vmstatestorage: "store09",
         watchdog: "model=diag288,action=inject-nmi",
+        // Beside an option, so that the type alone is what is current.
+        machine: "pc-q35-8.1,viommu=virtio",
+        scsihw: "megasas2",
       }),
     );
     expect(save).toBeDisabled();
+    // The bridge list arrives on a query of its own.
+    await waitFor(() => {
+      expect(control(nicCard("net3"), "Bridge").tagName).toBe("SELECT");
+    });
+    expect(control(nicCard("net3"), "Bridge")).toHaveValue("");
     // The Advanced Options section starts closed.
     await user.click(screen.getByText("Advanced Options"));
 
@@ -587,6 +611,27 @@ describe("HardwarePanel dirty check", () => {
         "pcnet",
         "e1000",
         "Intel E1000",
+      ],
+      [
+        "NIC bridge",
+        () => control(nicCard("net2"), "Bridge"),
+        "vmbr9",
+        "vmbr0",
+        "vmbr0",
+      ],
+      [
+        "machine type",
+        () => control(document.body, "Machine"),
+        "pc-q35-8.1",
+        "q35",
+        "Q35",
+      ],
+      [
+        "SCSI controller",
+        () => control(document.body, "SCSI Controller"),
+        "megasas2",
+        "pvscsi",
+        "VMware PVSCSI",
       ],
       [
         "vga type",
@@ -801,6 +846,28 @@ describe("HardwarePanel dirty check", () => {
 
     expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { boot: "order=scsi1;scsi0", delete: "net0" } }],
+    ]);
+  });
+
+  // verify_bootdev refuses an EFI disk or a TPM state in a boot order, and
+  // $update_vm_api a device the VM does not have, which a stored order can
+  // still name. So none of them is listed, and an order sent leaves it out.
+  it("lists no EFI disk, TPM state or missing device in the boot order, and sends a reorder without them", async () => {
+    const save = await renderPanel({
+      ...bootVM(),
+      efidisk0: "store01:vm-101-disk-2,efitype=4m,size=4M",
+      tpmstate0: "store01:vm-101-disk-3,size=4M,version=v2.0",
+      boot: "order=scsi0;scsi5;scsi1;net0",
+    });
+    expect(save).toBeDisabled();
+    for (const device of ["efidisk0", "tpmstate0", "scsi5"]) {
+      expect(document.getElementById(`boot-${device}`)).toBeNull();
+    }
+
+    await moveEarlierInBoot(SCSI1_BOOT);
+
+    expect(await saveAndGetFields(save)).toEqual([
+      [CONFIG_URL, { fields: { boot: "order=scsi1;scsi0;net0" } }],
     ]);
   });
 

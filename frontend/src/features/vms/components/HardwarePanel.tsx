@@ -118,6 +118,13 @@ const selectClass =
 const DISK_KEY_RE = /^(scsi|ide|sata|virtio|efidisk|tpmstate|unused)\d+$/;
 
 /**
+ * The drives a boot order may name: verify_bootdev (src/PVE/QemuServer.pm)
+ * refuses an EFI disk or a TPM state there. It takes usbN and hostpciN too,
+ * which the boot list does not offer.
+ */
+const BOOT_DISK_KEY_RE = /^(scsi|ide|sata|virtio)\d+$/;
+
+/**
  * Shown when a VM config carries no `cpu:` line. Proxmox's real default there
  * is kvm64 (get_default_cpu_type), so this is only a UI placeholder — never
  * write it back for a VM that never had it. normalizeCPU applies it to both
@@ -133,14 +140,28 @@ const DEFAULT_CPU_TYPE = "x86-64-v2-AES";
 const DEFAULT_MACHINE = "pc";
 
 /**
+ * The machine type a stored machine value runs: the one it names, or the
+ * default.
+ */
+function machineTypeOf(stored: string): string {
+  return parseMachine(stored).type || DEFAULT_MACHINE;
+}
+
+/**
+ * What a config setting no SCSI controller or OS type runs as: the defaults
+ * of qemu-server's scsihw and ostype options ($confdesc,
+ * src/PVE/QemuServer.pm).
+ */
+const DEFAULT_SCSIHW = "lsi";
+const DEFAULT_OSTYPE = "other";
+
+/**
  * The machine value Save sends for the type picked: the stored value itself
  * while the type picked is the one it runs, the default for a value naming
  * none included, or else that value with only its type replaced.
  */
 function machineFor(type: string, stored: string): string {
-  return type === (parseMachine(stored).type || DEFAULT_MACHINE)
-    ? stored
-    : buildMachine(type, stored);
+  return type === machineTypeOf(stored) ? stored : buildMachine(type, stored);
 }
 
 /** All smbios1 text fields blank — the shape parseSMBIOS/buildSMBIOS expect. */
@@ -477,8 +498,8 @@ export function HardwarePanel({
 
   // --- System ---
   const [bios, setBios] = useState("seabios");
-  const [machine, setMachine] = useState("pc");
-  const [scsihw, setScsihw] = useState("virtio-scsi-pci");
+  const [machine, setMachine] = useState(DEFAULT_MACHINE);
+  const [scsihw, setScsihw] = useState(DEFAULT_SCSIHW);
   const [agentEnabled, setAgentEnabled] = useState(false);
   const [agentFstrim, setAgentFstrim] = useState(false);
   const [kvmEnabled, setKvmEnabled] = useState(true);
@@ -491,7 +512,7 @@ export function HardwarePanel({
   const [bootOrder, setBootOrder] = useState<
     Array<{ device: string; enabled: boolean }>
   >([]);
-  const [ostype, setOstype] = useState("l26");
+  const [ostype, setOstype] = useState(DEFAULT_OSTYPE);
   const [protection, setProtection] = useState(false);
   const [localtime, setLocaltime] = useState(false);
   const [startupOrder, setStartupOrder] = useState("");
@@ -524,12 +545,12 @@ export function HardwarePanel({
   // from the loaded config, not the edit state, as cpuFlagRows is: picking
   // another value then leaves the stored one in the list, so it can be
   // picked back. Each is read the way the populate effect reads it.
-  const storedNicModels = useMemo(() => {
-    const models: Record<string, string> = {};
+  const storedNics = useMemo(() => {
+    const nics: Record<string, ParsedNet> = {};
     for (const [key, val] of Object.entries(original ?? {})) {
-      if (/^net\d+$/.test(key)) models[key] = parseNet(str(val)).model;
+      if (/^net\d+$/.test(key)) nics[key] = parseNet(str(val));
     }
-    return models;
+    return nics;
   }, [original]);
   const storedVgaType = useMemo(
     () => parseVGA(str(original?.["vga"] ?? "")).type,
@@ -538,6 +559,8 @@ export function HardwarePanel({
   const storedSelects = useMemo(() => {
     const wd = parseWatchdog(str(original?.["watchdog"] ?? ""));
     return {
+      machine: machineTypeOf(str(original?.["machine"] ?? "")),
+      scsihw: str(original?.["scsihw"] ?? DEFAULT_SCSIHW),
       keyboard: str(original?.["keyboard"] ?? ""),
       vmstatestorage: str(original?.["vmstatestorage"] ?? ""),
       watchdogModel: wd.model,
@@ -771,10 +794,8 @@ export function HardwarePanel({
     // System
     setBios(str(config["bios"] ?? "seabios"));
     // The type alone: viommu= and the rest are kept from the stored value.
-    setMachine(
-      parseMachine(str(config["machine"] ?? "")).type || DEFAULT_MACHINE,
-    );
-    setScsihw(str(config["scsihw"] ?? "virtio-scsi-pci"));
+    setMachine(machineTypeOf(str(config["machine"] ?? "")));
+    setScsihw(str(config["scsihw"] ?? DEFAULT_SCSIHW));
     const agent = parseAgent(str(config["agent"] ?? ""));
     setAgentEnabled(agent.enabled);
     setAgentFstrim(agent.fstrimClonedDisks);
@@ -806,16 +827,19 @@ export function HardwarePanel({
     setOnboot(bool01(config["onboot"]));
     setTablet(config["tablet"] != null ? bool01(config["tablet"]) : true);
     setHotplug(str(config["hotplug"] ?? ""));
-    setOstype(str(config["ostype"] ?? "l26"));
+    setOstype(str(config["ostype"] ?? DEFAULT_OSTYPE));
     setProtection(bool01(config["protection"]));
     setLocaltime(bool01(config["localtime"]));
-    const bootDevices = parseBootOrder(str(config["boot"] ?? ""));
+    // Only devices the VM has: Proxmox refuses an order naming one it does
+    // not (see bootToSend), and boots by the rest.
+    const bootDevices = parseBootOrder(str(config["boot"] ?? "")).filter(
+      (d) => config[d] != null,
+    );
     // Build full boot order: enabled devices first (in order), then all other bootable devices (disabled)
     const enabledSet = new Set(bootDevices);
     const allBootable: string[] = [];
     for (const key of Object.keys(config)) {
-      if (DISK_KEY_RE.test(key) && !key.startsWith("unused"))
-        allBootable.push(key);
+      if (BOOT_DISK_KEY_RE.test(key)) allBootable.push(key);
       else if (/^net\d+$/.test(key)) allBootable.push(key);
     }
     allBootable.sort((a, b) => a.localeCompare(b));
@@ -1039,7 +1063,7 @@ export function HardwarePanel({
 
     // System. The machine and the agent are among the optionalScalars.
     if (bios !== str(original["bios"] ?? "seabios")) fields["bios"] = bios;
-    if (scsihw !== str(original["scsihw"] ?? "virtio-scsi-pci"))
+    if (scsihw !== str(original["scsihw"] ?? DEFAULT_SCSIHW))
       fields["scsihw"] = scsihw;
     const origKvm = original["kvm"] != null ? bool01(original["kvm"]) : true;
     if (kvmEnabled !== origKvm) fields["kvm"] = kvmEnabled ? "1" : "0";
@@ -1107,7 +1131,8 @@ export function HardwarePanel({
       original["tablet"] != null ? bool01(original["tablet"]) : true;
     if (tablet !== origTablet) fields["tablet"] = tablet ? "1" : "0";
     if (hotplug !== str(original["hotplug"] ?? "")) fields["hotplug"] = hotplug;
-    if (ostype !== str(original["ostype"] ?? "l26")) fields["ostype"] = ostype;
+    if (ostype !== str(original["ostype"] ?? DEFAULT_OSTYPE))
+      fields["ostype"] = ostype;
     const origProtection = bool01(original["protection"]);
     if (protection !== origProtection)
       fields["protection"] = protection ? "1" : "0";
@@ -1361,26 +1386,30 @@ export function HardwarePanel({
 
   /**
    * The `boot` value Save sends, or null when it sends none: the ticked
-   * devices less every device this same Save removes. Proxmox refuses a boot
-   * order that names a device the request also deletes ("invalid bootorder:
-   * device ... does not exist'", in $update_vm_api, src/PVE/API2/Qemu.pm),
-   * and it refuses it late. That function writes each delete to the VM's
-   * pending changes first, then the other options one at a time in hash
-   * order, and dies on reaching boot before applying any of it. The removal,
-   * and whichever options came before boot, stay pending and apply at the
-   * next start (vm_start_nolock calls vmconfig_apply_pending,
-   * src/PVE/QemuServer.pm) or with the next write that succeeds, after the
-   * request has reported an error.
+   * devices less every device this same Save removes, or the VM does not
+   * have. Proxmox refuses a boot order that names a device the config lacks
+   * or the request also deletes ("invalid bootorder: device ... does not
+   * exist'", in $update_vm_api, src/PVE/API2/Qemu.pm), and it refuses it
+   * late. That function writes each delete to the VM's pending changes first,
+   * then the other options one at a time in hash order, and dies on reaching
+   * boot before applying any of it. The removal, and whichever options came
+   * before boot, stay pending and apply at the next start (vm_start_nolock
+   * calls vmconfig_apply_pending, src/PVE/QemuServer.pm) or with the next
+   * write that succeeds, after the request has reported an error.
    *
    * It is compared with the stored order less the same devices, because
    * that is what Proxmox makes of the stored order when no boot is sent: its
    * delete loop drops each deleted device from it ("remove from bootorder if
-   * necessary"). So removing a ticked device sends no boot of its own.
+   * necessary"). So removing a ticked device sends no boot of its own. A
+   * device the VM lacks it keeps, and boots by the rest (device_bootorder):
+   * left out of both, an order naming one is not sent just to drop it.
    */
   const bootToSend = useMemo(() => {
     if (!original) return null;
     const kept = (device: string) =>
-      !disksToRemove.has(device) && !deviceRemovals.has(device);
+      original[device] != null &&
+      !disksToRemove.has(device) &&
+      !deviceRemovals.has(device);
     const stored = parseBootOrder(str(original["boot"] ?? "")).filter(kept);
     const enabled = bootOrder
       .filter((b) => b.enabled && kept(b.device))
@@ -1418,7 +1447,7 @@ export function HardwarePanel({
     if (shares !== (original["shares"] != null ? str(original["shares"]) : ""))
       return true;
     if (bios !== str(original["bios"] ?? "seabios")) return true;
-    if (scsihw !== str(original["scsihw"] ?? "virtio-scsi-pci")) return true;
+    if (scsihw !== str(original["scsihw"] ?? DEFAULT_SCSIHW)) return true;
     if (
       kvmEnabled !== (original["kvm"] != null ? bool01(original["kvm"]) : true)
     )
@@ -1432,7 +1461,7 @@ export function HardwarePanel({
     )
       return true;
     if (hotplug !== str(original["hotplug"] ?? "")) return true;
-    if (ostype !== str(original["ostype"] ?? "l26")) return true;
+    if (ostype !== str(original["ostype"] ?? DEFAULT_OSTYPE)) return true;
     if (protection !== bool01(original["protection"])) return true;
     if (localtime !== bool01(original["localtime"])) return true;
     if (optionalScalars.some((f) => f.value !== f.was)) return true;
@@ -1871,6 +1900,10 @@ export function HardwarePanel({
                   setMachine(e.target.value);
                 }}
               >
+                <CurrentValueOption
+                  value={storedSelects.machine}
+                  known={machineTypes.map((o) => o.value)}
+                />
                 {machineTypes.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
@@ -1895,6 +1928,10 @@ export function HardwarePanel({
                   setScsihw(e.target.value);
                 }}
               >
+                <CurrentValueOption
+                  value={storedSelects.scsihw}
+                  known={scsiControllers.map((o) => o.value)}
+                />
                 {scsiControllers.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
@@ -2487,7 +2524,7 @@ export function HardwarePanel({
                           }}
                         >
                           <CurrentValueOption
-                            value={storedNicModels[nicKey] ?? ""}
+                            value={storedNics[nicKey]?.model ?? ""}
                             known={netModels.map((m) => m.value)}
                           />
                           {netModels.map((m) => (
@@ -2507,8 +2544,20 @@ export function HardwarePanel({
                               updateNicEdit(nicKey, { bridge: e.target.value });
                             }}
                           >
-                            {!bridgeNames.includes(nic.bridge) &&
-                              nic.bridge && (
+                            {/* No bridge is qemu's user-mode network,
+                                NATed, with its own DHCP and DNS ($net_fmt's
+                                bridge, src/PVE/QemuServer/Network.pm). */}
+                            <option value="">No bridge (NAT)</option>
+                            <CurrentValueOption
+                              value={storedNics[nicKey]?.bridge ?? ""}
+                              known={bridgeNames}
+                            />
+                            {/* One typed before the list arrived, neither
+                                listed nor stored, which the select would
+                                otherwise show as its first option. */}
+                            {nic.bridge &&
+                              nic.bridge !== storedNics[nicKey]?.bridge &&
+                              !bridgeNames.includes(nic.bridge) && (
                                 <option value={nic.bridge}>{nic.bridge}</option>
                               )}
                             {bridgeNames.map((b) => (
