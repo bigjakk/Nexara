@@ -31,6 +31,14 @@ vi.mock("../api/console-queries", async (importOriginal) => {
   return { ...actual, createConsoleTokenMinter: () => mintSpy };
 });
 
+// What the console does when its session has ended is ask the app to check its
+// own (lib/session-ended.ts); these tests only need to see that it asks.
+const { sessionEndedSpy } = vi.hoisted(() => ({ sessionEndedSpy: vi.fn() }));
+vi.mock("../lib/session-ended", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/session-ended")>()),
+  consoleSessionEnded: sessionEndedSpy,
+}));
+
 // Mock xterm.js with class implementations
 const { termOptions } = vi.hoisted(() => ({
   termOptions: {
@@ -293,7 +301,7 @@ describe("Terminal", () => {
     // Now the first socket's close event lands, after its replacement is up.
     vi.useFakeTimers();
     act(() => {
-      stale?.onclose?.();
+      stale?.deliverClose(1006);
     });
 
     const afterGhost = useConsoleStore.getState().tabs[0];
@@ -328,11 +336,64 @@ describe("Terminal", () => {
     });
 
     act(() => {
-      MockWebSocket.instances[0]?.onclose?.();
+      MockWebSocket.instances[0]?.deliverClose(1006);
     });
 
     expect(useConsoleStore.getState().tabs[0]?.status).toBe("reconnecting");
   });
+
+  // The server says so at open (an error with the code, then the Close) or
+  // while open (the Close alone); either is final.
+  it.each([
+    [
+      "refuses it at open",
+      (ws: MockWebSocket) => {
+        ws.onmessage?.({
+          data: JSON.stringify({ type: "error", code: "session_ended" }),
+        } as MessageEvent);
+        // Final at the error, before the Close that follows it.
+        expect(useConsoleStore.getState().tabs[0]?.status).toBe("disconnected");
+        ws.deliverClose(3000);
+      },
+    ],
+    [
+      "closes it while open",
+      (ws: MockWebSocket) => {
+        ws.deliverConnected();
+        ws.deliverClose(3000);
+      },
+    ],
+  ])(
+    "stops for good when the server %s because its session has ended",
+    async (_, end) => {
+      sessionEndedSpy.mockClear();
+      useConsoleStore.setState({
+        tabs: [{ ...tab, status: "connected" }],
+        activeTabId: tab.id,
+        windowMode: "floating",
+      });
+      renderWithProviders(<Terminal tab={tab} visible={true} />);
+      await waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1);
+      });
+
+      vi.useFakeTimers();
+      act(() => {
+        const ws = MockWebSocket.instances[0];
+        if (ws) end(ws);
+      });
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+
+      // A retry bumps reconnectKey (the fixture is a node shell; see above).
+      expect(useConsoleStore.getState().tabs[0]).toMatchObject({
+        status: "disconnected",
+        reconnectKey: 0,
+      });
+      expect(sessionEndedSpy).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("leaves no live status behind when the console is torn down", async () => {
     // Nothing survives the unmount, so the tab must not still read

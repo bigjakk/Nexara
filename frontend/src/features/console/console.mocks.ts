@@ -29,10 +29,25 @@ export class MockWebSocket {
   binaryType = "blob";
   onopen: (() => void) | null = null;
   onmessage: ((e: MessageEvent) => void) | null = null;
-  // Optional parameters so a test can fire these bare — `ws.onclose?.()` — as
-  // well as with an event, which is how the close-race tests drive them.
-  onclose: ((e?: Partial<CloseEvent>) => void) | null = null;
   onerror: ((e?: Partial<Event>) => void) | null = null;
+
+  // A close is dispatched to these in the order they were added: listeners, and
+  // onclose, which takes its place in that order when it is first set — on a
+  // real socket too, which is what a listener added before it relies on.
+  private closeHandlers: (((e: Partial<CloseEvent>) => void) | "onclose")[] =
+    [];
+  // Optional parameter so a test can fire it bare — `ws.onclose?.()` — as well
+  // as with an event.
+  private oncloseHandler: ((e?: Partial<CloseEvent>) => void) | null = null;
+  get onclose() {
+    return this.oncloseHandler;
+  }
+  set onclose(fn: ((e?: Partial<CloseEvent>) => void) | null) {
+    if (!this.closeHandlers.includes("onclose")) {
+      this.closeHandlers.push("onclose");
+    }
+    this.oncloseHandler = fn;
+  }
 
   constructor(
     public url: string,
@@ -43,6 +58,17 @@ export class MockWebSocket {
 
   send = vi.fn();
   close = vi.fn();
+
+  addEventListener(type: string, fn: (e: Partial<CloseEvent>) => void) {
+    if (type === "close") this.closeHandlers.push(fn);
+  }
+
+  /** Close the socket as the server does, with a close code. */
+  deliverClose(code: number) {
+    for (const handler of this.closeHandlers) {
+      (handler === "onclose" ? this.oncloseHandler : handler)?.({ code });
+    }
+  }
 
   /** Deliver the backend's "proxy is connected" control frame. */
   deliverConnected() {

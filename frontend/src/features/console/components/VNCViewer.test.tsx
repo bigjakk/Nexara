@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 // useGuestPowerSync → useVM needs a QueryClientProvider.
 import { renderWithProviders } from "@/test/test-utils";
 import { VNCViewer } from "./VNCViewer";
@@ -26,6 +26,14 @@ vi.mock("../api/console-queries", async (importOriginal) => {
     await importOriginal<typeof import("../api/console-queries")>();
   return { ...actual, createConsoleTokenMinter: () => mintSpy };
 });
+
+// What the console does when its session has ended is ask the app to check its
+// own (lib/session-ended.ts); these tests only need to see that it asks.
+const { sessionEndedSpy } = vi.hoisted(() => ({ sessionEndedSpy: vi.fn() }));
+vi.mock("../lib/session-ended", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/session-ended")>()),
+  consoleSessionEnded: sessionEndedSpy,
+}));
 
 // The toolbar is chrome with its own server state; irrelevant here.
 vi.mock("./VNCToolbar", () => ({ VNCToolbar: () => null }));
@@ -55,6 +63,11 @@ vi.mock("@novnc/novnc", () => {
       public options: Record<string, unknown>,
     ) {
       rfbInstances.push(this);
+      // As noVNC does: it takes over the socket's onclose, and reports a close
+      // as its disconnect event, at once and without the close code.
+      (socket as { onclose: unknown }).onclose = () => {
+        this.emit("disconnect");
+      };
     }
     addEventListener(type: string, fn: () => void) {
       (this.listeners[type] ??= []).push(fn);
@@ -188,6 +201,64 @@ describe("VNCViewer", () => {
     });
     expect(tabStatus()).toBe("reconnecting");
   });
+
+  // The server says so at open (an error with the code, then the Close) or
+  // while open (the Close, which RFB's disconnect follows without its code).
+  it.each([
+    {
+      name: "refuses it at open",
+      connectedFirst: false,
+      end: () => {
+        MockWebSocket.instances[0]?.onmessage?.({
+          data: JSON.stringify({ type: "error", code: "session_ended" }),
+        } as MessageEvent);
+        // Final at the error, before the Close that follows it.
+        expect(tabStatus()).toBe("disconnected");
+        MockWebSocket.instances[0]?.deliverClose(3000);
+      },
+    },
+    {
+      name: "closes it while open",
+      connectedFirst: true,
+      end: () => {
+        MockWebSocket.instances[0]?.deliverClose(3000);
+      },
+    },
+  ])(
+    "stops for good when the server $name because its session has ended",
+    async ({ connectedFirst, end }) => {
+      sessionEndedSpy.mockClear();
+      seedStore("connected");
+      const { rerender } = renderWithProviders(
+        <VNCViewer tab={tab} visible={true} />,
+      );
+      await waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1);
+      });
+      if (connectedFirst) {
+        act(() => {
+          MockWebSocket.instances[0]?.deliverConnected();
+        });
+        await waitFor(() => {
+          expect(rfbInstances).toHaveLength(1);
+        });
+      }
+
+      vi.useFakeTimers();
+      act(end);
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+
+      expect(tabStatus()).toBe("disconnected");
+      expect(useConsoleStore.getState().tabs[0]?.reconnectKey).toBe(0);
+      expect(sessionEndedSpy).toHaveBeenCalledTimes(1);
+      rerender(
+        <VNCViewer tab={{ ...tab, status: "disconnected" }} visible={true} />,
+      );
+      expect(screen.getByText("Session ended")).toBeInTheDocument();
+    },
+  );
 
   it("ignores frames queued on a superseded socket", async () => {
     // close() is asynchronous, so a frame already in flight still dispatches.

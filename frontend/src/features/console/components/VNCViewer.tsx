@@ -15,6 +15,11 @@ import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMAction } from "@/features/vms/api/vm-queries";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import { useIdleTabOnUnmount } from "../hooks/useIdleTabOnUnmount";
+import {
+  consoleSessionEnded,
+  SESSION_ENDED_CLOSE,
+  SESSION_ENDED_CODE,
+} from "../lib/session-ended";
 import { VNCToolbar } from "./VNCToolbar";
 import {
   buildVncWsUrl,
@@ -55,6 +60,8 @@ export function VNCViewer({
   // at once on login. An explicit reconnect (reconnectKey > 0) also counts
   // as activation, so the tab-bar reconnect button works on a background tab.
   const [activated, setActivated] = useState(visible || reconnectKey > 0);
+  // The server ended it because its session has ended: the overlay says so.
+  const [sessionEnded, setSessionEnded] = useState(false);
   useEffect(() => {
     if (visible || reconnectKey > 0) {
       setActivated(true);
@@ -86,6 +93,9 @@ export function VNCViewer({
     // looped forever. A per-run flag stays true for the generation it belongs
     // to, so a superseded connection can never speak for the tab again.
     let closed = false;
+    // The server ended this console because its session has ended: final, so
+    // nothing retries it (lib/session-ended.ts).
+    let sessionOver = false;
     let ws: WebSocket | null = null;
     // Per-run for the same reason `closed` is, though these never actually
     // leaked: as refs they were correct only because the cleanup reset the
@@ -98,12 +108,19 @@ export function VNCViewer({
       store.getState().tabs.find((t) => t.id === tabId)?.status ===
       "guest-stopped";
 
+    const endSession = () => {
+      sessionOver = true;
+      setSessionEnded(true);
+      updateTabStatus(tabId, "disconnected");
+      consoleSessionEnded();
+    };
+
     // Single funnel for auto-reconnects. Both the RFB disconnect event and
     // ws.onclose fire for one drop — without the dedup flag they each
     // scheduled a timer (and the second overwrote retryTimer, leaking the
     // first), producing overlapping reconnect cycles.
     const scheduleRetry = () => {
-      if (closed || retryScheduled) return;
+      if (closed || retryScheduled || sessionOver) return;
       if (tabIsParked()) return; // guest is off — wait for power-on instead
       if (retryCountRef.current < MAX_CONSOLE_AUTO_RETRIES) {
         const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
@@ -158,6 +175,15 @@ export function VNCViewer({
       ws.binaryType = "arraybuffer";
 
       const localWs = ws; // narrow non-null binding for closures
+
+      // A listener, not onclose: RFB replaces this socket's onclose once it
+      // takes it over, and its disconnect event does not carry the code. Added
+      // first, so it has run by the time that disconnect asks for a retry.
+      localWs.addEventListener("close", (event: CloseEvent) => {
+        if (!closed && !sessionOver && event.code === SESSION_ENDED_CLOSE) {
+          endSession();
+        }
+      });
 
       localWs.onmessage = (event: MessageEvent) => {
         // close() is asynchronous, so frames already queued on a superseded
@@ -224,7 +250,9 @@ export function VNCViewer({
               return;
             }
             if (msg.type === "error") {
-              if (msg.code === "guest_not_running") {
+              if (msg.code === SESSION_ENDED_CODE) {
+                endSession();
+              } else if (msg.code === "guest_not_running") {
                 // Backend confirmed the guest is powered off — park with a
                 // fresh retry budget for when it comes back.
                 retryCountRef.current = 0;
@@ -314,7 +342,11 @@ export function VNCViewer({
           className="h-full w-full bg-black"
           data-tab-id={tab.id}
         />
-        <ConsoleStateOverlay tab={tab} onReconnect={handleManualReconnect} />
+        <ConsoleStateOverlay
+          tab={tab}
+          sessionEnded={sessionEnded}
+          onReconnect={handleManualReconnect}
+        />
       </div>
     </div>
   );
@@ -329,9 +361,11 @@ export function VNCViewer({
  */
 function ConsoleStateOverlay({
   tab,
+  sessionEnded,
   onReconnect,
 }: {
   tab: ConsoleTab;
+  sessionEnded: boolean;
   onReconnect: () => void;
 }) {
   const actionMutation = useVMAction();
@@ -442,12 +476,18 @@ function ConsoleStateOverlay({
       )}
       <div>
         <p className="text-sm font-medium text-foreground">
-          {isError ? "Console connection failed" : "Console disconnected"}
+          {isError
+            ? "Console connection failed"
+            : sessionEnded
+              ? "Session ended"
+              : "Console disconnected"}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           {isError
             ? "The console session could not be established."
-            : "Automatic reconnect attempts were exhausted."}
+            : sessionEnded
+              ? "Sign in again to use the console."
+              : "Automatic reconnect attempts were exhausted."}
         </p>
       </div>
       <Button

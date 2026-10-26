@@ -8,6 +8,11 @@ import { useConsoleSession, useConsoleStoreApi } from "@/stores/console-store";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import { useIdleTabOnUnmount } from "../hooks/useIdleTabOnUnmount";
 import {
+  consoleSessionEnded,
+  SESSION_ENDED_CLOSE,
+  SESSION_ENDED_CODE,
+} from "../lib/session-ended";
+import {
   createConsoleTokenMinter,
   wsAuthProtocols,
 } from "../api/console-queries";
@@ -171,6 +176,9 @@ export function Terminal({ tab, visible }: TerminalProps) {
     // dropped connection and scheduled a retry — which bumped reconnectKey,
     // re-ran the effect, and looped forever.
     let closed = false;
+    // The server ended this console because its session has ended: final, so
+    // nothing retries it (lib/session-ended.ts).
+    let sessionOver = false;
     let ws: WebSocket | null = null;
     let dataDisposable: { dispose: () => void } | null = null;
     let resizeDisposable: { dispose: () => void } | null = null;
@@ -179,6 +187,13 @@ export function Terminal({ tab, visible }: TerminalProps) {
     const tabIsParked = () =>
       store.getState().tabs.find((t) => t.id === tabId)?.status ===
       "guest-stopped";
+
+    const endSession = () => {
+      sessionOver = true;
+      term.writeln("\r\n[Your session has ended]");
+      updateTabStatus(tabId, "disconnected");
+      consoleSessionEnded();
+    };
 
     const connect = async () => {
       // Remounted while parked on a stopped guest — don't reopen a
@@ -250,7 +265,9 @@ export function Terminal({ tab, visible }: TerminalProps) {
               return;
             }
             if (parsed.type === "error") {
-              if (parsed.code === "guest_not_running") {
+              if (parsed.code === SESSION_ENDED_CODE) {
+                endSession();
+              } else if (parsed.code === "guest_not_running") {
                 // Backend confirmed the guest is powered off \u2014 park with a
                 // fresh retry budget for when it comes back.
                 retryCountRef.current = 0;
@@ -273,8 +290,12 @@ export function Terminal({ tab, visible }: TerminalProps) {
         }
       };
 
-      ws.onclose = () => {
-        if (closed) return;
+      ws.onclose = (event: CloseEvent) => {
+        if (closed || sessionOver) return;
+        if (event.code === SESSION_ENDED_CLOSE) {
+          endSession();
+          return;
+        }
         if (tabIsParked()) return; // guest is off \u2014 wait for power-on instead
 
         if (retryCountRef.current < MAX_CONSOLE_AUTO_RETRIES) {
