@@ -76,12 +76,17 @@ import {
   parseVGA,
   buildVGA,
   parseDisk,
+  parseDriveMedia,
+  buildCDROM,
   parseAudio,
   buildAudio,
   parseStartup,
   buildStartup,
   parseBootOrder,
   buildBootOrder,
+  parseMachine,
+  buildMachine,
+  dropsIntelViommu,
   parseUSB,
   isRawUSBPassthrough,
   parsePCI,
@@ -120,6 +125,23 @@ const DISK_KEY_RE = /^(scsi|ide|sata|virtio|efidisk|tpmstate|unused)\d+$/;
  * silently upgrades the guest-visible CPU model.
  */
 const DEFAULT_CPU_TYPE = "x86-64-v2-AES";
+
+/**
+ * The machine a config naming no machine type runs as: qemu-server's default
+ * for x86_64 (default_machine_for_arch, src/PVE/QemuServer/Machine.pm).
+ */
+const DEFAULT_MACHINE = "pc";
+
+/**
+ * The machine value Save sends for the type picked: the stored value itself
+ * while the type picked is the one it runs, the default for a value naming
+ * none included, or else that value with only its type replaced.
+ */
+function machineFor(type: string, stored: string): string {
+  return type === (parseMachine(stored).type || DEFAULT_MACHINE)
+    ? stored
+    : buildMachine(type, stored);
+}
 
 /** All smbios1 text fields blank — the shape parseSMBIOS/buildSMBIOS expect. */
 function emptySmbios(): Record<SMBIOSTextField, string> {
@@ -282,8 +304,9 @@ function bootDeviceLabel(
     };
   }
   const val = str(config[key]);
-  if (val.includes("media=cdrom")) {
-    const iso = val.split(",")[0];
+  const drive = parseDriveMedia(val);
+  if (drive.cdrom) {
+    const iso = drive.file;
     return {
       label: `CD/DVD (${key})${iso && iso !== "none" ? ` — ${iso}` : " — empty"}`,
       type: "cdrom",
@@ -747,7 +770,10 @@ export function HardwarePanel({
 
     // System
     setBios(str(config["bios"] ?? "seabios"));
-    setMachine(str(config["machine"] ?? "pc"));
+    // The type alone: viommu= and the rest are kept from the stored value.
+    setMachine(
+      parseMachine(str(config["machine"] ?? "")).type || DEFAULT_MACHINE,
+    );
     setScsihw(str(config["scsihw"] ?? "virtio-scsi-pci"));
     const agent = parseAgent(str(config["agent"] ?? ""));
     setAgentEnabled(agent.enabled);
@@ -842,18 +868,13 @@ export function HardwarePanel({
     const audio = parseAudio(str(config["audio0"] ?? ""));
     setAudioDevice(audio.device);
 
-    // CD/DVD — scan all config keys for media=cdrom (ide*, sata*, etc.)
+    // CD/DVD — scan all config keys for media=cdrom (ide*, sata*, etc.),
+    // each by the volume it holds ("none" for no media).
     const newCdromEdits: Record<string, string> = {};
     for (const [cfgKey, cfgVal] of Object.entries(config)) {
       if (!DISK_KEY_RE.test(cfgKey)) continue;
-      const v = str(cfgVal);
-      if (v.includes("media=cdrom")) {
-        if (v === "none,media=cdrom") {
-          newCdromEdits[cfgKey] = "none";
-        } else {
-          newCdromEdits[cfgKey] = v.split(",")[0] ?? "none";
-        }
-      }
+      const drive = parseDriveMedia(str(cfgVal));
+      if (drive.cdrom) newCdromEdits[cfgKey] = drive.file;
     }
     setCdromEdits(newCdromEdits);
 
@@ -869,9 +890,7 @@ export function HardwarePanel({
       .filter(([key, val]) => {
         if (!DISK_KEY_RE.test(key)) return false;
         // Exclude CD/DVD drives on any bus
-        const v = str(val);
-        if (v.includes("media=cdrom")) return false;
-        return true;
+        return !parseDriveMedia(str(val)).cdrom;
       })
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, val]) => ({ key, parsed: parseDisk(str(val)) }));
@@ -1018,18 +1037,10 @@ export function HardwarePanel({
       }
     }
 
-    // System
+    // System. The machine and the agent are among the optionalScalars.
     if (bios !== str(original["bios"] ?? "seabios")) fields["bios"] = bios;
-    if (machine !== str(original["machine"] ?? "pc"))
-      fields["machine"] = machine;
     if (scsihw !== str(original["scsihw"] ?? "virtio-scsi-pci"))
       fields["scsihw"] = scsihw;
-    const newAgent = buildAgent({
-      enabled: agentEnabled,
-      fstrimClonedDisks: agentFstrim,
-    });
-    const origAgent = buildAgent(parseAgent(str(original["agent"] ?? "")));
-    if (newAgent !== origAgent) fields["agent"] = newAgent;
     const origKvm = original["kvm"] != null ? bool01(original["kvm"]) : true;
     if (kvmEnabled !== origKvm) fields["kvm"] = kvmEnabled ? "1" : "0";
     const origAcpi = original["acpi"] != null ? bool01(original["acpi"]) : true;
@@ -1180,23 +1191,12 @@ export function HardwarePanel({
       }
     }
 
-    // CD/DVD drives (all media=cdrom devices)
+    // CD/DVD drives (all media=cdrom devices), each rebuilt on its stored
+    // value like the NICs: a new ISO keeps the drive's other options.
     for (const [key, isoVal] of Object.entries(cdromEdits)) {
       const origRaw = str(original[key] ?? "");
-      if (!origRaw) {
-        // New cdrom device
-        fields[key] =
-          isoVal === "none" ? "none,media=cdrom" : `${isoVal},media=cdrom`;
-      } else {
-        const origVal =
-          origRaw !== "none,media=cdrom"
-            ? (origRaw.split(",")[0] ?? "none")
-            : "none";
-        if (isoVal !== origVal) {
-          fields[key] =
-            isoVal === "none" ? "none,media=cdrom" : `${isoVal},media=cdrom`;
-        }
-      }
+      const newVal = buildCDROM(isoVal, origRaw);
+      if (newVal !== origRaw) fields[key] = newVal;
     }
 
     // Meta
@@ -1292,6 +1292,28 @@ export function HardwarePanel({
         value: buildSMBIOS({ uuid: smbiosUuid, values: smbios }),
         was: buildSMBIOS(parseSMBIOS(o("smbios1"))),
       },
+      // These two are rebuilt on what is stored, keeping every option the
+      // panel has no control for, and are never empty once changed.
+      {
+        key: "machine",
+        value: machineFor(machine, o("machine")),
+        was: o("machine"),
+      },
+      {
+        key: "agent",
+        value: buildAgent(
+          {
+            enabled: agentEnabled,
+            // FSTRIM is an edit only while the agent is on: its control is
+            // shown only then, and Proxmox ignores it otherwise.
+            fstrimClonedDisks: agentEnabled
+              ? agentFstrim
+              : parseAgent(o("agent")).fstrimClonedDisks,
+          },
+          o("agent"),
+        ),
+        was: o("agent"),
+      },
     ];
   }, [
     original,
@@ -1305,6 +1327,9 @@ export function HardwarePanel({
     watchdogAction,
     smbiosUuid,
     smbios,
+    machine,
+    agentEnabled,
+    agentFstrim,
   ]);
 
   /**
@@ -1393,13 +1418,7 @@ export function HardwarePanel({
     if (shares !== (original["shares"] != null ? str(original["shares"]) : ""))
       return true;
     if (bios !== str(original["bios"] ?? "seabios")) return true;
-    if (machine !== str(original["machine"] ?? "pc")) return true;
     if (scsihw !== str(original["scsihw"] ?? "virtio-scsi-pci")) return true;
-    if (
-      buildAgent({ enabled: agentEnabled, fstrimClonedDisks: agentFstrim }) !==
-      buildAgent(parseAgent(str(original["agent"] ?? "")))
-    )
-      return true;
     if (
       kvmEnabled !== (original["kvm"] != null ? bool01(original["kvm"]) : true)
     )
@@ -1447,15 +1466,10 @@ export function HardwarePanel({
       ) !== origAudio
     )
       return true;
-    // CD/DVD drives
+    // CD/DVD drives, compared as handleSave compares them
     for (const [key, isoVal] of Object.entries(cdromEdits)) {
       const origRaw = str(original[key] ?? "");
-      if (!origRaw) return true; // new cdrom
-      const origVal =
-        origRaw !== "none,media=cdrom"
-          ? (origRaw.split(",")[0] ?? "none")
-          : "none";
-      if (isoVal !== origVal) return true;
+      if (buildCDROM(isoVal, origRaw) !== origRaw) return true;
     }
     if (description !== str(original["description"] ?? "")) return true;
     if (tags !== str(original["tags"] ?? "")) return true;
@@ -1487,10 +1501,7 @@ export function HardwarePanel({
     balloon,
     shares,
     bios,
-    machine,
     scsihw,
-    agentEnabled,
-    agentFstrim,
     kvmEnabled,
     acpi,
     onboot,
@@ -1866,6 +1877,14 @@ export function HardwarePanel({
                   </option>
                 ))}
               </select>
+              {/* Saved, buildMachine takes it off: Proxmox refuses an Intel
+                  vIOMMU beside a type without q35 in it. */}
+              {dropsIntelViommu(machine, str(original?.["machine"] ?? "")) && (
+                <p className="text-[10px] leading-snug text-amber-700 dark:text-amber-400">
+                  This VM&apos;s Intel vIOMMU needs a q35 machine type, so
+                  saving this one removes it.
+                </p>
+              )}
             </div>
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">SCSI Controller</Label>

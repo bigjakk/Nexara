@@ -42,6 +42,18 @@ export function segment(raw: string): Segment {
   };
 }
 
+/**
+ * Whether `seg` holds the value of a format's default_key: a segment with no
+ * "=" (not a blank one, which parse_property_string skips), or one spelled
+ * out under `keys`, the default key's name and its aliases.
+ */
+export function isDefaultKeySegment(seg: Segment, ...keys: string[]): boolean {
+  return (
+    (seg.key === null && seg.value !== "") ||
+    (seg.key !== null && keys.includes(seg.key))
+  );
+}
+
 export function splitSegments(raw: string): Segment[] {
   return raw === "" ? [] : raw.split(",").map(segment);
 }

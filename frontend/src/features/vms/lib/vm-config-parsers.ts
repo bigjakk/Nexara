@@ -4,6 +4,7 @@
  */
 
 import {
+  isDefaultKeySegment,
   joinSegments,
   setSegment,
   splitSegments,
@@ -149,11 +150,7 @@ function isNetModelShorthand(seg: Segment): boolean {
 
 /** The segment naming the model: bare, model=, or <model>=MAC. */
 function isNetModelSegment(seg: Segment): boolean {
-  return (
-    (seg.key === null && seg.value !== "") ||
-    seg.key === "model" ||
-    isNetModelShorthand(seg)
-  );
+  return isDefaultKeySegment(seg, "model") || isNetModelShorthand(seg);
 }
 
 /**
@@ -279,34 +276,74 @@ export function buildNet(parsed: ParsedNet, base = ""): string {
 // agent
 // ---------------------------------------------------------------------------
 
+/*
+ * qemu-server's $agent_fmt (src/PVE/QemuServer/Agent.pm), transcribed:
+ *
+ *   enabled              boolean, default 0, and the default_key: "1" alone
+ *                        is enabled=1, and so is "1,fstrim_cloned_disks=1".
+ *   fstrim_cloned_disks  boolean, default 0.
+ *   freeze-fs            boolean, default 1. freeze-fs-on-backup, its older
+ *                        name, and guest-fsfreeze are aliases of it.
+ *   type                 virtio (the default) or isa.
+ *
+ * Booleans read as pveBoolean reads them. parse_guest_agent ignores every
+ * other option while enabled is off, so turning the agent off keeps them:
+ * turned back on, it is as it was.
+ */
+
 export interface ParsedAgent {
   enabled: boolean;
   fstrimClonedDisks: boolean;
 }
 
-/**
- * Parse Proxmox agent field. Handles:
- *   "1", "0", "enabled=1,fstrim_cloned_disks=1", or empty/missing.
- */
-export function parseAgent(raw: string): ParsedAgent {
-  if (!raw) return { enabled: false, fstrimClonedDisks: false };
-
-  // Simple "0" or "1"
-  if (raw === "1") return { enabled: true, fstrimClonedDisks: false };
-  if (raw === "0") return { enabled: false, fstrimClonedDisks: false };
-
-  const kv = parseKVString(raw);
-  return {
-    enabled: kv.get("enabled") === "1",
-    fstrimClonedDisks: kv.get("fstrim_cloned_disks") === "1",
-  };
+/** The segment holding enabled: bare ($agent_fmt's default_key) or enabled=. */
+function isAgentEnabledSegment(seg: Segment): boolean {
+  return isDefaultKeySegment(seg, "enabled");
 }
 
-export function buildAgent(parsed: ParsedAgent): string {
-  if (!parsed.enabled) return "0";
-  const parts = ["enabled=1"];
-  if (parsed.fstrimClonedDisks) parts.push("fstrim_cloned_disks=1");
-  return parts.join(",");
+/**
+ * Parse agent, e.g. "1", "0", "1,fstrim_cloned_disks=1", "enabled=1,type=isa".
+ * No agent line is enabled=0. Options with no field here (type, freeze-fs
+ * and its aliases) are not read; buildAgent keeps them.
+ */
+export function parseAgent(raw: string): ParsedAgent {
+  const result: ParsedAgent = { enabled: false, fstrimClonedDisks: false };
+  for (const seg of splitSegments(raw)) {
+    if (isAgentEnabledSegment(seg)) result.enabled = pveBoolean(seg.value);
+    else if (seg.key === "fstrim_cloned_disks")
+      result.fstrimClonedDisks = pveBoolean(seg.value);
+  }
+  return result;
+}
+
+/**
+ * Build agent on `base` the way buildNet builds a NIC: only a changed option
+ * is rewritten, where it stands, so an untouched value, no agent line
+ * included, rebuilds to exactly `base`. enabled keeps the form it is stored
+ * in, bare or enabled=; where there is none it goes first as enabled=, as a
+ * new agent always has been written.
+ */
+export function buildAgent(parsed: ParsedAgent, base = ""): string {
+  const was = parseAgent(base);
+  let segs = splitSegments(base);
+  if (parsed.enabled !== was.enabled) {
+    const bit = parsed.enabled ? "1" : "0";
+    const bare = segs.find(isAgentEnabledSegment)?.key === null;
+    segs = setSegment(
+      segs,
+      isAgentEnabledSegment,
+      bare ? bit : `enabled=${bit}`,
+      "prepend",
+    );
+  }
+  if (parsed.fstrimClonedDisks !== was.fstrimClonedDisks) {
+    segs = setSegment(
+      segs,
+      (s) => s.key === "fstrim_cloned_disks",
+      parsed.fstrimClonedDisks ? "fstrim_cloned_disks=1" : null,
+    );
+  }
+  return joinSegments(segs);
 }
 
 // ---------------------------------------------------------------------------
@@ -324,7 +361,7 @@ export interface ParsedVGA {
 
 /** The segment naming the type: bare ($vga_fmt's default_key) or type=. */
 function isVgaTypeSegment(seg: Segment): boolean {
-  return (seg.key === null && seg.value !== "") || seg.key === "type";
+  return isDefaultKeySegment(seg, "type");
 }
 
 /**
@@ -374,20 +411,101 @@ export function buildVGA(parsed: ParsedVGA, base = ""): string {
 // boot order
 // ---------------------------------------------------------------------------
 
-/**
- * Parse boot field: "order=scsi0;ide2;net0"
- * Returns device list like ["scsi0", "ide2", "net0"].
+/*
+ * qemu-server's $boot_fmt (src/PVE/QemuServer.pm), transcribed: `order` is
+ * "device[;device...]", split as pve-common's split_list splits it (on ";",
+ * "," and whitespace); `legacy` is the deprecated default_key, a bare
+ * [acdn]{1,4} such as "cdn" (floppy, disk, CD-ROM, network), or legacy=,
+ * and is also what no boot line means. device_bootorder boots by the legacy
+ * value whenever there is one, and by the order only without it, so a value
+ * with a legacy part names no device here. (The format's own description
+ * says the order overrides legacy; the code that boots the VM says not.
+ * $update_vm_api writes a value with an order as the order alone, but
+ * create_vm keeps what it is given, so a value with both comes from a create,
+ * a restore or a hand edit.)
  */
+
+/** The devices a boot value orders, e.g. "order=scsi0;ide2;net0". */
 export function parseBootOrder(raw: string): string[] {
-  if (!raw) return [];
-  // strip "order=" prefix if present
-  const val = raw.startsWith("order=") ? raw.slice(6) : raw;
-  return val.split(";").filter(Boolean);
+  const segs = splitSegments(raw);
+  if (segs.some((s) => isDefaultKeySegment(s, "legacy"))) return [];
+  const order = segs.find((s) => s.key === "order")?.value ?? "";
+  return order.split(/[;,\s]+/).filter(Boolean);
 }
 
 export function buildBootOrder(devices: string[]): string {
   if (devices.length === 0) return "";
   return `order=${devices.join(";")}`;
+}
+
+// ---------------------------------------------------------------------------
+// machine
+// ---------------------------------------------------------------------------
+
+/*
+ * qemu-server's $machine_fmt (src/PVE/QemuServer/Machine.pm), transcribed:
+ * `type` is an optional default_key, so a bare segment is the machine type
+ * ("q35", "pc-i440fx-9.2+pve1") and "viommu=virtio" alone is a valid value
+ * naming none, which is the architecture's default machine (pc on x86_64,
+ * default_machine_for_arch). viommu is intel or virtio; aw-bits, enable-s3
+ * and enable-s4 have no field here. buildMachine keeps all three, and
+ * viommu, but for one rule that spans them: assert_valid_machine_property
+ * refuses an Intel vIOMMU on a type without q35 in it, and aw-bits with no
+ * vIOMMU.
+ */
+
+export interface ParsedMachine {
+  /** "" when the value names no type. */
+  type: string;
+  /** viommu=, or "". */
+  viommu: string;
+}
+
+/** The segment naming the type: bare ($machine_fmt's default_key) or type=. */
+function isMachineTypeSegment(seg: Segment): boolean {
+  return isDefaultKeySegment(seg, "type");
+}
+
+export function parseMachine(raw: string): ParsedMachine {
+  const result: ParsedMachine = { type: "", viommu: "" };
+  for (const seg of splitSegments(raw)) {
+    if (isMachineTypeSegment(seg)) result.type = seg.value;
+    else if (seg.key === "viommu") result.viommu = seg.value;
+  }
+  return result;
+}
+
+/**
+ * Build machine on `base` with `type` in place of the type it names, the way
+ * buildVGA changes a vga type: every other option keeps its bytes and its
+ * position, so the same type rebuilds to exactly `base`. The type keeps the
+ * form it is stored in, bare or type=; added to a value naming none, it goes
+ * first. A type without q35 drops an Intel vIOMMU and its aw-bits, which
+ * Proxmox refuses beside it (see dropsIntelViommu).
+ */
+export function buildMachine(type: string, base = ""): string {
+  if (type === parseMachine(base).type) return base;
+  let segs = splitSegments(base);
+  let text: string | null = null;
+  if (type) {
+    text =
+      segs.find(isMachineTypeSegment)?.key === "type" ? `type=${type}` : type;
+  }
+  segs = setSegment(segs, isMachineTypeSegment, text, "prepend");
+  if (dropsIntelViommu(type, base)) {
+    segs = setSegment(segs, (s) => s.key === "viommu", null);
+    segs = setSegment(segs, (s) => s.key === "aw-bits", null);
+  }
+  return joinSegments(segs);
+}
+
+/**
+ * Whether `type` takes the Intel vIOMMU off a stored machine value:
+ * assert_valid_machine_property wants q35 in the type of any value with
+ * viommu=intel, and aw-bits only beside a vIOMMU.
+ */
+export function dropsIntelViommu(type: string, base: string): boolean {
+  return parseMachine(base).viommu === "intel" && !type.includes("q35");
 }
 
 // ---------------------------------------------------------------------------
@@ -565,6 +683,57 @@ export function parseDisk(raw: string): ParsedDisk {
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// CD/DVD drives
+// ---------------------------------------------------------------------------
+
+/*
+ * qemu-server's drive format (%drivedesc_base, src/PVE/QemuServer/Drive.pm),
+ * the part a CD/DVD drive's edit touches. `file` is the default_key, so a
+ * bare segment is the drive's volume, and `volume` is an alias of it; on a
+ * CD/DVD drive that is an ISO's volume id, "none" for no media, or "cdrom"
+ * for the host's drive. `media` is cdrom or disk, disk when absent, and
+ * drive_is_cdrom reads media=cdrom alone. Every other option (cache, aio,
+ * size, ...) is the drive's own and is kept: create_disks
+ * (src/PVE/API2/Qemu.pm) reads size= afresh from a new volume and drops it
+ * for none and cdrom, so an old ISO's size does no harm.
+ */
+
+export interface ParsedDriveMedia {
+  /** The drive's volume, however it is spelled. */
+  file: string;
+  /** media=cdrom: a CD/DVD drive. */
+  cdrom: boolean;
+}
+
+/** The segment naming the volume: bare (the default_key), file= or volume=. */
+function isDriveFileSegment(seg: Segment): boolean {
+  return isDefaultKeySegment(seg, "file", "volume");
+}
+
+export function parseDriveMedia(raw: string): ParsedDriveMedia {
+  const result: ParsedDriveMedia = { file: "", cdrom: false };
+  for (const seg of splitSegments(raw)) {
+    if (isDriveFileSegment(seg)) result.file = seg.value;
+    else if (seg.key === "media") result.cdrom = seg.value === "cdrom";
+  }
+  return result;
+}
+
+/**
+ * Build a CD/DVD drive holding `file`. On `base`, the drive as stored, only
+ * the volume is rewritten, in the form it is stored in, so the same volume
+ * rebuilds to exactly `base`. With no base it builds a new drive.
+ */
+export function buildCDROM(file: string, base = ""): string {
+  if (!base) return `${file},media=cdrom`;
+  if (file === parseDriveMedia(base).file) return base;
+  const segs = splitSegments(base);
+  const key = segs.find(isDriveFileSegment)?.key ?? null;
+  const text = key === null ? file : `${key}=${file}`;
+  return joinSegments(setSegment(segs, isDriveFileSegment, text, "prepend"));
 }
 
 // ---------------------------------------------------------------------------

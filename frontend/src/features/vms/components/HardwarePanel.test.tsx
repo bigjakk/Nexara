@@ -473,6 +473,75 @@ describe("HardwarePanel dirty check", () => {
     ]);
   });
 
+  // The agent's bare "1" is its enabled flag, which the panel once read as
+  // off; and each of the three keeps the options it has no control for.
+  it("reads the agent, a CD/DVD drive and the machine as stored, and rebuilds each on it, changing only what was edited", async () => {
+    const save = await renderPanel(
+      nicVM({
+        agent: "1,fstrim_cloned_disks=1,type=isa",
+        ide2: "store01:iso/install.iso,media=cdrom,size=600M",
+        machine: "pc-q35-9.2+pve1,viommu=virtio",
+      }),
+    );
+    expect(save).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Agent" })).toBeChecked();
+    const cdrom = screen
+      .getByText("ide2", { exact: true })
+      .parentElement?.parentElement?.querySelector("select");
+    if (!cdrom) throw new Error("no CD/DVD select for ide2");
+
+    // The ISO first, alone: a dirty check that missed it would hide behind
+    // the edits after it.
+    fill(cdrom, "none");
+    expect(save).toBeEnabled();
+    await user.click(screen.getByRole("checkbox", { name: "FSTRIM" }));
+    fill(control(document.body, "Machine"), "q35");
+
+    expect(await saveAndGetFields(save)).toEqual([
+      [
+        CONFIG_URL,
+        {
+          fields: {
+            agent: "1,type=isa",
+            ide2: "none,media=cdrom,size=600M",
+            machine: "q35,viommu=virtio",
+          },
+        },
+      ],
+    ]);
+  });
+
+  // FSTRIM shows only while the agent is on, and Proxmox ignores it while
+  // the agent is off: ticked then, it is no edit.
+  it("sends nothing for an FSTRIM ticked on an agent turned off again", async () => {
+    const save = await renderPanel(nicVM());
+    const agent = screen.getByRole("checkbox", { name: "Agent" });
+
+    await user.click(agent);
+    await user.click(screen.getByRole("checkbox", { name: "FSTRIM" }));
+    expect(save).toBeEnabled();
+    await user.click(agent);
+
+    expect(save).toBeDisabled();
+  });
+
+  // Proxmox refuses an Intel vIOMMU beside a machine type without q35, so a
+  // switch to one takes it off, and says so before Save.
+  it("says that a machine type without q35 takes the Intel vIOMMU off, and sends it without", async () => {
+    const save = await renderPanel(
+      nicVM({ machine: "q35,viommu=intel,aw-bits=48" }),
+    );
+    const note = /Intel vIOMMU needs a q35 machine type/;
+    expect(screen.queryByText(note)).not.toBeInTheDocument();
+
+    fill(control(document.body, "Machine"), "pc");
+    expect(screen.getByText(note)).toBeInTheDocument();
+
+    expect(await saveAndGetFields(save)).toEqual([
+      [CONFIG_URL, { fields: { machine: "pc" } }],
+    ]);
+  });
+
   it("deletes vga when it is set back to the default", async () => {
     const save = await renderPanel(nicVM({ vga: "qxl" }));
     const vga = control(document.body, "VGA");

@@ -12,7 +12,11 @@ import {
   buildAudio,
   parseBootOrder,
   buildBootOrder,
+  parseMachine,
+  buildMachine,
   parseDisk,
+  parseDriveMedia,
+  buildCDROM,
   parseCPU,
   buildCPU,
   parseWatchdog,
@@ -323,42 +327,56 @@ describe("parseNet / buildNet", () => {
 });
 
 describe("parseAgent / buildAgent", () => {
-  it("parses '1'", () => {
-    const a = parseAgent("1");
-    expect(a.enabled).toBe(true);
-    expect(a.fstrimClonedDisks).toBe(false);
+  // enabled is $agent_fmt's default_key, so a bare segment is enabled, beside
+  // other options too; a value with none of it is enabled=0.
+  it.each([
+    ["", false, false],
+    ["0", false, false],
+    ["1", true, false],
+    ["1,fstrim_cloned_disks=1", true, true],
+    ["enabled=on,fstrim_cloned_disks=yes,type=isa", true, true],
+    ["fstrim_cloned_disks=1", false, true],
+  ])("reads %j as enabled %s, fstrim %s", (raw, enabled, fstrim) => {
+    expect(parseAgent(raw)).toEqual({ enabled, fstrimClonedDisks: fstrim });
   });
 
-  it("parses '0'", () => {
-    const a = parseAgent("0");
-    expect(a.enabled).toBe(false);
-  });
+  // freeze-fs-on-backup and type have no field, and must survive any edit.
+  const STORED = "1,fstrim_cloned_disks=1,freeze-fs-on-backup=0,type=isa";
 
-  it("parses kv format", () => {
-    const a = parseAgent("enabled=1,fstrim_cloned_disks=1");
-    expect(a.enabled).toBe(true);
-    expect(a.fstrimClonedDisks).toBe(true);
-  });
+  it.each(["", STORED])(
+    "rebuilds an untouched agent %j to exactly what is stored",
+    (raw) => {
+      expect(buildAgent(parseAgent(raw), raw)).toBe(raw);
+    },
+  );
 
-  it("parses empty string", () => {
-    const a = parseAgent("");
-    expect(a.enabled).toBe(false);
-  });
-
-  it("builds enabled with fstrim", () => {
-    expect(buildAgent({ enabled: true, fstrimClonedDisks: true })).toBe(
+  it.each([
+    [
+      "turns it off where it stands, keeping the rest",
+      STORED,
+      { enabled: false, fstrimClonedDisks: true },
+      "0,fstrim_cloned_disks=1,freeze-fs-on-backup=0,type=isa",
+    ],
+    [
+      "clears fstrim and nothing else",
+      STORED,
+      { enabled: true, fstrimClonedDisks: false },
+      "1,freeze-fs-on-backup=0,type=isa",
+    ],
+    [
+      "keeps the enabled= spelling",
+      "enabled=0,type=isa",
+      { enabled: true, fstrimClonedDisks: true },
+      "enabled=1,type=isa,fstrim_cloned_disks=1",
+    ],
+    [
+      "writes a new agent as it always has",
+      "",
+      { enabled: true, fstrimClonedDisks: true },
       "enabled=1,fstrim_cloned_disks=1",
-    );
-  });
-
-  it("builds enabled without fstrim", () => {
-    expect(buildAgent({ enabled: true, fstrimClonedDisks: false })).toBe(
-      "enabled=1",
-    );
-  });
-
-  it("builds disabled", () => {
-    expect(buildAgent({ enabled: false, fstrimClonedDisks: false })).toBe("0");
+    ],
+  ])("%s", (_name, raw, parsed, want) => {
+    expect(buildAgent(parsed, raw)).toBe(want);
   });
 });
 
@@ -513,20 +531,16 @@ describe("parseAudio / buildAudio", () => {
 });
 
 describe("parseBootOrder / buildBootOrder", () => {
-  it("parses boot order", () => {
-    expect(parseBootOrder("order=scsi0;ide2;net0")).toEqual([
-      "scsi0",
-      "ide2",
-      "net0",
-    ]);
-  });
-
-  it("handles empty string", () => {
-    expect(parseBootOrder("")).toEqual([]);
-  });
-
-  it("handles raw format without order= prefix", () => {
-    expect(parseBootOrder("scsi0;net0")).toEqual(["scsi0", "net0"]);
+  it.each([
+    ["order=scsi0;ide2;net0", ["scsi0", "ide2", "net0"]],
+    ["", []],
+    // $boot_fmt's default_key is the deprecated legacy=[acdn]{1,4}, not a
+    // device, and device_bootorder boots by it even beside an order.
+    ["cdn", []],
+    ["legacy=dc", []],
+    ["cdn,order=scsi0", []],
+  ])("reads %j as the order %j", (raw, want) => {
+    expect(parseBootOrder(raw)).toEqual(want);
   });
 
   it("builds boot order", () => {
@@ -535,6 +549,73 @@ describe("parseBootOrder / buildBootOrder", () => {
 
   it("builds empty", () => {
     expect(buildBootOrder([])).toBe("");
+  });
+});
+
+describe("parseMachine / buildMachine", () => {
+  // type is $machine_fmt's optional default_key: a value can name none.
+  it.each([
+    ["", { type: "", viommu: "" }],
+    [
+      "pc-q35-9.2+pve1,viommu=intel",
+      { type: "pc-q35-9.2+pve1", viommu: "intel" },
+    ],
+    ["type=q35,viommu=virtio", { type: "q35", viommu: "virtio" }],
+    ["viommu=virtio", { type: "", viommu: "virtio" }],
+  ])("reads %j", (raw, want) => {
+    expect(parseMachine(raw)).toEqual(want);
+  });
+
+  it.each([
+    [
+      "keeps viommu= and the rest when the type changes",
+      "pc-q35-9.2+pve1,viommu=intel,aw-bits=48",
+      "q35",
+      "q35,viommu=intel,aw-bits=48",
+    ],
+    [
+      "keeps the type= spelling",
+      "type=q35,viommu=virtio",
+      "pc",
+      "type=pc,viommu=virtio",
+    ],
+    [
+      "puts a type first in a value naming none",
+      "viommu=virtio",
+      "q35",
+      "q35,viommu=virtio",
+    ],
+    ["writes a type where there was no machine line", "", "q35", "q35"],
+    // Proxmox refuses an Intel vIOMMU beside a type without q35, and
+    // aw-bits beside no vIOMMU; a virtio one runs on any type.
+    [
+      "drops an Intel vIOMMU and its aw-bits for a type without q35",
+      "q35,viommu=intel,aw-bits=48",
+      "pc",
+      "pc",
+    ],
+    [
+      "keeps a virtio vIOMMU for any type",
+      "q35,viommu=virtio,aw-bits=48",
+      "pc",
+      "pc,viommu=virtio,aw-bits=48",
+    ],
+    // q35 anywhere in the type, as Proxmox matches it: the versioned types
+    // the machine select lists first are q35 types too.
+    [
+      "keeps an Intel vIOMMU for a versioned q35 type",
+      "q35,viommu=intel,aw-bits=48",
+      "pc-q35-9.2+pve1",
+      "pc-q35-9.2+pve1,viommu=intel,aw-bits=48",
+    ],
+    [
+      "rebuilds the same type to exactly what is stored",
+      "q35,enable-s3=1",
+      "q35",
+      "q35,enable-s3=1",
+    ],
+  ])("%s", (_name, raw, type, want) => {
+    expect(buildMachine(type, raw)).toBe(want);
   });
 });
 
@@ -595,6 +676,51 @@ describe("parseDisk", () => {
     const d = parseDisk("none,media=cdrom");
     expect(d.volume).toBe("none");
     expect(d.storage).toBe("");
+  });
+});
+
+describe("parseDriveMedia / buildCDROM", () => {
+  // file is the drive format's default_key, and volume an alias of it.
+  it.each([
+    [
+      "store01:iso/install.iso,media=cdrom,size=600M",
+      "store01:iso/install.iso",
+      true,
+    ],
+    ["none,media=cdrom", "none", true],
+    [
+      "volume=store01:iso/install.iso,media=cdrom",
+      "store01:iso/install.iso",
+      true,
+    ],
+    ["store01:vm-101-disk-0,size=32G", "store01:vm-101-disk-0", false],
+    ["store01:vm-101-disk-0,media=disk", "store01:vm-101-disk-0", false],
+  ])("reads %j as %j, cdrom %s", (raw, file, cdrom) => {
+    expect(parseDriveMedia(raw)).toEqual({ file, cdrom });
+  });
+
+  it.each([
+    [
+      "puts a new ISO in place of the stored volume, keeping the drive's options",
+      "store01:iso/install.iso,media=cdrom,size=600M,aio=native",
+      "store02:iso/other.iso",
+      "store02:iso/other.iso,media=cdrom,size=600M,aio=native",
+    ],
+    [
+      "keeps the volume= spelling when the media is taken out",
+      "volume=store01:iso/install.iso,media=cdrom",
+      "none",
+      "volume=none,media=cdrom",
+    ],
+    [
+      "rebuilds the same volume to exactly what is stored",
+      "media=cdrom,store01:iso/install.iso",
+      "store01:iso/install.iso",
+      "media=cdrom,store01:iso/install.iso",
+    ],
+    ["builds a new drive", "", "none", "none,media=cdrom"],
+  ])("%s", (_name, raw, file, want) => {
+    expect(buildCDROM(file, raw)).toBe(want);
   });
 });
 

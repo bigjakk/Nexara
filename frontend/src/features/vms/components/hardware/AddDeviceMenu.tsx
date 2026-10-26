@@ -999,8 +999,9 @@ function AddPCIDialog({
   const createMapping = useCreatePCIMapping(clusterId);
   const busy = createMapping.isPending;
 
-  // "q35" anywhere in the machine type — pc-q35-9.0, q35,viommu=intel — as
-  // Proxmox's dialog tests it; unset is i440fx.
+  // "q35" anywhere in the machine type — pc-q35-9.0, q35 — as Proxmox's
+  // dialog tests it. The hardware panel passes the type alone, "pc" (i440fx)
+  // when the VM sets none.
   const machine = config["machine"];
   const isQ35 = typeof machine === "string" && machine.includes("q35");
 
