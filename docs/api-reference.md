@@ -2080,3 +2080,20 @@ Sec-WebSocket-Protocol: nexara.token, nexara.token.<console_jwt>
 `type` values: `node_shell`, `vm_serial`, `vm_vnc`, `ct_attach`, `ct_vnc`.
 A console token is single-purpose — it's rejected on any upgrade whose
 scope tuple doesn't match the one it was minted for.
+
+A console is held to the sign-in it was opened under: the session whose
+access token minted the console token, or the API key. The console is refused,
+and closed while open (checked every 5 seconds), once that session is signed
+out, revoked or expired, every session of the account is revoked, the account is
+deactivated, or the API key is revoked or expires. An API key outlives a sign-out
+of all devices and a password change, as it does elsewhere, and so does a console
+it opened.
+
+- Minting answers `401` ("Session has ended") for a session that has ended, and
+  for an access token that names no session (issued before this release: a
+  refresh replaces it). It answers `503` when the session cannot be checked.
+- A console refused at open gets `{"type":"error","code":"session_ended"}`, then
+  WebSocket close code `3000` ("session ended"); one closed while open gets the
+  close code alone. A client should stop reconnecting then.
+- A console whose sign-in could not be checked for about a minute is closed with
+  `1011`; that, and any other error or close code, may be retried.

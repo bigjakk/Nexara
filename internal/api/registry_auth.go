@@ -357,7 +357,9 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Path:   authScope + "/console-token",
 		Description: "Mint a 60-second token locked to one console: a single cluster, node, guest and " +
 			"console type. Requires console:node, console:vm or console:container on THAT cluster " +
-			"depending on the type requested — deliberately not view:*, which every built-in Viewer holds.",
+			"depending on the type requested — deliberately not view:*, which every built-in Viewer holds. " +
+			"The console stays open only while the caller's session (or API key) does: a session that has " +
+			"ended gets 401, and an open console is closed with code 3000 once it ends.",
 		Group:       "Authentication",
 		Permissions: Permissions{Deferred: consoleTokenReason},
 		NodesCheckedByHandler: map[string]string{

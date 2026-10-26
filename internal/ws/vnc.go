@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	gorillaWs "github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/auth"
@@ -26,6 +27,9 @@ type VNCHandler struct {
 	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	jwt           *auth.JWTService
 	logger        *slog.Logger
+	// checkEvery is how often an open console re-checks its credential
+	// (console_credential.go); tests shorten it.
+	checkEvery time.Duration
 }
 
 // NewVNCHandler creates a new VNCHandler.
@@ -35,6 +39,7 @@ func NewVNCHandler(queries *db.Queries, encryptionKey string, jwt *auth.JWTServi
 		encryptionKey: encryptionKey,
 		jwt:           jwt,
 		logger:        logger,
+		checkEvery:    credentialCheckEvery,
 	}
 }
 
@@ -102,6 +107,11 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 		guestType = "lxc"
 	default:
 		h.writeError(conn, "invalid console type")
+		return
+	}
+
+	live, credLogger, admitted := admitCredential(conn, h.queries, logger)
+	if !admitted {
 		return
 	}
 
@@ -176,8 +186,14 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	if password == "" {
 		password = vncResp.Ticket
 	}
+	if !stillLive(conn, live, credLogger) {
+		return
+	}
 	connectedMsg := `{"type":"connected","password":` + strconv.Quote(password) + `}`
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(connectedMsg))
+
+	watch := watchRelay(live, h.checkEvery, conn, pxConn, credLogger)
+	defer watch.stop()
 
 	// Bidirectional proxy: browser WebSocket ↔ Proxmox WebSocket.
 	var wg sync.WaitGroup
@@ -186,7 +202,7 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	// Browser → Proxmox: forward all messages.
 	go func() {
 		defer wg.Done()
-		defer closeRelayLeg(pxConn)
+		defer closeRelayLeg(pxConn, gorillaWs.CloseNormalClosure, "")
 		for {
 			msgType, msg, readErr := conn.ReadMessage()
 			if readErr != nil {
@@ -201,7 +217,10 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	// Proxmox → Browser: forward all messages.
 	go func() {
 		defer wg.Done()
-		defer closeRelayLeg(conn)
+		defer func() {
+			code, reason := watch.browserClose()
+			closeRelayLeg(conn, code, reason)
+		}()
 		for {
 			msgType, msg, readErr := pxConn.ReadMessage()
 			if readErr != nil {

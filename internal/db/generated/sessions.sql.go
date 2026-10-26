@@ -273,6 +273,51 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (
 	return i, err
 }
 
+const isConsoleCredentialLive = `-- name: IsConsoleCredentialLive :one
+SELECT EXISTS (
+  SELECT 1 FROM users u
+  WHERE u.id = $1
+    AND u.is_active
+    AND (
+      EXISTS (
+        SELECT 1 FROM sessions s
+        WHERE s.id = $2::uuid
+          AND s.user_id = u.id
+          AND NOT s.is_revoked
+          AND s.expires_at > now()
+      )
+      OR EXISTS (
+        SELECT 1 FROM api_keys k
+        WHERE k.id = $3::uuid
+          AND k.user_id = u.id
+          AND NOT k.is_revoked
+          AND (k.expires_at IS NULL OR k.expires_at > now())
+      )
+    )
+) AS live
+`
+
+type IsConsoleCredentialLiveParams struct {
+	UserID    uuid.UUID   `json:"user_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+	ApiKeyID  pgtype.UUID `json:"api_key_id"`
+}
+
+// Whether a console may stay open: its user is active, and the credential that
+// opened it — a session (sessions.id) or an API key (api_keys.id), whichever
+// the console token names — is still the user's, not revoked and not expired.
+// Every way a sign-in ends lands here: a sign-out or a revoke from the session
+// list (is_revoked), every revoke-all (RevokeAllUserSessionsIn), a
+// deactivation, by an admin or LDAP sync (is_active), an expiry, a deleted user
+// (the rows cascade away). A NULL id matches nothing; the caller refuses a
+// credential naming both or neither (internal/ws/console_credential.go).
+func (q *Queries) IsConsoleCredentialLive(ctx context.Context, arg IsConsoleCredentialLiveParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isConsoleCredentialLive, arg.UserID, arg.SessionID, arg.ApiKeyID)
+	var live bool
+	err := row.Scan(&live)
+	return live, err
+}
+
 const listUserSessions = `-- name: ListUserSessions :many
 SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id, user_role, previous_token_hash, rotated_at FROM sessions WHERE user_id = $1 AND is_revoked = false AND expires_at > now()
 ORDER BY created_at DESC

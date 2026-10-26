@@ -268,7 +268,7 @@ func newChain(t *testing.T) *chain {
 	app.Use(fiberrecover.New())
 	mountRegistry(app, reg, s.authRequired(), everyNodeIsAMember())
 
-	token, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin")
+	token, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("access token: %v", err)
 	}

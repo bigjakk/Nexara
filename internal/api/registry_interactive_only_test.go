@@ -459,7 +459,7 @@ func newInteractiveHarness(t *testing.T, edit func(*Endpoint)) *interactiveHarne
 	fake, uid, apiKey := newChainDB(t)
 	jwtSvc := auth.NewJWTService("interactive-only-test-secret", 15*time.Minute, 7*24*time.Hour)
 	srv := &Server{queries: db.New(fake), jwtService: jwtSvc}
-	token, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin")
+	token, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("access token: %v", err)
 	}

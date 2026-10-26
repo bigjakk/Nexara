@@ -21,6 +21,16 @@ const (
 	AuthMethodAPIKey  = "api_key"
 )
 
+// LocalsSessionID and LocalsAPIKeyID are the keys under which authentication
+// records WHICH credential the caller used, as a uuid.UUID: the session its
+// access token belongs to (authRequired, authOptional), or the API key
+// (authenticateAPIKey). ConsoleToken copies it into the console token, which
+// holds the console open only while that credential is live.
+const (
+	LocalsSessionID = "session_id"
+	LocalsAPIKeyID  = "api_key_id"
+)
+
 // AuthenticatedWithSession reports whether the request was authenticated by an
 // interactive session. It is what the registry's InteractiveOnly gate asks
 // (registry.go), and it is an ALLOWLIST on purpose: the gate admits a session and

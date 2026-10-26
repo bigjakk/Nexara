@@ -121,7 +121,7 @@ func newCompressTestServer(t *testing.T, compressionEnabled bool) (*Server, stri
 	s.app.Get(compressProbeAuth, send)
 	s.app.Post(compressProbeAllowed, send)
 
-	token, _, err := s.jwtService.GenerateAccessToken(uuid.New(), "probe@example.com", "admin")
+	token, _, err := s.jwtService.GenerateAccessToken(uuid.New(), "probe@example.com", "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("mint access token: %v", err)
 	}

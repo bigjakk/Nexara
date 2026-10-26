@@ -1136,6 +1136,7 @@ func (s *Server) authRequired() fiber.Handler {
 		// request authenticated any other way — or by something added later that
 		// forgot to say how — is refused there.
 		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
+		c.Locals(handlers.LocalsSessionID, claims.SessionID)
 
 		if s.rbacEngine != nil {
 			c.Locals("rbac_engine", s.rbacEngine)
@@ -1196,6 +1197,7 @@ func (s *Server) authOptional() fiber.Handler {
 		c.Locals("role", claims.Role)
 		// Whoever has a user_id has a method (authRequired does the same).
 		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
+		c.Locals(handlers.LocalsSessionID, claims.SessionID)
 
 		return c.Next()
 	}
@@ -1230,7 +1232,7 @@ func (s *Server) authenticateAPIKey(c fiber.Ctx, token string) error {
 	// How the caller authenticated, for the registry's InteractiveOnly gate — one
 	// set of constants for the writers and that reader.
 	c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodAPIKey)
-	c.Locals("api_key_id", row.ID)
+	c.Locals(handlers.LocalsAPIKeyID, row.ID)
 
 	if s.rbacEngine != nil {
 		c.Locals("rbac_engine", s.rbacEngine)

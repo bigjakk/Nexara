@@ -47,6 +47,9 @@ type ConsoleHandler struct {
 	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	jwt           *auth.JWTService
 	logger        *slog.Logger
+	// checkEvery is how often an open console re-checks its credential
+	// (console_credential.go); tests shorten it.
+	checkEvery time.Duration
 }
 
 // NewConsoleHandler creates a new ConsoleHandler.
@@ -56,6 +59,7 @@ func NewConsoleHandler(queries *db.Queries, encryptionKey string, jwt *auth.JWTS
 		encryptionKey: encryptionKey,
 		jwt:           jwt,
 		logger:        logger,
+		checkEvery:    credentialCheckEvery,
 	}
 }
 
@@ -124,6 +128,11 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	case "node_shell", "vm_serial", "ct_attach":
 	default:
 		h.writeError(conn, "invalid console type")
+		return
+	}
+
+	live, credLogger, admitted := admitCredential(conn, h.queries, logger)
+	if !admitted {
 		return
 	}
 
@@ -219,8 +228,14 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 
 	logger.Info("console session established")
 
+	if !stillLive(conn, live, credLogger) {
+		return
+	}
 	// Send a connected status to the browser.
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(`{"type":"connected"}`))
+
+	watch := watchRelay(live, h.checkEvery, conn, pxConn, credLogger)
+	defer watch.stop()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -228,7 +243,7 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	// Browser → Proxmox
 	go func() {
 		defer wg.Done()
-		defer closeRelayLeg(pxConn)
+		defer closeRelayLeg(pxConn, gorillaWs.CloseNormalClosure, "")
 		for {
 			msgType, msg, readErr := conn.ReadMessage()
 			if readErr != nil {
@@ -280,7 +295,10 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	// Proxmox → Browser
 	go func() {
 		defer wg.Done()
-		defer closeRelayLeg(conn)
+		defer func() {
+			code, reason := watch.browserClose()
+			closeRelayLeg(conn, code, reason)
+		}()
 		for {
 			_, msg, readErr := pxConn.ReadMessage()
 			if readErr != nil {
@@ -376,12 +394,14 @@ func closeBrowserSocket(conn *fiberWs.Conn) {
 // let any goroutine call and which takes the same deadline, so a peer that
 // has stopped reading cannot hold this leg in the write either. The frame is
 // built with gorilla's helpers for both connections: CloseMessage and the
-// close-code encoding are RFC 6455's, identical in the two packages.
-func closeRelayLeg(to peerConn) {
+// close-code encoding are RFC 6455's, identical in the two packages. code and
+// reason are the Close's: a normal closure, or why the session watcher ended the
+// console (relayWatch.browserClose). It reports whether the Close was written.
+func closeRelayLeg(to peerConn, code int, reason string) (sent bool) {
 	deadline := time.Now().Add(closeDrainTimeout)
 	_ = to.NetConn().SetReadDeadline(deadline)
-	_ = to.WriteControl(gorillaWs.CloseMessage,
-		gorillaWs.FormatCloseMessage(gorillaWs.CloseNormalClosure, ""), deadline)
+	return to.WriteControl(gorillaWs.CloseMessage,
+		gorillaWs.FormatCloseMessage(code, reason), deadline) == nil
 }
 
 // writeError sends a JSON error message to the browser, then a Close frame.

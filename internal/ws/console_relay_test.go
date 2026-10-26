@@ -88,7 +88,10 @@ type sessionDB struct {
 }
 
 func (d *sessionDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	_ = d.gateLookupDB.QueryRow(ctx, sql, args...)
+	row := d.gateLookupDB.QueryRow(ctx, sql, args...)
+	if isLivenessCheck(sql) {
+		return row
+	}
 	if len(args) == 1 {
 		if id, ok := args[0].(uuid.UUID); ok && id == d.cluster.ID {
 			return clusterRow{d.cluster}
@@ -134,30 +137,43 @@ func openSession(t *testing.T, kind string, scope auth.ConsoleScope, pve *fakePr
 // the handler logging to logger.
 func openSessionAt(t *testing.T, kind string, scope auth.ConsoleScope, apiURL, query string, logger *slog.Logger) *gorillaws.Conn {
 	t.Helper()
+	return openSessionWith(t, kind, scope, newSessionDB(t, scope, apiURL), credentialCheckEvery, query, logger)
+}
+
+// newSessionDB holds the scope's cluster, with its API at apiURL.
+func newSessionDB(t *testing.T, scope auth.ConsoleScope, apiURL string) *sessionDB {
+	t.Helper()
 	secret, err := crypto.Encrypt("fake-token-secret", sessionKey)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
-	queries := db.New(&sessionDB{cluster: db.Cluster{
+	return &sessionDB{cluster: db.Cluster{
 		ID:                   uuid.MustParse(scope.ClusterID),
 		Name:                 "cluster01",
 		ApiUrl:               apiURL,
 		TokenID:              "root@pam!nexara",
 		TokenSecretEncrypted: secret,
-	}})
+	}}
+}
+
+// openSessionWith is openSessionAt over the given database, re-checking the
+// console's credential every checkEvery.
+func openSessionWith(t *testing.T, kind string, scope auth.ConsoleScope, sdb *sessionDB, checkEvery time.Duration, query string, logger *slog.Logger) *gorillaws.Conn {
+	t.Helper()
+	queries := db.New(sdb)
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
 
 	cfg := wsConfigWithSubprotocol(nil)
-	handler := fiberws.New(NewConsoleHandler(queries, sessionKey, jwtSvc, logger).HandleConsole, cfg)
+	consoleHandler := NewConsoleHandler(queries, sessionKey, jwtSvc, logger)
+	consoleHandler.checkEvery = checkEvery
+	handler := fiberws.New(consoleHandler.HandleConsole, cfg)
 	if kind == "vnc" {
-		handler = fiberws.New(NewVNCHandler(queries, sessionKey, jwtSvc, logger).HandleVNC, cfg)
+		vncHandler := NewVNCHandler(queries, sessionKey, jwtSvc, logger)
+		vncHandler.checkEvery = checkEvery
+		handler = fiberws.New(vncHandler.HandleVNC, cfg)
 	}
 	app := fiber.New()
-	app.Get("/probe", func(c fiber.Ctx) error {
-		validated := scope
-		c.Locals(consoleScopeLocal, &validated)
-		return c.Next()
-	}, handler)
+	app.Get("/probe", standInGate(&scope), handler)
 	port := startGateApp(t, app)
 
 	dialer := *gorillaws.DefaultDialer
@@ -267,6 +283,86 @@ func TestConsoleRelay_EndsWhenAPeerNeverAnswersTheClose(t *testing.T) {
 				}
 			default:
 				t.Error("Proxmox was never sent a Close; the relay leg ended without asking it to")
+			}
+		})
+	}
+}
+
+// TestConsoleRelay_HeldToItsCredential: a console whose session or key has ended
+// is refused at open, before Proxmox is asked for a ticket, and is closed when its
+// credential ends while it is open — Proxmox first, then the browser, with the
+// Close code the SPA stops on.
+func TestConsoleRelay_HeldToItsCredential(t *testing.T) {
+	scopes := map[string]auth.ConsoleScope{
+		"vnc":     {ClusterID: gateClusterA, Node: "pve-01", VMID: 100, Type: "vm_vnc"},
+		"console": {ClusterID: gateClusterA, Node: "pve-01", VMID: 100, Type: "vm_serial"},
+	}
+	for kind, scope := range scopes {
+		t.Run(kind+": refused at open", func(t *testing.T) {
+			t.Parallel()
+			pve := newFakeProxmox(t, func(c *gorillaws.Conn) { _, _, _ = c.ReadMessage() })
+			sdb := newSessionDB(t, scope, pve.srv.URL)
+			sdb.setEnded()
+
+			browser := openSessionWith(t, kind, scope, sdb, credentialCheckEvery, "", testLogger())
+			_ = browser.SetReadDeadline(time.Now().Add(5 * time.Second))
+			if _, msg, err := browser.ReadMessage(); err != nil || !strings.Contains(string(msg), `"code":"session_ended"`) {
+				t.Fatalf("first message = %s (%v), want the session_ended error", msg, err)
+			}
+			if _, _, err := browser.ReadMessage(); !gorillaws.IsCloseError(err, closeSessionEnded) {
+				t.Fatalf("then: %v, want a Close %d", err, closeSessionEnded)
+			}
+			if got := pve.requests(); len(got) != 0 {
+				t.Errorf("Proxmox was sent %v; nothing may be asked of it for an ended session", got)
+			}
+		})
+
+		// Proxmox can take seconds to set a console up, and the next check is
+		// credentialCheckEvery away: it is asked again before it is announced.
+		t.Run(kind+": refused when it ends while Proxmox sets it up", func(t *testing.T) {
+			t.Parallel()
+			pve := newFakeProxmox(t, func(c *gorillaws.Conn) { _, _, _ = c.ReadMessage() })
+			sdb := newSessionDB(t, scope, pve.srv.URL)
+			sdb.endAfterChecks(1)
+
+			browser := openSessionWith(t, kind, scope, sdb, credentialCheckEvery, "", testLogger())
+			_ = browser.SetReadDeadline(time.Now().Add(5 * time.Second))
+			if _, msg, err := browser.ReadMessage(); err != nil || !strings.Contains(string(msg), `"code":"session_ended"`) {
+				t.Fatalf("first message = %s (%v), want the session_ended error, never connected", msg, err)
+			}
+			if got := pve.requests(); len(got) == 0 || !strings.HasSuffix(got[len(got)-1], "/vncwebsocket") {
+				t.Errorf("Proxmox was sent %v; the second check must follow the console's setup", got)
+			}
+		})
+
+		t.Run(kind+": closed when it ends while open", func(t *testing.T) {
+			t.Parallel()
+			closed := make(chan int, 1)
+			pve := newFakeProxmox(t, func(c *gorillaws.Conn) {
+				c.SetCloseHandler(func(code int, _ string) error {
+					closed <- code
+					return c.WriteControl(gorillaws.CloseMessage, gorillaws.FormatCloseMessage(code, ""), time.Now().Add(time.Second))
+				})
+				for {
+					if _, _, err := c.ReadMessage(); err != nil {
+						return
+					}
+				}
+			})
+			sdb := newSessionDB(t, scope, pve.srv.URL)
+			browser := openSessionWith(t, kind, scope, sdb, 10*time.Millisecond, "", testLogger())
+			readConnected(t, browser)
+
+			sdb.setEnded()
+
+			_ = browser.SetReadDeadline(time.Now().Add(5 * time.Second))
+			if _, _, err := browser.ReadMessage(); !gorillaws.IsCloseError(err, closeSessionEnded) {
+				t.Fatalf("after the session ended: %v, want a Close %d", err, closeSessionEnded)
+			}
+			select {
+			case <-closed:
+			default:
+				t.Error("Proxmox was never sent a Close; its leg must be cut first")
 			}
 		})
 	}

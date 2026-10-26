@@ -279,6 +279,22 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		}
 		s.sessions = append(s.sessions, sess)
 		return authFakeRow{value: sess}
+	case "GetNodeByClusterAndName":
+		// cluster_id, name: every node is a member; no test here is about membership.
+		return authFakeRow{value: db.Node{ID: uuid.New(), ClusterID: args[0].(uuid.UUID), Name: args[1].(string)}}
+	case "IsConsoleCredentialLive":
+		// user_id, session_id, api_key_id; and the SQL's predicate over the sessions
+		// held here (the store holds no API keys).
+		u, ok := s.users[args[0].(uuid.UUID)]
+		sid := args[1].(pgtype.UUID)
+		live := false
+		for _, sess := range s.sessions {
+			if ok && u.IsActive && sid.Valid && sess.ID == uuid.UUID(sid.Bytes) && sess.UserID == u.ID &&
+				!sess.IsRevoked && sess.ExpiresAt.After(time.Now()) {
+				live = true
+			}
+		}
+		return authFakeScalar{value: live}
 	default:
 		return authFakeRow{err: fmt.Errorf("unexpected QueryRow: %s", name)}
 	}
@@ -431,6 +447,23 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 			c.Locals("user_id", id)
 			c.Locals("role", role)
 		}
+		// How the caller authenticated, as authRequired and authenticateAPIKey record it:
+		// X-Test-Session names the session its access token belongs to ("none" for a token
+		// that names no session), X-Test-API-Key the key.
+		if v := c.Get("X-Test-Session"); v != "" {
+			c.Locals(LocalsAuthMethod, AuthMethodSession)
+			if id, err := uuid.Parse(v); err == nil {
+				c.Locals(LocalsSessionID, id)
+			}
+		}
+		if v := c.Get("X-Test-API-Key"); v != "" {
+			id, err := uuid.Parse(v)
+			if err != nil {
+				return fiber.NewError(fiber.StatusBadRequest, "bad X-Test-API-Key")
+			}
+			c.Locals(LocalsAuthMethod, AuthMethodAPIKey)
+			c.Locals(LocalsAPIKeyID, id)
+		}
 		return c.Next()
 	})
 	installStubEngineMiddleware(app)
@@ -442,6 +475,7 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 		app.Post("/auth/totp/verify-login", withRequestParams(t, totpVerifyLoginMirror(), nil, a.totp.VerifyLogin))
 	}
 	app.Put("/users/:id", withRequestParams(t, epochUserUpdateMirror(), []string{"id"}, uh.Update))
+	app.Post("/auth/console-token", withRequestParams(t, consoleTokenMirror(), nil, ah.ConsoleToken))
 	app.Get("/probe", func(c fiber.Ctx) error { return a.probe(c) })
 
 	a.app = app
@@ -463,6 +497,20 @@ func epochUserUpdateMirror() apischema.Properties {
 		"display_name": {Type: apischema.String, Optional: true},
 		"is_active":    {Type: apischema.Boolean, Optional: true},
 		"role":         {Type: apischema.String, Optional: true},
+	}
+}
+
+// requireTokenNamesSession fails unless the response's access token names session: a
+// console it opens is held to that session (ConsoleToken).
+func requireTokenNamesSession(t *testing.T, a *epochApp, body map[string]any, session uuid.UUID) {
+	t.Helper()
+	tok, _ := body["access_token"].(string)
+	claims, err := a.jwt.ValidateAccessToken(tok)
+	if err != nil {
+		t.Fatalf("the access token does not validate: %v", err)
+	}
+	if claims.SessionID != session {
+		t.Errorf("the access token names session %v, want the one created, %v", claims.SessionID, session)
 	}
 }
 

@@ -190,7 +190,7 @@ func TestIntegrationWSAccessTokenRejected(t *testing.T) {
 	env := setupIntegration(t)
 
 	userID := uuid.New()
-	accessToken, _, err := env.jwtSvc.GenerateAccessToken(userID, "test@example.com", "admin")
+	accessToken, _, err := env.jwtSvc.GenerateAccessToken(userID, "test@example.com", "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("generate access token: %v", err)
 	}

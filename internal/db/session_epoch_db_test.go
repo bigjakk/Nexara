@@ -141,6 +141,7 @@ func (h *epochHarness) exec(t *testing.T, what, sql string, args ...any) {
 func (h *epochHarness) reset(t *testing.T) {
 	t.Helper()
 	h.exec(t, "clear sessions", `DELETE FROM sessions WHERE user_id = ANY($1)`, []uuid.UUID{epochUserA, epochUserB})
+	h.exec(t, "clear api keys", `DELETE FROM api_keys WHERE user_id = ANY($1)`, []uuid.UUID{epochUserA, epochUserB})
 	h.exec(t, "reset users", `UPDATE users SET auth_epoch = 0, is_active = true WHERE id = ANY($1)`,
 		[]uuid.UUID{epochUserA, epochUserB})
 	h.mr.FlushAll()
@@ -1116,6 +1117,83 @@ func TestRevokeAll_UnderRepeatableReadALateInsertSurvives(t *testing.T) {
 			}
 			if h.revoked(t, created.ID) || len(ids) != 0 {
 				t.Errorf("revoked=%t listed=%v: the session was ended after all, so READ COMMITTED is no longer what the guarantee rests on", h.revoked(t, created.ID), ids)
+			}
+		})
+	}
+}
+
+// TestIsConsoleCredentialLive is the question every open console asks
+// (internal/ws/console_credential.go), against Postgres: live only for the user's
+// own session or API key, neither revoked nor expired, while the user is active. A
+// revoke-all sets the same column RevokeSession does (pinned above), and a
+// deactivation by LDAP sync the same flag as an admin's.
+func TestIsConsoleCredentialLive(t *testing.T) {
+	env := setupMigration(t)
+	defer env.Cleanup()
+	h, purge := newEpochHarness(t, env)
+	defer purge()
+
+	deactivate := func(t *testing.T, _ gen.Session, _ gen.ApiKey) {
+		if _, err := h.q.UpdateUserProfile(env.Ctx, epochDeactivate(epochUserA)); err != nil {
+			t.Fatalf("deactivate: %v", err)
+		}
+	}
+	tests := []struct {
+		name     string
+		session  bool // the console names the session, or else
+		key      bool // the API key, both epochUserA's
+		asUser   uuid.UUID
+		end      func(t *testing.T, s gen.Session, k gen.ApiKey)
+		wantLive bool
+	}{
+		{"control: a live session", true, false, epochUserA, nil, true},
+		{"a revoked session", true, false, epochUserA, func(t *testing.T, s gen.Session, _ gen.ApiKey) {
+			if err := h.q.RevokeSession(env.Ctx, s.ID); err != nil {
+				t.Fatalf("revoke: %v", err)
+			}
+		}, false},
+		{"an expired session", true, false, epochUserA, func(t *testing.T, s gen.Session, _ gen.ApiKey) {
+			h.exec(t, "expire", `UPDATE sessions SET expires_at = now() - interval '1 minute' WHERE id = $1`, s.ID)
+		}, false},
+		{"a session whose user was deactivated", true, false, epochUserA, deactivate, false},
+		{"another user's session", true, false, epochUserB, nil, false},
+		{"control: a live API key that never expires", false, true, epochUserA, nil, true},
+		{"a revoked API key", false, true, epochUserA, func(t *testing.T, _ gen.Session, k gen.ApiKey) {
+			if err := h.q.RevokeAPIKey(env.Ctx, k.ID); err != nil {
+				t.Fatalf("revoke: %v", err)
+			}
+		}, false},
+		{"an expired API key", false, true, epochUserA, func(t *testing.T, _ gen.Session, k gen.ApiKey) {
+			h.exec(t, "expire", `UPDATE api_keys SET expires_at = now() - interval '1 minute' WHERE id = $1`, k.ID)
+		}, false},
+		{"another user's API key", false, true, epochUserB, nil, false},
+		{"neither", false, false, epochUserA, nil, false},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h.reset(t)
+			s := h.mustCreate(t, epochUserA, 0, fmt.Sprintf("console-session-%d", i))
+			k, err := h.q.CreateAPIKey(env.Ctx, gen.CreateAPIKeyParams{
+				UserID: epochUserA, Name: "console", KeyPrefix: "nxra_test",
+				KeyHash: auth.HashToken(fmt.Sprintf("console-key-%d", i)),
+			})
+			if err != nil {
+				t.Fatalf("create an API key: %v", err)
+			}
+			if tt.end != nil {
+				tt.end(t, s, k)
+			}
+
+			params := gen.IsConsoleCredentialLiveParams{UserID: tt.asUser}
+			if tt.session {
+				params.SessionID = pgtype.UUID{Bytes: s.ID, Valid: true}
+			}
+			if tt.key {
+				params.ApiKeyID = pgtype.UUID{Bytes: k.ID, Valid: true}
+			}
+			live, err := h.q.IsConsoleCredentialLive(env.Ctx, params)
+			if err != nil || live != tt.wantLive {
+				t.Errorf("live = %v (err %v), want %v", live, err, tt.wantLive)
 			}
 		})
 	}

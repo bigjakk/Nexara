@@ -69,7 +69,7 @@ func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, ac
 
 	// Inject api_key_id into details for API-key-authed requests so audit
 	// rows can be attributed to the specific key, not just the user.
-	if apiKeyID, ok := c.Locals("api_key_id").(uuid.UUID); ok {
+	if apiKeyID, ok := c.Locals(LocalsAPIKeyID).(uuid.UUID); ok {
 		if m == nil {
 			m = map[string]any{}
 		}

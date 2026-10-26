@@ -1053,6 +1053,15 @@ type Querier interface {
 	// to. status and upid are left to their column defaults ('pending' and empty):
 	// the row exists precisely because the download has not started yet.
 	InsertVirtioWinDownload(ctx context.Context, arg InsertVirtioWinDownloadParams) (VirtioWinDownload, error)
+	// Whether a console may stay open: its user is active, and the credential that
+	// opened it — a session (sessions.id) or an API key (api_keys.id), whichever
+	// the console token names — is still the user's, not revoked and not expired.
+	// Every way a sign-in ends lands here: a sign-out or a revoke from the session
+	// list (is_revoked), every revoke-all (RevokeAllUserSessionsIn), a
+	// deactivation, by an admin or LDAP sync (is_active), an expiry, a deleted user
+	// (the rows cascade away). A NULL id matches nothing; the caller refuses a
+	// credential naming both or neither (internal/ws/console_credential.go).
+	IsConsoleCredentialLive(ctx context.Context, arg IsConsoleCredentialLiveParams) (bool, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ListAPIKeysByUserRow, error)
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
 	ListActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) ([]AlertHistory, error)

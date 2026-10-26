@@ -17,7 +17,7 @@ func TestGenerateAndValidateAccessToken(t *testing.T) {
 	email := "test@example.com"
 	role := "admin"
 
-	token, expiresAt, err := svc.GenerateAccessToken(userID, email, role)
+	token, expiresAt, err := svc.GenerateAccessToken(userID, email, role, uuid.New())
 	if err != nil {
 		t.Fatalf("GenerateAccessToken() error: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestValidateAccessToken_WrongSecret(t *testing.T) {
 	svc1 := NewJWTService("secret-one", 15*time.Minute, 7*24*time.Hour)
 	svc2 := NewJWTService("secret-two", 15*time.Minute, 7*24*time.Hour)
 
-	token, _, err := svc1.GenerateAccessToken(uuid.New(), "test@example.com", "user")
+	token, _, err := svc1.GenerateAccessToken(uuid.New(), "test@example.com", "user", uuid.New())
 	if err != nil {
 		t.Fatalf("GenerateAccessToken() error: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestValidateAccessToken_WrongSecret(t *testing.T) {
 func TestValidateAccessToken_ExpiredToken(t *testing.T) {
 	svc := NewJWTService("test-secret", -1*time.Hour, 7*24*time.Hour)
 
-	token, _, err := svc.GenerateAccessToken(uuid.New(), "test@example.com", "user")
+	token, _, err := svc.GenerateAccessToken(uuid.New(), "test@example.com", "user", uuid.New())
 	if err != nil {
 		t.Fatalf("GenerateAccessToken() error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestGenerateAndValidateConsoleToken(t *testing.T) {
 		Type:      "vm_vnc",
 	}
 
-	token, _, err := svc.GenerateConsoleToken(userID, "test@example.com", "admin", scope, 5*time.Minute)
+	token, _, err := svc.GenerateConsoleToken(userID, "test@example.com", "admin", ConsoleCredential{SessionID: uuid.New()}, scope, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("GenerateConsoleToken() error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestGenerateAndValidateConsoleToken(t *testing.T) {
 
 func TestAccessTokenHasNoConsoleScope(t *testing.T) {
 	svc := newTestJWTService()
-	token, _, err := svc.GenerateAccessToken(uuid.New(), "test@example.com", "admin")
+	token, _, err := svc.GenerateAccessToken(uuid.New(), "test@example.com", "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("GenerateAccessToken() error: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestConsoleTokenExpiry(t *testing.T) {
 	svc := newTestJWTService()
 	scope := ConsoleScope{ClusterID: uuid.NewString(), Node: "pve1", Type: "node_shell"}
 
-	token, _, err := svc.GenerateConsoleToken(uuid.New(), "test@example.com", "admin", scope, -1*time.Second)
+	token, _, err := svc.GenerateConsoleToken(uuid.New(), "test@example.com", "admin", ConsoleCredential{SessionID: uuid.New()}, scope, -1*time.Second)
 	if err != nil {
 		t.Fatalf("GenerateConsoleToken() error: %v", err)
 	}
@@ -179,5 +179,42 @@ func TestHashToken_Deterministic(t *testing.T) {
 	}
 	if hash1 == token {
 		t.Error("hash should not equal input")
+	}
+}
+
+// TestTokensNameTheirCredential: an access token is minted only for a session, and a
+// console token only for exactly one of a session and an API key — one naming
+// neither would hold its console to nothing (internal/ws/console_credential.go).
+func TestTokensNameTheirCredential(t *testing.T) {
+	t.Parallel()
+	svc := NewJWTService("test-secret", time.Minute, time.Hour)
+	scope := ConsoleScope{ClusterID: "cluster01", Node: "pve-01", Type: "node_shell"}
+	id := uuid.New()
+	console := func(cred ConsoleCredential) error {
+		_, _, err := svc.GenerateConsoleToken(id, "test@example.com", "admin", cred, scope, time.Minute)
+		return err
+	}
+	tests := []struct {
+		name string
+		err  error
+		ok   bool
+	}{
+		{"an access token for a session", func() error {
+			_, _, err := svc.GenerateAccessToken(id, "test@example.com", "admin", id)
+			return err
+		}(), true},
+		{"an access token for no session", func() error {
+			_, _, err := svc.GenerateAccessToken(id, "test@example.com", "admin", uuid.Nil)
+			return err
+		}(), false},
+		{"a console token for a session", console(ConsoleCredential{SessionID: id}), true},
+		{"a console token for an API key", console(ConsoleCredential{APIKeyID: id}), true},
+		{"a console token for neither", console(ConsoleCredential{}), false},
+		{"a console token for both", console(ConsoleCredential{SessionID: id, APIKeyID: id}), false},
+	}
+	for _, tt := range tests {
+		if (tt.err == nil) != tt.ok {
+			t.Errorf("%s: err = %v, want minted %v", tt.name, tt.err, tt.ok)
+		}
 	}
 }

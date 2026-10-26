@@ -36,9 +36,16 @@ var (
 // access token to proxy access logs, browser history, or referrer leakage.
 type Claims struct {
 	jwt.RegisteredClaims
-	UserID       uuid.UUID     `json:"uid"`
-	Email        string        `json:"email"`
-	Role         string        `json:"role"`
+	UserID uuid.UUID `json:"uid"`
+	Email  string    `json:"email"`
+	Role   string    `json:"role"`
+	// SessionID is the sign-in session (sessions.id) the token belongs to: the one
+	// an access token was issued for, and on a console token the one whose access
+	// token minted it. APIKeyID is set instead on a console token an API key
+	// minted. A console is held to whichever it carries while it is open
+	// (internal/ws/console_credential.go).
+	SessionID    uuid.UUID     `json:"sid,omitzero"`
+	APIKeyID     uuid.UUID     `json:"akid,omitzero"`
 	ConsoleScope *ConsoleScope `json:"console_scope,omitempty"`
 	// WSScope marks a token whose only valid use is upgrading a WebSocket
 	// connection. Currently the only value is "hub" (the generic /ws hub).
@@ -59,6 +66,26 @@ type ConsoleScope struct {
 
 // WSScopeHub is the only value currently accepted in Claims.WSScope.
 const WSScopeHub = "hub"
+
+// ConsoleCredential is the sign-in a console token was minted under — a session
+// or an API key, exactly one — which its console is held to while it is open.
+type ConsoleCredential struct {
+	SessionID uuid.UUID
+	APIKeyID  uuid.UUID
+}
+
+// Valid reports whether it names exactly one credential.
+func (c ConsoleCredential) Valid() bool {
+	return (c.SessionID == uuid.Nil) != (c.APIKeyID == uuid.Nil)
+}
+
+// ConsoleCredential is the credential the claims carry.
+func (c *Claims) ConsoleCredential() ConsoleCredential {
+	return ConsoleCredential{SessionID: c.SessionID, APIKeyID: c.APIKeyID}
+}
+
+// errNoCredential refuses a token that would belong to no sign-in.
+var errNoCredential = errors.New("a token must name the session or API key it belongs to")
 
 // TokenPair holds an access token and a refresh token.
 //
@@ -107,8 +134,11 @@ func NewJWTService(secret string, accessTTL, refreshTTL time.Duration) *JWTServi
 	}
 }
 
-// GenerateAccessToken creates a signed JWT access token.
-func (j *JWTService) GenerateAccessToken(userID uuid.UUID, email, role string) (string, time.Time, error) {
+// GenerateAccessToken creates a signed JWT access token for the session sessionID.
+func (j *JWTService) GenerateAccessToken(userID uuid.UUID, email, role string, sessionID uuid.UUID) (string, time.Time, error) {
+	if sessionID == uuid.Nil {
+		return "", time.Time{}, errNoCredential
+	}
 	now := time.Now()
 	expiresAt := now.Add(j.accessTokenTTL)
 	claims := Claims{
@@ -119,9 +149,10 @@ func (j *JWTService) GenerateAccessToken(userID uuid.UUID, email, role string) (
 			IssuedAt:  jwt.NewNumericDate(now),
 			Issuer:    "nexara",
 		},
-		UserID: userID,
-		Email:  email,
-		Role:   role,
+		UserID:    userID,
+		Email:     email,
+		Role:      role,
+		SessionID: sessionID,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -133,8 +164,12 @@ func (j *JWTService) GenerateAccessToken(userID uuid.UUID, email, role string) (
 }
 
 // GenerateConsoleToken creates a short-lived JWT whose only valid use is opening
-// the specific console described by scope. ttl should be small (≤ 60 seconds).
-func (j *JWTService) GenerateConsoleToken(userID uuid.UUID, email, role string, scope ConsoleScope, ttl time.Duration) (string, time.Time, error) {
+// the specific console described by scope, held to cred while it is open. ttl
+// should be small (≤ 60 seconds).
+func (j *JWTService) GenerateConsoleToken(userID uuid.UUID, email, role string, cred ConsoleCredential, scope ConsoleScope, ttl time.Duration) (string, time.Time, error) {
+	if !cred.Valid() {
+		return "", time.Time{}, errNoCredential
+	}
 	now := time.Now()
 	expiresAt := now.Add(ttl)
 	claims := Claims{
@@ -148,6 +183,8 @@ func (j *JWTService) GenerateConsoleToken(userID uuid.UUID, email, role string, 
 		UserID:       userID,
 		Email:        email,
 		Role:         role,
+		SessionID:    cred.SessionID,
+		APIKeyID:     cred.APIKeyID,
 		ConsoleScope: &scope,
 	}
 

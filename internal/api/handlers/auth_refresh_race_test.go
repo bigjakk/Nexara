@@ -818,6 +818,9 @@ func TestRefresh_RotationOutcomes(t *testing.T) {
 				if claims.UserID != a.store.user.ID {
 					t.Errorf("access token is for %v, want %v", claims.UserID, a.store.user.ID)
 				}
+				if claims.SessionID != a.store.session.ID {
+					t.Errorf("access token names session %v, want the one refreshed, %v", claims.SessionID, a.store.session.ID)
+				}
 				if rt, _ := body["refresh_token"].(string); rt != "" {
 					t.Errorf("refresh_token = %q in the body; it travels only in the cookie", rt)
 				}

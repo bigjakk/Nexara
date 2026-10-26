@@ -40,6 +40,8 @@ var claimsFieldRoles = map[string]fieldRole{
 	"UserID":           roleIdentity,
 	"Email":            roleIdentity,
 	"Role":             roleIdentity,
+	"SessionID":        roleIdentity,
+	"APIKeyID":         roleIdentity,
 	"ConsoleScope":     roleKindMarker,
 	"WSScope":          roleKindMarker,
 }
@@ -170,11 +172,11 @@ func TestClaimsKind_TokensTheServiceIssuesHaveTheKindTheyWereIssuedFor(t *testin
 	user := uuid.New()
 	scope := ConsoleScope{ClusterID: "cluster01", Node: "pve-01", Type: "node_shell"}
 
-	access, _, err := svc.GenerateAccessToken(user, "alice@example.com", "admin")
+	access, _, err := svc.GenerateAccessToken(user, "alice@example.com", "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)
 	}
-	console, _, err := svc.GenerateConsoleToken(user, "alice@example.com", "admin", scope, time.Minute)
+	console, _, err := svc.GenerateConsoleToken(user, "alice@example.com", "admin", ConsoleCredential{SessionID: uuid.New()}, scope, time.Minute)
 	if err != nil {
 		t.Fatalf("GenerateConsoleToken: %v", err)
 	}

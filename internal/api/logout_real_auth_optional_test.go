@@ -38,7 +38,7 @@ func TestLogoutThroughTheRealAuthOptional(t *testing.T) {
 
 	accessToken := func(t *testing.T, s *auth.JWTService, user uuid.UUID) string {
 		t.Helper()
-		tok, _, err := s.GenerateAccessToken(user, "alice@example.com", "admin")
+		tok, _, err := s.GenerateAccessToken(user, "alice@example.com", "admin", uuid.New())
 		if err != nil {
 			t.Fatalf("GenerateAccessToken: %v", err)
 		}
@@ -47,7 +47,7 @@ func TestLogoutThroughTheRealAuthOptional(t *testing.T) {
 	consoleToken := func(t *testing.T, user uuid.UUID) string {
 		t.Helper()
 		scope := auth.ConsoleScope{ClusterID: uuid.NewString(), Node: "pve-01", Type: "node_shell"}
-		tok, _, err := lapsed.GenerateConsoleToken(user, "alice@example.com", "admin", scope, -time.Hour)
+		tok, _, err := lapsed.GenerateConsoleToken(user, "alice@example.com", "admin", auth.ConsoleCredential{SessionID: uuid.New()}, scope, -time.Hour)
 		if err != nil {
 			t.Fatalf("GenerateConsoleToken: %v", err)
 		}
@@ -176,7 +176,7 @@ func TestLogoutThroughTheRealAuthOptional(t *testing.T) {
 		{
 			name: "an expired token signed with another secret, naming another user",
 			header: func(t *testing.T) string {
-				tok, _, err := auth.NewJWTService("some-other-secret", -time.Hour, time.Hour).GenerateAccessToken(other, "alice@example.com", "admin")
+				tok, _, err := auth.NewJWTService("some-other-secret", -time.Hour, time.Hour).GenerateAccessToken(other, "alice@example.com", "admin", uuid.New())
 				if err != nil {
 					t.Fatalf("GenerateAccessToken: %v", err)
 				}

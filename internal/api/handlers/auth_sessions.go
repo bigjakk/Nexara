@@ -62,10 +62,11 @@ func toSessionResponse(s db.Session, currentID uuid.UUID) sessionResponse {
 // currentSessionID resolves the session the request is being made from, via
 // the refresh cookie.
 //
-// Best-effort by design: the access token carries no session id, so a caller
-// without the cookie (an API client, or a browser whose cookie has expired
-// while its access token has not) simply gets no session flagged current. That
-// is a missing label, not an error — nothing about the response depends on it.
+// Best-effort by design: it goes by the cookie, so a caller without one (an API
+// client, or a browser whose cookie has expired while its access token has not)
+// simply gets no session flagged current — though the access token names its
+// session now (LocalsSessionID). That is a missing label, not an error —
+// nothing about the response depends on it.
 func (h *AuthHandler) currentSessionID(c fiber.Ctx) uuid.UUID {
 	token := readRefreshTokenFromCookie(c)
 	if token == "" {

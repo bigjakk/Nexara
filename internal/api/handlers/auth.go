@@ -687,11 +687,6 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		})
 	}
 
-	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role)
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate access token")
-	}
-
 	refreshToken, err := h.jwtService.GenerateRefreshToken()
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate refresh token")
@@ -707,7 +702,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 	// context that never ends, and a pool with no free connection would hold the
 	// registration for as long as it took.
 	sessionCtx, cancelSession := h.dbContext(c)
-	_, err = h.sessionManager.CreateSession(
+	session, err := h.sessionManager.CreateSession(
 		sessionCtx, user.ID, user.AuthEpoch, refreshToken, user.Role,
 		c.Get("User-Agent"), c.IP(),
 		h.jwtService.RefreshTokenTTL(),
@@ -722,6 +717,12 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 			})
 		}
 		return sessionNotCreated(user.ID, err)
+	}
+
+	// Minted once the session exists: the token names it (see issueTokens).
+	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role, session.ID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate access token")
 	}
 
 	details, _ := json.Marshal(map[string]string{"email": user.Email, "role": user.Role})
@@ -1052,18 +1053,13 @@ func sessionNotCreated(userID uuid.UUID, err error) error {
 // the rest of the auth handlers' deciding database work; a pool with no free
 // connection is a 503 and not a request that waits for ever.
 func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, epoch int64, auditAction string) error {
-	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role)
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate access token")
-	}
-
 	refreshToken, err := h.jwtService.GenerateRefreshToken()
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate refresh token")
 	}
 
 	ctx, cancel := h.dbContext(c)
-	_, err = h.sessionManager.CreateSession(
+	session, err := h.sessionManager.CreateSession(
 		ctx, user.ID, epoch, refreshToken, user.Role,
 		c.Get("User-Agent"), c.IP(),
 		h.jwtService.RefreshTokenTTL(),
@@ -1084,6 +1080,14 @@ func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, epoch int64, auditA
 			})
 		}
 		return sessionNotCreated(user.ID, err)
+	}
+
+	// Minted once the session exists, because it names it: the console tokens it
+	// mints are held to that session while their consoles are open (ConsoleToken).
+	// Signing cannot fail for an HMAC key, so no session is left without a token.
+	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role, session.ID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate access token")
 	}
 
 	details, _ := json.Marshal(map[string]string{"email": user.Email, "ip": c.IP()})
@@ -1115,6 +1119,51 @@ func (h *AuthHandler) IssueTokens(c fiber.Ctx, user db.User, epoch int64, auditA
 type consoleTokenResponse struct {
 	Token     string `json:"token"`
 	ExpiresIn int    `json:"expires_in"`
+}
+
+// sessionEndedMessage answers a console token asked for by a session that has
+// ended, or by an access token that names no session.
+const sessionEndedMessage = "Session has ended"
+
+// consoleCredential is the credential a console token is held to while its
+// console is open (internal/ws/console_credential.go): the API key the request
+// came with — authenticateAPIKey checked it in this request — or the session its
+// access token belongs to, which must still be live. A session that has ended
+// mints nothing: its access token outlives it by up to its own lifetime, and a
+// console the server closed for that session would otherwise reopen on the next
+// reconnect. The 401 sends the SPA to a refresh, which ends the session there
+// too — or, for an access token from before tokens named their session, mints one
+// that does.
+func (h *AuthHandler) consoleCredential(c fiber.Ctx, userID uuid.UUID) (auth.ConsoleCredential, error) {
+	if method, _ := c.Locals(LocalsAuthMethod).(string); method == AuthMethodAPIKey {
+		keyID, _ := c.Locals(LocalsAPIKeyID).(uuid.UUID)
+		if keyID == uuid.Nil {
+			return auth.ConsoleCredential{}, fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
+		}
+		return auth.ConsoleCredential{APIKeyID: keyID}, nil
+	}
+	sessionID, _ := c.Locals(LocalsSessionID).(uuid.UUID)
+	if sessionID == uuid.Nil {
+		return auth.ConsoleCredential{}, fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
+	}
+	ctx, cancel := h.dbContext(c)
+	live, err := h.queries.IsConsoleCredentialLive(ctx, db.IsConsoleCredentialLiveParams{
+		UserID:    userID,
+		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
+	})
+	cancel()
+	switch {
+	case isTransientDBError(err):
+		slog.Warn("console token: the session could not be checked; answering 503", "user_id", userID, "error", err)
+		return auth.ConsoleCredential{}, fiber.NewError(fiber.StatusServiceUnavailable, "Service temporarily unavailable")
+	case err != nil:
+		slog.Error("console token: checking the session failed; answering 500", "user_id", userID, "error", err)
+		return auth.ConsoleCredential{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to mint console token")
+	case !live:
+		slog.Info("console token: refused, as the caller's session has ended", "user_id", userID, "session_id", sessionID)
+		return auth.ConsoleCredential{}, fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
+	}
+	return auth.ConsoleCredential{SessionID: sessionID}, nil
 }
 
 // ConsoleToken mints a short-lived (60 second), scope-locked JWT that can ONLY
@@ -1198,6 +1247,10 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 	if err := requireNodeInCluster(c, lookupOf(h.queries), clusterUUID, node); err != nil {
 		return err
 	}
+	cred, err := h.consoleCredential(c, user.ID)
+	if err != nil {
+		return err
+	}
 
 	// Console tokens are bound to a single immediate WS upgrade — the SPA
 	// mints and connects within ~50ms. 60 seconds is
@@ -1207,6 +1260,7 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 	const consoleTokenTTL = 60 * time.Second
 	token, _, err := h.jwtService.GenerateConsoleToken(
 		user.ID, user.Email, user.Role,
+		cred,
 		auth.ConsoleScope{
 			ClusterID: clusterID,
 			Node:      node,
@@ -1462,7 +1516,7 @@ func (h *AuthHandler) Refresh(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusUnauthorized, "Role changed; please log in again")
 	}
 
-	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role)
+	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role, session.ID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate access token")
 	}

@@ -51,7 +51,7 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 
 	userID := uuid.New()
 
-	accessToken, _, err := jwtSvc.GenerateAccessToken(userID, "user@example.com", "admin")
+	accessToken, _, err := jwtSvc.GenerateAccessToken(userID, "user@example.com", "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("generate access token: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 		Type:      "node_shell",
 	}
 	consoleToken, _, err := jwtSvc.GenerateConsoleToken(
-		userID, "user@example.com", "admin", consoleScope, 60*time.Second,
+		userID, "user@example.com", "admin", auth.ConsoleCredential{SessionID: uuid.New()}, consoleScope, 60*time.Second,
 	)
 	if err != nil {
 		t.Fatalf("generate console token: %v", err)
@@ -83,7 +83,7 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 		Type:      "vm_vnc",
 	}
 	vmVNCToken, _, err := jwtSvc.GenerateConsoleToken(
-		userID, "user@example.com", "admin", vmVNCScope, 60*time.Second,
+		userID, "user@example.com", "admin", auth.ConsoleCredential{SessionID: uuid.New()}, vmVNCScope, 60*time.Second,
 	)
 	if err != nil {
 		t.Fatalf("generate vm vnc console token: %v", err)
@@ -94,13 +94,13 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 	// test exercised the validator's expiry branch on the WS upgrade path,
 	// which is exactly the path Finding #1 lived in.
 	expiredConsoleToken, _, err := jwtSvc.GenerateConsoleToken(
-		userID, "user@example.com", "admin", consoleScope, -1*time.Minute,
+		userID, "user@example.com", "admin", auth.ConsoleCredential{SessionID: uuid.New()}, consoleScope, -1*time.Minute,
 	)
 	if err != nil {
 		t.Fatalf("generate expired console token: %v", err)
 	}
 	expiredVMVNCToken, _, err := jwtSvc.GenerateConsoleToken(
-		userID, "user@example.com", "admin", vmVNCScope, -1*time.Minute,
+		userID, "user@example.com", "admin", auth.ConsoleCredential{SessionID: uuid.New()}, vmVNCScope, -1*time.Minute,
 	)
 	if err != nil {
 		t.Fatalf("generate expired vm vnc console token: %v", err)

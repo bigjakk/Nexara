@@ -40,7 +40,7 @@ const logoutJWTSecret = "test-secret"
 // from now (a negative ttl is a token that has already lapsed).
 func logoutAccessToken(t *testing.T, secret string, ttl time.Duration, user uuid.UUID) string {
 	t.Helper()
-	tok, _, err := auth.NewJWTService(secret, ttl, time.Hour).GenerateAccessToken(user, "alice@example.com", "admin")
+	tok, _, err := auth.NewJWTService(secret, ttl, time.Hour).GenerateAccessToken(user, "alice@example.com", "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)
 	}

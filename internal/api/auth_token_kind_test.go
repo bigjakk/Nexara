@@ -50,11 +50,12 @@ func TestAuthMiddlewares_AdmitOnlyASessionsAccessToken(t *testing.T) {
 		return signed
 	}
 	scope := &auth.ConsoleScope{ClusterID: "cluster01", Node: "pve-01", Type: "node_shell"}
-	access, _, err := jwtSvc.GenerateAccessToken(user, chainEmail, "admin")
+	session := uuid.New()
+	access, _, err := jwtSvc.GenerateAccessToken(user, chainEmail, "admin", session)
 	if err != nil {
 		t.Fatalf("access token: %v", err)
 	}
-	console, _, err := jwtSvc.GenerateConsoleToken(user, chainEmail, "admin", *scope, time.Minute)
+	console, _, err := jwtSvc.GenerateConsoleToken(user, chainEmail, "admin", auth.ConsoleCredential{SessionID: uuid.New()}, *scope, time.Minute)
 	if err != nil {
 		t.Fatalf("console token: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestAuthMiddlewares_AdmitOnlyASessionsAccessToken(t *testing.T) {
 
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
 	whoami := func(c fiber.Ctx) error {
-		return c.SendString(fmt.Sprintf("%v|%v", c.Locals("user_id"), c.Locals(handlers.LocalsAuthMethod)))
+		return c.SendString(fmt.Sprintf("%v|%v|%v", c.Locals("user_id"), c.Locals(handlers.LocalsAuthMethod), c.Locals(handlers.LocalsSessionID)))
 	}
 	app.Get("/required", srv.authRequired(), whoami)
 	app.Get("/optional", srv.authOptional(), whoami)
@@ -89,8 +90,8 @@ func TestAuthMiddlewares_AdmitOnlyASessionsAccessToken(t *testing.T) {
 	}
 
 	for _, tc := range []struct{ name, token, want string }{
-		{"an access token", access, user.String() + "|" + handlers.AuthMethodSession},
-		{"an API key", apiKey, keyOwner.String() + "|" + handlers.AuthMethodAPIKey},
+		{"an access token", access, user.String() + "|" + handlers.AuthMethodSession + "|" + session.String()},
+		{"an API key", apiKey, keyOwner.String() + "|" + handlers.AuthMethodAPIKey + "|<nil>"},
 	} {
 		for _, path := range []string{"/required", "/optional"} {
 			if status, body := get(path, tc.token); status != http.StatusOK || body != tc.want {
@@ -114,8 +115,8 @@ func TestAuthMiddlewares_AdmitOnlyASessionsAccessToken(t *testing.T) {
 				t.Errorf("authRequired = %d %q, want 401 %q", status, messageOf(body), tc.message)
 			}
 			// authOptional lets the request through as nobody: no user, and no method.
-			if status, body := get("/optional", tc.token); status != http.StatusOK || body != "<nil>|<nil>" {
-				t.Errorf("authOptional = %d %q, want 200 \"<nil>|<nil>\": a token that is not a session authenticates no one", status, body)
+			if status, body := get("/optional", tc.token); status != http.StatusOK || body != "<nil>|<nil>|<nil>" {
+				t.Errorf("authOptional = %d %q, want 200 \"<nil>|<nil>|<nil>\": a token that is not a session authenticates no one", status, body)
 			}
 		})
 	}

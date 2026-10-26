@@ -363,6 +363,13 @@ func (s *Server) authenticate(c fiber.Ctx, consoleRoute bool) error {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 		}
 		c.Locals(consoleScopeLocal, claims.ConsoleScope)
+		// The sign-in the token was minted under, which the console is held to while
+		// it is open (console_credential.go). The handler refuses a token that names
+		// none, or both.
+		c.Locals(consoleCredentialLocal, consoleCredential{
+			UserID:            claims.UserID,
+			ConsoleCredential: claims.ConsoleCredential(),
+		})
 	default:
 		// Generic /ws hub.
 		if claims.ConsoleScope != nil {

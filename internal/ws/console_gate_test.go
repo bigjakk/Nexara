@@ -23,6 +23,7 @@ import (
 	gorillaws "github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -40,10 +41,16 @@ import (
 // it needs a Proxmox client — the lookup is the observable proof of which
 // cluster a console would have been opened on.
 
-// gateLookupDB records the uuid handed to every QueryRow (GetCluster's id).
+// gateLookupDB records the uuid handed to every QueryRow (GetCluster's id),
+// except the console credential's liveness check, which it answers itself —
+// live, unless ended — and records apart.
 type gateLookupDB struct {
-	mu  sync.Mutex
-	ids []uuid.UUID
+	mu    sync.Mutex
+	ids   []uuid.UUID
+	creds []consoleCredential
+	ended bool
+	// endsAfter, when set, answers live only to that many checks.
+	endsAfter int
 }
 
 func (d *gateLookupDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
@@ -54,9 +61,18 @@ func (d *gateLookupDB) Query(context.Context, string, ...any) (pgx.Rows, error) 
 	return nil, pgx.ErrNoRows
 }
 
-func (d *gateLookupDB) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
+func (d *gateLookupDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if isLivenessCheck(sql) {
+		sid, _ := args[1].(pgtype.UUID)
+		akid, _ := args[2].(pgtype.UUID)
+		userID, _ := args[0].(uuid.UUID)
+		d.creds = append(d.creds, consoleCredential{UserID: userID, ConsoleCredential: auth.ConsoleCredential{
+			SessionID: uuid.UUID(sid.Bytes), APIKeyID: uuid.UUID(akid.Bytes),
+		}})
+		return boolRow(!d.ended && (d.endsAfter == 0 || len(d.creds) <= d.endsAfter))
+	}
 	for _, a := range args {
 		if id, ok := a.(uuid.UUID); ok {
 			d.ids = append(d.ids, id)
@@ -71,9 +87,57 @@ func (d *gateLookupDB) lookedUp() []uuid.UUID {
 	return append([]uuid.UUID(nil), d.ids...)
 }
 
+// checked is every credential the liveness check was asked about.
+func (d *gateLookupDB) checked() []consoleCredential {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]consoleCredential(nil), d.creds...)
+}
+
+// setEnded makes the liveness check answer that the credential has ended.
+func (d *gateLookupDB) setEnded() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ended = true
+}
+
+// endAfterChecks makes the credential end after n checks have said it is live.
+func (d *gateLookupDB) endAfterChecks(n int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.endsAfter = n
+}
+
+func isLivenessCheck(sql string) bool {
+	return strings.Contains(sql, "-- name: IsConsoleCredentialLive ")
+}
+
 type gateNoRow struct{}
 
 func (gateNoRow) Scan(...any) error { return pgx.ErrNoRows }
+
+type boolRow bool
+
+func (r boolRow) Scan(dest ...any) error {
+	*dest[0].(*bool) = bool(r)
+	return nil
+}
+
+// testCredential is the credential standInGate hands every handler.
+var testCredential = consoleCredential{
+	UserID:            uuid.MustParse("c0000000-0000-4000-8000-000000000001"),
+	ConsoleCredential: auth.ConsoleCredential{SessionID: uuid.MustParse("c0000000-0000-4000-8000-000000000002")},
+}
+
+// standInGate does what Server.authenticate does once it has validated a token:
+// it hands the handler the scope and the credential.
+func standInGate(scope *auth.ConsoleScope) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		c.Locals(consoleScopeLocal, scope)
+		c.Locals(consoleCredentialLocal, testCredential)
+		return c.Next()
+	}
+}
 
 // startGateApp serves app on a free loopback port and returns the port.
 func startGateApp(t *testing.T, app *fiber.App) int {
@@ -142,12 +206,13 @@ func TestConsoleGate_RealRoutesRefuseTheBypasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hub token: %v", err)
 	}
-	serialToken, _, err := jwtSvc.GenerateConsoleToken(userID, "operator@example.com", "operator",
+	session := auth.ConsoleCredential{SessionID: uuid.New()}
+	serialToken, _, err := jwtSvc.GenerateConsoleToken(userID, "operator@example.com", "operator", session,
 		auth.ConsoleScope{ClusterID: gateClusterA, Node: "pve-01", VMID: 100, Type: "vm_serial"}, time.Minute)
 	if err != nil {
 		t.Fatalf("console token: %v", err)
 	}
-	vncToken, _, err := jwtSvc.GenerateConsoleToken(userID, "operator@example.com", "operator",
+	vncToken, _, err := jwtSvc.GenerateConsoleToken(userID, "operator@example.com", "operator", session,
 		auth.ConsoleScope{ClusterID: gateClusterA, Node: "pve-01", VMID: 100, Type: "vm_vnc"}, time.Minute)
 	if err != nil {
 		t.Fatalf("vnc token: %v", err)
@@ -203,6 +268,11 @@ func TestConsoleGate_RealRoutesRefuseTheBypasses(t *testing.T) {
 			if got := lookups.lookedUp()[before:]; len(got) != 1 || got[0].String() != gateClusterA {
 				t.Errorf("the handler looked up %v, want exactly [%s]", got, gateClusterA)
 			}
+			// The gate hands the handler the token's own credential.
+			want := consoleCredential{UserID: userID, ConsoleCredential: session}
+			if got := lookups.checked(); len(got) == 0 || got[len(got)-1] != want {
+				t.Errorf("the handler checked %v, want the token's credential %v", got, want)
+			}
 		})
 	}
 }
@@ -227,10 +297,7 @@ func TestConsoleHandlers_ActOnTheValidatedScope(t *testing.T) {
 		t.Run(kind+": the scope, not the query", func(t *testing.T) {
 			lookups := &gateLookupDB{}
 			app := fiber.New()
-			app.Get("/probe", func(c fiber.Ctx) error {
-				c.Locals(consoleScopeLocal, scopes[kind])
-				return c.Next()
-			}, gateHandlerFor(kind, db.New(lookups), jwtSvc, logger))
+			app.Get("/probe", standInGate(scopes[kind]), gateHandlerFor(kind, db.New(lookups), jwtSvc, logger))
 			port := startGateApp(t, app)
 
 			status, _ := dialGate(t, port, "/probe?cluster_id="+gateClusterB+"&node=pve-02&vmid=999&type=lxc", "x")
@@ -255,10 +322,7 @@ func TestConsoleHandlers_ActOnTheValidatedScope(t *testing.T) {
 				bogus.Type = "node_shell"
 			}
 			app := fiber.New()
-			app.Get("/probe", func(c fiber.Ctx) error {
-				c.Locals(consoleScopeLocal, &bogus)
-				return c.Next()
-			}, gateHandlerFor(kind, db.New(lookups), jwtSvc, logger))
+			app.Get("/probe", standInGate(&bogus), gateHandlerFor(kind, db.New(lookups), jwtSvc, logger))
 			port := startGateApp(t, app)
 
 			_, msg := dialGate(t, port, "/probe", "x")
@@ -531,11 +595,7 @@ func TestConsoleHandlers_ClosePromptlyWithAReasonAfterAPanic(t *testing.T) {
 			t.Parallel()
 			scope := auth.ConsoleScope{ClusterID: gateClusterA, Node: "pve-01", VMID: 100, Type: consoleType}
 			app := fiber.New()
-			app.Get("/probe", func(c fiber.Ctx) error {
-				validated := scope
-				c.Locals(consoleScopeLocal, &validated)
-				return c.Next()
-			}, gateHandlerFor(kind, nil, jwtSvc, logger))
+			app.Get("/probe", standInGate(&scope), gateHandlerFor(kind, nil, jwtSvc, logger))
 			port := startGateApp(t, app)
 
 			dialer := *gorillaws.DefaultDialer

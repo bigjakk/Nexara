@@ -61,6 +61,8 @@ func TestLogin_TheSessionIsCreatedAgainstTheEpochThePasswordCheckRead(t *testing
 	}
 	if live := a.store.liveSessionsOf(user.ID); len(live) != 1 {
 		t.Errorf("%d live sessions, want 1", len(live))
+	} else {
+		requireTokenNamesSession(t, a, body, live[0].ID)
 	}
 	if got := a.store.auditActions(); len(got) != 1 || got[0] != "login" {
 		t.Errorf("audit actions = %v, want [login]", got)
@@ -277,6 +279,8 @@ func TestRegister_TheFirstUserStillGetsItsSession(t *testing.T) {
 	}
 	if live := store.liveSessionsOf(created.ID); len(live) != 1 {
 		t.Errorf("%d live sessions, want 1", len(live))
+	} else {
+		requireTokenNamesSession(t, a, body, live[0].ID)
 	}
 	wantRow := authFakeAuditRow{actor: created.ID, resourceType: "auth", resourceID: created.ID.String(), action: "register"}
 	if rows := store.auditRowsWritten(); !reflect.DeepEqual(rows, []authFakeAuditRow{wantRow}) {

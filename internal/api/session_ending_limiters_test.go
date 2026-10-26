@@ -77,11 +77,11 @@ func newEndSessionsServer(t *testing.T) *endSessionsServer {
 	fake, uid, apiKey := newChainDB(t)
 	jwtSvc := auth.NewJWTService("session-limiters-test-secret", 15*time.Minute, 7*24*time.Hour)
 	otherID := uuid.New()
-	ownerToken, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin")
+	ownerToken, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("access token: %v", err)
 	}
-	otherToken, _, err := jwtSvc.GenerateAccessToken(otherID, "bob@example.com", "viewer")
+	otherToken, _, err := jwtSvc.GenerateAccessToken(otherID, "bob@example.com", "viewer", uuid.New())
 	if err != nil {
 		t.Fatalf("access token: %v", err)
 	}

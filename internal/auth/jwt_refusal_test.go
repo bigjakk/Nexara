@@ -70,7 +70,7 @@ func TestAccessTokenIsSomeoneElses(t *testing.T) {
 
 	expired := func(t *testing.T) string {
 		t.Helper()
-		tok, _, err := lapsedSvc.GenerateAccessToken(user, "alice@example.com", "admin")
+		tok, _, err := lapsedSvc.GenerateAccessToken(user, "alice@example.com", "admin", uuid.New())
 		if err != nil {
 			t.Fatalf("GenerateAccessToken: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestAccessTokenIsSomeoneElses(t *testing.T) {
 		{
 			name: "an access token that has not expired, which authOptional would have named",
 			token: func(t *testing.T) string {
-				tok, _, err := svc.GenerateAccessToken(user, "alice@example.com", "admin")
+				tok, _, err := svc.GenerateAccessToken(user, "alice@example.com", "admin", uuid.New())
 				if err != nil {
 					t.Fatalf("GenerateAccessToken: %v", err)
 				}
@@ -168,7 +168,7 @@ func TestAccessTokenIsSomeoneElses(t *testing.T) {
 		{
 			name: "a live access token with white space on both sides",
 			token: func(t *testing.T) string {
-				tok, _, err := svc.GenerateAccessToken(user, "alice@example.com", "admin")
+				tok, _, err := svc.GenerateAccessToken(user, "alice@example.com", "admin", uuid.New())
 				if err != nil {
 					t.Fatalf("GenerateAccessToken: %v", err)
 				}
@@ -192,7 +192,7 @@ func TestAccessTokenIsSomeoneElses(t *testing.T) {
 		{
 			name: "an expired token signed with another secret",
 			token: func(t *testing.T) string {
-				tok, _, err := foreignSvc.GenerateAccessToken(user, "alice@example.com", "admin")
+				tok, _, err := foreignSvc.GenerateAccessToken(user, "alice@example.com", "admin", uuid.New())
 				if err != nil {
 					t.Fatalf("GenerateAccessToken: %v", err)
 				}
@@ -218,7 +218,7 @@ func TestAccessTokenIsSomeoneElses(t *testing.T) {
 		{
 			name: "an expired console token",
 			token: func(t *testing.T) string {
-				tok, _, err := lapsedSvc.GenerateConsoleToken(user, "alice@example.com", "admin", scope, -time.Hour)
+				tok, _, err := lapsedSvc.GenerateConsoleToken(user, "alice@example.com", "admin", ConsoleCredential{SessionID: uuid.New()}, scope, -time.Hour)
 				if err != nil {
 					t.Fatalf("GenerateConsoleToken: %v", err)
 				}
@@ -238,7 +238,7 @@ func TestAccessTokenIsSomeoneElses(t *testing.T) {
 		{
 			name: "a console token that has not expired",
 			token: func(t *testing.T) string {
-				tok, _, err := svc.GenerateConsoleToken(user, "alice@example.com", "admin", scope, time.Minute)
+				tok, _, err := svc.GenerateConsoleToken(user, "alice@example.com", "admin", ConsoleCredential{SessionID: uuid.New()}, scope, time.Minute)
 				if err != nil {
 					t.Fatalf("GenerateConsoleToken: %v", err)
 				}
