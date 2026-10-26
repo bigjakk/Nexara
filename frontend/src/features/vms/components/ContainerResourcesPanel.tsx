@@ -729,6 +729,25 @@ const MP_KEY_RE = /^mp(\d+)$/;
 // move-volume without "delete source" leaves behind.
 const UNUSED_KEY_RE = /^unused(\d+)$/;
 
+// The fields a Save deletes when they are cleared. pve-container refuses an
+// empty value for most (a type or format check: integer, number, dns-name,
+// pve-startup-order), and the whole write with it; features it takes empty,
+// but stores as sent and reads back as " ". Absent, each reads as unset
+// (src/PVE/LXC.pm, src/PVE/LXC/Config.pm): all of the host's cores, no CPU
+// limit, the cgroup's default CPU weight, no swap (`$conf->{swap} // 0`;
+// deleting it hotplugs 0), the hostname CT<vmid>, no startup order, no
+// features. Memory is not one: update_pct_config refuses to delete it, so a
+// Save waits until it has a value.
+const DELETED_WHEN_CLEARED = new Set([
+  "cores",
+  "cpulimit",
+  "cpuunits",
+  "swap",
+  "hostname",
+  "startup",
+  "features",
+]);
+
 const consoleModes = [
   { value: "tty", label: "TTY" },
   { value: "console", label: "Console" },
@@ -964,11 +983,13 @@ export function ContainerResourcesPanel({
     }
     populatedFrom.current = config;
 
-    setCores(str(config["cores"]) || "1");
+    // Absent, each reads as Proxmox runs it (DELETED_WHEN_CLEARED): no number
+    // for cores or cpuunits, 512 MiB of memory (`|| 512`) and no swap.
+    setCores(str(config["cores"]));
     setCpulimit(str(config["cpulimit"]));
-    setCpuunits(str(config["cpuunits"]) || "1024");
+    setCpuunits(str(config["cpuunits"]));
     setMemory(str(config["memory"]) || "512");
-    setSwap(str(config["swap"]) || "512");
+    setSwap(str(config["swap"]) || "0");
     setHostname(str(config["hostname"]));
     setNameserver(str(config["nameserver"]));
     setSearchdomain(str(config["searchdomain"]));
@@ -994,11 +1015,11 @@ export function ContainerResourcesPanel({
 
     // Build original field snapshot
     const orig: Record<string, string> = {};
-    orig["cores"] = str(config["cores"]) || "1";
+    orig["cores"] = str(config["cores"]);
     orig["cpulimit"] = str(config["cpulimit"]);
-    orig["cpuunits"] = str(config["cpuunits"]) || "1024";
+    orig["cpuunits"] = str(config["cpuunits"]);
     orig["memory"] = str(config["memory"]) || "512";
-    orig["swap"] = str(config["swap"]) || "512";
+    orig["swap"] = str(config["swap"]) || "0";
     orig["hostname"] = str(config["hostname"]);
     orig["nameserver"] = str(config["nameserver"]);
     orig["searchdomain"] = str(config["searchdomain"]);
@@ -1076,9 +1097,7 @@ export function ContainerResourcesPanel({
     const deletes: string[] = [];
     for (const [key, val] of Object.entries(currentFields)) {
       if (val === (origFields[key] ?? "")) continue;
-      // pve-startup-order refuses an empty value, and the whole write with
-      // it: a startup cleared is deleted.
-      if (key === "startup" && val === "") deletes.push(key);
+      if (val === "" && DELETED_WHEN_CLEARED.has(key)) deletes.push(key);
       else diff[key] = val;
     }
     // Handle deletions
@@ -1095,6 +1114,8 @@ export function ContainerResourcesPanel({
   }, [currentFields, origFields, deleteNics, deleteVolumes]);
 
   const hasChanges = Object.keys(changedFields).length > 0;
+  // Proxmox can neither take an empty memory nor delete it.
+  const memoryMissing = memory === "";
   const isRunning = ctStatus.toLowerCase() === "running";
 
   // Mount points (read-only display + resize)
@@ -1167,7 +1188,13 @@ export function ContainerResourcesPanel({
   }: {
     confirmed: readonly VolumeToDelete[] | null;
   }) {
-    if (savesSent.current !== savesSeenSettled.current || !hasChanges) return;
+    if (
+      savesSent.current !== savesSeenSettled.current ||
+      !hasChanges ||
+      memoryMissing
+    ) {
+      return;
+    }
     // This render's fields are built on a config already replaced, whose
     // repopulating effect has not run yet. (While the confirmation is open
     // that effect waits on purpose, and the checks below cover it.)
@@ -1368,7 +1395,7 @@ export function ContainerResourcesPanel({
         <Button
           size="sm"
           className="gap-1.5"
-          disabled={!hasChanges || setConfigMutation.isPending}
+          disabled={!hasChanges || memoryMissing || setConfigMutation.isPending}
           onClick={() => {
             saveChanges({ confirmed: null });
           }}
@@ -1490,6 +1517,7 @@ export function ContainerResourcesPanel({
                 onChange={(e) => {
                   setCores(e.target.value);
                 }}
+                placeholder="all"
                 className="h-8 text-sm"
               />
             </div>
@@ -1518,6 +1546,7 @@ export function ContainerResourcesPanel({
                 onChange={(e) => {
                   setCpuunits(e.target.value);
                 }}
+                placeholder="Default"
                 className="h-8 text-sm"
               />
             </div>
@@ -1539,6 +1568,12 @@ export function ContainerResourcesPanel({
                 }}
                 className="h-8 text-sm"
               />
+              {memoryMissing && (
+                <p className="mt-1 text-xs text-destructive">
+                  Proxmox cannot unset a container&apos;s memory: enter an
+                  amount to save.
+                </p>
+              )}
             </div>
             <div>
               <Label className="text-xs">Swap (MiB)</Label>
@@ -1550,6 +1585,7 @@ export function ContainerResourcesPanel({
                 onChange={(e) => {
                   setSwap(e.target.value);
                 }}
+                placeholder="0"
                 className="h-8 text-sm"
               />
             </div>

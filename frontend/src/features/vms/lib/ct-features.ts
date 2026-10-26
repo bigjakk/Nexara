@@ -58,10 +58,21 @@ export function parseFeatures(raw: string): CTFeatures {
  * its position. So an untouched value rebuilds to exactly `base`, whatever
  * its order, and comparing the two is the dirty check. A flag turned off,
  * or a mount list cleared, is dropped: absent is off.
+ *
+ * A value it rewrites also loses its blank segments. parse_property_string
+ * skips them, but Proxmox stores a value as sent and reads one sent empty
+ * back as " " (parse_pct_config), so a flag added to that would otherwise go
+ * out as " ,nesting=1".
  */
 export function buildFeatures(parsed: CTFeatures, base = ""): string {
   const was = parseFeatures(base);
-  let segs = splitSegments(base);
+  const changed =
+    FEATURE_FLAGS.some((key) => parsed[key] !== was[key]) ||
+    parsed.mount !== was.mount;
+  if (!changed) return base;
+  let segs = splitSegments(base).filter(
+    (s) => s.key !== null || s.value !== "",
+  );
   for (const key of FEATURE_FLAGS) {
     if (parsed[key] === was[key]) continue;
     segs = setSegment(

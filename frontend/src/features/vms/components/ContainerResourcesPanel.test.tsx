@@ -148,38 +148,88 @@ describe("ContainerResourcesPanel change tracking", () => {
     });
   });
 
-  // pve-startup-order takes the order bare and refuses an empty value: a bare
-  // order read as a key opened the panel dirty and went from any Save, and a
-  // startup cleared was sent as "" and refused with the whole write.
+  // Proxmox refuses an empty value for most of these, and the whole write with
+  // it, and stores an empty features value as sent; absent, each reads as
+  // unset, so a field cleared is deleted. And pve-startup-order takes the
+  // order bare: read as a key, it opened the panel dirty and went from any
+  // Save.
   it.each([
     [
       "keeps a bare startup order when a delay is edited",
-      "1,up=30",
+      { startup: "1,up=30" },
       "Up Delay (s)",
       "45",
       { startup: "1,up=45" },
     ],
     [
       "deletes a startup cleared",
-      "1",
+      { startup: "1" },
       "Startup Order",
       "",
       { delete: "startup" },
     ],
-  ])("%s", async (_name, stored, label, value, want) => {
-    state.config = { ...state.config, startup: stored };
+    [
+      "deletes a CPU limit, the other numbers and the hostname cleared",
+      { cpulimit: 2, cpuunits: 200, swap: 512 },
+      ["Cores", "CPU Limit", "CPU Units", "Swap (MiB)", "Hostname"],
+      "",
+      { delete: "cores,cpulimit,cpuunits,swap,hostname" },
+    ],
+    [
+      "deletes features once the last flag is unticked",
+      { features: "nesting=1", unprivileged: 1 },
+      "Nesting",
+      "",
+      { delete: "features" },
+    ],
+  ])("%s", async (_name, stored, labels, value, want) => {
+    state.config = { ...state.config, ...stored };
     const user = userEvent.setup();
     renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
     const save = screen.getByRole("button", { name: /save/i });
     expect(save).toBeDisabled();
 
-    const input = screen.getByText(label).parentElement?.querySelector("input");
-    if (!input) throw new Error(`${label} input not found`);
-    await user.clear(input);
-    if (value) await user.type(input, value);
+    for (const label of [labels].flat()) {
+      const field = screen
+        .getByText(label)
+        .parentElement?.querySelector("input, button");
+      if (!field) throw new Error(`${label} field not found`);
+      if (field instanceof HTMLButtonElement) {
+        await user.click(field);
+      } else {
+        await user.clear(field);
+        if (value) await user.type(field, value);
+      }
+    }
     await user.click(save);
 
     expect(state.saved?.["fields"]).toEqual(want);
+  });
+
+  // Unset, cores and the CPU weight have no number to show and swap is 0, as
+  // Proxmox runs them; memory, which it can neither take empty nor delete,
+  // holds a Save until it has a value.
+  it("shows unset cores, CPU units and swap as Proxmox runs them, and holds Save while memory is cleared", async () => {
+    delete state.config["cores"];
+    const user = userEvent.setup();
+    renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
+    const input = (label: string) => {
+      const el = screen.getByText(label).parentElement?.querySelector("input");
+      if (!el) throw new Error(`${label} input not found`);
+      return el;
+    };
+    expect(input("Cores")).toHaveValue(null);
+    expect(input("CPU Units")).toHaveValue(null);
+    expect(input("Swap (MiB)")).toHaveValue(0);
+    const save = screen.getByRole("button", { name: /save/i });
+    expect(save).toBeDisabled();
+
+    await user.clear(input("Memory (MiB)"));
+
+    expect(
+      screen.getByText(/cannot unset a container's memory/),
+    ).toBeInTheDocument();
+    expect(save).toBeDisabled();
   });
 
   // check_ct_modify_config_perm lets only root@pam change a privileged

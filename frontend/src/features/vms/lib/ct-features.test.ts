@@ -21,8 +21,9 @@ describe("parseFeatures / buildFeatures", () => {
   });
 
   // Proxmox's permission check compares mount as written, spaces and all:
-  // trimmed, it reads as a change only root@pam may make.
-  it.each(["", STORED, "mount= nfs;cifs ,nesting=1"])(
+  // trimmed, it reads as a change only root@pam may make. " " is how it reads
+  // back a features value sent empty.
+  it.each(["", " ", STORED, "mount= nfs;cifs ,nesting=1"])(
     "rebuilds an untouched value %j to exactly what is stored",
     (raw) => {
       expect(buildFeatures(parseFeatures(raw), raw)).toBe(raw);
@@ -59,6 +60,12 @@ describe("parseFeatures / buildFeatures", () => {
       "",
       { nesting: true, keyctl: true, mount: "nfs" },
       "nesting=1,keyctl=1,mount=nfs",
+    ],
+    [
+      "leaves out the blank segments of a value it rewrites",
+      " ,",
+      { nesting: true },
+      "nesting=1",
     ],
   ])("%s", (_name, raw, edit, want) => {
     expect(buildFeatures({ ...parseFeatures(raw), ...edit }, raw)).toBe(want);
