@@ -57,7 +57,7 @@ export function buildKVString(map: Map<string, string>): string {
  * true, in any case, are true; 0, off, no and false are false. Anything else
  * fails Proxmox's check_type there; it reads as off here.
  */
-function pveBoolean(value: string): boolean {
+export function pveBoolean(value: string): boolean {
   return /^(1|on|yes|true)$/i.test(value);
 }
 

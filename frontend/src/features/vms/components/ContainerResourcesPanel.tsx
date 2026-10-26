@@ -49,6 +49,8 @@ import { useTaskLogStore } from "@/stores/task-log-store";
 import { parseKVString, buildKVString } from "../lib/vm-config-parsers";
 import { parseCTNet, buildCTNet, emptyCTNet } from "../lib/ct-net";
 import type { CTNetEdit } from "../lib/ct-net";
+import { parseFeatures, buildFeatures } from "../lib/ct-features";
+import type { CTFeatures } from "../lib/ct-features";
 import type { VMConfig } from "../types/vm";
 
 const selectClass =
@@ -167,46 +169,6 @@ function parseMountPoint(raw: string): CTMountPoint {
   result.ro = kv.get("ro") === "1";
   result.replicate = kv.get("replicate") !== "0";
   return result;
-}
-
-// ---------------------------------------------------------------------------
-// LXC features parser/builder
-// ---------------------------------------------------------------------------
-
-interface CTFeatures {
-  nesting: boolean;
-  fuse: boolean;
-  keyctl: boolean;
-  mknod: boolean;
-  mount: string;
-}
-
-function parseFeatures(raw: string): CTFeatures {
-  const result: CTFeatures = {
-    nesting: false,
-    fuse: false,
-    keyctl: false,
-    mknod: false,
-    mount: "",
-  };
-  if (!raw) return result;
-  const kv = parseKVString(raw);
-  result.nesting = kv.get("nesting") === "1";
-  result.fuse = kv.get("fuse") === "1";
-  result.keyctl = kv.get("keyctl") === "1";
-  result.mknod = kv.get("mknod") === "1";
-  result.mount = kv.get("mount") ?? "";
-  return result;
-}
-
-function buildFeatures(f: CTFeatures): string {
-  const m = new Map<string, string>();
-  if (f.nesting) m.set("nesting", "1");
-  if (f.fuse) m.set("fuse", "1");
-  if (f.keyctl) m.set("keyctl", "1");
-  if (f.mknod) m.set("mknod", "1");
-  if (f.mount) m.set("mount", f.mount);
-  return buildKVString(m);
 }
 
 // ---------------------------------------------------------------------------
@@ -1093,7 +1055,9 @@ export function ContainerResourcesPanel({
     f["protection"] = protection ? "1" : "0";
     f["cmode"] = cmode;
     f["startup"] = buildStartupOrder(startup);
-    f["features"] = buildFeatures(features);
+    // Rebuilt on the value it was read from, so an untouched one is the
+    // stored string, in its order, keys this form has no field for included.
+    f["features"] = buildFeatures(features, origFields["features"] ?? "");
     f["description"] = description;
     f["tags"] = tags;
     for (const [key, nic] of nics) {
@@ -1119,6 +1083,7 @@ export function ContainerResourcesPanel({
     cmode,
     startup,
     features,
+    origFields,
     description,
     tags,
     nics,

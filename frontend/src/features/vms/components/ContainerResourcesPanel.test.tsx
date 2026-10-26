@@ -121,6 +121,32 @@ describe("ContainerResourcesPanel change tracking", () => {
     expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
   });
 
+  // Proxmox stores features as sent, in any order and with keys the form has
+  // no field for. Rebuilt from its five fields, such a value opened the panel
+  // dirty and lost force_rw_sys, so every Save sent a feature change that
+  // Proxmox lets only root@pam make. Nesting is the one a token may change.
+  it("opens clean on features with a key it has no field for, and keeps it when Nesting is ticked", async () => {
+    state.config = {
+      ...state.config,
+      features: "keyctl=1,force_rw_sys=1",
+    };
+    const user = userEvent.setup();
+    renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
+    const save = screen.getByRole("button", { name: /save/i });
+    expect(save).toBeDisabled();
+
+    const nesting = screen
+      .getByText("Nesting")
+      .parentElement?.querySelector("button");
+    if (!nesting) throw new Error("Nesting checkbox not found");
+    await user.click(nesting);
+    await user.click(save);
+
+    expect(state.saved?.["fields"]).toEqual({
+      features: "keyctl=1,force_rw_sys=1,nesting=1",
+    });
+  });
+
   it("keeps unmodelled NIC keys when saving an unrelated edit", async () => {
     const user = userEvent.setup();
     renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
