@@ -17,6 +17,7 @@ import {
   parseDisk,
   parseDriveMedia,
   buildCDROM,
+  isCloudInitVolume,
   parseCPU,
   buildCPU,
   parseWatchdog,
@@ -721,6 +722,16 @@ describe("parseDriveMedia / buildCDROM", () => {
     ["builds a new drive", "", "none", "none,media=cdrom"],
   ])("%s", (_name, raw, file, want) => {
     expect(buildCDROM(file, raw)).toBe(want);
+  });
+
+  // The volume create_disks allocates for one, on a block or a file storage.
+  it.each([
+    ["store01:vm-101-cloudinit", true],
+    ["store02:101/vm-101-cloudinit.qcow2", true],
+    ["store01:iso/cloudinit.iso", false],
+    ["store01:vm-101-disk-0", false],
+  ])("reads %j as a cloud-init volume: %s", (file, want) => {
+    expect(isCloudInitVolume(file)).toBe(want);
   });
 });
 

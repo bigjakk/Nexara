@@ -707,17 +707,18 @@ describe("HardwarePanel dirty check", () => {
 
   // Proxmox refuses a key that is both set and deleted ("you can't use
   // '-net1' and -delete net1' at the same time", $update_vm_api in
-  // src/PVE/API2/Qemu.pm), which fails the whole Save. A NIC and a disk, with a
-  // resize on it, edited and then removed are sent as the removal alone, in one
-  // Save beside the same edits on ones that are kept, so that the edits really
-  // are sent when nothing removes them. A resize is a request of its own, sent
-  // before the config write, and for a disk the same Save removes it would race
-  // the delete.
-  it("sends only the removal for a NIC or disk edited and then removed, and the edit for one that is kept", async () => {
+  // src/PVE/API2/Qemu.pm), which fails the whole Save. A NIC, a CD/DVD drive
+  // and a disk, with a resize on it, edited and then removed are sent as the
+  // removal alone, in one Save beside the same edits on ones that are kept, so
+  // that the edits really are sent when nothing removes them. A resize is a
+  // request of its own, sent before the config write, and for a disk the same
+  // Save removes it would race the delete.
+  it("sends only the removal for a NIC, CD/DVD drive or disk edited and then removed, and the edit for one that is kept", async () => {
     const save = await renderPanel(
       nicVM({
         scsi0: "store01:vm-101-disk-0,size=32G",
         scsi1: "store01:vm-101-disk-1,size=16G",
+        ide2: "store01:iso/install.iso,media=cdrom",
       }),
     );
 
@@ -732,6 +733,12 @@ describe("HardwarePanel dirty check", () => {
     await user.click(
       within(diskRow("scsi1")).getByRole("button", { name: /remove/i }),
     );
+    const cdrom = diskRow("ide2").parentElement?.querySelector("select");
+    if (!cdrom) throw new Error("no CD/DVD select for ide2");
+    fill(cdrom, "none");
+    await user.click(
+      within(diskRow("ide2")).getByRole("button", { name: /remove/i }),
+    );
 
     expect(await saveAndGetFields(save)).toEqual([
       [
@@ -740,7 +747,7 @@ describe("HardwarePanel dirty check", () => {
           fields: {
             net1: "e1000=02:00:00:00:00:02,bridge=vmbr3,firewall=on,queues=2",
             scsi0: "store01:vm-101-disk-0,size=32G,cache=writeback",
-            delete: "net0,scsi1",
+            delete: "net0,ide2,scsi1",
           },
         },
       ],
@@ -882,6 +889,85 @@ describe("HardwarePanel dirty check", () => {
     expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { delete: "scsi0" } }],
     ]);
+  });
+
+  // Removing a cloud-init drive frees its volume, where removing an ISO
+  // drive only empties the slot, so only it asks first.
+  it("asks before staging a cloud-init drive's removal, naming its volume, and offers no ISO for it", async () => {
+    const save = await renderPanel(
+      nicVM({ ide2: "store01:vm-101-cloudinit,media=cdrom" }),
+    );
+    const row = () => {
+      const label = screen.getByText("ide2", { exact: true }).parentElement;
+      if (!label) throw new Error("no row for ide2");
+      return label;
+    };
+    expect(within(row()).getByText("Cloud-Init")).toBeInTheDocument();
+    expect(row().parentElement?.querySelector("select")).toBeNull();
+
+    await user.click(within(row()).getByRole("button", { name: /remove/i }));
+    let dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("store01:vm-101-cloudinit");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(save).toBeDisabled();
+
+    await user.click(within(row()).getByRole("button", { name: /remove/i }));
+    dialog = await screen.findByRole("alertdialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove Drive" }),
+    );
+    expect(
+      within(row()).getByText(/marked for\s+removal/i),
+    ).toBeInTheDocument();
+    // The Remove that opened it is gone: focus stays with the drives.
+    await waitFor(() => {
+      expect(
+        screen.getByRole("region", { name: "CD/DVD drives" }),
+      ).toHaveFocus();
+    });
+
+    // Undone, it is as it was; removed again, Save deletes it.
+    await user.click(within(row()).getByRole("button", { name: "Undo" }));
+    expect(save).toBeDisabled();
+    await user.click(within(row()).getByRole("button", { name: /remove/i }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Remove Drive",
+      }),
+    );
+
+    expect(await saveAndGetFields(save)).toEqual([
+      [CONFIG_URL, { fields: { delete: "ide2" } }],
+    ]);
+  });
+
+  // $update_vm_api lets only root@pam set a serial port that is not a
+  // socket, or delete one, and Nexara's API token never is root@pam.
+  it("offers only a socket to add, saying why, and no Remove for a host serial port", async () => {
+    await renderPanel(nicVM({ serial0: "/dev/ttyS0", serial1: "socket" }));
+    await user.click(screen.getByText("Serial Ports (2)"));
+    const host = screen.getByText("serial0", { exact: true }).parentElement;
+    if (!host) throw new Error("no row for serial0");
+    expect(
+      within(host).getByText(/only root@pam can remove it/),
+    ).toBeInTheDocument();
+    expect(within(host).queryAllByRole("button")).toEqual([]);
+    expect(
+      within(diskRow("serial1")).getByRole("button", { name: /remove/i }),
+    ).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: /add device/i }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: /serial port/i }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("option", { name: /ttyS0/ }),
+    ).toBeDisabled();
+    expect(
+      within(dialog).getByRole("option", { name: /socket/i }),
+    ).toBeEnabled();
+    expect(dialog).toHaveTextContent(/only for root@pam/);
   });
 });
 

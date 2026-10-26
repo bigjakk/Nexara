@@ -723,6 +723,16 @@ export function parseDriveMedia(raw: string): ParsedDriveMedia {
 }
 
 /**
+ * Whether a drive's volume is a cloud-init drive's: drive_is_cloudinit's
+ * pattern (src/PVE/QemuServer/Drive.pm), its $QEMU_FORMAT_RE spelled out.
+ */
+export function isCloudInitVolume(file: string): boolean {
+  return /[:/](?:vm-\d+-)?cloudinit(?:\.(?:raw|qcow|qcow2|qed|vmdk|cloop))?$/.test(
+    file,
+  );
+}
+
+/**
  * Build a CD/DVD drive holding `file`. On `base`, the drive as stored, only
  * the volume is rewritten, in the form it is stored in, so the same volume
  * rebuilds to exactly `base`. With no base it builds a new drive.

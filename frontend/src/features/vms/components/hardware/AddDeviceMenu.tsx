@@ -1388,6 +1388,11 @@ function AddPCIDialog({
 // Serial Port Dialog
 // ---------------------------------------------------------------------------
 
+// $update_vm_api (src/PVE/API2/Qemu.pm) lets nobody but root@pam set a
+// serialN to anything but a socket, and Nexara connects with an API token,
+// which never is root@pam. So the host ports are listed, to say they exist
+// and why they are not offered, but cannot be picked: Proxmox would refuse
+// one, and the Save it is in.
 function AddSerialDialog({
   config,
   onAdd,
@@ -1424,12 +1429,21 @@ function AddSerialDialog({
             }}
           >
             {serialOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
+              <option
+                key={o.value}
+                value={o.value}
+                disabled={o.value !== "socket"}
+              >
+                {o.value === "socket" ? o.label : `${o.label} (root@pam only)`}
               </option>
             ))}
           </select>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Proxmox attaches a host serial port only for root@pam, and Nexara
+          connects with an API token, so only a socket can be added here. Set a
+          host port in Proxmox, as root@pam.
+        </p>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
             Cancel

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import {
   Loader2,
   Save,
@@ -78,6 +78,7 @@ import {
   parseDisk,
   parseDriveMedia,
   buildCDROM,
+  isCloudInitVolume,
   parseAudio,
   buildAudio,
   parseStartup,
@@ -373,6 +374,18 @@ export function HardwarePanel({
     key: string;
     volume: string;
   } | null>(null);
+
+  // Removing a cloud-init drive frees its volume, where removing an ISO drive
+  // only empties a slot (vmconfig_register_unused_drive,
+  // src/PVE/QemuServer.pm). So it is staged like the other removals, but only
+  // once this confirmation says so.
+  const [cloudInitToRemove, setCloudInitToRemove] = useState<{
+    key: string;
+    volume: string;
+  } | null>(null);
+  // Where focus goes once that confirmation stages the removal: the Remove
+  // button that opened it is gone, replaced by the row's Undo.
+  const cdromList = useRef<HTMLDivElement>(null);
 
   // USB/PCI device listing from node
   const { data: usbDevices } = useNodeUSBDevices(clusterId, nodeName);
@@ -983,17 +996,19 @@ export function HardwarePanel({
     setCdromEdits((prev) => ({ ...prev, [key]: isoVolid }));
   }
 
+  // A stored drive stays listed, marked for removal until Save as a disk
+  // is; one added since is dropped.
   function handleRemoveCDROM(key: string) {
+    if (original?.[key] != null) {
+      setDeviceRemovals((prev) => new Set(prev).add(key));
+      return;
+    }
     setCdromEdits((prev) => {
       const next = { ...prev };
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete next[key];
       return next;
     });
-    // If it existed in original config, mark for deletion
-    if (original && original[key] != null) {
-      setDeviceRemovals((prev) => new Set(prev).add(key));
-    }
   }
 
   function handleRemoveDevice(key: string) {
@@ -1219,6 +1234,7 @@ export function HardwarePanel({
     // CD/DVD drives (all media=cdrom devices), each rebuilt on its stored
     // value like the NICs: a new ISO keeps the drive's other options.
     for (const [key, isoVal] of Object.entries(cdromEdits)) {
+      if (deviceRemovals.has(key)) continue;
       const origRaw = str(original[key] ?? "");
       const newVal = buildCDROM(isoVal, origRaw);
       if (newVal !== origRaw) fields[key] = newVal;
@@ -1497,6 +1513,7 @@ export function HardwarePanel({
       return true;
     // CD/DVD drives, compared as handleSave compares them
     for (const [key, isoVal] of Object.entries(cdromEdits)) {
+      if (deviceRemovals.has(key)) continue;
       const origRaw = str(original[key] ?? "");
       if (buildCDROM(isoVal, origRaw) !== origRaw) return true;
     }
@@ -2779,50 +2796,99 @@ export function HardwarePanel({
         <Section
           title={`CD/DVD Drives (${String(Object.keys(cdromEdits).length)})`}
         >
-          <div className="space-y-3">
+          <div
+            ref={cdromList}
+            role="region"
+            aria-label="CD/DVD drives"
+            tabIndex={-1}
+            className="space-y-3 outline-none"
+          >
             {Object.entries(cdromEdits)
               .sort(([a], [b]) => a.localeCompare(b))
-              .map(([key, isoVal]) => (
-                <div key={key} className="space-y-1.5 rounded border p-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-medium">{key}</span>
-                    <Badge variant="secondary" className="text-[10px]">
-                      CD/DVD
-                    </Badge>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                      onClick={() => {
-                        handleRemoveCDROM(key);
-                      }}
+              .map(([key, isoVal]) => {
+                if (deviceRemovals.has(key)) {
+                  return (
+                    <div
+                      key={key}
+                      className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950"
                     >
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </Button>
-                  </div>
-                  <select
-                    className={compactSelect}
-                    value={isoVal}
-                    onChange={(e) => {
-                      setCdromEdits((prev) => ({
-                        ...prev,
-                        [key]: e.target.value,
-                      }));
-                    }}
-                  >
-                    <option value="none">No media (empty drive)</option>
-                    {isoVal !== "none" &&
-                      !isoFiles.some((iso) => iso.volid === isoVal) && (
-                        <option value={isoVal}>{isoVal} (current)</option>
+                      <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">
+                        {key}
+                      </span>
+                      <span className="text-[10px] text-red-600 dark:text-red-400">
+                        marked for removal
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto h-6 px-2 text-[10px]"
+                        onClick={() => {
+                          handleUndoRemoveDevice(key);
+                        }}
+                      >
+                        Undo
+                      </Button>
+                    </div>
+                  );
+                }
+                // A cloud-init drive holds the volume Proxmox generates, not
+                // an ISO: picking one would free it, as removing it does.
+                const cloudInit = isCloudInitVolume(isoVal);
+                return (
+                  <div key={key} className="space-y-1.5 rounded border p-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-medium">
+                        {key}
+                      </span>
+                      <Badge variant="secondary" className="text-[10px]">
+                        {cloudInit ? "Cloud-Init" : "CD/DVD"}
+                      </Badge>
+                      {cloudInit && (
+                        <span className="truncate text-[10px] text-muted-foreground">
+                          {isoVal}
+                        </span>
                       )}
-                    {isoFiles.map((iso) => (
-                      <option key={iso.volid} value={iso.volid}>
-                        {iso.volid}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
+                        onClick={() => {
+                          if (cloudInit) {
+                            setCloudInitToRemove({ key, volume: isoVal });
+                          } else {
+                            handleRemoveCDROM(key);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" /> Remove
+                      </Button>
+                    </div>
+                    {!cloudInit && (
+                      <select
+                        className={compactSelect}
+                        value={isoVal}
+                        onChange={(e) => {
+                          setCdromEdits((prev) => ({
+                            ...prev,
+                            [key]: e.target.value,
+                          }));
+                        }}
+                      >
+                        <option value="none">No media (empty drive)</option>
+                        {isoVal !== "none" &&
+                          !isoFiles.some((iso) => iso.volid === isoVal) && (
+                            <option value={isoVal}>{isoVal} (current)</option>
+                          )}
+                        {isoFiles.map((iso) => (
+                          <option key={iso.volid} value={iso.volid}>
+                            {iso.volid}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                );
+              })}
             {Object.keys(cdromEdits).length === 0 && (
               <p className="text-xs text-muted-foreground">
                 No CD/DVD drives configured. Use &quot;Add Device&quot; to add
@@ -3595,6 +3661,10 @@ export function HardwarePanel({
             {serialKeys.map((key) => {
               const val = str(config[key]);
               const isRemoved = deviceRemovals.has(key);
+              // $update_vm_api (src/PVE/API2/Qemu.pm) lets nobody but
+              // root@pam delete a serialN that is not a socket: the USB rows'
+              // reason, said the same way.
+              const rootOnly = val !== "socket";
               if (isRemoved) {
                 return (
                   <div
@@ -3629,16 +3699,23 @@ export function HardwarePanel({
                   <span className="text-[10px] text-muted-foreground">
                     {val}
                   </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
-                    onClick={() => {
-                      handleRemoveDevice(key);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" /> Remove
-                  </Button>
+                  {rootOnly ? (
+                    <span className="ml-auto min-w-0 text-right text-[10px] text-muted-foreground">
+                      A host serial port; only root@pam can remove it, in
+                      Proxmox
+                    </span>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
+                      onClick={() => {
+                        handleRemoveDevice(key);
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3" /> Remove
+                    </Button>
+                  )}
                 </div>
               );
             })}
@@ -3935,6 +4012,41 @@ export function HardwarePanel({
               }}
             >
               {detachDisk.isPending ? "Deleting..." : "Delete Disk"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={cloudInitToRemove !== null}
+        onOpenChange={(open) => {
+          if (!open) setCloudInitToRemove(null);
+        }}
+      >
+        <AlertDialogContent fallbackFocus={() => cdromList.current}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove cloud-init drive {cloudInitToRemove?.key}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              When the removal applies, on Save or at the next restart of a
+              running VM, Proxmox deletes the drive&apos;s volume{" "}
+              <span className="font-mono font-semibold">
+                {cloudInitToRemove?.volume}
+              </span>{" "}
+              from storage. The VM&apos;s cloud-init settings stay, and a
+              cloud-init drive added again is generated from them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (cloudInitToRemove) handleRemoveCDROM(cloudInitToRemove.key);
+              }}
+            >
+              Remove Drive
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
