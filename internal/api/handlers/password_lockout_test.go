@@ -808,6 +808,25 @@ func TestChangePassword_TheLockoutIsPerAccountAndOnlyForThisRoute(t *testing.T) 
 	}
 }
 
+// TestChangePassword_ADeactivatedAccountIsRefusedBeforeAnAttemptIsCounted: change-password
+// admits a session that has ended (the owner's remedy), so nothing ahead of it asks whether
+// the account is active, and a deactivated account's token must not set a password that
+// outlives the deactivation.
+func TestChangePassword_ADeactivatedAccountIsRefusedBeforeAnAttemptIsCounted(t *testing.T) {
+	t.Parallel()
+	a, _ := lockoutAppWith(t, "redis", func(s *raceStore) { s.user.IsActive = false }, raceOptions{})
+
+	if status, body, _ := a.change(t, changeBody); status != http.StatusUnauthorized || a.passwordChanged() {
+		t.Fatalf("the right password on a deactivated account = %d (%v), changed: %v; want 401 and nothing changed",
+			status, body, a.passwordChanged())
+	}
+	for _, key := range a.redis.Keys() {
+		if strings.HasPrefix(key, "pwchange:") {
+			t.Errorf("Redis holds %q: a refused deactivated account must not count an attempt", key)
+		}
+	}
+}
+
 // TestChangePassword_AnAttemptThatCannotBeCountedIsNotChecked is the decision for
 // a Redis that cannot be reached, in each way it can fail: the password is not
 // checked, 503, and nothing changes. The right password is refused like a wrong

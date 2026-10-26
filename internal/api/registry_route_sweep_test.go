@@ -249,6 +249,7 @@ func sweepAuth(reg *Registry) fiber.Handler {
 		// route admits only that, and the sweep is about what handlers do with a
 		// request that reached them.
 		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
+		c.Locals(handlers.LocalsSessionID, uuid.MustParse(callerSessionID))
 		return c.Next()
 	}
 }
@@ -1202,7 +1203,7 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 	// before its handler ran — an outcome classifySweepOutcome rightly counts
 	// as fine, which would silently take those handlers out of this sweep.
 	// Membership is TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold's.
-	mountRegistry(app, s.registry, sweepAuth(s.registry), everyNodeIsAMember())
+	mountRegistry(app, s.registry, sweepAuth(s.registry), everyNodeIsAMember(), everySessionIsLive())
 
 	type sweepSkip struct {
 		route  string
@@ -1382,7 +1383,7 @@ func TestGuard_RouteSweepCatchesAnUndeclaredParamRead(t *testing.T) {
 
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
 	app.Use(recover.New(recover.Config{PanicHandler: sweepPanicHandler}))
-	mountRegistry(app, reg, sweepAuth(reg), nil)
+	mountRegistry(app, reg, sweepAuth(reg), nil, nil)
 
 	outcome := sweepDispatch(app, fiber.MethodGet, "/api/v1/sweep-harness-demo/"+testClusterID, nil)
 	if outcome.dispatchErr != nil {

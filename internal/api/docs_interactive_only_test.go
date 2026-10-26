@@ -103,3 +103,24 @@ func TestDocs_TheRoutesThatSpendTheAuthBudgetAreTheOnesThatDo(t *testing.T) {
 	sameSet(t, "the routes that spend the per-address Auth budget",
 		docsRoutes(t, referenceSentence(t, "on the flagged routes that budget covers:")), want)
 }
+
+// TestDocs_TheOwnersRemediesAreTheRoutesThatAdmitAnEndedSession: the reference names the
+// interactive-only routes that admit a session that has ended, and the ones on which a
+// refused ended session still spends the per-address Auth budget. Both lists follow the
+// remedy column of interactiveOnlyRoutes (the second with authLimitedPaths), as the two
+// lists above follow the route set.
+func TestDocs_TheOwnersRemediesAreTheRoutesThatAdmitAnEndedSession(t *testing.T) {
+	var remedies, spend []string
+	for _, r := range interactiveOnlyRoutes {
+		switch {
+		case r.remedy:
+			remedies = append(remedies, r.method+" "+r.path)
+		case authLimitedPaths[limiterPathOf(r.path)]:
+			spend = append(spend, r.method+" "+r.path)
+		}
+	}
+	sameSet(t, "the routes that admit a session that has ended",
+		docsRoutes(t, referenceSentence(t, "The three that admit it are ")), remedies)
+	sameSet(t, "the routes on which a refused ended session spends the Auth budget",
+		docsRoutes(t, referenceSentence(t, "when it is refused on ")), spend)
+}

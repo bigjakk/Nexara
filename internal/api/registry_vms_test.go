@@ -1221,7 +1221,7 @@ func newRecoveringRegistryApp(t *testing.T, es ...Endpoint) *fiber.App {
 	}
 	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
 	app.Use(recover.New())
-	mountRegistry(app, reg, noAuth(), nil)
+	mountRegistry(app, reg, noAuth(), nil, nil)
 	return app
 }
 

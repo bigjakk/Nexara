@@ -33,6 +33,12 @@ const consoleTokenReason = "the resource is chosen by the request BODY — node_
 	"vm_serial and vm_vnc on console:vm, ct_attach and ct_vnc on console:container — and the cluster " +
 	"comes from the body as well, since the path names none; middleware runs before either is readable"
 
+// ownersRemedy is why the three routes that cut a session off — sign out everywhere,
+// end one session, change the password — admit a session that has ended
+// (Endpoint.AdmitsEndedSession).
+const ownersRemedy = "the owner's remedy when someone else holds a live session of the account: that holder can end " +
+	"each session the owner opens, and the owner's access token, which outlives it, is not to be refused here for that"
+
 // The seven SelfService reasons and the five Public ones below are carried
 // across VERBATIM from selfServiceRoutes and publicRoutes in
 // rbac_route_guard_test.go, which are the reviewed lists these declarations
@@ -206,8 +212,9 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Parameters:  apischema.Properties{},
 		Handler:     h.LogoutAll,
 
-		InteractiveOnly: "ends every session of the account: a leaked key must not be able to loop it and refuse every sign-in the owner attempts",
-		RateLimiter:     logoutAllLimiter,
+		InteractiveOnly:    "ends every session of the account: a leaked key must not be able to loop it and refuse every sign-in the owner attempts",
+		AdmitsEndedSession: ownersRemedy,
+		RateLimiter:        logoutAllLimiter,
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodGet,
@@ -240,15 +247,18 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		},
 		Handler: h.RevokeSessionByID,
 
-		InteractiveOnly: "ends one session of the account, given its id: with logout-all refused, a leaked key could list the sessions and end each of them",
-		RateLimiter:     sessionRevokeLimiter,
+		InteractiveOnly:    "ends one session of the account, given its id: with logout-all refused, a leaked key could list the sessions and end each of them",
+		AdmitsEndedSession: ownersRemedy,
+		RateLimiter:        sessionRevokeLimiter,
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   authScope + "/ws-token",
 		Description: "Mint a 60-second token whose only valid use is upgrading the /ws hub. It exists so " +
 			"the long-lived access token never travels in a WebSocket URL; per-cluster authorization is " +
-			"applied at subscribe time, not here.",
+			"applied at subscribe time, not here. A session that has ended gets 403, not 401: a browser mints " +
+			"this token in the background, and a 401 would make it refresh, fail and sign out. An access token " +
+			"that names no session gets 401, which a refresh answers.",
 		Group:       "Authentication",
 		Permissions: Permissions{SelfService: "mints a hub token for the caller; per-cluster authorization is enforced at subscribe time in internal/ws"},
 		Parameters:  apischema.Properties{},
@@ -287,7 +297,8 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Path:   authScope + "/change-password",
 		Description: "Change the caller's own password, proving the current one first, and revoke every " +
 			"session on the account, the caller's included, so each device signs in again. Refused for an " +
-			"account provisioned from LDAP or OIDC, and refused with 403 for a request authenticated with " +
+			"account provisioned from LDAP or OIDC, refused with 401 for an account that has been " +
+			"deactivated, and refused with 403 for a request authenticated with " +
 			"an API key: changing a password takes an interactive login session. A wrong current " +
 			"password is answered 403 as well, not 401, because a 401 makes a client refresh its session " +
 			"and send the request again, which would count every wrong attempt twice. The current " +
@@ -348,7 +359,8 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		},
 		Handler: h.ChangePassword,
 
-		InteractiveOnly: "proves the current password and ends every session of the account: a leaked key must not be able to guess the password or set its own",
+		InteractiveOnly:    "proves the current password and ends every session of the account: a leaked key must not be able to guess the password or set its own",
+		AdmitsEndedSession: ownersRemedy,
 	})
 
 	// ── Console ───────────────────────────────────────────────────────

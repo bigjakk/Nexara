@@ -54,11 +54,16 @@ func stubAuth(grants map[string]bool) fiber.Handler {
 		c.Locals("rbac_engine", &stubRBACEngine{grants: grants})
 		// An interactive session, as authRequired records one (see noAuth).
 		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
+		c.Locals(handlers.LocalsSessionID, uuid.MustParse(callerSessionID))
 		return c.Next()
 	}
 }
 
 const testUserID = "11111111-2222-3333-4444-555555555555"
+
+// callerSessionID is the session the stand-ins for authRequired say the caller's
+// access token belongs to, which the InteractiveOnly gate looks up.
+const callerSessionID = "66666666-7777-4888-8999-aaaaaaaaaaaa"
 
 func authedRequest(method, target string) *http.Request {
 	req := httptest.NewRequest(method, target, nil)
@@ -399,7 +404,7 @@ func TestMountRegistryRefusesToMountWithoutAuthentication(t *testing.T) {
 			t.Errorf("panic = %q, want it to name the missing authentication middleware", msg)
 		}
 	}()
-	mountRegistry(fiber.New(), reg, nil, nil)
+	mountRegistry(fiber.New(), reg, nil, nil, nil)
 }
 
 // TestSetupRoutesMountsTheRegistry pins the production wiring: the

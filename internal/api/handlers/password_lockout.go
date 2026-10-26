@@ -521,6 +521,13 @@ func (h *AuthHandler) admitPasswordAttempt(c fiber.Ctx, userID uuid.UUID) (user 
 	if err != nil {
 		return db.User{}, lockoutReservation{}, passwordNotChanged("read the user", userID, err)
 	}
+	// change-password admits a session that has ended — it is one of the owner's
+	// remedies (Endpoint.AdmitsEndedSession) — so nothing ahead of it asks whether the
+	// account is still active: a deactivated account's token must not set a password
+	// that outlives the deactivation. Refused before the attempt is counted.
+	if !user.IsActive {
+		return db.User{}, lockoutReservation{}, fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
+	}
 	if user.AuthSource != "local" {
 		return db.User{}, lockoutReservation{}, fiber.NewError(fiber.StatusForbidden, "Password is managed by your identity provider")
 	}

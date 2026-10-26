@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 
@@ -131,6 +132,11 @@ type chainDB struct {
 	key     db.GetAPIKeyByHashRow
 	user    db.User
 
+	// ended is the sessions IsConsoleCredentialLive answers have ended — every other
+	// one is live — and liveErr, when set, is its answer to every question instead.
+	ended   map[uuid.UUID]bool
+	liveErr error
+
 	// stamped is closed by the first UpdateAPIKeyLastUsed, which authenticateAPIKey
 	// sends from a goroutine of its own: waitForKeyStamp waits on it, and nothing
 	// polls.
@@ -188,6 +194,16 @@ func (f *chainDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 		return failedRow{pgx.ErrNoRows}
 	case "GetUserByID":
 		return structRow{f.user}
+	case "IsConsoleCredentialLive":
+		// user_id, session_id, api_key_id
+		if f.liveErr != nil {
+			return failedRow{f.liveErr}
+		}
+		sid := args[1].(pgtype.UUID)
+		f.mu.Lock()
+		ended := f.ended[uuid.UUID(sid.Bytes)]
+		f.mu.Unlock()
+		return structRow{struct{ Live bool }{sid.Valid && !ended}}
 	}
 	return failedRow{fmt.Errorf("unexpected QueryRow %s", name)}
 }
@@ -266,7 +282,7 @@ func newChain(t *testing.T) *chain {
 	// This chain has no pool, so a request that gets as far as the handler's transaction
 	// panics on it; recovered, that is a 500 a test asserts on, and not a crash.
 	app.Use(fiberrecover.New())
-	mountRegistry(app, reg, s.authRequired(), everyNodeIsAMember())
+	mountRegistry(app, reg, s.authRequired(), everyNodeIsAMember(), queries)
 
 	token, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin", uuid.New())
 	if err != nil {

@@ -303,9 +303,13 @@ type IsConsoleCredentialLiveParams struct {
 	ApiKeyID  pgtype.UUID `json:"api_key_id"`
 }
 
-// Whether a console may stay open: its user is active, and the credential that
-// opened it — a session (sessions.id) or an API key (api_keys.id), whichever
-// the console token names — is still the user's, not revoked and not expired.
+// Whether a sign-in is still live: its user is active, and the credential — a
+// session (sessions.id) or an API key (api_keys.id), whichever is named — is
+// still the user's, not revoked and not expired. It decides whether a console may
+// stay open (the credential its console token names), and whether a request may
+// mint something that outlives it: handlers.LiveCredential asks it for the
+// session an access token belongs to, on the console and hub token mints and on
+// the InteractiveOnly routes that are held to a live session.
 // Every way a sign-in ends lands here: a sign-out or a revoke from the session
 // list (is_revoked), every revoke-all (RevokeAllUserSessionsIn), a
 // deactivation, by an admin or LDAP sync (is_active), an expiry, a deleted user

@@ -105,7 +105,10 @@ func textPtr(t pgtype.Text) *string {
 // An API key cannot create new API keys, so a leaked key cannot mint more of
 // itself: the route is declared InteractiveOnly (registry_api_keys.go), which the
 // registry enforces right after authentication, before the permission check and
-// this handler. The handler does not ask how the caller authenticated.
+// this handler. The same gate admits a session only while it is live
+// (LiveCredential), so an access token that outlives its session cannot mint a
+// key that would outlive it for good. The handler does not ask how the caller
+// authenticated.
 func (h *APIKeyHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	// Absent means "never expires", which is why this is an OptInt read rather
 	// than a zero test: the supplied flag tells the two apart, and no declared

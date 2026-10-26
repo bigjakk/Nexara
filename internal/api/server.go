@@ -36,6 +36,12 @@ type Server struct {
 	// route without one. Set in New from queries.
 	nodeLookup handlers.NodeLookup
 
+	// credentialLiveness answers whether a session is still live, for the
+	// registry's InteractiveOnly gate. setupRoutes hands it to mountRegistry,
+	// which refuses to mount an InteractiveOnly route without one. Set in New
+	// from queries, like nodeLookup and for the same reason.
+	credentialLiveness handlers.CredentialLiveness
+
 	config                 *config.Config
 	db                     *pgxpool.Pool
 	queries                *db.Queries
@@ -177,6 +183,7 @@ func New(a *nexapp.App) *Server {
 	// (hasCrypto), so leaving it nil never strands one.
 	if d.queries != nil {
 		s.nodeLookup = d.queries
+		s.credentialLiveness = d.queries
 	}
 
 	s.registerInfra(d)

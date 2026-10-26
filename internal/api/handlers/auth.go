@@ -1121,51 +1121,6 @@ type consoleTokenResponse struct {
 	ExpiresIn int    `json:"expires_in"`
 }
 
-// sessionEndedMessage answers a console token asked for by a session that has
-// ended, or by an access token that names no session.
-const sessionEndedMessage = "Session has ended"
-
-// consoleCredential is the credential a console token is held to while its
-// console is open (internal/ws/console_credential.go): the API key the request
-// came with — authenticateAPIKey checked it in this request — or the session its
-// access token belongs to, which must still be live. A session that has ended
-// mints nothing: its access token outlives it by up to its own lifetime, and a
-// console the server closed for that session would otherwise reopen on the next
-// reconnect. The 401 sends the SPA to a refresh, which ends the session there
-// too — or, for an access token from before tokens named their session, mints one
-// that does.
-func (h *AuthHandler) consoleCredential(c fiber.Ctx, userID uuid.UUID) (auth.ConsoleCredential, error) {
-	if method, _ := c.Locals(LocalsAuthMethod).(string); method == AuthMethodAPIKey {
-		keyID, _ := c.Locals(LocalsAPIKeyID).(uuid.UUID)
-		if keyID == uuid.Nil {
-			return auth.ConsoleCredential{}, fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
-		}
-		return auth.ConsoleCredential{APIKeyID: keyID}, nil
-	}
-	sessionID, _ := c.Locals(LocalsSessionID).(uuid.UUID)
-	if sessionID == uuid.Nil {
-		return auth.ConsoleCredential{}, fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
-	}
-	ctx, cancel := h.dbContext(c)
-	live, err := h.queries.IsConsoleCredentialLive(ctx, db.IsConsoleCredentialLiveParams{
-		UserID:    userID,
-		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
-	})
-	cancel()
-	switch {
-	case isTransientDBError(err):
-		slog.Warn("console token: the session could not be checked; answering 503", "user_id", userID, "error", err)
-		return auth.ConsoleCredential{}, fiber.NewError(fiber.StatusServiceUnavailable, "Service temporarily unavailable")
-	case err != nil:
-		slog.Error("console token: checking the session failed; answering 500", "user_id", userID, "error", err)
-		return auth.ConsoleCredential{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to mint console token")
-	case !live:
-		slog.Info("console token: refused, as the caller's session has ended", "user_id", userID, "session_id", sessionID)
-		return auth.ConsoleCredential{}, fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
-	}
-	return auth.ConsoleCredential{SessionID: sessionID}, nil
-}
-
 // ConsoleToken mints a short-lived (60 second), scope-locked JWT that can ONLY
 // be used to open a single console WebSocket matching cluster_id/node/vmid/type.
 // Browsers cannot attach Authorization headers to a WebSocket upgrade, so the
@@ -1247,7 +1202,10 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 	if err := requireNodeInCluster(c, lookupOf(h.queries), clusterUUID, node); err != nil {
 		return err
 	}
-	cred, err := h.consoleCredential(c, user.ID)
+	// What the console is held to while it is open (internal/ws/console_credential.go).
+	// A session that has ended mints nothing: a console the server closed for it would
+	// otherwise reopen on the next reconnect.
+	cred, err := LiveCredential(c, h.queries)
 	if err != nil {
 		return err
 	}
@@ -1323,6 +1281,13 @@ type wsTokenResponse struct {
 // upgrade entirely. The hub token can be carried in `?token=` or in the
 // `Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>` subprotocol
 // header (preferred — keeps the JWT out of proxy access logs and Referer).
+//
+// An API key may mint one, as it always could. A session must still be live
+// (LiveCredential): its access token outlives a sign-out or a revoke for the rest
+// of its lifetime, and a hub token minted then would open a socket that streams
+// the account's events after the account was cut off. (A socket that is already
+// open when the session ends is not closed by this: the hub holds no credential.)
+// The refusal of an ended session is a 403, not a 401: see wsTokenRefusal.
 func (h *AuthHandler) WSToken(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
@@ -1340,6 +1305,9 @@ func (h *AuthHandler) WSToken(c fiber.Ctx, _ *apischema.Params) error {
 		AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "ws_token_denied_inactive", nil)
 		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
 	}
+	if _, err := LiveCredential(c, h.queries); err != nil {
+		return wsTokenRefusal(err)
+	}
 
 	const wsHubTokenTTL = 60 * time.Second
 	token, _, err := h.jwtService.GenerateWSHubToken(user.ID, user.Email, user.Role, wsHubTokenTTL)
@@ -1351,6 +1319,24 @@ func (h *AuthHandler) WSToken(c fiber.Ctx, _ *apischema.Params) error {
 		Token:     token,
 		ExpiresIn: int(wsHubTokenTTL.Seconds()),
 	})
+}
+
+// wsTokenRefusal answers a hub token refused by LiveCredential. A session that has
+// ended is 403, not the helper's 401, because of who asks: the SPA mints a hub token
+// in the background, at every load and every reconnect (websocket-store.ts), and
+// answers a 401 by refreshing — which an ended session refuses, so the app signs out
+// and drops its access token. When someone else ended the session, that token is
+// what the owner's remedies still accept (Endpoint.AdmitsEndedSession: sign out
+// everywhere, change the password), and a 401 here would throw it away within a
+// second of the page loading, every time the owner signed in. A 403 only makes the
+// hub back off. An access token that names no session (errNoSession: issued before
+// tokens named their session) keeps the 401, whose refresh replaces it with one that
+// does, and every other refusal (503, 500) is the helper's own.
+func wsTokenRefusal(err error) error {
+	if errors.Is(err, errSessionEnded) {
+		return fiber.NewError(fiber.StatusForbidden, sessionEndedMessage)
+	}
+	return err
 }
 
 // Refresh exchanges a valid refresh token for a new token pair. The refresh

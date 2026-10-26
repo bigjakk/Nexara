@@ -312,12 +312,29 @@ an interactive login session instead. The routes are
 each of them an `interactive_only` field holding the reason; it is absent for
 every other route.
 
+The session must also still be live, on every one of these routes but three. An
+access token stays valid for the rest of its lifetime (`ACCESS_TOKEN_TTL`, 15
+minutes by default) after its session ends — signed out, revoked from the session
+list, ended by a password change, *Sign Out All Devices* or the account's
+deactivation, or expired — and such a token is refused with `401`
+("Session has ended"), at the same point as a key's `403`; `503` means the session
+could not be checked, and the request can be retried. A client that answers a
+`401` by refreshing finds the session gone and must sign in again. An access token
+issued before tokens named their session is refused the same way, once: a refresh
+replaces it. The three that admit it are `POST /auth/logout-all`,
+`DELETE /auth/sessions/:id` and `POST /auth/change-password`, the owner's remedy
+when someone else holds a live session of the account: whoever it is can end each
+session the owner opens, so the owner's access token, which outlives its session, is
+not refused there for that.
+
 The refusal comes ahead of a route's own rate limiter, but not ahead of the
 per-address limiters, which run before any request is authenticated: a key that
 is refused still spends a request of the per-address Auth budget on the flagged
 routes that budget covers: `POST /auth/change-password`, `DELETE /auth/totp` and
 `POST /auth/totp/recovery-codes/regenerate`. It spends nothing of the caps on
-`POST /auth/logout-all` and `DELETE /auth/sessions/:id`, which are per user.
+`POST /auth/logout-all` and `DELETE /auth/sessions/:id`, which are per user. A
+session that has ended spends a request of the Auth budget in the same way when it
+is refused on `DELETE /auth/totp` or `POST /auth/totp/recovery-codes/regenerate`.
 
 ## Error Format
 
@@ -667,8 +684,8 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | POST | `/auth/logout-all` | Logout all sessions; the refresh cookie is deleted only when it is the caller's own or names no live session |
 | GET | `/auth/me` | Get current user profile |
 | PUT | `/auth/profile` | Update user profile |
-| POST | `/auth/change-password` | Change password (interactive session only — `403` for an API key, and for a wrong current password; `429` with `Retry-After` while locked out after repeated wrong current passwords) |
-| POST | `/auth/ws-token` | Mint a 60 s scope-locked JWT for the `/ws` hub upgrade |
+| POST | `/auth/change-password` | Change password (interactive session only — `403` for an API key, and for a wrong current password; `401` for a deactivated account; `429` with `Retry-After` while locked out after repeated wrong current passwords) |
+| POST | `/auth/ws-token` | Mint a 60 s scope-locked JWT for the `/ws` hub upgrade; `403` for a session that has ended |
 | POST | `/auth/console-token` | Mint a 60 s scope-locked JWT bound to a single console (`/ws/console`, `/ws/vnc`) |
 | GET | `/auth/setup-status` | Check if initial registration is needed |
 | GET | `/auth/sso-status` | Check if OIDC/SSO is configured |
@@ -2012,6 +2029,14 @@ the target cluster, not `view:*`: `console:node` for `node_shell`,
 permission and deliberately holds none of these. Each mint is written to the
 audit log unless the request sets `"silent": true`, which is honoured only for
 the two VNC types (background thumbnail previews) and still enforces RBAC.
+
+Either token is minted only for a sign-in that is still live: an API key (which
+authenticating the request has just checked), or a session that has not ended. An
+access token whose session has ended gets `401` ("Session has ended") from the
+console-token mint and `403` from the hub-token mint, which a browser asks for in
+the background, where a `401` would make it refresh and sign out; an access token
+that names no session gets `401` from both. `503` means the session could not be
+checked.
 
 The token rides in the WebSocket subprotocol so it never appears in URLs,
 proxy logs, or `Referer` headers:

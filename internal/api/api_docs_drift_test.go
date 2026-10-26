@@ -79,6 +79,9 @@ func newRouteStubServer(t *testing.T) *Server {
 		// every node is as good as any; the tests that are about membership
 		// remount the registry with their own.
 		nodeLookup: everyNodeIsAMember(),
+		// The same for the InteractiveOnly gate's question, whether a session is
+		// still live (mountRegistry refuses those routes without an answer).
+		credentialLiveness: everySessionIsLive(),
 	}
 	requireAllHandlersStubbed(t, s)
 	s.setupRoutes()

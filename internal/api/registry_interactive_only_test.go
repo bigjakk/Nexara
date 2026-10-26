@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -48,11 +50,15 @@ var interactiveOnlyRoutes = []struct {
 	handler      string // routeHandlerKey of the declared Handler
 	target       string // the request's URL: path with its parameters filled in
 	body, why    string
+	// remedy: one of the owner's remedies, which admits a session that has ended
+	// (Endpoint.AdmitsEndedSession); every other route here refuses one.
+	remedy bool
 }{
 	{
 		method: fiber.MethodPost, path: "/api/v1/auth/change-password", handler: "AuthHandler.ChangePassword", target: "/api/v1/auth/change-password",
-		body: `{"old_password":"x","new_password":"y"}`,
-		why:  "guess the current password, then set its own and end every session of the owner",
+		body:   `{"old_password":"x","new_password":"y"}`,
+		why:    "guess the current password, then set its own and end every session of the owner",
+		remedy: true,
 	},
 	{
 		method: fiber.MethodPost, path: "/api/v1/auth/totp/setup", handler: "TOTPHandler.BeginSetup", target: "/api/v1/auth/totp/setup",
@@ -76,13 +82,15 @@ var interactiveOnlyRoutes = []struct {
 	},
 	{
 		method: fiber.MethodPost, path: "/api/v1/auth/logout-all", handler: "AuthHandler.LogoutAll", target: "/api/v1/auth/logout-all",
-		body: `{}`,
-		why:  "loop it and keep the owner signed out: every session the owner opens is gone at the next call",
+		body:   `{}`,
+		why:    "loop it and keep the owner signed out: every session the owner opens is gone at the next call",
+		remedy: true,
 	},
 	{
 		method: fiber.MethodDelete, path: "/api/v1/auth/sessions/:id", handler: "AuthHandler.RevokeSessionByID", target: "/api/v1/auth/sessions/d4e5f6a7-0000-4000-8000-000000000066",
-		body: ``,
-		why:  "list the owner's sessions and end each of them one by one, which is logout-all by another route",
+		body:   ``,
+		why:    "list the owner's sessions and end each of them one by one, which is logout-all by another route",
+		remedy: true,
 	},
 	{
 		method: fiber.MethodPost, path: "/api/v1/api-keys", handler: "APIKeyHandler.Create", target: "/api/v1/api-keys",
@@ -116,6 +124,7 @@ func stubAuthKeyAware(c fiber.Ctx) error {
 	case "unmarked":
 	default:
 		c.Locals(handlers.LocalsAuthMethod, handlers.AuthMethodSession)
+		c.Locals(handlers.LocalsSessionID, uuid.MustParse(callerSessionID))
 	}
 	return c.Next()
 }
@@ -264,6 +273,32 @@ func TestRegisterRefusesAnInteractiveOnlyThatCannotWork(t *testing.T) {
 	if msg := registerPanic(t, public); !strings.Contains(msg, "Public and InteractiveOnly") {
 		t.Errorf("a Public route: panic = %q, want it to refuse the pairing", msg)
 	}
+
+	// AdmitsEndedSession is the InteractiveOnly gate's exception, so it needs that
+	// gate, and a reason.
+	for _, admits := range []struct{ name, interactiveOnly, reason string }{
+		{"a route that is not InteractiveOnly", "", "the owner's remedy"},
+		{"a blank reason", "a leaked key must not be able to do this", "  "},
+	} {
+		e := validEndpoint()
+		e.InteractiveOnly, e.AdmitsEndedSession = admits.interactiveOnly, admits.reason
+		if msg := registerPanic(t, e); !strings.Contains(msg, "AdmitsEndedSession") {
+			t.Errorf("%s: panic = %q, want it to refuse the AdmitsEndedSession", admits.name, msg)
+		}
+	}
+
+	// Mounted with nothing to ask whether a session is live, the gate would have to
+	// admit a session that has ended or refuse every one: a boot failure instead.
+	func() {
+		defer func() {
+			if msg := fmt.Sprint(recover()); !strings.Contains(msg, "session check") {
+				t.Errorf("mounted with no session check: panic = %q, want mountRegistry to refuse", msg)
+			}
+		}()
+		reg := NewRegistry()
+		reg.Register(flagged)
+		mountRegistry(fiber.New(), reg, noAuth(), everyNodeIsAMember(), nil)
+	}()
 }
 
 // TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes pins the SET. Every route
@@ -291,6 +326,13 @@ func TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes(t *testing.T) 
 			t.Errorf("%s is not declared at all, so nothing refuses an API key on it", key)
 		case strings.TrimSpace(e.InteractiveOnly) == "":
 			t.Errorf("%s no longer carries InteractiveOnly: an API key can reach it, and could %s", key, why)
+		}
+	}
+	// And which of them admit a session that has ended: the owner's remedies, and only they.
+	for _, r := range interactiveOnlyRoutes {
+		if e, ok := declared[r.method+" "+r.path]; ok && (e.AdmitsEndedSession != "") != r.remedy {
+			t.Errorf("%s %s: AdmitsEndedSession = %q, want it set exactly when the route is one of the owner's remedies (%v)",
+				r.method, r.path, e.AdmitsEndedSession, r.remedy)
 		}
 	}
 	for key, e := range declared {
@@ -420,10 +462,11 @@ func TestGuard_EveryInteractiveOnlyRouteMountsTheGateRightAfterAuthentication(t 
 // eight routes and the real error handler, with a recorder where each handler was and a
 // fake database behind the middleware.
 type interactiveHarness struct {
-	app     *fiber.App
-	db      *chainDB
-	key     string
-	session string
+	app       *fiber.App
+	db        *chainDB
+	key       string
+	session   string    // an access token of the key's owner
+	sessionID uuid.UUID // the session it belongs to
 
 	mu      sync.Mutex
 	reached map[string]int
@@ -459,7 +502,8 @@ func newInteractiveHarness(t *testing.T, edit func(*Endpoint)) *interactiveHarne
 	fake, uid, apiKey := newChainDB(t)
 	jwtSvc := auth.NewJWTService("interactive-only-test-secret", 15*time.Minute, 7*24*time.Hour)
 	srv := &Server{queries: db.New(fake), jwtService: jwtSvc}
-	token, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin", uuid.New())
+	sessionID := uuid.New()
+	token, _, err := jwtSvc.GenerateAccessToken(uid, chainEmail, "admin", sessionID)
 	if err != nil {
 		t.Fatalf("access token: %v", err)
 	}
@@ -469,9 +513,9 @@ func newInteractiveHarness(t *testing.T, edit func(*Endpoint)) *interactiveHarne
 	// fails inside the permission middleware; recovered, that is a response a test
 	// asserts against by name, and not a crash of the package.
 	app.Use(fiberrecover.New())
-	mountRegistry(app, reg, srv.authRequired(), everyNodeIsAMember())
+	mountRegistry(app, reg, srv.authRequired(), everyNodeIsAMember(), srv.queries)
 
-	h.app, h.db, h.key, h.session = app, fake, apiKey, token
+	h.app, h.db, h.key, h.session, h.sessionID = app, fake, apiKey, token, sessionID
 	return h
 }
 
@@ -536,7 +580,7 @@ func TestInteractiveOnly_AnAPIKeyIsRefusedOnEveryDeclaredRoute(t *testing.T) {
 		why            string
 	}{
 		{"control: with the flag gone the same key reaches the handler", "key", func(e *Endpoint) {
-			e.InteractiveOnly = ""
+			e.InteractiveOnly, e.AdmitsEndedSession = "", ""
 			e.Permissions = Permissions{SelfService: "test control: authorization is not what is under test"}
 		}, "the request is not valid for the route, so the refusals above proved nothing"},
 		{"control: with the flag on a session reaches the handler", "session", func(e *Endpoint) {
@@ -555,6 +599,49 @@ func TestInteractiveOnly_AnAPIKeyIsRefusedOnEveryDeclaredRoute(t *testing.T) {
 				if resp.StatusCode != http.StatusNoContent || h.reachedCount(key) != 1 {
 					t.Errorf("%s: status = %d (%q), handler reached %d times, want 204 and once: %s",
 						key, resp.StatusCode, env.Message, h.reachedCount(key), c.why)
+				}
+			}
+		})
+	}
+}
+
+// TestInteractiveOnly_ASessionThatHasEndedIsRefusedButByTheOwnersRemedies: an access token
+// outlives its session, and must not then mint a key or a second factor. Through the real
+// chain and the database's answer for the token's own session: 401 when it has ended, 503
+// when it cannot be checked — but the owner's remedies admit it, unasked. The live-session
+// control is TestInteractiveOnly_AnAPIKeyIsRefusedOnEveryDeclaredRoute's.
+func TestInteractiveOnly_ASessionThatHasEndedIsRefusedButByTheOwnersRemedies(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		edit    func(*interactiveHarness)
+		status  int
+		message string
+	}{
+		{"the session has ended", func(h *interactiveHarness) { h.db.ended = map[uuid.UUID]bool{h.sessionID: true} },
+			http.StatusUnauthorized, "Session has ended"},
+		{"the session cannot be checked", func(h *interactiveHarness) { h.db.liveErr = context.DeadlineExceeded },
+			http.StatusServiceUnavailable, "Service temporarily unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newInteractiveHarness(t, nil)
+			tc.edit(h)
+			for _, r := range interactiveOnlyRoutes {
+				key := r.method + " " + r.path
+				resp, env := h.request(t, r.method, r.target, r.body, h.session)
+				if r.remedy {
+					if resp.StatusCode != http.StatusNoContent || h.reachedCount(key) != 1 {
+						t.Errorf("%s: status = %d (%q), handler reached %d times; want 204 once: the owner's remedy must "+
+							"admit a session that has ended", key, resp.StatusCode, env.Message, h.reachedCount(key))
+					}
+					continue
+				}
+				if resp.StatusCode != tc.status || env.Message != tc.message {
+					t.Errorf("%s: status = %d, message = %q; want %d %q", key, resp.StatusCode, env.Message, tc.status, tc.message)
+				}
+				if n := h.reachedCount(key); n != 0 {
+					t.Errorf("%s: the handler was reached %d times", key, n)
 				}
 			}
 		})

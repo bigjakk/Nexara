@@ -97,3 +97,44 @@ func TestConsoleToken_BindsTheCallersCredential(t *testing.T) {
 		})
 	}
 }
+
+// TestWSToken_RefusesASessionThatHasEnded is ws-token's wiring to the rule the table
+// above holds for console tokens (LiveCredential): an access token outlives its
+// session, and a hub socket opened with a token minted from it would stream the
+// account's events after the account was cut off. An ended session is 403, not 401,
+// so the SPA's background mint does not sign the owner out (wsTokenRefusal); a token
+// naming no session keeps the 401 a refresh answers; an API key may still mint one.
+func TestWSToken_RefusesASessionThatHasEnded(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		revoked bool
+		caller  string // the header that says how the caller authenticated
+		session string // what it names, when not the session the store holds
+		status  int
+	}{
+		{"a live session", false, "X-Test-Session", "", http.StatusOK},
+		{"a session that has ended", true, "X-Test-Session", "", http.StatusForbidden},
+		{"an access token that names no session", false, "X-Test-Session", "none", http.StatusUnauthorized},
+		{"an API key", true, "X-Test-API-Key", "", http.StatusOK},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			user := epochUser(t, epochLoginEmail, 0)
+			store := newEpochStore(user)
+			sess := db.Session{ID: uuid.New(), UserID: user.ID, ExpiresAt: time.Now().Add(time.Hour), IsRevoked: tt.revoked}
+			store.sessions = append(store.sessions, sess)
+			a := newEpochApp(t, store, epochOptions{})
+
+			named := sess.ID.String()
+			if tt.session != "" {
+				named = tt.session
+			}
+			resp := a.send(t, http.MethodPost, "/auth/ws-token", "{}",
+				map[string]string{"X-Test-Acting-User": user.ID.String(), tt.caller: named}, 5*time.Second)
+			if resp.StatusCode != tt.status {
+				t.Fatalf("status %d, want %d", resp.StatusCode, tt.status)
+			}
+		})
+	}
+}

@@ -115,7 +115,7 @@ func newEndSessionsServer(t *testing.T) *endSessionsServer {
 		}
 		reg.Register(e)
 	}
-	mountRegistry(s.app, reg, s.authRequired(), everyNodeIsAMember())
+	mountRegistry(s.app, reg, s.authRequired(), everyNodeIsAMember(), s.queries)
 	return h
 }
 

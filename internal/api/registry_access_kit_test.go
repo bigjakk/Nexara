@@ -138,7 +138,7 @@ func mountWith(auth fiber.Handler, lookup handlers.NodeLookup, e Endpoint, mw ..
 	for _, m := range mw {
 		app.Use(m)
 	}
-	mountRegistry(app, reg, auth, lookup)
+	mountRegistry(app, reg, auth, lookup, everySessionIsLive())
 	return app
 }
 

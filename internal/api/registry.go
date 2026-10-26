@@ -78,6 +78,12 @@ type Endpoint struct {
 	// (APIEndpoint.InteractiveOnly) and read by the next person deciding whether
 	// a new route belongs in the set.
 	//
+	// The session must also still be LIVE: an access token whose session has
+	// ended — signed out, revoked, every session of the account revoked, expired,
+	// the account deactivated — is refused at the same point, 401 "Session has
+	// ended" (interactiveOnlyGate has the reason), except on the owner's remedies
+	// (AdmitsEndedSession).
+	//
 	// "Ahead of the RateLimiter" means THIS field's route-level one. The
 	// application-level limiters (setupMiddleware) run before authentication, so a
 	// refused key has already spent a request of them: on the flagged paths that are
@@ -98,6 +104,24 @@ type Endpoint struct {
 	//
 	// A Public route has no caller to refuse; register refuses the pairing.
 	InteractiveOnly string
+
+	// AdmitsEndedSession, on an InteractiveOnly route, lets its gate admit a
+	// session that has ENDED, which every other InteractiveOnly route refuses. The
+	// string is the reason. It is for the owner's remedies against whoever holds a
+	// live session of theirs — sign out everywhere, end one session, change the
+	// password: that holder can end each session the owner opens the moment it
+	// opens (GET /auth/sessions lists them), and the owner's access token, which
+	// outlives its session for the rest of its lifetime, is then all the owner has
+	// to cut them off with. Held to a live session, the remedies would be refused
+	// exactly when they are needed. What a cut-off token can still do with them is
+	// what it could before: end the owner's sessions, spend the owner's per-user
+	// budgets on these routes and, with five wrong guesses, the change-password lock,
+	// or change a password it knows. change-password checks the account is active
+	// itself (admitPasswordAttempt), since this gate no longer does.
+	// TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes pins which
+	// routes carry it, and register refuses it on a route that is not
+	// InteractiveOnly.
+	AdmitsEndedSession string
 
 	// Parameters is the route's parameter schema. Register compiles it
 	// and panics if it is malformed.
@@ -232,6 +256,10 @@ func (r *Registry) register(e Endpoint) error {
 	if e.InteractiveOnly != "" && strings.TrimSpace(e.InteractiveOnly) == "" {
 		return fmt.Errorf("endpoint %s %s has a blank InteractiveOnly: the string is the reason, and it must say "+
 			"what a leaked API key could do here", e.Method, e.Path)
+	}
+	if e.AdmitsEndedSession != "" && (e.InteractiveOnly == "" || strings.TrimSpace(e.AdmitsEndedSession) == "") {
+		return fmt.Errorf("endpoint %s %s has AdmitsEndedSession %q: it needs a reason, and is only for an InteractiveOnly route, "+
+			"whose gate is the one that would otherwise refuse an ended session", e.Method, e.Path, e.AdmitsEndedSession)
 	}
 	if e.InteractiveOnly != "" && !e.Permissions.authenticated() {
 		return fmt.Errorf("endpoint %s %s is Public and InteractiveOnly: a route with no session has no caller "+
@@ -605,13 +633,32 @@ const interactiveOnlyMessage = "This action requires an interactive login sessio
 // tomorrow, including one that forgets to say how it authenticated. A deny-list of
 // "API key" would admit that principal until somebody remembered to add it.
 //
-// A named function and not a closure, so that the mounted chain names it and a
-// guard can find it (TestGuard_EveryInteractiveOnlyRouteMountsTheGateRightAfterAuthentication).
-func interactiveOnlyGate(c fiber.Ctx) error {
-	if !handlers.AuthenticatedWithSession(c) {
-		return fiber.NewError(fiber.StatusForbidden, interactiveOnlyMessage)
+// And it admits the session only while the session is LIVE
+// (handlers.LiveCredential, asked of live): an access token outlives a sign-out, a
+// revoke and every revoke-all for the rest of its lifetime, and in that time it must
+// not mint a key or a second factor that would outlive it. That is 401 "Session has
+// ended" (503 when the session cannot be checked), and like the 403 it comes before
+// the limiter. Here, once, rather than in each handler, because a check each handler
+// has to remember is the check the next credential route forgets: a new one joins
+// InteractiveOnly (TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes) and
+// is held to a live session with it, unless it is one of the owner's remedies and
+// says so (Endpoint.AdmitsEndedSession, which mounts the gate with endedAdmitted).
+//
+// The handler it returns is a closure of this named function, so the mounted chain
+// still names it ("interactiveOnlyGate.func1") and a guard can find it
+// (TestGuard_EveryInteractiveOnlyRouteMountsTheGateRightAfterAuthentication).
+func interactiveOnlyGate(live handlers.CredentialLiveness, endedAdmitted bool) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		if !handlers.AuthenticatedWithSession(c) {
+			return fiber.NewError(fiber.StatusForbidden, interactiveOnlyMessage)
+		}
+		if !endedAdmitted {
+			if _, err := handlers.LiveCredential(c, live); err != nil {
+				return err
+			}
+		}
+		return c.Next()
 	}
-	return c.Next()
 }
 
 // mountRegistry attaches every endpoint in reg to router.
@@ -646,21 +693,30 @@ func interactiveOnlyGate(c fiber.Ctx) error {
 // missing lookup is a boot failure, not a route that forwards whatever node
 // it is given. It may be nil when none does. A test that is not about
 // membership passes everyNodeIsAMember, which, like noAuth, says so.
-func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes handlers.NodeLookup) {
+//
+// sessions answers whether a session is still live, for the InteractiveOnly
+// gate, on the same terms: it must not be nil when any endpoint is
+// InteractiveOnly and does not admit an ended session, because a gate with
+// nothing to ask would have to admit an ended session or refuse a live one. A
+// test that is not about ended sessions passes everySessionIsLive.
+func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes handlers.NodeLookup, sessions handlers.CredentialLiveness) {
 	if auth == nil {
 		panic("api: mountRegistry needs an authentication middleware; pass an explicit pass-through if that is really the intent")
 	}
 	// Checked for every endpoint before any is mounted, so a refusal never
 	// leaves half a route table behind it.
-	if nodes == nil {
-		for _, e := range reg.endpoints {
-			if names := e.checkedNodeParams(); len(names) > 0 {
-				panic(fmt.Sprintf("api: mountRegistry needs a node lookup: %s %s names a Proxmox node in %s, "+
-					"which is checked against the cluster's nodes before its handler runs",
-					e.Method, e.Path, strings.Join(names, ", ")))
-			}
+	for _, e := range reg.endpoints {
+		if names := e.checkedNodeParams(); nodes == nil && len(names) > 0 {
+			panic(fmt.Sprintf("api: mountRegistry needs a node lookup: %s %s names a Proxmox node in %s, "+
+				"which is checked against the cluster's nodes before its handler runs",
+				e.Method, e.Path, strings.Join(names, ", ")))
+		}
+		if sessions == nil && e.InteractiveOnly != "" && e.AdmitsEndedSession == "" {
+			panic(fmt.Sprintf("api: mountRegistry needs a session check: %s %s is InteractiveOnly, which admits a session "+
+				"only while it is live", e.Method, e.Path))
 		}
 	}
+	liveOnly, endedAdmitted := interactiveOnlyGate(sessions, false), interactiveOnlyGate(sessions, true)
 	for _, e := range reg.endpoints {
 		// []any rather than []fiber.Handler because that is what Fiber
 		// v3's Add takes; the elements are all fiber.Handler.
@@ -670,10 +726,13 @@ func mountRegistry(router fiber.Router, reg *Registry, auth fiber.Handler, nodes
 		}
 		// Straight after authentication, which is what says how the caller
 		// authenticated, and ahead of the limiter and the permission check: a key
-		// refused here must neither spend a bucket nor learn, from a permission
-		// answer, anything about what its owner may do.
-		if e.InteractiveOnly != "" {
-			chain = append(chain, interactiveOnlyGate)
+		// refused here — or a session that has ended — must neither spend a bucket
+		// nor learn, from a permission answer, anything about what its owner may do.
+		switch {
+		case e.InteractiveOnly != "" && e.AdmitsEndedSession != "":
+			chain = append(chain, endedAdmitted)
+		case e.InteractiveOnly != "":
+			chain = append(chain, liveOnly)
 		}
 		if e.RateLimiter != nil {
 			chain = append(chain, e.RateLimiter)

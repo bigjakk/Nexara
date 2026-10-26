@@ -476,6 +476,7 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 	}
 	app.Put("/users/:id", withRequestParams(t, epochUserUpdateMirror(), []string{"id"}, uh.Update))
 	app.Post("/auth/console-token", withRequestParams(t, consoleTokenMirror(), nil, ah.ConsoleToken))
+	app.Post("/auth/ws-token", withRequestParams(t, apischema.Properties{}, nil, ah.WSToken))
 	app.Get("/probe", func(c fiber.Ctx) error { return a.probe(c) })
 
 	a.app = app

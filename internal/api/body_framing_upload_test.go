@@ -190,7 +190,7 @@ func serveUploadDeclaration(t *testing.T, rows uploadRows, grants uploadGrants, 
 		c.Locals("user_id", userID)
 		c.Locals("rbac_engine", grants)
 		return c.Next()
-	}, nil)
+	}, nil, nil)
 	hits := new(atomic.Int32)
 	app.Get(hiddenRequestProbe, func(c fiber.Ctx) error {
 		hits.Add(1)
