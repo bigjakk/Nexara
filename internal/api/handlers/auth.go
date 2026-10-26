@@ -2294,6 +2294,10 @@ func (h *AuthHandler) SSOStatus(c fiber.Ctx, _ *apischema.Params) error {
 // A code that carries no epoch — written by a release that recorded none, in the
 // seconds around an upgrade — cannot be tied to the callback's read, and is refused
 // like an expired one; the user starts the sign-in again.
+//
+// The browser that trades the code must be the one the callback handed it to
+// (oidcExchangeBinding): a code lifted from another browser's /oidc-callback link is
+// refused, 401, before it is spent — the login CSRF browserBinding describes.
 func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error {
 	// The route is declared on AuthHandler alone, so a Server wired with an
 	// auth handler but no OIDC one reaches here rather than 404ing at the
@@ -2302,8 +2306,16 @@ func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error 
 		return fiber.NewError(fiber.StatusNotFound, "OIDC not configured")
 	}
 
+	code := p.String("code")
+	if !oidcExchangeBinding.matches(c, code) {
+		// Info, not Warn: the route has no rate limit, and anybody can send it.
+		slog.Info("oidc token exchange: refused a code that was not handed to this browser", "ip", c.IP())
+		return fiber.NewError(fiber.StatusUnauthorized, oidcNotThisBrowserMessage)
+	}
+	oidcExchangeBinding.spend(c, code)
+
 	// Atomic GetDel — single-use exchange code
-	data, err := h.oidcHandler.rdb.GetDel(c.Context(), "oidc:exchange:"+p.String("code")).Result()
+	data, err := h.oidcHandler.rdb.GetDel(c.Context(), "oidc:exchange:"+code).Result()
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired exchange code")
 	}

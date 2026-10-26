@@ -173,7 +173,9 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 		Description: "Trade the one-time code the OIDC callback redirected with for an access token and " +
 			"a refresh cookie. The code is consumed atomically, so a replay finds nothing. The session is " +
 			"created against the state of the account the callback read: a revoke-all of the account's " +
-			"sessions since then refuses the sign-in with a 401 that says to sign in again.",
+			"sessions since then refuses the sign-in with a 401 that says to sign in again. The request " +
+			"must carry the cookie the callback set with the code (a nexara_oidc_exchange_… cookie): a code " +
+			"no such cookie holds — one from another browser's sign-in — is refused with a 401, unspent.",
 		Group:       "Authentication",
 		Permissions: Permissions{Public: "exchanges the OIDC one-time code for tokens"},
 		Parameters: apischema.Properties{

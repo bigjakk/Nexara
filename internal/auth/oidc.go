@@ -95,39 +95,45 @@ func NewOIDCProvider(ctx context.Context, cfg OIDCConfig, rdb *redis.Client) (*O
 	}, nil
 }
 
-// GenerateAuthURL generates state+nonce+PKCE, stores in Redis, returns the auth URL.
-func (p *OIDCProvider) GenerateAuthURL(ctx context.Context) (string, error) {
-	state, err := generateRandomString(32)
+// OIDCStateTTL is how long a sign-in's state waits in Redis for the callback, and how
+// long the browser binding of it lives (handlers' oidcStateBinding).
+const OIDCStateTTL = 10 * time.Minute
+
+// GenerateAuthURL generates state+nonce+PKCE, stores them in Redis, and returns the
+// auth URL and the state, which the caller binds to the browser it hands the URL to:
+// the callback refuses a state the browser it comes back in was not given (login CSRF).
+func (p *OIDCProvider) GenerateAuthURL(ctx context.Context) (authURL, state string, err error) {
+	state, err = generateRandomString(32)
 	if err != nil {
-		return "", fmt.Errorf("generate state: %w", err)
+		return "", "", fmt.Errorf("generate state: %w", err)
 	}
 
 	nonce, err := generateRandomString(32)
 	if err != nil {
-		return "", fmt.Errorf("generate nonce: %w", err)
+		return "", "", fmt.Errorf("generate nonce: %w", err)
 	}
 
 	codeVerifier, err := generateRandomString(64)
 	if err != nil {
-		return "", fmt.Errorf("generate PKCE verifier: %w", err)
+		return "", "", fmt.Errorf("generate PKCE verifier: %w", err)
 	}
 
-	// Store state data in Redis with 10 minute TTL
+	// Store state data in Redis for OIDCStateTTL
 	stateData := nonce + "|" + codeVerifier
-	if err := p.rdb.Set(ctx, "oidc:state:"+state, stateData, 10*time.Minute).Err(); err != nil {
-		return "", fmt.Errorf("store state: %w", err)
+	if err := p.rdb.Set(ctx, "oidc:state:"+state, stateData, OIDCStateTTL).Err(); err != nil {
+		return "", "", fmt.Errorf("store state: %w", err)
 	}
 
 	// Generate PKCE S256 challenge
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	url := p.oauth2Cfg.AuthCodeURL(state,
+	authURL = p.oauth2Cfg.AuthCodeURL(state,
 		oidc.Nonce(nonce),
 		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 	)
 
-	return url, nil
+	return authURL, state, nil
 }
 
 // ExchangeAndVerify validates state, exchanges the code with PKCE, verifies the ID token,

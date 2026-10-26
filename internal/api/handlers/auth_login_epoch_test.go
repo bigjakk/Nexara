@@ -464,7 +464,7 @@ func TestOIDCExchange_TheSessionIsCreatedAgainstTheEpochTheCallbackRead(t *testi
 		a := newEpochApp(t, newEpochStore(user), epochOptions{})
 		code := epochSeedExchange(t, a, user)
 
-		resp := a.post(t, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`)
+		resp := a.exchange(t, code)
 		authRequireStatus(t, resp, http.StatusOK)
 		inserts := a.store.named("CreateSessionAtEpoch")
 		if len(inserts) != 1 || epochArg(t, inserts[0]) != 3 {
@@ -488,7 +488,7 @@ func TestOIDCExchange_TheSessionIsCreatedAgainstTheEpochTheCallbackRead(t *testi
 			code := epochSeedExchange(t, a, user)
 			a.store.mutate(user.ID, tt.land)
 
-			resp := a.post(t, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`)
+			resp := a.exchange(t, code)
 			body := decodeObject(t, resp)
 
 			// A deactivated account is told so by the exchange's own check, as it always
@@ -522,7 +522,7 @@ func TestOIDCExchange_TheSessionIsCreatedAgainstTheEpochTheCallbackRead(t *testi
 			}
 
 			// The code was consumed whatever the answer: a replay finds nothing.
-			again := a.post(t, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`)
+			again := a.exchange(t, code)
 			if again.StatusCode != http.StatusUnauthorized {
 				t.Errorf("a replay answered %d, want 401", again.StatusCode)
 			}
@@ -560,7 +560,7 @@ func TestOIDCExchange_ACodeWithoutAUsableEpochIsRefused(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			resp := a.post(t, "/auth/oidc/token-exchange", `{"code":"handmade"}`)
+			resp := a.exchange(t, "handmade")
 			body := authRequireStatus(t, resp, http.StatusUnauthorized)
 			if msg, _ := body["message"].(string); !strings.Contains(msg, "Invalid or expired exchange code") {
 				t.Errorf("message = %q, want the answer an expired code gets", msg)
@@ -585,7 +585,7 @@ func TestOIDCExchange_ADatabaseFailureOfTheInsertIsNotARefusal(t *testing.T) {
 	a := newEpochApp(t, store, epochOptions{})
 	code := epochSeedExchange(t, a, user)
 
-	resp := a.post(t, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`)
+	resp := a.exchange(t, code)
 	body := authRequireStatus(t, resp, http.StatusServiceUnavailable)
 	epochRequireNothingIssued(t, resp, body)
 	epochRequireNoLoginAudit(t, store)

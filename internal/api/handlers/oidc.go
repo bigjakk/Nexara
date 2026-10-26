@@ -516,17 +516,32 @@ func (h *OIDCHandler) Authorize(c fiber.Ctx, _ *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to initialize OIDC provider")
 	}
 
-	authURL, err := provider.GenerateAuthURL(c.Context())
+	authURL, state, err := provider.GenerateAuthURL(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate auth URL")
 	}
+	// The callback refuses a state this browser was not given (oidcStateBinding).
+	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).set(c, state)
 
 	return c.JSON(fiber.Map{"redirect_url": authURL})
 }
 
+// oidcNotThisBrowserMessage answers a callback, or an exchange, that this browser did
+// not start: the login-CSRF refusal of browserBinding. Taking longer than the state
+// lives, or starting at another address than the one the redirect URI names, are the
+// honest ways to get it, so it says those too.
+const oidcNotThisBrowserMessage = "The single sign-on could not be finished: it was not started in this browser, it took " +
+	"too long, or it was started at a different address than this one. Start it again from the sign-in page."
+
 // Callback handles GET /api/v1/auth/oidc/callback.
 // Called by the IdP after authentication; exchanges code, provisions user,
 // stores short-lived exchange code in Redis, and redirects to frontend.
+//
+// The browser that comes back must be the one the sign-in was started in: a state it
+// holds no binding for (oidcStateBinding) is refused before anything else is looked
+// at. The binding is spent once the configuration says where its cookie lives (the
+// redirect URI's path); a binding that does not match is left alone, as it may be the
+// browser's own sign-in, still in flight.
 func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 	code := c.Query("code")
 	state := c.Query("state")
@@ -534,11 +549,16 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		errMsg := c.Query("error_description", c.Query("error", "unknown error"))
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("SSO failed: "+errMsg))
 	}
+	if !oidcStateBinding.matches(c, state) {
+		slog.Warn("oidc callback: refused a sign-in that was not started in this browser", "ip", c.IP())
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcNotThisBrowserMessage))
+	}
 
 	cfg, err := h.queries.GetEnabledOIDCConfig(c.Context())
 	if err != nil {
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("OIDC not configured"))
 	}
+	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).spend(c, state)
 
 	oidcCfg, err := h.buildOIDCConfig(cfg)
 	if err != nil {
@@ -610,6 +630,8 @@ func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, 
 		slog.Error("OIDC callback: could not store the exchange code", "user_id", user.ID, "error", err)
 		return db.User{}, "", "Internal error"
 	}
+	// The exchange refuses a code this browser was not given (oidcExchangeBinding).
+	oidcExchangeBinding.set(c, exchangeCode)
 	return user, exchangeCode, ""
 }
 

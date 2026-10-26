@@ -409,7 +409,7 @@ func TestOIDCExchange_ATOTPUsersPendingTokenCarriesTheCallbacksEpoch(t *testing.
 	code := epochSeedExchange(t, a, user)
 	a.store.bump(user.ID) // a revoke-all lands after the callback
 
-	resp := a.post(t, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`)
+	resp := a.exchange(t, code)
 	body := decodeObject(t, resp)
 
 	if resp.StatusCode != http.StatusOK || body["totp_required"] != true {

@@ -488,9 +488,14 @@ func (a *authRaceApp) awaitSessionRedisRow(t *testing.T) {
 }
 
 func refreshCookies(resp *http.Response) []*http.Cookie {
+	return cookiesNamed(resp, RefreshCookieName)
+}
+
+// cookiesNamed is every Set-Cookie of the response for the named cookie.
+func cookiesNamed(resp *http.Response, name string) []*http.Cookie {
 	var out []*http.Cookie
 	for _, c := range resp.Cookies() {
-		if c.Name == RefreshCookieName {
+		if c.Name == name {
 			out = append(out, c)
 		}
 	}

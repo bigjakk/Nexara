@@ -500,7 +500,9 @@ Navigate to **Admin > OIDC** to configure single sign-on.
    - **Issuer URL** — OIDC issuer (e.g., `https://accounts.google.com`)
    - **Client ID** — from your identity provider
    - **Client Secret** — from your identity provider (encrypted at rest)
-   - **Redirect URI** — `https://your-nexara-domain/oidc-callback`
+   - **Redirect URI** — `https://your-nexara-domain/api/v1/auth/oidc/callback`. Users must open Nexara at this
+     same address to sign in with SSO: the sign-in is bound to the browser that starts it, and one finished at
+     another address is refused — on the sign-in page at this address, where starting again works
 3. Configure claims mapping:
    - **Username Claim** — which claim to use as username (default: `preferred_username`)
    - **Email Claim** — which claim to use as email (default: `email`)
@@ -517,6 +519,10 @@ Navigate to **Admin > OIDC** to configure single sign-on.
 4. Nexara exchanges the code for tokens, verifies the ID token (signature, nonce, audience)
 5. A local user is created (JIT provisioning) with `auth_source=oidc`
 6. Group claims are mapped to Nexara roles
+
+The sign-in is bound to the browser that started it, with a cookie set at step 1 and another once steps 4–6 are done. A
+link from someone else's sign-in — the provider's redirect back, or the `/oidc-callback` page it leads to —
+opened in another browser signs nobody in, so an attacker cannot sign a victim's browser in as themselves.
 
 ### Two-Factor Authentication (TOTP)
 

@@ -45,6 +45,9 @@ type epochStore struct {
 	// after runs, store locked, once a statement of this name has produced its answer: a
 	// writer landing right behind a read.
 	after map[string]func(*epochStore)
+
+	// oidcConfig is what GetEnabledOIDCConfig answers; nil is no enabled configuration.
+	oidcConfig *db.OidcConfig
 }
 
 func newEpochStore(users ...db.User) *epochStore {
@@ -288,6 +291,11 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		}
 		s.sessions = append(s.sessions, sess)
 		return authFakeRow{value: sess}
+	case "GetEnabledOIDCConfig":
+		if s.oidcConfig == nil {
+			return authFakeRow{err: pgx.ErrNoRows}
+		}
+		return authFakeRow{value: *s.oidcConfig}
 	case "GetSessionByTokenHash":
 		// token_hash: the SQL's predicate, the session's current hash and not revoked.
 		for _, sess := range s.sessions {
@@ -488,6 +496,7 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 	app.Post("/auth/register", ah.Register)
 	app.Post("/auth/login", withRequestParams(t, authLoginMirror(), nil, ah.Login))
 	app.Post("/auth/oidc/token-exchange", withRequestParams(t, epochOIDCExchangeMirror(), nil, ah.OIDCTokenExchange))
+	app.Get("/auth/oidc/callback", a.oidc.Callback)
 	if a.totp != nil {
 		app.Post("/auth/totp/verify-login", withRequestParams(t, totpVerifyLoginMirror(), nil, a.totp.VerifyLogin))
 	}
@@ -551,6 +560,14 @@ func (a *epochApp) send(t *testing.T, method, path, body string, headers map[str
 func (a *epochApp) post(t *testing.T, path, body string) *http.Response {
 	t.Helper()
 	return a.send(t, http.MethodPost, path, body, nil, 20*time.Second)
+}
+
+// exchange trades an SSO exchange code as the browser the callback handed it to
+// does: the code in the body, and its binding in a cookie (oidcExchangeBinding).
+func (a *epochApp) exchange(t *testing.T, code string) *http.Response {
+	t.Helper()
+	return a.send(t, http.MethodPost, "/auth/oidc/token-exchange", `{"code":"`+code+`"}`,
+		map[string]string{"Cookie": oidcExchangeBinding.cookieName(code) + "=" + code}, 20*time.Second)
 }
 
 // epochLoginBody is the body of a password login.

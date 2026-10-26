@@ -295,7 +295,8 @@ password. A pending token issued before this rule existed is refused as expired.
    Response: { "redirect_url": "https://idp.example.com/authorize?..." }
    ```
 
-3. After the IdP redirects back, exchange the code:
+3. The IdP redirects the browser back to `GET /api/v1/auth/oidc/callback`, which
+   answers with a redirect to `/oidc-callback?oidc_token=<code>`. Exchange that code:
    ```
    POST /api/v1/auth/oidc/token-exchange
    Body: { "code": "..." }
@@ -310,6 +311,17 @@ password. A pending token issued before this rule existed is refused as expired.
    the session is created against that: a revoke-all of the account's sessions
    between the callback and the exchange refuses the sign-in with the `401` described
    under Login, and the code is spent either way.
+
+The flow is bound to the browser that starts it, by a cookie for each step. Step 2
+sets an HttpOnly, SameSite=Lax cookie (`nexara_oidc_state_…`, sent only to the
+callback, at the redirect URI's path), and the callback refuses a state no such
+cookie holds, redirecting to the login page with an error; the callback sets one for
+the exchange code in turn (`nexara_oidc_exchange_…`, sent only to the exchange), and
+the exchange refuses, with `401` and before spending it, a code no such cookie holds.
+So a client keeps cookies between the steps and starts and finishes the sign-in at
+one address, the one the redirect URI names, within the 10 minutes the state lives.
+A link from someone else's sign-in, the callback it ends in or the
+`/oidc-callback?oidc_token=` page that follows, signs nobody in.
 
 ### Interactive-Only Routes
 
