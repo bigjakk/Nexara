@@ -130,11 +130,33 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 		Method: fiber.MethodPost,
 		Path:   totpScope + "/setup",
 		Description: "Begin enrolling the caller's own second factor: returns the secret and its " +
-			"otpauth:// URL. Nothing is stored on the account until the enrollment is confirmed.",
+			"otpauth:// URL. Nothing is stored on the account until the enrollment is confirmed. The caller " +
+			"proves it is the account's owner first. An account that signs in with a Nexara password sends " +
+			"the current one: a wrong one is answered 403, and the attempts count in the same limit as " +
+			"POST /auth/change-password — five wrong ones within 60 minutes, on either route, lock the account " +
+			"out of both for 30 minutes, and while the lock lasts every request with a password is answered 429 with a " +
+			"Retry-After header (in seconds); a right one gives back the attempt it took, and when the attempt " +
+			"cannot be counted (Redis cannot be reached) the answer is 503 and nothing is checked. The route is " +
+			"also capped at 15 requests a minute per client address, in the budget login uses. An account " +
+			"that signs in through LDAP or " +
+			"single sign-on has no Nexara password: it must have signed in within the last 10 minutes, and " +
+			"is answered 403, saying to sign in again, otherwise.",
 		Group:       "Two-Factor Authentication",
 		Permissions: Permissions{SelfService: "enrolls the caller's own second factor"},
-		Parameters:  apischema.Properties{},
-		Handler:     h.BeginSetup,
+		Parameters: apischema.Properties{
+			// Write-only, and never in an audit row, like change-password's old_password:
+			// a wrong password is logged as an attempt and never as a value.
+			"current_password": {
+				Type:      apischema.String,
+				Optional:  true,
+				MaxLength: apischema.Ptr(1024),
+				Typetext:  "<string>",
+				Description: "The account's current password. Required for an account that signs in with a Nexara " +
+					"password; an account that signs in through LDAP or single sign-on has none, and its value is not " +
+					"looked at. Never returned, and never recorded in an audit row.",
+			},
+		},
+		Handler: h.BeginSetup,
 
 		InteractiveOnly: "starts enrolling a second factor on the account: a leaked key must not be able to begin taking over its login",
 	})

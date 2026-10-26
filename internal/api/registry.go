@@ -87,7 +87,7 @@ type Endpoint struct {
 	// "Ahead of the RateLimiter" means THIS field's route-level one. The
 	// application-level limiters (setupMiddleware) run before authentication, so a
 	// refused key has already spent a request of them: on the flagged paths that are
-	// in authLimitedPaths — change-password, DELETE /auth/totp and
+	// in authLimitedPaths — change-password, /auth/totp/setup, DELETE /auth/totp and
 	// /auth/totp/recovery-codes/regenerate — the per-address auth bucket login
 	// shares counts a key the gate then turns away.
 	//

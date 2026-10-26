@@ -10,13 +10,15 @@ import (
 	"time"
 )
 
-// The change-password lockout is read and written by ChangePassword and by nothing
-// else. In particular no path that ends a session — sign out, sign out everywhere,
-// the revoke of one session, any revoke-all — may clear it: whoever holds a stolen
-// token can end the sessions of the account it was stolen from (and, with the
-// interactive-only routes, only with a session), and a lock that such a revoke
-// lifted would be a lock the guesser lifts for himself. The two tests below hold
-// that, one by behaviour and one by shape.
+// The change-password lockout is read and written by the two routes that check the
+// current password — ChangePassword, and ProveCurrentPassword for the two-factor
+// setup — and by nothing else. In particular no path that ends a session — sign out,
+// sign out everywhere, the revoke of one session, any revoke-all — may clear it:
+// whoever holds a stolen token can end the sessions of the account it was stolen from
+// (and, with the interactive-only routes, only with a live session), and a lock that
+// such a revoke lifted would be a lock the guesser lifts for himself. Nor may the
+// setup clear it, whose password does not change. The two tests below hold that, one
+// by behaviour and one by shape.
 
 // TestChangePassword_EndingSessionsDoesNotLiftTheLockout: lock the account, end its
 // sessions the way the harness can — sign out everywhere — and the account is still
@@ -55,15 +57,16 @@ func TestChangePassword_EndingSessionsDoesNotLiftTheLockout(t *testing.T) {
 	}
 }
 
-// TestGuard_OnlyChangePasswordTouchesTheLockout holds the shape of the code to the
+// TestGuard_OnlyThePasswordRoutesTouchTheLockout holds the shape of the code to the
 // rule above. The keys the lockout keeps appear in one file, and the operations that
 // count an attempt, give it back or clear the count are called from the one function
-// each of them belongs to — which ChangePassword alone reaches. A new caller, or a
-// second one in a handler that ends a session, fails here by name.
+// each of them belongs to — which ChangePassword and ProveCurrentPassword reach, each
+// once, and only ChangePassword the clear. A new caller, or a second one in a handler
+// that ends a session, fails here by name.
 //
 // The scan of the source finds the calls it is about, and fails when it finds none of
 // one: a guard whose subject was renamed would otherwise go on passing.
-func TestGuard_OnlyChangePasswordTouchesTheLockout(t *testing.T) {
+func TestGuard_OnlyThePasswordRoutesTouchTheLockout(t *testing.T) {
 	t.Run("the keys are written in one file", func(t *testing.T) {
 		const owner = "internal/api/handlers/password_lockout.go"
 		_, sources := authParsedSources(t)
@@ -88,8 +91,8 @@ func TestGuard_OnlyChangePasswordTouchesTheLockout(t *testing.T) {
 		// three store operations, which have common names; a plain or selector call for
 		// the rest, whose names are the lockout's own.
 		allowed := map[string][]string{
-			"admitPasswordAttempt":   {"ChangePassword"},
-			"handBackAttempt":        {"ChangePassword"},
+			"admitPasswordAttempt":   {"ChangePassword", "ProveCurrentPassword"},
+			"handBackAttempt":        {"ChangePassword", "ProveCurrentPassword"},
 			"forgetPasswordFailures": {"ChangePassword"},
 			"lockoutStore":           {"admitPasswordAttempt", "handBackAttempt", "forgetPasswordFailures"},
 			"reserve":                {"admitPasswordAttempt"},
@@ -134,7 +137,7 @@ func TestGuard_OnlyChangePasswordTouchesTheLockout(t *testing.T) {
 					}
 					seen[name] = append(seen[name], fn.Name.Name)
 					if !slices.Contains(allowed[name], fn.Name.Name) {
-						t.Errorf("%s calls %s: only %v may — the lockout's state is touched by ChangePassword and by nothing that ends a session",
+						t.Errorf("%s calls %s: only %v may — the lockout's state is touched by the two password routes and by nothing that ends a session",
 							fn.Name.Name, name, allowed[name])
 					}
 					return true
@@ -146,11 +149,11 @@ func TestGuard_OnlyChangePasswordTouchesTheLockout(t *testing.T) {
 				t.Errorf("the scan found no call of %s: this guard has gone stale", name)
 			}
 		}
-		// Each of ChangePassword's three entry points is called exactly once: a second
+		// Each entry point is called exactly once by each function allowed it: a second
 		// call would be a second place that decides what becomes of the count.
 		for _, name := range []string{"admitPasswordAttempt", "handBackAttempt", "forgetPasswordFailures"} {
-			if got := len(seen[name]); got != 1 {
-				t.Errorf("%s is called %d times (from %v), want once", name, got, seen[name])
+			if got, want := seen[name], allowed[name]; !slices.Equal(slices.Sorted(slices.Values(got)), want) {
+				t.Errorf("%s is called from %v, want exactly once from each of %v", name, got, want)
 			}
 		}
 	})

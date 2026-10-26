@@ -188,13 +188,16 @@ https://nexara.example.com/api/v1
    leaked must not be able to guess the current password or set a new one. A wrong
    current password is answered `403` too, not `401`: a `401` makes a client
    refresh its session and send the request again, which would count every wrong
-   attempt twice. The current password can be tried only so often. Five wrong
-   ones within 60 minutes lock the account out of this route for 30 minutes: the
-   fifth wrong one is itself answered `429`, and while the lock lasts every
-   request, the right password included, is answered `429` with a `Retry-After`
-   header (in seconds) and changes nothing. The lock covers this route alone —
-   signing in, the sessions and every other route carry on, and signing out of
-   every device or ending a session does not lift it. A change that goes through
+   attempt twice. The current password can be tried only so often, here and at
+   `POST /auth/totp/setup`, which asks for it too and counts in the same budget.
+   Five wrong ones within 60 minutes, on either route, lock the account out of
+   both for 30 minutes: the fifth wrong one is itself answered `429`, and while
+   the lock lasts every request, the right password included, is answered `429`
+   with a `Retry-After` header (in seconds) and changes nothing. The lock covers
+   those two routes alone — signing in, the sessions and every other route carry
+   on, and signing out of every device or ending a session does not lift it. A
+   right password at the two-factor setup gives back only the attempt it took,
+   since the password does not change. A change that goes through
    clears the count, because the password the guesses were aimed at is gone. A
    correct current password whose change does not go through — the new password
    is refused as too weak, the database is unavailable — gives back only the one
@@ -330,11 +333,12 @@ not refused there for that.
 The refusal comes ahead of a route's own rate limiter, but not ahead of the
 per-address limiters, which run before any request is authenticated: a key that
 is refused still spends a request of the per-address Auth budget on the flagged
-routes that budget covers: `POST /auth/change-password`, `DELETE /auth/totp` and
-`POST /auth/totp/recovery-codes/regenerate`. It spends nothing of the caps on
+routes that budget covers: `POST /auth/change-password`, `POST /auth/totp/setup`,
+`DELETE /auth/totp` and `POST /auth/totp/recovery-codes/regenerate`. It spends nothing of the caps on
 `POST /auth/logout-all` and `DELETE /auth/sessions/:id`, which are per user. A
 session that has ended spends a request of the Auth budget in the same way when it
-is refused on `DELETE /auth/totp` or `POST /auth/totp/recovery-codes/regenerate`.
+is refused on `POST /auth/totp/setup`, `DELETE /auth/totp` or
+`POST /auth/totp/recovery-codes/regenerate`.
 
 ## Error Format
 
@@ -515,7 +519,7 @@ envelope documented above.
 
 | Scope | Budget | Applies to |
 |-------|--------|------------|
-| Auth | 15/min, one budget for all of them | `/auth/login`, `/auth/register`, `/auth/change-password`, `/auth/totp/verify-login`, `DELETE /auth/totp`, `/auth/totp/recovery-codes/regenerate`, `/auth/oidc/authorize`, `/auth/oidc/callback` |
+| Auth | 15/min, one budget for all of them | `/auth/login`, `/auth/register`, `/auth/change-password`, `/auth/totp/setup`, `/auth/totp/verify-login`, `DELETE /auth/totp`, `/auth/totp/recovery-codes/regenerate`, `/auth/oidc/authorize`, `/auth/oidc/callback` |
 | Sign out everywhere | 5/min per user | `POST /auth/logout-all` — keyed on the signed-in user, not the address, and deliberately not part of the Auth budget above: that budget is spent before a request is authenticated, so anyone could use it up and leave an account's owner without the way to end a stolen session. Only the account's own sessions spend this one; a refused API key spends none of it. A call over the cap revokes nothing and leaves the refresh cookie in place |
 | End one session | 30/min per user | `DELETE /auth/sessions/:id` — keyed on the signed-in user, with a budget of its own: ending one session is signing out everywhere one device at a time, so it is capped too, but a person ends several devices in a sitting, which is why the cap is larger. A refused API key spends none of it, and a call over the cap revokes nothing and leaves the refresh cookie in place |
 | Refresh | 30/min | `/auth/refresh` |
@@ -528,14 +532,15 @@ envelope documented above.
 The general limiter's exemption is by path prefix, not by coverage: the auth
 paths listed above carry their own budgets, but the remaining `/api/v1/auth/*`
 endpoints (`/auth/me`, `/auth/logout`,
-`/auth/totp/setup`, `/auth/oidc/token-exchange`, …) and the `/ws`,
+`/auth/totp/setup/verify`, `/auth/oidc/token-exchange`, …) and the `/ws`,
 `/ws/console`, `/ws/vnc` upgrades have no request-rate limit at all.
 
-`POST /auth/change-password` has a second guard that is not a rate limit and is
-not in the table: five wrong current passwords within 60 minutes lock that one
-route for the account for 30 minutes, whatever addresses they came from. Its
-`429` is the handler's own — the JSON error envelope, with a `Retry-After` header
-in seconds — and is described under Authentication above.
+`POST /auth/change-password` and `POST /auth/totp/setup` share a second guard that
+is not a rate limit and is not in the table: five wrong current passwords within
+60 minutes, on either route, lock both for the account for 30 minutes, whatever
+addresses they came from. Its `429` is the handlers' own — the JSON error envelope,
+with a `Retry-After` header in seconds — and is described under Authentication
+above.
 
 ## Request Parameters
 
@@ -693,7 +698,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | GET | `/auth/oidc/callback` | OIDC callback (internal) |
 | POST | `/auth/oidc/token-exchange` | Exchange OIDC code for JWT |
 | POST | `/auth/totp/verify-login` | Complete TOTP challenge |
-| POST | `/auth/totp/setup` | Begin TOTP enrollment |
+| POST | `/auth/totp/setup` | Begin TOTP enrollment. Send `current_password` (`400` without one, `403` when wrong, `429` while locked out with change-password, which shares the limit); an LDAP or SSO account sends none and must have signed in within the last 10 minutes (`403` otherwise) |
 | POST | `/auth/totp/setup/verify` | Confirm TOTP enrollment |
 | DELETE | `/auth/totp` | Disable TOTP |
 | GET | `/auth/totp/status` | Get TOTP enrollment status |

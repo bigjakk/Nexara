@@ -79,6 +79,7 @@ func TestGuard_CredentialRoutesKeepTheirRateLimit(t *testing.T) {
 		"/api/v1/auth/login":                          "password brute force",
 		"/api/v1/auth/register":                       "unauthenticated account creation on a fresh install",
 		"/api/v1/auth/change-password":                "checks the CURRENT password, so it is a second place to guess it, reachable with nothing but a bearer token",
+		"/api/v1/auth/totp/setup":                     "checks the CURRENT password too, a third place to guess it, and a right one costs a bcrypt and hands its attempt back",
 		"/api/v1/auth/totp/verify-login":              "six-digit second factor",
 		"/api/v1/auth/totp":                           "the disable route validates a TOTP or recovery code",
 		"/api/v1/auth/totp/recovery-codes/regenerate": "validates a TOTP code",

@@ -497,7 +497,7 @@ func TestConsoleTokenVMIDAcceptsZero(t *testing.T) {
 	}
 }
 
-// TestAuthCredentialsAreBodyOnly pins the four parameters in this domain that
+// TestAuthCredentialsAreBodyOnly pins the five parameters in this domain that
 // carry a secret.
 //
 // A credential in a query string is recorded by every proxy access log and
@@ -513,6 +513,7 @@ func TestAuthCredentialsAreBodyOnly(t *testing.T) {
 		{fiber.MethodPost, authScope + "/login", []string{"password"}},
 		{fiber.MethodPost, authScope + "/refresh", []string{"refresh_token"}},
 		{fiber.MethodPost, authScope + "/change-password", []string{"old_password", "new_password"}},
+		{fiber.MethodPost, totpScope + "/setup", []string{"current_password"}},
 	}
 
 	for _, tc := range cases {

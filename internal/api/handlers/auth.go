@@ -2378,7 +2378,8 @@ func (h *AuthHandler) UpdateProfile(c fiber.Ctx, p *apischema.Params) error {
 //
 // How often the current password can be guessed is bounded. Each attempt is
 // counted BEFORE its password is checked, and passwordLockoutThreshold wrong ones
-// within passwordLockoutWindow lock the account out of this route for
+// within passwordLockoutWindow — here or at the two-factor setup, which counts in
+// the same budget (ProveCurrentPassword) — lock the account out of both routes for
 // passwordLockoutDuration — 429 with a Retry-After, and the right password is
 // refused like any other until the lock ends (password_lockout.go has the rule and
 // the reasons). The order of the request is: the read of the account, the count
@@ -2453,23 +2454,14 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
-	user, attempt, err := h.admitPasswordAttempt(c, userID)
+	user, attempt, err := h.admitPasswordAttempt(c, userID, changePasswordProof)
 	if err != nil {
 		return err
 	}
 
 	if err := h.checkCurrentPassword(user.PasswordHash, p.String("old_password")); err != nil {
-		logWrongPassword(c, userID, attempt)
-		if attempt.admission == lockoutAdmittedLast {
-			// The last wrong password of the budget: the lock is in place from now on.
-			details := passwordLockoutRecord(c, userID, attempt)
-			h.withFollowUp(c, func() {
-				AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "password_change_locked", details)
-			})
-			return passwordLocked(c, attempt.retryAfter)
-		}
-		// 403, not 401: see the note on ChangePassword.
-		return fiber.NewError(fiber.StatusForbidden, "Current password is incorrect")
+		// 403, or the 429 of the last one of the budget: see the note on ChangePassword.
+		return h.refuseWrongPassword(c, userID, attempt, changePasswordProof)
 	}
 
 	// The password is right, so this attempt was not a guess, and what becomes of
@@ -2485,7 +2477,7 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx, p *apischema.Params) error {
 	committed := false
 	defer func() {
 		if !committed {
-			h.handBackAttempt(c, userID, attempt)
+			h.handBackAttempt(c, userID, attempt, changePasswordProof)
 		}
 	}()
 

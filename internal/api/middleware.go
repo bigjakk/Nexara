@@ -223,9 +223,10 @@ func (s *Server) setupMiddleware() {
 	// RegenerateRecoveryCodes because both validate a TOTP code; without this,
 	// an attacker holding a stolen access token would have no per-IP cap and
 	// only the per-user lockout (5 fails / 5 min cooldown) — see Phase 4.4.
-	// Includes change-password for the same reason: it validates the current
-	// password, and the per-user lockout (handlers/password_lockout.go) is all
-	// that would otherwise stand between a stolen token and a guess.
+	// Includes change-password and the 2FA setup for the same reason: each
+	// validates the current password, and the per-user lockout
+	// (handlers/password_lockout.go) is all that would otherwise stand between a
+	// stolen token and a guess.
 	//
 	// Does NOT include logout-all, nor DELETE /auth/sessions/:id. Those routes are a
 	// loop and not a guess, and each is capped per USER on the route itself
@@ -236,13 +237,13 @@ func (s *Server) setupMiddleware() {
 	// token, the one request an owner must not be refused because a stranger sent
 	// fifteen logins.
 	//
-	// ONE bucket serves every path in the set, on purpose: login and
-	// change-password are two oracles for the same password, so an address gets
-	// 15 guesses a minute across both, not 15 at each. Because it runs before
+	// ONE bucket serves every path in the set, on purpose: login, change-password
+	// and the 2FA setup are three oracles for the same password, so an address gets
+	// 15 guesses a minute across all of them, not 15 at each. Because it runs before
 	// authentication it also counts what a later link refuses: an API key turned
-	// away by the InteractiveOnly gate from change-password, DELETE /auth/totp or
-	// /auth/totp/recovery-codes/regenerate has already spent a request of its
-	// address's bucket here (TestDocs_TheRoutesThatSpendTheAuthBudgetAreTheOnesThatDo
+	// away by the InteractiveOnly gate from change-password, /auth/totp/setup, DELETE
+	// /auth/totp or /auth/totp/recovery-codes/regenerate has already spent a request
+	// of its address's bucket here (TestDocs_TheRoutesThatSpendTheAuthBudgetAreTheOnesThatDo
 	// holds the reference to that list).
 	s.app.Use(limiter.New(limiter.Config{
 		Max:        15,
@@ -1044,7 +1045,7 @@ func (s *Server) fingerprintFetchLimiter() fiber.Handler {
 // its brute-force cap off. The comparison uses the same normalisation
 // limiterPath applies, since that is what the closures compare against.
 var (
-	// authLimitedPaths are the login, change-password and TOTP-code paths capped
+	// authLimitedPaths are the login, current-password and TOTP-code paths capped
 	// at 15 attempts per minute per IP, in one bucket.
 	//
 	// Change-password checks the caller's CURRENT password, so it is a second
@@ -1068,6 +1069,7 @@ var (
 		"/api/v1/auth/login":                          true,
 		"/api/v1/auth/register":                       true,
 		"/api/v1/auth/change-password":                true,
+		"/api/v1/auth/totp/setup":                     true,
 		"/api/v1/auth/totp/verify-login":              true,
 		"/api/v1/auth/totp":                           true,
 		"/api/v1/auth/totp/recovery-codes/regenerate": true,

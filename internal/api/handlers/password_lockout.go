@@ -12,33 +12,41 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The per-user lockout of POST /auth/change-password.
+// The per-user lockout of the routes that check the caller's CURRENT password:
+// POST /auth/change-password, and POST /auth/totp/setup, which asks for it before it
+// hands out a second factor's secret (ProveCurrentPassword).
 //
-// The route checks the caller's CURRENT password, which makes it a second oracle
-// for the secret login guards, and one that anybody holding a bearer token for
-// the account can reach: a stolen access token never meets login's defences. A
-// right guess does not only answer "yes" — it sets the attacker's own password
-// and ends every session of the owner. The per-IP cap on the route
-// (authLimitedPaths) bounds what one address can try; this bounds what ALL
-// addresses together can try against one account.
+// Each of them is a second oracle for the secret login guards, and one that anybody
+// holding a bearer token for the account can reach: a stolen access token never
+// meets login's defences. A right guess does not only answer "yes" — it sets the
+// attacker's own password and ends every session of the owner, or enrols the
+// attacker's authenticator and takes the recovery codes. The per-IP cap on
+// change-password (authLimitedPaths) bounds what one address can try; this bounds
+// what ALL addresses together can try against one account, through either route:
+// they count in ONE budget, because two would give whoever holds a stolen token
+// twice the guesses at the same password.
 //
 // The rule: passwordLockoutThreshold wrong current passwords within
-// passwordLockoutWindow lock the account out of this ONE route for
-// passwordLockoutDuration. While it is locked every request — the right password
-// included — answers 429 with a Retry-After and changes nothing. Nothing else is
-// locked: login, the sessions and every other route read none of this state, and
-// its keys (pwchange:user:*) are its own, apart from the TOTP lockout's. Nothing
-// that ends a session — logout-all, the revoke of one session, any revoke-all —
-// clears it either: only ChangePassword touches the state, a change that commits
-// (clear) or a request handing back its own attempt (release), and
-// TestGuard_OnlyChangePasswordTouchesTheLockout holds the keys to this file and the
-// calls to that one handler.
+// passwordLockoutWindow lock the account out of these TWO routes for
+// passwordLockoutDuration. While it is locked every request to either — the right
+// password included — answers 429 with a Retry-After and changes nothing. Nothing
+// else is locked: login, the sessions and every other route read none of this
+// state, and its keys (pwchange:user:*) are its own, apart from the TOTP login
+// lockout's. Nothing that ends a session — logout-all, the revoke of one session,
+// any revoke-all — clears it either: only the two routes touch the state, through
+// ChangePassword and ProveCurrentPassword — a password change that commits (clear),
+// or a request handing back its own attempt (release; the only thing
+// ProveCurrentPassword ever does to the count once a password verified, because its
+// route does not change the password) — and
+// TestGuard_OnlyThePasswordRoutesTouchTheLockout holds the keys to this file and the
+// calls to those two functions.
 //
 // The window is AT LEAST as long as the lock, and that is not a detail. Were it
 // shorter, an attacker could stay under the threshold — four guesses a window,
@@ -79,11 +87,59 @@ const (
 	passwordLockoutDuration  = 30 * time.Minute
 )
 
-// passwordLockoutUnavailableMessage is the 503 for an attempt that could not be
-// counted. It says the password was NOT changed, like every other refusal of this
-// route that is not the user's doing, and that it is worth retrying.
-const passwordLockoutUnavailableMessage = "Changing the password is unavailable right now because its attempt limit could not be checked, " +
-	"and your password was NOT changed; please try again shortly."
+// passwordLockoutUnavailableMessage is change-password's 503 for an attempt that
+// could not be counted. It says the password was NOT changed, like every other
+// refusal of that route that is not the user's doing, and that it is worth
+// retrying. The two-factor setup answers the same failure, and a read it could not
+// make, with totpSetupUnavailableMessage (503) or totpSetupFailedMessage (500):
+// nothing was checked, and nothing set up.
+const (
+	passwordLockoutUnavailableMessage = "Changing the password is unavailable right now because its attempt limit could not be checked, " +
+		"and your password was NOT changed; please try again shortly."
+	totpSetupUnavailableMessage = "Two-factor authentication cannot be set up right now; nothing was changed. Please try again shortly."
+	totpSetupFailedMessage      = "Two-factor authentication could not be set up; nothing was changed."
+)
+
+// passwordProof is one of the two routes that check the caller's current password,
+// for what its answers and its log lines say: they share the budget and every rule
+// of it, and differ only in their words.
+type passwordProof struct {
+	// what begins every log line the route leaves: "change password".
+	what string
+	// readFailed answers a read of the account that failed: nothing was checked.
+	readFailed func(userID uuid.UUID, err error) error
+	// uncounted is the 503 for an attempt that could not be counted.
+	uncounted string
+}
+
+var (
+	changePasswordProof = passwordProof{
+		what: "change password",
+		readFailed: func(userID uuid.UUID, err error) error {
+			return passwordNotChanged("read the user", userID, err)
+		},
+		uncounted: passwordLockoutUnavailableMessage,
+	}
+	totpSetupProof = passwordProof{
+		what: "two-factor setup",
+		readFailed: func(userID uuid.UUID, err error) error {
+			return totpSetupNotChecked("read the user", userID, err)
+		},
+		uncounted: totpSetupUnavailableMessage,
+	}
+)
+
+// totpSetupNotChecked answers a two-factor setup that could not check its caller is
+// the owner because a read failed — of the account, or of the session: 503 when the
+// database is away, 500 otherwise, nothing checked and nothing set up.
+func totpSetupNotChecked(step string, userID uuid.UUID, err error) error {
+	if isTransientDBError(err) {
+		slog.Warn("two-factor setup: could not "+step+"; nothing was checked or set up", "user_id", userID, "error", err)
+		return fiber.NewError(fiber.StatusServiceUnavailable, totpSetupUnavailableMessage)
+	}
+	slog.Error("two-factor setup: failed to "+step+"; nothing was checked or set up", "user_id", userID, "error", err)
+	return fiber.NewError(fiber.StatusInternalServerError, totpSetupFailedMessage)
+}
 
 // lockoutAdmission is what counting an attempt decided. The zero value is the
 // refusal, so a reservation that was never filled in cannot be mistaken for
@@ -491,10 +547,10 @@ func (m *memoryPasswordLockout) sweep(now time.Time) {
 	}
 }
 
-// admitPasswordAttempt is the first half of ChangePassword: the read of the
-// account, and the lockout's count of this attempt, under ONE deciding bound. It
-// answers with the account and the admitted attempt, or with the refusal the
-// request ends in.
+// admitPasswordAttempt is the first half of both routes' check (ChangePassword,
+// ProveCurrentPassword): the read of the account, and the lockout's count of this
+// attempt, under ONE deciding bound. It answers with the account and the admitted
+// attempt, or with the refusal the request ends in, in proof's words.
 //
 // The lock is read BEFORE the password is checked, and counting the attempt is
 // what reads it. Consulting it after the check would let the right password
@@ -513,18 +569,19 @@ func (m *memoryPasswordLockout) sweep(now time.Time) {
 // counted. A Redis that does not answer at all is the same failure, and it is
 // answered when the deciding bound ends and not when the client gives up
 // (boundedByContext).
-func (h *AuthHandler) admitPasswordAttempt(c fiber.Ctx, userID uuid.UUID) (user db.User, attempt lockoutReservation, err error) {
+func (h *AuthHandler) admitPasswordAttempt(c fiber.Ctx, userID uuid.UUID, proof passwordProof) (user db.User, attempt lockoutReservation, err error) {
 	ctx, cancel := h.dbContext(c)
 	defer cancel()
 
 	user, err = h.queries.GetUserByID(ctx, userID)
 	if err != nil {
-		return db.User{}, lockoutReservation{}, passwordNotChanged("read the user", userID, err)
+		return db.User{}, lockoutReservation{}, proof.readFailed(userID, err)
 	}
 	// change-password admits a session that has ended — it is one of the owner's
 	// remedies (Endpoint.AdmitsEndedSession) — so nothing ahead of it asks whether the
 	// account is still active: a deactivated account's token must not set a password
-	// that outlives the deactivation. Refused before the attempt is counted.
+	// that outlives the deactivation. Refused before the attempt is counted. (The
+	// two-factor setup is held to a live session, which asks it already.)
 	if !user.IsActive {
 		return db.User{}, lockoutReservation{}, fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
 	}
@@ -534,7 +591,7 @@ func (h *AuthHandler) admitPasswordAttempt(c fiber.Ctx, userID uuid.UUID) (user 
 
 	attempt, err = h.lockoutStore().reserve(ctx, userID)
 	if err != nil {
-		return db.User{}, lockoutReservation{}, passwordLockoutUnavailable(userID, err)
+		return db.User{}, lockoutReservation{}, passwordLockoutUnavailable(userID, err, proof)
 	}
 	switch attempt.admission {
 	case lockoutAdmitted, lockoutAdmittedLast:
@@ -550,32 +607,88 @@ func (h *AuthHandler) admitPasswordAttempt(c fiber.Ctx, userID uuid.UUID) (user 
 // leave nothing, and the guesses made under the threshold are the ones nobody would
 // otherwise see. Never the password — not the one that was tried, which is often the
 // right one for another account, and not the one it would have been changed to.
-func logWrongPassword(c fiber.Ctx, userID uuid.UUID, attempt lockoutReservation) {
-	slog.Warn("change password: wrong current password",
+func logWrongPassword(c fiber.Ctx, userID uuid.UUID, attempt lockoutReservation, proof passwordProof) {
+	slog.Warn(proof.what+": wrong current password",
 		"user_id", userID, "ip", c.IP(), "attempt", attempt.attempts, "attempts_before_lock", passwordLockoutThreshold)
 }
 
-// passwordLockoutRecord is what the lockout leaves behind when it locks: the
-// details of its audit row, and a warning in the log. ChangePassword writes the row
-// itself — a lockout is the second thing that request can record, next to
-// password_changed, and both are one user's credential events, install-global
-// (audit_cluster_guard_test.go) — and it is written only by the wrong current
-// password that was the last of the budget. A refused attempt on a locked account
-// records nothing, so one lockout is one row, and an attempt that could not be
-// counted is never a lockout.
+// refuseWrongPassword answers a current password that did not verify, for both
+// routes: a warning in the log for every one (logWrongPassword), and 403 — or, for
+// the last one of the budget, the 429 of the lock that is in place from now on,
+// with the lock's audit row. It is the one place that writes that row, so one
+// lockout is one row whichever route armed it, with the same action and details.
 //
-// The row says that it happened, from where, how many attempts and how long it
-// lasts, and never the password that was tried: audit details are readable by
+// 403 and not 401, because the SPA's client (api-client.ts, request() in its
+// "refresh" mode) takes every 401 for an expired access token, refreshes the
+// session and sends the request again once: each wrong submit would reach the
+// check twice, count as two attempts, and rotate the session for nothing. The 403
+// says what is true — the caller is who they say they are, and is refused this —
+// and a client replays nothing.
+func (h *AuthHandler) refuseWrongPassword(c fiber.Ctx, userID uuid.UUID, attempt lockoutReservation, proof passwordProof) error {
+	logWrongPassword(c, userID, attempt, proof)
+	if attempt.admission == lockoutAdmittedLast {
+		details := passwordLockoutRecord(c, userID, attempt, proof)
+		h.withFollowUp(c, func() {
+			AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "password_change_locked", details)
+		})
+		return passwordLocked(c, attempt.retryAfter)
+	}
+	return fiber.NewError(fiber.StatusForbidden, "Current password is incorrect")
+}
+
+// ProveCurrentPassword checks the caller's current password for a route that hands
+// out a sign-in factor without changing the password: POST /auth/totp/setup
+// (TOTPHandler.BeginSetup, through the function wireAuthCompositions gives it), so
+// that a stolen access token cannot enrol its own authenticator, take the recovery
+// codes and lock the owner out of sign-in. It is ChangePassword's check under
+// ChangePassword's budget, not a second one: the same read of the account and
+// count of the attempt (admitPasswordAttempt), the same answers to a wrong password
+// (refuseWrongPassword), the same 503 when the attempt cannot be counted, with
+// nothing checked.
+//
+// What differs is what a RIGHT password does to the count. Nothing about the
+// password changes, so the guesses already counted are still aimed at the same
+// secret: the request gives back only the attempt it took (handBackAttempt), and
+// never makes the clear of a committed password change. It gives it back at once,
+// not when the setup is done, because what the route does next cannot turn a proved
+// password into a guess.
+//
+// nil means the password is right and the route may go on; anything else is the
+// answer the request ends in. An account that is not local has no password here to
+// prove, and is refused as ChangePassword refuses it: its caller does not ask.
+func (h *AuthHandler) ProveCurrentPassword(c fiber.Ctx, userID uuid.UUID, password string) error {
+	user, attempt, err := h.admitPasswordAttempt(c, userID, totpSetupProof)
+	if err != nil {
+		return err
+	}
+	if err := h.checkCurrentPassword(user.PasswordHash, password); err != nil {
+		return h.refuseWrongPassword(c, userID, attempt, totpSetupProof)
+	}
+	h.handBackAttempt(c, userID, attempt, totpSetupProof)
+	return nil
+}
+
+// passwordLockoutRecord is what the lockout leaves behind when it locks: the
+// details of its audit row, and a warning in the log. refuseWrongPassword writes the
+// row — a lockout is one user's credential event, install-global
+// (audit_cluster_guard_test.go) — and it is written only by the wrong current
+// password that was the last of the budget, on whichever route it came. A refused
+// attempt on a locked account records nothing, so one lockout is one row, and an
+// attempt that could not be counted is never a lockout.
+//
+// The row says that it happened, from where, how many attempts, how long it lasts
+// and which route armed it, and never the password that was tried: audit details are readable by
 // every Viewer, and a wrong password is often a right one for another account.
-func passwordLockoutRecord(c fiber.Ctx, userID uuid.UUID, attempt lockoutReservation) json.RawMessage {
+func passwordLockoutRecord(c fiber.Ctx, userID uuid.UUID, attempt lockoutReservation, proof passwordProof) json.RawMessage {
 	lockSeconds := int(attempt.retryAfter / time.Second)
-	slog.Warn("change password: the account is locked out of changing its password after repeated wrong current passwords",
+	slog.Warn(proof.what+": the account is locked out of changing its password and setting up two-factor authentication after repeated wrong current passwords",
 		"user_id", userID, "ip", c.IP(), "failed_attempts", attempt.attempts, "lockout_seconds", lockSeconds)
 
 	details, _ := json.Marshal(map[string]any{
 		"ip":              c.IP(),
 		"failed_attempts": attempt.attempts,
 		"lockout_seconds": lockSeconds,
+		"route":           proof.what,
 	})
 	return details
 }
@@ -600,20 +713,21 @@ func (h *AuthHandler) forgetPasswordFailures(ctx context.Context, userID uuid.UU
 }
 
 // handBackAttempt gives back the one attempt a request took when its password
-// verified and its change did not commit — the new password was refused, the
-// database failed, another request got there first: the password was right, so it
-// was not a guess, and the request has nothing to show for the attempt it spent.
-// Only that attempt: see the store's release for why the others stay.
+// verified and nothing it did made the counted guesses moot: a password change that
+// did not commit — the new password was refused, the database failed, another
+// request got there first — or a two-factor setup, whose password does not change
+// (ProveCurrentPassword). The password was right, so it was not a guess. Only that
+// attempt: see the store's release for why the others stay.
 //
 // It is best effort, and it runs after the answer is decided, under a deadline of its
 // own (authFollowUpTimeout) like every step that enforces or records a decision, so
 // it adds at most that to the longest path through the handler, which is a change
 // that commits.
-func (h *AuthHandler) handBackAttempt(c fiber.Ctx, userID uuid.UUID, attempt lockoutReservation) {
+func (h *AuthHandler) handBackAttempt(c fiber.Ctx, userID uuid.UUID, attempt lockoutReservation, proof passwordProof) {
 	ctx, cancel := h.followUp(c.Context())
 	defer cancel()
 	if err := h.lockoutStore().release(ctx, userID, attempt); err != nil {
-		slog.Warn("change password: could not give back the attempt a verified password took; it stays counted until its window ends",
+		slog.Warn(proof.what+": could not give back the attempt a verified password took; it stays counted until its window ends",
 			"user_id", userID, "error", err)
 	}
 }
@@ -644,8 +758,9 @@ func passwordLocked(c fiber.Ctx, wait time.Duration) error {
 }
 
 // passwordLockedMessage says how long the lock has left, in whole minutes rounded
-// up, and that nothing else is affected: a user who has just been told to wait is
-// also wondering whether they are still signed in.
+// up, what it covers — both routes, whichever one the user is on — and that nothing
+// else is affected: a user who has just been told to wait is also wondering whether
+// they are still signed in.
 func passwordLockedMessage(wait time.Duration) string {
 	minutes := int((wait + time.Minute - 1) / time.Minute)
 	if minutes < 1 {
@@ -655,8 +770,8 @@ func passwordLockedMessage(wait time.Duration) string {
 	if minutes == 1 {
 		unit = "minute"
 	}
-	return fmt.Sprintf("Too many incorrect attempts at the current password. Changing the password is locked for %d more %s; "+
-		"you stay signed in and nothing else about the account is affected.", minutes, unit)
+	return fmt.Sprintf("Too many incorrect attempts at the current password. Changing the password and setting up two-factor "+
+		"authentication are locked for %d more %s; you stay signed in and nothing else about the account is affected.", minutes, unit)
 }
 
 // passwordLockoutUnavailable answers an attempt that could not be counted: 503,
@@ -669,11 +784,11 @@ func passwordLockedMessage(wait time.Duration) string {
 // threshold it arms the lock with no audit row, and the next request is answered
 // "locked" for an account whose owner was told nothing about an attempt (see
 // boundedByContext). It is the only trace such a lock leaves.
-func passwordLockoutUnavailable(userID uuid.UUID, err error) error {
-	slog.Warn("change password: the failed-attempt counter could not be reached; the current password was not checked and the password was not changed. "+
+func passwordLockoutUnavailable(userID uuid.UUID, err error, proof passwordProof) error {
+	slog.Warn(proof.what+": the failed-attempt counter could not be reached; the current password was not checked and the password was not changed. "+
 		"The attempt may still have been counted: a call that was only given up on can land later, and if it is the one that reaches the threshold "+
 		"the lock is armed with no audit row",
 		"user_id", userID, "error", err,
 		"abandoned", errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled))
-	return fiber.NewError(fiber.StatusServiceUnavailable, passwordLockoutUnavailableMessage)
+	return fiber.NewError(fiber.StatusServiceUnavailable, proof.uncounted)
 }

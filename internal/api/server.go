@@ -499,6 +499,8 @@ func (s *Server) wireAuthCompositions() {
 	if s.authHandler != nil && s.totpHandler != nil {
 		s.authHandler.SetTOTPHandler(s.totpHandler)
 		s.totpHandler.SetIssueTokensFn(s.authHandler.IssueTokens)
+		// A setup proves a local account's current password in change-password's budget.
+		s.totpHandler.SetCurrentPasswordCheck(s.authHandler.ProveCurrentPassword)
 	}
 }
 

@@ -15,10 +15,19 @@ export function useTOTPStatus() {
   });
 }
 
+/**
+ * Begins the setup, which the server hands out only to the account's owner: an
+ * account that signs in with a Nexara password sends the current one, and an
+ * LDAP or single sign-on account sends none (it needs a recent sign-in instead).
+ */
 export function useTOTPSetup() {
   return useMutation({
-    mutationFn: () =>
-      apiClient.post<TOTPSetupResponse>(apiPath`/api/v1/auth/totp/setup`),
+    mutationFn: (data: { current_password?: string }) =>
+      apiClient.post<TOTPSetupResponse>(apiPath`/api/v1/auth/totp/setup`, data),
+    // Its variables hold the current password: gcTime 0 drops the finished
+    // mutation as soon as nothing observes it, and the dialog resets it when
+    // it closes (SecurityPage), so the password goes when the dialog does.
+    gcTime: 0,
   });
 }
 

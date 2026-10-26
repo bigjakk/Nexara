@@ -302,12 +302,13 @@ func registerAuthEndpoints(reg *Registry, h *handlers.AuthHandler, logoutAllLimi
 			"an API key: changing a password takes an interactive login session. A wrong current " +
 			"password is answered 403 as well, not 401, because a 401 makes a client refresh its session " +
 			"and send the request again, which would count every wrong attempt twice. The current " +
-			"password can be tried only so often: five wrong ones within 60 minutes lock the account " +
-			"out of this route for 30 minutes, the fifth wrong one is itself the 429 that says so, and " +
-			"while it is locked every request, the right password included, answers 429 with a " +
-			"Retry-After header (in seconds) and changes nothing. The lock is this route's own: signing " +
-			"in and everything else carry on, and signing out of every device or ending a session does " +
-			"not lift it. A change that goes through clears the count, because the password the guesses " +
+			"password can be tried only so often, here and at POST /auth/totp/setup, which asks for it " +
+			"too: five wrong ones within 60 minutes, on either route, lock the account out of both for 30 " +
+			"minutes, the fifth wrong one is itself the 429 that says so, and while it is locked every " +
+			"request, the right password included, answers 429 with a Retry-After header (in seconds) and " +
+			"changes nothing. The lock is those two routes' own: signing in and everything else carry on, " +
+			"and signing out of every device or ending a session does not lift it. A change that goes " +
+			"through clears the count, because the password the guesses " +
 			"were aimed at is gone; a correct current password whose change does not go through (the new " +
 			"password is refused as too weak, the database is unavailable) gives back only the one " +
 			"attempt it took, so the wrong guesses counted before it stay counted. Every wrong current " +

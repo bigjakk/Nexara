@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { ApiClientError } from "@/lib/api-client";
 import { ActiveSessionsCard } from "../components/ActiveSessionsCard";
+import { useProfile } from "../api/profile-queries";
 import {
   useTOTPStatus,
   useTOTPSetup,
@@ -41,6 +42,12 @@ type SetupStep = "idle" | "qr" | "verify" | "recovery";
 
 export function SecurityPage() {
   const { data: status, isLoading: statusLoading } = useTOTPStatus();
+  // An account with no Nexara password (LDAP, single sign-on) has none to
+  // confirm: the server asks it for a recent sign-in instead. Undecided until
+  // the profile has loaded, so nobody is asked for a password they do not have.
+  const { data: profile, isError: profileFailed } = useProfile();
+  const hasPassword =
+    profile === undefined ? undefined : profile.auth_source === "local";
   const setupMutation = useTOTPSetup();
   const confirmMutation = useTOTPConfirm();
   const disableMutation = useTOTPDisable();
@@ -53,6 +60,14 @@ export function SecurityPage() {
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [error, setError] = useState("");
 
+  // Enable 2FA first proves it is the owner, in a dialog of its own. Each close
+  // moves setupAttempt on, so an answer that lands after the dialog was closed
+  // is dropped instead of opening the QR step or an error nobody asked for.
+  const [setupDialogOpen, setSetupDialogOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [setupError, setSetupError] = useState("");
+  const setupAttempt = useRef(0);
+
   const [disableDialogOpen, setDisableDialogOpen] = useState(false);
   // Where focus goes when Disable 2FA closes: the card, whose Disable 2FA
   // button goes once 2FA is off.
@@ -62,18 +77,34 @@ export function SecurityPage() {
   const [regenDialogOpen, setRegenDialogOpen] = useState(false);
   const [regenCode, setRegenCode] = useState("");
 
+  // The password is kept only while the dialog is open: here, and in the
+  // mutation's variables, which reset() drops.
+  const closeSetupDialog = () => {
+    setupAttempt.current++;
+    setSetupDialogOpen(false);
+    setCurrentPassword("");
+    setSetupError("");
+    setupMutation.reset();
+  };
+
   const handleStartSetup = async () => {
-    setError("");
+    setSetupError("");
+    const attempt = setupAttempt.current;
     try {
-      const res = await setupMutation.mutateAsync();
+      const res = await setupMutation.mutateAsync(
+        hasPassword ? { current_password: currentPassword } : {},
+      );
+      if (attempt !== setupAttempt.current) return;
       setOtpauthUrl(res.otpauth_url);
       setManualSecret(res.secret);
+      closeSetupDialog();
       setSetupStep("qr");
     } catch (err) {
+      if (attempt !== setupAttempt.current) return;
       if (err instanceof ApiClientError) {
-        setError(err.body.message);
+        setSetupError(err.body.message);
       } else {
-        setError("Failed to start setup");
+        setSetupError("Failed to start setup");
       }
     }
   };
@@ -242,10 +273,12 @@ export function SecurityPage() {
                 </div>
                 <ShieldOff className="h-8 w-8 text-muted-foreground" />
               </div>
-              <Button onClick={() => void handleStartSetup()}>
-                {setupMutation.isPending && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
+              <Button
+                onClick={() => {
+                  setError("");
+                  setSetupDialogOpen(true);
+                }}
+              >
                 Enable 2FA
               </Button>
             </div>
@@ -368,6 +401,65 @@ export function SecurityPage() {
       )}
 
       <ActiveSessionsCard />
+
+      {/* Enable 2FA Dialog: the owner proves it is them before the secret is shown */}
+      <Dialog
+        open={setupDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) closeSetupDialog();
+        }}
+      >
+        <DialogContent fallbackFocus={() => twoFactorCard.current}>
+          <DialogHeader>
+            <DialogTitle>Enable Two-Factor Authentication</DialogTitle>
+            <DialogDescription>
+              {hasPassword === undefined
+                ? profileFailed
+                  ? "Your account could not be loaded. Reload the page to set up 2FA."
+                  : "Loading your account…"
+                : hasPassword
+                  ? "Enter your current password to continue. You will then scan a QR code with your authenticator app."
+                  : "Your account signs in through LDAP or single sign-on, so there is no Nexara password to confirm. Setup needs a sign-in from the last 10 minutes: if yours is older, sign out and sign in again first."}
+            </DialogDescription>
+          </DialogHeader>
+          {hasPassword && (
+            <div className="space-y-2">
+              <Label htmlFor="setup-current-password">Current Password</Label>
+              <Input
+                id="setup-current-password"
+                type="password"
+                autoComplete="current-password"
+                autoFocus
+                value={currentPassword}
+                onChange={(e) => {
+                  setCurrentPassword(e.target.value);
+                }}
+              />
+            </div>
+          )}
+          {setupError && (
+            <p className="text-sm text-destructive">{setupError}</p>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeSetupDialog}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                hasPassword === undefined ||
+                (hasPassword && !currentPassword) ||
+                setupMutation.isPending
+              }
+              onClick={() => void handleStartSetup()}
+            >
+              {setupMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Disable 2FA Dialog */}
       <Dialog open={disableDialogOpen} onOpenChange={setDisableDialogOpen}>

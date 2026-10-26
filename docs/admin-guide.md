@@ -524,9 +524,12 @@ Navigate to **Admin > OIDC** to configure single sign-on.
 
 1. Navigate to **Settings > Security**
 2. Click **Enable 2FA**
-3. Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.)
-4. Enter the 6-digit code to verify
-5. Save the recovery codes in a secure location
+3. Enter your current password. An account that signs in through LDAP or single sign-on has no Nexara password to
+   enter: it needs a sign-in from the last 10 minutes instead, so sign out and back in first if yours is older.
+   Five wrong passwords within an hour, here and at **Change Password** together, lock both for 30 minutes
+4. Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.)
+5. Enter the 6-digit code to verify
+6. Save the recovery codes in a secure location
 
 #### Admin Management
 

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
@@ -34,7 +36,19 @@ const (
 	totpLockoutThreshold = 5
 	totpLockoutWindow    = 10 * time.Minute
 	totpLockoutDuration  = 5 * time.Minute
+
+	// totpFreshSignIn is how recent a sign-in must be to begin enrolling a second
+	// factor on an account that has no Nexara password to prove: one that signs in
+	// through LDAP or single sign-on (see confirmItIsTheOwner).
+	totpFreshSignIn = 10 * time.Minute
 )
+
+// The answers of a setup that cannot go on until the caller proves it is the owner.
+const totpPasswordRequiredMessage = "Enter your current password to set up two-factor authentication."
+
+var totpSignInAgainMessage = fmt.Sprintf("To set up two-factor authentication, sign out and sign in again, then start within %d minutes: "+
+	"your account signs in through LDAP or single sign-on, so Nexara has no password of yours to confirm and asks for a recent sign-in instead.",
+	int(totpFreshSignIn/time.Minute))
 
 var totpCodePattern = regexp.MustCompile(`^\d{6}$`)
 
@@ -54,6 +68,12 @@ type TOTPHandler struct {
 	rdb         *redis.Client
 	eventPub    *events.Publisher
 	issueTokens func(c fiber.Ctx, user db.User, epoch int64, auditAction string) error
+
+	// proveCurrentPassword is AuthHandler.ProveCurrentPassword: BeginSetup's check of
+	// a local account's current password, under the change-password lockout's
+	// budget. Wired by SetCurrentPasswordCheck; nil refuses every local account's
+	// setup rather than skipping the check.
+	proveCurrentPassword func(c fiber.Ctx, userID uuid.UUID, password string) error
 
 	// followUpTimeout bounds each follow-up of a decision that has been made — the
 	// audit row of a second step that was refused — and is authFollowUpTimeout when
@@ -106,8 +126,21 @@ func (h *TOTPHandler) SetIssueTokensFn(fn func(c fiber.Ctx, user db.User, epoch 
 	h.issueTokens = fn
 }
 
+// SetCurrentPasswordCheck sets the check of a local account's current password
+// that BeginSetup asks for (AuthHandler.ProveCurrentPassword; called from server
+// setup).
+func (h *TOTPHandler) SetCurrentPasswordCheck(fn func(c fiber.Ctx, userID uuid.UUID, password string) error) {
+	h.proveCurrentPassword = fn
+}
+
 // BeginSetup handles POST /api/v1/auth/totp/setup — starts TOTP enrollment.
-func (h *TOTPHandler) BeginSetup(c fiber.Ctx, _ *apischema.Params) error {
+//
+// The secret it hands out is what turns a second factor on (ConfirmSetup needs a
+// code from it), so it is handed out only to the account's owner: a session that
+// is live (the registry's InteractiveOnly gate) and that proves it is the owner
+// (confirmItIsTheOwner). A stolen access token alone would otherwise enrol its own
+// authenticator, take the recovery codes, and lock the owner out of sign-in.
+func (h *TOTPHandler) BeginSetup(c fiber.Ctx, p *apischema.Params) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -124,6 +157,9 @@ func (h *TOTPHandler) BeginSetup(c fiber.Ctx, _ *apischema.Params) error {
 	user, err := h.queries.GetUserByID(c.Context(), userID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get user")
+	}
+	if err := h.confirmItIsTheOwner(c, user, p.String("current_password")); err != nil {
+		return err
 	}
 
 	encrypted, otpauthURL, plainSecret, err := h.totpService.GenerateSecret(user.Email)
@@ -143,6 +179,58 @@ func (h *TOTPHandler) BeginSetup(c fiber.Ctx, _ *apischema.Params) error {
 		"secret":      plainSecret,
 		"otpauth_url": otpauthURL,
 	})
+}
+
+// confirmItIsTheOwner is what BeginSetup asks of a caller beyond a live session.
+//
+// An account that signs in with a Nexara password proves it, under the budget
+// change-password counts in (proveCurrentPassword): 403 for a wrong one, 429 while
+// the account is locked out of both routes, 503 when the attempt cannot be counted.
+// An empty password is no attempt at all and counts nothing.
+//
+// An account that signs in through LDAP or single sign-on has no Nexara password —
+// its password_hash is empty — so it proves a recent sign-in instead: the session
+// this request came with began within totpFreshSignIn (its created_at is the
+// sign-in; a refresh rotates the token and keeps it). A token stolen from an older
+// session cannot begin a setup; signing in again, through the directory or the
+// identity provider, is the proof. A password it sends is not looked at. An LDAP
+// account's password could be proved with a directory bind, as its sign-in is; the
+// recent sign-in is asked instead because it serves OIDC accounts too, which have
+// no password anywhere, and keeps a guesser's attempts off the directory, whose own
+// lockout they would spend. Its cost: a token stolen within the window can still
+// begin a setup.
+func (h *TOTPHandler) confirmItIsTheOwner(c fiber.Ctx, user db.User, password string) error {
+	if user.AuthSource == "local" {
+		if password == "" {
+			return fiber.NewError(fiber.StatusBadRequest, totpPasswordRequiredMessage)
+		}
+		if h.proveCurrentPassword == nil {
+			slog.Error("two-factor setup: no current-password check is wired, so no local account can begin a setup", "user_id", user.ID)
+			return fiber.NewError(fiber.StatusInternalServerError, totpSetupFailedMessage)
+		}
+		return h.proveCurrentPassword(c, user.ID, password)
+	}
+
+	sessionID, _ := c.Locals(LocalsSessionID).(uuid.UUID)
+	if sessionID == uuid.Nil {
+		return fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), authDBTimeout)
+	session, err := h.queries.GetSessionByID(ctx, sessionID)
+	cancel()
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
+	case err != nil:
+		return totpSetupNotChecked("read the session", user.ID, err)
+	case session.UserID != user.ID:
+		return fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
+	case time.Since(session.CreatedAt) > totpFreshSignIn:
+		slog.Info("two-factor setup: refused, as the sign-in is too old for an account with no Nexara password",
+			"user_id", user.ID, "auth_source", user.AuthSource, "session_id", sessionID)
+		return fiber.NewError(fiber.StatusForbidden, totpSignInAgainMessage)
+	}
+	return nil
 }
 
 // ConfirmSetup handles POST /api/v1/auth/totp/setup/verify — confirms TOTP enrollment.

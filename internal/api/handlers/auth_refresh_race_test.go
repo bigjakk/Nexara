@@ -187,6 +187,13 @@ func (s *raceStore) doQueryRow(name string, args []any, _ func(func())) pgx.Row 
 			return authFakeRow{err: pgx.ErrNoRows}
 		}
 		return authFakeRow{value: s.user}
+	case "GetUserTOTPSecret":
+		return authFakeRow{value: db.GetUserTOTPSecretRow{ID: s.user.ID, TotpSecret: s.user.TotpSecret}}
+	case "GetSessionByID":
+		if s.deleted || args[0] != s.session.ID {
+			return authFakeRow{err: pgx.ErrNoRows}
+		}
+		return authFakeRow{value: s.session}
 	case "GetPasswordHashForSettle":
 		// The locking read that settles a COMMIT of unknown outcome. There are no row locks
 		// to wait on here (internal/db pins that the real one waits for the transaction the
@@ -381,7 +388,8 @@ func newAuthRaceAppWith(t *testing.T, tweak func(*raceStore), opts raceOptions) 
 	}
 	app.Post("/auth/refresh", observe, withRequestParams(t, authRefreshMirror(), nil, handler.Refresh))
 	// authOptional (Logout) and authRequired (the self-service routes) set user_id in
-	// production; the header stands in for both.
+	// production; the header stands in for both, and X-Test-Session for the session the
+	// caller's access token belongs to.
 	actingUser := func(c fiber.Ctx) error {
 		if v := c.Get("X-Test-Acting-User"); v != "" {
 			id, err := uuid.Parse(v)
@@ -389,6 +397,13 @@ func newAuthRaceAppWith(t *testing.T, tweak func(*raceStore), opts raceOptions) 
 				return fiber.NewError(fiber.StatusBadRequest, "bad X-Test-Acting-User")
 			}
 			c.Locals("user_id", id)
+		}
+		if v := c.Get("X-Test-Session"); v != "" {
+			id, err := uuid.Parse(v)
+			if err != nil {
+				return fiber.NewError(fiber.StatusBadRequest, "bad X-Test-Session")
+			}
+			c.Locals(LocalsSessionID, id)
 		}
 		return c.Next()
 	}
@@ -398,6 +413,13 @@ func newAuthRaceAppWith(t *testing.T, tweak func(*raceStore), opts raceOptions) 
 		"old_password": {Type: apischema.String},
 		"new_password": {Type: apischema.String},
 	}, nil, handler.ChangePassword))
+	// The two-factor setup, wired the way wireAuthCompositions wires it: its check of the
+	// current password is this handler's.
+	totp := &TOTPHandler{queries: queries, totpService: auth.NewTOTPService(totpTestKey), rdb: rdb}
+	totp.SetCurrentPasswordCheck(handler.ProveCurrentPassword)
+	app.Post("/auth/totp/setup", observe, actingUser, withRequestParams(t, apischema.Properties{
+		"current_password": {Type: apischema.String, Optional: true},
+	}, nil, totp.BeginSetup))
 
 	a.app = app
 	if !opts.concurrent {

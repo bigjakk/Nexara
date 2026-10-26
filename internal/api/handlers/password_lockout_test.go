@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -635,8 +636,8 @@ func TestChangePassword_TheLockoutAuditRowSaysNothingSecret(t *testing.T) {
 	if err := json.Unmarshal([]byte(rows[0]), &details); err != nil {
 		t.Fatalf("the details are not JSON: %v: %s", err, rows[0])
 	}
-	if len(details) != 3 {
-		t.Errorf("details = %v, want exactly ip, failed_attempts and lockout_seconds", details)
+	if len(details) != 4 || details["route"] != "change password" {
+		t.Errorf("details = %v, want exactly ip, failed_attempts, lockout_seconds and the route that armed it", details)
 	}
 	if ip, _ := details["ip"].(string); ip == "" {
 		t.Errorf("details = %v, want the client's address", details)
@@ -772,11 +773,11 @@ func (f faultyLockout) clear(ctx context.Context, id uuid.UUID) error {
 	return f.passwordLockoutStore.clear(ctx, id)
 }
 
-// TestChangePassword_TheLockoutIsPerAccountAndOnlyForThisRoute: one account's lock
-// is its own, and it is a lock on this route alone. The other account is
+// TestChangePassword_TheLockoutIsPerAccountAndApartFromTheLoginLockout: one account's
+// lock is its own, and a lock on the password routes alone. The other account is
 // counted from one, and nothing the lockout writes is anything the TOTP lockout
 // — which login's second factor reads — looks at.
-func TestChangePassword_TheLockoutIsPerAccountAndOnlyForThisRoute(t *testing.T) {
+func TestChangePassword_TheLockoutIsPerAccountAndApartFromTheLoginLockout(t *testing.T) {
 	a, _ := lockoutApp(t, "redis", raceOptions{})
 	locked := a.store.user.ID
 	a.lockoutArm(t)
@@ -824,6 +825,81 @@ func TestChangePassword_ADeactivatedAccountIsRefusedBeforeAnAttemptIsCounted(t *
 		if strings.HasPrefix(key, "pwchange:") {
 			t.Errorf("Redis holds %q: a refused deactivated account must not count an attempt", key)
 		}
+	}
+}
+
+// TestTOTPSetup_ProvesTheCurrentPasswordInChangePasswordsBudget: beginning a two-factor
+// setup asks for the current password — a stolen access token alone would otherwise enrol
+// its own authenticator and lock the owner out — in the budget change-password counts in,
+// one per account across both routes. A right password there gives back only its own
+// attempt (the password does not change, so the guesses before it still count), and the
+// lock the next wrong one arms covers both routes.
+func TestTOTPSetup_ProvesTheCurrentPasswordInChangePasswordsBudget(t *testing.T) {
+	t.Parallel()
+	a, _ := lockoutApp(t, "redis", raceOptions{})
+	setup := func(password string) (int, bool) {
+		body := `{}`
+		if password != "" {
+			body = `{"current_password":"` + password + `"}`
+		}
+		resp, _ := a.postAs(t, "/auth/totp/setup", body, 10*time.Second)
+		return resp.StatusCode, a.redis.Exists(totpSetupKey(a.store.user.ID))
+	}
+
+	if status, stored := setup(""); status != http.StatusBadRequest || stored {
+		t.Fatalf("no password = %d (secret stored: %v), want 400 and nothing stored", status, stored)
+	}
+	a.lockoutSpend(t, passwordLockoutThreshold-2)
+	if status, stored := setup(racePassword + "-wrong"); status != http.StatusForbidden || stored {
+		t.Fatalf("a wrong password = %d (secret stored: %v), want 403 and nothing stored", status, stored)
+	}
+	if status, stored := setup(racePassword); status != http.StatusOK || !stored {
+		t.Fatalf("the right password = %d (secret stored: %v), want 200 and the secret stored", status, stored)
+	}
+	if status, _ := setup(racePassword + "-wrong"); status != http.StatusTooManyRequests {
+		t.Fatalf("the %dth wrong password = %d, want the 429 that locks: one budget for both routes, and a right "+
+			"password gives back only its own attempt", passwordLockoutThreshold, status)
+	}
+	if status, body, _ := a.change(t, changeBody); status != http.StatusTooManyRequests {
+		t.Errorf("changing the password with the right one = %d (%v), want 429: the lock covers both routes", status, body)
+	}
+	if got := a.store.auditActions(); !slices.Equal(got, []string{"password_change_locked"}) {
+		t.Errorf("audit actions = %v, want the one row of the lockout", got)
+	}
+}
+
+// TestTOTPSetup_AnAccountWithNoNexaraPasswordNeedsARecentSignIn: an LDAP or single sign-on
+// account has no Nexara password to prove (its hash is empty), so beginning a setup asks
+// instead that the session it came with began within totpFreshSignIn. A password it sends
+// is not looked at, and counts nothing.
+func TestTOTPSetup_AnAccountWithNoNexaraPasswordNeedsARecentSignIn(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		signedIn time.Duration // how long ago the session began
+		status   int
+	}{
+		{"a sign-in a minute ago", time.Minute, http.StatusOK},
+		{"a sign-in an hour ago", time.Hour, http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a, _ := lockoutAppWith(t, "redis", func(s *raceStore) {
+				s.user.AuthSource, s.user.PasswordHash = "ldap", ""
+				s.session.CreatedAt = time.Now().Add(-tc.signedIn)
+			}, raceOptions{})
+
+			resp, _ := a.postTimed(t, "/auth/totp/setup", `{"current_password":"anything"}`, "", map[string]string{
+				"X-Test-Acting-User": a.store.user.ID.String(), "X-Test-Session": a.store.session.ID.String(),
+			}, 10*time.Second)
+
+			if resp.StatusCode != tc.status {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tc.status)
+			}
+			if a.redis.Exists(passwordFailKey(a.store.user.ID)) {
+				t.Error("the password it sent was counted: an account with no Nexara password has none to guess")
+			}
+		})
 	}
 }
 
@@ -1143,21 +1219,28 @@ func TestPasswordLockoutHealsALockThatHasNoExpiry(t *testing.T) {
 
 // TestPasswordLockoutFiguresAreTheDocumentedOnes keeps the rule's three figures —
 // how many wrong passwords, within how long, locked for how long — the same in the
-// code and in the two places that tell a client: the API reference and the route's
-// declaration. The figures follow the constants, so changing one fails here until
-// the prose does.
+// code and in the places that tell a client: the API reference and the declarations
+// of the two routes that share the lock. The figures follow the constants, so
+// changing one fails here until the prose does.
 func TestPasswordLockoutFiguresAreTheDocumentedOnes(t *testing.T) {
 	words := map[int]string{3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten"}
 	word, ok := words[passwordLockoutThreshold]
 	if !ok {
 		t.Fatalf("passwordLockoutThreshold is %d: add its word to this test, which spells the figure as the prose does", passwordLockoutThreshold)
 	}
-	want := fmt.Sprintf("%s wrong ones within %d minutes lock the account out of this route for %d minutes",
+	want := fmt.Sprintf("%s wrong ones within %d minutes, on either route, lock the account out of both for %d minutes",
 		word, int(passwordLockoutWindow/time.Minute), int(passwordLockoutDuration/time.Minute))
 
-	for _, file := range []string{"docs/api-reference.md", "internal/api/registry_auth.go"} {
+	for _, file := range []string{"docs/api-reference.md", "internal/api/registry_auth.go", "internal/api/registry_totp.go"} {
 		if !strings.Contains(strings.ToLower(authProse(t, file)), want) {
 			t.Errorf("%s does not say %q: the prose and passwordLockoutThreshold, passwordLockoutWindow and passwordLockoutDuration have drifted", file, want)
+		}
+	}
+	// And the 2FA setup's window for an account with no Nexara password.
+	fresh := fmt.Sprintf("signed in within the last %d minutes", int(totpFreshSignIn/time.Minute))
+	for _, file := range []string{"docs/api-reference.md", "internal/api/registry_totp.go"} {
+		if !strings.Contains(authProse(t, file), fresh) {
+			t.Errorf("%s does not say %q: the prose and totpFreshSignIn have drifted", file, fresh)
 		}
 	}
 }
