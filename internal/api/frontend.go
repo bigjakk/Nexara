@@ -36,6 +36,20 @@ func (s *Server) RegisterFrontend(distFS fs.FS) {
 	// the fallback yields to Fiber's native 404 rather than serving an empty body.
 	indexHTML, indexErr := fs.ReadFile(distFS, "index.html")
 
+	// The embedded FS has zero modtimes, which the static middleware still sends
+	// as `Last-Modified: Mon, 01 Jan 0001` and answers ANY If-Modified-Since with
+	// 304, since no date is earlier. Every unhashed file would then stay
+	// "unchanged" across upgrades: a cached shell kept loading the previous
+	// release's bundle against the new API. So nothing but /assets/* is ever
+	// answered conditionally (applyFrontendCacheHeaders drops the date from the
+	// answer too).
+	s.app.Use("/", func(c fiber.Ctx) error {
+		if !isHashedAsset(c) {
+			c.Request().Header.Del(fiber.HeaderIfModifiedSince)
+		}
+		return c.Next()
+	})
+
 	s.app.Use("/", static.New("", static.Config{
 		FS:     distFS,
 		Browse: false,
@@ -44,15 +58,14 @@ func (s *Server) RegisterFrontend(distFS fs.FS) {
 		Next: func(c fiber.Ctx) bool {
 			return strings.HasPrefix(c.Path(), "/api/")
 		},
-		// ModifyResponse runs after a real file is found and served. The
-		// embedded FS has zero modtimes, so responses carry no validators (no
-		// Last-Modified/ETag) — without explicit headers, browsers fall back to
-		// heuristics and can pin a stale shell that references asset hashes
-		// deleted by the next upgrade (blank page on mobile until the user
-		// clears site data).
+		// ModifyResponse runs after a real file is found and served. Without
+		// explicit headers, browsers fall back to heuristics and can pin a stale
+		// shell that references asset hashes deleted by the next upgrade (blank
+		// page on mobile until the user clears site data).
 		//   - /assets/* are content-hashed by Vite → cache forever.
 		//   - Everything else (shell, theme-init.js, favicon) is re-fetched
-		//     every load so a new release takes effect immediately.
+		//     every load so a new release takes effect immediately, with no
+		//     Last-Modified to revalidate against (see the middleware above).
 		ModifyResponse: func(c fiber.Ctx) error {
 			applyFrontendCacheHeaders(c)
 			return nil
@@ -74,20 +87,32 @@ func (s *Server) RegisterFrontend(distFS fs.FS) {
 	}))
 }
 
+// isHashedAsset reports whether this request is for a file under Vite's
+// content-hashed /assets/. It reads the once-decoded, normalised path fasthttp
+// hands the file server, not the raw one c.Path() returns, so
+// `/assets/..%2findex.html` is the shell. The static middleware decodes again
+// until nothing changes and turns "\" into "/", and Vite's names hold neither,
+// so a path that still has a "%" or a "\" is never treated as an asset.
+func isHashedAsset(c fiber.Ctx) bool {
+	p := string(c.RequestCtx().Path())
+	return strings.HasPrefix(p, "/assets/") && !strings.ContainsAny(p, `%\`)
+}
+
 // applyFrontendCacheHeaders sets cache-control plus a couple of content-type
 // fixups on successfully-served static frontend assets. Split out so the
 // found-file path (static's ModifyResponse hook) stays readable.
 func applyFrontendCacheHeaders(c fiber.Ctx) {
 	contentType := string(c.Response().Header.ContentType())
-	if strings.HasPrefix(c.Path(), "/assets/") && !strings.HasPrefix(contentType, "text/html") {
+	if isHashedAsset(c) && !strings.HasPrefix(contentType, "text/html") {
 		c.Set(fiber.HeaderCacheControl, "public, max-age=31536000, immutable")
 	} else {
 		c.Set(fiber.HeaderCacheControl, "no-cache")
+		c.Response().Header.Del(fiber.HeaderLastModified)
 	}
 	// The Go mime table doesn't know .webmanifest, so the PWA manifest falls
 	// back to application/octet-stream — which browsers refuse under
 	// X-Content-Type-Options: nosniff.
-	if strings.HasSuffix(c.Path(), ".webmanifest") {
+	if strings.HasSuffix(string(c.RequestCtx().Path()), ".webmanifest") {
 		c.Set(fiber.HeaderContentType, "application/manifest+json")
 	}
 }

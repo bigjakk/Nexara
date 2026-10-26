@@ -149,6 +149,50 @@ func TestRegisterFrontend_CacheHeaders(t *testing.T) {
 	}
 }
 
+// TestRegisterFrontend_StaleRevalidationGetsTheNewShell: the embedded files'
+// zero modtimes went out as `Last-Modified: Mon, 01 Jan 0001`, and the static
+// middleware answered any If-Modified-Since with 304, since no date is earlier.
+// A browser that cached the shell kept it forever, so after an upgrade it ran the
+// old bundle against the new API. Hashed assets keep their 304: they never change.
+func TestRegisterFrontend_StaleRevalidationGetsTheNewShell(t *testing.T) {
+	s := newTestServer(t)
+	s.RegisterFrontend(spaTestFS())
+	t.Parallel() // after New, which writes a package-level cookie mode
+
+	cases := []struct {
+		path string
+		want int
+	}{
+		{"/", http.StatusOK},
+		{"/manifest.webmanifest", http.StatusOK}, // unhashed, like theme-init.js
+		{"/assets/app-123.js", http.StatusNotModified},
+		// The shell under asset-looking spellings: the raw path vs the one the
+		// file server resolves, a double encoding it decodes again, and a "\"
+		// it turns into "/".
+		{"/assets/../index.html", http.StatusOK},
+		{"/assets/..%252findex.html", http.StatusOK},
+		{"/assets/x%5c..%5c..%5cindex.html", http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Header.Set("If-Modified-Since", "Mon, 01 Jan 0001 00:00:00 GMT")
+			resp, err := s.App().Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tc.want {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tc.want)
+			}
+			if tc.want == http.StatusOK && resp.Header.Get("Last-Modified") != "" {
+				t.Errorf("Last-Modified = %q, want none: it is the date browsers revalidate with", resp.Header.Get("Last-Modified"))
+			}
+		})
+	}
+}
+
 // TestRegisterFrontend_ManifestContentType pins the PWA manifest's MIME type:
 // Go's mime table doesn't know .webmanifest, and the octet-stream fallback is
 // refused by browsers under X-Content-Type-Options: nosniff.
