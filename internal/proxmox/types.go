@@ -382,6 +382,36 @@ type ClusterResource struct {
 	PluginType string  `json:"plugintype,omitempty"`
 }
 
+// qemuRunStates is QEMU's RunState enum (qapi/run-state.json) without "running"
+// and "paused", which GuestStatus handles itself.
+var qemuRunStates = map[string]bool{
+	"debug": true, "inmigrate": true, "internal-error": true, "io-error": true,
+	"postmigrate": true, "prelaunch": true, "finish-migrate": true, "restore-vm": true,
+	"save-vm": true, "shutdown": true, "suspended": true, "watchdog": true,
+	"guest-panicked": true, "colo": true,
+}
+
+// GuestStatus is the status the inventory stores for a /cluster/resources
+// guest: what EffectiveStatus stores for the same VM. pvestatd reports a running
+// QEMU guest's qmpstatus there (`$d->{qmpstatus} || $d->{status}`), where the
+// node's list reports "running" plus the qmpstatus. So "paused" is stored as
+// "suspended", and any other run state (a backup of a stopped VM runs it in
+// "prelaunch") as "running". The fast sync and the slow pass write the same
+// row: if they disagreed, the row would flip on every pass and publish a status
+// change each time.
+func (r ClusterResource) GuestStatus() string {
+	if r.Type != "qemu" {
+		return r.Status
+	}
+	switch {
+	case r.Status == "paused":
+		return "suspended"
+	case qemuRunStates[r.Status]:
+		return "running"
+	}
+	return r.Status
+}
+
 // GuestCPU is a guest's CPU: the list's reading, or resources (pvestatd's
 // /cluster/resources figure) when a running guest lists exactly 0, as every
 // running guest does from a fresh pveproxy worker with no earlier reading in

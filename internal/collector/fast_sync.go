@@ -152,8 +152,9 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 		}
 		old, exists := known[vmid]
 		isTemplate := r.Template > 0
+		status := r.GuestStatus()
 		if exists &&
-			old.Status == r.Status &&
+			old.Status == status &&
 			old.NodeID == nodeID &&
 			old.Name == r.Name &&
 			old.Template == isTemplate &&
@@ -168,7 +169,7 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 			Vmid:      vmid,
 			Name:      r.Name,
 			Type:      r.Type,
-			Status:    r.Status,
+			Status:    status,
 			CpuCount:  safeconv.Int32(r.MaxCPU),
 			MemTotal:  r.MaxMem,
 			DiskTotal: r.MaxDisk,
@@ -183,11 +184,11 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 			continue
 		}
 		inventoryChanged = true
-		if exists && old.Status != r.Status && s.eventPub != nil {
+		if exists && old.Status != status && s.eventPub != nil {
 			s.logger.Info("VM status changed (fast sync)",
 				"vmid", vmid,
 				"old_status", old.Status,
-				"new_status", r.Status,
+				"new_status", status,
 				"cluster_id", cluster.ID,
 			)
 			s.eventPub.ClusterEvent(ctx, cluster.ID.String(),

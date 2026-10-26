@@ -91,6 +91,45 @@ func TestSyncClusterResources(t *testing.T) {
 		}
 	})
 
+	// /cluster/resources reads a running VM's QEMU run state; the slow pass
+	// stores "suspended" for paused and "running" for every other state. Storing
+	// the raw value flipped the row on every tick.
+	t.Run("a QEMU run state is stored as the slow pass stores it", func(t *testing.T) {
+		for _, tc := range []struct{ listed, stored, wantWrite string }{
+			{"paused", "running", "suspended"},
+			{"paused", "suspended", ""}, // already agrees: no write, no event
+			{"prelaunch", "running", ""},
+		} {
+			guest := guestRunning
+			guest.Status = tc.listed
+			srv := newResourceServer(t, []proxmox.ClusterResource{nodeOnline, guest})
+			mq := newMockQueries()
+			pub := &mockEventPub{}
+			s := newTestSyncer(mq)
+			s.SetEventPublisher(pub)
+			cluster := makeCluster(t, srv.URL)
+			seedFastSync(mq, cluster, "online", tc.stored, "web-server")
+
+			if err := s.syncClusterResources(context.Background(), cluster); err != nil {
+				t.Fatalf("%s over %s: syncClusterResources: %v", tc.listed, tc.stored, err)
+			}
+			srv.Close()
+			wantUpserts := 0
+			if tc.wantWrite != "" {
+				wantUpserts = 1
+			}
+			if len(mq.upsertVMCalls) != wantUpserts {
+				t.Fatalf("%s over %s: %d upserts, want %d", tc.listed, tc.stored, len(mq.upsertVMCalls), wantUpserts)
+			}
+			if wantUpserts == 1 && mq.upsertVMCalls[0].Status != tc.wantWrite {
+				t.Errorf("%s over %s: wrote %q, want %q", tc.listed, tc.stored, mq.upsertVMCalls[0].Status, tc.wantWrite)
+			}
+			if got := pub.countKind(events.KindVMStateChange); got != wantUpserts {
+				t.Errorf("%s over %s: vm_state_change = %d, want %d", tc.listed, tc.stored, got, wantUpserts)
+			}
+		}
+	})
+
 	t.Run("guest absent from cluster config is deleted immediately", func(t *testing.T) {
 		srv := newResourceServer(t, []proxmox.ClusterResource{nodeOnline})
 		defer srv.Close()
