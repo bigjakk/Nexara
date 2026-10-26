@@ -175,6 +175,15 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 			}
 		}
 		return pgconn.NewCommandTag("DELETE 0"), nil
+	case "RevokeSession":
+		id := args[0].(uuid.UUID)
+		for i := range s.sessions {
+			if s.sessions[i].ID == id && !s.sessions[i].IsRevoked {
+				remember(func() { s.sessions[i].IsRevoked = false })
+				s.sessions[i].IsRevoked = true
+			}
+		}
+		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "InsertAuditLog":
 		return s.insertAudit(args)
 	default:
@@ -279,6 +288,14 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		}
 		s.sessions = append(s.sessions, sess)
 		return authFakeRow{value: sess}
+	case "GetSessionByTokenHash":
+		// token_hash: the SQL's predicate, the session's current hash and not revoked.
+		for _, sess := range s.sessions {
+			if sess.TokenHash == args[0].(string) && !sess.IsRevoked {
+				return authFakeRow{value: sess}
+			}
+		}
+		return authFakeRow{err: pgx.ErrNoRows}
 	case "GetNodeByClusterAndName":
 		// cluster_id, name: every node is a member; no test here is about membership.
 		return authFakeRow{value: db.Node{ID: uuid.New(), ClusterID: args[0].(uuid.UUID), Name: args[1].(string)}}

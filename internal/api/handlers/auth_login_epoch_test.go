@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,7 +77,8 @@ func TestLogin_TheSessionIsCreatedAgainstTheEpochThePasswordCheckRead(t *testing
 // sign-out of all devices, an administrator's deactivation). Every refusal row answers 401
 // telling the user to sign in again and issues NOTHING, and the insert must have been ATTEMPTED
 // against the epoch the check read: the refusal is the insert's, not a pre-check on a re-read
-// row, which would leave a narrower window open.
+// row, which would leave a narrower window open. Nor does a refused sign-in end the session
+// of the refresh cookie it would have replaced.
 func TestLogin_ARevokeAllAfterTheCredentialCheckRefusesTheSession(t *testing.T) {
 	logs := captureProductionLog(t)
 
@@ -110,20 +113,28 @@ func TestLogin_ARevokeAllAfterTheCredentialCheckRefusesTheSession(t *testing.T) 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			user := epochUser(t, epochLoginEmail, 4)
-			store := newEpochStore(user)
+			other := epochUser(t, epochAdminEmail, 0)
+			store := newEpochStore(user, other)
+			// The browser holds another account's cookie, which the sign-in would replace.
+			store.sessions = append(store.sessions, db.Session{ID: uuid.New(), UserID: other.ID,
+				TokenHash: auth.HashToken("replaced-refresh-token"), ExpiresAt: time.Now().Add(time.Hour)})
 			if tt.land != nil {
 				store.after["GetUserByEmail"] = func(s *epochStore) { tt.land(s, user.ID) }
 			}
 			a := newEpochApp(t, store, epochOptions{})
 
-			resp := a.post(t, "/auth/login", epochLoginBody(epochLoginEmail))
+			resp := a.send(t, http.MethodPost, "/auth/login", epochLoginBody(epochLoginEmail),
+				map[string]string{"Cookie": RefreshCookieName + "=replaced-refresh-token"}, 20*time.Second)
 			body := authRequireStatus(t, resp, tt.want)
+			if ended := store.sessions[0].IsRevoked; ended != (tt.want == http.StatusOK) {
+				t.Errorf("the replaced cookie's session ended: %v, want it ended only by a sign-in that went through", ended)
+			}
 			if tt.want == http.StatusOK {
 				if live := store.liveSessionsOf(user.ID); len(live) != 1 {
 					t.Errorf("%d live sessions for the control, want 1", len(live))
 				}
-				if got := store.auditActions(); !reflect.DeepEqual(got, []string{"login"}) {
-					t.Errorf("audit actions = %v, want [login]", got)
+				if got := store.auditActions(); !reflect.DeepEqual(got, []string{"login", "session_replaced"}) {
+					t.Errorf("audit actions = %v, want [login session_replaced]", got)
 				}
 				return
 			}
@@ -578,4 +589,52 @@ func TestOIDCExchange_ADatabaseFailureOfTheInsertIsNotARefusal(t *testing.T) {
 	body := authRequireStatus(t, resp, http.StatusServiceUnavailable)
 	epochRequireNothingIssued(t, resp, body)
 	epochRequireNoLoginAudit(t, store)
+}
+
+// TestLogin_EndsTheSessionWhoseRefreshCookieItReplaces: a sign-in's cookie takes the place
+// of the browser's, whose session used to stay live until it expired, consoles and all. The
+// sign-in ends it, whoever's it is, and audits it; it leaves alone a jar whose cookie it
+// cannot tell (two refresh cookies), and a session it could not look up does not cost the
+// sign-in. That a refused sign-in ends nothing is TestLogin_ARevokeAllAfter…'s.
+func TestLogin_EndsTheSessionWhoseRefreshCookieItReplaces(t *testing.T) {
+	t.Parallel()
+	const oldToken = "replaced-refresh-token"
+	for _, tc := range []struct {
+		name        string
+		cookie      string
+		lookupFails bool
+		ended       bool
+	}{
+		{"another account's session", RefreshCookieName + "=" + oldToken, false, true},
+		{"a jar with two refresh cookies", RefreshCookieName + "=" + oldToken + "; " + RefreshCookieName + "=another-token", false, false},
+		{"a session that cannot be looked up", RefreshCookieName + "=" + oldToken, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			alice := epochUser(t, epochLoginEmail, 0)
+			bob := epochUser(t, epochAdminEmail, 0)
+			store := newEpochStore(alice, bob)
+			replaced := db.Session{ID: uuid.New(), UserID: bob.ID, TokenHash: auth.HashToken(oldToken), ExpiresAt: time.Now().Add(time.Hour)}
+			store.sessions = append(store.sessions, replaced)
+			if tc.lookupFails {
+				store.failOn["GetSessionByTokenHash"] = context.DeadlineExceeded
+			}
+			a := newEpochApp(t, store, epochOptions{})
+
+			resp := a.send(t, http.MethodPost, "/auth/login", epochLoginBody(alice.Email), map[string]string{"Cookie": tc.cookie}, 20*time.Second)
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("sign-in = %d, want 200", resp.StatusCode)
+			}
+			if ended := store.sessions[0].IsRevoked; ended != tc.ended {
+				t.Errorf("the replaced cookie's session ended: %v, want %v", ended, tc.ended)
+			}
+			if audited := slices.Contains(store.auditActions(), "session_replaced"); audited != tc.ended {
+				t.Errorf("session_replaced audited: %v, want %v", audited, tc.ended)
+			}
+			if store.sessions[len(store.sessions)-1].IsRevoked {
+				t.Error("the sign-in's own session was ended")
+			}
+		})
+	}
 }

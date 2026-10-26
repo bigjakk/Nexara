@@ -1096,6 +1096,10 @@ func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, epoch int64, auditA
 	perms := h.loadPerms(c, user.ID)
 
 	setRefreshCookie(c, refreshToken, h.jwtService.RefreshTokenTTL())
+	// That cookie takes the place of whatever refresh cookie the browser held, so the
+	// session the old one named is ended now rather than left live until it expires.
+	// Last, so that nothing after it can fail the sign-in it is a follow-up of.
+	h.endReplacedSession(c, user.ID, session.ID)
 
 	return c.JSON(authResponse{
 		User: authUserResponse{
@@ -1109,6 +1113,72 @@ func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, epoch int64, auditA
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})
+}
+
+// endReplacedSession ends the session the request's refresh cookie names, when it is
+// not kept — the one this sign-in has just created: the sign-in's Set-Cookie takes that
+// cookie's place in the browser, so the session can no longer be refreshed from there,
+// and whoever holds it — another account signed in from another tab of the same
+// browser, or this account's own earlier sign-in — would otherwise keep it, its access
+// tokens and the consoles held to it (internal/ws/console_credential.go) live until it
+// expires, up to the refresh token's lifetime. The SPA's reset closes what it can see;
+// this is the server's half.
+//
+// It is a follow-up of a sign-in that has already been decided, so it is best effort,
+// under a deadline of its own: a session it cannot look up or revoke is logged and left
+// as it was, and the sign-in goes on. Only the cookie's CURRENT token is looked at
+// (ValidateRefreshToken), never one a refresh rotated away: when a refresh in another
+// tab has just rotated it, the browser may yet keep that refresh's cookie rather than
+// this one, and ending its session then would sign the browser out of both — so that
+// session is left as it was too. A jar with more than one refresh cookie is left
+// alone: which of them the new cookie replaces is the browser's to decide, and ending
+// the wrong session would strand a cookie that stays.
+//
+// The session row is revoked in PostgreSQL, which is what ends it, and audited as
+// session_replaced under the session's owner, like a sign-out; its details say from
+// where, and whether it was the same account. Its Redis row, a cache nothing reads, is
+// deleted off the answer's path: the client's read timeout is not the request's
+// (SessionManager.mirrorSession), and a Redis that does not answer must not delay the
+// sign-in.
+func (h *AuthHandler) endReplacedSession(c fiber.Ctx, signedIn, keep uuid.UUID) {
+	token := readRefreshTokenFromCookie(c)
+	if token == "" || refreshTokenTooLong(token) || refreshCookieCount(c) != 1 {
+		return
+	}
+	ctx, cancel := h.followUp(c.Context())
+	defer cancel()
+	replaced, err := h.sessionManager.ValidateRefreshToken(ctx, token)
+	switch {
+	case errors.Is(err, auth.ErrInvalidToken):
+		return // no live session holds it: nothing to end
+	case err != nil:
+		slog.Warn("sign-in: could not look up the session of the refresh cookie it replaced; that session stays live until it ends",
+			"user_id", signedIn, "new_session_id", keep, "error", err)
+		return
+	case replaced.ID == keep:
+		return
+	}
+	if err := h.queries.RevokeSession(ctx, replaced.ID); err != nil {
+		slog.Warn("sign-in: could not end the session of the refresh cookie it replaced; that session stays live until it ends",
+			"user_id", signedIn, "new_session_id", keep, "replaced_session_id", replaced.ID, "replaced_user_id", replaced.UserID, "error", err)
+		return
+	}
+	slog.Info("sign-in: ended the session of the refresh cookie it replaced",
+		"user_id", signedIn, "new_session_id", keep, "replaced_session_id", replaced.ID, "replaced_user_id", replaced.UserID)
+	details, _ := json.Marshal(map[string]any{"ip": c.IP(), "same_account": replaced.UserID == signedIn})
+	h.withFollowUp(c, func() {
+		AuditLogAs(c, h.queries, h.eventPub, replaced.UserID, pgtype.UUID{}, "auth", replaced.UserID.String(), "session_replaced", details)
+	})
+	go func() { //nolint:gosec // G118: intentionally detached — a cache row's delete must not hold the sign-in
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("sign-in: deleting the Redis row of the session it replaced panicked", "replaced_session_id", replaced.ID, "panic", r)
+			}
+		}()
+		fctx, fcancel := h.followUp(context.Background())
+		defer fcancel()
+		h.sessionManager.ForgetSessions(fctx, []uuid.UUID{replaced.ID})
+	}()
 }
 
 // IssueTokens is the exported version of issueTokens for cross-handler use.

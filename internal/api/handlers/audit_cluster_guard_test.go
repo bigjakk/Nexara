@@ -41,6 +41,9 @@ var auditClusterExempt = map[string]string{
 
 	"auth_sessions.go.RevokeSessionByID": "sessions belong to a user account, not a cluster; same scope as Logout/LogoutAll",
 
+	// The session whose refresh cookie a sign-in replaced, ended by that sign-in.
+	"auth.go.endReplacedSession": "session teardown; no cluster in scope",
+
 	// The lockout of one user's current-password checks (change-password, the 2FA setup).
 	"password_lockout.go.refuseWrongPassword": "credential lockout for one user; install-global",
 

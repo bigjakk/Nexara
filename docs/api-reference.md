@@ -62,6 +62,18 @@ https://nexara.example.com/api/v1
    always an empty string (retained only so the response shape stays stable).
    The same applies to the first registration.
 
+   The cookie takes the place of the one the browser held, and a sign-in — by
+   password, through the directory, with the second factor or the SSO exchange —
+   ends the session that one belonged to: an earlier sign-in of the same account,
+   or another account signed in from another tab of the browser. Its access tokens
+   stop being accepted where a live session is needed, its consoles close, and the
+   audit log records `session_replaced` under its owner. It is ended once the
+   sign-in has gone through, so a sign-in whose answer is lost on the way still
+   ends it. No session is ended when
+   the request carries more than one refresh cookie, when the cookie's token was
+   replaced a moment before by a refresh in another tab, or when the session
+   cannot be looked up or ended; none of these costs the sign-in.
+
    A session is created only if the account's sessions have not been ended since
    the credential was checked. If a password change, *Sign Out All Devices*
    (`POST /auth/logout-all`) or an administrator deactivating the account lands
