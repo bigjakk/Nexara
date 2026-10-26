@@ -14,6 +14,8 @@ import {
   buildBootOrder,
   parseMachine,
   buildMachine,
+  parseStartup,
+  buildStartup,
   parseDisk,
   parseDriveMedia,
   buildCDROM,
@@ -550,6 +552,56 @@ describe("parseBootOrder / buildBootOrder", () => {
 
   it("builds empty", () => {
     expect(buildBootOrder([])).toBe("");
+  });
+});
+
+describe("parseStartup / buildStartup", () => {
+  // pve-startup-order takes the order bare too, and parts in any order.
+  it.each([
+    ["order=1,up=30,down=60", { order: "1", up: "30", down: "60" }],
+    ["1,up=30", { order: "1", up: "30", down: "" }],
+    ["up=30,order=2", { order: "2", up: "30", down: "" }],
+    ["", { order: "", up: "", down: "" }],
+  ])("reads %j", (raw, want) => {
+    expect(parseStartup(raw)).toEqual(want);
+  });
+
+  it.each(["", "1,up=30", "down=5,order=2,up=30"])(
+    "rebuilds an untouched startup %j to exactly what is stored",
+    (raw) => {
+      expect(buildStartup(parseStartup(raw), raw)).toBe(raw);
+    },
+  );
+
+  it.each([
+    [
+      "keeps a bare order when a delay changes",
+      "1,up=30",
+      { up: "45" },
+      "1,up=45",
+    ],
+    [
+      "keeps the bare form of a changed order",
+      "1,up=30",
+      { order: "4" },
+      "4,up=30",
+    ],
+    [
+      "keeps the order= form where it stands",
+      "up=30,order=2",
+      { order: "3" },
+      "up=30,order=3",
+    ],
+    ["puts an order added first", "up=30", { order: "1" }, "order=1,up=30"],
+    ["drops a delay cleared", "1,up=30", { up: "" }, "1"],
+    [
+      "writes a new startup as it always has",
+      "",
+      { order: "1", up: "30", down: "60" },
+      "order=1,up=30,down=60",
+    ],
+  ])("%s", (_name, raw, edit, want) => {
+    expect(buildStartup({ ...parseStartup(raw), ...edit }, raw)).toBe(want);
   });
 });
 

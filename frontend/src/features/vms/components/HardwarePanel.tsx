@@ -1165,14 +1165,12 @@ export function HardwarePanel({
     }
     // Boot order: see bootToSend.
     if (bootToSend !== null) fields["boot"] = bootToSend;
-    // Startup order
-    const origStartup = parseStartup(str(original["startup"] ?? ""));
-    const newStartup = buildStartup({
-      order: startupOrder,
-      up: startupUp,
-      down: startupDown,
-    });
-    const origStartupStr = buildStartup(origStartup);
+    // Startup order, rebuilt on the stored value: a bare order stays.
+    const origStartupStr = str(original["startup"] ?? "");
+    const newStartup = buildStartup(
+      { order: startupOrder, up: startupUp, down: startupDown },
+      origStartupStr,
+    );
     if (newStartup !== origStartupStr) {
       if (newStartup) {
         fields["startup"] = newStartup;
@@ -1484,13 +1482,12 @@ export function HardwarePanel({
     if (optionalScalars.some((f) => f.value !== f.was)) return true;
     if (optionalBooleans.some((b) => b.value !== b.was)) return true;
     if (bootToSend !== null) return true;
-    const origStartup = parseStartup(str(original["startup"] ?? ""));
+    const origStartup = str(original["startup"] ?? "");
     if (
-      buildStartup({
-        order: startupOrder,
-        up: startupUp,
-        down: startupDown,
-      }) !== buildStartup(origStartup)
+      buildStartup(
+        { order: startupOrder, up: startupUp, down: startupDown },
+        origStartup,
+      ) !== origStartup
     )
       return true;
     // Multi-NIC changes, compared as handleSave compares them

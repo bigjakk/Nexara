@@ -46,7 +46,12 @@ import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
 import { parseBwlimit } from "@/features/storage/lib/disk-move";
 import { useTaskLogStore } from "@/stores/task-log-store";
-import { parseKVString, buildKVString } from "../lib/vm-config-parsers";
+import {
+  parseKVString,
+  parseStartup,
+  buildStartup,
+  type ParsedStartup,
+} from "../lib/vm-config-parsers";
 import { parseCTNet, buildCTNet, emptyCTNet } from "../lib/ct-net";
 import type { CTNetEdit } from "../lib/ct-net";
 import { parseFeatures, buildFeatures } from "../lib/ct-features";
@@ -169,34 +174,6 @@ function parseMountPoint(raw: string): CTMountPoint {
   result.ro = kv.get("ro") === "1";
   result.replicate = kv.get("replicate") !== "0";
   return result;
-}
-
-// ---------------------------------------------------------------------------
-// Startup order parser/builder
-// ---------------------------------------------------------------------------
-
-interface StartupOrder {
-  order: string;
-  up: string;
-  down: string;
-}
-
-function parseStartupOrder(raw: string): StartupOrder {
-  const result: StartupOrder = { order: "", up: "", down: "" };
-  if (!raw) return result;
-  const kv = parseKVString(raw);
-  result.order = kv.get("order") ?? "";
-  result.up = kv.get("up") ?? "";
-  result.down = kv.get("down") ?? "";
-  return result;
-}
-
-function buildStartupOrder(s: StartupOrder): string {
-  const m = new Map<string, string>();
-  if (s.order) m.set("order", s.order);
-  if (s.up) m.set("up", s.up);
-  if (s.down) m.set("down", s.down);
-  return buildKVString(m);
 }
 
 // ---------------------------------------------------------------------------
@@ -879,7 +856,7 @@ export function ContainerResourcesPanel({
   const [onboot, setOnboot] = useState(false);
   const [protection, setProtection] = useState(false);
   const [cmode, setCmode] = useState("tty");
-  const [startup, setStartup] = useState<StartupOrder>({
+  const [startup, setStartup] = useState<ParsedStartup>({
     order: "",
     up: "",
     down: "",
@@ -998,7 +975,7 @@ export function ContainerResourcesPanel({
     setOnboot(num(config["onboot"]) === 1);
     setProtection(num(config["protection"]) === 1);
     setCmode(str(config["cmode"]) || "tty");
-    setStartup(parseStartupOrder(str(config["startup"])));
+    setStartup(parseStartup(str(config["startup"])));
     setFeatures(parseFeatures(str(config["features"])));
     setDescription(str(config["description"]));
     setTags(str(config["tags"]));
@@ -1054,7 +1031,9 @@ export function ContainerResourcesPanel({
     f["onboot"] = onboot ? "1" : "0";
     f["protection"] = protection ? "1" : "0";
     f["cmode"] = cmode;
-    f["startup"] = buildStartupOrder(startup);
+    // Rebuilt on the value it was read from, as features is: a bare order
+    // stays, and an untouched startup is the stored string.
+    f["startup"] = buildStartup(startup, origFields["startup"] ?? "");
     // Rebuilt on the value it was read from, so an untouched one is the
     // stored string, in its order, keys this form has no field for included.
     f["features"] = buildFeatures(features, origFields["features"] ?? "");
@@ -1094,13 +1073,15 @@ export function ContainerResourcesPanel({
   // Detect changes
   const changedFields = useMemo(() => {
     const diff: Record<string, string> = {};
+    const deletes: string[] = [];
     for (const [key, val] of Object.entries(currentFields)) {
-      if (val !== (origFields[key] ?? "")) {
-        diff[key] = val;
-      }
+      if (val === (origFields[key] ?? "")) continue;
+      // pve-startup-order refuses an empty value, and the whole write with
+      // it: a startup cleared is deleted.
+      if (key === "startup" && val === "") deletes.push(key);
+      else diff[key] = val;
     }
     // Handle deletions
-    const deletes: string[] = [];
     for (const key of deleteNics) {
       deletes.push(key);
     }

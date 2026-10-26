@@ -577,6 +577,20 @@ describe("HardwarePanel dirty check", () => {
     ]);
   });
 
+  // pve-startup-order takes the order bare; read as a key, it was dropped
+  // from any startup edit.
+  it("keeps a bare startup order when a delay is edited", async () => {
+    const save = await renderPanel(nicVM({ startup: "1,up=30" }));
+    expect(save).toBeDisabled();
+    expect(control(document.body, "Startup Order")).toHaveValue(1);
+
+    fill(control(document.body, "Up Delay (s)"), "45");
+
+    expect(await saveAndGetFields(save)).toEqual([
+      [CONFIG_URL, { fields: { startup: "1,up=45" } }],
+    ]);
+  });
+
   it("deletes vga when it is set back to the default", async () => {
     const save = await renderPanel(nicVM({ vga: "qxl" }));
     const vga = control(document.body, "VGA");

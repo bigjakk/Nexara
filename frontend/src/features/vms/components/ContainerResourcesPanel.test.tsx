@@ -147,6 +147,40 @@ describe("ContainerResourcesPanel change tracking", () => {
     });
   });
 
+  // pve-startup-order takes the order bare and refuses an empty value: a bare
+  // order read as a key opened the panel dirty and went from any Save, and a
+  // startup cleared was sent as "" and refused with the whole write.
+  it.each([
+    [
+      "keeps a bare startup order when a delay is edited",
+      "1,up=30",
+      "Up Delay (s)",
+      "45",
+      { startup: "1,up=45" },
+    ],
+    [
+      "deletes a startup cleared",
+      "1",
+      "Startup Order",
+      "",
+      { delete: "startup" },
+    ],
+  ])("%s", async (_name, stored, label, value, want) => {
+    state.config = { ...state.config, startup: stored };
+    const user = userEvent.setup();
+    renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
+    const save = screen.getByRole("button", { name: /save/i });
+    expect(save).toBeDisabled();
+
+    const input = screen.getByText(label).parentElement?.querySelector("input");
+    if (!input) throw new Error(`${label} input not found`);
+    await user.clear(input);
+    if (value) await user.type(input, value);
+    await user.click(save);
+
+    expect(state.saved?.["fields"]).toEqual(want);
+  });
+
   it("keeps unmodelled NIC keys when saving an unrelated edit", async () => {
     const user = userEvent.setup();
     renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);

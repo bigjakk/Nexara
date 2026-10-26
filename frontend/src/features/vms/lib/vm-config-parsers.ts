@@ -563,31 +563,65 @@ export function buildAudio(parsed: ParsedAudio, base = ""): string {
 // startup order
 // ---------------------------------------------------------------------------
 
+/*
+ * pve-common's pve-startup-order (pve_parse_startup_order,
+ * src/PVE/JSONSchema.pm), the format of both qemu-server's and
+ * pve-container's `startup`, transcribed: "[[order=]\d+][,up=\d+][,down=\d+]".
+ * The order may stand bare, as "1,up=30"; the parts may come in any order,
+ * and the last of a kind wins; blank parts are skipped. Nothing else is
+ * accepted, an empty value included, so a startup cleared is a delete. Both
+ * store the value as sent.
+ */
+
 export interface ParsedStartup {
   order: string;
   up: string;
   down: string;
 }
 
-/**
- * Parse startup field: "order=1,up=30,down=60"
- */
-export function parseStartup(raw: string): ParsedStartup {
-  if (!raw) return { order: "", up: "", down: "" };
-  const kv = parseKVString(raw);
-  return {
-    order: kv.get("order") ?? "",
-    up: kv.get("up") ?? "",
-    down: kv.get("down") ?? "",
-  };
+/** The part holding the order: bare, or order=. */
+function isStartupOrderSegment(seg: Segment): boolean {
+  return isDefaultKeySegment(seg, "order");
 }
 
-export function buildStartup(parsed: ParsedStartup): string {
-  const parts: string[] = [];
-  if (parsed.order) parts.push(`order=${parsed.order}`);
-  if (parsed.up) parts.push(`up=${parsed.up}`);
-  if (parsed.down) parts.push(`down=${parsed.down}`);
-  return parts.join(",");
+export function parseStartup(raw: string): ParsedStartup {
+  const result: ParsedStartup = { order: "", up: "", down: "" };
+  for (const seg of splitSegments(raw)) {
+    if (isStartupOrderSegment(seg)) result.order = seg.value;
+    else if (seg.key === "up") result.up = seg.value;
+    else if (seg.key === "down") result.down = seg.value;
+  }
+  return result;
+}
+
+/**
+ * Build startup on `base` the way buildVGA builds vga: only a changed part
+ * is rewritten, where it stands, the order in the form it is stored in, so
+ * an untouched value rebuilds to exactly `base`. An order added goes first,
+ * where the format's typetext puts it; "" is no startup at all.
+ */
+export function buildStartup(parsed: ParsedStartup, base = ""): string {
+  const was = parseStartup(base);
+  let segs = splitSegments(base);
+  if (parsed.order !== was.order) {
+    let text: string | null = null;
+    if (parsed.order) {
+      text =
+        segs.find(isStartupOrderSegment)?.key === null
+          ? parsed.order
+          : `order=${parsed.order}`;
+    }
+    segs = setSegment(segs, isStartupOrderSegment, text, "prepend");
+  }
+  for (const key of ["up", "down"] as const) {
+    if (parsed[key] === was[key]) continue;
+    segs = setSegment(
+      segs,
+      (s) => s.key === key,
+      parsed[key] ? `${key}=${parsed[key]}` : null,
+    );
+  }
+  return joinSegments(segs);
 }
 
 // ---------------------------------------------------------------------------
