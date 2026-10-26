@@ -164,6 +164,9 @@ func (s *Server) buildRegistry() *Registry {
 	if s.auditHandler != nil {
 		registerAuditEndpoints(reg, s.auditHandler)
 	}
+	if s.guestHistoryHandler != nil {
+		registerGuestHistoryEndpoints(reg, s.guestHistoryHandler)
+	}
 	if s.settingsHandler != nil {
 		registerSettingsEndpoints(reg, s.settingsHandler)
 	}

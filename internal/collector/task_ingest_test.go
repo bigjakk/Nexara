@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -258,12 +259,25 @@ func TestSyncTasks_WatermarkGuard(t *testing.T) {
 		}
 		q := newMockQueries()
 		s := &Syncer{queries: q, logger: testLogger()}
-		s.syncTasks(context.Background(), twoNodeClient, cluster)
+		listed, offline := s.syncTasks(context.Background(), twoNodeClient, cluster)
 		if len(q.externalTaskCalls) != 1 {
 			t.Fatalf("expected the healthy node's task to ingest, got %d", len(q.externalTaskCalls))
 		}
 		if len(q.upsertTaskSyncCalls) != 0 {
 			t.Fatalf("watermark must not advance when a node's task fetch fails, got %d upserts", len(q.upsertTaskSyncCalls))
+		}
+		// Only pve1's status changes can be decided: pve2's tasks are missing.
+		if !slices.Equal(listed, []string{"pve1"}) || len(offline) != 0 {
+			t.Errorf("listed, offline = %v, %v; want [pve1], []", listed, offline)
+		}
+
+		// The same failure on a node the cluster reports offline holds the
+		// watermark too, and is named apart: its guests' changes to and from
+		// "unknown" are decided while it stays down.
+		twoNodeClient.nodes[1].Status = "offline"
+		if listed, offline := s.syncTasks(context.Background(), twoNodeClient, cluster); !slices.Equal(listed, []string{"pve1"}) ||
+			!slices.Equal(offline, []string{"pve2"}) {
+			t.Errorf("with pve2 offline: listed, offline = %v, %v; want [pve1], [pve2]", listed, offline)
 		}
 	})
 }

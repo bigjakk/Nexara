@@ -143,7 +143,30 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 		return fmt.Errorf("snapshot nodes: %w", listErr)
 	}
 
+	// What /cluster/resources said about each guest's status on the previous
+	// tick. That listing is pvestatd's view, refreshed every 10 seconds, while
+	// the slow pass reads the node's own live guest list and the task watcher
+	// writes the state a finished task leaves — both newer. So a row that
+	// differs from the listing while the listing says what it said last tick
+	// holds the newer reading, and writing the listing back would flip the
+	// guest to a state it has already left: on screen for a few seconds, and
+	// for good in its History (guest_status_changes, migrations/000115). The
+	// listing's status is adopted only when it CHANGED, or on the first tick,
+	// which has nothing to compare; the slow pass corrects anything else
+	// within one pass.
+	lastStatus, _ := s.resourceStatus.Load(cluster.ID)
+	prevStatus, _ := lastStatus.(map[int32]string)
+	seenStatus := make(map[int32]string, len(guests))
+	defer s.resourceStatus.Store(cluster.ID, seenStatus)
+
 	for vmid, r := range guests {
+		status := r.GuestStatus()
+		// Remembered once the row agrees with it, below: a write that fails
+		// must see the change again next tick, or it is never retried.
+		listedStatus := status
+		if was, seen := prevStatus[vmid]; seen {
+			seenStatus[vmid] = was
+		}
 		nodeID, nodeKnown := nodeIDByName[r.Node]
 		if !nodeKnown {
 			// Brand-new node the slow loop hasn't registered yet; it owns
@@ -152,7 +175,9 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 		}
 		old, exists := known[vmid]
 		isTemplate := r.Template > 0
-		status := r.GuestStatus()
+		if was, seen := prevStatus[vmid]; exists && seen && was == status {
+			status = old.Status
+		}
 		if exists &&
 			old.Status == status &&
 			old.NodeID == nodeID &&
@@ -161,6 +186,7 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 			old.Pool == r.Pool &&
 			old.HaState == r.HAState &&
 			old.Tags == r.Tags {
+			seenStatus[vmid] = listedStatus
 			continue
 		}
 		if _, upErr := s.queries.UpsertVM(ctx, db.UpsertVMParams{
@@ -183,6 +209,7 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 				"cluster_id", cluster.ID, "vmid", vmid, "error", upErr)
 			continue
 		}
+		seenStatus[vmid] = listedStatus
 		inventoryChanged = true
 		if exists && old.Status != status && s.eventPub != nil {
 			s.logger.Info("VM status changed (fast sync)",

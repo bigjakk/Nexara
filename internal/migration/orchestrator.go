@@ -1238,6 +1238,9 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 			//
 			// The persisted copy is worth cleaning because it outlives PVE's
 			// task log, and it feeds the audit join and the report digest.
+			// When the retention prunes the row, DeleteCompletedTasks copies it
+			// to task_history_archive for a guest's History — without a failed
+			// migration's exit text, so the archive keeps no copy of it.
 			_, _ = o.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 				Upid:       upid,
 				Status:     taskStatus,

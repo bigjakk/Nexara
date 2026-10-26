@@ -62,6 +62,70 @@ type Querier interface {
 	// The claim clears last_error and last_upid, which belong to the previous run:
 	// without that, a run being started would show beside the last run's error.
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
+	// A guest's History tab: everything that happened to one guest, newest first.
+	// Served by GET /api/v1/clusters/:cluster_id/guests/:vmid/history
+	// (internal/api/handlers/guest_history.go), from three stores:
+	//
+	//   audit_log            every action Nexara recorded about the guest — its own
+	//                        tasks, Proxmox's (ingested by the collector), DRS, the
+	//                        scheduler, config changes with no task. Kept forever.
+	//   task_history (+ the  how each task ended. task_history_archive holds the
+	//   _archive)            guest tasks task_history has pruned (000115).
+	//   guest_status_changes run-state changes no task explains (000115).
+	//
+	// A guest is (cluster_id, vmid), never a vms.id: the collector re-issues those
+	// (000068/000084), and a VMID is only unique within its cluster — the other
+	// cluster's VM 100 is a different guest.
+	// ClassifyGuestStatusChanges decides, once, whether a task explains each
+	// settled status change on a cluster: one that started (allowing 30s of clock
+	// skew between Nexara and the node) before the change was seen, and had not
+	// ended before the guest was last seen in its old state, less 2 minutes for
+	// how stale that sighting can be (pvestatd's 10s cycle, then the fast sync's
+	// interval). last_seen_at rather than observed_at is what keeps a gap honest:
+	// after Nexara or the node was unreachable, a change is first seen when it is
+	// reachable again, long after the task that made it.
+	//
+	// "Settled" is the caller's settled_before: a change seen more recently stays
+	// unclassified, and hidden, until the collector has had time to ingest the
+	// Proxmox task that may explain it. A stop from the Proxmox GUI reaches the
+	// inventory before its qmstop task reaches task_history; classifying it at once
+	// would show it as a stop no task explains, and then never take that back.
+	//
+	// Which task types explain which change is the direction-specific list below,
+	// because a task is evidence only for what it can do: an HA restart that begins
+	// seconds after a crash does not explain the crash. The "any" set changes a
+	// guest's state in either direction as part of its work (a reboot, a restore,
+	// a backup in stop or suspend mode or of a stopped VM, which runs it in
+	// prelaunch). An unknown type explains nothing — the change stays visible,
+	// which is the side to err on for a list whose point is to show the stops a
+	// task did not cause. A suspend is in the stopped list too: a hibernating VM
+	// stops, and a container's suspend checkpoints it and stops it, after the task
+	// watcher's predicted "suspended".
+	//
+	// The last arm is a backup JOB: a vzdump that backs up several guests carries
+	// no VMID (UPID worker id empty), so it explains the changes on the node it
+	// ran on while it ran. A real crash of another guest on that node during the
+	// backup window is hidden by it; that is the trade.
+	//
+	// Only the changes on listed_nodes — the nodes whose tasks this pass's ingest
+	// listed (syncTasks) — are decided; one whose node could not list waits, and
+	// may then wait past TASK_HISTORY_RETENTION, which is why the search covers
+	// task_history_archive too. On an offline_nodes member only a change to or
+	// from 'unknown' is decided — no task explains one — while its others wait
+	// for the tasks it has not handed over (a node rebooting shuts its guests down
+	// just before it goes). The archive holds guest tasks only, so a backup JOB
+	// (below) explains nothing once pruned. A change older than give_up_before
+	// is decided whatever its node: a node the cluster calls online whose task list
+	// never loads would otherwise hide its guests' changes for good, and deciding
+	// without its tasks errs on the side this list exists for — the change shows.
+	// Once made, the decision is stored and does not depend on the task rows
+	// surviving.
+	//
+	// The archive branch is bounded to the guest and to tasks that finished after
+	// the window opened, which (cluster_id, vmid, finished_at) serves: everything
+	// in the archive is older than the retention, so a recent change reads none
+	// of it.
+	ClassifyGuestStatusChanges(ctx context.Context, arg ClassifyGuestStatusChangesParams) (int64, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
 	// Forget that Nexara minted this cluster's credential.
@@ -331,6 +395,33 @@ type Querier interface {
 	// source of truth. Cutoff is computed in Go (now - retention) so the window is
 	// configurable (TASK_HISTORY_RETENTION); shared by the automatic scheduler sweep
 	// and the manual Clear-Completed endpoint.
+	//
+	// A guest task is not dropped but MOVED, in this one statement, to
+	// task_history_archive (migrations/000115): it is the only record of how the
+	// task ended, which a guest's History tab shows for as long as the audit log
+	// keeps the task itself — forever. Every pruned row is deleted whether or not
+	// it is archived; the WHERE on the INSERT only picks which ones are kept.
+	// is_guest_upid, not vmid alone: InsertTaskHistory sets vmid for any numeric
+	// worker id, and cephdestroyosd's is an OSD number.
+	//
+	// A FAILED migration keeps its verdict but not its exit text. A cross-cluster
+	// migration's die message can carry the target cluster's API token, and the
+	// two guards that keep it out of exit_status (see
+	// ListRunningTaskHistoryByCluster below) are both off when the orchestrator's
+	// SetMigrationJobStarted fails: here, that text would outlive the retention
+	// that has bounded it so far. Keyed on the worker type, not migration_jobs,
+	// because that is exactly the case where the job row names no UPID; it costs
+	// an intra-cluster migration's failure reason after the retention, which its
+	// task log and the orchestrator's own (scrubbed) audit row still give. On
+	// 'failed' rather than "not completed": every writer of Proxmox's text stores
+	// 'failed' for a failure (classifyTaskExit, the orchestrator), while a raw
+	// 'stopped' row — only PUT /api/v1/tasks/:upid writes one, from its request
+	// body — needs its exit text to say whether it succeeded.
+	//
+	// The same sweep drops the guest status changes a task explained
+	// (ClassifyGuestStatusChanges): nothing reads them once classified — the task
+	// itself is the History entry — and they are as old as the tasks it prunes.
+	// The changes no task explained are a guest's own record, and stay.
 	DeleteCompletedTasks(ctx context.Context, cutoff time.Time) error
 	DeleteDRSRule(ctx context.Context, arg DeleteDRSRuleParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) error
@@ -1281,6 +1372,84 @@ type Querier interface {
 	ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory, error)
 	// No row-level tiebreak, for the reasons noted on ListSettingsByScope above.
 	ListGlobalSettings(ctx context.Context) ([]Setting, error)
+	// ListGuestHistory is the timeline: one page of a guest's entries, newest
+	// first, with the total under the same filters.
+	//
+	// Entries, one per thing that happened:
+	//
+	//   audit    an audit row naming the guest: by vmid (000084); a clone INTO it,
+	//            which names its source (see ListGuestLifecycleEvents); or an HA
+	//            resource row, which names the guest only by its HA sid ("vm:100",
+	//            "ct:100") and so carries no vmid. A Proxmox-ingested row is
+	//            dropped when a Nexara row carries the same UPID: the collector's
+	//            dedupe can lose a race with a handler's own insert, and the two
+	//            rows are one task, the Nexara one the one that says who asked.
+	//   task     a guest task with NO audit row, from task_history or its archive
+	//            — only when include_tasks, which the handler sets from view:task.
+	//            Every task path writes an audit row too, so this is the rare row
+	//            whose audit insert failed; sharing a UPID with an audit row makes
+	//            a task the same entry, never a second one.
+	//   status   a status change no task explains (ClassifyGuestStatusChanges),
+	//            for the guest types in status_guest_types — the run state is
+	//            inventory data, which the handler reads under view:vm for a VM and
+	//            view:container for a container.
+	//
+	// Guest tasks only: is_guest_upid, never vmid alone, because InsertTaskHistory
+	// stamps a vmid on any numeric worker id — cephdestroyosd's is an OSD number,
+	// so "destroy OSD 113" would otherwise read as something done to VM 113.
+	// audit_log.vmid is already gated the same way at insert.
+	//
+	// guest_audit is three branches rather than one OR, so each reads its own
+	// index — the vmid arm (cluster_id, vmid), the clone arm the action index, the
+	// HA arm the resource_type index — instead of the planner settling on the
+	// whole cluster's rows. The second and third exclude the first's rows, so no
+	// row is read twice. The Proxmox-duplicate probe is scoped to the same guest
+	// by parameter, not by correlation: correlated on the UPID alone, the planner
+	// hashes every Nexara row the install has ever written, on every request.
+	//
+	// after/after_inclusive is the cutoff guestHistoryCutoff derived from
+	// ListGuestLifecycleEvents: inclusive from a birth, so the create or clone is
+	// the first entry; exclusive after a destroy, so the previous guest's last act
+	// is not this one's first.
+	//
+	// category is derived HERE, once, so it can be filtered on before the page is
+	// cut; the handler's guestHistoryCategories lists the same values (pinned by
+	// TestGuestHistoryCategoryVocabulary). Nexara's own action names are matched
+	// before the Proxmox worker type, because they are the more specific of the
+	// two: DRS asks an HA-managed guest to migrate through an hamigrate task, and
+	// that is a migration. A start or stop of an HA-managed guest runs as hastart
+	// or hastop, from Nexara or the Proxmox GUI alike, and is a power action; 'ha'
+	// is what is left — the guest's HA resource itself. Unmatched is 'other' —
+	// still listed, under its own action name.
+	//
+	// The page is cut on narrow rows, and only its rows are joined to their audit
+	// details, task outcome and user: a guest with ten thousand entries carries
+	// ten thousand jsonb blobs through the sort otherwise. total is count(*) OVER
+	// the filtered set, computed before LIMIT — the Items and the Total come from
+	// one query and so cannot be counted under different filters.
+	ListGuestHistory(ctx context.Context, arg ListGuestHistoryParams) ([]ListGuestHistoryRow, error)
+	// ListGuestLifecycleEvents returns the audit rows that begin or end a guest's
+	// occupancy of a VMID, newest first, for the handler to pick where the
+	// timeline starts (guestHistoryCutoff). Proxmox hands out the lowest free
+	// VMID, so VM 105 today may be the third guest to hold that number, and
+	// without a cutoff the first two guests' history would read as this one's.
+	//
+	// A birth is a create or restore of the VMID — by the UPID's worker type,
+	// which both Nexara's handlers and the collector's ingest record — or a clone
+	// INTO it. A clone's UPID names its SOURCE, so the target is read from the
+	// new_id the clone handlers record; a clone made in Proxmox's own GUI records
+	// no target and is no birth here, which leaves the previous occupant's destroy
+	// as the cutoff instead.
+	//
+	// A destroy comes back with its outcome, because a FAILED destroy ended
+	// nothing; the handler decides with proxmox.TaskSucceeded rather than a SQL
+	// copy of that rule. recorded_status is the status the collector stored when
+	// it ingested a task, for a task whose row has since been pruned.
+	//
+	// Bounded: the handler only needs the newest birth and the newest destroy that
+	// did not fail, and a guest restored nightly would otherwise drag in a year of
+	// restores.
+	ListGuestLifecycleEvents(ctx context.Context, arg ListGuestLifecycleEventsParams) ([]ListGuestLifecycleEventsRow, error)
 	ListGuestSmbiosByCluster(ctx context.Context, clusterID uuid.UUID) ([]GuestSmbios, error)
 	ListGuestSnapshotsByCluster(ctx context.Context, clusterID uuid.UUID) ([]GuestSnapshot, error)
 	// ListGuestSnapshotsForReport feeds the snapshot_inventory report type: one
@@ -2129,6 +2298,7 @@ type Querier interface {
 	// A request now writes exactly the fields it was given.
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	UpdateVMPool(ctx context.Context, arg UpdateVMPoolParams) error
+	// Records the change in guest_status_changes too, by trigger (see UpsertVM).
 	UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error
 	UpdateVeeamServer(ctx context.Context, arg UpdateVeeamServerParams) (VeeamServer, error)
 	UpsertCVECache(ctx context.Context, arg UpsertCVECacheParams) error
@@ -2240,6 +2410,9 @@ type Querier interface {
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error)
 	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (UpsertStoragePoolRow, error)
 	UpsertTaskSyncState(ctx context.Context, arg UpsertTaskSyncStateParams) error
+	// A write that changes status also records the change in guest_status_changes,
+	// by trigger (trg_vms_status_change, migrations/000115), for the guest's
+	// History; so does UpdateVMStatus.
 	UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error)
 	UpsertVeeamBackupObject(ctx context.Context, arg UpsertVeeamBackupObjectParams) (VeeamBackupObject, error)
 	// Writes the session a start or stop returned inline, immediately.

@@ -378,6 +378,19 @@ type GuestSnapshot struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
+type GuestStatusChange struct {
+	ID         uuid.UUID   `json:"id"`
+	ClusterID  uuid.UUID   `json:"cluster_id"`
+	Vmid       int32       `json:"vmid"`
+	GuestType  string      `json:"guest_type"`
+	Node       string      `json:"node"`
+	FromStatus string      `json:"from_status"`
+	ToStatus   string      `json:"to_status"`
+	LastSeenAt time.Time   `json:"last_seen_at"`
+	ObservedAt time.Time   `json:"observed_at"`
+	Explained  pgtype.Bool `json:"explained"`
+}
+
 type GuestToolsConfig struct {
 	ClusterID uuid.UUID `json:"cluster_id"`
 	// disabled = nothing; report = detect installed versions only, no writes to any guest; staged = also stage updates for guests that are behind
@@ -1029,6 +1042,21 @@ type TaskHistory struct {
 	UpdatedAt   time.Time          `json:"updated_at"`
 	Source      string             `json:"source"`
 	Vmid        pgtype.Int4        `json:"vmid"`
+}
+
+type TaskHistoryArchive struct {
+	Upid        string             `json:"upid"`
+	ClusterID   uuid.UUID          `json:"cluster_id"`
+	Vmid        int32              `json:"vmid"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Description string             `json:"description"`
+	Status      string             `json:"status"`
+	ExitStatus  string             `json:"exit_status"`
+	Node        string             `json:"node"`
+	TaskType    string             `json:"task_type"`
+	Source      string             `json:"source"`
+	StartedAt   time.Time          `json:"started_at"`
+	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
 }
 
 type TotpRecoveryCode struct {

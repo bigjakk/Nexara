@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -40,6 +41,7 @@ type mockQueries struct {
 	auditLogs                     []db.InsertAuditLogParams
 	upsertNodeCalls               []db.UpsertNodeParams
 	upsertVMCalls                 []db.UpsertVMParams
+	upsertVMFailures              int // UpsertVM fails this many more calls, then succeeds
 	upsertStorageCalls            []db.UpsertStoragePoolParams
 	replicationUpserts            []db.UpsertReplicationJobParams
 	deleteStaleReplicationCalls   int
@@ -50,6 +52,7 @@ type mockQueries struct {
 
 	runningTasks   []db.TaskHistory
 	reconcileCalls []db.ReconcileTaskHistoryParams
+	classifyCalls  []db.ClassifyGuestStatusChangesParams
 
 	existingTaskUPIDs   map[string]bool // ListExistingTaskHistoryUPIDs echoes these back
 	existingAuditUPIDs  map[string]bool // ListExistingAuditLogUPIDs echoes these back
@@ -176,6 +179,10 @@ func (m *mockQueries) UpsertNode(_ context.Context, arg db.UpsertNodeParams) (db
 
 func (m *mockQueries) UpsertVM(_ context.Context, arg db.UpsertVMParams) (db.Vm, error) {
 	m.upsertVMCalls = append(m.upsertVMCalls, arg)
+	if m.upsertVMFailures > 0 {
+		m.upsertVMFailures--
+		return db.Vm{}, fmt.Errorf("upsert failed")
+	}
 	key := fmt.Sprintf("%s:%d", arg.ClusterID.String(), arg.Vmid)
 	// Like the real ON CONFLICT (cluster_id, vmid) upsert, an existing row
 	// keeps its id across syncs.
@@ -437,6 +444,11 @@ func (m *mockQueries) ReconcileTaskHistory(_ context.Context, arg db.ReconcileTa
 	return 1, nil
 }
 
+func (m *mockQueries) ClassifyGuestStatusChanges(_ context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error) {
+	m.classifyCalls = append(m.classifyCalls, arg)
+	return 0, nil
+}
+
 func (m *mockQueries) GetVMByClusterAndVmid(_ context.Context, _ db.GetVMByClusterAndVmidParams) (db.Vm, error) {
 	return db.Vm{}, fmt.Errorf("not found")
 }
@@ -600,6 +612,13 @@ func TestSyncCluster_Success(t *testing.T) {
 		"/api2/json/cluster/resources": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.ClusterResource{{Type: "qemu", VMID: 100, CPU: 0.9}})
 		},
+		// Both nodes list their tasks, so the pass's task ingest is complete.
+		"/api2/json/nodes/pve1/tasks": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.NodeTask{})
+		},
+		"/api2/json/nodes/pve2/tasks": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.NodeTask{})
+		},
 	})
 	defer srv.Close()
 
@@ -725,6 +744,22 @@ func TestSyncCluster_Success(t *testing.T) {
 			t.Errorf("VMMetrics[%d].MemGuest = %v, want %v", i, *got, want)
 		}
 	}
+
+	// The pass classifies the cluster's settled status changes, once, and only
+	// those older than the settle window: a younger one may still be waiting
+	// for its task to be ingested. (TestSyncCluster_VMMigration's nodes list no
+	// tasks, and that pass decides nothing on them.)
+	if len(mq.classifyCalls) != 1 || mq.classifyCalls[0].ClusterID != cluster.ID ||
+		!slices.Equal(mq.classifyCalls[0].ListedNodes, []string{"pve1", "pve2"}) || len(mq.classifyCalls[0].OfflineNodes) != 0 {
+		t.Fatalf("status change classification calls = %+v, want one for cluster %s, nodes pve1 and pve2",
+			mq.classifyCalls, cluster.ID)
+	}
+	if age := time.Since(mq.classifyCalls[0].SettledBefore); age < statusChangeSettle || age > statusChangeSettle+time.Minute {
+		t.Errorf("classified changes settled before %v ago, want %v", age, statusChangeSettle)
+	}
+	if age := time.Since(mq.classifyCalls[0].GiveUpBefore); age < statusChangeGiveUp || age > statusChangeGiveUp+time.Minute {
+		t.Errorf("gave up on unlisted nodes' changes after %v, want %v", age, statusChangeGiveUp)
+	}
 }
 
 func TestSyncCluster_VMMigration(t *testing.T) {
@@ -808,6 +843,14 @@ func TestSyncCluster_VMMigration(t *testing.T) {
 
 	if lastVMCall.NodeID == firstNodeID {
 		t.Error("VM should have migrated to a different node_id after second sync")
+	}
+
+	// Neither node lists its tasks here, so neither pass may decide a change on
+	// them yet — only one that has waited a day (ClassifyGuestStatusChanges).
+	for _, call := range mq.classifyCalls {
+		if len(call.ListedNodes) != 0 {
+			t.Errorf("classified changes on nodes whose tasks were not listed: %+v", call)
+		}
 	}
 }
 

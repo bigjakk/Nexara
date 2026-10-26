@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -62,6 +63,66 @@ func TestSyncClusterResources(t *testing.T) {
 		}
 		if got := pub.countKind(events.KindInventoryChange); got != 0 {
 			t.Errorf("inventory_change = %d, want 0 (events: %+v)", got, pub.events)
+		}
+	})
+
+	// The slow pass reads the node's live guest list; /cluster/resources is
+	// pvestatd's, up to 10s behind. A tick must not write that stale status
+	// back over the newer one — it would also record a status change that
+	// never happened in the guest's History.
+	t.Run("an unchanged listing never reverts a newer status", func(t *testing.T) {
+		var mu sync.Mutex
+		listed := guestRunning
+		srv := newTestServer(t, map[string]http.HandlerFunc{
+			"/api2/json/cluster/resources": func(w http.ResponseWriter, _ *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				jsonResponse(w, []proxmox.ClusterResource{nodeOnline, listed})
+			},
+		})
+		defer srv.Close()
+		list := func(status string) {
+			mu.Lock()
+			defer mu.Unlock()
+			listed.Status = status
+		}
+		mq := newMockQueries()
+		s := newTestSyncer(mq)
+		cluster := makeCluster(t, srv.URL)
+		seedFastSync(mq, cluster, "online", "running", "web-server")
+		tick := func() {
+			t.Helper()
+			if err := s.syncClusterResources(context.Background(), cluster); err != nil {
+				t.Fatalf("syncClusterResources: %v", err)
+			}
+		}
+		key := fmt.Sprintf("%s:%d", cluster.ID, 100)
+
+		tick() // the listing agrees with the row
+		vm := mq.vms[key]
+		vm.Status = "stopped" // the slow pass saw the stop first
+		mq.vms[key] = vm
+		tick() // pvestatd has not caught up
+		if len(mq.upsertVMCalls) != 0 {
+			t.Fatalf("an unchanged listing wrote its stale status back: %+v", mq.upsertVMCalls)
+		}
+
+		list("stopped")
+		tick() // caught up: nothing to write
+		list("running")
+		tick() // a change in the listing is news
+		if got := mq.vms[key].Status; got != "running" {
+			t.Fatalf("a listing that changed was not adopted: the row says %q", got)
+		}
+
+		// A write that fails is retried next tick: the listing is only
+		// remembered once the row holds it.
+		mq.upsertVMFailures = 1
+		list("stopped")
+		tick()
+		tick()
+		if got := mq.vms[key].Status; got != "stopped" {
+			t.Fatalf("a failed write was never retried: the row says %q", got)
 		}
 	})
 

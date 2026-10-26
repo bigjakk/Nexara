@@ -18,7 +18,21 @@ import (
 // syncTasks fetches active + finished tasks from every node in a cluster and
 // records external (non-Nexara) tasks. Running→done transitions are owned by
 // the separate reconcileRunningTasks pass, not by re-ingestion here.
-func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db.Cluster) {
+//
+// It returns the nodes whose task lists this pass read and deduplicated, and
+// separately the members reported offline, whose lists cannot load.
+// classifyStatusChanges decides the status changes on listed nodes — a task
+// from a node that failed to list is missing, and the change it explains
+// would be filed as one no task explains — and the rest wait for a pass that
+// lists them, a day at most (statusChangeGiveUp). Per node, so one node that
+// cannot list holds back only its own guests. On an offline member only the
+// changes to and from "unknown" are decided, which no task explains: its
+// other changes — the shutdowns of a node going down for a reboot — wait for
+// the tasks it has not handed over yet. (An offline member still holds the
+// watermark back, as before.) A task that failed to ingest is logged and does
+// not hold its node back; a change only it explains then shows as one no task
+// explains, the side to err on.
+func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db.Cluster) (listed, offline []string) {
 	// Load high-water mark (default: 24h ago on first run).
 	since, err := s.queries.GetTaskSyncState(ctx, cluster.ID)
 	if err != nil {
@@ -31,12 +45,13 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 			"cluster_id", cluster.ID,
 			"error", err,
 		)
-		return
+		return nil, nil
 	}
 
 	var maxStartTime int64
 	dedupFailed := false
 	fetchFailed := false
+	listed = make([]string, 0, len(nodes))
 	for _, node := range nodes {
 		tasks, err := client.GetNodeTasks(ctx, node.Node, since, 500)
 		if err != nil {
@@ -50,6 +65,9 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 			// started on THIS node before the new watermark, and the
 			// since-filter would skip them forever once the node recovers.
 			fetchFailed = true
+			if node.Status == "offline" {
+				offline = append(offline, node.Node)
+			}
 			continue
 		}
 
@@ -84,6 +102,7 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 				)
 			}
 		}
+		listed = append(listed, node.Node)
 	}
 
 	// Advance the high-water mark only when every node was fetched AND deduped
@@ -102,6 +121,7 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 			)
 		}
 	}
+	return listed, offline
 }
 
 // seenTaskUPIDs returns the subset of the candidate UPIDs ingestTask must skip:

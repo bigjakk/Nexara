@@ -1,3 +1,6 @@
+-- A write that changes status also records the change in guest_status_changes,
+-- by trigger (trg_vms_status_change, migrations/000115), for the guest's
+-- History; so does UpdateVMStatus.
 -- name: UpsertVM :one
 INSERT INTO vms (cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, lock_state, last_seen_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
@@ -43,6 +46,7 @@ SELECT * FROM vms WHERE cluster_id = $1 AND type = 'lxc' ORDER BY vmid;
 -- name: GetContainer :one
 SELECT * FROM vms WHERE id = $1 AND type = 'lxc';
 
+-- Records the change in guest_status_changes too, by trigger (see UpsertVM).
 -- name: UpdateVMStatus :exec
 UPDATE vms SET status = $2, updated_at = now() WHERE id = $1;
 

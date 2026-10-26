@@ -171,6 +171,8 @@ type SyncQueries interface {
 	// Task reconcile
 	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.TaskHistory, error)
 	ReconcileTaskHistory(ctx context.Context, arg db.ReconcileTaskHistoryParams) (int64, error)
+	// Guest status changes (the History tab)
+	ClassifyGuestStatusChanges(ctx context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg db.GetVMByClusterAndVmidParams) (db.Vm, error)
 	// Node queries
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.Node, error)
@@ -304,6 +306,7 @@ type Syncer struct {
 	osTypeSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestOSTypes
 	nodePressureInFlight atomic.Bool             // re-entrancy guard for SyncAllNodePressure
 	disk                 diskCarry               // VMs' last reported disk counters
+	resourceStatus       sync.Map                // cluster ID → map[int32]string: each guest's status at the last fast tick
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.
@@ -766,13 +769,20 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 
 	// Ingest completed Proxmox tasks into the audit log (deduplicating
 	// against tasks that Nexara itself initiated).
-	s.syncTasks(ctx, client, cluster)
+	listedNodes, offlineNodes := s.syncTasks(ctx, client, cluster)
 
 	// Reconcile Nexara-dispatched tasks still marked "running": poll each UPID
 	// and flip to completed/failed. Kept separate from syncTasks because
 	// GetNodeTasks(since=…) filters by start-time and would never re-list a long
 	// task after it finishes (watermark blind spot).
 	s.reconcileRunningTasks(ctx, client, cluster)
+
+	// Decide which settled guest status changes a task explains. After the two
+	// passes above on purpose: the task that explains a change made in the
+	// Proxmox GUI reaches task_history in this pass's ingest — so the changes
+	// on nodes that ingest listed (see syncTasks), and those that have waited
+	// too long for theirs. Every pass, even one that listed no node.
+	s.classifyStatusChanges(ctx, cluster, listedNodes, offlineNodes)
 
 	// Only notify the frontend when inventory data actually changed
 	// (VM status transitions, VMs added/removed). This avoids triggering

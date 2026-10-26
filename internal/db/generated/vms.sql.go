@@ -511,6 +511,7 @@ type UpdateVMStatusParams struct {
 	Status string    `json:"status"`
 }
 
+// Records the change in guest_status_changes too, by trigger (see UpsertVM).
 func (q *Queries) UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error {
 	_, err := q.db.Exec(ctx, updateVMStatus, arg.ID, arg.Status)
 	return err
@@ -555,6 +556,9 @@ type UpsertVMParams struct {
 	LockState string    `json:"lock_state"`
 }
 
+// A write that changes status also records the change in guest_status_changes,
+// by trigger (trg_vms_status_change, migrations/000115), for the guest's
+// History; so does UpdateVMStatus.
 func (q *Queries) UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error) {
 	row := q.db.QueryRow(ctx, upsertVM,
 		arg.ClusterID,

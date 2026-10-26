@@ -90,8 +90,24 @@ func (q *Queries) CountTaskHistoryFiltered(ctx context.Context, arg CountTaskHis
 }
 
 const deleteCompletedTasks = `-- name: DeleteCompletedTasks :exec
-DELETE FROM task_history
-WHERE status != 'running' AND COALESCE(finished_at, started_at) < $1::timestamptz
+WITH explained_changes AS (
+    DELETE FROM guest_status_changes
+    WHERE explained AND observed_at < $1::timestamptz
+), pruned AS (
+    DELETE FROM task_history
+    WHERE status != 'running' AND COALESCE(finished_at, started_at) < $1::timestamptz
+    RETURNING upid, cluster_id, vmid, user_id, description, status, exit_status,
+              node, task_type, source, started_at, finished_at
+)
+INSERT INTO task_history_archive (upid, cluster_id, vmid, user_id, description, status,
+                                  exit_status, node, task_type, source, started_at, finished_at)
+SELECT upid, cluster_id, vmid, user_id, description, status,
+       CASE WHEN status = 'failed' AND split_part(upid, ':', 6) IN ('qmigrate', 'vzmigrate')
+            THEN '' ELSE exit_status END,
+       node, task_type, source, started_at, finished_at
+FROM pruned
+WHERE vmid IS NOT NULL AND is_guest_upid(upid)
+ON CONFLICT (upid) DO NOTHING
 `
 
 // DeleteCompletedTasks removes terminal task_history rows whose finish (or
@@ -100,6 +116,33 @@ WHERE status != 'running' AND COALESCE(finished_at, started_at) < $1::timestampt
 // source of truth. Cutoff is computed in Go (now - retention) so the window is
 // configurable (TASK_HISTORY_RETENTION); shared by the automatic scheduler sweep
 // and the manual Clear-Completed endpoint.
+//
+// A guest task is not dropped but MOVED, in this one statement, to
+// task_history_archive (migrations/000115): it is the only record of how the
+// task ended, which a guest's History tab shows for as long as the audit log
+// keeps the task itself — forever. Every pruned row is deleted whether or not
+// it is archived; the WHERE on the INSERT only picks which ones are kept.
+// is_guest_upid, not vmid alone: InsertTaskHistory sets vmid for any numeric
+// worker id, and cephdestroyosd's is an OSD number.
+//
+// A FAILED migration keeps its verdict but not its exit text. A cross-cluster
+// migration's die message can carry the target cluster's API token, and the
+// two guards that keep it out of exit_status (see
+// ListRunningTaskHistoryByCluster below) are both off when the orchestrator's
+// SetMigrationJobStarted fails: here, that text would outlive the retention
+// that has bounded it so far. Keyed on the worker type, not migration_jobs,
+// because that is exactly the case where the job row names no UPID; it costs
+// an intra-cluster migration's failure reason after the retention, which its
+// task log and the orchestrator's own (scrubbed) audit row still give. On
+// 'failed' rather than "not completed": every writer of Proxmox's text stores
+// 'failed' for a failure (classifyTaskExit, the orchestrator), while a raw
+// 'stopped' row — only PUT /api/v1/tasks/:upid writes one, from its request
+// body — needs its exit text to say whether it succeeded.
+//
+// The same sweep drops the guest status changes a task explained
+// (ClassifyGuestStatusChanges): nothing reads them once classified — the task
+// itself is the History entry — and they are as old as the tasks it prunes.
+// The changes no task explained are a guest's own record, and stay.
 func (q *Queries) DeleteCompletedTasks(ctx context.Context, cutoff time.Time) error {
 	_, err := q.db.Exec(ctx, deleteCompletedTasks, cutoff)
 	return err

@@ -48,6 +48,7 @@ func newRouteStubServer(t *testing.T) *Server {
 		taskHandler:            &handlers.TaskHandler{},
 		scheduleHandler:        &handlers.ScheduleHandler{},
 		auditHandler:           &handlers.AuditHandler{},
+		guestHistoryHandler:    &handlers.GuestHistoryHandler{},
 		drsHandler:             &handlers.DRSHandler{},
 		migrationHandler:       &handlers.MigrationHandler{},
 		networkHandler:         &handlers.NetworkHandler{},
