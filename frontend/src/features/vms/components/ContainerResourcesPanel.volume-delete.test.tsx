@@ -126,6 +126,18 @@ async function openPanel() {
   return { queryClient, save };
 }
 
+/** The Name input of the NIC `key`. */
+function nameOf(key: string): HTMLInputElement {
+  const row = screen.getByText(key, { exact: true }).parentElement
+    ?.parentElement;
+  if (!row) throw new Error(`no row for ${key}`);
+  const name = within(row)
+    .getByText("Name")
+    .parentElement?.querySelector("input");
+  if (!name) throw new Error(`no Name input for ${key}`);
+  return name;
+}
+
 /** The input under a field label; the panel's labels are not tied to them. */
 function fieldInput(label: string): HTMLInputElement {
   const input = screen.getByText(label).parentElement?.querySelector("input");
@@ -663,6 +675,74 @@ describe("ContainerResourcesPanel unused volume deletion", () => {
     expect(screen.queryByText("unused2")).not.toBeInTheDocument();
     expect(unusedRow("unused1")).toBeInTheDocument();
     expect(save).toBeDisabled();
+  });
+
+  // Until Proxmox's copy arrives the panel shows a new NIC as the Save sent
+  // it, with no hwaddr, and pve-container gives a NIC sent without one a new
+  // random MAC: so it is not editable from that copy. One Proxmox's own copy
+  // has with no hwaddr (written by hand) is: nothing better is coming.
+  it("keeps a NIC a Save created read only until Proxmox's copy brings its MAC, then sends that MAC with an edit", async () => {
+    serverConfig = {
+      ...serverConfig,
+      net2: "name=eth2,bridge=vmbr0,ip=dhcp,type=veth",
+    };
+    const refetch = deferred<unknown>();
+    let gets = 0;
+    mockedGet.mockImplementation((path: string) => {
+      if (path !== CONFIG_URL) {
+        return Promise.reject(new Error(`unexpected GET ${path}`));
+      }
+      gets += 1;
+      return gets === 1
+        ? Promise.resolve({ ...serverConfig })
+        : refetch.promise;
+    });
+    mockedPut.mockResolvedValue({ status: "ok" });
+    const { save } = await openPanel();
+    expect(nameOf("net2")).toBeEnabled();
+    // net0 is edited by the same Save: it keeps its MAC, so it stays open.
+    fill(nameOf("net0"), "eth5");
+    const net0 = String(serverConfig["net0"]).replace("name=eth0", "name=eth5");
+    await user.click(
+      screen.getByRole("button", { name: "Add Network Interface" }),
+    );
+    await user.click(save);
+    await screen.findByText("Saved");
+    expect(mockedPut.mock.calls).toEqual([
+      [
+        CONFIG_URL,
+        {
+          fields: { net0, net1: "name=eth1,bridge=vmbr0,ip=dhcp,firewall=1" },
+        },
+      ],
+    ]);
+
+    expect(nameOf("net1")).toBeDisabled();
+    expect(nameOf("net0")).toBeEnabled();
+    expect(nameOf("net2")).toBeEnabled();
+    expect(
+      screen.getByText(/waiting for the mac address/i),
+    ).toBeInTheDocument();
+
+    const net1 =
+      "name=eth1,bridge=vmbr0,hwaddr=02:00:00:00:00:02,ip=dhcp,firewall=1,type=veth";
+    await act(async () => {
+      refetch.resolve({ ...serverConfig, net0, net1 });
+      await refetch.promise;
+    });
+    await waitFor(() => {
+      expect(nameOf("net1")).toBeEnabled();
+    });
+    fill(nameOf("net1"), "eth9");
+    await user.click(save);
+
+    await waitFor(() => {
+      expect(mockedPut).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedPut.mock.calls[1]).toEqual([
+      CONFIG_URL,
+      { fields: { net1: net1.replace("name=eth1", "name=eth9") } },
+    ]);
   });
 
   it("gives way to the refetched config, which may reuse a deleted key for another volume", async () => {

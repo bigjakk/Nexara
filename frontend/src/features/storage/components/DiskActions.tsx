@@ -230,6 +230,14 @@ export function MoveDiskDialog({
             onDeleteSourceChange={setDeleteOriginal}
             keptHint="The source volume is kept as an unused disk on this VM. Remove it later to reclaim the space."
           />
+          {/* The hardware panel, which opens this, re-reads every field and
+              drops what it has staged when the configuration it shows
+              changes, as this move's does when it finishes. */}
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            When the move finishes this VM&apos;s configuration reloads, and
+            unsaved changes in this panel are discarded. Save first to keep
+            them.
+          </p>
           <Button
             onClick={handleMove}
             disabled={

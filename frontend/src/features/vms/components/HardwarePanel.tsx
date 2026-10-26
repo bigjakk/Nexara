@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
   Loader2,
   Save,
@@ -766,23 +766,24 @@ export function HardwarePanel({
   }
 
   // The staged changes: disks and devices marked for removal, and new ones
-  // waiting for Save. They are the half of this panel the populate effect
-  // below does NOT re-read when the config changes, so an action that changes
-  // the config has to clear them itself. A Save and an unused-disk delete both
-  // do, through this one list, so the two cannot drift apart. A disk move, or
-  // a change made elsewhere that reaches this panel as a refetch, does not
-  // yet: the fields are re-read and the staged half survives them.
-  function clearStagedChanges() {
+  // waiting for Save. The populate effect below re-reads every field when the
+  // config changes, and clears these with them: left in place across a disk
+  // move, which changes the config when it finishes, or a change made
+  // elsewhere, a later Save would apply them without the edits that went with
+  // them. A Save and an unused-disk delete clear them too, as soon as they
+  // succeed, through this one list, so the two cannot drift apart.
+  const clearStagedChanges = useCallback(() => {
     setDisksToRemove(new Set());
     setPendingNewDisks([]);
     setPendingDeviceAdds({});
     setDeviceRemovals(new Set());
-  }
+  }, []);
 
-  // Populate fields from config
+  // Populate fields from config, and drop what was staged on the last one
   useEffect(() => {
     if (!config) return;
     setOriginal(config);
+    clearStagedChanges();
 
     // CPU
     setCores(str(config["cores"] ?? 1));
@@ -918,7 +919,7 @@ export function HardwarePanel({
     // Meta
     setDescription(str(config["description"] ?? ""));
     setTags(str(config["tags"] ?? ""));
-  }, [config]);
+  }, [config, clearStagedChanges]);
 
   // Discover disk keys from config (exclude any CD-ROM device)
   const diskEntries = useMemo(() => {
@@ -4001,9 +4002,9 @@ export function HardwarePanel({
                     onSuccess: () => {
                       // The delete changed the config, so the refetch
                       // re-populates every field and the unsaved edits are
-                      // gone, as the dialog said. The staged changes would
-                      // outlive it, and a later Save would apply them
-                      // without the edits that went with them.
+                      // gone, as the dialog said. The staged changes go at
+                      // once, as the populate effect drops them when that
+                      // refetch lands, so none is sent in between.
                       clearStagedChanges();
                       closeUnusedDelete();
                     },

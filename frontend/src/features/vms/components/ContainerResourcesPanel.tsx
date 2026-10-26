@@ -613,11 +613,20 @@ function NICRow({
   nic,
   onChange,
   bridges,
+  macPending = false,
 }: {
   deviceKey: string;
   nic: CTNetEdit;
   onChange: (updated: CTNetEdit) => void;
   bridges: string[];
+  /**
+   * A NIC that a Save just created, or rewrote, without a MAC, shown from
+   * what that Save sent until Proxmox's own copy arrives with the MAC it gave
+   * it. It is read only until then: pve-container's parse_lxc_network
+   * (src/PVE/LXC/Config.pm) gives a value with no hwaddr a new random one,
+   * so sent again without it the NIC would change its MAC.
+   */
+  macPending?: boolean;
 }) {
   return (
     <div className="space-y-2 rounded border p-2">
@@ -631,8 +640,17 @@ function NICRow({
             {nic.hwaddr}
           </span>
         )}
+        {macPending && (
+          <span className="text-xs text-muted-foreground">
+            Waiting for the MAC address Proxmox gives it; it can be edited once
+            the configuration reloads.
+          </span>
+        )}
       </div>
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <fieldset
+        disabled={macPending}
+        className="grid min-w-0 grid-cols-2 gap-2 md:grid-cols-4"
+      >
         <div>
           <Label className="text-xs">Name</Label>
           <Input
@@ -757,7 +775,7 @@ function NICRow({
             <Label className="text-xs">Firewall</Label>
           </div>
         </div>
-      </div>
+      </fieldset>
     </div>
   );
 }
@@ -1697,6 +1715,14 @@ export function ContainerResourcesPanel({
                     });
                   }}
                   bridges={bridgeList}
+                  // Shown from what the last Save sent, which created or
+                  // rewrote it with no MAC, and not yet from Proxmox's copy,
+                  // which names the one it gave: config is that Save's
+                  // result until the copy lands.
+                  macPending={
+                    nic.hwaddr === "" &&
+                    str(config[key]) !== str(fetchedConfig?.[key])
+                  }
                 />
                 <Button
                   variant="ghost"

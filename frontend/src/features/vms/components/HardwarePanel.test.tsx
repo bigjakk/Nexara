@@ -332,6 +332,37 @@ describe("HardwarePanel unused disk removal", () => {
     expect(mockedPut).not.toHaveBeenCalled();
   });
 
+  // A disk move changes the config when its task finishes, as a change made
+  // elsewhere can at any time, and every field is re-read from the new one.
+  // Kept, the staged changes would go with a later Save, without the edits
+  // that went with them.
+  it("discards what is staged when the config changes under the panel, as a disk move's does", async () => {
+    const { queryClient } = renderWithProviders(<HardwarePanel {...props} />);
+    await screen.findByText("unused0");
+    const save = screen.getByText("Save Changes", { selector: "button" });
+    await stageOneOfEachKind();
+    expect(save).toBeEnabled();
+
+    // What the move leaves: scsi0 on another storage, its source unused1.
+    serverConfig = {
+      ...serverConfig,
+      scsi0: "store02:vm-101-disk-3,size=32G",
+      unused1: "store01:vm-101-disk-0",
+    };
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["clusters", CLUSTER, "vms", VM, "config"],
+      });
+    });
+    await screen.findByText("unused1");
+
+    expectNothingStaged();
+    await waitFor(() => {
+      expect(save).toBeDisabled();
+    });
+    expect(mockedPut).not.toHaveBeenCalled();
+  });
+
   // Save and the delete clear the staged changes through one shared list, so
   // this pins Save's use of it — for every kind, since a Save that cleared
   // only the disk removals would pass a test that staged only a disk removal.
