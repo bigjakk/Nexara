@@ -204,10 +204,10 @@ The CPU, memory, disk and network charts on the dashboard, a node's page and a g
 
 ## Block Jobs
 
-A running VM's Overview tab has a **Block jobs** card listing the QEMU block jobs working on its disks: a mirror while a disk moves, a live migration copies local disks, or a running VM is cloned; a stream during a live restore from Proxmox Backup Server, or while a snapshot is removed on Proxmox VE 9's volume-chain storage; a backup. Each shows how far it has got, its speed limit, and the rate and time left, worked out between refreshes. The card refreshes every 3 seconds while a job runs, every 15 seconds otherwise, and every minute after a failed read.
+A running VM's [History](#a-guests-history) tab opens with the QEMU block jobs working on its disks, as live rows above the history: a mirror while a disk moves, a live migration copies local disks, or a running VM is cloned; a stream during a live restore from Proxmox Backup Server, or while a snapshot is removed on Proxmox VE 9's volume-chain storage; a backup. Each shows how far it has got, its speed limit, and the rate and time left, worked out between refreshes. The rows refresh every 3 seconds while a job runs, every 15 seconds otherwise, and every minute after a failed read, and only while the History tab is open. With no job running there are no rows.
 
-- It needs `view:vm`. Nexara reads the jobs through Proxmox's QEMU monitor with one fixed, read-only command (`info block-jobs`). For that the cluster's API token needs `Sys.Audit` on the VM on Proxmox VE 9, or `VM.Monitor` on Proxmox VE 8.
-- A QEMU too stuck to answer (a hung storage backend, say) shows that as the card's message: Proxmox waits up to 25 seconds for QEMU, and Nexara up to 30 for Proxmox. Several people watching the same VM share one read.
+- The read needs `view:vm`, and the History tab it sits in needs `view:audit` and `view:task` — every built-in role holds all three. Nexara reads the jobs through Proxmox's QEMU monitor with one fixed, read-only command (`info block-jobs`). For that the cluster's API token needs `Sys.Audit` on the VM on Proxmox VE 9, or `VM.Monitor` on Proxmox VE 8.
+- A QEMU too stuck to answer (a hung storage backend, say) shows that as a row's message: Proxmox waits up to 25 seconds for QEMU, and Nexara up to 30 for Proxmox. Several people watching the same VM share one read.
 - A line QEMU prints in a shape Nexara does not recognise is shown as printed rather than dropped.
 
 ---
@@ -1435,6 +1435,16 @@ Failed tasks surface the error message from Proxmox in the UI — failures are n
 Both live on the **Events** page in the sidebar: the **Audit Log** tab, and a **Tasks** tab for anyone holding `view:task`. Reaching the page at all requires `view:audit`, which every built-in role has — including Viewer, so assume audit rows are readable by any signed-in user.
 
 Filter the audit log by cluster, resource type, user, action, source, severity and time range. What you see is scoped to the clusters your roles reach.
+
+### A Guest's History
+
+Every VM and container page has a **History** tab: what happened to that guest, newest first — power actions, migrations (DRS and HA included), snapshots, backups, clones, config and HA-resource changes, and console opens — whether done in Nexara or in Proxmox, each task with how it ended. A row expands to its details, a **Live view** button and the task's log from Proxmox. Filter by type, by source (done in Nexara, done in Proxmox, or no task) and by time.
+
+- A guest is its cluster and VMID: the other cluster's VM with the same number never mixes in, and the history starts at the guest's own create, clone or restore — or just after the destroy of the guest that held the VMID before, since Proxmox reuses the lowest free one.
+- **Changes no task explains** — a shutdown or a crash inside the guest, a node that stopped reporting — are recorded as Nexara's collector sees them and shown about five minutes later, once it has ingested any Proxmox task that would explain them. A change made while Nexara was down is seen when it comes back, and still matched against the tasks that ran in between.
+- A task's outcome outlives `TASK_HISTORY_RETENTION`: when the retention sweep prunes a guest task, it moves to an archive the History tab reads. A failed migration keeps its verdict there but not Proxmox's text, which for a cross-cluster migration can carry the target cluster's API token.
+- Not listed: a backup job that covers several guests, whose Proxmox task names no guest. The Backups tab has the guest's backups.
+- The tab needs `view:audit` and `view:task`. Through the API (`GET /api/v1/clusters/{cluster_id}/guests/{vmid}/history`) a `view:audit` holder gets each task's outcome; the exit text from its task record, and tasks with no audit entry, need `view:task` as well, and status changes `view:vm` (VMs) or `view:container` (containers).
 
 ### Exporting the Audit Log
 

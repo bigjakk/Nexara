@@ -19,9 +19,13 @@ import type { TaskLogLine } from "@/features/vms/api/vm-queries";
 export function TaskLogSection({
   lines,
   isLoading = false,
+  isError = false,
 }: {
   lines: TaskLogLine[] | undefined;
   isLoading?: boolean;
+  /** The read failed. Proxmox rotates old task logs away, so a guest's
+   *  History reaches tasks whose log is gone; say so rather than show nothing. */
+  isError?: boolean;
 }) {
   const { t } = useTranslation("common");
   return (
@@ -43,6 +47,11 @@ export function TaskLogSection({
       {lines && lines.length === 0 && (
         <div className="mt-1 text-xs text-muted-foreground">
           {t("noLogOutput")}
+        </div>
+      )}
+      {isError && !isLoading && !lines && (
+        <div className="mt-1 text-xs text-muted-foreground">
+          {t("logUnavailable")}
         </div>
       )}
     </div>

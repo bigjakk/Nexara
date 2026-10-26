@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
-import { apiClient } from "@/lib/api-client";
-import { BlockJobsCard } from "./BlockJobsCard";
+import { apiClient, ApiClientError } from "@/lib/api-client";
+import { LiveBlockJobRows } from "./LiveBlockJobRows";
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
@@ -10,7 +10,17 @@ vi.mock("@/lib/api-client", async () =>
 
 const mockedGet = vi.mocked(apiClient.get);
 
-describe("BlockJobsCard", () => {
+function rows() {
+  return (
+    <table>
+      <tbody>
+        <LiveBlockJobRows clusterId="c1" vmId="v1" colSpan={6} />
+      </tbody>
+    </table>
+  );
+}
+
+describe("LiveBlockJobRows", () => {
   beforeEach(() => {
     mockedGet.mockReset();
   });
@@ -32,7 +42,7 @@ describe("BlockJobsCard", () => {
       ],
       unparsed: ["A line QEMU has never printed"],
     });
-    renderWithProviders(<BlockJobsCard clusterId="c1" vmId="v1" />);
+    renderWithProviders(rows());
 
     const job = await screen.findByTestId("block-job");
     expect(job).toHaveTextContent("mirror");
@@ -61,9 +71,7 @@ describe("BlockJobsCard", () => {
       unparsed: [],
     });
     mockedGet.mockResolvedValueOnce(job(1));
-    const { queryClient, rerender } = renderWithProviders(
-      <BlockJobsCard clusterId="c1" vmId="v1" />,
-    );
+    const { queryClient, rerender } = renderWithProviders(rows());
     await screen.findByTestId("block-job");
     expect(screen.queryByText(/Rate:/)).not.toBeInTheDocument();
 
@@ -73,16 +81,34 @@ describe("BlockJobsCard", () => {
     expect(await screen.findByText("Rate: 1.5 MiB/s")).toBeInTheDocument();
     expect(screen.getByText("About 3 s left")).toBeInTheDocument();
     // A render with no new fetch keeps the pace it measured.
-    rerender(<BlockJobsCard clusterId="c1" vmId="v1" />);
+    rerender(rows());
     expect(screen.getByText("Rate: 1.5 MiB/s")).toBeInTheDocument();
   });
 
+  // Live rows sit above the history: with nothing running they are not there
+  // at all, while a QEMU that did not answer is itself the answer.
   it.each([
-    [{ running: true, jobs: [], unparsed: [] }, "No active block jobs"],
-    [{ running: false, jobs: [], unparsed: [] }, "Not running"],
-  ])("says so when there is nothing to show (%#)", async (reply, text) => {
-    mockedGet.mockResolvedValue(reply);
-    renderWithProviders(<BlockJobsCard clusterId="c1" vmId="v1" />);
-    expect(await screen.findByText(text)).toBeInTheDocument();
+    [{ running: true, jobs: [], unparsed: [] }, ""],
+    [{ running: false, jobs: [], unparsed: [] }, ""],
+    [
+      new ApiClientError(502, { error: "bad_gateway", message: "got timeout" }),
+      "got timeout",
+    ],
+  ])("renders only what there is to show (%#)", async (reply, text) => {
+    if (reply instanceof Error) mockedGet.mockRejectedValue(reply);
+    else mockedGet.mockResolvedValue(reply);
+    const { container, queryClient } = renderWithProviders(rows());
+    await vi.waitFor(() => {
+      const state = queryClient.getQueryState([
+        "clusters",
+        "c1",
+        "vms",
+        "v1",
+        "block-jobs",
+      ]);
+      expect(state?.status).not.toBe("pending");
+    });
+    expect(container.querySelectorAll("tr")).toHaveLength(text ? 1 : 0);
+    if (text) expect(screen.getByText(text)).toBeInTheDocument();
   });
 });

@@ -27,7 +27,7 @@ function deliver(channel: string, payload: unknown) {
 }
 
 /** Mounts the hook for both clusters over a cache holding `keys`. */
-function mount(keys: string[][]) {
+function mount(keys: (string | number)[][]) {
   const client = createTestQueryClient({ keepCache: true });
   for (const key of keys) {
     client.setQueryData(key, []);
@@ -66,9 +66,19 @@ describe("useEventInvalidation — task events and the schedule list", () => {
       vi.useFakeTimers();
       const stale = {
         "the cluster's schedules": ["clusters", CLUSTER, "schedules"],
+        "a guest's History": ["guest-history", CLUSTER, 100, 0, "", "", ""],
       };
       const fresh = {
         "another cluster's schedules": ["clusters", OTHER_CLUSTER, "schedules"],
+        "another cluster's guest History": [
+          "guest-history",
+          OTHER_CLUSTER,
+          100,
+          0,
+          "",
+          "",
+          "",
+        ],
         // Narrow on purpose: a task event is not an inventory change, and
         // prefix-invalidating the cluster would refetch every query under it.
         "the cluster's VM list": ["clusters", CLUSTER, "vms"],
@@ -122,6 +132,31 @@ describe("useEventInvalidation — task events and the schedule list", () => {
         false,
       );
     }
+  });
+});
+
+// A change with no task — a config edit, an HA resource — reaches a guest's
+// History only as its audit entry.
+describe("useEventInvalidation — audit_entry and guest History", () => {
+  it("marks the event's cluster's guest histories stale, and no other cluster's", () => {
+    vi.useFakeTimers();
+    const history = ["guest-history", CLUSTER, 100, 0, "", "", ""];
+    const otherHistory = ["guest-history", OTHER_CLUSTER, 100, 0, "", "", ""];
+    const client = mount([history, otherHistory]);
+
+    act(() => {
+      deliver(`cluster:${CLUSTER}:events`, {
+        kind: "audit_entry",
+        cluster_id: CLUSTER,
+        resource_type: "vm",
+        resource_id: "d0000000-0000-4000-8000-000000000002",
+        action: "config_update",
+      });
+    });
+    flush();
+
+    expect(client.getQueryState(history)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(otherHistory)?.isInvalidated).toBe(false);
   });
 });
 

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "@/test/test-utils";
+import { useAuthStore } from "@/stores/auth-store";
 import { VMDetailPage } from "./VMDetailPage";
 import type { VMResponse } from "@/types/api";
 
@@ -166,12 +167,6 @@ vi.mock("../api/vm-queries", () => ({
     data: { running: false },
     isLoading: false,
   }),
-  useBlockJobs: () => ({
-    data: { running: true, jobs: [], unparsed: [] },
-    isLoading: false,
-    error: null,
-    dataUpdatedAt: 0,
-  }),
   useConvertToTemplate: () => ({
     mutate: vi.fn(),
     isPending: false,
@@ -262,6 +257,29 @@ describe("VMDetailPage", () => {
     expect(
       screen.getByRole("button", { name: /^Clone$/i }),
     ).toBeInTheDocument();
+  });
+
+  // History reads the audit log and opens Proxmox task logs; with either
+  // grant missing it would be a tab of refusals, so it is not offered.
+  it.each([
+    [["view:audit", "view:task"], true],
+    [["view:audit"], false],
+    [["view:task"], false],
+  ])("offers the History tab with %o: %s", (permissions, shown) => {
+    useAuthStore.setState({
+      user: {
+        id: "u1",
+        email: "u@example.test",
+        display_name: "U",
+        role: "user",
+      },
+      permissions,
+    });
+    renderPage();
+    expect(screen.queryByRole("tab", { name: /history/i }) !== null).toBe(
+      shown,
+    );
+    useAuthStore.setState({ user: null, permissions: [] });
   });
 
   // Guest tools are a Windows-only concept, and this page is the one place the

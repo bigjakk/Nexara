@@ -11,14 +11,14 @@ import { vi } from "vitest";
  *   vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
  */
 
-type Verb = "get" | "list" | "post" | "put" | "patch" | "delete";
+type Verb = "get" | "list" | "page" | "post" | "put" | "patch" | "delete";
 
 /**
  * `@/lib/api-client` with only its transport replaced: the real module is
  * spread in, because api-error.ts imports ApiClientError from it (a mock that
  * supplies only apiClient makes describeError throw on every render) and the
  * session (clearTokens, storeTokens, sessionScope) stays the real one.
- * apiClient gets get, list, post, put and delete as bare vi.fn()s; `verbs`
+ * apiClient gets get, list, page, post, put and delete as bare vi.fn()s; `verbs`
  * replaces one of them, or adds patch, e.g. to hand a request to a mock the
  * file holds. `overrides` replaces other exports of the module, e.g. a session
  * call a hook makes.
@@ -37,6 +37,7 @@ export async function apiClientMock(
     apiClient: {
       get: vi.fn(),
       list: vi.fn(),
+      page: vi.fn(),
       post: vi.fn(),
       put: vi.fn(),
       delete: vi.fn(),

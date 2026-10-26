@@ -28,6 +28,7 @@ import {
   type AuditLogEntry,
 } from "../api/events-queries";
 import { SyslogConfigCard } from "./SyslogConfigCard";
+import { detailPairs } from "../lib/audit-details";
 
 const PAGE_SIZE = 25;
 
@@ -108,53 +109,6 @@ function formatDetailsSummary(entry: AuditLogEntry): string | null {
     if (typeof d["status"] === "string" && d["status"] !== "completed")
       parts.push(d["status"]);
     return parts.length > 0 ? parts.join(" · ") : null;
-  } catch {
-    return null;
-  }
-}
-
-function detailKeyLabel(key: string): string {
-  const labels: Record<string, string> = {
-    vm_type: "Type",
-    vmid: "VMID",
-    source_node: "Source Node",
-    target_node: "Target Node",
-    migration_type: "Migration Type",
-    online: "Live Migration",
-    error: "Error",
-    status: "Status",
-    bwlimit_kib: "BW Limit (KiB)",
-    delete_source: "Delete Source",
-    target_vmid: "Target VMID",
-    storage: "Storage",
-    pool: "Pool",
-    name: "Name",
-    size: "Size",
-  };
-  return (
-    labels[key] ??
-    key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-  );
-}
-
-function detailValue(val: unknown): string {
-  if (typeof val === "boolean") return val ? "Yes" : "No";
-  if (typeof val === "number") return String(val);
-  if (typeof val === "string") return val;
-  if (val === null || val === undefined) return "-";
-  return JSON.stringify(val);
-}
-
-function detailPairs(entry: AuditLogEntry): Array<[string, string]> | null {
-  if (!entry.details || entry.details === "{}" || entry.details === "null")
-    return null;
-  try {
-    const d = JSON.parse(entry.details) as Record<string, unknown>;
-    const pairs: Array<[string, string]> = [];
-    for (const [k, v] of Object.entries(d)) {
-      pairs.push([detailKeyLabel(k), detailValue(v)]);
-    }
-    return pairs.length > 0 ? pairs : null;
   } catch {
     return null;
   }
@@ -241,7 +195,7 @@ function EventRow({
   onToggle: () => void;
 }) {
   const summary = formatDetailsSummary(entry);
-  const details = expanded ? detailPairs(entry) : null;
+  const details = expanded ? detailPairs(entry.details) : null;
   const severity = entrySeverity(entry);
 
   return (

@@ -76,5 +76,6 @@
   "details": "Details",
   "log": "Log",
   "loadingLog": "Loading log…",
-  "noLogOutput": "No log output"
+  "noLogOutput": "No log output",
+  "logUnavailable": "Proxmox did not return this task's log. It may have been rotated away."
 }

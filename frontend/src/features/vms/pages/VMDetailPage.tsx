@@ -58,7 +58,7 @@ import { ContainerResourcesPanel } from "../components/ContainerResourcesPanel";
 import { SchedulePanel } from "../components/SchedulePanel";
 import { BackupPanel } from "../components/BackupPanel";
 import { VeeamProtectionCard } from "../components/VeeamProtectionCard";
-import { BlockJobsCard } from "../components/BlockJobsCard";
+import { GuestHistoryTab } from "../components/GuestHistoryTab";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 import type { TimeRange } from "@/types/api";
@@ -81,8 +81,13 @@ export function VMDetailPage() {
   // ?tab=snapshots). Only trusted on mount — AppShell remounts per pathname.
   const [searchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
-  const validTabs =
-    kind === "vm"
+  const { canConsole, hasPermission } = usePermissions();
+  // History is read from the audit log, and its rows open Proxmox task logs:
+  // without both grants the tab would be a table of refusals.
+  const canHistory =
+    hasPermission("view", "audit") && hasPermission("view", "task");
+  const validTabs = [
+    ...(kind === "vm"
       ? [
           "overview",
           "hardware",
@@ -91,7 +96,9 @@ export function VMDetailPage() {
           "backups",
           "schedules",
         ]
-      : ["overview", "resources", "snapshots", "backups", "schedules"];
+      : ["overview", "resources", "snapshots", "backups", "schedules"]),
+    ...(canHistory ? ["history"] : []),
+  ];
   const initialTab =
     requestedTab && validTabs.includes(requestedTab)
       ? requestedTab
@@ -103,7 +110,6 @@ export function VMDetailPage() {
   const liveMetric = clusterMetrics?.vmMetrics.get(vmId);
 
   const { data: nodes } = useClusterNodes(clusterId);
-  const { canConsole } = usePermissions();
   const updateTabNode = useConsoleStore((s) => s.updateTabNode);
 
   // Resolve node name from node_id
@@ -392,6 +398,7 @@ export function VMDetailPage() {
           )}
           <TabsTrigger value="backups">Backups</TabsTrigger>
           <TabsTrigger value="schedules">Schedules</TabsTrigger>
+          {canHistory && <TabsTrigger value="history">History</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 space-y-6">
@@ -427,11 +434,6 @@ export function VMDetailPage() {
               configOstype={vm.config_ostype}
               ostype={vm.ostype}
             />
-          )}
-
-          {/* Block jobs — QEMU VMs only, when running */}
-          {kind === "vm" && normalizedStatus === "running" && (
-            <BlockJobsCard clusterId={clusterId} vmId={vmId} />
           )}
 
           {/* Metrics */}
@@ -510,6 +512,17 @@ export function VMDetailPage() {
             node={nodeName}
           />
         </TabsContent>
+
+        {canHistory && (
+          <TabsContent value="history" className="mt-4">
+            <GuestHistoryTab
+              clusterId={clusterId}
+              vmId={vmId}
+              vmid={vm.vmid}
+              showBlockJobs={kind === "vm" && normalizedStatus === "running"}
+            />
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Dialogs */}
