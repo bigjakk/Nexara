@@ -1318,6 +1318,10 @@ export function ContainerResourcesPanel({
 
   if (!config) return null;
 
+  // check_ct_modify_config_perm (src/PVE/LXC.pm) reads this to decide who may
+  // change a container's features; see the Features section.
+  const unprivileged = num(config["unprivileged"]) === 1;
+
   return (
     <div className="space-y-3">
       {/* Warning banner for running container */}
@@ -1804,58 +1808,75 @@ export function ContainerResourcesPanel({
           </div>
         </Section>
 
-        {/* Features */}
+        {/* Features. check_ct_modify_config_perm (pve-container
+            src/PVE/LXC.pm) lets nobody but root@pam change a privileged
+            container's features, or any but nesting on an unprivileged one,
+            and Nexara connects with an API token, which never is root@pam. So
+            those show what is set and say why they are locked: a change to
+            one would fail the whole Save. */}
         <Section title="Features">
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-3">
               <div className="flex items-center gap-2">
                 <Checkbox
+                  id="ct-feature-nesting"
                   checked={features.nesting}
+                  disabled={!unprivileged}
                   onCheckedChange={(v) => {
                     setFeatures((f) => ({ ...f, nesting: v === true }));
                   }}
                 />
-                <Label className="text-xs">Nesting</Label>
+                <Label htmlFor="ct-feature-nesting" className="text-xs">
+                  Nesting
+                </Label>
               </div>
               <div className="flex items-center gap-2">
                 <Checkbox
+                  id="ct-feature-fuse"
                   checked={features.fuse}
-                  onCheckedChange={(v) => {
-                    setFeatures((f) => ({ ...f, fuse: v === true }));
-                  }}
+                  disabled
                 />
-                <Label className="text-xs">FUSE</Label>
+                <Label htmlFor="ct-feature-fuse" className="text-xs">
+                  FUSE
+                </Label>
               </div>
               <div className="flex items-center gap-2">
                 <Checkbox
+                  id="ct-feature-keyctl"
                   checked={features.keyctl}
-                  onCheckedChange={(v) => {
-                    setFeatures((f) => ({ ...f, keyctl: v === true }));
-                  }}
+                  disabled
                 />
-                <Label className="text-xs">Keyctl</Label>
+                <Label htmlFor="ct-feature-keyctl" className="text-xs">
+                  Keyctl
+                </Label>
               </div>
               <div className="flex items-center gap-2">
                 <Checkbox
+                  id="ct-feature-mknod"
                   checked={features.mknod}
-                  onCheckedChange={(v) => {
-                    setFeatures((f) => ({ ...f, mknod: v === true }));
-                  }}
+                  disabled
                 />
-                <Label className="text-xs">Mknod</Label>
+                <Label htmlFor="ct-feature-mknod" className="text-xs">
+                  Mknod
+                </Label>
               </div>
             </div>
             <div>
-              <Label className="text-xs">Allowed Mount Types</Label>
+              <Label htmlFor="ct-feature-mount" className="text-xs">
+                Allowed Mount Types
+              </Label>
               <Input
+                id="ct-feature-mount"
                 value={features.mount}
-                onChange={(e) => {
-                  setFeatures((f) => ({ ...f, mount: e.target.value }));
-                }}
-                placeholder="e.g. cifs;nfs"
+                disabled
                 className="h-8 text-sm"
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              {unprivileged
+                ? "Proxmox lets only root@pam change FUSE, Keyctl, Mknod and the mount types, and Nexara connects with an API token. Set them in Proxmox, as root@pam."
+                : "On a privileged container Proxmox lets only root@pam change features, Nesting included, and Nexara connects with an API token. Set them in Proxmox, as root@pam."}
+            </p>
           </div>
         </Section>
       </div>

@@ -129,6 +129,7 @@ describe("ContainerResourcesPanel change tracking", () => {
     state.config = {
       ...state.config,
       features: "keyctl=1,force_rw_sys=1",
+      unprivileged: 1,
     };
     const user = userEvent.setup();
     renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
@@ -180,6 +181,30 @@ describe("ContainerResourcesPanel change tracking", () => {
 
     expect(state.saved?.["fields"]).toEqual(want);
   });
+
+  // check_ct_modify_config_perm lets only root@pam change a privileged
+  // container's features, or any but nesting on an unprivileged one, and a
+  // token never is root@pam.
+  it.each([
+    ["an unprivileged", 1, true, /only root@pam change FUSE/],
+    ["a privileged", 0, false, /privileged container/],
+  ])(
+    "locks the features a token cannot change on %s container",
+    (_name, unprivileged, nestingOpen, note) => {
+      state.config = { ...state.config, features: "nesting=1", unprivileged };
+      renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
+
+      for (const name of ["FUSE", "Keyctl", "Mknod"]) {
+        expect(screen.getByRole("checkbox", { name })).toBeDisabled();
+      }
+      expect(screen.getByLabelText("Allowed Mount Types")).toBeDisabled();
+      expect(screen.getByRole("checkbox", { name: "Nesting" })).toHaveProperty(
+        "disabled",
+        !nestingOpen,
+      );
+      expect(screen.getByText(note)).toBeInTheDocument();
+    },
+  );
 
   it("keeps unmodelled NIC keys when saving an unrelated edit", async () => {
     const user = userEvent.setup();
