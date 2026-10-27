@@ -67,13 +67,23 @@ describe("HistoryButton", () => {
 
     setPermissions(["view:audit", "view:task"]);
     renderWithProviders(
-      <HistoryButton kind={guestHistoryKind} target={target} title="rule01" />,
+      <HistoryButton
+        kind={guestHistoryKind}
+        target={target}
+        title="rule01"
+        rowsAbove={(colSpan) => (
+          <tr>
+            <td colSpan={colSpan}>a live task</td>
+          </tr>
+        )}
+      />,
     );
     expect(mockedPage).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "History of rule01" }));
 
     expect(await screen.findByText("Config change")).toBeInTheDocument();
     expect(screen.getByText("History: rule01")).toBeInTheDocument();
+    expect(screen.getByText("a live task")).toBeInTheDocument();
     expect(String(mockedPage.mock.calls[0]?.[0])).toBe(
       "/api/v1/clusters/c1/ha/rules/rule01/history?limit=50&offset=0",
     );

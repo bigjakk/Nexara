@@ -1,4 +1,4 @@
-import { useState, type SyntheticEvent } from "react";
+import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { History } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,9 @@ interface HistoryDrawerProps {
   target: HistoryTarget;
   /** What the History is of, e.g. the object's name. */
   title: string;
+  /** Live rows above the first page, as HistoryTimeline's — a PBS server's
+   *  running tasks. */
+  rowsAbove?: ((colSpan: number) => ReactNode) | undefined;
 }
 
 /**
@@ -33,6 +36,7 @@ export function HistoryDrawer({
   kind,
   target,
   title,
+  rowsAbove,
   open,
   onOpenChange,
 }: HistoryDrawerProps & {
@@ -57,7 +61,12 @@ export function HistoryDrawer({
           <SheetDescription>{t("drawer.description")}</SheetDescription>
         </SheetHeader>
         <div className="mt-4">
-          <HistoryTimeline kind={kind} target={target} enabled={open} />
+          <HistoryTimeline
+            kind={kind}
+            target={target}
+            enabled={open}
+            rowsAbove={rowsAbove}
+          />
         </div>
       </SheetContent>
     </Sheet>
