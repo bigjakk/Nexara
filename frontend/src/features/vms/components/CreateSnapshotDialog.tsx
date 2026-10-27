@@ -12,11 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  useCreateSnapshot,
-  useSnapshotCapability,
-  useTaskStatus,
-} from "../api/vm-queries";
+import { useCreateSnapshot, useSnapshotCapability } from "../api/vm-queries";
+import { useTaskStatus } from "@/features/tasks/api/tasks-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { snapshotNameError, SNAPSHOT_NAME_RULES } from "../lib/snapshot-name";

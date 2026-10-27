@@ -14,7 +14,6 @@ import type {
   VMActionResponse,
   CloneRequest,
   MigrateRequest,
-  TaskStatusResponse,
   ResourceKind,
   Snapshot,
   SnapshotRequest,
@@ -267,24 +266,6 @@ export function useDestroyVM() {
     },
     onSuccess: (_data, variables) => {
       invalidateResourceLists(queryClient, variables.clusterId);
-    },
-  });
-}
-
-// --- Task status polling ---
-
-export function useTaskStatus(clusterId: string, upid: string | null) {
-  return useQuery({
-    queryKey: ["clusters", clusterId, "tasks", upid],
-    queryFn: () =>
-      apiClient.get<TaskStatusResponse>(
-        apiPath`/api/v1/clusters/${clusterId}/tasks/${upid ?? ""}`,
-      ),
-    enabled: upid !== null && upid.length > 0 && clusterId.length > 0,
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (data && data.status === "stopped") return false;
-      return 3_000; // fast polling for smooth progress bars; WS events also trigger invalidation
     },
   });
 }
@@ -1173,36 +1154,6 @@ export function useDeleteSchedule() {
         queryKey: ["clusters", variables.clusterId, "schedules"],
       });
     },
-  });
-}
-
-export interface TaskLogLine {
-  n: number;
-  t: string;
-}
-
-/**
- * A task's log, 5000 lines at most. start skips that many lines first, as
- * Proxmox's own start does: a guest's History reads its part of a backup job's
- * log, which can begin past the first 5000.
- */
-export function useTaskLog(
-  clusterId: string | null,
-  upid: string | null,
-  enabled: boolean,
-  start = 0,
-): UseQueryResult<TaskLogLine[]> {
-  return useQuery({
-    queryKey: ["task-log", clusterId, upid, start],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (start > 0) params.set("start", String(start));
-      return apiClient.list<TaskLogLine>(
-        apiPath`/api/v1/clusters/${clusterId ?? ""}/tasks/${upid ?? ""}/log?${params}`,
-      );
-    },
-    enabled: enabled && !!clusterId && !!upid,
-    staleTime: 60_000,
   });
 }
 

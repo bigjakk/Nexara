@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useTaskStatus } from "../api/vm-queries";
+import { useTaskStatus } from "@/features/tasks/api/tasks-queries";
 
 interface TaskProgressBannerProps {
   clusterId: string;

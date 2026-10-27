@@ -32,6 +32,14 @@ const mockVM: VMResponse = {
 // What useVM serves for the current test; renderPage sets it.
 let mockCurrentVM: VMResponse = mockVM;
 
+vi.mock("@/features/tasks/api/tasks-queries", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/tasks/api/tasks-queries")
+  >()),
+  useTaskStatus: () => ({ data: null }),
+  useTaskLog: () => ({ data: null, isLoading: false }),
+}));
+
 vi.mock("../api/vm-queries", () => ({
   useVM: () => ({
     data: mockCurrentVM,
@@ -56,9 +64,6 @@ vi.mock("../api/vm-queries", () => ({
     mutate: vi.fn(),
     isPending: false,
     reset: vi.fn(),
-  }),
-  useTaskStatus: () => ({
-    data: null,
   }),
   useClusterVMIDs: () => ({
     data: new Set<number>(),
@@ -158,10 +163,6 @@ vi.mock("../api/vm-queries", () => ({
   useDeleteSchedule: () => ({
     mutate: vi.fn(),
     isPending: false,
-  }),
-  useTaskLog: () => ({
-    data: null,
-    isLoading: false,
   }),
   useGuestAgentInfo: () => ({
     data: { running: false },

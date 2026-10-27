@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { SortDirection } from "@/hooks/useTableSort";
+import type { TaskStatusResponse } from "@/features/vms/types/vm";
 import type { TaskSortKey } from "../lib/task-columns";
 
 /** A row from the reconciled task_history table (server-authoritative status). */
@@ -92,5 +93,53 @@ export function useTasks({
     // which would otherwise collapse to 0 during every page transition.
     placeholderData: (prev) => prev,
     refetchInterval: 60_000, // WS events invalidate immediately; this is a fallback
+  });
+}
+
+// --- One task's status and log, which every view of a task reads ---
+
+export function useTaskStatus(clusterId: string, upid: string | null) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "tasks", upid],
+    queryFn: () =>
+      apiClient.get<TaskStatusResponse>(
+        apiPath`/api/v1/clusters/${clusterId}/tasks/${upid ?? ""}`,
+      ),
+    enabled: upid !== null && upid.length > 0 && clusterId.length > 0,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data && data.status === "stopped") return false;
+      return 3_000; // fast polling for smooth progress bars; WS events also trigger invalidation
+    },
+  });
+}
+
+export interface TaskLogLine {
+  n: number;
+  t: string;
+}
+
+/**
+ * A task's log, 5000 lines at most. start skips that many lines first, as
+ * Proxmox's own start does: a guest's History reads its part of a backup job's
+ * log, which can begin past the first 5000.
+ */
+export function useTaskLog(
+  clusterId: string | null,
+  upid: string | null,
+  enabled: boolean,
+  start = 0,
+): UseQueryResult<TaskLogLine[]> {
+  return useQuery({
+    queryKey: ["task-log", clusterId, upid, start],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (start > 0) params.set("start", String(start));
+      return apiClient.list<TaskLogLine>(
+        apiPath`/api/v1/clusters/${clusterId ?? ""}/tasks/${upid ?? ""}/log?${params}`,
+      );
+    },
+    enabled: enabled && !!clusterId && !!upid,
+    staleTime: 60_000,
   });
 }

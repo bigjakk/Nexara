@@ -1,6 +1,6 @@
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { TaskLogLine } from "@/features/vms/api/vm-queries";
+import type { TaskLogLine } from "@/features/tasks/api/tasks-queries";
 
 /**
  * Proxmox answers a log it can no longer open — rotated away — with this one

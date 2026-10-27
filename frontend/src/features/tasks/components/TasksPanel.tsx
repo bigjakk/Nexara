@@ -11,7 +11,6 @@ import type { SortDirection } from "@/hooks/useTableSort";
 import { formatDateTime } from "@/lib/format";
 import { displayProgress } from "@/components/layout/task-status";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useTaskStatus, useTaskLog } from "@/features/vms/api/vm-queries";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { PAGE_SIZE, selectClass, statusFilters } from "../lib/task-filters";
 import {
@@ -21,7 +20,12 @@ import {
   type TaskSortKey,
 } from "../lib/task-columns";
 import { TASK_COLUMNS } from "../lib/task-column-defs";
-import { useTasks, type TaskRecord } from "../api/tasks-queries";
+import {
+  useTaskLog,
+  useTaskStatus,
+  useTasks,
+  type TaskRecord,
+} from "../api/tasks-queries";
 
 export type TaskLayout = ColumnLayout<TaskRecord, TaskSortKey, TaskCellCtx>;
 

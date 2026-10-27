@@ -14,7 +14,7 @@ import { formatDateTime } from "@/lib/format";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { selectClass } from "@/features/tasks/lib/task-filters";
 import { detailPairs } from "@/features/events/lib/audit-details";
-import { useTaskLog, useTaskStatus } from "@/features/vms/api/vm-queries";
+import { useTaskLog, useTaskStatus } from "@/features/tasks/api/tasks-queries";
 import { HISTORY_PAGE_SIZE, useHistory } from "../api/history-queries";
 import {
   SOURCE_LABEL,

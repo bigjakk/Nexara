@@ -31,16 +31,21 @@ vi.mock("../api/vm-queries", async (importOriginal) => {
       isError: false,
       reset: () => {},
     }),
-    useTaskStatus: (_clusterId: string, upid: string | null) => ({
-      data: upid
-        ? {
-            status: "stopped",
-            exit_status: "snapshot feature is not available",
-          }
-        : undefined,
-    }),
   };
 });
+vi.mock("@/features/tasks/api/tasks-queries", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/tasks/api/tasks-queries")
+  >()),
+  useTaskStatus: (_clusterId: string, upid: string | null) => ({
+    data: upid
+      ? {
+          status: "stopped",
+          exit_status: "snapshot feature is not available",
+        }
+      : undefined,
+  }),
+}));
 
 const defaultProps = {
   open: true,

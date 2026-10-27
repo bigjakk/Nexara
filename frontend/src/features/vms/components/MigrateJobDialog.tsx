@@ -43,7 +43,7 @@ import {
 } from "@/features/migrations/api/migration-queries";
 import { useVMConfig, useContainerConfig } from "../api/vm-queries";
 import { parseDisk } from "../lib/vm-config-parsers";
-import type { TaskLogLine } from "../api/vm-queries";
+import type { TaskLogLine } from "@/features/tasks/api/tasks-queries";
 import type {
   CreateMigrationRequest,
   MigrationType,

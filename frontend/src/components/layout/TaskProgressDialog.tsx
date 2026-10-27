@@ -12,8 +12,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
-import { useTaskStatus } from "@/features/vms/api/vm-queries";
-import type { TaskLogLine } from "@/features/vms/api/vm-queries";
+import {
+  useTaskStatus,
+  type TaskLogLine,
+} from "@/features/tasks/api/tasks-queries";
 import { useTaskLogStore } from "@/stores/task-log-store";
 
 /**

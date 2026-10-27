@@ -6,7 +6,7 @@ import {
   useRecentActivity,
   type AuditLogEntry,
 } from "@/features/audit/api/audit-queries";
-import { useTaskStatus, useTaskLog } from "@/features/vms/api/vm-queries";
+import { useTaskStatus, useTaskLog } from "@/features/tasks/api/tasks-queries";
 import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
