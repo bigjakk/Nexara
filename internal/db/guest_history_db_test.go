@@ -58,6 +58,11 @@ func TestGuestHistory(t *testing.T) {
 	}
 	purge()
 	defer purge()
+	// No worker patterns, NULL ones included, keep every guest row.
+	var everyRow bool
+	if err := pool.QueryRow(ctx, `SELECT history_worker_ok('UPID:pve-01:1:1:1:qmstart:100:root@pam:', NULL)`).Scan(&everyRow); err != nil || !everyRow {
+		t.Errorf("history_worker_ok with NULL patterns = %v (%v), want true", everyRow, err)
+	}
 	// The selector reads without the audit indexes built after startup
 	// (EnsureHistoryIndexes), only slower: the timeline runs with them absent.
 	for _, ix := range historyIndexes {

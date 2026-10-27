@@ -3,8 +3,8 @@
 -- backfilled, and a re-run is safe.
 --
 -- history_worker_ok is the History selector's test of a guest row's Proxmox
--- worker type against a kind's patterns (LIKE, any of them; none is every
--- row), written once for the several arms of ListHistory
+-- worker type against a kind's patterns (LIKE, any of them; none — or NULL —
+-- is every row), written once for the several arms of ListHistory
 -- (queries/history.sql) that need the same answer. A row with no UPID has the
 -- worker type ''.
 --
@@ -21,5 +21,5 @@
 CREATE OR REPLACE FUNCTION history_worker_ok(upid text, patterns text[]) RETURNS boolean
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
 AS $$
-    SELECT cardinality($2) = 0 OR COALESCE(split_part($1, ':', 6), '') LIKE ANY($2)
+    SELECT cardinality(COALESCE($2, '{}')) = 0 OR COALESCE(split_part($1, ':', 6), '') LIKE ANY($2)
 $$;
