@@ -85,22 +85,20 @@ func selectGuest(ctx context.Context, r HistoryRequest) (HistorySelection, error
 // the destroy, exclusive: Proxmox reuses the lowest free VMID, so everything
 // before it belongs to the previous guest that held the number.
 //
-// A destroy that failed, or is still running, ended nothing and is passed
-// over. One whose end was never recorded counts: it is far likelier to be an
-// old destroy whose task row was pruned than one that failed.
+// An event that failed, or is still running, is passed over: a create,
+// restore or clone that failed made no guest — a failed clone into a VMID in
+// use leaves the guest that holds it — and a failed destroy ended none. One
+// whose end was never recorded counts: it is far likelier to be an old task
+// whose row was pruned than one that failed.
 //
 // No event at all means no cutoff — the guest's whole recorded history.
 func guestHistoryCutoff(events []db.ListGuestLifecycleEventsRow) (after pgtype.Timestamptz, inclusive bool) {
 	for _, e := range events {
-		at := pgtype.Timestamptz{Time: e.CreatedAt, Valid: true}
-		if !e.IsDestroy {
-			return at, true
-		}
 		switch historyTaskOutcome(e.TaskStatus, e.TaskExitStatus, e.RecordedStatus) {
 		case historyOutcomeFailed, historyOutcomeRunning:
 			continue
 		}
-		return at, false
+		return pgtype.Timestamptz{Time: e.CreatedAt, Valid: true}, !e.IsDestroy
 	}
 	return pgtype.Timestamptz{}, false
 }

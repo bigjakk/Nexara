@@ -217,10 +217,11 @@ ON CONFLICT (upid) DO NOTHING;
 -- no target and is no birth here, which leaves the previous occupant's destroy
 -- as the cutoff instead.
 --
--- A destroy comes back with its outcome, because a FAILED destroy ended
--- nothing; the handler decides with proxmox.TaskSucceeded rather than a SQL
--- copy of that rule. recorded_status is the status the collector stored when
--- it ingested a task, for a task whose row has since been pruned.
+-- Each event comes back with its outcome, because a FAILED one did nothing: a
+-- failed destroy ended no guest, a failed create, restore or clone made none.
+-- The handler decides with proxmox.TaskSucceeded rather than a SQL copy of
+-- that rule. recorded_status is the status the collector stored when it
+-- ingested a task, for a task whose row has since been pruned.
 --
 -- Bounded: the handler only needs the newest birth and the newest destroy that
 -- did not fail, and a guest restored nightly would otherwise drag in a year of
