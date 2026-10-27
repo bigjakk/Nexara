@@ -68,10 +68,10 @@ type HistoryKind struct {
 	ObjectTypes []string
 	// ObservedTypes are those of ObjectTypes whose changes seen in Proxmox
 	// (cluster_object_changes) the kind shows beside their audit rows, each
-	// mapped in observedTypePermission (Validate). A request reads only those
-	// of them its caller may view under the type's own permission — a pool's
-	// under view:pool whatever the kind's — and no type undeclared or unmapped.
-	ObservedTypes []string
+	// with the view permission it is read under (Validate). A request reads
+	// only those of them its caller may view so — a pool's under view:pool
+	// whatever the kind's — and no type undeclared.
+	ObservedTypes []HistoryObservedType
 	// GuestFromPath says the selection's one guest is the one the path's
 	// "vmid" names — List refuses any other selection — and the caller asked
 	// for it by VMID, so listing it discloses nothing. Every
@@ -95,11 +95,33 @@ type HistoryKind struct {
 	ObjectsIgnoreGuestCutoff bool
 }
 
+// HistoryObservedType is one type whose changes seen in Proxmox a kind shows,
+// read under View — or, when that is empty, the type's own permission in
+// observedTypePermission. Declared per kind, since one type is keyed for
+// several scopes whose pages need different permissions: firewall_rule is the
+// cluster's, a node's and a guest's, and a node's firewall rules are read
+// under view:network, as its firewall page is.
+type HistoryObservedType struct {
+	Type, View string
+}
+
+// observedView is the view permission t's changes are read under, and
+// whether there is one.
+func (t HistoryObservedType) observedView() (string, bool) {
+	if t.View != "" {
+		return t.View, true
+	}
+	view, mapped := observedTypePermission[t.Type]
+	return view, mapped
+}
+
 // observedTypePermission is the view permission of each resource type whose
 // changes seen in Proxmox cluster_object_changes records — its trigger, the
 // Ceph pass and the observer. An observed row carries what the type's own
 // view shows (its detail, its field names), so a kind reads it only under
-// that permission. A type missing here is read as an audit row alone.
+// that permission, unless its declaration names another
+// (HistoryObservedType). A type missing here and not given one is read as an
+// audit row alone.
 var observedTypePermission = map[string]string{
 	"vm":                           "vm",
 	"container":                    "container",
@@ -276,9 +298,9 @@ func (k HistoryKind) Validate() error {
 		}
 	}
 	for _, t := range k.ObservedTypes {
-		if _, mapped := observedTypePermission[t]; !mapped || !slices.Contains(k.ObjectTypes, t) {
+		if _, viewed := t.observedView(); !viewed || !slices.Contains(k.ObjectTypes, t.Type) {
 			return fmt.Errorf("history kind %q shows the observed changes of %q, which is not one of its ObjectTypes "+
-				"or has no view permission in observedTypePermission", k.Name, t)
+				"or has no view permission, its own or in observedTypePermission", k.Name, t.Type)
 		}
 	}
 	if !slices.Contains(k.Categories, k.Default) {

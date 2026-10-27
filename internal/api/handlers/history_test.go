@@ -155,9 +155,11 @@ func TestHistoryKindValidate(t *testing.T) {
 		{"a default the filter refuses", func(k *HistoryKind) { k.Default = "misc" }, "Default"},
 		{"a global kind with a guest", func(k *HistoryKind) { k.Global, k.GuestFromPath = true, true }, "global"},
 		{"a global kind reading a cluster's type", func(k *HistoryKind) { k.Global = true }, "unique only within a cluster"},
-		{"an observed type it does not read", func(k *HistoryKind) { k.ObservedTypes = []string{"replication"} }, "observed changes"},
+		{"an observed type it does not read", func(k *HistoryKind) {
+			k.ObservedTypes = []HistoryObservedType{{Type: "replication"}}
+		}, "observed changes"},
 		{"an observed type with no view", func(k *HistoryKind) {
-			k.ObjectTypes, k.ObservedTypes = []string{"pool", "probe"}, []string{"probe"}
+			k.ObjectTypes, k.ObservedTypes = []string{"pool", "probe"}, []HistoryObservedType{{Type: "probe"}}
 		}, "observed changes"},
 	} {
 		k := valid()
@@ -165,6 +167,12 @@ func TestHistoryKindValidate(t *testing.T) {
 		if err := k.Validate(); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("%s: Validate() = %v, want an error naming %q", tt.name, err, tt.want)
 		}
+	}
+	// A type the map lacks is shown under a view of the kind's own.
+	k := valid()
+	k.ObjectTypes, k.ObservedTypes = []string{"pool", "probe"}, []HistoryObservedType{{Type: "probe", View: "network"}}
+	if err := k.Validate(); err != nil {
+		t.Errorf("an observed type with its own view: %v", err)
 	}
 }
 
