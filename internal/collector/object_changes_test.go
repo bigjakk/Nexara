@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -268,47 +270,153 @@ func TestSyncReplicationMarksTheBaselineAfterEveryWholePass(t *testing.T) {
 	})
 }
 
-// An object adds at most maxObjectChangesPerHour rows an hour, however often it
-// changes: the count is per object and starts over an hour after its first row.
-func TestAllowObjectChangeCapsEachObjectPerHour(t *testing.T) {
+// A field adds at most maxObjectChangesPerHour rows an hour, however often it
+// changes, counted apart from the object's other fields. What the cap holds back is
+// not lost: the field keeps the reading it was last filed against, so when the
+// hour ends the net change since is filed once — and one that came back to where it
+// was files nothing.
+func TestObjectChangeCapIsPerFieldAndHoldsBackNothingForGood(t *testing.T) {
 	t.Parallel()
-	s := &Syncer{logger: testLogger()}
-	cluster := uuid.New()
-	start := time.Now()
-	allowed := func(id string, at time.Time) bool {
-		ok, _ := s.allowObjectChange(cluster, "ceph_osd", id, at)
-		return ok
+	start := time.Now().Truncate(time.Second)
+	minute := func(n int) time.Time { return start.Add(time.Duration(n) * time.Minute) }
+	osd := func(id int, up, in bool) cephOSDMetricSnapshot {
+		return cephOSDMetricSnapshot{OSDID: id, OSDName: "osd." + strconv.Itoa(id), Host: "pve-01", StatusUp: up, StatusIn: in, CrushWeight: 1.8}
 	}
-	for i := 0; i < maxObjectChangesPerHour; i++ {
-		if !allowed("1", start.Add(time.Duration(i)*time.Minute)) {
-			t.Fatalf("row %d of an hour was refused, want the first %d allowed", i+1, maxObjectChangesPerHour)
+	pool := func(size, minSize int) cephPoolMetricSnapshot {
+		return cephPoolMetricSnapshot{PoolID: 1, PoolName: "pool01", Size: size, MinSize: minSize, PGNum: 32}
+	}
+	// filed is the rows filed for one object, as "change fields".
+	filed := func(mq *mockQueries, id string) []string {
+		var out []string
+		for _, ch := range mq.objectChanges {
+			if ch.ResourceID == id {
+				out = append(out, ch.Change+" "+strings.Join(ch.Fields, ","))
+			}
 		}
+		return out
 	}
-	if allowed("1", start.Add(50*time.Minute)) {
-		t.Errorf("row %d of the hour was allowed", maxObjectChangesPerHour+1)
+	repeat := func(row string, n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = row
+		}
+		return out
 	}
-	if _, firstOver := s.allowObjectChange(cluster, "ceph_osd", "1", start.Add(51*time.Minute)); firstOver {
-		t.Error("the warning is wanted once an hour per object, not for every refused row")
+	last := func(mq *mockQueries) db.InsertClusterObjectChangeParams {
+		return mq.objectChanges[len(mq.objectChanges)-1]
 	}
-	if !allowed("2", start.Add(50*time.Minute)) {
-		t.Error("another object was refused for the first one's flapping")
+	netChange := func(t *testing.T, row db.InsertClusterObjectChangeParams, field string) (from, to any) {
+		t.Helper()
+		var detail map[string]map[string]any
+		if err := json.Unmarshal(row.Detail, &detail); err != nil {
+			t.Fatalf("detail %s: %v", row.Detail, err)
+		}
+		return detail[field]["from"], detail[field]["to"]
 	}
-	if !allowed("1", start.Add(61*time.Minute)) {
-		t.Error("the first object is still refused an hour after its first row")
-	}
-}
 
-// recordObjectChanges stops filing an object's rows at the hourly cap.
-func TestRecordObjectChangesStopsAtTheCap(t *testing.T) {
-	t.Parallel()
-	mq := newMockQueries()
-	s := &Syncer{queries: mq, logger: testLogger()}
-	changes := make([]objectChange, 0, maxObjectChangesPerHour+5)
-	for i := 0; i < maxObjectChangesPerHour+5; i++ {
-		changes = append(changes, objectChange{resourceID: "7", change: "changed", fields: []string{"up"}, detail: map[string]any{}})
-	}
-	s.recordObjectChanges(context.Background(), uuid.New(), "ceph_osd", changes, time.Now())
-	if len(mq.objectChanges) != maxObjectChangesPerHour {
-		t.Errorf("%d rows filed for one object in an hour, want the cap of %d", len(mq.objectChanges), maxObjectChangesPerHour)
-	}
+	t.Run("a storm in one field does not hide another, and ends as one net row", func(t *testing.T) {
+		t.Parallel()
+		mq, cluster := newMockQueries(), uuid.New()
+		s := &Syncer{queries: mq, logger: testLogger()}
+		pass := func(at int, osds ...cephOSDMetricSnapshot) {
+			s.observeCephOSDsAt(context.Background(), cluster, osds, minute(at))
+		}
+		pass(0, osd(1, true, true), osd(2, true, true))
+		for i := 1; i <= 25; i++ { // osd.1's up flaps each minute; osd.2 goes down once
+			pass(i, osd(1, i%2 == 0, true), osd(2, i < 3, true))
+		}
+		pass(26, osd(1, false, false), osd(2, false, true)) // osd.1 goes out too
+		if got, want := filed(mq, "1"), append(repeat("changed up", maxObjectChangesPerHour), "changed in"); !reflect.DeepEqual(got, want) {
+			t.Errorf("osd.1 filed %v, want %d up rows then the out", got, maxObjectChangesPerHour)
+		}
+		if got := filed(mq, "2"); !reflect.DeepEqual(got, []string{"changed up"}) {
+			t.Errorf("osd.2 filed %v, want its one change: another object's storm is not its cap", got)
+		}
+		before := len(mq.objectChanges)
+		pass(60, osd(1, false, false), osd(2, false, true))
+		if len(mq.objectChanges) != before {
+			t.Fatalf("a row was filed before the hour ended: %+v", last(mq))
+		}
+		pass(61, osd(1, false, false), osd(2, false, true))
+		if len(mq.objectChanges) != before+1 {
+			t.Fatalf("%d rows filed when the hour ended, want the one net change", len(mq.objectChanges)-before)
+		}
+		row := last(mq)
+		from, to := netChange(t, row, "up")
+		if row.ResourceID != "1" || !reflect.DeepEqual(row.Fields, []string{"up"}) || from != true || to != false || !row.LastSeenAt.Equal(minute(20)) {
+			t.Errorf("net row = %s %v up %v -> %v, seen as it was at %v; want osd.1 up true -> false, last seen as it was at minute 20",
+				row.ResourceID, row.Fields, from, to, row.LastSeenAt.Sub(start))
+		}
+		pass(62, osd(1, false, false), osd(2, false, true))
+		if len(mq.objectChanges) != before+1 {
+			t.Error("the net change was filed again")
+		}
+	})
+
+	t.Run("a flap that comes back files nothing when the hour ends", func(t *testing.T) {
+		t.Parallel()
+		mq, cluster := newMockQueries(), uuid.New()
+		s := &Syncer{queries: mq, logger: testLogger()}
+		s.observeCephOSDsAt(context.Background(), cluster, []cephOSDMetricSnapshot{osd(1, true, true)}, minute(0))
+		for i := 1; i <= 24; i++ {
+			s.observeCephOSDsAt(context.Background(), cluster, []cephOSDMetricSnapshot{osd(1, i%2 == 0, true)}, minute(i))
+		}
+		for _, at := range []int{61, 62} {
+			s.observeCephOSDsAt(context.Background(), cluster, []cephOSDMetricSnapshot{osd(1, true, true)}, minute(at))
+		}
+		if n := len(mq.objectChanges); n != maxObjectChangesPerHour {
+			t.Errorf("%d rows filed, want only the %d of the storm", n, maxObjectChangesPerHour)
+		}
+		if n := len(s.cephSeen[cluster].rows); n != 0 {
+			t.Errorf("%d windows are still kept an hour on", n)
+		}
+	})
+
+	t.Run("an object that comes and goes beyond the cap ends as it is", func(t *testing.T) {
+		t.Parallel()
+		mq, cluster := newMockQueries(), uuid.New()
+		s := &Syncer{queries: mq, logger: testLogger()}
+		pass := func(at int, withThree bool) {
+			osds := []cephOSDMetricSnapshot{osd(1, true, true)}
+			if withThree {
+				osds = append(osds, osd(3, true, true))
+			}
+			s.observeCephOSDsAt(context.Background(), cluster, osds, minute(at))
+		}
+		pass(0, true)
+		for i := 1; i <= 21; i++ { // gone at 1, back at 2 ... gone at 21: the 21st is held
+			pass(i, i%2 == 0)
+		}
+		if n := len(filed(mq, "3")); n != maxObjectChangesPerHour {
+			t.Fatalf("osd.3 filed %d rows, want %d", n, maxObjectChangesPerHour)
+		}
+		pass(61, false)
+		if got := filed(mq, "3"); len(got) != maxObjectChangesPerHour+1 || got[len(got)-1] != "removed " {
+			t.Errorf("osd.3 filed %v, want a removal once the hour ended: it is gone", got)
+		}
+		if row := last(mq); !row.LastSeenAt.Equal(minute(20)) {
+			t.Errorf("the removal says it was last seen at %v, want minute 20", row.LastSeenAt.Sub(start))
+		}
+	})
+
+	t.Run("a pool's size storm leaves its minimum alone", func(t *testing.T) {
+		t.Parallel()
+		mq, cluster := newMockQueries(), uuid.New()
+		s := &Syncer{queries: mq, logger: testLogger()}
+		pass := func(at, size, minSize int) {
+			s.observeCephPoolsAt(context.Background(), cluster, []cephPoolMetricSnapshot{pool(size, minSize)}, minute(at))
+		}
+		pass(0, 3, 2)
+		for i := 1; i <= 23; i++ {
+			pass(i, 3-i%2, 2) // 2 at the odd minutes, 3 at the even
+		}
+		pass(24, 2, 1)
+		if got, want := filed(mq, "pool01"), append(repeat("changed size", maxObjectChangesPerHour), "changed min_size"); !reflect.DeepEqual(got, want) {
+			t.Errorf("the pool filed %v, want %d size rows then the minimum", got, maxObjectChangesPerHour)
+		}
+		pass(61, 2, 1)
+		if from, to := netChange(t, last(mq), "size"); len(mq.objectChanges) != maxObjectChangesPerHour+2 || from != float64(3) || to != float64(2) {
+			t.Errorf("%d rows, last size %v -> %v; want one net row, size 3 -> 2", len(mq.objectChanges), from, to)
+		}
+	})
 }
