@@ -113,8 +113,9 @@ type Querier interface {
 	// OSDs; a noout set on one OSD alone is not reported by Proxmox, so is not seen) —
 	// and the only
 	// way a start, a restart or a reboot explains its going back in: as it came up. An
-	// OSD marked out by someone while it was up, or in again while it stayed up, is not
-	// explained by the stop or the start beside it. A replication job's removal is
+	// OSD marked out by someone while it was up, or in again while it stayed up (no
+	// coming up in the same reading or the two minutes before), is not explained by the
+	// stop or the start beside it. A replication job's removal is
 	// lagged too: Proxmox holds a deleted job until it has cleaned up its replicas.
 	//
 	// The window: the row was made no earlier than the object was last seen as it was

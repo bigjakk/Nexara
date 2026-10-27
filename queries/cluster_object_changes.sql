@@ -87,8 +87,9 @@ VALUES (sqlc.arg('cluster_id'), sqlc.arg('resource_type'), sqlc.arg('resource_id
 -- OSDs; a noout set on one OSD alone is not reported by Proxmox, so is not seen) —
 -- and the only
 -- way a start, a restart or a reboot explains its going back in: as it came up. An
--- OSD marked out by someone while it was up, or in again while it stayed up, is not
--- explained by the stop or the start beside it. A replication job's removal is
+-- OSD marked out by someone while it was up, or in again while it stayed up (no
+-- coming up in the same reading or the two minutes before), is not explained by the
+-- stop or the start beside it. A replication job's removal is
 -- lagged too: Proxmox holds a deleted job until it has cleaned up its replicas.
 --
 -- The window: the row was made no earlier than the object was last seen as it was
@@ -175,9 +176,17 @@ WITH rules(resource_type, change, field, direction, audit_type, action, match, n
                                             AND u.detail->'up'->>'to' = 'true'
                                             AND u.observed_at > d.observed_at
                                             AND u.observed_at <= c.observed_at))) AS auto_out,
-           -- and its marking back in, which comes with the OSD coming up.
+           -- and its marking back in, which comes with the OSD coming up: in the same
+           -- reading, or the pass after it (an up recorded within the 2 minutes before).
            (c.resource_type = 'ceph_osd' AND p.field = 'in' AND c.detail->'in'->>'to' = 'true'
-            AND c.detail->'up'->>'to' = 'true') AS auto_in
+            AND (c.detail->'up'->>'to' = 'true'
+                 OR EXISTS (SELECT 1 FROM cluster_object_changes u
+                            WHERE u.cluster_id = c.cluster_id
+                              AND u.resource_type = c.resource_type
+                              AND u.resource_id = c.resource_id
+                              AND u.change = 'changed'
+                              AND u.detail->'up'->>'to' = 'true'
+                              AND u.observed_at BETWEEN c.observed_at - interval '2 minutes' AND c.observed_at))) AS auto_in
     FROM cluster_object_changes c
     CROSS JOIN LATERAL (
         SELECT f AS field FROM unnest(c.fields) AS f WHERE c.change = 'changed'
