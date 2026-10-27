@@ -213,15 +213,30 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 
 	// The identity comes from the task's type and id and the guest it is stamped
 	// with from its UPID (queries/audit_log.sql): a task whose two disagree would
-	// file one kind of object under another's guest, so it is not recorded.
-	if !upidAgrees(task) {
-		s.logger.Warn("task sync: a task's type or id disagrees with its UPID; not recorded",
-			"cluster_id", cluster.ID, "node", nodeName, "upid", task.UPID)
-		return nil
+	// file one kind of object under another's guest. A legitimate task never does,
+	// but it is still recorded — a slip of ours must never drop a real task, and a
+	// skipped one would be listed and warned about again every pass — as the
+	// generic task it would be had nothing mapped it, with the type and id its UPID
+	// carries (the ones the guest is stamped from), flagged identity_mismatch.
+	// Recorded, it is in the seen set from the next pass on, so it warns once.
+	reportedType, reportedID := task.Type, task.ID
+	mismatch := !upidAgrees(task)
+	if mismatch {
+		task.Type, task.ID, _ = upidTypeAndID(task.UPID)
+		s.logger.Warn("task sync: a task's type or id disagrees with its UPID; recorded as a generic task",
+			"cluster_id", cluster.ID, "node", nodeName, "upid", task.UPID,
+			"reported_type", reportedType, "reported_id", cleanTaskText(reportedID))
 	}
 
 	// Map task type to audit log resource_type + action + resource_id.
-	mapping, resourceID, ok := mapTask(task.Type, task.ID, nodeName)
+	var (
+		mapping    taskMapping
+		resourceID string
+		ok         bool
+	)
+	if !mismatch {
+		mapping, resourceID, ok = mapTask(task.Type, task.ID, nodeName)
+	}
 	if !ok {
 		// Unmapped types fall through as generic proxmox_task.
 		mapping = taskMapping{
@@ -246,7 +261,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 	// are reused, so a lookup done later can return whichever guest holds the
 	// id *now*, which for a destroy entry is a different guest entirely.
 	resourceName := ""
-	if isGuestTaskType(task.Type) {
+	if !mismatch && isGuestTaskType(task.Type) {
 		if vmid, err := strconv.ParseInt(task.ID, 10, 32); err == nil {
 			if vm, err := s.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{
 				ClusterID: cluster.ID,
@@ -300,6 +315,11 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 	if resourceName != "" {
 		detailMap["resource_name"] = resourceName
 	}
+	if mismatch {
+		detailMap["identity_mismatch"] = true
+		detailMap["reported_type"] = reportedType
+		detailMap["reported_id"] = cleanTaskText(reportedID)
+	}
 	details, _ := json.Marshal(detailMap)
 
 	if err := s.queries.InsertAuditLogWithSource(ctx, db.InsertAuditLogWithSourceParams{
@@ -328,45 +348,22 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 	return nil
 }
 
-// upidAgrees reports whether a task's type and id are the ones its UPID carries
-// (fields 6 and 7 of UPID:node:pid:pstart:starttime:type:id:user:). An id may
-// have been escaped into the UPID, so the unescaped form counts too. A UPID that
-// is not in the full form carries no type or id to disagree with.
-func upidAgrees(task proxmox.NodeTask) bool {
-	parts := strings.Split(task.UPID, ":")
+// upidTypeAndID is the worker type and id a UPID carries (fields 6 and 7 of
+// UPID:node:pid:pstart:starttime:type:id:user:). ok is false for a UPID that is
+// not in the full form.
+func upidTypeAndID(upid string) (taskType, id string, ok bool) {
+	parts := strings.Split(upid, ":")
 	if len(parts) < 8 || parts[0] != "UPID" {
-		return true
+		return "", "", false
 	}
-	if parts[5] != task.Type {
-		return false
-	}
-	return parts[6] == task.ID || unescapeUPIDText(parts[6]) == task.ID
+	return parts[5], parts[6], true
 }
 
-// unescapeUPIDText decodes the \xHH and %HH escapes a UPID field may carry.
-func unescapeUPIDText(s string) string {
-	if !strings.ContainsAny(s, `\%`) {
-		return s
-	}
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+3 < len(s) && s[i+1] == 'x' {
-			if v, err := strconv.ParseUint(s[i+2:i+4], 16, 8); err == nil {
-				b.WriteByte(byte(v))
-				i += 3
-				continue
-			}
-		}
-		if s[i] == '%' && i+2 < len(s) {
-			if v, err := strconv.ParseUint(s[i+1:i+3], 16, 8); err == nil {
-				b.WriteByte(byte(v))
-				i += 2
-				continue
-			}
-		}
-		b.WriteByte(s[i])
-	}
-	return b.String()
+// upidAgrees reports whether a task's type and id are the ones its UPID carries.
+// A UPID that is not in the full form carries none to disagree with.
+func upidAgrees(task proxmox.NodeTask) bool {
+	taskType, id, ok := upidTypeAndID(task.UPID)
+	return !ok || (taskType == task.Type && id == task.ID)
 }
 
 // cleanTaskText bounds text taken from a task for an audit detail or a

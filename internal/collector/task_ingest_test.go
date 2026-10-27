@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -255,28 +256,28 @@ func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
 	}
 }
 
-// TestIngestTask_RefusesATaskDisagreeingWithItsUPID: the identity comes from the
-// task's type and id and the guest it is stamped with from its UPID, so a task
-// whose two disagree would file one kind of object under another's guest. It is
-// not recorded; an id the UPID carries escaped still agrees, and a UPID not in
-// the full form has no fields to disagree with.
-func TestIngestTask_RefusesATaskDisagreeingWithItsUPID(t *testing.T) {
+// TestIngestTask_FlagsATaskDisagreeingWithItsUPID: a task whose type or id is not
+// the one its UPID carries is still recorded — a slip of ours must never drop a
+// real task — as the generic task it would be had nothing mapped it, with the type
+// and id its UPID carries, flagged identity_mismatch. A UPID not in the full form
+// has no fields to disagree with.
+func TestIngestTask_FlagsATaskDisagreeingWithItsUPID(t *testing.T) {
 	t.Parallel()
 	cluster := db.Cluster{ID: uuid.New()}
 	upid := func(taskType, id string) string {
 		return "UPID:pve-01:00001A2B:00C0FFEE:6540A1B2:" + taskType + ":" + id + ":root@pam:"
 	}
 	for _, tc := range []struct {
-		name         string
-		task         proxmox.NodeTask
-		wantRecorded bool
+		name                         string
+		task                         proxmox.NodeTask
+		wantType, wantID, wantAction string
+		wantFlag                     bool
 	}{
-		{"type and id as the UPID has them", proxmox.NodeTask{UPID: upid("cephdestroyosd", "osd.5"), Type: "cephdestroyosd", ID: "osd.5"}, true},
-		{"a Ceph task carrying a guest task's UPID", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "cephdestroyosd", ID: "osd.5"}, false},
-		{"the same id under another type", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "cephdestroyosd", ID: "100"}, false},
-		{"the same type, another id", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "qmstart", ID: "101"}, false},
-		{"an id escaped into the UPID", proxmox.NodeTask{UPID: upid("cephcreatepool", `a\x3ab`), Type: "cephcreatepool", ID: "a:b"}, true},
-		{"a UPID without the fields", proxmox.NodeTask{UPID: "UPID:pve-01:qmstart:100", Type: "qmstart", ID: "101"}, true},
+		{"type and id as the UPID has them", proxmox.NodeTask{UPID: upid("cephdestroyosd", "osd.5"), Type: "cephdestroyosd", ID: "osd.5"}, "ceph_osd", "5", "osd_destroy", false},
+		{"a Ceph task carrying a guest task's UPID", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "cephdestroyosd", ID: "osd.5"}, "proxmox_task", "100", "qmstart", true},
+		{"the same id under another type", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "cephdestroyosd", ID: "100"}, "proxmox_task", "100", "qmstart", true},
+		{"the same type, another id", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "qmstart", ID: "101"}, "proxmox_task", "100", "qmstart", true},
+		{"a UPID without the fields", proxmox.NodeTask{UPID: "UPID:pve-01:qmstart:100", Type: "qmstart", ID: "101"}, "vm", "101", "start", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -286,10 +287,23 @@ func TestIngestTask_RefusesATaskDisagreeingWithItsUPID(t *testing.T) {
 			if err := s.ingestTask(context.Background(), cluster, "pve-01", tc.task, nil); err != nil {
 				t.Fatalf("ingestTask: %v", err)
 			}
-			recorded := len(q.auditWithSourceCalls) == 1 && len(q.externalTaskCalls) == 1
-			if recorded != tc.wantRecorded || (!recorded && len(q.auditWithSourceCalls)+len(q.externalTaskCalls) != 0) {
-				t.Errorf("recorded = %v (%d audit rows, %d task rows), want %v",
-					recorded, len(q.auditWithSourceCalls), len(q.externalTaskCalls), tc.wantRecorded)
+			if len(q.auditWithSourceCalls) != 1 || len(q.externalTaskCalls) != 1 {
+				t.Fatalf("recorded %d audit rows and %d task rows, want 1 of each: a task is never dropped",
+					len(q.auditWithSourceCalls), len(q.externalTaskCalls))
+			}
+			row := q.auditWithSourceCalls[0]
+			var details map[string]any
+			if err := json.Unmarshal(row.Details, &details); err != nil {
+				t.Fatalf("details: %v", err)
+			}
+			flagged := details["identity_mismatch"] == true
+			if row.ResourceType != tc.wantType || row.ResourceID != tc.wantID || row.Action != tc.wantAction || flagged != tc.wantFlag {
+				t.Errorf("filed as (%s, %s, %s), flagged %v; want (%s, %s, %s), flagged %v",
+					row.ResourceType, row.ResourceID, row.Action, flagged, tc.wantType, tc.wantID, tc.wantAction, tc.wantFlag)
+			}
+			if tc.wantFlag && (q.externalTaskCalls[0].TaskType != tc.wantAction || details["reported_type"] != tc.task.Type) {
+				t.Errorf("the task row's type is %q (want the UPID's %q) and the row keeps the reported type %v (want %q)",
+					q.externalTaskCalls[0].TaskType, tc.wantAction, details["reported_type"], tc.task.Type)
 			}
 		})
 	}
