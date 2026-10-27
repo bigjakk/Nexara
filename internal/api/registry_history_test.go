@@ -20,10 +20,12 @@ const historyRouteCount = 1
 
 // The guest is the one kind gated on view:audit alone, and the one whose
 // guest is not filtered on view:vm/view:container (GuestFromPath); any other
-// kind on either list skips a permission its rows need.
+// kind on either list skips a permission its rows need. Leaving an object's
+// rows out of a guest's cutoff (ObjectsIgnoreGuestCutoff) is pinned the same
+// way: no kind does yet.
 func TestHistoryAuditOnlyIsTheGuestAlone(t *testing.T) {
 	t.Parallel()
-	var auditOnly, fromPath []string
+	var auditOnly, fromPath, ignoresCutoff []string
 	for _, r := range historyRoutes() {
 		if r.AuditOnly != "" {
 			auditOnly = append(auditOnly, r.Kind.Name)
@@ -31,9 +33,13 @@ func TestHistoryAuditOnlyIsTheGuestAlone(t *testing.T) {
 		if r.Kind.GuestFromPath {
 			fromPath = append(fromPath, r.Kind.Name)
 		}
+		if r.Kind.ObjectsIgnoreGuestCutoff {
+			ignoresCutoff = append(ignoresCutoff, r.Kind.Name)
+		}
 	}
-	if !slices.Equal(auditOnly, []string{"guest"}) || !slices.Equal(fromPath, []string{"guest"}) {
-		t.Errorf("gated on view:audit alone: %v; guests unfiltered: %v; want [guest] for both", auditOnly, fromPath)
+	if !slices.Equal(auditOnly, []string{"guest"}) || !slices.Equal(fromPath, []string{"guest"}) || len(ignoresCutoff) != 0 {
+		t.Errorf("gated on view:audit alone: %v; guests unfiltered: %v; objects free of the cutoff: %v; "+
+			"want [guest], [guest], []", auditOnly, fromPath, ignoresCutoff)
 	}
 }
 
