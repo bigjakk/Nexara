@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -204,6 +206,15 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		return nil
 	}
 
+	// The identity comes from the task's type and id and the guest it is stamped
+	// with from its UPID (queries/audit_log.sql): a task whose two disagree would
+	// file one kind of object under another's guest, so it is not recorded.
+	if !upidAgrees(task) {
+		s.logger.Warn("task sync: a task's type or id disagrees with its UPID; not recorded",
+			"cluster_id", cluster.ID, "node", nodeName, "upid", task.UPID)
+		return nil
+	}
+
 	// Map task type to audit log resource_type + action + resource_id.
 	mapping, resourceID, ok := mapTask(task.Type, task.ID, nodeName)
 	if !ok {
@@ -213,7 +224,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 			Action:       task.Type,
 		}
 		resourceID = task.ID
-		if resourceID == "" {
+		if !objectIDOK(resourceID) {
 			resourceID = nodeName
 		}
 	}
@@ -256,12 +267,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		taskStatus, taskExit = classifyTaskExit(task.Status)
 		finishedAt = pgtype.Timestamptz{Time: time.Unix(task.EndTime, 0), Valid: true}
 	}
-	taskDescription := mapping.Action
-	if resourceName != "" {
-		taskDescription += " " + resourceName
-	} else if task.ID != "" {
-		taskDescription += " " + task.ID
-	}
+	taskDescription := describeTask(mapping, resourceID, resourceName, task.ID)
 	if err := s.queries.InsertExternalTaskHistory(ctx, db.InsertExternalTaskHistoryParams{
 		ClusterID:   cluster.ID,
 		UserID:      auth.SystemUserID,
@@ -284,7 +290,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		"node":         nodeName,
 		"status":       task.Status,
 		"task_type":    task.Type,
-		"resource_id":  task.ID,
+		"resource_id":  cleanTaskText(task.ID),
 	}
 	if resourceName != "" {
 		detailMap["resource_name"] = resourceName
@@ -315,4 +321,78 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 	}
 
 	return nil
+}
+
+// upidAgrees reports whether a task's type and id are the ones its UPID carries
+// (fields 6 and 7 of UPID:node:pid:pstart:starttime:type:id:user:). An id may
+// have been escaped into the UPID, so the unescaped form counts too. A UPID that
+// is not in the full form carries no type or id to disagree with.
+func upidAgrees(task proxmox.NodeTask) bool {
+	parts := strings.Split(task.UPID, ":")
+	if len(parts) < 8 || parts[0] != "UPID" {
+		return true
+	}
+	if parts[5] != task.Type {
+		return false
+	}
+	return parts[6] == task.ID || unescapeUPIDText(parts[6]) == task.ID
+}
+
+// unescapeUPIDText decodes the \xHH and %HH escapes a UPID field may carry.
+func unescapeUPIDText(s string) string {
+	if !strings.ContainsAny(s, `\%`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+3 < len(s) && s[i+1] == 'x' {
+			if v, err := strconv.ParseUint(s[i+2:i+4], 16, 8); err == nil {
+				b.WriteByte(byte(v))
+				i += 3
+				continue
+			}
+		}
+		if s[i] == '%' && i+2 < len(s) {
+			if v, err := strconv.ParseUint(s[i+1:i+3], 16, 8); err == nil {
+				b.WriteByte(byte(v))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// cleanTaskText bounds text taken from a task for an audit detail or a
+// description: capped, and control characters made visible.
+func cleanTaskText(s string) string {
+	r := []rune(s)
+	if len(r) > maxObjectIDLen {
+		r = r[:maxObjectIDLen]
+	}
+	for i, c := range r {
+		if unicode.IsControl(c) {
+			r[i] = '?'
+		}
+	}
+	return string(r)
+}
+
+// describeTask is the Tasks page's description of an ingested task: the
+// mapping's wording where it has one, then the object it was done to.
+func describeTask(mapping taskMapping, resourceID, resourceName, taskID string) string {
+	description := mapping.Action
+	if mapping.Describe != "" {
+		description = mapping.Describe
+	}
+	switch {
+	case resourceName != "":
+		return description + " " + resourceName
+	case mapping.Describe != "" && mapping.Fixed == "":
+		return description + " " + cleanTaskText(resourceID)
+	case mapping.Describe == "" && taskID != "":
+		return description + " " + cleanTaskText(taskID)
+	}
+	return description
 }

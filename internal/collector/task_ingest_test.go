@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,29 +182,44 @@ func TestIngestTask_External(t *testing.T) {
 }
 
 // TestIngestTask_FilesObjectTasksUnderTheirIdentity pins the (type, id, action)
-// an external task is filed under. For an object of the cluster page it is the
-// identity the handlers record when Nexara dispatches the same work, so one
-// History holds both: a Ceph daemon keyed by its number or name rather than
-// "osd.12", a certificate by node, an SDN apply by the cluster.
+// an external task is filed under and the description the Tasks page shows. For
+// an object of the cluster page the identity is the one the handlers record
+// when Nexara dispatches the same work, so one History holds both: a Ceph daemon
+// keyed by its number or name rather than "osd.12", a certificate by node, an
+// SDN apply by the cluster. An id that is not one Proxmox could have minted for
+// the kind is not remapped: the task is filed as the generic one it would be had
+// nothing mapped it.
 func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
 	t.Parallel()
 	cluster := db.Cluster{ID: uuid.New()}
 	for _, tc := range []struct {
 		name, taskType, id           string
 		wantType, wantID, wantAction string
+		wantDescription              string
 	}{
-		{"OSD destroy is keyed by the number", "cephdestroyosd", "osd.12", "ceph_osd", "12", "osd_destroy"},
-		{"OSD create can only name the device", "cephcreateosd", "sdb", "ceph_osd", "sdb", "osd_create"},
-		{"monitor", "cephcreatemon", "mon.pve-01", "ceph_mon", "pve-01", "mon_create"},
-		{"manager", "cephdestroymgr", "mgr.pve-01", "ceph_mgr", "pve-01", "mgr_destroy"},
-		{"pool", "cephsetpool", "pool01", "ceph_pool", "pool01", "update"},
-		{"OSD daemon restart is an OSD action", "srvrestart", "osd.3", "ceph_osd", "3", "osd_restart"},
-		{"monitor daemon start", "srvstart", "mon.pve-01", "ceph_mon", "pve-01", "mon_start"},
-		{"a node service is not Ceph", "srvrestart", "pveproxy", "proxmox_task", "pveproxy", "srvrestart"},
-		{"certificate renewal is keyed by its node", "acmerenew", "", "certificate", "pve-01", "renewed"},
-		{"SDN apply is the cluster's", "reloadnetworkall", "", "sdn", "cluster", "sdn_applied"},
-		{"node network apply", "srvreload", "networking", "network", "pve-01", "network_applied"},
-		{"another service reload stays one", "srvreload", "pveproxy", "node", "pveproxy", "service_reload"},
+		{"OSD destroy is keyed by the number", "cephdestroyosd", "osd.12", "ceph_osd", "12", "osd_destroy", "Destroy Ceph OSD 12"},
+		{"OSD create can only name the device", "cephcreateosd", "sdb", "ceph_osd", "sdb", "osd_create", "Create Ceph OSD sdb"},
+		{"monitor", "cephcreatemon", "mon.pve-01", "ceph_mon", "pve-01", "mon_create", "Create Ceph monitor pve-01"},
+		{"manager", "cephdestroymgr", "mgr.pve-01", "ceph_mgr", "pve-01", "mgr_destroy", "Destroy Ceph manager pve-01"},
+		{"pool", "cephsetpool", "pool01", "ceph_pool", "pool01", "update", "Update Ceph pool pool01"},
+		{"OSD daemon restart is an OSD action", "srvrestart", "osd.3", "ceph_osd", "3", "osd_restart", "Restart Ceph OSD 3"},
+		{"monitor daemon start", "srvstart", "mon.pve-01", "ceph_mon", "pve-01", "mon_start", "Start Ceph MON pve-01"},
+		{"a node service is not Ceph", "srvrestart", "pveproxy", "proxmox_task", "pveproxy", "srvrestart", "srvrestart pveproxy"},
+		{"certificate renewal is keyed by its node", "acmerenew", "", "certificate", "pve-01", "renewed", "Renew certificate for pve-01"},
+		{"and by its node whatever the id says", "acmerenew", "other-node", "certificate", "pve-01", "renewed", "Renew certificate for pve-01"},
+		{"SDN apply is the cluster's", "reloadnetworkall", "", "sdn", "cluster", "sdn_applied", "Apply SDN configuration"},
+		{"node network apply", "srvreload", "networking", "network", "pve-01", "network_applied", "Apply network configuration on pve-01"},
+		{"another service reload stays one", "srvreload", "pveproxy", "node", "pveproxy", "service_reload", "service_reload pveproxy"},
+
+		// Ids that are not Proxmox's for the kind: never an empty or invented key.
+		{"an OSD number that is not one", "cephdestroyosd", "osd.abc", "proxmox_task", "osd.abc", "cephdestroyosd", "cephdestroyosd osd.abc"},
+		{"an OSD destroy with no id", "cephdestroyosd", "", "proxmox_task", "pve-01", "cephdestroyosd", "cephdestroyosd"},
+		{"an id that is only the prefix", "cephdestroymon", "mon.", "proxmox_task", "mon.", "cephdestroymon", "cephdestroymon mon."},
+		{"a pool with no name", "cephdestroypool", "", "proxmox_task", "pve-01", "cephdestroypool", "cephdestroypool"},
+		{"a pool name with a control character", "cephcreatepool", "pool\n01", "proxmox_task", "pve-01", "cephcreatepool", "cephcreatepool pool?01"},
+		{"a pool name past the bound", "cephcreatepool", strings.Repeat("p", maxObjectIDLen+1), "proxmox_task", "pve-01", "cephcreatepool", ""},
+		{"a daemon service task with no daemon", "srvrestart", "osd.", "proxmox_task", "osd.", "srvrestart", "srvrestart osd."},
+		{"a daemon service task naming no OSD number", "srvrestart", "osd.abc", "proxmox_task", "osd.abc", "srvrestart", "srvrestart osd.abc"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -216,13 +232,62 @@ func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
 			if err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil); err != nil {
 				t.Fatalf("ingestTask: %v", err)
 			}
-			if len(q.auditWithSourceCalls) != 1 {
-				t.Fatalf("wrote %d audit rows, want 1", len(q.auditWithSourceCalls))
+			if len(q.auditWithSourceCalls) != 1 || len(q.externalTaskCalls) != 1 {
+				t.Fatalf("wrote %d audit rows and %d task rows, want 1 of each", len(q.auditWithSourceCalls), len(q.externalTaskCalls))
 			}
 			got := q.auditWithSourceCalls[0]
 			if got.ResourceType != tc.wantType || got.ResourceID != tc.wantID || got.Action != tc.wantAction {
 				t.Errorf("filed as (%s, %s, %s), want (%s, %s, %s)",
 					got.ResourceType, got.ResourceID, got.Action, tc.wantType, tc.wantID, tc.wantAction)
+			}
+			// An over-long name is cut in the description (wantDescription is
+			// empty there: the cut text is only checked to be bounded).
+			desc := q.externalTaskCalls[0].Description
+			if tc.wantDescription != "" && desc != tc.wantDescription {
+				t.Errorf("described as %q, want %q", desc, tc.wantDescription)
+			}
+			if len([]rune(desc)) > maxObjectIDLen+64 {
+				t.Errorf("the description is %d characters; text taken from a task must be bounded", len([]rune(desc)))
+			}
+		})
+	}
+}
+
+// TestIngestTask_RefusesATaskDisagreeingWithItsUPID: the identity comes from the
+// task's type and id and the guest it is stamped with from its UPID, so a task
+// whose two disagree would file one kind of object under another's guest. It is
+// not recorded; an id the UPID carries escaped still agrees, and a UPID not in
+// the full form has no fields to disagree with.
+func TestIngestTask_RefusesATaskDisagreeingWithItsUPID(t *testing.T) {
+	t.Parallel()
+	cluster := db.Cluster{ID: uuid.New()}
+	upid := func(taskType, id string) string {
+		return "UPID:pve-01:00001A2B:00C0FFEE:6540A1B2:" + taskType + ":" + id + ":root@pam:"
+	}
+	for _, tc := range []struct {
+		name         string
+		task         proxmox.NodeTask
+		wantRecorded bool
+	}{
+		{"type and id as the UPID has them", proxmox.NodeTask{UPID: upid("cephdestroyosd", "osd.5"), Type: "cephdestroyosd", ID: "osd.5"}, true},
+		{"a Ceph task carrying a guest task's UPID", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "cephdestroyosd", ID: "osd.5"}, false},
+		{"the same id under another type", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "cephdestroyosd", ID: "100"}, false},
+		{"the same type, another id", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "qmstart", ID: "101"}, false},
+		{"an id escaped into the UPID", proxmox.NodeTask{UPID: upid("cephcreatepool", `a\x3ab`), Type: "cephcreatepool", ID: "a:b"}, true},
+		{"a UPID without the fields", proxmox.NodeTask{UPID: "UPID:pve-01:qmstart:100", Type: "qmstart", ID: "101"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := newMockQueries()
+			s := &Syncer{queries: q, logger: testLogger()}
+			tc.task.Status, tc.task.StartTime = "OK", time.Now().Add(-time.Minute).Unix()
+			if err := s.ingestTask(context.Background(), cluster, "pve-01", tc.task, nil); err != nil {
+				t.Fatalf("ingestTask: %v", err)
+			}
+			recorded := len(q.auditWithSourceCalls) == 1 && len(q.externalTaskCalls) == 1
+			if recorded != tc.wantRecorded || (!recorded && len(q.auditWithSourceCalls)+len(q.externalTaskCalls) != 0) {
+				t.Errorf("recorded = %v (%d audit rows, %d task rows), want %v",
+					recorded, len(q.auditWithSourceCalls), len(q.externalTaskCalls), tc.wantRecorded)
 			}
 		})
 	}

@@ -1,6 +1,9 @@
 package collector
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 type taskMapping struct {
 	ResourceType string
@@ -9,9 +12,39 @@ type taskMapping struct {
 	// where the object is the cluster itself ("cluster" for an SDN apply).
 	// Without it such a task is filed under its node.
 	Fixed string
+	// OnNode files the task under the node it ran on, whatever its id says: a
+	// certificate is the node's.
+	OnNode bool
+	// Describe is the Tasks page's description of the work, in the words the
+	// handlers use for a task Nexara dispatched ("Renew certificate for"); the
+	// object it was done to follows. Without it the description is the audit
+	// action and the task's id.
+	Describe string
 	// StripPrefix comes off the UPID's id field to leave the resource_id:
 	// Proxmox calls a Ceph daemon "osd.12", Nexara keys it "12".
 	StripPrefix string
+	// Object marks a mapping onto an object of the cluster page keyed by the
+	// UPID's id. That id arrives from a node, so it has to look like one
+	// Proxmox mints for the kind: not empty, not long, no control characters
+	// (objectIDOK), and matching IDPattern where the kind has one. A task whose
+	// id does not is not mapped, and is filed as the generic proxmox_task it
+	// would be had nothing mapped it — never under an empty or invented id.
+	Object    bool
+	IDPattern *regexp.Regexp
+}
+
+// The shapes Proxmox gives the ids of the Ceph objects a task names: an OSD's
+// number, the device a new OSD is made on, and the name of a monitor, manager or
+// metadata server (a node name or a name chosen on create).
+var (
+	cephOSDNumber = regexp.MustCompile(`^[0-9]{1,9}$`)
+	cephOSDDevice = regexp.MustCompile(`^[A-Za-z0-9/._+@-]{1,128}$`)
+	cephDaemonID  = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$`)
+)
+
+// idOK reports whether id may be filed as this mapping's object.
+func (m taskMapping) idOK(id string) bool {
+	return objectIDOK(id) && (m.IDPattern == nil || m.IDPattern.MatchString(id))
 }
 
 var proxmoxTaskMap = map[string]taskMapping{
@@ -64,41 +97,44 @@ var proxmoxTaskMap = map[string]taskMapping{
 	// certificate, keyed by node. The account tasks (acmeregister, acmeupdate,
 	// acmerefresh, acmedeactivate) name no account either, so there is nothing to
 	// key them on; they stay as they were.
-	"acmenewcert":  {ResourceType: "certificate", Action: "ordered"},
-	"acmerenew":    {ResourceType: "certificate", Action: "renewed"},
-	"acmerevoke":   {ResourceType: "certificate", Action: "revoked"},
+	"acmenewcert":  {ResourceType: "certificate", Action: "ordered", OnNode: true, Describe: "Order certificate for"},
+	"acmerenew":    {ResourceType: "certificate", Action: "renewed", OnNode: true, Describe: "Renew certificate for"},
+	"acmerevoke":   {ResourceType: "certificate", Action: "revoked", OnNode: true, Describe: "Revoke certificate for"},
 	"acmeregister": {ResourceType: "node", Action: "acme_register"},
 
 	// SDN apply: the whole cluster's, whichever node ran it.
-	"reloadnetworkall": {ResourceType: "sdn", Action: "sdn_applied", Fixed: "cluster"},
+	"reloadnetworkall": {ResourceType: "sdn", Action: "sdn_applied", Fixed: "cluster", Describe: "Apply SDN configuration"},
 
 	// Ceph. Filed under the object's own identity — the one ceph.go and
 	// ceph_osd.go record for a task Nexara dispatched — so a change made in the
 	// Proxmox GUI lands in the same History. A new OSD's id is not known until
 	// the task has run (its UPID names the device), so a create can only be
 	// filed under that.
-	"cephcreateosd":   {ResourceType: "ceph_osd", Action: "osd_create"},
-	"cephdestroyosd":  {ResourceType: "ceph_osd", Action: "osd_destroy", StripPrefix: "osd."},
-	"cephcreatemon":   {ResourceType: "ceph_mon", Action: "mon_create", StripPrefix: "mon."},
-	"cephdestroymon":  {ResourceType: "ceph_mon", Action: "mon_destroy", StripPrefix: "mon."},
-	"cephcreatemgr":   {ResourceType: "ceph_mgr", Action: "mgr_create", StripPrefix: "mgr."},
-	"cephdestroymgr":  {ResourceType: "ceph_mgr", Action: "mgr_destroy", StripPrefix: "mgr."},
-	"cephcreatemds":   {ResourceType: "ceph_mds", Action: "mds_create", StripPrefix: "mds."},
-	"cephdestroymds":  {ResourceType: "ceph_mds", Action: "mds_destroy", StripPrefix: "mds."},
-	"cephfscreate":    {ResourceType: "ceph_fs", Action: "fs_create"},
-	"cephdestroyfs":   {ResourceType: "ceph_fs", Action: "fs_destroy"},
-	"cephcreatepool":  {ResourceType: "ceph_pool", Action: "create"},
-	"cephdestroypool": {ResourceType: "ceph_pool", Action: "delete"},
-	"cephsetpool":     {ResourceType: "ceph_pool", Action: "update"},
+	"cephcreateosd":   {ResourceType: "ceph_osd", Action: "osd_create", Object: true, Describe: "Create Ceph OSD", IDPattern: cephOSDDevice},
+	"cephdestroyosd":  {ResourceType: "ceph_osd", Action: "osd_destroy", StripPrefix: "osd.", Object: true, Describe: "Destroy Ceph OSD", IDPattern: cephOSDNumber},
+	"cephcreatemon":   {ResourceType: "ceph_mon", Action: "mon_create", StripPrefix: "mon.", Object: true, Describe: "Create Ceph monitor", IDPattern: cephDaemonID},
+	"cephdestroymon":  {ResourceType: "ceph_mon", Action: "mon_destroy", StripPrefix: "mon.", Object: true, Describe: "Destroy Ceph monitor", IDPattern: cephDaemonID},
+	"cephcreatemgr":   {ResourceType: "ceph_mgr", Action: "mgr_create", StripPrefix: "mgr.", Object: true, Describe: "Create Ceph manager", IDPattern: cephDaemonID},
+	"cephdestroymgr":  {ResourceType: "ceph_mgr", Action: "mgr_destroy", StripPrefix: "mgr.", Object: true, Describe: "Destroy Ceph manager", IDPattern: cephDaemonID},
+	"cephcreatemds":   {ResourceType: "ceph_mds", Action: "mds_create", StripPrefix: "mds.", Object: true, Describe: "Create Ceph metadata server", IDPattern: cephDaemonID},
+	"cephdestroymds":  {ResourceType: "ceph_mds", Action: "mds_destroy", StripPrefix: "mds.", Object: true, Describe: "Destroy Ceph metadata server", IDPattern: cephDaemonID},
+	"cephfscreate":    {ResourceType: "ceph_fs", Action: "fs_create", Object: true, Describe: "Create CephFS"},
+	"cephdestroyfs":   {ResourceType: "ceph_fs", Action: "fs_destroy", Object: true, Describe: "Destroy CephFS"},
+	"cephcreatepool":  {ResourceType: "ceph_pool", Action: "create", Object: true, Describe: "Create Ceph pool"},
+	"cephdestroypool": {ResourceType: "ceph_pool", Action: "delete", Object: true, Describe: "Destroy Ceph pool"},
+	"cephsetpool":     {ResourceType: "ceph_pool", Action: "update", Object: true, Describe: "Update Ceph pool"},
 }
 
 // cephDaemonKinds maps the prefix of a Ceph daemon's service name to the audit
-// resource_type of its kind.
-var cephDaemonKinds = map[string]string{
-	"osd.": "ceph_osd",
-	"mon.": "ceph_mon",
-	"mgr.": "ceph_mgr",
-	"mds.": "ceph_mds",
+// resource_type of its kind and the shape of the id after the prefix.
+var cephDaemonKinds = map[string]struct {
+	resourceType string
+	idPattern    *regexp.Regexp
+}{
+	"osd.": {"ceph_osd", cephOSDNumber},
+	"mon.": {"ceph_mon", cephDaemonID},
+	"mgr.": {"ceph_mgr", cephDaemonID},
+	"mds.": {"ceph_mds", cephDaemonID},
 }
 
 // serviceTaskVerbs are the node-service worker types that start, stop or
@@ -121,15 +157,16 @@ var serviceTaskVerbs = map[string]string{
 // pveproxy restart is not filed as anything it is not.
 func mapTask(taskType, taskID, node string) (mapping taskMapping, resourceID string, ok bool) {
 	if verb, isService := serviceTaskVerbs[taskType]; isService {
-		for prefix, resourceType := range cephDaemonKinds {
-			if rest, found := strings.CutPrefix(taskID, prefix); found && rest != "" {
-				kind := strings.TrimSuffix(prefix, ".")
-				return taskMapping{ResourceType: resourceType, Action: kind + "_" + verb}, rest, true
+		for prefix, kind := range cephDaemonKinds {
+			if rest, found := strings.CutPrefix(taskID, prefix); found && objectIDOK(rest) && kind.idPattern.MatchString(rest) {
+				name := strings.TrimSuffix(prefix, ".")
+				describe := strings.ToUpper(verb[:1]) + verb[1:] + " Ceph " + strings.ToUpper(name)
+				return taskMapping{ResourceType: kind.resourceType, Action: name + "_" + verb, Describe: describe}, rest, true
 			}
 		}
 	}
 	if taskType == "srvreload" && taskID == "networking" {
-		return taskMapping{ResourceType: "network", Action: "network_applied"}, node, true
+		return taskMapping{ResourceType: "network", Action: "network_applied", Describe: "Apply network configuration on"}, node, true
 	}
 
 	mapping, ok = proxmoxTaskMap[taskType]
@@ -139,10 +176,15 @@ func mapTask(taskType, taskID, node string) (mapping taskMapping, resourceID str
 	switch {
 	case mapping.Fixed != "":
 		resourceID = mapping.Fixed
-	case taskID == "":
+	case mapping.OnNode:
+		resourceID = node
+	case taskID == "" && !mapping.Object:
 		resourceID = node
 	default:
 		resourceID = strings.TrimPrefix(taskID, mapping.StripPrefix)
+	}
+	if mapping.Object && !mapping.idOK(resourceID) {
+		return taskMapping{}, "", false
 	}
 	return mapping, resourceID, true
 }
