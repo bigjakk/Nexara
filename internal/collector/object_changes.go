@@ -253,6 +253,7 @@ func (s *Syncer) observeCephOSDsAt(ctx context.Context, clusterID uuid.UUID, osd
 	}
 	s.cephMu.Unlock()
 	s.recordObjectChanges(ctx, clusterID, "ceph_osd", kept, prevAt)
+	// Saved after the rows are filed: a crash in between files them again after the restart, never loses them.
 	s.saveReading(ctx, clusterID, "ceph_osd", saved, now)
 }
 
@@ -286,6 +287,7 @@ func (s *Syncer) observeCephPoolsAt(ctx context.Context, clusterID uuid.UUID, po
 	}
 	s.cephMu.Unlock()
 	s.recordObjectChanges(ctx, clusterID, "ceph_pool", kept, prevAt)
+	// Saved after the rows are filed, as above.
 	s.saveReading(ctx, clusterID, "ceph_pool", saved, now)
 }
 
