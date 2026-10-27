@@ -225,7 +225,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		task.Type, task.ID, _ = upidTypeAndID(task.UPID)
 		s.logger.Warn("task sync: a task's type or id disagrees with its UPID; recorded as a generic task",
 			"cluster_id", cluster.ID, "node", nodeName, "upid", task.UPID,
-			"reported_type", reportedType, "reported_id", cleanTaskText(reportedID))
+			"reported_type", cleanTaskText(reportedType), "reported_id", cleanTaskText(reportedID))
 	}
 
 	// Map task type to audit log resource_type + action + resource_id.
@@ -317,7 +317,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 	}
 	if mismatch {
 		detailMap["identity_mismatch"] = true
-		detailMap["reported_type"] = reportedType
+		detailMap["reported_type"] = cleanTaskText(reportedType)
 		detailMap["reported_id"] = cleanTaskText(reportedID)
 	}
 	details, _ := json.Marshal(detailMap)

@@ -306,12 +306,14 @@ func TestIngestTask_FlagsATaskDisagreeingWithItsUPID(t *testing.T) {
 		task                         proxmox.NodeTask
 		wantType, wantID, wantAction string
 		wantFlag                     bool
+		wantReported                 string // the reported type as kept, cleaned; the task's own when empty
 	}{
-		{"type and id as the UPID has them", proxmox.NodeTask{UPID: upid("cephdestroyosd", "osd.5"), Type: "cephdestroyosd", ID: "osd.5"}, "ceph_osd", "5", "osd_destroy", false},
-		{"a Ceph task carrying a guest task's UPID", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "cephdestroyosd", ID: "osd.5"}, "proxmox_task", "100", "qmstart", true},
-		{"the same id under another type", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "cephdestroyosd", ID: "100"}, "proxmox_task", "100", "qmstart", true},
-		{"the same type, another id", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "qmstart", ID: "101"}, "proxmox_task", "100", "qmstart", true},
-		{"a UPID without the fields", proxmox.NodeTask{UPID: "UPID:pve-01:qmstart:100", Type: "qmstart", ID: "101"}, "vm", "101", "start", false},
+		{"type and id as the UPID has them", proxmox.NodeTask{UPID: upid("cephdestroyosd", "osd.5"), Type: "cephdestroyosd", ID: "osd.5"}, "ceph_osd", "5", "osd_destroy", false, ""},
+		{"a Ceph task carrying a guest task's UPID", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "cephdestroyosd", ID: "osd.5"}, "proxmox_task", "100", "qmstart", true, ""},
+		{"the same id under another type", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "cephdestroyosd", ID: "100"}, "proxmox_task", "100", "qmstart", true, ""},
+		{"the same type, another id", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "qmstart", ID: "101"}, "proxmox_task", "100", "qmstart", true, ""},
+		{"a UPID without the fields", proxmox.NodeTask{UPID: "UPID:pve-01:qmstart:100", Type: "qmstart", ID: "101"}, "vm", "101", "start", false, ""},
+		{"a reported type with a control character is kept cleaned", proxmox.NodeTask{UPID: upid("qmstart", "100"), Type: "ceph\ndestroyosd", ID: "100"}, "proxmox_task", "100", "qmstart", true, "ceph?destroyosd"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -335,9 +337,13 @@ func TestIngestTask_FlagsATaskDisagreeingWithItsUPID(t *testing.T) {
 				t.Errorf("filed as (%s, %s, %s), flagged %v; want (%s, %s, %s), flagged %v",
 					row.ResourceType, row.ResourceID, row.Action, flagged, tc.wantType, tc.wantID, tc.wantAction, tc.wantFlag)
 			}
-			if tc.wantFlag && (q.externalTaskCalls[0].TaskType != tc.wantAction || details["reported_type"] != tc.task.Type) {
+			wantReported := tc.wantReported
+			if wantReported == "" {
+				wantReported = tc.task.Type
+			}
+			if tc.wantFlag && (q.externalTaskCalls[0].TaskType != tc.wantAction || details["reported_type"] != wantReported) {
 				t.Errorf("the task row's type is %q (want the UPID's %q) and the row keeps the reported type %v (want %q)",
-					q.externalTaskCalls[0].TaskType, tc.wantAction, details["reported_type"], tc.task.Type)
+					q.externalTaskCalls[0].TaskType, tc.wantAction, details["reported_type"], wantReported)
 			}
 		})
 	}
