@@ -1455,9 +1455,18 @@ type Querier interface {
 	//            guest is (cluster_id, vmid), never a vms.id: the collector
 	//            re-issues those (000068/000084), and a VMID is only unique within
 	//            its cluster — the other cluster's VM 100 is a different guest.
-	//   objects  (object_types/keys/values): the generic selector — every audit
-	//            row of the cluster of one of the resource types whose resource_id,
-	//            or, where a key is named, that details key, is the value.
+	//            guest_workers, when set, keeps only the guests' rows whose UPID
+	//            names a worker type LIKE one of them (an HA resource's History
+	//            holds its guest's ha* tasks and nothing else of the guest's).
+	//   objects  (parallel object_* arrays): the generic selector — the audit rows
+	//            of one resource type that are one object's:
+	//              no key       resource_id is the value;
+	//              a key        details->>key is the value, a string or an
+	//                           integer, within one resource_id when one is named
+	//                           (a PBS datastore within its server's rows);
+	//              a list key   the value is one element of a comma-separated
+	//                           details key (an ACL's users). Read by resource
+	//                           type alone, so for a type with few rows.
 	//
 	// The cluster is a REQUIRED argument on every branch: the route's
 	// cluster-scoped gate authorized exactly that cluster.
@@ -1497,12 +1506,16 @@ type Querier interface {
 	// audit_log.vmid is already gated the same way at insert.
 	//
 	// The audit branches are four rather than one OR, so each reads its own index
-	// — the vmid arm (cluster_id, vmid), the clone arm the action index, the HA and
-	// object arms the resource_type index — instead of the planner settling on the
-	// whole cluster's rows. Each later arm excludes the rows an earlier one takes,
-	// so no row is read twice. "vmid IS NOT NULL" lets the vmid arms use their
-	// partial indexes whatever the plan: a generic plan cannot prove it from
-	// "= ANY(<parameter>)". The Proxmox-duplicate probe reads the selection
+	// — the vmid arm (cluster_id, vmid), the clone arm the action index, the HA arm
+	// the resource_type index, the object arm 000117's — instead of the planner
+	// settling on the whole cluster's rows. Each later arm excludes the rows an
+	// earlier one keeps, so no row is read twice; a guest's row guest_workers turns
+	// away is still an object's to take. The object arm reads each object on its
+	// own: (resource_type, resource_id) for its own rows, GIN details @> {key:
+	// value} for a details key — a filter on details->>key read every row of the
+	// type. "vmid IS NOT NULL" lets the vmid arms use their partial indexes
+	// whatever the plan: a generic plan cannot prove it from "= ANY(<parameter>)".
+	// The Proxmox-duplicate probe reads the selection
 	// itself, never audit_log: probed there by UPID, a generic plan — pgx's
 	// statement cache lets Postgres switch to one after five executions — scans
 	// the whole cluster's rows on every request.

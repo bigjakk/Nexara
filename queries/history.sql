@@ -20,9 +20,18 @@
 --            guest is (cluster_id, vmid), never a vms.id: the collector
 --            re-issues those (000068/000084), and a VMID is only unique within
 --            its cluster — the other cluster's VM 100 is a different guest.
---   objects  (object_types/keys/values): the generic selector — every audit
---            row of the cluster of one of the resource types whose resource_id,
---            or, where a key is named, that details key, is the value.
+--            guest_workers, when set, keeps only the guests' rows whose UPID
+--            names a worker type LIKE one of them (an HA resource's History
+--            holds its guest's ha* tasks and nothing else of the guest's).
+--   objects  (parallel object_* arrays): the generic selector — the audit rows
+--            of one resource type that are one object's:
+--              no key       resource_id is the value;
+--              a key        details->>key is the value, a string or an
+--                           integer, within one resource_id when one is named
+--                           (a PBS datastore within its server's rows);
+--              a list key   the value is one element of a comma-separated
+--                           details key (an ACL's users). Read by resource
+--                           type alone, so for a type with few rows.
 --
 -- The cluster is a REQUIRED argument on every branch: the route's
 -- cluster-scoped gate authorized exactly that cluster.
@@ -63,12 +72,16 @@
 -- audit_log.vmid is already gated the same way at insert.
 --
 -- The audit branches are four rather than one OR, so each reads its own index
--- — the vmid arm (cluster_id, vmid), the clone arm the action index, the HA and
--- object arms the resource_type index — instead of the planner settling on the
--- whole cluster's rows. Each later arm excludes the rows an earlier one takes,
--- so no row is read twice. "vmid IS NOT NULL" lets the vmid arms use their
--- partial indexes whatever the plan: a generic plan cannot prove it from
--- "= ANY(<parameter>)". The Proxmox-duplicate probe reads the selection
+-- — the vmid arm (cluster_id, vmid), the clone arm the action index, the HA arm
+-- the resource_type index, the object arm 000117's — instead of the planner
+-- settling on the whole cluster's rows. Each later arm excludes the rows an
+-- earlier one keeps, so no row is read twice; a guest's row guest_workers turns
+-- away is still an object's to take. The object arm reads each object on its
+-- own: (resource_type, resource_id) for its own rows, GIN details @> {key:
+-- value} for a details key — a filter on details->>key read every row of the
+-- type. "vmid IS NOT NULL" lets the vmid arms use their partial indexes
+-- whatever the plan: a generic plan cannot prove it from "= ANY(<parameter>)".
+-- The Proxmox-duplicate probe reads the selection
 -- itself, never audit_log: probed there by UPID, a generic plan — pgx's
 -- statement cache lets Postgres switch to one after five executions — scans
 -- the whole cluster's rows on every request.
@@ -116,10 +129,12 @@ WITH guests AS MATERIALIZED (
     JOIN unnest(sqlc.arg('cutoff_after')::timestamptz[]) WITH ORDINALITY AS a(after, n) ON a.n = v.n
     JOIN unnest(sqlc.arg('cutoff_inclusive')::bool[]) WITH ORDINALITY AS i(inclusive, n) ON i.n = v.n
 ), objects AS (
-    SELECT t.resource_type, k.detail_key, v.value
+    SELECT t.resource_type, r.resource_id, k.detail_key, v.value, l.in_list
     FROM unnest(sqlc.arg('object_types')::text[]) WITH ORDINALITY AS t(resource_type, n)
+    JOIN unnest(sqlc.arg('object_resource_ids')::text[]) WITH ORDINALITY AS r(resource_id, n) ON r.n = t.n
     JOIN unnest(sqlc.arg('object_keys')::text[]) WITH ORDINALITY AS k(detail_key, n) ON k.n = t.n
     JOIN unnest(sqlc.arg('object_values')::text[]) WITH ORDINALITY AS v(value, n) ON v.n = t.n
+    JOIN unnest(sqlc.arg('object_in_list')::bool[]) WITH ORDINALITY AS l(in_list, n) ON l.n = t.n
 ), rules AS (
     SELECT c.category, f.field, p.pattern, c.n AS ord
     FROM unnest(sqlc.arg('rule_categories')::text[]) WITH ORDINALITY AS c(category, n)
@@ -133,6 +148,7 @@ WITH guests AS MATERIALIZED (
     WHERE a.cluster_id = sqlc.arg('cluster_id')
       AND a.vmid IS NOT NULL
       AND a.vmid = ANY(sqlc.arg('vmids')::int[])
+      AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR a.created_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
@@ -144,6 +160,7 @@ WITH guests AS MATERIALIZED (
       AND a.cluster_id = sqlc.arg('cluster_id')
       AND NOT COALESCE(a.vmid = ANY(sqlc.arg('vmids')::int[]), false)
       AND a.details->>'new_id' = ANY(sqlc.arg('vmids')::int[]::text[])
+      AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR a.created_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
@@ -156,6 +173,7 @@ WITH guests AS MATERIALIZED (
       AND NOT COALESCE(a.vmid = ANY(sqlc.arg('vmids')::int[]), false)
       AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest(sqlc.arg('vmids')::int[]) AS v,
                                                      unnest('{vm:,ct:}'::text[]) AS p))
+      AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR a.created_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
@@ -163,18 +181,42 @@ WITH guests AS MATERIALIZED (
            a.details->>'upid', a.details->>'node', a.details->>'status',
            NULL::int
     FROM audit_log a
-    WHERE a.resource_type = ANY(sqlc.arg('object_types')::text[])
-      AND a.cluster_id = sqlc.arg('cluster_id')
-      AND NOT COALESCE(a.vmid = ANY(sqlc.arg('vmids')::int[]), false)
-      AND NOT (a.action IN ('clone', 'clone-to-template')
-               AND COALESCE(a.details->>'new_id' = ANY(sqlc.arg('vmids')::int[]::text[]), false))
-      AND NOT (a.resource_type = 'ha_resource'
-               AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest(sqlc.arg('vmids')::int[]) AS v,
-                                                              unnest('{vm:,ct:}'::text[]) AS p)))
-      AND EXISTS (SELECT 1 FROM objects o
-                  WHERE o.resource_type = a.resource_type
-                    AND o.value = CASE WHEN o.detail_key = '' THEN a.resource_id
-                                       ELSE a.details->>o.detail_key END)
+    WHERE cardinality(sqlc.arg('object_types')::text[]) > 0
+      AND a.id IN (
+          SELECT m.id
+          FROM objects o
+          CROSS JOIN LATERAL (
+              SELECT b.id FROM audit_log b
+              WHERE o.detail_key = ''
+                AND b.resource_type = o.resource_type AND b.resource_id = o.value
+                AND b.cluster_id = sqlc.arg('cluster_id')
+              UNION ALL
+              SELECT b.id FROM audit_log b
+              WHERE o.detail_key <> '' AND NOT o.in_list
+                AND (b.details @> jsonb_build_object(o.detail_key, o.value)
+                     OR b.details @> CASE WHEN o.value ~ '^-?[0-9]{1,15}$'
+                                          THEN jsonb_build_object(o.detail_key, o.value::bigint) END)
+                AND b.details->>o.detail_key = o.value
+                AND b.resource_type = o.resource_type
+                AND (o.resource_id = '' OR b.resource_id = o.resource_id)
+                AND b.cluster_id = sqlc.arg('cluster_id')
+              UNION ALL
+              SELECT b.id FROM audit_log b
+              WHERE o.in_list
+                AND b.resource_type = o.resource_type
+                AND (o.resource_id = '' OR b.resource_id = o.resource_id)
+                AND o.value = ANY(regexp_split_to_array(btrim(b.details->>o.detail_key), '\s*,\s*'))
+                AND b.cluster_id = sqlc.arg('cluster_id')
+          ) m)
+      AND NOT COALESCE(a.vmid = ANY(sqlc.arg('vmids')::int[])
+                       AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[]), false)
+      AND NOT COALESCE(a.action IN ('clone', 'clone-to-template')
+                       AND a.details->>'new_id' = ANY(sqlc.arg('vmids')::int[]::text[])
+                       AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[]), false)
+      AND NOT COALESCE(a.resource_type = 'ha_resource'
+                       AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest(sqlc.arg('vmids')::int[]) AS v,
+                                                                      unnest('{vm:,ct:}'::text[]) AS p))
+                       AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[]), false)
       AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
 ), entries AS (
     SELECT ('audit:' || s.id::text)::text           AS entry_id,
@@ -206,6 +248,7 @@ WITH guests AS MATERIALIZED (
       AND t.vmid IS NOT NULL
       AND t.vmid = ANY(sqlc.arg('vmids')::int[])
       AND is_guest_upid(t.upid)
+      AND history_worker_ok(t.upid, sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR t.started_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR t.started_at >= sqlc.narg('since')::timestamptz)
       AND NOT EXISTS (SELECT 1 FROM audit_log a
@@ -217,6 +260,7 @@ WITH guests AS MATERIALIZED (
     WHERE sqlc.arg('include_tasks')::bool
       AND r.cluster_id = sqlc.arg('cluster_id')
       AND r.vmid = ANY(sqlc.arg('vmids')::int[])
+      AND history_worker_ok(r.upid, sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR r.started_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR r.started_at >= sqlc.narg('since')::timestamptz)
       AND NOT EXISTS (SELECT 1 FROM audit_log a
@@ -229,6 +273,7 @@ WITH guests AS MATERIALIZED (
       AND s.vmid = ANY(sqlc.arg('vmids')::int[])
       AND s.explained = false
       AND s.guest_type = ANY(sqlc.arg('status_guest_types')::text[])
+      AND history_worker_ok(NULL, sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR s.observed_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR s.observed_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
@@ -238,6 +283,7 @@ WITH guests AS MATERIALIZED (
     WHERE sqlc.arg('include_tasks')::bool
       AND b.cluster_id = sqlc.arg('cluster_id')
       AND b.vmid = ANY(sqlc.arg('vmids')::int[])
+      AND history_worker_ok(b.upid, sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR b.started_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR b.started_at >= sqlc.narg('since')::timestamptz)
 ), category_map AS MATERIALIZED (

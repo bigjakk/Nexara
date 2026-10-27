@@ -110,6 +110,10 @@ type HistorySelection struct {
 	// a clone into it and its HA resource; its tasks with no audit row, its
 	// status changes no task explains and its parts of backup jobs.
 	Guests []HistoryGuest
+	// GuestWorkers, when set, keeps only the guests' rows whose UPID names a
+	// Proxmox worker type LIKE one of them — an HA resource's History takes
+	// its guest's "ha%" tasks and nothing else of the guest's.
+	GuestWorkers []string
 	// Objects are the generic selector's audit rows.
 	Objects []HistoryObject
 }
@@ -123,13 +127,22 @@ type HistoryGuest struct {
 	Inclusive bool
 }
 
-// HistoryObject selects every audit row in the cluster of ResourceType whose
-// resource_id — or, when DetailKey is set, whose details->>DetailKey — is
-// Value.
+// HistoryObject selects the audit rows in the cluster of ResourceType that are
+// one object's:
+//
+//   - no DetailKey: those whose resource_id is Value;
+//   - a DetailKey: those whose details->>DetailKey is Value, a string or an
+//     integer — and whose resource_id is ResourceID, when one is set: a PBS
+//     datastore is one name within its server's rows;
+//   - a DetailKey and InList: those whose DetailKey is a comma-separated list
+//     holding Value, such as an ACL's users. Read by ResourceType alone, so
+//     for a type with few rows.
 type HistoryObject struct {
 	ResourceType string
+	ResourceID   string
 	DetailKey    string
 	Value        string
+	InList       bool
 }
 
 // SelectObjects is the generic selector, for any object with a stable audit
@@ -373,17 +386,28 @@ func viewableGuests(guests []HistoryGuest, types []db.ListGuestTypesRow, viewabl
 // as List does. A guest named twice is one guest — a folder's memberships can
 // name a VMID twice — unless its two cutoffs differ: ListHistory looks each
 // one's cutoff up by VMID, and would hold it to the first only, so that is
-// refused.
+// refused. So is a selection ListHistory would read wrong: an object that
+// names nothing, a ResourceID or list with no details key to go with it, and
+// a worker pattern Postgres refuses.
 func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.ListHistoryParams, error) {
 	params := db.ListHistoryParams{
-		DefaultCategory: k.Default,
-		ClusterID:       clusterID,
-		Vmids:           make([]int32, 0, len(sel.Guests)),
-		CutoffAfter:     make([]time.Time, 0, len(sel.Guests)),
-		CutoffInclusive: make([]bool, 0, len(sel.Guests)),
-		ObjectTypes:     make([]string, 0, len(sel.Objects)),
-		ObjectKeys:      make([]string, 0, len(sel.Objects)),
-		ObjectValues:    make([]string, 0, len(sel.Objects)),
+		DefaultCategory:   k.Default,
+		ClusterID:         clusterID,
+		Vmids:             make([]int32, 0, len(sel.Guests)),
+		CutoffAfter:       make([]time.Time, 0, len(sel.Guests)),
+		CutoffInclusive:   make([]bool, 0, len(sel.Guests)),
+		GuestWorkers:      make([]string, 0, len(sel.GuestWorkers)),
+		ObjectTypes:       make([]string, 0, len(sel.Objects)),
+		ObjectResourceIds: make([]string, 0, len(sel.Objects)),
+		ObjectKeys:        make([]string, 0, len(sel.Objects)),
+		ObjectValues:      make([]string, 0, len(sel.Objects)),
+		ObjectInList:      make([]bool, 0, len(sel.Objects)),
+	}
+	for _, w := range sel.GuestWorkers {
+		if w == "" || !likePatternOK(w) {
+			return db.ListHistoryParams{}, fmt.Errorf("history worker pattern %q is empty or ends in a lone backslash", w)
+		}
+		params.GuestWorkers = append(params.GuestWorkers, w)
 	}
 	floorless := false
 	for _, g := range sel.Guests {
@@ -414,9 +438,17 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		params.CutoffFloor = pgtype.Timestamptz{}
 	}
 	for _, o := range sel.Objects {
+		if o.ResourceType == "" || o.Value == "" {
+			return db.ListHistoryParams{}, fmt.Errorf("history object %+v names no resource type or value", o)
+		}
+		if o.DetailKey == "" && (o.ResourceID != "" || o.InList) {
+			return db.ListHistoryParams{}, fmt.Errorf("history object %+v has a resource id or list but no details key", o)
+		}
 		params.ObjectTypes = append(params.ObjectTypes, o.ResourceType)
+		params.ObjectResourceIds = append(params.ObjectResourceIds, o.ResourceID)
 		params.ObjectKeys = append(params.ObjectKeys, o.DetailKey)
 		params.ObjectValues = append(params.ObjectValues, o.Value)
+		params.ObjectInList = append(params.ObjectInList, o.InList)
 	}
 	params.RuleCategories, params.RuleFields, params.RulePatterns = k.sqlRules()
 	return params, nil

@@ -106,8 +106,8 @@ func TestGuestHistory(t *testing.T) {
 	audit(historyClusterID, hoursAgo(8), "proxmox", "vm", "100", "destroy", map[string]any{"upid": historyUPID(3, "qmdestroy", "100"), "status": "OK"})
 
 	// ── This guest, VMID 100, cloned from 50 seven hours ago: the birth.
-	cloneUPID := historyUPID(4, "qmclone", "50")
-	audit(historyClusterID, hoursAgo(7), "nexara", "vm", uuid.NewString(), "clone", map[string]any{"upid": cloneUPID, "vmid": 50, "new_id": 100})
+	cloneUPID, cloneRow := historyUPID(4, "qmclone", "50"), uuid.NewString()
+	audit(historyClusterID, hoursAgo(7), "nexara", "vm", cloneRow, "clone", map[string]any{"upid": cloneUPID, "vmid": 50, "new_id": 100})
 	// A Nexara start, and the collector's ingest of the same UPID: one entry.
 	startUPID := historyUPID(5, "qmstart", "100")
 	audit(historyClusterID, hoursAgo(6), "nexara", "vm", uuid.NewString(), "start", map[string]any{"upid": startUPID})
@@ -451,6 +451,15 @@ func TestGuestHistory(t *testing.T) {
 		p.RowLimit = 50
 		return p
 	}
+	selection := func(sel handlers.HistorySelection) gen.ListHistoryParams {
+		t.Helper()
+		p, err := handlers.GuestHistory().ListParams(historyClusterID, sel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 50, true, []string{"qemu"}
+		return p
+	}
 	list := func(p gen.ListHistoryParams) ([]string, int64) {
 		t.Helper()
 		rows, err := q.ListHistory(ctx, p)
@@ -533,8 +542,9 @@ func TestGuestHistory(t *testing.T) {
 			func(p *gen.ListHistoryParams) { p.IncludeTasks, p.StatusGuestTypes = true, []string{"qemu"} }), 14, ""},
 		// An object naming rows a guest arm already takes — the ingested
 		// rows' resource_id is the VMID — adds none of them a second time.
-		{"a guest and an object over the same rows", withFilter(full, func(p *gen.ListHistoryParams) {
-			p.ObjectTypes, p.ObjectKeys, p.ObjectValues = []string{"vm"}, []string{""}, []string{"100"}
+		{"a guest and an object over the same rows", selection(handlers.HistorySelection{
+			Guests:  []handlers.HistoryGuest{{VMID: 100, After: pgtype.Timestamptz{Time: hoursAgo(7), Valid: true}, Inclusive: true}},
+			Objects: []handlers.HistoryObject{{ResourceType: "vm", Value: "100"}},
 		}), 13, ""},
 	} {
 		got, total := list(tt.p)
@@ -595,6 +605,63 @@ func TestGuestHistory(t *testing.T) {
 	twinParams.RowLimit = 50
 	if got, _ := list(twinParams); !slices.Equal(got, []string{"audit start other "}) {
 		t.Errorf("a node's guest task whose Nexara twin is the guest's: %v, want the Proxmox row kept", got)
+	}
+
+	// ── The selector's other shapes, each against a row it must not take.
+	audit(historyClusterID, minsAgo(4), "nexara", "pbs_server", "srv-a", "datastore_update", map[string]any{"datastore": "datastore01"})
+	audit(historyClusterID, minsAgo(4), "nexara", "pbs_server", "srv-b", "datastore_update", map[string]any{"datastore": "datastore01"})
+	audit(historyClusterID, minsAgo(4), "nexara", "ceph_osd", "osd.12", "osd_restart", map[string]any{"osd_id": 12})
+	audit(historyClusterID, minsAgo(4), "nexara", "ceph_osd", "osd.120", "osd_restart", map[string]any{"osd_id": 120})
+	audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/vms/100", "updated", map[string]any{"users": "alice@pve, bob@pve"})
+	audit(historyClusterID, minsAgo(4), "nexara", "pve_acl", "/", "updated", map[string]any{"users": "jbob@pve, carol@pve"})
+	// VM 105's HA task, its plain start, and its HA resource, which names it
+	// only by its sid and has no task.
+	audit(historyClusterID, minsAgo(3), "proxmox", "proxmox_task", "105", "hastart", map[string]any{"upid": historyUPID(32, "hastart", "105"), "status": "OK"})
+	audit(historyClusterID, minsAgo(3), "proxmox", "vm", "105", "start", map[string]any{"upid": historyUPID(33, "qmstart", "105"), "status": "OK"})
+	audit(historyClusterID, minsAgo(2), "nexara", "ha_resource", "vm:105", "updated", map[string]any{"state": "started", "vmid": 105})
+	for _, tt := range []struct {
+		name string
+		sel  handlers.HistorySelection
+		want []string
+	}{
+		{"a details key within one resource id", handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "pbs_server", ResourceID: "srv-a", DetailKey: "datastore", Value: "datastore01"}}},
+			[]string{"audit datastore_update srv-a"}},
+		{"a details key holding an integer", handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "ceph_osd", DetailKey: "osd_id", Value: "12"}}},
+			[]string{"audit osd_restart osd.12"}},
+		{"a spelling of the integer is another value", handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "ceph_osd", DetailKey: "osd_id", Value: "012"}}},
+			[]string{}},
+		{"one element of a comma list", handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "pve_acl", DetailKey: "users", Value: "bob@pve", InList: true}}},
+			[]string{"audit updated /vms/100"}},
+		// The guest's other rows are turned away, and its HA resource row,
+		// which the guest arm would have taken, is still the object's.
+		{"a guest's tasks of one worker type", handlers.HistorySelection{
+			Guests: []handlers.HistoryGuest{{VMID: 105}}, GuestWorkers: []string{"ha%"},
+			Objects: []handlers.HistoryObject{{ResourceType: "ha_resource", Value: "vm:105"}}},
+			[]string{"audit updated vm:105", "audit hastart 105"}},
+		// VM 100 has a row in every guest source — audit by vmid, clone and HA
+		// sid, task-only, archived, status, backup — and no ha* task. Its HA
+		// row and the clone into it are still the objects'.
+		{"the worker filter reaches every guest source", handlers.HistorySelection{
+			Guests:       []handlers.HistoryGuest{{VMID: 100, After: pgtype.Timestamptz{Time: hoursAgo(7), Valid: true}, Inclusive: true}},
+			GuestWorkers: []string{"ha%"}, Objects: []handlers.HistoryObject{{ResourceType: "ha_resource", Value: "vm:100"},
+				{ResourceType: "vm", DetailKey: "new_id", Value: "100"}}},
+			[]string{"audit created vm:100", "audit clone " + cloneRow}},
+	} {
+		rows, err := q.ListHistory(ctx, selection(tt.sel))
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		got := make([]string, 0, len(rows))
+		for _, r := range rows {
+			got = append(got, r.Kind+" "+r.Action+" "+r.ResourceID)
+		}
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }
 

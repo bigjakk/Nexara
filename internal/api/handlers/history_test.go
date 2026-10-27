@@ -201,9 +201,17 @@ func TestHistoryKindListParams(t *testing.T) {
 		!slices.Equal(p.Vmids, []int32{100}) {
 		t.Errorf("the same guest twice: vmids %v, err %v; want one guest", p.Vmids, err)
 	}
-	if _, err := GuestHistory().ListParams([16]byte{1}, HistorySelection{Guests: []HistoryGuest{
-		{VMID: 100}, {VMID: 100, After: pgtype.Timestamptz{Time: at, Valid: true}}}}); err == nil {
-		t.Error("one guest with two cutoffs was accepted")
+	// A selection ListHistory would read wrong — or fail on — is refused.
+	for name, sel := range map[string]HistorySelection{
+		"one guest with two cutoffs": {Guests: []HistoryGuest{{VMID: 100}, {VMID: 100, After: pgtype.Timestamptz{Time: at, Valid: true}}}},
+		"an object naming no value":  {Objects: []HistoryObject{{ResourceType: "pool"}}},
+		"a resource id with no key":  {Objects: []HistoryObject{{ResourceType: "pbs_server", ResourceID: "s1", Value: "x"}}},
+		"a list with no key":         {Objects: []HistoryObject{{ResourceType: "pve_acl", Value: "u@pve", InList: true}}},
+		"a lone-backslash worker":    {Guests: []HistoryGuest{{VMID: 100}}, GuestWorkers: []string{`ha\`}},
+	} {
+		if _, err := GuestHistory().ListParams([16]byte{1}, sel); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
 	}
 }
 

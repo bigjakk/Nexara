@@ -63,15 +63,17 @@ WITH guests AS MATERIALIZED (
     JOIN unnest($3::timestamptz[]) WITH ORDINALITY AS a(after, n) ON a.n = v.n
     JOIN unnest($4::bool[]) WITH ORDINALITY AS i(inclusive, n) ON i.n = v.n
 ), objects AS (
-    SELECT t.resource_type, k.detail_key, v.value
+    SELECT t.resource_type, r.resource_id, k.detail_key, v.value, l.in_list
     FROM unnest($5::text[]) WITH ORDINALITY AS t(resource_type, n)
-    JOIN unnest($6::text[]) WITH ORDINALITY AS k(detail_key, n) ON k.n = t.n
-    JOIN unnest($7::text[]) WITH ORDINALITY AS v(value, n) ON v.n = t.n
+    JOIN unnest($6::text[]) WITH ORDINALITY AS r(resource_id, n) ON r.n = t.n
+    JOIN unnest($7::text[]) WITH ORDINALITY AS k(detail_key, n) ON k.n = t.n
+    JOIN unnest($8::text[]) WITH ORDINALITY AS v(value, n) ON v.n = t.n
+    JOIN unnest($9::bool[]) WITH ORDINALITY AS l(in_list, n) ON l.n = t.n
 ), rules AS (
     SELECT c.category, f.field, p.pattern, c.n AS ord
-    FROM unnest($8::text[]) WITH ORDINALITY AS c(category, n)
-    JOIN unnest($9::text[]) WITH ORDINALITY AS f(field, n) ON f.n = c.n
-    JOIN unnest($10::text[]) WITH ORDINALITY AS p(pattern, n) ON p.n = c.n
+    FROM unnest($10::text[]) WITH ORDINALITY AS c(category, n)
+    JOIN unnest($11::text[]) WITH ORDINALITY AS f(field, n) ON f.n = c.n
+    JOIN unnest($12::text[]) WITH ORDINALITY AS p(pattern, n) ON p.n = c.n
 ), audit AS (
     SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid' AS upid, a.details->>'node' AS node, a.details->>'status' AS recorded_status,
@@ -80,8 +82,9 @@ WITH guests AS MATERIALIZED (
     WHERE a.cluster_id = $1
       AND a.vmid IS NOT NULL
       AND a.vmid = ANY($2::int[])
-      AND ($11::timestamptz IS NULL OR a.created_at >= $11::timestamptz)
-      AND ($12::timestamptz IS NULL OR a.created_at >= $12::timestamptz)
+      AND history_worker_ok(a.details->>'upid', $13::text[])
+      AND ($14::timestamptz IS NULL OR a.created_at >= $14::timestamptz)
+      AND ($15::timestamptz IS NULL OR a.created_at >= $15::timestamptz)
     UNION ALL
     SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
@@ -91,8 +94,9 @@ WITH guests AS MATERIALIZED (
       AND a.cluster_id = $1
       AND NOT COALESCE(a.vmid = ANY($2::int[]), false)
       AND a.details->>'new_id' = ANY($2::int[]::text[])
-      AND ($11::timestamptz IS NULL OR a.created_at >= $11::timestamptz)
-      AND ($12::timestamptz IS NULL OR a.created_at >= $12::timestamptz)
+      AND history_worker_ok(a.details->>'upid', $13::text[])
+      AND ($14::timestamptz IS NULL OR a.created_at >= $14::timestamptz)
+      AND ($15::timestamptz IS NULL OR a.created_at >= $15::timestamptz)
     UNION ALL
     SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
@@ -103,26 +107,51 @@ WITH guests AS MATERIALIZED (
       AND NOT COALESCE(a.vmid = ANY($2::int[]), false)
       AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest($2::int[]) AS v,
                                                      unnest('{vm:,ct:}'::text[]) AS p))
-      AND ($11::timestamptz IS NULL OR a.created_at >= $11::timestamptz)
-      AND ($12::timestamptz IS NULL OR a.created_at >= $12::timestamptz)
+      AND history_worker_ok(a.details->>'upid', $13::text[])
+      AND ($14::timestamptz IS NULL OR a.created_at >= $14::timestamptz)
+      AND ($15::timestamptz IS NULL OR a.created_at >= $15::timestamptz)
     UNION ALL
     SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
            NULL::int
     FROM audit_log a
-    WHERE a.resource_type = ANY($5::text[])
-      AND a.cluster_id = $1
-      AND NOT COALESCE(a.vmid = ANY($2::int[]), false)
-      AND NOT (a.action IN ('clone', 'clone-to-template')
-               AND COALESCE(a.details->>'new_id' = ANY($2::int[]::text[]), false))
-      AND NOT (a.resource_type = 'ha_resource'
-               AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest($2::int[]) AS v,
-                                                              unnest('{vm:,ct:}'::text[]) AS p)))
-      AND EXISTS (SELECT 1 FROM objects o
-                  WHERE o.resource_type = a.resource_type
-                    AND o.value = CASE WHEN o.detail_key = '' THEN a.resource_id
-                                       ELSE a.details->>o.detail_key END)
-      AND ($12::timestamptz IS NULL OR a.created_at >= $12::timestamptz)
+    WHERE cardinality($5::text[]) > 0
+      AND a.id IN (
+          SELECT m.id
+          FROM objects o
+          CROSS JOIN LATERAL (
+              SELECT b.id FROM audit_log b
+              WHERE o.detail_key = ''
+                AND b.resource_type = o.resource_type AND b.resource_id = o.value
+                AND b.cluster_id = $1
+              UNION ALL
+              SELECT b.id FROM audit_log b
+              WHERE o.detail_key <> '' AND NOT o.in_list
+                AND (b.details @> jsonb_build_object(o.detail_key, o.value)
+                     OR b.details @> CASE WHEN o.value ~ '^-?[0-9]{1,15}$'
+                                          THEN jsonb_build_object(o.detail_key, o.value::bigint) END)
+                AND b.details->>o.detail_key = o.value
+                AND b.resource_type = o.resource_type
+                AND (o.resource_id = '' OR b.resource_id = o.resource_id)
+                AND b.cluster_id = $1
+              UNION ALL
+              SELECT b.id FROM audit_log b
+              WHERE o.in_list
+                AND b.resource_type = o.resource_type
+                AND (o.resource_id = '' OR b.resource_id = o.resource_id)
+                AND o.value = ANY(regexp_split_to_array(btrim(b.details->>o.detail_key), '\s*,\s*'))
+                AND b.cluster_id = $1
+          ) m)
+      AND NOT COALESCE(a.vmid = ANY($2::int[])
+                       AND history_worker_ok(a.details->>'upid', $13::text[]), false)
+      AND NOT COALESCE(a.action IN ('clone', 'clone-to-template')
+                       AND a.details->>'new_id' = ANY($2::int[]::text[])
+                       AND history_worker_ok(a.details->>'upid', $13::text[]), false)
+      AND NOT COALESCE(a.resource_type = 'ha_resource'
+                       AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest($2::int[]) AS v,
+                                                                      unnest('{vm:,ct:}'::text[]) AS p))
+                       AND history_worker_ok(a.details->>'upid', $13::text[]), false)
+      AND ($15::timestamptz IS NULL OR a.created_at >= $15::timestamptz)
 ), entries AS (
     SELECT ('audit:' || s.id::text)::text           AS entry_id,
            'audit'::text                            AS kind,
@@ -148,24 +177,26 @@ WITH guests AS MATERIALIZED (
     SELECT ('task:' || t.upid)::text, 'task', NULL::uuid, t.started_at, t.source, t.task_type,
            'task', '', t.vmid, t.vmid, t.user_id, t.upid, t.node, '', '', '', NULL
     FROM task_history t
-    WHERE $13::bool
+    WHERE $16::bool
       AND t.cluster_id = $1
       AND t.vmid IS NOT NULL
       AND t.vmid = ANY($2::int[])
       AND is_guest_upid(t.upid)
-      AND ($11::timestamptz IS NULL OR t.started_at >= $11::timestamptz)
-      AND ($12::timestamptz IS NULL OR t.started_at >= $12::timestamptz)
+      AND history_worker_ok(t.upid, $13::text[])
+      AND ($14::timestamptz IS NULL OR t.started_at >= $14::timestamptz)
+      AND ($15::timestamptz IS NULL OR t.started_at >= $15::timestamptz)
       AND NOT EXISTS (SELECT 1 FROM audit_log a
                       WHERE a.details->>'upid' = t.upid AND a.cluster_id = t.cluster_id)
     UNION ALL
     SELECT ('task:' || r.upid)::text, 'task', NULL::uuid, r.started_at, r.source, r.task_type,
            'task', '', r.vmid, r.vmid, r.user_id, r.upid, r.node, '', '', '', NULL
     FROM task_history_archive r
-    WHERE $13::bool
+    WHERE $16::bool
       AND r.cluster_id = $1
       AND r.vmid = ANY($2::int[])
-      AND ($11::timestamptz IS NULL OR r.started_at >= $11::timestamptz)
-      AND ($12::timestamptz IS NULL OR r.started_at >= $12::timestamptz)
+      AND history_worker_ok(r.upid, $13::text[])
+      AND ($14::timestamptz IS NULL OR r.started_at >= $14::timestamptz)
+      AND ($15::timestamptz IS NULL OR r.started_at >= $15::timestamptz)
       AND NOT EXISTS (SELECT 1 FROM audit_log a
                       WHERE a.details->>'upid' = r.upid AND a.cluster_id = r.cluster_id)
     UNION ALL
@@ -175,18 +206,20 @@ WITH guests AS MATERIALIZED (
     WHERE s.cluster_id = $1
       AND s.vmid = ANY($2::int[])
       AND s.explained = false
-      AND s.guest_type = ANY($14::text[])
-      AND ($11::timestamptz IS NULL OR s.observed_at >= $11::timestamptz)
-      AND ($12::timestamptz IS NULL OR s.observed_at >= $12::timestamptz)
+      AND s.guest_type = ANY($17::text[])
+      AND history_worker_ok(NULL, $13::text[])
+      AND ($14::timestamptz IS NULL OR s.observed_at >= $14::timestamptz)
+      AND ($15::timestamptz IS NULL OR s.observed_at >= $15::timestamptz)
     UNION ALL
     SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.started_at, b.source, 'vzdump',
            'backup', '', b.vmid, b.vmid, b.user_id, b.upid, b.node, '', '', '', NULL
     FROM guest_backups b
-    WHERE $13::bool
+    WHERE $16::bool
       AND b.cluster_id = $1
       AND b.vmid = ANY($2::int[])
-      AND ($11::timestamptz IS NULL OR b.started_at >= $11::timestamptz)
-      AND ($12::timestamptz IS NULL OR b.started_at >= $12::timestamptz)
+      AND history_worker_ok(b.upid, $13::text[])
+      AND ($14::timestamptz IS NULL OR b.started_at >= $14::timestamptz)
+      AND ($15::timestamptz IS NULL OR b.started_at >= $15::timestamptz)
 ), category_map AS MATERIALIZED (
     SELECT jsonb_object_agg(
                k.kind || ':' || k.worker || ':' || length(k.resource_type) || ':' || k.resource_type
@@ -200,7 +233,7 @@ WITH guests AS MATERIALIZED (
                                    WHEN 'worker' THEN k.worker
                                END LIKE r.pattern
                          ORDER BY r.ord
-                         LIMIT 1), $15::text)) AS categories
+                         LIMIT 1), $18::text)) AS categories
     FROM (SELECT DISTINCT e.kind, e.action, e.resource_type, split_part(e.upid, ':', 6) AS worker
           FROM entries e) k
 ), categorized AS (
@@ -214,11 +247,11 @@ WITH guests AS MATERIALIZED (
     FROM categorized c
     LEFT JOIN guests g ON g.vmid = c.subject
     WHERE (g.vmid IS NULL OR c.occurred_at > g.after OR (g.inclusive AND c.occurred_at = g.after))
-      AND ($12::timestamptz IS NULL OR c.occurred_at >= $12::timestamptz)
-      AND ($16::text IS NULL OR c.category = $16::text)
-      AND ($17::text IS NULL OR c.source = $17::text)
+      AND ($15::timestamptz IS NULL OR c.occurred_at >= $15::timestamptz)
+      AND ($19::text IS NULL OR c.category = $19::text)
+      AND ($20::text IS NULL OR c.source = $20::text)
     ORDER BY c.occurred_at DESC, c.entry_id DESC
-    LIMIT $19::int OFFSET $18::int
+    LIMIT $22::int OFFSET $21::int
 )
 SELECT p.entry_id, p.kind, p.occurred_at, p.source, p.action, p.resource_type, p.resource_id, p.vmid,
        COALESCE(p.subject, 0)::int AS subject_vmid,
@@ -252,25 +285,28 @@ ORDER BY p.occurred_at DESC, p.entry_id DESC
 `
 
 type ListHistoryParams struct {
-	ClusterID        uuid.UUID          `json:"cluster_id"`
-	Vmids            []int32            `json:"vmids"`
-	CutoffAfter      []time.Time        `json:"cutoff_after"`
-	CutoffInclusive  []bool             `json:"cutoff_inclusive"`
-	ObjectTypes      []string           `json:"object_types"`
-	ObjectKeys       []string           `json:"object_keys"`
-	ObjectValues     []string           `json:"object_values"`
-	RuleCategories   []string           `json:"rule_categories"`
-	RuleFields       []string           `json:"rule_fields"`
-	RulePatterns     []string           `json:"rule_patterns"`
-	CutoffFloor      pgtype.Timestamptz `json:"cutoff_floor"`
-	Since            pgtype.Timestamptz `json:"since"`
-	IncludeTasks     bool               `json:"include_tasks"`
-	StatusGuestTypes []string           `json:"status_guest_types"`
-	DefaultCategory  string             `json:"default_category"`
-	Category         pgtype.Text        `json:"category"`
-	Source           pgtype.Text        `json:"source"`
-	RowOffset        int32              `json:"row_offset"`
-	RowLimit         int32              `json:"row_limit"`
+	ClusterID         uuid.UUID          `json:"cluster_id"`
+	Vmids             []int32            `json:"vmids"`
+	CutoffAfter       []time.Time        `json:"cutoff_after"`
+	CutoffInclusive   []bool             `json:"cutoff_inclusive"`
+	ObjectTypes       []string           `json:"object_types"`
+	ObjectResourceIds []string           `json:"object_resource_ids"`
+	ObjectKeys        []string           `json:"object_keys"`
+	ObjectValues      []string           `json:"object_values"`
+	ObjectInList      []bool             `json:"object_in_list"`
+	RuleCategories    []string           `json:"rule_categories"`
+	RuleFields        []string           `json:"rule_fields"`
+	RulePatterns      []string           `json:"rule_patterns"`
+	GuestWorkers      []string           `json:"guest_workers"`
+	CutoffFloor       pgtype.Timestamptz `json:"cutoff_floor"`
+	Since             pgtype.Timestamptz `json:"since"`
+	IncludeTasks      bool               `json:"include_tasks"`
+	StatusGuestTypes  []string           `json:"status_guest_types"`
+	DefaultCategory   string             `json:"default_category"`
+	Category          pgtype.Text        `json:"category"`
+	Source            pgtype.Text        `json:"source"`
+	RowOffset         int32              `json:"row_offset"`
+	RowLimit          int32              `json:"row_limit"`
 }
 
 type ListHistoryRow struct {
@@ -329,9 +365,18 @@ type ListHistoryRow struct {
 //	         guest is (cluster_id, vmid), never a vms.id: the collector
 //	         re-issues those (000068/000084), and a VMID is only unique within
 //	         its cluster — the other cluster's VM 100 is a different guest.
-//	objects  (object_types/keys/values): the generic selector — every audit
-//	         row of the cluster of one of the resource types whose resource_id,
-//	         or, where a key is named, that details key, is the value.
+//	         guest_workers, when set, keeps only the guests' rows whose UPID
+//	         names a worker type LIKE one of them (an HA resource's History
+//	         holds its guest's ha* tasks and nothing else of the guest's).
+//	objects  (parallel object_* arrays): the generic selector — the audit rows
+//	         of one resource type that are one object's:
+//	           no key       resource_id is the value;
+//	           a key        details->>key is the value, a string or an
+//	                        integer, within one resource_id when one is named
+//	                        (a PBS datastore within its server's rows);
+//	           a list key   the value is one element of a comma-separated
+//	                        details key (an ACL's users). Read by resource
+//	                        type alone, so for a type with few rows.
 //
 // The cluster is a REQUIRED argument on every branch: the route's
 // cluster-scoped gate authorized exactly that cluster.
@@ -371,12 +416,16 @@ type ListHistoryRow struct {
 // audit_log.vmid is already gated the same way at insert.
 //
 // The audit branches are four rather than one OR, so each reads its own index
-// — the vmid arm (cluster_id, vmid), the clone arm the action index, the HA and
-// object arms the resource_type index — instead of the planner settling on the
-// whole cluster's rows. Each later arm excludes the rows an earlier one takes,
-// so no row is read twice. "vmid IS NOT NULL" lets the vmid arms use their
-// partial indexes whatever the plan: a generic plan cannot prove it from
-// "= ANY(<parameter>)". The Proxmox-duplicate probe reads the selection
+// — the vmid arm (cluster_id, vmid), the clone arm the action index, the HA arm
+// the resource_type index, the object arm 000117's — instead of the planner
+// settling on the whole cluster's rows. Each later arm excludes the rows an
+// earlier one keeps, so no row is read twice; a guest's row guest_workers turns
+// away is still an object's to take. The object arm reads each object on its
+// own: (resource_type, resource_id) for its own rows, GIN details @> {key:
+// value} for a details key — a filter on details->>key read every row of the
+// type. "vmid IS NOT NULL" lets the vmid arms use their partial indexes
+// whatever the plan: a generic plan cannot prove it from "= ANY(<parameter>)".
+// The Proxmox-duplicate probe reads the selection
 // itself, never audit_log: probed there by UPID, a generic plan — pgx's
 // statement cache lets Postgres switch to one after five executions — scans
 // the whole cluster's rows on every request.
@@ -424,11 +473,14 @@ func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]Lis
 		arg.CutoffAfter,
 		arg.CutoffInclusive,
 		arg.ObjectTypes,
+		arg.ObjectResourceIds,
 		arg.ObjectKeys,
 		arg.ObjectValues,
+		arg.ObjectInList,
 		arg.RuleCategories,
 		arg.RuleFields,
 		arg.RulePatterns,
+		arg.GuestWorkers,
 		arg.CutoffFloor,
 		arg.Since,
 		arg.IncludeTasks,
