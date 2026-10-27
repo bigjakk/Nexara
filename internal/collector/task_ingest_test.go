@@ -180,6 +180,54 @@ func TestIngestTask_External(t *testing.T) {
 	})
 }
 
+// TestIngestTask_FilesObjectTasksUnderTheirIdentity pins the (type, id, action)
+// an external task is filed under. For an object of the cluster page it is the
+// identity the handlers record when Nexara dispatches the same work, so one
+// History holds both: a Ceph daemon keyed by its number or name rather than
+// "osd.12", a certificate by node, an SDN apply by the cluster.
+func TestIngestTask_FilesObjectTasksUnderTheirIdentity(t *testing.T) {
+	t.Parallel()
+	cluster := db.Cluster{ID: uuid.New()}
+	for _, tc := range []struct {
+		name, taskType, id           string
+		wantType, wantID, wantAction string
+	}{
+		{"OSD destroy is keyed by the number", "cephdestroyosd", "osd.12", "ceph_osd", "12", "osd_destroy"},
+		{"OSD create can only name the device", "cephcreateosd", "sdb", "ceph_osd", "sdb", "osd_create"},
+		{"monitor", "cephcreatemon", "mon.pve-01", "ceph_mon", "pve-01", "mon_create"},
+		{"manager", "cephdestroymgr", "mgr.pve-01", "ceph_mgr", "pve-01", "mgr_destroy"},
+		{"pool", "cephsetpool", "pool01", "ceph_pool", "pool01", "update"},
+		{"OSD daemon restart is an OSD action", "srvrestart", "osd.3", "ceph_osd", "3", "osd_restart"},
+		{"monitor daemon start", "srvstart", "mon.pve-01", "ceph_mon", "pve-01", "mon_start"},
+		{"a node service is not Ceph", "srvrestart", "pveproxy", "proxmox_task", "pveproxy", "srvrestart"},
+		{"certificate renewal is keyed by its node", "acmerenew", "", "certificate", "pve-01", "renewed"},
+		{"SDN apply is the cluster's", "reloadnetworkall", "", "sdn", "cluster", "sdn_applied"},
+		{"node network apply", "srvreload", "networking", "network", "pve-01", "network_applied"},
+		{"another service reload stays one", "srvreload", "pveproxy", "node", "pveproxy", "service_reload"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := newMockQueries()
+			s := &Syncer{queries: q, logger: testLogger()}
+			task := proxmox.NodeTask{
+				UPID: "UPID:pve-01:" + tc.taskType + ":" + tc.id, Type: tc.taskType, ID: tc.id,
+				Status: "OK", StartTime: time.Now().Add(-time.Minute).Unix(), EndTime: time.Now().Unix(),
+			}
+			if err := s.ingestTask(context.Background(), cluster, "pve-01", task, nil); err != nil {
+				t.Fatalf("ingestTask: %v", err)
+			}
+			if len(q.auditWithSourceCalls) != 1 {
+				t.Fatalf("wrote %d audit rows, want 1", len(q.auditWithSourceCalls))
+			}
+			got := q.auditWithSourceCalls[0]
+			if got.ResourceType != tc.wantType || got.ResourceID != tc.wantID || got.Action != tc.wantAction {
+				t.Errorf("filed as (%s, %s, %s), want (%s, %s, %s)",
+					got.ResourceType, got.ResourceID, got.Action, tc.wantType, tc.wantID, tc.wantAction)
+			}
+		})
+	}
+}
+
 // ingestSyncFakeClient implements just the two ProxmoxClient methods syncTasks
 // touches (GetNodes, GetNodeTasks); the embedded interface stubs the rest.
 type ingestSyncFakeClient struct {

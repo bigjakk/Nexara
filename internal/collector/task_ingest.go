@@ -204,13 +204,17 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		return nil
 	}
 
-	// Map task type to audit log resource_type + action.
-	mapping, ok := proxmoxTaskMap[task.Type]
+	// Map task type to audit log resource_type + action + resource_id.
+	mapping, resourceID, ok := mapTask(task.Type, task.ID, nodeName)
 	if !ok {
 		// Unmapped types fall through as generic proxmox_task.
 		mapping = taskMapping{
 			ResourceType: "proxmox_task",
 			Action:       task.Type,
+		}
+		resourceID = task.ID
+		if resourceID == "" {
+			resourceID = nodeName
 		}
 	}
 
@@ -286,12 +290,6 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		detailMap["resource_name"] = resourceName
 	}
 	details, _ := json.Marshal(detailMap)
-
-	// Determine resource ID. For VM/CT tasks, use the VMID from the task.
-	resourceID := task.ID
-	if resourceID == "" {
-		resourceID = nodeName
-	}
 
 	if err := s.queries.InsertAuditLogWithSource(ctx, db.InsertAuditLogWithSourceParams{
 		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
