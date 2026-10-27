@@ -267,12 +267,17 @@ var observedChangeRules = slices.Concat(
 			ActionRe: `^set_timezone$`, FieldRe: `^timezone$`},
 		{Kind: "node", Change: "changed", AuditType: "node", MatchKey: "id",
 			ActionRe: `^set_options$`, FieldRe: `^(description|wakeonlan|startall-onboot-delay|ballooning-target)$`},
-		{Kind: "node", Change: "changed", AuditType: "node", MatchKey: "id",
-			ActionRe: `^create_firewall_rule$`, FieldRe: `^firewall_rules$`, Counts: "add1"},
-		{Kind: "node", Change: "changed", AuditType: "node", MatchKey: "id",
-			ActionRe: `^update_firewall_rule$`, FieldRe: `^firewall_rules$`, Counts: "edit1"},
-		{Kind: "node", Change: "changed", AuditType: "node", MatchKey: "id",
-			ActionRe: `^delete_firewall_rule$`, FieldRe: `^firewall_rules$`, Counts: "del1"},
+	},
+	// A node's firewall rules, filed as firewall_rule / node/<node>, are
+	// edited through Nexara under the node (node_firewall.go), so its rows are
+	// found by the change's node.
+	[]explainRule{
+		{Kind: "firewall_rule", Change: "changed", AuditType: "node", MatchKey: "node",
+			ActionRe: `^create_firewall_rule$`, FieldRe: `^rules$`, Counts: "add1"},
+		{Kind: "firewall_rule", Change: "changed", AuditType: "node", MatchKey: "node",
+			ActionRe: `^update_firewall_rule$`, FieldRe: `^rules$`, Counts: "edit1"},
+		{Kind: "firewall_rule", Change: "changed", AuditType: "node", MatchKey: "node",
+			ActionRe: `^delete_firewall_rule$`, FieldRe: `^rules$`, Counts: "del1"},
 	},
 
 	// HA: a start or stop of an HA guest sets its resource's requested state,

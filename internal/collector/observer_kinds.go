@@ -393,8 +393,10 @@ func readNodeObject(kind string, targetFor func(string) (proxmox.ObserveTarget, 
 }
 
 // readNodeFirewall reads a node's firewall rules as one ordered list, filed as
-// node / <node>, field firewall_rules, as the node's own audit rows are: a rule
-// has no id but its position, which moves.
+// firewall_rule / node/<node>, field rules: the scope of a rule set, as the
+// cluster's is "cluster" and a guest's vm/<vmid> (the audit key table), since a
+// rule has no id but its position, which moves. A node's firewall is not a
+// node's object for who may read its History.
 func readNodeFirewall(ctx context.Context, p *observePass, node db.Node) ([]kindReading, readOutcome) {
 	target, err := proxmox.ObserveNodeFirewallRules(node.Name)
 	if err != nil {
@@ -405,8 +407,8 @@ func readNodeFirewall(ctx context.Context, p *observePass, node db.Node) ([]kind
 		return nil, out
 	}
 	return []kindReading{{kind: "node_firewall", objects: []observedObject{{
-		id: node.Name, resourceType: "node", resourceID: node.Name, node: node.Name,
-		lists: map[string][]string{"firewall_rules": canonicalRules(items)},
+		id: node.Name, resourceType: "firewall_rule", resourceID: "node/" + node.Name, node: node.Name,
+		lists: map[string][]string{"rules": canonicalRules(items)},
 	}}}}, readOK
 }
 

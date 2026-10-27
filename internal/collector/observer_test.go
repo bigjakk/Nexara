@@ -349,8 +349,8 @@ func TestObserverKinds(t *testing.T) {
 			noise: answers{"/nodes/pve-01/firewall/rules": `[{"pos":0,"type":"in","action":"ACCEPT","dport":"22","digest":"f2","ipversion":4}]`},
 			edit: answers{"/nodes/pve-01/firewall/rules": `[{"pos":0,"type":"in","action":"DROP","dport":"8006"},` +
 				`{"pos":1,"type":"in","action":"ACCEPT","dport":"22"}]`},
-			want: "changed node/pve-01 [firewall_rules]", value: "8006",
-			detail: `{"counts":{"firewall_rules":{"added":1,"removed":0}}}`},
+			want: "changed firewall_rule/node/pve-01 [rules]", value: "8006",
+			detail: `{"counts":{"rules":{"added":1,"removed":0}}}`},
 		{kind: "ha_resource",
 			base:  answers{"/cluster/ha/resources": `[{"sid":"vm:100","type":"vm","state":"started","digest":"h1"}]`},
 			noise: answers{"/cluster/ha/resources": `[{"sid":"vm:100","type":"vm","state":"started","digest":"h2","errors":{"group":"x"}}]`},
@@ -863,7 +863,8 @@ func TestObservedActionVocabulary(t *testing.T) {
 			return true
 		}
 		return slices.ContainsFunc(observedChangeRules, func(r explainRule) bool {
-			return r.Kind == kind && r.ActionRe != "" && regexp.MustCompile(r.ActionRe).MatchString(action)
+			return (r.Kind == kind || r.AuditType == kind) && r.ActionRe != "" &&
+				regexp.MustCompile(r.ActionRe).MatchString(action)
 		})
 	}
 	guestClassified := slices.Concat(guestConfigActions, guestOtherActions)

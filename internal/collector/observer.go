@@ -587,8 +587,10 @@ func (p *observePass) objectKey(kind, id string) string {
 func removedObject(kind, id, node string) observedObject {
 	resourceType := kind
 	switch kind {
-	case "node_options", "node_dns", "node_time", "node_firewall":
+	case "node_options", "node_dns", "node_time":
 		resourceType = "node"
+	case "node_firewall":
+		return observedObject{id: id, resourceType: "firewall_rule", resourceID: "node/" + id, node: node}
 	}
 	return observedObject{id: id, resourceType: resourceType, resourceID: id, node: node}
 }
