@@ -29,11 +29,35 @@ type BackupHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	// jobListTimeout bounds each job-list read around a create; zero means
+	// backupJobListTimeout.
+	jobListTimeout time.Duration
 }
 
 // NewBackupHandler creates a new backup handler.
 func NewBackupHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *BackupHandler {
 	return &BackupHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
+}
+
+// backupJobListTimeout bounds each of the two job-list reads CreateBackupJob
+// makes to learn the id of the job it created. Both only decorate an audit row,
+// so neither may hold the create up: a client that times out on a slow create
+// and retries makes a duplicate job.
+const backupJobListTimeout = 5 * time.Second
+
+// SetJobListTimeout narrows the bound on those reads, so that a test can make
+// one time out without waiting for the production bound.
+func (h *BackupHandler) SetJobListTimeout(d time.Duration) { h.jobListTimeout = d }
+
+// listBackupJobsBounded reads the cluster's backup jobs within the bound.
+func (h *BackupHandler) listBackupJobsBounded(c fiber.Ctx, client *proxmox.Client) ([]proxmox.BackupJob, error) {
+	d := h.jobListTimeout
+	if d <= 0 {
+		d = backupJobListTimeout
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), d)
+	defer cancel()
+	return client.ListBackupJobs(ctx)
 }
 
 // createPBSClient creates a PBS client for the given server ID. Routes
@@ -1230,9 +1254,9 @@ func (h *BackupHandler) CreateBackupJob(c fiber.Ctx, p *apischema.Params) error 
 	}
 
 	// POST /cluster/backup answers null, not the id it gave the job, so the id
-	// is found by what the job list gained. A list that cannot be read costs
-	// the row its id, never the create.
-	before, beforeErr := client.ListBackupJobs(c.Context())
+	// is found by what the job list gained. A list that cannot be read, or not
+	// within the bound, costs the row its id, never the create.
+	before, beforeErr := h.listBackupJobsBounded(c, client)
 
 	if err := client.CreateBackupJob(c.Context(), req.toParams()); err != nil {
 		return mapProxmoxError(err)
@@ -1240,7 +1264,7 @@ func (h *BackupHandler) CreateBackupJob(c fiber.Ctx, p *apischema.Params) error 
 
 	jobID := backupJobIDUnknown
 	if beforeErr == nil {
-		if after, err := client.ListBackupJobs(c.Context()); err == nil {
+		if after, err := h.listBackupJobsBounded(c, client); err == nil {
 			jobID = soleNewBackupJobID(before, after)
 		}
 	}

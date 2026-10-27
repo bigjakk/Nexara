@@ -88,9 +88,14 @@ type backupRunPVE struct {
 
 	// listBefore and listAfter are what the job list answers to its first read
 	// and to every later one, around a create; listReads counts the reads. An
-	// empty one makes that read fail with a 500.
+	// empty one makes that read fail with a 500, and a read in hangReads (0 is
+	// the first) blocks until its caller gives up. creates counts the POSTs.
 	listBefore, listAfter string
-	listReads             int
+	listReads, creates    int
+	hangReads             map[int]bool
+	// listTimeout, when set, is the bound the harness gives the handler's list
+	// reads, so a hung read costs a moment, not the production bound.
+	listTimeout time.Duration
 
 	srv    *httptest.Server
 	mu     sync.Mutex
@@ -118,8 +123,13 @@ func (p *backupRunPVE) serve(t *testing.T) string {
 			if p.listReads == 0 {
 				list = p.listBefore
 			}
+			hang := p.hangReads[p.listReads]
 			p.listReads++
 			p.mu.Unlock()
+			if hang {
+				<-r.Context().Done()
+				return
+			}
 			if list == "" {
 				write(http.StatusInternalServerError, `{"data":null,"message":"fixture: the job list is unreadable\n"}`)
 				return
@@ -127,6 +137,9 @@ func (p *backupRunPVE) serve(t *testing.T) string {
 			write(http.StatusOK, `{"data":`+list+`}`)
 		case r.Method == http.MethodPost && path == "/api2/json/cluster/backup":
 			// A create answers null, not the id it gave the job.
+			p.mu.Lock()
+			p.creates++
+			p.mu.Unlock()
 			write(http.StatusOK, `{"data":null}`)
 		case r.Method == http.MethodGet && path == "/api2/json/nodes":
 			if p.stopListeningAfterNodes {
@@ -403,6 +416,9 @@ func newBackupJobApp(t *testing.T, pve *backupRunPVE, method, path string,
 	dbtx := &backupRunDBTX{}
 	e := declaredEndpoint(t, method, path)
 	backup := handlers.NewBackupHandler(db.New(dbtx), backupRunEncKey, nil)
+	if pve.listTimeout > 0 {
+		backup.SetJobListTimeout(pve.listTimeout)
+	}
 	e.Handler = func(c fiber.Ctx, p *apischema.Params) error { return handler(backup, c, p) }
 
 	// stubAuth sets the user TrackTask and AuditLog need — without one they
