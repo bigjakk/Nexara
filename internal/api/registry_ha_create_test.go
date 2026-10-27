@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -120,7 +122,8 @@ func (haCreateCacheQueries) ListNodeEndpoints(context.Context, uuid.UUID) ([]db.
 type haCreateDBTX struct {
 	mu     sync.Mutex
 	audits [][]any
-	rows   []string // the SQL of every QueryRow, answered with no row
+	rows   []string // the SQL of every QueryRow
+	vm     *db.Vm   // the guest the inventory lookup finds; nil finds none
 }
 
 func (d *haCreateDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -141,7 +144,25 @@ func (d *haCreateDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row
 	d.mu.Lock()
 	d.rows = append(d.rows, sql)
 	d.mu.Unlock()
+	if d.vm != nil && strings.Contains(sql, "-- name: GetVMByClusterAndVmid") {
+		return haCreateVMRow{*d.vm}
+	}
 	return haCreateNoRow{}
+}
+
+// haCreateVMRow is a QueryRow result holding one vms row. sqlc scans a model's
+// query into the struct's fields in declaration order, which is how this fills them.
+type haCreateVMRow struct{ vm db.Vm }
+
+func (r haCreateVMRow) Scan(dest ...any) error {
+	v := reflect.ValueOf(r.vm)
+	if len(dest) != v.NumField() {
+		return fmt.Errorf("scanning %d columns into a model of %d fields", len(dest), v.NumField())
+	}
+	for i, d := range dest {
+		reflect.ValueOf(d).Elem().Set(v.Field(i))
+	}
+	return nil
 }
 
 // haCreateNoRow is a QueryRow result with nothing in it.

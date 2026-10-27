@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -330,24 +332,37 @@ func (h *NetworkHandler) ListSDNSubnets(c fiber.Ctx, p *apischema.Params) error 
 	return RespondItems(c, subnets)
 }
 
+// sdnLookupTimeout bounds the read that finds the id Proxmox gave a subnet: the
+// audit row is owed whether or not the read answers.
+const sdnLookupTimeout = 5 * time.Second
+
 // sdnSubnetKey is the id Proxmox gave a subnet just created: its zone, then the
 // CIDR with the slash dashed ("myzone-192.0.2.0-24"). Update and delete address a
 // subnet by that id, so the create's row has to file under it too — the CIDR the
 // create takes is another spelling of the same object, and a row under each would
 // split one subnet's History in two. The vnet's listing reports the id (the zone
 // is not in the request), so the entry ending in the dashed CIDR is the one just
-// made; a listing that cannot be read leaves the CIDR as sent.
+// made. A listing that cannot be read in time, or that has no such entry, leaves
+// the CIDR as sent, and the row is still written.
 func sdnSubnetKey(ctx context.Context, pxClient *proxmox.Client, vnet, cidr string) string {
-	subnets, err := pxClient.GetSDNSubnets(ctx, vnet)
-	if err != nil {
-		return cidr
-	}
-	dashed := "-" + strings.ReplaceAll(cidr, "/", "-")
-	for _, s := range subnets {
-		if strings.HasSuffix(s.Subnet, dashed) {
-			return s.Subnet
+	return sdnSubnetKeyWithin(ctx, sdnLookupTimeout, pxClient.GetSDNSubnets, vnet, cidr)
+}
+
+func sdnSubnetKeyWithin(ctx context.Context, timeout time.Duration,
+	list func(context.Context, string) ([]proxmox.SDNSubnet, error), vnet, cidr string) string {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	subnets, err := list(ctx, vnet)
+	if err == nil {
+		dashed := "-" + strings.ReplaceAll(cidr, "/", "-")
+		for _, s := range subnets {
+			if strings.HasSuffix(s.Subnet, dashed) {
+				return s.Subnet
+			}
 		}
 	}
+	slog.Warn("SDN subnet audit: could not find the id Proxmox gave the subnet; filing it under the CIDR as sent",
+		"vnet", vnet, "subnet", cidr, "error", err)
 	return cidr
 }
 

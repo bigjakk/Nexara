@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -230,4 +232,67 @@ func TestHARuleDeleteDetails(t *testing.T) {
 			t.Fatalf("confirmed-absent and could-not-tell both produce %s", absent)
 		}
 	})
+}
+
+// haSIDKey names a bare VMID by its guest's type in the inventory, then by what
+// Proxmox reports if that is this VMID's vm: or ct: spelling, and leaves it as
+// sent otherwise — whatever the lookups do, including never answering.
+func TestHASIDKey(t *testing.T) {
+	t.Parallel()
+	boom := errors.New("lookup failed")
+	// A lookup that never answers on its own; the valve makes an unbounded call
+	// return a wrong value instead of hanging the run.
+	hang := func(ctx context.Context) (string, error) {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(10 * time.Second):
+			return "vm:109", nil
+		}
+	}
+	say := func(sid string, err error) func(context.Context) (string, error) {
+		return func(context.Context) (string, error) { return sid, err }
+	}
+
+	for _, tt := range []struct {
+		name     string
+		sid      string
+		kind     string // the inventory's answer; "" is a miss
+		reported func(context.Context) (string, error)
+		want     string
+		fellBack bool
+		asked    []string // which lookups ran, in order
+	}{
+		{name: "a typed sid is already canonical", sid: "vm:109", want: "vm:109"},
+		{name: "a container in the inventory", sid: "109", kind: "lxc", want: "ct:109", asked: []string{"inventory"}},
+		{name: "a VM in the inventory", sid: "109", kind: "qemu", want: "vm:109", asked: []string{"inventory"}},
+		{name: "missing from the inventory, Proxmox says", sid: "109", reported: say("ct:109", nil), want: "ct:109", asked: []string{"inventory", "proxmox"}},
+		{name: "Proxmox names another resource", sid: "109", reported: say("vm:999", nil), want: "109", fellBack: true, asked: []string{"inventory", "proxmox"}},
+		{name: "neither answers", sid: "109", reported: say("", boom), want: "109", fellBack: true, asked: []string{"inventory", "proxmox"}},
+		{name: "a VMID not in canonical form is no inventory key", sid: "0109", kind: "lxc", reported: say("vm:0109", nil), want: "vm:0109", asked: []string{"proxmox"}},
+		{name: "Proxmox never answers", sid: "109", reported: hang, want: "109", fellBack: true, asked: []string{"inventory", "proxmox"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var asked []string
+			inventory := func(context.Context, int32) (string, error) {
+				asked = append(asked, "inventory")
+				if tt.kind == "" {
+					return "", boom
+				}
+				return tt.kind, nil
+			}
+			reported := func(ctx context.Context) (string, error) {
+				asked = append(asked, "proxmox")
+				return tt.reported(ctx)
+			}
+			got, err := haSIDKey(context.Background(), 50*time.Millisecond, tt.sid, inventory, reported)
+			if got != tt.want || (err != nil) != tt.fellBack {
+				t.Errorf("haSIDKey = (%q, %v), want (%q, fell back %v)", got, err, tt.want, tt.fellBack)
+			}
+			if !slices.Equal(asked, tt.asked) {
+				t.Errorf("lookups run = %v, want %v", asked, tt.asked)
+			}
+		})
+	}
 }

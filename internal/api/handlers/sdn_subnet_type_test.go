@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -156,5 +157,22 @@ func TestSDNSubnetKey(t *testing.T) {
 				t.Errorf("sdnSubnetKey = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A listing that never answers must not hold the audit row back: the key falls
+// back to the CIDR as sent once the bound is up.
+func TestSDNSubnetKeyIsBounded(t *testing.T) {
+	t.Parallel()
+	hang := func(ctx context.Context, _ string) ([]proxmox.SDNSubnet, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Second): // the valve: an unbounded call answers wrongly instead of hanging
+			return []proxmox.SDNSubnet{{Subnet: "zone01-192.0.2.0-24"}}, nil
+		}
+	}
+	if got := sdnSubnetKeyWithin(context.Background(), 50*time.Millisecond, hang, "vnet01", "192.0.2.0/24"); got != "192.0.2.0/24" {
+		t.Errorf("sdnSubnetKeyWithin = %q, want the CIDR as sent", got)
 	}
 }

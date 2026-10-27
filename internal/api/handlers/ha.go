@@ -3,10 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -78,24 +80,75 @@ func resolveResourceNames(ctx context.Context, queries *db.Queries, clusterID uu
 	return out
 }
 
+// haSIDLookupTimeout bounds the work of finding out which sid a bare VMID is:
+// the audit row is owed whether or not that work gets an answer.
+const haSIDLookupTimeout = 5 * time.Second
+
 // haSIDKey is the sid an HA resource is known by, for the audit row.
 //
 // The API takes a bare VMID as a shortcut ("109"): Proxmox resolves it to vm:109
 // or ct:109 by the guest's type (PVE::HA::Config::parse_sid), and the listing, the
 // other routes and the guest's History all know the resource by that spelling.
 // Audited as sent, a create and a later update of one resource would file under
-// two keys. Only a bare VMID costs a read: a sid with a type is already the
-// canonical one. A read that fails leaves the sid as sent, since the row is still
-// owed and the caller's own spelling is all that is known.
-func haSIDKey(ctx context.Context, pxClient *proxmox.Client, sid string) string {
+// two keys. A sid with a type is already the canonical one. A bare VMID is a VM
+// or a container by the type of the guest in the inventory (guestType); failing
+// that, by what Proxmox reports (reported), taken only if it is this VMID under
+// vm: or ct: — anything else it says is not a spelling of this resource.
+//
+// Both are bounded by timeout. When neither answers, the sid comes back as sent
+// beside the reason, so the caller can still write the row and log the miss.
+func haSIDKey(ctx context.Context, timeout time.Duration, sid string,
+	guestType func(context.Context, int32) (string, error), reported func(context.Context) (string, error)) (string, error) {
 	if strings.Contains(sid, ":") {
-		return sid
+		return sid, nil
 	}
-	res, err := pxClient.GetHAResource(ctx, sid)
-	if err != nil || res.SID == "" {
-		return sid
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	// Only the canonical spelling of a VMID names a guest: "0109" is not 109.
+	if vmid, err := strconv.ParseInt(sid, 10, 32); err == nil && strconv.FormatInt(vmid, 10) == sid {
+		if kind, err := guestType(ctx, int32(vmid)); err == nil {
+			switch kind {
+			case "qemu":
+				return "vm:" + sid, nil
+			case "lxc":
+				return "ct:" + sid, nil
+			}
+		}
 	}
-	return res.SID
+	got, err := reported(ctx)
+	if err != nil {
+		return sid, err
+	}
+	if got == "vm:"+sid || got == "ct:"+sid {
+		return got, nil
+	}
+	return sid, errors.New("the sid Proxmox reported is not this VMID's")
+}
+
+// sidKey is haSIDKey for this cluster, logging the times it had to leave the
+// sid as sent.
+func (h *HAHandler) sidKey(ctx context.Context, clusterID uuid.UUID, sid string, reported func(context.Context) (string, error)) string {
+	key, err := haSIDKey(ctx, haSIDLookupTimeout, sid,
+		func(ctx context.Context, vmid int32) (string, error) {
+			vm, err := h.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{ClusterID: clusterID, Vmid: vmid})
+			return vm.Type, err
+		}, reported)
+	if err != nil {
+		slog.Warn("HA resource audit: could not tell whether a bare VMID is a VM or a container; filing it as sent",
+			"cluster_id", clusterID, "sid", sid, "error", err)
+	}
+	return key
+}
+
+// haReportedSID is the sid Proxmox gives the HA resource asked for as sid.
+func haReportedSID(pxClient *proxmox.Client, sid string) func(context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		res, err := pxClient.GetHAResource(ctx, sid)
+		if err != nil {
+			return "", err
+		}
+		return res.SID, nil
+	}
 }
 
 // findHARule looks up the rule matching name in the cluster's rule list. Used
@@ -270,7 +323,7 @@ func (h *HAHandler) CreateResource(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.CreateHAResource(c.Context(), req); err != nil {
 		return mapProxmoxError(err)
 	}
-	sid = haSIDKey(c.Context(), pxClient, sid)
+	sid = h.sidKey(c.Context(), clusterID, sid, haReportedSID(pxClient, sid))
 	detailMap := map[string]any{"sid": sid}
 	if name := resolveSIDName(c.Context(), h.queries, clusterID, sid); name != "" {
 		detailMap["name"] = name
@@ -347,7 +400,7 @@ func (h *HAHandler) UpdateResource(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateHAResource(c.Context(), sid, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	sid = haSIDKey(c.Context(), pxClient, sid)
+	sid = h.sidKey(c.Context(), clusterID, sid, haReportedSID(pxClient, sid))
 	detailMap := map[string]any{"sid": sid}
 	if name := resolveSIDName(c.Context(), h.queries, clusterID, sid); name != "" {
 		detailMap["name"] = name
@@ -389,15 +442,20 @@ func (h *HAHandler) DeleteResource(c fiber.Ctx, p *apischema.Params) error {
 	}
 	// Snapshot the resource before deletion so the audit entry has context.
 	// Best-effort: a fetch failure should not block the delete itself.
-	snapshot, snapErr := pxClient.GetHAResource(c.Context(), sid)
+	snapCtx, cancelSnap := context.WithTimeout(c.Context(), haSIDLookupTimeout)
+	snapshot, snapErr := pxClient.GetHAResource(snapCtx, sid)
+	cancelSnap()
 	if err := pxClient.DeleteHAResource(c.Context(), sid); err != nil {
 		return mapProxmoxError(err)
 	}
-	// The snapshot is the only chance to learn which resource a bare VMID was
-	// (see haSIDKey): once deleted there is nothing left to ask.
-	if snapshot != nil && snapshot.SID != "" {
-		sid = snapshot.SID
-	}
+	// The snapshot is the only chance to ask Proxmox which resource a bare VMID
+	// was (see haSIDKey): once deleted there is nothing left to ask.
+	sid = h.sidKey(c.Context(), clusterID, sid, func(context.Context) (string, error) {
+		if snapErr != nil || snapshot == nil {
+			return "", snapErr
+		}
+		return snapshot.SID, nil
+	})
 	detailMap := map[string]any{"sid": sid}
 	if name := resolveSIDName(c.Context(), h.queries, clusterID, sid); name != "" {
 		detailMap["name"] = name

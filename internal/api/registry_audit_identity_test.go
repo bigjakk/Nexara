@@ -43,6 +43,8 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 		wantAbsent   []string       // details the row must not carry
 		forbidden    string         // text that must appear nowhere in the details
 		wantTask     bool           // a task_history row was written for it
+		vm           *db.Vm         // the guest the inventory holds, if any
+		wantNoProbe  bool           // Proxmox was not asked for the resource
 	}{
 		{
 			// Proxmox resolves a bare VMID to vm: or ct: by the guest's type, and
@@ -52,6 +54,22 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			bind:     func(q *db.Queries) Handler { return ha(q).CreateResource },
 			replies:  map[string]string{"GET /api2/json/cluster/ha/resources/109": `{"sid":"ct:109","type":"ct"}`},
 			wantType: "ha_resource", wantID: "ct:109", wantAction: "created", wantDetails: map[string]any{"sid": "ct:109"},
+		},
+		{
+			// The inventory knows the guest's type, so Proxmox is not asked.
+			name: "HA create with a bare VMID of a container in the inventory", method: fiber.MethodPost, path: haScope + "/resources",
+			target: "/ha/resources", body: `{"sid":"109"}`,
+			bind:     func(q *db.Queries) Handler { return ha(q).CreateResource },
+			vm:       &db.Vm{Vmid: 109, Type: "lxc", Name: "linux01"},
+			wantType: "ha_resource", wantID: "ct:109", wantAction: "created", wantNoProbe: true,
+		},
+		{
+			// What Proxmox reports is taken only if it is this VMID's own sid.
+			name: "HA update with a bare VMID, Proxmox naming another resource", method: fiber.MethodPut, path: haScope + "/resources/:sid",
+			target: "/ha/resources/109", body: `{"state":"started"}`,
+			bind:     func(q *db.Queries) Handler { return ha(q).UpdateResource },
+			replies:  map[string]string{"GET /api2/json/cluster/ha/resources/109": `{"sid":"vm:999","type":"vm"}`},
+			wantType: "ha_resource", wantID: "109", wantAction: "updated",
 		},
 		{
 			name: "HA update with a bare VMID", method: fiber.MethodPut, path: haScope + "/resources/:sid",
@@ -66,6 +84,13 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			bind:     func(q *db.Queries) Handler { return ha(q).DeleteResource },
 			replies:  map[string]string{"GET /api2/json/cluster/ha/resources/109": `{"sid":"vm:109","type":"vm"}`},
 			wantType: "ha_resource", wantID: "vm:109", wantAction: "deleted",
+		},
+		{
+			name: "HA delete with a bare VMID, the snapshot naming another resource", method: fiber.MethodDelete, path: haScope + "/resources/:sid",
+			target:   "/ha/resources/109",
+			bind:     func(q *db.Queries) Handler { return ha(q).DeleteResource },
+			replies:  map[string]string{"GET /api2/json/cluster/ha/resources/109": `{"sid":"vm:999","type":"vm"}`},
+			wantType: "ha_resource", wantID: "109", wantAction: "deleted",
 		},
 		{
 			// A zone and a VNet are separate namespaces in Proxmox, so one id can
@@ -200,7 +225,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			e := declaredEndpoint(t, tc.method, tc.path)
-			dbtx := &haCreateDBTX{}
+			dbtx := &haCreateDBTX{vm: tc.vm}
 			e.Handler = tc.bind(db.New(dbtx))
 			pve := &haCreatePVE{replies: tc.replies}
 			app := newHAStandInApp(t, e, pve, dbtx, map[string]bool{
@@ -243,6 +268,15 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			}
 			if tasked != tc.wantTask {
 				t.Errorf("a task_history row was written = %v, want %v", tasked, tc.wantTask)
+			}
+			if tc.wantNoProbe {
+				pve.mu.Lock()
+				for _, r := range pve.seen {
+					if r.method == fiber.MethodGet {
+						t.Errorf("Proxmox was asked %s %s, which the inventory answers", r.method, r.path)
+					}
+				}
+				pve.mu.Unlock()
 			}
 			for _, key := range tc.wantAbsent {
 				if _, ok := details[key]; ok {
