@@ -167,6 +167,7 @@ type SyncQueries interface {
 	ListExistingTaskHistoryUPIDs(ctx context.Context, upids []string) ([]string, error)
 	ListExistingAuditLogUPIDs(ctx context.Context, upids []string) ([]string, error)
 	ListCrossClusterMigrationUPIDs(ctx context.Context, upids []string) ([]string, error)
+	LinkSDNApplyNodeTasks(ctx context.Context, arg db.LinkSDNApplyNodeTasksParams) (int64, error)
 	InsertExternalTaskHistory(ctx context.Context, arg db.InsertExternalTaskHistoryParams) error
 	// Task reconcile
 	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.TaskHistory, error)

@@ -1202,6 +1202,17 @@ type Querier interface {
 	// (the rows cascade away). A NULL id matches nothing; the caller refuses a
 	// credential naming both or neither (internal/ws/console_credential.go).
 	IsConsoleCredentialLive(ctx context.Context, arg IsConsoleCredentialLiveParams) (bool, error)
+	// An SDN apply (reloadnetworkall) reloads every node's network as a task of its
+	// own, as root@pam (srvreload, service "networking"). The collector ingests each
+	// as a node network apply made in Proxmox; they are parts of the apply, not
+	// applies. This marks them: the action says so and details.parent_upid names the
+	// apply that was running on the cluster at that moment — an audit row of the
+	// apply (Nexara's, or one ingested) that carries its UPID, from its start to its
+	// end in task_history (15 minutes when that is not known), with 10 seconds of
+	// slack either way. Only the Proxmox-sourced rows are touched, and only once:
+	// the action it matches is the one it replaces. Called after every ingest pass,
+	// so a node listed before the node that ran the apply is linked on a later one.
+	LinkSDNApplyNodeTasks(ctx context.Context, arg LinkSDNApplyNodeTasksParams) (int64, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ListAPIKeysByUserRow, error)
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
 	ListActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) ([]AlertHistory, error)

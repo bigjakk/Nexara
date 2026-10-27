@@ -108,6 +108,10 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 		listed = append(listed, node.Node)
 	}
 
+	// An SDN apply reloads each node's network as a task of its own: mark those,
+	// whichever node's list they came from, now that every list is in.
+	s.linkSDNApplyTasks(ctx, cluster)
+
 	// Advance the high-water mark only when every node was fetched AND deduped
 	// cleanly. If any node failed we processed a partial set, so leaving `since`
 	// where it is forces a full retry next tick rather than silently skipping
@@ -396,4 +400,20 @@ func describeTask(mapping taskMapping, resourceID, resourceName, taskID string) 
 		return description + " " + cleanTaskText(taskID)
 	}
 	return description
+}
+
+// sdnApplyLinkWindow is how far back an ingest pass looks for node reloads of an
+// SDN apply it has not marked yet: a pass that follows an outage still finds them.
+const sdnApplyLinkWindow = 24 * time.Hour
+
+// linkSDNApplyTasks marks the per-node network reloads of an SDN apply as parts
+// of it (LinkSDNApplyNodeTasks). A failure is only logged: the rows stay as the
+// node network applies they were ingested as, and a later pass tries again.
+func (s *Syncer) linkSDNApplyTasks(ctx context.Context, cluster db.Cluster) {
+	if _, err := s.queries.LinkSDNApplyNodeTasks(ctx, db.LinkSDNApplyNodeTasksParams{
+		ClusterID: cluster.ID,
+		Since:     time.Now().Add(-sdnApplyLinkWindow),
+	}); err != nil {
+		s.logger.Warn("task sync: failed to mark the node reloads of an SDN apply", "cluster_id", cluster.ID, "error", err)
+	}
 }

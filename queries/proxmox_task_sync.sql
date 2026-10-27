@@ -54,3 +54,43 @@ SELECT upid FROM migration_jobs
 WHERE migration_type = 'cross-cluster'
   AND upid <> ''
   AND upid = ANY(sqlc.arg('upids')::text[]);
+
+-- An SDN apply (reloadnetworkall) reloads every node's network as a task of its
+-- own, as root@pam (srvreload, service "networking"). The collector ingests each
+-- as a node network apply made in Proxmox; they are parts of the apply, not
+-- applies. This marks them: the action says so and details.parent_upid names the
+-- apply that was running on the cluster at that moment — an audit row of the
+-- apply (Nexara's, or one ingested) that carries its UPID, from its start to its
+-- end in task_history (15 minutes when that is not known), with 10 seconds of
+-- slack either way. Only the Proxmox-sourced rows are touched, and only once:
+-- the action it matches is the one it replaces. Called after every ingest pass,
+-- so a node listed before the node that ran the apply is linked on a later one.
+-- name: LinkSDNApplyNodeTasks :execrows
+WITH applies AS (
+    SELECT a.details->>'upid' AS upid,
+           a.created_at AS started_at,
+           COALESCE(th.finished_at, a.created_at + interval '15 minutes') AS ended_at
+    FROM audit_log a
+    LEFT JOIN task_history th ON th.cluster_id = a.cluster_id AND th.upid = a.details->>'upid'
+    WHERE a.cluster_id = sqlc.arg('cluster_id')::uuid
+      AND a.resource_type = 'sdn'
+      AND a.resource_id = 'cluster'
+      AND a.action = 'sdn_applied'
+      AND a.details->>'upid' IS NOT NULL
+      AND a.created_at > sqlc.arg('since')::timestamptz - interval '15 minutes'
+)
+UPDATE audit_log c
+SET action = 'network_reloaded_by_sdn',
+    details = c.details || jsonb_build_object('parent_upid', (
+        SELECT p.upid FROM applies p
+        WHERE c.created_at BETWEEN p.started_at - interval '10 seconds' AND p.ended_at + interval '10 seconds'
+        ORDER BY p.started_at DESC
+        LIMIT 1))
+WHERE c.cluster_id = sqlc.arg('cluster_id')::uuid
+  AND c.resource_type = 'network'
+  AND c.action = 'network_applied'
+  AND c.source = 'proxmox'
+  AND c.created_at > sqlc.arg('since')::timestamptz
+  AND EXISTS (
+      SELECT 1 FROM applies p
+      WHERE c.created_at BETWEEN p.started_at - interval '10 seconds' AND p.ended_at + interval '10 seconds');

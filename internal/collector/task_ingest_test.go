@@ -314,6 +314,25 @@ func (f *ingestSyncFakeClient) GetNodeTasks(_ context.Context, node string, _ in
 	return f.tasks[node], nil
 }
 
+// Each ingest pass marks the per-node reloads of an SDN apply once every node's
+// list is in — also when a node failed to list, so one slow node does not hold
+// back the marking of the rest.
+func TestSyncTasksMarksTheNodeReloadsOfAnSDNApply(t *testing.T) {
+	t.Parallel()
+	cluster := db.Cluster{ID: uuid.New()}
+	client := &ingestSyncFakeClient{
+		nodes:    []proxmox.NodeListEntry{{Node: "pve1", Status: "online"}, {Node: "pve2", Status: "online"}},
+		taskErrs: map[string]error{"pve2": errors.New("timeout")},
+	}
+	q := newMockQueries()
+	s := &Syncer{queries: q, logger: testLogger()}
+	s.syncTasks(context.Background(), client, cluster)
+	if len(q.sdnApplyLinks) != 1 || q.sdnApplyLinks[0].ClusterID != cluster.ID ||
+		time.Since(q.sdnApplyLinks[0].Since) < sdnApplyLinkWindow {
+		t.Errorf("node reloads marked with %+v, want one pass for this cluster over the last %v", q.sdnApplyLinks, sdnApplyLinkWindow)
+	}
+}
+
 // TestSyncTasks_WatermarkGuard verifies the task-sync high-water mark advances
 // only when a tick deduped cleanly. A dedup failure must hold `since` back so
 // the un-ingested tasks are retried next tick, not skipped past forever by the

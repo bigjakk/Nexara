@@ -72,6 +72,7 @@ type mockQueries struct {
 	existingTaskUPIDs   map[string]bool // ListExistingTaskHistoryUPIDs echoes these back
 	existingAuditUPIDs  map[string]bool // ListExistingAuditLogUPIDs echoes these back
 	crossClusterUPIDs   map[string]bool // ListCrossClusterMigrationUPIDs echoes these back
+	sdnApplyLinks       []db.LinkSDNApplyNodeTasksParams
 	externalTaskCalls   []db.InsertExternalTaskHistoryParams
 	taskHistUPIDErr     error // when set, ListExistingTaskHistoryUPIDs fails (dedup error)
 	crossClusterUPIDErr error // when set, ListCrossClusterMigrationUPIDs fails
@@ -451,6 +452,11 @@ func (m *mockQueries) ListExistingAuditLogUPIDs(_ context.Context, upids []strin
 		}
 	}
 	return out, nil
+}
+
+func (m *mockQueries) LinkSDNApplyNodeTasks(_ context.Context, arg db.LinkSDNApplyNodeTasksParams) (int64, error) {
+	m.sdnApplyLinks = append(m.sdnApplyLinks, arg)
+	return 0, nil
 }
 
 func (m *mockQueries) ListCrossClusterMigrationUPIDs(_ context.Context, upids []string) ([]string, error) {
