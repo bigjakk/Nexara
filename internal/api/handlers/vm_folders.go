@@ -213,6 +213,7 @@ func (h *VMFoldersHandler) Update(c fiber.Ctx) error {
 	}
 
 	auditFields := map[string]any{}
+	fromParent := folderParentID(folder)
 
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
@@ -251,6 +252,9 @@ func (h *VMFoldersHandler) Update(c fiber.Ctx) error {
 		} else {
 			auditFields["parent_id"] = nil
 		}
+		// The folder it left finds the move by from_parent_id, as it finds a
+		// guest's departure by from_folder_id.
+		auditFields["from_parent_id"] = fromParent
 
 		moved, moveErr := h.queries.MoveVMFolder(c.Context(), db.MoveVMFolderParams{ID: folderID, ParentID: newParent})
 		if moveErr != nil {
@@ -299,7 +303,8 @@ func (h *VMFoldersHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete folder")
 	}
 
-	details, _ := json.Marshal(map[string]any{"name": folder.Name})
+	// parent_id, so the folder it was in finds the delete: it has no row left.
+	details, _ := json.Marshal(map[string]any{"name": folder.Name, "parent_id": folderParentID(folder)})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm_folder", folderID.String(), "delete", details)
 
 	return c.SendStatus(fiber.StatusNoContent)
@@ -340,14 +345,21 @@ func (h *VMFoldersHandler) AssignVM(c fiber.Ctx, p *apischema.Params) error {
 		folderID = &parsed
 	}
 
+	// from_folder_id names the folder the guest left, when it was in one: that
+	// folder's History finds the departure by it, having no other record.
 	if folderID == nil {
-		if err := h.queries.UnassignVMFromFolder(c.Context(), db.UnassignVMFromFolderParams{
+		from, err := h.queries.UnassignVMFromFolder(c.Context(), db.UnassignVMFromFolderParams{
 			ClusterID: clusterID,
 			Vmid:      vm.Vmid,
-		}); err != nil {
+		})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to unassign VM")
 		}
-		details, _ := json.Marshal(map[string]any{"vmid": vm.Vmid, "folder_id": nil})
+		fields := map[string]any{"vmid": vm.Vmid, "folder_id": nil}
+		if err == nil {
+			fields["from_folder_id"] = from
+		}
+		details, _ := json.Marshal(fields)
 		AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm_folder_membership", vmID.String(), "unassign", details)
 		return c.SendStatus(fiber.StatusNoContent)
 	}
@@ -355,18 +367,32 @@ func (h *VMFoldersHandler) AssignVM(c fiber.Ctx, p *apischema.Params) error {
 	if err := h.ensureFolderInCluster(c, *folderID, clusterID); err != nil {
 		return err
 	}
-	if err := h.queries.AssignVMToFolder(c.Context(), db.AssignVMToFolderParams{
+	from, err := h.queries.AssignVMToFolder(c.Context(), db.AssignVMToFolderParams{
 		ClusterID: clusterID,
 		Vmid:      vm.Vmid,
 		FolderID:  *folderID,
-	}); err != nil {
+	})
+	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to assign VM")
 	}
 
-	details, _ := json.Marshal(map[string]any{"vmid": vm.Vmid, "folder_id": *folderID})
+	fields := map[string]any{"vmid": vm.Vmid, "folder_id": *folderID}
+	if from != "" {
+		fields["from_folder_id"] = from
+	}
+	details, _ := json.Marshal(fields)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm_folder_membership", vmID.String(), "assign", details)
 
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// folderParentID is a folder's parent as an audit row names it: its id, or
+// null for a folder at the top level.
+func folderParentID(f db.VmFolder) any {
+	if !f.ParentID.Valid {
+		return nil
+	}
+	return uuid.UUID(f.ParentID.Bytes)
 }
 
 // ensureFolderInCluster returns 404 if the folder doesn't exist or doesn't

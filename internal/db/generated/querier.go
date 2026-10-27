@@ -22,7 +22,11 @@ type Querier interface {
 	// a no-op for active jobs, whose terminal transition sets the flag itself.
 	ArmJobCleanupPending(ctx context.Context, id uuid.UUID) error
 	AssignUserRole(ctx context.Context, arg AssignUserRoleParams) (UserRole, error)
-	AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) error
+	// AssignVMToFolder returns the folder the guest was filed in before, '' when
+	// none, for the audit row to name (from_folder_id): the folder it left has no
+	// other record of it. The subquery reads the table as it stood when the
+	// statement began, so it sees the row this upsert replaces.
+	AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) (string, error)
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) error
 	// Moves the user's auth_epoch to its next value and says how many rows it changed
 	// (0: there is no such user). It is the FIRST statement of every revoke-all —
@@ -2697,7 +2701,9 @@ type Querier interface {
 	TaskUPIDOnRecord(ctx context.Context, upid string) (bool, error)
 	TouchRollingUpdateNode(ctx context.Context, id uuid.UUID) error
 	TransitionAlertToFiring(ctx context.Context, id uuid.UUID) error
-	UnassignVMFromFolder(ctx context.Context, arg UnassignVMFromFolderParams) error
+	// UnassignVMFromFolder returns the folder the guest left, likewise; no row
+	// when it was in none.
+	UnassignVMFromFolder(ctx context.Context, arg UnassignVMFromFolderParams) (uuid.UUID, error)
 	UpdateAPIKeyLastUsed(ctx context.Context, arg UpdateAPIKeyLastUsedParams) error
 	UpdateAlertEscalation(ctx context.Context, arg UpdateAlertEscalationParams) error
 	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)

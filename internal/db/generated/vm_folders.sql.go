@@ -13,12 +13,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const assignVMToFolder = `-- name: AssignVMToFolder :exec
+const assignVMToFolder = `-- name: AssignVMToFolder :one
 INSERT INTO vm_folder_memberships (cluster_id, vmid, folder_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (cluster_id, vmid) DO UPDATE
 SET folder_id = EXCLUDED.folder_id,
     updated_at = NOW()
+RETURNING COALESCE((SELECT p.folder_id::text FROM vm_folder_memberships p
+                    WHERE p.cluster_id = $1 AND p.vmid = $2), '')::text AS from_folder_id
 `
 
 type AssignVMToFolderParams struct {
@@ -27,9 +29,15 @@ type AssignVMToFolderParams struct {
 	FolderID  uuid.UUID `json:"folder_id"`
 }
 
-func (q *Queries) AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) error {
-	_, err := q.db.Exec(ctx, assignVMToFolder, arg.ClusterID, arg.Vmid, arg.FolderID)
-	return err
+// AssignVMToFolder returns the folder the guest was filed in before, ” when
+// none, for the audit row to name (from_folder_id): the folder it left has no
+// other record of it. The subquery reads the table as it stood when the
+// statement began, so it sees the row this upsert replaces.
+func (q *Queries) AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) (string, error) {
+	row := q.db.QueryRow(ctx, assignVMToFolder, arg.ClusterID, arg.Vmid, arg.FolderID)
+	var from_folder_id string
+	err := row.Scan(&from_folder_id)
+	return from_folder_id, err
 }
 
 const createVMFolder = `-- name: CreateVMFolder :one
@@ -210,8 +218,9 @@ func (q *Queries) RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) 
 	return i, err
 }
 
-const unassignVMFromFolder = `-- name: UnassignVMFromFolder :exec
+const unassignVMFromFolder = `-- name: UnassignVMFromFolder :one
 DELETE FROM vm_folder_memberships WHERE cluster_id = $1 AND vmid = $2
+RETURNING folder_id
 `
 
 type UnassignVMFromFolderParams struct {
@@ -219,7 +228,11 @@ type UnassignVMFromFolderParams struct {
 	Vmid      int32     `json:"vmid"`
 }
 
-func (q *Queries) UnassignVMFromFolder(ctx context.Context, arg UnassignVMFromFolderParams) error {
-	_, err := q.db.Exec(ctx, unassignVMFromFolder, arg.ClusterID, arg.Vmid)
-	return err
+// UnassignVMFromFolder returns the folder the guest left, likewise; no row
+// when it was in none.
+func (q *Queries) UnassignVMFromFolder(ctx context.Context, arg UnassignVMFromFolderParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, unassignVMFromFolder, arg.ClusterID, arg.Vmid)
+	var folder_id uuid.UUID
+	err := row.Scan(&folder_id)
+	return folder_id, err
 }
