@@ -726,11 +726,13 @@ func pruneDatastoreParams() apischema.Properties {
 
 // restoreBackupParams is the body of POST /clusters/:cluster_id/restore.
 //
-// Six parameters are required, matching exactly the one combined check the
-// handler made: pbs_server_id, backup_type, backup_id, backup_time,
-// target_node and vmid. The two numeric ones carry a Minimum of 1 because
-// the handler refused `backup_time == 0` and `vmid <= 0`, which apischema
-// would otherwise accept as supplied values.
+// Seven parameters are required: the six the handler's one combined check
+// refused — pbs_server_id, backup_type, backup_id, backup_time, target_node and
+// vmid — and datastore, which the restore now chooses its storage by (every
+// caller already sent it, the dialog from the snapshot it was opened on). The
+// two numeric ones carry a Minimum of 1 because the handler refused
+// `backup_time == 0` and `vmid <= 0`, which apischema would otherwise accept
+// as supplied values.
 //
 // backup_type carries the Enum the handler enforced at the bottom of the
 // function ("backup_type must be 'vm' or 'ct'") — a Nexara vocabulary rather
@@ -783,10 +785,14 @@ func restoreBackupParams() apischema.Properties {
 			Typetext:    "<integer>",
 			Description: "VMID to restore the guest as.",
 		},
-		"datastore": optString(64, "<datastore>",
-			"PBS datastore the snapshot lives in. With the PBS server it picks the cluster's Proxmox storage "+
-				"the archive is read through; leave it out only when the server has one such storage, or the "+
-				"restore is refused as ambiguous."),
+		"datastore": {
+			Type:      apischema.String,
+			MinLength: apischema.Ptr(1),
+			MaxLength: apischema.Ptr(64),
+			Typetext:  "<datastore>",
+			Description: "PBS datastore the snapshot lives in. With the PBS server it picks the cluster's " +
+				"Proxmox storage the archive is read through.",
+		},
 		"storage": optString(100, "<storage>",
 			"Storage to restore the disks onto. Omitted lets Proxmox use the archive's own."),
 		"force": optFlag("Overwrite an existing guest with this VMID. The guest is stopped first, as a task of its own, " +

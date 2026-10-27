@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -13,70 +14,97 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// restoreStorage names the Proxmox storage a restore reads its archive through:
-// the one pbs storage of the cluster that points at the PBS server and datastore
-// the snapshot lives on and that the guest's node can use.
+// How restoreStorage tied the storage it chose to the PBS server.
+const (
+	matchedByFingerprint   = "fingerprint"
+	matchedByAddress       = "address"
+	matchedByOnlyCandidate = "only_candidate"
+)
+
+// defaultPBSPort is the port Proxmox connects to when a pbs storage names none,
+// and the port a PBS listens on unless it is told otherwise.
+const defaultPBSPort = 8007
+
+// restoreStorage names the Proxmox storage a restore reads its archive through,
+// and says how it is tied to the PBS server the snapshot lives on.
 //
 // A restore addresses the snapshot as "<storage>:backup/<type>/<id>/<time>", so
 // the storage decides which PBS it is read from. It used to be the first pbs
 // storage of the cluster, whatever server and datastore were asked for, which
 // with datastores synced between servers restored from a PBS nobody chose.
 //
-// A storage is a candidate when it is enabled, is available on the node, has no
-// namespace — Nexara lists a datastore's root namespace only, so a namespaced
-// storage cannot hold the snapshot — and names the datastore (when the request
-// does). It belongs to the server when it shares the server's host or its TLS
-// fingerprint. No candidate, or more than one, is refused with what to change:
-// a restore must not choose between two readings of the request.
-func restoreStorage(cfgs []proxmox.StorageConfig, server db.PbsServer, datastore, node string) (string, error) {
+// A candidate is an enabled pbs storage that is available on the node, has no
+// namespace — Nexara lists a datastore's root namespace only — and names the
+// datastore. storageTie decides which candidates are the server's: one match
+// is used, several are refused. With none, a single candidate that nothing
+// contradicts is used when no other Nexara PBS server claims it, which is how a
+// PBS that Nexara reaches by an address and Proxmox by a name keeps working; the
+// caller records and logs that. Anything else is refused with what to change: a
+// restore must not choose between two readings of the request.
+func restoreStorage(cfgs []proxmox.StorageConfig, server db.PbsServer, others []db.PbsServer, datastore, node string) (storage, matchedBy string, err error) {
 	var pbs, matches []string
+	matchedWith := map[string]string{}
+	var open []proxmox.StorageConfig
 	for _, cfg := range cfgs {
 		if cfg.Type != "pbs" {
 			continue
 		}
 		pbs = append(pbs, cfg.Storage)
-		if restoreStorageMatches(cfg, server, datastore, node) {
+		if !restoreCandidate(cfg, datastore, node) {
+			continue
+		}
+		switch storageTie(cfg, server) {
+		case tieFingerprint:
 			matches = append(matches, cfg.Storage)
+			matchedWith[cfg.Storage] = matchedByFingerprint
+		case tieAddress:
+			matches = append(matches, cfg.Storage)
+			matchedWith[cfg.Storage] = matchedByAddress
+		case tieNone:
+			open = append(open, cfg)
+		case tieContradicted:
 		}
 	}
 	sort.Strings(pbs)
 	sort.Strings(matches)
 
-	what := "PBS server " + quoted(server.Name)
-	if datastore != "" {
-		what = "datastore " + quoted(datastore) + " of " + what
-	}
+	what := "datastore " + quoted(datastore) + " of PBS server " + quoted(server.Name)
 	switch {
 	case len(pbs) == 0:
-		return "", fiber.NewError(fiber.StatusBadRequest, "No PBS storage configured on this PVE cluster. Add the PBS server as storage in PVE first (Datacenter > Storage > Add > Proxmox Backup Server).")
-	case len(matches) == 0:
-		return "", fiber.NewError(fiber.StatusBadRequest, "No enabled Proxmox storage on node "+node+" reads "+what+
-			" (its root namespace). The PBS storages on this cluster are "+strings.Join(pbs, ", ")+
-			". Add one in Proxmox (Datacenter > Storage > Add > Proxmox Backup Server), with the address or fingerprint Nexara knows the PBS server by.")
+		return "", "", fiber.NewError(fiber.StatusBadRequest, "No PBS storage configured on this PVE cluster. Add the PBS server as storage in PVE first (Datacenter > Storage > Add > Proxmox Backup Server).")
 	case len(matches) > 1:
-		fix := "remove the duplicate, or restrict one of them to other nodes"
-		if datastore == "" {
-			fix = "name the datastore in the request to choose between them"
-		}
-		return "", fiber.NewError(fiber.StatusConflict, "More than one Proxmox storage on this cluster reads "+what+": "+
-			strings.Join(matches, ", ")+". A restore cannot tell which to read through; "+fix+".")
+		return "", "", fiber.NewError(fiber.StatusConflict, "More than one Proxmox storage on this cluster reads "+what+": "+
+			strings.Join(matches, ", ")+". A restore cannot tell which to read through; remove the duplicate, or restrict one of them to other nodes.")
+	case len(matches) == 1:
+		return matches[0], matchedWith[matches[0]], nil
+	case len(open) == 1 && !claimedByAnother(open[0], server, others):
+		return open[0].Storage, matchedByOnlyCandidate, nil
 	}
-	return matches[0], nil
+	return "", "", fiber.NewError(fiber.StatusBadRequest, "No enabled Proxmox storage on node "+node+" reads "+what+
+		" (its root namespace) and can be tied to that server. The PBS storages on this cluster are "+strings.Join(pbs, ", ")+
+		". Add one in Proxmox (Datacenter > Storage > Add > Proxmox Backup Server), with the address, port or fingerprint Nexara knows the PBS server by.")
 }
 
 func quoted(s string) string { return `"` + s + `"` }
 
-func restoreStorageMatches(cfg proxmox.StorageConfig, server db.PbsServer, datastore, node string) bool {
-	if cfg.Disable != 0 || cfg.Namespace != "" {
+// restoreCandidate is whether a pbs storage could hold the snapshot at all.
+func restoreCandidate(cfg proxmox.StorageConfig, datastore, node string) bool {
+	if cfg.Disable != 0 || cfg.Namespace != "" || cfg.Datastore != datastore {
 		return false
 	}
-	if cfg.Nodes != "" && !slices.Contains(nodeList(cfg.Nodes), node) {
-		return false
-	}
-	if datastore != "" && cfg.Datastore != datastore {
-		return false
-	}
-	return storageIsServer(cfg, server)
+	return cfg.Nodes == "" || slices.Contains(nodeList(cfg.Nodes), node)
+}
+
+// claimedByAnother reports whether any Nexara PBS server other than server is
+// tied to the storage.
+func claimedByAnother(cfg proxmox.StorageConfig, server db.PbsServer, others []db.PbsServer) bool {
+	return slices.ContainsFunc(others, func(o db.PbsServer) bool {
+		if o.ID == server.ID {
+			return false
+		}
+		t := storageTie(cfg, o)
+		return t == tieFingerprint || t == tieAddress
+	})
 }
 
 // nodeList splits a storage's "nodes" the way Proxmox reads one (split_list:
@@ -85,22 +113,51 @@ func nodeList(nodes string) []string {
 	return strings.FieldsFunc(nodes, func(r rune) bool { return r == ',' || r == ';' || unicode.IsSpace(r) })
 }
 
-// storageIsServer reports whether a pbs storage points at a Nexara PBS server:
-// the same host, or the same certificate fingerprint when both carry one. The
-// fingerprint is the way round a server that Nexara and Proxmox reach by
-// different names. The port is not compared (Proxmox's config carries it, this
-// client's StorageConfig does not), so two PBS instances on one host cannot be
-// told apart by address. Proxmox keeps an IPv6 server bare in its config and
-// adds the brackets itself, while a URL has them.
-func storageIsServer(cfg proxmox.StorageConfig, server db.PbsServer) bool {
-	if fp := normalizeFingerprint(cfg.FingerprintPBS); fp != "" && fp == normalizeFingerprint(server.TlsFingerprint) {
-		return true
+// tie is what a pbs storage's own settings say about whether it is a Nexara PBS
+// server.
+type tie int
+
+const (
+	// tieNone: nothing says it is, nothing says it is not. The same server can
+	// be reached by an address in Nexara and a name in Proxmox.
+	tieNone tie = iota
+	tieFingerprint
+	tieAddress
+	// tieContradicted: it is not the server. Both sides carry a certificate
+	// fingerprint and they differ, or it is the same host on another port.
+	tieContradicted
+)
+
+// storageTie compares a pbs storage with a Nexara PBS server. Two fingerprints
+// decide on their own: equal is the same server, different is not, whatever the
+// addresses say. Otherwise the host (case-insensitive) and the port must both
+// agree; both default to 8007 when they name none. Proxmox keeps an IPv6 server
+// bare in its config and adds the brackets itself, while a URL has them.
+func storageTie(cfg proxmox.StorageConfig, server db.PbsServer) tie {
+	if fs, fp := normalizeFingerprint(cfg.FingerprintPBS), normalizeFingerprint(server.TlsFingerprint); fs != "" && fp != "" {
+		if fs == fp {
+			return tieFingerprint
+		}
+		return tieContradicted
 	}
 	u, err := url.Parse(server.ApiUrl)
-	if err != nil || u.Hostname() == "" {
-		return false
+	if err != nil || u.Hostname() == "" || !strings.EqualFold(cfg.Server, u.Hostname()) {
+		return tieNone
 	}
-	return strings.EqualFold(cfg.Server, u.Hostname())
+	port := defaultPBSPort
+	if p := u.Port(); p != "" {
+		if port, err = strconv.Atoi(p); err != nil {
+			return tieNone
+		}
+	}
+	storagePort := int(cfg.Port)
+	if storagePort == 0 {
+		storagePort = defaultPBSPort
+	}
+	if port != storagePort {
+		return tieContradicted
+	}
+	return tieAddress
 }
 
 func normalizeFingerprint(fp string) string {

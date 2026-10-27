@@ -26,7 +26,11 @@ const (
 		`{"storage":"store02","type":"pbs","server":"pbs01.example.com","datastore":"datastore01","nodes":"pve-02"},` +
 		`{"storage":"store04","type":"pbs","server":"pbs01.example.com","datastore":"datastore01","nodes":"pve-01"},` +
 		`{"storage":"store03","type":"pbs","server":"pbs01.example.com","datastore":"datastore02"}]`
+	// restoreOtherServerOnly is one pbs storage, which the second Nexara PBS server
+	// the test knows of owns; restoreAliasOnly is one nothing but its being the only
+	// candidate ties to the requested server.
 	restoreOtherServerOnly = `[{"storage":"store01","type":"pbs","server":"pbs02.example.com","datastore":"datastore01"}]`
+	restoreAliasOnly       = `[{"storage":"store05","type":"pbs","server":"pbs-alias.example.com","datastore":"datastore01"}]`
 )
 
 // A restore reads the snapshot through the Proxmox storage that points at the
@@ -49,15 +53,18 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 		status  int
 		calls   []string
 		from    string // the storage the archive is read through; empty when refused
+		by      string // how it was tied to the server
 	}{
 		{"the storage of the requested server and datastore, on the node asked for", restoreStorages, false, 200,
-			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04"},
-		{"no storage reads the server: nothing is dispatched", restoreOtherServerOnly, false, 400,
-			[]string{storageGet}, ""},
+			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address"},
+		{"another Nexara PBS server owns the only pbs storage: nothing is dispatched", restoreOtherServerOnly, false, 400,
+			[]string{storageGet}, "", ""},
+		{"the only candidate is used, and recorded as such", restoreAliasOnly, false, 200,
+			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store05", "only_candidate"},
 		{"over an existing guest: the storage is chosen on the guest's node, then the stop, then the restore", restoreStorages, true, 200,
-			[]string{storageGet, stopPost, stopPoll, restore}, "store02"},
+			[]string{storageGet, stopPost, stopPoll, restore}, "store02", "address"},
 		{"over an existing guest with no such storage: it is not stopped", restoreOtherServerOnly, true, 400,
-			[]string{storageGet}, ""},
+			[]string{storageGet}, "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -67,8 +74,11 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 			app, dbtx := newBackupJobApp(t, base, fiber.MethodPost, clusterScope+"/restore",
 				(*handlers.BackupHandler).RestoreBackup)
 			clusterID, nodeID := uuid.MustParse(testClusterID), uuid.MustParse("5c4b3a29-1817-4615-9413-000000000002")
+			pbs01 := db.PbsServer{ID: uuid.MustParse(testPBSServerID), Name: "pbs01", ApiUrl: "https://pbs01.example.com:8007"}
+			pbs02 := db.PbsServer{ID: uuid.MustParse("5c4b3a29-1817-4615-9413-000000000007"), Name: "pbs02", ApiUrl: "https://pbs02.example.com:8007"}
+			dbtx.lists = map[string][]any{"ListPBSServers": {pbs01, pbs02}}
 			dbtx.lookups = map[string]any{
-				"GetPBSServer": db.PbsServer{ID: uuid.MustParse(testPBSServerID), Name: "pbs01", ApiUrl: "https://pbs01.example.com:8007"},
+				"GetPBSServer": pbs01,
 				"GetCluster":   db.Cluster{ID: clusterID},
 				// The guest lives on pve-02; the request names pve-01.
 				"GetVMByClusterAndVmid": db.Vm{ID: uuid.MustParse("5c4b3a29-1817-4615-9413-000000000003"), ClusterID: clusterID, NodeID: nodeID, Vmid: 101, Name: "linux01", Type: "qemu"},
@@ -122,8 +132,9 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 			}
 
 			last := audits[len(audits)-1]
-			if last.action != "backup_restored" || last.details["from_storage"] != tt.from || last.details["archive"] != wantArchive {
-				t.Errorf("restore audit row = %s (%s), want backup_restored reading through %s as %s", last.raw, last.action, tt.from, wantArchive)
+			if last.action != "backup_restored" || last.details["from_storage"] != tt.from || last.details["archive"] != wantArchive ||
+				last.details["matched_by"] != tt.by {
+				t.Errorf("restore audit row = %s (%s), want backup_restored reading through %s (%s) as %s", last.raw, last.action, tt.from, tt.by, wantArchive)
 			}
 			if tt.force {
 				stop := audits[0]

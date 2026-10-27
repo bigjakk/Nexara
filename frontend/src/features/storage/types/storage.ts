@@ -172,6 +172,7 @@ export interface StorageConfigResponse {
   volume?: string;
   transport?: string;
   datastore?: string;
+  port?: number;
   fingerprint?: string;
   "encryption-key"?: string;
   preallocation?: string;

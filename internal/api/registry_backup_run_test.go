@@ -258,8 +258,10 @@ type backupRunDBTX struct {
 	tasks  [][]any
 	other  []string
 	// lookups answers a :one query by its sqlc name with the row struct to
-	// replay, for a handler that reads before it writes. Set before any request.
+	// replay, and lists a :many query with its rows, for a handler that reads
+	// before it writes. Set before any request.
 	lookups map[string]any
+	lists   map[string][]any
 }
 
 func (d *backupRunDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -276,6 +278,11 @@ func (d *backupRunDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn
 func (d *backupRunDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	for name, rows := range d.lists {
+		if strings.Contains(sql, "-- name: "+name+" :many") {
+			return &metricRows{rows: rows}, nil
+		}
+	}
 	d.other = append(d.other, sql)
 	return nil, errBackupRunUnexpectedQuery
 }

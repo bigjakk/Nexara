@@ -1599,12 +1599,16 @@ Rules are addressed by position, so every rule listing returns a `digest` on eac
 | POST | `/clusters/:id/backup-jobs/:job_id/run` | Run backup job |
 
 A restore reads the snapshot through the cluster's Proxmox storage for the
-requested PBS server and `datastore`: the enabled `pbs` storage, with no
-namespace and usable on the target node, that shares the server's address or
-certificate fingerprint. The answer is `400` when none fits and `409` when more
-than one does (name the `datastore`, or remove the duplicate). With `force`, the
-existing guest is stopped only once the storage is found, and the stop is
-recorded as a task of its own.
+requested PBS server and `datastore` (required): an enabled `pbs` storage, with
+no namespace, usable on the target node and naming that datastore. It is tied to
+the server by certificate fingerprint when both carry one (different
+fingerprints rule it out), otherwise by host and port, 8007 where none is set.
+With no tie at all, a single remaining candidate that no other Nexara PBS server
+is tied to is used, and the restore's audit entry records `matched_by` as
+`only_candidate` (`fingerprint` and `address` otherwise). The answer is `400`
+when no storage can be used and `409` when more than one is tied to the server
+(remove the duplicate). With `force`, the existing guest is stopped only once the
+storage is found, and the stop is recorded as a task of its own.
 
 A backup job carries exactly one guest selection, set on create and update:
 

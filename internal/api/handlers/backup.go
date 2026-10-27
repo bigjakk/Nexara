@@ -1721,9 +1721,17 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	pveStorageName, err := restoreStorage(cfgs, server, req.Datastore, req.TargetNode)
+	servers, err := h.queries.ListPBSServers(c.Context())
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list PBS servers")
+	}
+	pveStorageName, matchedBy, err := restoreStorage(cfgs, server, servers, req.Datastore, req.TargetNode)
 	if err != nil {
 		return err
+	}
+	if matchedBy == matchedByOnlyCandidate {
+		slog.Warn("restore: nothing but elimination ties the storage to the PBS server; used it as the only candidate",
+			"cluster_id", clusterID, "pbs_server_id", req.PBSServerID, "storage", pveStorageName, "datastore", req.Datastore)
 	}
 
 	// Build the archive path: <pve-storage>:backup/<type>/<id>/<ISO-timestamp>
@@ -1814,6 +1822,7 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 			"vmid":                req.VMID,
 			"storage":             req.Storage,
 			"from_storage":        pveStorageName,
+			"matched_by":          matchedBy,
 			"force":               req.Force,
 			"unique":              req.Unique,
 			"start_after_restore": req.StartAfterRestore,

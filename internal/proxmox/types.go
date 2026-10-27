@@ -699,10 +699,11 @@ type StorageConfig struct {
 	Transport string `json:"transport,omitempty"`
 
 	// pbs
-	Datastore      string `json:"datastore,omitempty"`
-	FingerprintPBS string `json:"fingerprint,omitempty"`
-	EncryptionKey  string `json:"encryption-key,omitempty"`
-	MasterPubkey   string `json:"master-pubkey,omitempty"`
+	Datastore      string  `json:"datastore,omitempty"`
+	Port           FlexInt `json:"port,omitempty"` // the PBS port; Proxmox connects to 8007 when it is absent
+	FingerprintPBS string  `json:"fingerprint,omitempty"`
+	EncryptionKey  string  `json:"encryption-key,omitempty"`
+	MasterPubkey   string  `json:"master-pubkey,omitempty"`
 
 	// common optional
 	Preallocation string `json:"preallocation,omitempty"`

@@ -513,7 +513,7 @@ func TestRestoreRequiresWhatTheHandlerDid(t *testing.T) {
 		}
 	}
 	sort.Strings(got)
-	want := []string{"backup_id", "backup_time", "backup_type", "cluster_id", "pbs_server_id", "target_node", "vmid"}
+	want := []string{"backup_id", "backup_time", "backup_type", "cluster_id", "datastore", "pbs_server_id", "target_node", "vmid"}
 	if !slices.Equal(got, want) {
 		t.Errorf("required parameters = %v, want %v", got, want)
 	}
