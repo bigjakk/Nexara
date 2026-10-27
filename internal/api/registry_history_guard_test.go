@@ -16,8 +16,7 @@ import (
 // cluster page's objects files its audit row under; the id each kind uses is
 // documented on AuditLog. An object's History reads its rows by that pair, so a
 // route missing here, a handler that audits as another kind and one that audits
-// as none all fail below. The firewall templates' create and update are legacy
-// routes in router.go and are not seen.
+// as none all fail below.
 var clusterObjectAudits = map[string][]string{
 	"HAHandler.CreateResource": {"ha_resource"},
 	"HAHandler.UpdateResource": {"ha_resource"},
@@ -87,6 +86,8 @@ var clusterObjectAudits = map[string][]string{
 	"NetworkHandler.CreateSecurityGroupRule":   {"firewall_security_group_rule"},
 	"NetworkHandler.UpdateSecurityGroupRule":   {"firewall_security_group_rule"},
 	"NetworkHandler.DeleteSecurityGroupRule":   {"firewall_security_group_rule"},
+	"NetworkHandler.CreateTemplate":            {"firewall_template"},
+	"NetworkHandler.UpdateTemplate":            {"firewall_template"},
 	"NetworkHandler.ApplyTemplate":             {"firewall_template"},
 	"NetworkHandler.DeleteTemplate":            {"firewall_template"},
 
@@ -142,6 +143,11 @@ var clusterObjectAudits = map[string][]string{
 	"ClusterOptionsHandler.UpdateDescription": {"cluster_options"},
 	"ClusterOptionsHandler.UpdateTags":        {"cluster_options"},
 }
+
+// clusterObjectLegacyHandlers are the cluster page's mutating routes still wired
+// by hand in router.go (legacy_route_ratchet_test.go): the registry walk cannot
+// see them, so the guard reads them by name.
+var clusterObjectLegacyHandlers = []string{"NetworkHandler.CreateTemplate", "NetworkHandler.UpdateTemplate"}
 
 // clusterObjectRoute matches the routes of the objects the table covers: the
 // cluster page's tabs (HA, Ceph, pools, mappings, access control, replication,
@@ -261,28 +267,18 @@ func stringLiteral(e ast.Expr) string {
 // the source.
 func TestGuard_ClusterObjectMutationsFileUnderTheirKind(t *testing.T) {
 	routed := map[string]bool{}
-	for _, e := range sharedRouteStub(t).registry.Endpoints() {
-		if e.Method == fiber.MethodGet || !clusterObjectRoute.MatchString(e.Path) {
-			continue
-		}
-		fd, _, decls, _, err := resolveHandlerDecl(e.Handler)
-		if err != nil {
-			t.Errorf("%s %s: %v", e.Method, e.Path, err)
-			continue
-		}
-		key := funcKey(fd)
+	check := func(route, key string, fd *ast.FuncDecl, decls map[string]*ast.FuncDecl) {
 		routed[key] = true
-
 		want, known := clusterObjectAudits[key]
 		if !known {
-			t.Errorf("%s %s (%s) is a mutation on one of the cluster page's objects with no entry in "+
+			t.Errorf("%s is a mutation on one of the cluster page's objects with no entry in "+
 				"clusterObjectAudits: add the resource_type its audit row files under, so its History can find it",
-				e.Method, e.Path, key)
-			continue
+				route)
+			return
 		}
 		calls := auditCallsIn(fd, decls, map[string]bool{})
 		if len(calls) == 0 {
-			t.Errorf("%s %s (%s) writes no audit row (AuditLog or TrackTask)", e.Method, e.Path, key)
+			t.Errorf("%s writes no audit row (AuditLog or TrackTask)", route)
 		}
 		filed := map[string]bool{}
 		for _, c := range calls {
@@ -302,6 +298,35 @@ func TestGuard_ClusterObjectMutationsFileUnderTheirKind(t *testing.T) {
 			if len(calls) > 0 && !filed[wantType] {
 				t.Errorf("%s is expected to file under %q and never does; update clusterObjectAudits", key, wantType)
 			}
+		}
+	}
+
+	for _, e := range sharedRouteStub(t).registry.Endpoints() {
+		if e.Method == fiber.MethodGet || !clusterObjectRoute.MatchString(e.Path) {
+			continue
+		}
+		fd, _, decls, _, err := resolveHandlerDecl(e.Handler)
+		if err != nil {
+			t.Errorf("%s %s: %v", e.Method, e.Path, err)
+			continue
+		}
+		check(e.Method+" "+e.Path+" ("+funcKey(fd)+")", funcKey(fd), fd, decls)
+	}
+
+	handlersDir, _ := relPackageDir(apiPackageImportPath + "/handlers")
+	handlerDecls, err := packageFuncDecls(handlersDir)
+	if err != nil {
+		t.Fatalf("parse the handlers: %v", err)
+	}
+	for _, key := range clusterObjectLegacyHandlers {
+		fd, ok := handlerDecls[key]
+		switch {
+		case routed[key]:
+			t.Errorf("%s is routed through the registry now: delete it from clusterObjectLegacyHandlers", key)
+		case !ok:
+			t.Errorf("clusterObjectLegacyHandlers names %s, which no handler declares", key)
+		default:
+			check("legacy route "+key, key, fd, handlerDecls)
 		}
 	}
 
