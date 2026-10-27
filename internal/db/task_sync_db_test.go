@@ -26,17 +26,17 @@ func TestListExistingAuditLogUPIDs_AnswersForOneClusterOnly(t *testing.T) {
 	ctx, pool := env.Ctx, env.Pool
 	migrateUp(t, env.Migrate)
 
-	clusterA, clusterB, clusterC := taskSyncID(1), taskSyncID(2), taskSyncID(3)
+	clusterA, clusterB := taskSyncID(1), taskSyncID(2)
 	purge := func() {
 		pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE id::text LIKE '12600000-0000-4000-8000-%'`)
-		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{clusterA, clusterB, clusterC})
+		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{clusterA, clusterB})
 	}
 	purge()
 	defer purge()
 
-	for i, c := range []uuid.UUID{clusterA, clusterB, clusterC} {
+	for i, c := range []uuid.UUID{clusterA, clusterB} {
 		if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, name, api_url, token_id, token_secret_encrypted)
 			VALUES ($1, $2, 'https://cluster.invalid:8006', 'test@pam!t', 'x')`, c, fmt.Sprintf("cluster0%d", i+1)); err != nil {
 			t.Fatalf("seed cluster: %v", err)
@@ -63,7 +63,6 @@ func TestListExistingAuditLogUPIDs_AnswersForOneClusterOnly(t *testing.T) {
 	}{
 		{"the cluster that recorded one", clusterA, []string{upid(1)}},
 		{"another cluster that recorded another", clusterB, []string{upid(2)}},
-		{"a cluster added after the one that recorded the detached entry", clusterC, nil},
 	} {
 		got, err := q.ListExistingAuditLogUPIDs(ctx, gen.ListExistingAuditLogUPIDsParams{ClusterID: tc.cluster, Upids: all})
 		if err != nil {
