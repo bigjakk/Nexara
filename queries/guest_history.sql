@@ -229,27 +229,34 @@ ON CONFLICT (upid) DO NOTHING;
 -- not (POST /api/v1/tasks refuses a UPID on record; this holds a row that
 -- predates that).
 --
--- Bounded: the handler only needs the newest birth and the newest destroy that
--- did not fail, and a guest restored nightly would otherwise drag in a year of
--- restores.
+-- For several guests at once — a folder's — each guest's events together,
+-- newest first, each guest's read on its own as one guest's would be. Bounded
+-- per guest: the handler only needs the newest birth and the newest destroy
+-- that did not fail, and a guest restored nightly would otherwise drag in a
+-- year of restores.
 -- name: ListGuestLifecycleEvents :many
-SELECT a.created_at,
-       COALESCE(split_part(a.details->>'upid', ':', 6) IN ('qmdestroy', 'vzdestroy'), false)::bool AS is_destroy,
-       COALESCE(ar.status, th.status, '')::text                                   AS task_status,
-       COALESCE(ar.exit_status, th.exit_status, '')::text                         AS task_exit_status,
-       COALESCE(a.details->>'status', '')::text                                   AS recorded_status
-FROM audit_log a
-LEFT JOIN task_history th
-       ON th.upid = a.details->>'upid' AND th.cluster_id = a.cluster_id
-LEFT JOIN task_history_archive ar
-       ON ar.upid = a.details->>'upid' AND ar.cluster_id = a.cluster_id
-WHERE a.cluster_id = sqlc.arg('cluster_id')
-  AND (
-        (a.vmid = sqlc.arg('vmid')::int
-         AND split_part(a.details->>'upid', ':', 6) IN ('qmcreate', 'vzcreate', 'qmrestore',
-                                                        'vzrestore', 'qmdestroy', 'vzdestroy'))
-     OR (a.action IN ('clone', 'clone-to-template')
-         AND a.details->>'new_id' = sqlc.arg('vmid')::int::text)
-  )
-ORDER BY a.created_at DESC, a.id
-LIMIT 50;
+SELECT v.vmid::int AS vmid, e.created_at, e.is_destroy, e.task_status, e.task_exit_status, e.recorded_status
+FROM unnest(sqlc.arg('vmids')::int[]) AS v(vmid)
+CROSS JOIN LATERAL (
+    SELECT a.id, a.created_at,
+           COALESCE(split_part(a.details->>'upid', ':', 6) IN ('qmdestroy', 'vzdestroy'), false)::bool AS is_destroy,
+           COALESCE(ar.status, th.status, '')::text                                   AS task_status,
+           COALESCE(ar.exit_status, th.exit_status, '')::text                         AS task_exit_status,
+           COALESCE(a.details->>'status', '')::text                                   AS recorded_status
+    FROM audit_log a
+    LEFT JOIN task_history th
+           ON th.upid = a.details->>'upid' AND th.cluster_id = a.cluster_id
+    LEFT JOIN task_history_archive ar
+           ON ar.upid = a.details->>'upid' AND ar.cluster_id = a.cluster_id
+    WHERE a.cluster_id = sqlc.arg('cluster_id')
+      AND (
+            (a.vmid = v.vmid
+             AND split_part(a.details->>'upid', ':', 6) IN ('qmcreate', 'vzcreate', 'qmrestore',
+                                                            'vzrestore', 'qmdestroy', 'vzdestroy'))
+         OR (a.action IN ('clone', 'clone-to-template')
+             AND a.details->>'new_id' = v.vmid::text)
+      )
+    ORDER BY a.created_at DESC, a.id
+    LIMIT 50
+) e
+ORDER BY v.vmid, e.created_at DESC, e.id;

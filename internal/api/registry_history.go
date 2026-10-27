@@ -44,6 +44,7 @@ type historyRoute struct {
 func historyRoutes() []historyRoute {
 	return []historyRoute{
 		guestHistoryRoute(),
+		folderHistoryRoute(),
 	}
 }
 
@@ -56,9 +57,10 @@ func registerHistoryEndpoints(reg *Registry, h *handlers.HistoryHandler) {
 
 // historyEndpoint builds one kind's route, refusing at startup a kind whose
 // type filter could not work (HistoryKind.Validate), a route that is not a
-// cluster's — or, for a global kind, one that is — and a gate left undecided:
-// exactly one of Resource and AuditOnly, and Resource for a global kind. A
-// global kind's gate is all GLOBAL, since it reads every cluster's rows.
+// cluster's — or, for a global kind, one that is — a guest-from-path kind
+// whose path does not name its guest, and a gate left undecided: exactly one
+// of Resource and AuditOnly, and Resource for a global kind. A global kind's
+// gate is all GLOBAL, since it reads every cluster's rows.
 func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 	if err := r.Kind.Validate(); err != nil {
 		panic(fmt.Sprintf("history route %s: %v", r.Path, err))
@@ -70,6 +72,11 @@ func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 	if inCluster == r.Kind.Global || !strings.HasPrefix(r.Path, pathPrefix) || !strings.HasSuffix(r.Path, "/history") {
 		panic(fmt.Sprintf("history route %s: a History route is %s/…/history, and a global kind's is "+
 			"%s…/history outside it", r.Path, clusterScope, pathPrefix))
+	}
+	if g := r.Kind.GuestFromPath; g != "" &&
+		(r.Parameters[g].Type != apischema.Integer || !strings.Contains(r.Path+"/", "/:"+g+"/")) {
+		panic(fmt.Sprintf("history route %s: the guest's path parameter %q is not one of its integer path "+
+			"parameters", r.Path, g))
 	}
 	resource, auditOnly := strings.TrimSpace(r.Resource), strings.TrimSpace(r.AuditOnly)
 	if (resource == "") == (auditOnly == "") || r.Kind.Global && auditOnly != "" {

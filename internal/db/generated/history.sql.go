@@ -185,11 +185,16 @@ WITH guests AS MATERIALIZED (
     FROM audit s
     WHERE NOT (s.source = 'proxmox' AND s.upid IS NOT NULL AND EXISTS (
             SELECT 1 FROM audit b WHERE b.source <> 'proxmox' AND b.upid = s.upid))
+      AND (s.vmid IS NULL OR s.subject IS NOT NULL OR s.vmid = ANY($1::int[])
+           OR $18::text[] @> '{qemu,lxc}'
+           OR EXISTS (SELECT 1 FROM vms v
+                      WHERE v.cluster_id = s.cluster_id AND v.vmid = s.vmid
+                        AND v.type = ANY($18::text[])))
     UNION ALL
     SELECT ('task:' || t.upid)::text, 'task', NULL::uuid, t.cluster_id, t.started_at, t.source, t.task_type,
            'task', '', t.vmid, t.vmid, t.user_id, t.upid, t.node, '', '', '', NULL
     FROM task_history t
-    WHERE $18::bool
+    WHERE $19::bool
       AND t.cluster_id = $12::uuid
       AND t.vmid IS NOT NULL
       AND t.vmid = ANY($1::int[])
@@ -203,7 +208,7 @@ WITH guests AS MATERIALIZED (
     SELECT ('task:' || r.upid)::text, 'task', NULL::uuid, r.cluster_id, r.started_at, r.source, r.task_type,
            'task', '', r.vmid, r.vmid, r.user_id, r.upid, r.node, '', '', '', NULL
     FROM task_history_archive r
-    WHERE $18::bool
+    WHERE $19::bool
       AND r.cluster_id = $12::uuid
       AND r.vmid = ANY($1::int[])
       AND history_worker_ok(r.upid, $13::text[])
@@ -218,7 +223,7 @@ WITH guests AS MATERIALIZED (
     WHERE s.cluster_id = $12::uuid
       AND s.vmid = ANY($1::int[])
       AND s.explained = false
-      AND s.guest_type = ANY($19::text[])
+      AND s.guest_type = ANY($18::text[])
       AND history_worker_ok(NULL, $13::text[])
       AND ($14::timestamptz IS NULL OR s.observed_at >= $14::timestamptz)
       AND ($15::timestamptz IS NULL OR s.observed_at >= $15::timestamptz)
@@ -226,7 +231,7 @@ WITH guests AS MATERIALIZED (
     SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.cluster_id, b.started_at, b.source, 'vzdump',
            'backup', '', b.vmid, b.vmid, b.user_id, b.upid, b.node, '', '', '', NULL
     FROM guest_backups b
-    WHERE $18::bool
+    WHERE $19::bool
       AND b.cluster_id = $12::uuid
       AND b.vmid = ANY($1::int[])
       AND history_worker_ok(b.upid, $13::text[])
@@ -316,8 +321,8 @@ type ListHistoryParams struct {
 	Since               pgtype.Timestamptz `json:"since"`
 	ObjectsIgnoreCutoff bool               `json:"objects_ignore_cutoff"`
 	Global              bool               `json:"global"`
-	IncludeTasks        bool               `json:"include_tasks"`
 	StatusGuestTypes    []string           `json:"status_guest_types"`
+	IncludeTasks        bool               `json:"include_tasks"`
 	DefaultCategory     string             `json:"default_category"`
 	Category            pgtype.Text        `json:"category"`
 	ExcludeCategories   []string           `json:"exclude_categories"`
@@ -431,6 +436,13 @@ type ListHistoryRow struct {
 //	         says who asked. A twin outside the selection drops nothing — a
 //	         node's History keeps a guest task it selects by details.node even
 //	         when the Nexara row of it, filed under the guest, is not its own.
+//	         A row that names a guest outside the guests, filed under none of
+//	         them — one filed into a folder, a task run on a node — is the
+//	         caller's only under that guest's own view permission, as the
+//	         guests are (viewableGuests): its type in status_guest_types, or
+//	         both types for a guest the inventory no longer holds. A row filed
+//	         under one of the guests is that guest's, as the clone into it,
+//	         which names its source, is.
 //	task     a guest task with NO audit row, from task_history or its archive
 //	         — only when include_tasks, which the handler sets from view:task.
 //	         Every task path writes an audit row too, so this is the rare row
@@ -536,8 +548,8 @@ func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]Lis
 		arg.Since,
 		arg.ObjectsIgnoreCutoff,
 		arg.Global,
-		arg.IncludeTasks,
 		arg.StatusGuestTypes,
+		arg.IncludeTasks,
 		arg.DefaultCategory,
 		arg.Category,
 		arg.ExcludeCategories,

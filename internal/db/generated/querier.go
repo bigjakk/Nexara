@@ -1682,9 +1682,11 @@ type Querier interface {
 	// not (POST /api/v1/tasks refuses a UPID on record; this holds a row that
 	// predates that).
 	//
-	// Bounded: the handler only needs the newest birth and the newest destroy that
-	// did not fail, and a guest restored nightly would otherwise drag in a year of
-	// restores.
+	// For several guests at once — a folder's — each guest's events together,
+	// newest first, each guest's read on its own as one guest's would be. Bounded
+	// per guest: the handler only needs the newest birth and the newest destroy
+	// that did not fail, and a guest restored nightly would otherwise drag in a
+	// year of restores.
 	ListGuestLifecycleEvents(ctx context.Context, arg ListGuestLifecycleEventsParams) ([]ListGuestLifecycleEventsRow, error)
 	ListGuestSmbiosByCluster(ctx context.Context, clusterID uuid.UUID) ([]GuestSmbios, error)
 	ListGuestSnapshotsByCluster(ctx context.Context, clusterID uuid.UUID) ([]GuestSnapshot, error)
@@ -1784,6 +1786,13 @@ type Querier interface {
 	//            says who asked. A twin outside the selection drops nothing — a
 	//            node's History keeps a guest task it selects by details.node even
 	//            when the Nexara row of it, filed under the guest, is not its own.
+	//            A row that names a guest outside the guests, filed under none of
+	//            them — one filed into a folder, a task run on a node — is the
+	//            caller's only under that guest's own view permission, as the
+	//            guests are (viewableGuests): its type in status_guest_types, or
+	//            both types for a guest the inventory no longer holds. A row filed
+	//            under one of the guests is that guest's, as the clone into it,
+	//            which names its source, is.
 	//   task     a guest task with NO audit row, from task_history or its archive
 	//            — only when include_tasks, which the handler sets from view:task.
 	//            Every task path writes an audit row too, so this is the rare row
@@ -2119,6 +2128,9 @@ type Querier interface {
 	// ListTopAlertRulesInWindow lists the rules that fired most in the period,
 	// for the digest's "noisiest rules" table.
 	ListTopAlertRulesInWindow(ctx context.Context, arg ListTopAlertRulesInWindowParams) ([]ListTopAlertRulesInWindowRow, error)
+	// ListUnfiledGuests is the guests of the cluster filed in no folder — the
+	// sidebar tree's Discovered — for its History.
+	ListUnfiledGuests(ctx context.Context, clusterID uuid.UUID) ([]int32, error)
 	// The collector's reading of backup JOB logs (internal/collector/
 	// backup_job_log.go): the finished jobs still to read, the ones it can no
 	// longer read, and the write of one job's result.
@@ -2150,6 +2162,10 @@ type Querier interface {
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ListUsersWithRoles(ctx context.Context) ([]ListUsersWithRolesRow, error)
+	// ListVMFolderMembers is every membership of the cluster, by VMID, for a
+	// folder's History: unlike ListVMFolderMembershipsByCluster it keeps a member
+	// the inventory no longer lists, whose history is still the folder's.
+	ListVMFolderMembers(ctx context.Context, clusterID uuid.UUID) ([]ListVMFolderMembersRow, error)
 	// Membership is keyed on the stable Proxmox identity (cluster_id, vmid); join
 	// back to vms to return each VM's current internal id so the API contract (and
 	// the frontend, which maps by vm.id) is unchanged. Memberships whose VMID isn't

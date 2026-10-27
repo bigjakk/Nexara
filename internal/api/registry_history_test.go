@@ -16,7 +16,14 @@ import (
 	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
-const historyRouteCount = 1
+const historyRouteCount = 2
+
+// historyRoutesOutsideTheClusterCheckShape are the History routes gated on
+// AllOf view:audit and the kind's own view permission (historyRoute.Resource).
+var historyRoutesOutsideTheClusterCheckShape = map[string]string{
+	"GET /api/v1/clusters/:cluster_id/vm-folders/:folder_id/history": "AllOf: view:audit for the rows, " +
+		"view:vm_folder for the folder that selects them",
+}
 
 // The guest is the one kind gated on view:audit alone, and the one whose
 // guest is not filtered on view:vm/view:container (GuestFromPath); any other
@@ -30,7 +37,7 @@ func TestHistoryAuditOnlyIsTheGuestAlone(t *testing.T) {
 		if r.AuditOnly != "" {
 			auditOnly = append(auditOnly, r.Kind.Name)
 		}
-		if r.Kind.GuestFromPath {
+		if r.Kind.GuestFromPath != "" {
 			fromPath = append(fromPath, r.Kind.Name)
 		}
 		if r.Kind.ObjectsIgnoreGuestCutoff {
@@ -91,17 +98,19 @@ func TestHistoryGateScope(t *testing.T) {
 // A route's gate is decided at registration: neither or both of Resource and
 // AuditOnly is refused, so no kind can fall back to view:audit alone; so is a
 // global kind on view:audit alone, or at a cluster's path, where its gate
-// would be one cluster's.
+// would be one cluster's; and a guest-from-path route that does not declare
+// its guest, whose every request would fail on reading it.
 func TestHistoryEndpointRefusesAnUndecidedGate(t *testing.T) {
 	t.Parallel()
 	global := handlers.HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true,
 		Select: handlers.SelectObjects("vmid", handlers.HistoryObject{ResourceType: "pbs_server"})}
 	for name, r := range map[string]historyRoute{
-		"neither":                {Kind: handlers.GuestHistory()},
-		"both":                   {Kind: handlers.GuestHistory(), Resource: "node", AuditOnly: "because"},
-		"global on audit alone":  {Kind: global, Path: pathPrefix + "probes/:vmid/history", AuditOnly: "because"},
-		"global at a cluster's":  {Kind: global, Resource: "pbs"},
-		"a cluster's kind above": {Kind: handlers.GuestHistory(), Path: pathPrefix + "probes/:vmid/history", Resource: "vm"},
+		"neither":                 {Kind: handlers.GuestHistory()},
+		"both":                    {Kind: handlers.GuestHistory(), Resource: "node", AuditOnly: "because"},
+		"global on audit alone":   {Kind: global, Path: pathPrefix + "probes/:vmid/history", AuditOnly: "because"},
+		"global at a cluster's":   {Kind: global, Resource: "pbs"},
+		"a cluster's kind above":  {Kind: handlers.GuestHistory(), Path: pathPrefix + "probes/:vmid/history", Resource: "vm"},
+		"a path guest undeclared": {Kind: handlers.GuestHistory(), AuditOnly: "because"},
 	} {
 		if r.Path == "" {
 			r.Path = clusterScope + "/probe/:vmid/history"

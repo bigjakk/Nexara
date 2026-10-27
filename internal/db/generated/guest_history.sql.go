@@ -194,34 +194,40 @@ func (q *Queries) ClassifyGuestStatusChanges(ctx context.Context, arg ClassifyGu
 }
 
 const listGuestLifecycleEvents = `-- name: ListGuestLifecycleEvents :many
-SELECT a.created_at,
-       COALESCE(split_part(a.details->>'upid', ':', 6) IN ('qmdestroy', 'vzdestroy'), false)::bool AS is_destroy,
-       COALESCE(ar.status, th.status, '')::text                                   AS task_status,
-       COALESCE(ar.exit_status, th.exit_status, '')::text                         AS task_exit_status,
-       COALESCE(a.details->>'status', '')::text                                   AS recorded_status
-FROM audit_log a
-LEFT JOIN task_history th
-       ON th.upid = a.details->>'upid' AND th.cluster_id = a.cluster_id
-LEFT JOIN task_history_archive ar
-       ON ar.upid = a.details->>'upid' AND ar.cluster_id = a.cluster_id
-WHERE a.cluster_id = $1
-  AND (
-        (a.vmid = $2::int
-         AND split_part(a.details->>'upid', ':', 6) IN ('qmcreate', 'vzcreate', 'qmrestore',
-                                                        'vzrestore', 'qmdestroy', 'vzdestroy'))
-     OR (a.action IN ('clone', 'clone-to-template')
-         AND a.details->>'new_id' = $2::int::text)
-  )
-ORDER BY a.created_at DESC, a.id
-LIMIT 50
+SELECT v.vmid::int AS vmid, e.created_at, e.is_destroy, e.task_status, e.task_exit_status, e.recorded_status
+FROM unnest($1::int[]) AS v(vmid)
+CROSS JOIN LATERAL (
+    SELECT a.id, a.created_at,
+           COALESCE(split_part(a.details->>'upid', ':', 6) IN ('qmdestroy', 'vzdestroy'), false)::bool AS is_destroy,
+           COALESCE(ar.status, th.status, '')::text                                   AS task_status,
+           COALESCE(ar.exit_status, th.exit_status, '')::text                         AS task_exit_status,
+           COALESCE(a.details->>'status', '')::text                                   AS recorded_status
+    FROM audit_log a
+    LEFT JOIN task_history th
+           ON th.upid = a.details->>'upid' AND th.cluster_id = a.cluster_id
+    LEFT JOIN task_history_archive ar
+           ON ar.upid = a.details->>'upid' AND ar.cluster_id = a.cluster_id
+    WHERE a.cluster_id = $2
+      AND (
+            (a.vmid = v.vmid
+             AND split_part(a.details->>'upid', ':', 6) IN ('qmcreate', 'vzcreate', 'qmrestore',
+                                                            'vzrestore', 'qmdestroy', 'vzdestroy'))
+         OR (a.action IN ('clone', 'clone-to-template')
+             AND a.details->>'new_id' = v.vmid::text)
+      )
+    ORDER BY a.created_at DESC, a.id
+    LIMIT 50
+) e
+ORDER BY v.vmid, e.created_at DESC, e.id
 `
 
 type ListGuestLifecycleEventsParams struct {
+	Vmids     []int32     `json:"vmids"`
 	ClusterID pgtype.UUID `json:"cluster_id"`
-	Vmid      int32       `json:"vmid"`
 }
 
 type ListGuestLifecycleEventsRow struct {
+	Vmid           int32     `json:"vmid"`
 	CreatedAt      time.Time `json:"created_at"`
 	IsDestroy      bool      `json:"is_destroy"`
 	TaskStatus     string    `json:"task_status"`
@@ -252,11 +258,13 @@ type ListGuestLifecycleEventsRow struct {
 // not (POST /api/v1/tasks refuses a UPID on record; this holds a row that
 // predates that).
 //
-// Bounded: the handler only needs the newest birth and the newest destroy that
-// did not fail, and a guest restored nightly would otherwise drag in a year of
-// restores.
+// For several guests at once — a folder's — each guest's events together,
+// newest first, each guest's read on its own as one guest's would be. Bounded
+// per guest: the handler only needs the newest birth and the newest destroy
+// that did not fail, and a guest restored nightly would otherwise drag in a
+// year of restores.
 func (q *Queries) ListGuestLifecycleEvents(ctx context.Context, arg ListGuestLifecycleEventsParams) ([]ListGuestLifecycleEventsRow, error) {
-	rows, err := q.db.Query(ctx, listGuestLifecycleEvents, arg.ClusterID, arg.Vmid)
+	rows, err := q.db.Query(ctx, listGuestLifecycleEvents, arg.Vmids, arg.ClusterID)
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +273,7 @@ func (q *Queries) ListGuestLifecycleEvents(ctx context.Context, arg ListGuestLif
 	for rows.Next() {
 		var i ListGuestLifecycleEventsRow
 		if err := rows.Scan(
+			&i.Vmid,
 			&i.CreatedAt,
 			&i.IsDestroy,
 			&i.TaskStatus,

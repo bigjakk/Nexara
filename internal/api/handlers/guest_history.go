@@ -25,7 +25,7 @@ func GuestHistory() HistoryKind {
 		Select:     selectGuest,
 		// The path names the guest; a status change, the inventory's part, is
 		// filtered on its type instead (historyScope).
-		GuestFromPath: true,
+		GuestFromPath: "vmid",
 	}
 }
 
@@ -74,7 +74,7 @@ func selectGuest(ctx context.Context, r HistoryRequest) (HistorySelection, error
 	vmid := safeconv.Int32(int(r.Params.Int("vmid")))
 	events, err := r.Queries.ListGuestLifecycleEvents(ctx, db.ListGuestLifecycleEventsParams{
 		ClusterID: ClusterUUID(r.ClusterID),
-		Vmid:      vmid,
+		Vmids:     []int32{vmid},
 	})
 	if err != nil {
 		return HistorySelection{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to read the guest's history")

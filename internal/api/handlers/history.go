@@ -72,12 +72,14 @@ type HistoryKind struct {
 	// only those of them its caller may view so — a pool's under view:pool
 	// whatever the kind's — and no type undeclared.
 	ObservedTypes []HistoryObservedType
-	// GuestFromPath says the selection's one guest is the one the path's
-	// "vmid" names — List refuses any other selection — and the caller asked
-	// for it by VMID, so listing it discloses nothing. Every
-	// other kind's guests — a folder's members, a node's guests — are kept
-	// only where the caller may open them (viewableGuests).
-	GuestFromPath bool
+	// GuestFromPath names the integer path parameter whose VMID is the
+	// selection's one guest — List refuses any other selection — and the
+	// caller asked for it by that VMID, so listing it discloses nothing. A
+	// name rather than a flag: List reads it whatever the route, and the
+	// registry checks the route declares it. Every other kind's guests — a
+	// folder's members, a node's guests — are kept only where the caller may
+	// open them (viewableGuests).
+	GuestFromPath string
 	// Global reads the kind's objects in every cluster and in none, for an
 	// object that belongs to no one cluster: its route sits outside
 	// /clusters/:cluster_id and is gated on view:audit and its own view
@@ -289,7 +291,7 @@ func (k HistoryKind) Validate() error {
 	if k.Select == nil {
 		return fmt.Errorf("history kind %q has no Select", k.Name)
 	}
-	if k.Global && k.GuestFromPath {
+	if k.Global && k.GuestFromPath != "" {
 		return fmt.Errorf("history kind %q is global, and a global kind has no guests", k.Name)
 	}
 	for _, t := range k.ObjectTypes {
@@ -698,11 +700,12 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	}
 	// GuestFromPath exempts the path's guest, and that guest alone, from the
 	// filter below.
-	if r.kind.GuestFromPath && (len(sel.Guests) != 1 || int64(sel.Guests[0].VMID) != p.Int("vmid") || len(sel.Objects) > 0) {
+	if r.kind.GuestFromPath != "" && (len(sel.Guests) != 1 ||
+		int64(sel.Guests[0].VMID) != p.Int(r.kind.GuestFromPath) || len(sel.Objects) > 0) {
 		slog.Error("history selection refused: a guest-from-path kind selected more than the path's guest", "kind", r.kind.Name)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read the history")
 	}
-	if !r.kind.GuestFromPath && len(sel.Guests) > 0 {
+	if r.kind.GuestFromPath == "" && len(sel.Guests) > 0 {
 		vmids := make([]int32, 0, len(sel.Guests))
 		for _, g := range sel.Guests {
 			vmids = append(vmids, g.VMID)

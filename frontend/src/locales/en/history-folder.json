@@ -1,0 +1,37 @@
+{
+  "categories": {
+    "power": "Power",
+    "migration": "Migration",
+    "snapshot": "Snapshot",
+    "backup": "Backup",
+    "clone": "Clone",
+    "lifecycle": "Create / destroy",
+    "config": "Configuration",
+    "ha": "HA",
+    "console": "Console",
+    "folder": "Folders",
+    "other": "Other"
+  },
+  "categoryNotes": {
+    "backup": "A backup job that covers several guests is listed here once it has finished and Nexara has read its log.",
+    "folder": "Folders made, renamed, moved and deleted, and the guests filed into and out of them. A guest or subfolder that left is listed for moves made from this release on."
+  },
+  "empty": "Nothing has been recorded for this folder or its guests yet.",
+  "events": {
+    "folderCreated": "Folder created",
+    "folderRenamed": "Folder renamed",
+    "folderMoved": "Folder moved",
+    "folderDeleted": "Folder deleted",
+    "filed": "Filed in a folder",
+    "moved": "Moved to another folder",
+    "unfiled": "Removed from its folder"
+  },
+  "summaries": {
+    "path": "{{from}} → {{to}}",
+    "into": "→ {{to}}",
+    "named": "{{name}}: {{from}} → {{to}}",
+    "topLevel": "Top level",
+    "discovered": "Discovered",
+    "deletedFolder": "a deleted folder"
+  }
+}

@@ -68,6 +68,13 @@
 --            says who asked. A twin outside the selection drops nothing — a
 --            node's History keeps a guest task it selects by details.node even
 --            when the Nexara row of it, filed under the guest, is not its own.
+--            A row that names a guest outside the guests, filed under none of
+--            them — one filed into a folder, a task run on a node — is the
+--            caller's only under that guest's own view permission, as the
+--            guests are (viewableGuests): its type in status_guest_types, or
+--            both types for a guest the inventory no longer holds. A row filed
+--            under one of the guests is that guest's, as the clone into it,
+--            which names its source, is.
 --   task     a guest task with NO audit row, from task_history or its archive
 --            — only when include_tasks, which the handler sets from view:task.
 --            Every task path writes an audit row too, so this is the rare row
@@ -283,6 +290,11 @@ WITH guests AS MATERIALIZED (
     FROM audit s
     WHERE NOT (s.source = 'proxmox' AND s.upid IS NOT NULL AND EXISTS (
             SELECT 1 FROM audit b WHERE b.source <> 'proxmox' AND b.upid = s.upid))
+      AND (s.vmid IS NULL OR s.subject IS NOT NULL OR s.vmid = ANY(sqlc.arg('vmids')::int[])
+           OR sqlc.arg('status_guest_types')::text[] @> '{qemu,lxc}'
+           OR EXISTS (SELECT 1 FROM vms v
+                      WHERE v.cluster_id = s.cluster_id AND v.vmid = s.vmid
+                        AND v.type = ANY(sqlc.arg('status_guest_types')::text[])))
     UNION ALL
     SELECT ('task:' || t.upid)::text, 'task', NULL::uuid, t.cluster_id, t.started_at, t.source, t.task_type,
            'task', '', t.vmid, t.vmid, t.user_id, t.upid, t.node, '', '', '', NULL

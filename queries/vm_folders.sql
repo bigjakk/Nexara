@@ -57,3 +57,19 @@ RETURNING COALESCE((SELECT p.folder_id::text FROM vm_folder_memberships p
 -- name: UnassignVMFromFolder :one
 DELETE FROM vm_folder_memberships WHERE cluster_id = $1 AND vmid = $2
 RETURNING folder_id;
+
+-- ListVMFolderMembers is every membership of the cluster, by VMID, for a
+-- folder's History: unlike ListVMFolderMembershipsByCluster it keeps a member
+-- the inventory no longer lists, whose history is still the folder's.
+-- name: ListVMFolderMembers :many
+SELECT vmid, folder_id FROM vm_folder_memberships
+WHERE cluster_id = $1;
+
+-- ListUnfiledGuests is the guests of the cluster filed in no folder — the
+-- sidebar tree's Discovered — for its History.
+-- name: ListUnfiledGuests :many
+SELECT v.vmid FROM vms v
+WHERE v.cluster_id = $1
+  AND NOT EXISTS (
+      SELECT 1 FROM vm_folder_memberships m
+      WHERE m.cluster_id = v.cluster_id AND m.vmid = v.vmid);

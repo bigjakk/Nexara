@@ -95,6 +95,69 @@ func (q *Queries) GetVMFolder(ctx context.Context, id uuid.UUID) (VmFolder, erro
 	return i, err
 }
 
+const listUnfiledGuests = `-- name: ListUnfiledGuests :many
+SELECT v.vmid FROM vms v
+WHERE v.cluster_id = $1
+  AND NOT EXISTS (
+      SELECT 1 FROM vm_folder_memberships m
+      WHERE m.cluster_id = v.cluster_id AND m.vmid = v.vmid)
+`
+
+// ListUnfiledGuests is the guests of the cluster filed in no folder — the
+// sidebar tree's Discovered — for its History.
+func (q *Queries) ListUnfiledGuests(ctx context.Context, clusterID uuid.UUID) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listUnfiledGuests, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int32{}
+	for rows.Next() {
+		var vmid int32
+		if err := rows.Scan(&vmid); err != nil {
+			return nil, err
+		}
+		items = append(items, vmid)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVMFolderMembers = `-- name: ListVMFolderMembers :many
+SELECT vmid, folder_id FROM vm_folder_memberships
+WHERE cluster_id = $1
+`
+
+type ListVMFolderMembersRow struct {
+	Vmid     int32     `json:"vmid"`
+	FolderID uuid.UUID `json:"folder_id"`
+}
+
+// ListVMFolderMembers is every membership of the cluster, by VMID, for a
+// folder's History: unlike ListVMFolderMembershipsByCluster it keeps a member
+// the inventory no longer lists, whose history is still the folder's.
+func (q *Queries) ListVMFolderMembers(ctx context.Context, clusterID uuid.UUID) ([]ListVMFolderMembersRow, error) {
+	rows, err := q.db.Query(ctx, listVMFolderMembers, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVMFolderMembersRow{}
+	for rows.Next() {
+		var i ListVMFolderMembersRow
+		if err := rows.Scan(&i.Vmid, &i.FolderID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVMFolderMembershipsByCluster = `-- name: ListVMFolderMembershipsByCluster :many
 SELECT v.id AS vm_id, m.folder_id, m.updated_at
 FROM vm_folder_memberships m

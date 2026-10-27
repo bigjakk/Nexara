@@ -3,15 +3,18 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/api/handlers"
 	gen "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -452,7 +455,7 @@ func TestGuestHistory(t *testing.T) {
 		}
 	}
 	events, err := q.ListGuestLifecycleEvents(ctx, gen.ListGuestLifecycleEventsParams{
-		ClusterID: pgtype.UUID{Bytes: historyClusterID, Valid: true}, Vmid: 100,
+		ClusterID: pgtype.UUID{Bytes: historyClusterID, Valid: true}, Vmids: []int32{100},
 	})
 	if err != nil {
 		t.Fatalf("lifecycle: %v", err)
@@ -474,7 +477,7 @@ func TestGuestHistory(t *testing.T) {
 	exec("planted verdict", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, vmid, source)
 		VALUES ($1, $2, $3, 'failed', 'pve-01', 'qmcreate', 150, 'nexara')`, historyClusterID, historyUserID, archivedCreate)
 	if created, err := q.ListGuestLifecycleEvents(ctx, gen.ListGuestLifecycleEventsParams{
-		ClusterID: pgtype.UUID{Bytes: historyClusterID, Valid: true}, Vmid: 150,
+		ClusterID: pgtype.UUID{Bytes: historyClusterID, Valid: true}, Vmids: []int32{150},
 	}); err != nil || len(created) != 1 || created[0].TaskStatus != "completed" {
 		t.Errorf("an archived create under a planted verdict: %+v (%v), want the archive's completed", created, err)
 	}
@@ -646,7 +649,7 @@ func TestGuestHistory(t *testing.T) {
 	audit(historyOtherID, minsAgo(2), "nexara", "node", "pve-01", "reboot", map[string]any{})
 	// Both rules match the apt update: the first one decides.
 	node := handlers.HistoryKind{Name: "node", Categories: []string{"updates", "tasks", "other"}, Default: "other",
-		ObjectTypes: []string{"node", "network", "vm"},
+		ObjectTypes: []string{"node", "network", "vm", "container"},
 		Rules: []handlers.HistoryRule{
 			{Category: "updates", Field: handlers.HistoryFieldAction, Equals: []string{"apt_update"}},
 			{Category: "tasks", Field: handlers.HistoryFieldWorker, Like: []string{"apt%"}},
@@ -672,9 +675,45 @@ func TestGuestHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	twinParams.RowLimit = 50
+	twinParams.RowLimit, twinParams.StatusGuestTypes = 50, []string{"qemu", "lxc"}
 	if got, _ := list(twinParams); !slices.Equal(got, []string{"audit start other "}) {
 		t.Errorf("a node's guest task whose Nexara twin is the guest's: %v, want the Proxmox row kept", got)
+	}
+
+	// An object's row naming a guest outside the guests is shown under that
+	// guest's own view permission: container 108's with view:container; VM
+	// 106's, a guest the inventory does not hold, only with both.
+	if _, err := q.UpsertVM(ctx, gen.UpsertVMParams{ClusterID: historyClusterID, NodeID: historyNodeID,
+		Vmid: 108, Name: "linux08", Type: "lxc", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	audit(historyClusterID, minsAgo(0.5), "proxmox", "container", "108", "start",
+		map[string]any{"upid": historyUPID(35, "vzstart", "108"), "node": "pve-01", "status": "OK"})
+	for _, tt := range []struct {
+		types []string
+		want  []string
+	}{
+		{[]string{"qemu", "lxc"}, []string{"audit start 108", "audit start 106"}},
+		{[]string{"lxc"}, []string{"audit start 108"}},
+		{[]string{"qemu"}, []string{}},
+	} {
+		p, err := node.ListParams(historyClusterID, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+			{ResourceType: "vm", DetailKey: "node", Value: "pve-01"}, {ResourceType: "container", DetailKey: "node", Value: "pve-01"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.RowLimit, p.StatusGuestTypes = 50, tt.types
+		rows, err := q.ListHistory(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, 0, len(rows))
+		for _, r := range rows {
+			got = append(got, r.Kind+" "+r.Action+" "+r.ResourceID)
+		}
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("a node's guest rows with view of %v: %v, want %v", tt.types, got, tt.want)
+		}
 	}
 
 	// ── The selector's other shapes, each against a row it must not take.
@@ -753,6 +792,158 @@ func TestGuestHistory(t *testing.T) {
 	sp.RowLimit = 50
 	if got, _ := list(sp); !slices.Contains(got, "audit destroy lifecycle ") || !slices.Contains(got, "audit create lifecycle ") {
 		t.Errorf("a kind whose objects ignore the guest's cutoff: %v, want the previous guest's create and destroy", got)
+	}
+
+	// ── A folder's History, through its own selector: its guests and its
+	// subfolders' (VM 120 in F, VM 121 in S below it), each from its own
+	// cutoff, and the folders' rows — the guests and subfolders that left
+	// (VM 123 moved to G, VM 124 unfiled, T moved to G, U deleted). Never G's
+	// own, nor VM 122 there.
+	folderOf := map[string]string{}
+	mkFolder := func(cluster uuid.UUID, name string, parent *gen.VmFolder) gen.VmFolder {
+		t.Helper()
+		p := gen.CreateVMFolderParams{ClusterID: cluster, Name: name}
+		if parent != nil {
+			p.ParentID = pgtype.UUID{Bytes: parent.ID, Valid: true}
+		}
+		f, err := q.CreateVMFolder(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		folderOf[f.ID.String()] = name
+		return f
+	}
+	fF := mkFolder(historyClusterID, "F", nil)
+	fS, fT, fU, fG := mkFolder(historyClusterID, "S", &fF), mkFolder(historyClusterID, "T", &fF),
+		mkFolder(historyClusterID, "U", &fF), mkFolder(historyClusterID, "G", nil)
+	guestRow := map[int32]string{}
+	for vmid, typ := range map[int32]string{120: "qemu", 121: "qemu", 122: "qemu", 123: "qemu", 124: "lxc"} {
+		v, err := q.UpsertVM(ctx, gen.UpsertVMParams{ClusterID: historyClusterID, NodeID: historyNodeID,
+			Vmid: vmid, Name: fmt.Sprintf("linux%d", vmid), Type: typ, Status: "running"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		guestRow[vmid] = v.ID.String()
+	}
+	// Filed as AssignVM files a guest: the folder it left comes back, for its
+	// audit row (from_folder_id).
+	file := func(at float64, vmid int32, folder *gen.VmFolder, wantFrom string) {
+		t.Helper()
+		details := map[string]any{"vmid": vmid, "folder_id": nil}
+		action, from := "unassign", ""
+		if folder != nil {
+			action, details["folder_id"] = "assign", folder.ID.String()
+			var err error
+			if from, err = q.AssignVMToFolder(ctx, gen.AssignVMToFolderParams{ClusterID: historyClusterID,
+				Vmid: vmid, FolderID: folder.ID}); err != nil {
+				t.Fatal(err)
+			}
+		} else if left, err := q.UnassignVMFromFolder(ctx, gen.UnassignVMFromFolderParams{ClusterID: historyClusterID,
+			Vmid: vmid}); err == nil {
+			from = left.String()
+		}
+		if from != wantFrom {
+			t.Errorf("filing VM %d: the folder it left = %q, want %q", vmid, folderOf[from], folderOf[wantFrom])
+		}
+		if from != "" {
+			details["from_folder_id"] = from
+		}
+		audit(historyClusterID, minsAgo(at), "nexara", "vm_folder_membership", guestRow[vmid], action, details)
+	}
+	folderRow := func(at float64, f gen.VmFolder, action string, details map[string]any) {
+		audit(historyClusterID, minsAgo(at), "nexara", "vm_folder", f.ID.String(), action, details)
+	}
+	folderRow(60, fF, "create", map[string]any{"name": "F", "parent_id": nil})
+	folderRow(59, fS, "create", map[string]any{"name": "S", "parent_id": fF.ID})
+	file(58, 120, &fF, "")
+	audit(historyClusterID, minsAgo(58.5), "proxmox", "vm", "121", "destroy", // the previous VM 121: before its cutoff
+		map[string]any{"upid": historyUPID(37, "qmdestroy", "121"), "status": "OK"})
+	audit(historyClusterID, minsAgo(57.5), "proxmox", "vm", "121", "create",
+		map[string]any{"upid": historyUPID(38, "qmcreate", "121"), "status": "OK"})
+	file(57, 121, &fS, "")
+	file(56, 123, &fF, "")
+	file(55, 124, &fF, "")
+	folderRow(54, fT, "create", map[string]any{"name": "T", "parent_id": fF.ID})
+	folderRow(53, fG, "create", map[string]any{"name": "G", "parent_id": nil})
+	file(52, 122, &fG, "")
+	folderRow(51, fF, "update", map[string]any{"name": "F"})
+	file(50, 123, &fG, fF.ID.String())
+	file(49, 124, nil, fF.ID.String())
+	folderRow(48, fT, "update", map[string]any{"parent_id": fG.ID, "from_parent_id": fF.ID})
+	exec("T moved", `UPDATE vm_folders SET parent_id = $1 WHERE id = $2`, fG.ID, fT.ID)
+	folderRow(47, fU, "delete", map[string]any{"name": "U", "parent_id": fF.ID})
+	exec("U deleted", `DELETE FROM vm_folders WHERE id = $1`, fU.ID)
+	audit(historyClusterID, minsAgo(46), "proxmox", "vm", "120", "start", map[string]any{"upid": historyUPID(39, "qmstart", "120"), "status": "OK"})
+	audit(historyClusterID, minsAgo(45), "proxmox", "vm", "122", "start", map[string]any{"upid": historyUPID(40, "qmstart", "122"), "status": "OK"})
+
+	folderProps := apischema.Properties{"folder_id": {Type: apischema.String}}
+	if err := folderProps.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	selectFolder := func(cluster uuid.UUID, folder string) (handlers.HistorySelection, error) {
+		params, err := folderProps.Validate(map[string]any{"folder_id": folder})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return handlers.FolderHistory().Select(ctx, handlers.HistoryRequest{Queries: q, ClusterID: cluster, Params: params})
+	}
+	folderHistory := func(sel handlers.HistorySelection, types []string) []string {
+		t.Helper()
+		p, err := handlers.FolderHistory().ListParams(historyClusterID, sel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 50, true, types
+		rows, err := q.ListHistory(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, 0, len(rows))
+		for _, r := range rows {
+			name := r.ResourceID
+			if r.ResourceType == "vm_folder" {
+				name = folderOf[r.ResourceID]
+			} else if r.ResourceType == "vm_folder_membership" {
+				name = fmt.Sprint(r.Vmid)
+			}
+			got = append(got, r.Action+" "+name)
+		}
+		return got
+	}
+	sel, err := selectFolder(historyClusterID, fF.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := folderHistory(sel, []string{"qemu", "lxc"}), []string{"start 120", "delete U", "update T",
+		"unassign 124", "assign 123", "update F", "create T", "assign 124", "assign 123", "assign 121", "create 121",
+		"assign 120", "create S", "create F"}; !slices.Equal(got, want) {
+		t.Errorf("folder F's History =\n\t%v\nwant\n\t%v", got, want)
+	}
+	// Without view:vm its VMs are dropped (viewableGuests), and so is every
+	// row naming one of them that the folder's own rows would show: what is
+	// left is the folders' and container 124's.
+	sel.Guests = nil
+	if got, want := folderHistory(sel, []string{"lxc"}), []string{"delete U", "update T", "unassign 124",
+		"update F", "create T", "assign 124", "create S", "create F"}; !slices.Equal(got, want) {
+		t.Errorf("folder F's History without view:vm =\n\t%v\nwant\n\t%v", got, want)
+	}
+	// The guests in no folder; a folder of the other cluster is not this one's.
+	if unfiled, err := selectFolder(historyClusterID, handlers.UnfiledFolderSegment); err != nil {
+		t.Fatal(err)
+	} else {
+		var vmids []int32
+		for _, g := range unfiled.Guests {
+			vmids = append(vmids, g.VMID)
+		}
+		slices.Sort(vmids)
+		if want := []int32{100, 108, 124}; !slices.Equal(vmids, want) || len(unfiled.Objects) != 0 {
+			t.Errorf("the unfiled guests = %v and %d objects, want %v and none", vmids, len(unfiled.Objects), want)
+		}
+	}
+	elsewhere := mkFolder(historyOtherID, "F", nil)
+	var notFound *fiber.Error
+	if _, err := selectFolder(historyClusterID, elsewhere.ID.String()); !errors.As(err, &notFound) || notFound.Code != fiber.StatusNotFound {
+		t.Errorf("another cluster's folder: %v, want a 404", err)
 	}
 
 	// ── Every arm reads the route's cluster alone: audit keys are unique only
