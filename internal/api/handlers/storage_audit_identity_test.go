@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"reflect"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // A storage's audit rows name the storage, not the storage_pools row the request
@@ -50,5 +52,20 @@ func TestStorageAuditRowsNameTheirStorageNotThePoolRow(t *testing.T) {
 				t.Errorf("details = %s\nwant %v", got.Details, tt.details)
 			}
 		})
+	}
+}
+
+// A virtio-win config save is filed under the storage it targets; a disabled
+// config may target none, and then it is the cluster's, not a storage row with
+// nothing for a name.
+func TestVirtioWinConfigAuditResource(t *testing.T) {
+	t.Parallel()
+
+	cluster := uuid.New()
+	if typ, id := virtioWinAuditResource(cluster, "store01"); typ != "storage" || id != "store01" {
+		t.Errorf("a storage is chosen: filed under (%s, %q), want (storage, store01)", typ, id)
+	}
+	if typ, id := virtioWinAuditResource(cluster, ""); typ != "cluster" || id != cluster.String() {
+		t.Errorf("no storage: filed under (%s, %q), want (cluster, %s)", typ, id, cluster)
 	}
 }
