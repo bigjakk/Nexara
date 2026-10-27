@@ -121,20 +121,23 @@ func newPBSUPIDCaptureServer(t *testing.T) (string, *pbsUPIDCapture) {
 }
 
 // errPBSUPIDUnexpectedQuery is what the stand-in DBTX answers for anything
-// other than the PBS server read and the audit insert. Nothing else should run:
-// the task routes are reads, so neither audits nor publishes, and a datastore
-// action writes its audit row and nothing more.
+// other than the PBS server read, a job list and the audit insert. Nothing else
+// should run: the task routes are reads, so neither audits nor publishes, and a
+// datastore action writes its audit row and nothing more.
 var errPBSUPIDUnexpectedQuery = errors.New("unexpected query")
 
-// pbsUPIDDBTX answers GetPBSServer with one standalone server row, records the
-// audit inserts, and fails everything else, so a handler that starts reading
-// something else fails loudly here rather than being handed a row that happens
-// to satisfy it.
+// pbsUPIDDBTX answers GetPBSServer with one standalone server row, replays the
+// job lists a test gives it, records the audit inserts, and fails everything
+// else, so a handler that starts reading something else fails loudly here
+// rather than being handed a row that happens to satisfy it.
 // The field name differs from pbsServerRow's deliberately: with both
 // spelled "server" the two structs are convertible, and staticcheck reads
 // the literal below as a conversion waiting to happen (S1016).
 type pbsUPIDDBTX struct {
-	row    db.PbsServer
+	row db.PbsServer
+	// jobs answers a :many query by its sqlc name with the rows to replay; set
+	// before the first request.
+	jobs   map[string][]any
 	mu     sync.Mutex
 	audits []capturedQuery
 }
@@ -149,7 +152,12 @@ func (d *pbsUPIDDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.C
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
 }
 
-func (*pbsUPIDDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (d *pbsUPIDDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	for name, rows := range d.jobs {
+		if strings.Contains(sql, "-- name: "+name+" :many") {
+			return &structRows{rows: rows}, nil
+		}
+	}
 	return nil, errPBSUPIDUnexpectedQuery
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // mountPBSAuditRoutes mounts the PBS datastore actions whose audit rows
@@ -46,6 +47,7 @@ func mountPBSAuditRoutes(t *testing.T, app *fiber.App, h *BackupHandler) {
 // so the "backup" row filed under the name named no server a History could find.
 // The row is labelled (resource_name) by datastore, snapshot or job, and the PBS
 // task a trigger started is pbs_upid, not the upid the feed opens as a PVE task.
+// A job's datastore is the one the collector last synced for it, if any.
 func TestPBSDatastoreActionsAreAuditedUnderTheirServer(t *testing.T) {
 	t.Parallel()
 
@@ -63,12 +65,17 @@ func TestPBSDatastoreActionsAreAuditedUnderTheirServer(t *testing.T) {
 		{
 			name: "sync job", method: http.MethodPost, path: "/sync-jobs/sync01/run",
 			action:  "sync_job_triggered",
-			details: map[string]any{"job_id": "sync01", "resource_name": "sync01", "pbs_upid": pbsUPIDSample},
+			details: map[string]any{"datastore": "datastore01", "job_id": "sync01", "resource_name": "sync01", "pbs_upid": pbsUPIDSample},
+		},
+		{
+			name: "sync job the collector has not synced yet", method: http.MethodPost, path: "/sync-jobs/sync02/run",
+			action:  "sync_job_triggered",
+			details: map[string]any{"job_id": "sync02", "resource_name": "sync02", "pbs_upid": pbsUPIDSample},
 		},
 		{
 			name: "verify job", method: http.MethodPost, path: "/verify-jobs/verify01/run",
 			action:  "verify_job_triggered",
-			details: map[string]any{"job_id": "verify01", "resource_name": "verify01", "pbs_upid": pbsUPIDSample},
+			details: map[string]any{"datastore": "datastore02", "job_id": "verify01", "resource_name": "verify01", "pbs_upid": pbsUPIDSample},
 		},
 		{
 			name: "snapshot protect", method: http.MethodPut, path: "/datastores/datastore01/snapshots/protect",
@@ -83,6 +90,10 @@ func TestPBSDatastoreActionsAreAuditedUnderTheirServer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			h := newPBSUPIDHarness(t)
+			h.dbtx.jobs = map[string][]any{
+				"ListPBSSyncJobsByServer":   {db.PbsSyncJob{PbsServerID: h.pbsID, JobID: "sync01", Store: "datastore01"}},
+				"ListPBSVerifyJobsByServer": {db.PbsVerifyJob{PbsServerID: h.pbsID, JobID: "verify01", Store: "datastore02"}},
+			}
 
 			req := httptest.NewRequest(tt.method, "/api/v1/pbs-servers/"+h.pbsID.String()+tt.path, strings.NewReader(tt.body))
 			if tt.body != "" {

@@ -211,6 +211,36 @@ func (h *BackupHandler) auditPBS(c fiber.Ctx, cluster pgtype.UUID, pbsID uuid.UU
 	AuditLog(c, h.queries, h.eventPub, cluster, "pbs_server", pbsID.String(), action, raw)
 }
 
+// syncJobStore and verifyJobStore are the datastore a job works on, which the
+// request that triggers it does not name: read from the jobs the collector last
+// synced, "" for one it has not seen yet or when the read fails. The trigger has
+// already been made, so this only labels its audit row.
+func (h *BackupHandler) syncJobStore(ctx context.Context, pbsID uuid.UUID, jobID string) string {
+	jobs, err := h.queries.ListPBSSyncJobsByServer(ctx, pbsID)
+	if err != nil {
+		return ""
+	}
+	for _, j := range jobs {
+		if j.JobID == jobID {
+			return j.Store
+		}
+	}
+	return ""
+}
+
+func (h *BackupHandler) verifyJobStore(ctx context.Context, pbsID uuid.UUID, jobID string) string {
+	jobs, err := h.queries.ListPBSVerifyJobsByServer(ctx, pbsID)
+	if err != nil {
+		return ""
+	}
+	for _, j := range jobs {
+		if j.JobID == jobID {
+			return j.Store
+		}
+	}
+	return ""
+}
+
 // --- Live proxy endpoints ---
 
 // ListDatastores handles GET /api/v1/pbs-servers/:pbs_id/datastores
@@ -572,9 +602,7 @@ func (h *BackupHandler) RunSyncJob(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	// No datastore: a job names it, the request does not, and the job's own
-	// task (pbs_upid) carries it for whoever reads that.
-	h.auditPBS(c, cluster, pbsID, "", "sync_job_triggered",
+	h.auditPBS(c, cluster, pbsID, h.syncJobStore(c.Context(), pbsID, jobID), "sync_job_triggered",
 		map[string]any{"job_id": jobID, "resource_name": jobID, "pbs_upid": upid})
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "sync_job_triggered")
 
@@ -604,7 +632,7 @@ func (h *BackupHandler) RunVerifyJob(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditPBS(c, cluster, pbsID, "", "verify_job_triggered",
+	h.auditPBS(c, cluster, pbsID, h.verifyJobStore(c.Context(), pbsID, jobID), "verify_job_triggered",
 		map[string]any{"job_id": jobID, "resource_name": jobID, "pbs_upid": upid})
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "verify_job_triggered")
 
