@@ -17,10 +17,11 @@
 -- is added beside the existing details, which are never changed, except that
 -- the trigger's own value always wins: an entry whose details already held that
 -- key (nothing writes one) would otherwise name the wrong cluster. The same
--- UPDATE detaches the entries, so
--- the foreign key's SET NULL finds nothing left to rewrite: one pass over the
--- cluster's entries rather than two (about half a million entries took 28
--- seconds, against 56 for two passes and 22 for SET NULL alone).
+-- UPDATE detaches the entries, so the foreign key's SET NULL finds nothing left
+-- to rewrite: one pass over the cluster's entries rather than two. Removing a
+-- cluster that held about half a million entries of a million took 22 to 29
+-- seconds (it varies with load), as long as SET NULL alone and against 56 for
+-- two passes; the CASCADE this replaces deleted them in about a second.
 --
 -- The column is already nullable (000014) and every existing value references a
 -- cluster that exists, so no existing row changes and none can violate the new
