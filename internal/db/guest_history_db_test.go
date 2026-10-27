@@ -901,9 +901,10 @@ func TestGuestHistory(t *testing.T) {
 		got := make([]string, 0, len(rows))
 		for _, r := range rows {
 			name := r.ResourceID
-			if r.ResourceType == "vm_folder" {
+			switch r.ResourceType {
+			case "vm_folder":
 				name = folderOf[r.ResourceID]
-			} else if r.ResourceType == "vm_folder_membership" {
+			case "vm_folder_membership":
 				name = fmt.Sprint(r.Vmid)
 			}
 			got = append(got, r.Action+" "+name)
@@ -931,7 +932,7 @@ func TestGuestHistory(t *testing.T) {
 	if unfiled, err := selectFolder(historyClusterID, handlers.UnfiledFolderSegment); err != nil {
 		t.Fatal(err)
 	} else {
-		var vmids []int32
+		vmids := make([]int32, 0, len(unfiled.Guests))
 		for _, g := range unfiled.Guests {
 			vmids = append(vmids, g.VMID)
 		}
