@@ -2,14 +2,14 @@ package handlers
 
 // How to add a kind of object with a History (the guest's: guest_history.go, registry_guest_history.go):
 //  1. handlers/<kind>_history.go: its HistoryKind — Name, Categories in filter order, the Rules that
-//     derive them (first match wins, else Default), and Select: which rows are the object's.
-//     SelectObjects(param, …) reads audit rows by resource_type and id, or a DetailKey; param must be a
-//     declared String path parameter (a node's: StdOption("node-name"), which 404s a non-member). Global
-//     only for ids unique across Nexara (globalHistoryResourceTypes): it reads every cluster's rows.
-//  2. api/registry_<kind>_history.go: its historyRoute (path, description, its own view permission) and
-//     one line in historyRoutes(). 3. Frontend: locales/en/history-<Name>.json, the same categories in
-//     the same order (TestHistoryCategoryVocabulary); a HistoryKind in your feature's lib/ (see
-//     features/history/types/history.ts); a <HistoryTimeline> or <HistoryButton>.
+//     derive them (first match wins, else Default), Select (which rows are the object's) and the
+//     ObjectTypes it names, an observed type's read under that type's own view. SelectObjects(param, …)
+//     reads audit rows by resource_type and id, or a DetailKey; param must be a declared String path
+//     parameter (a node's: StdOption("node-name"), which 404s a non-member). Global only for ids unique
+//     across Nexara (globalHistoryResourceTypes): it reads every cluster's rows.
+//  2. api/registry_<kind>_history.go: its historyRoute (path, description, its own view permission), and
+//     one line in historyRoutes(). 3. Frontend: locales/en/history-<Name>.json with the same categories,
+//     in order (TestHistoryCategoryVocabulary); a HistoryKind (features/history/types/history.ts).
 
 import (
 	"context"
@@ -61,6 +61,12 @@ type HistoryKind struct {
 	// Select names the rows that are the object's, from the request's
 	// validated parameters. An error it returns is the response.
 	Select HistorySelector
+	// ObjectTypes are the resource types Select may name in Objects, declared
+	// so that what a kind reads is checked at startup: a global kind's against
+	// globalHistoryResourceTypes (Validate), and every kind's observed types
+	// against its route's own view permission (ObservedTypePermission, which
+	// the registry checks). ListParams refuses an object of any other type.
+	ObjectTypes []string
 	// GuestFromPath says the selection's one guest is the one the path names:
 	// the caller asked for it by VMID, so listing it discloses nothing. Every
 	// other kind's guests — a folder's members, a node's guests — are kept
@@ -81,6 +87,60 @@ type HistoryKind struct {
 	// right for an object that is the guest's, as its HA resource is. Set it
 	// where an object's rows stand on their own, as a node's tasks do.
 	ObjectsIgnoreGuestCutoff bool
+}
+
+// observedTypePermission is the view permission of each resource type whose
+// changes seen in Proxmox cluster_object_changes records — its trigger, the
+// Ceph pass and the observer. An observed row carries what the type's own
+// view shows (its detail, its field names), so a kind reads it only under
+// that permission. A type missing here is read as an audit row alone.
+var observedTypePermission = map[string]string{
+	"vm":                           "vm",
+	"container":                    "container",
+	"ha_resource":                  "ha",
+	"ha_group":                     "ha",
+	"ha_rule":                      "ha",
+	"pool":                         "pool",
+	"network":                      "network",
+	"sdn_zone":                     "network",
+	"sdn_vnet":                     "network",
+	"sdn_subnet":                   "network",
+	"sdn_controller":               "network",
+	"sdn_ipam":                     "network",
+	"sdn_dns":                      "network",
+	"firewall_options":             "network",
+	"firewall_rule":                "network",
+	"firewall_alias":               "network",
+	"firewall_ipset":               "network",
+	"firewall_ipset_entry":         "network",
+	"firewall_security_group":      "network",
+	"firewall_security_group_rule": "network",
+	"cluster_options":              "cluster",
+	"metric_server":                "cluster",
+	"usb_mapping":                  "cluster",
+	"pci_mapping":                  "cluster",
+	"pve_user":                     "access",
+	"pve_token":                    "access",
+	"pve_group":                    "access",
+	"pve_role":                     "access",
+	"pve_acl":                      "access",
+	"acme_account":                 "certificate",
+	"acme_plugin":                  "certificate",
+	"acme_config":                  "certificate",
+	"storage":                      "storage",
+	"backup":                       "backup",
+	"node":                         "node",
+	"replication":                  "replication",
+	"ceph_osd":                     "ceph",
+	"ceph_pool":                    "ceph",
+	"pbs_server":                   "pbs",
+}
+
+// ObservedTypePermission is the view permission an observed row of
+// resourceType is read under, and whether the type has observed rows at all.
+func ObservedTypePermission(resourceType string) (permission string, observed bool) {
+	permission, observed = observedTypePermission[resourceType]
+	return permission, observed
 }
 
 // globalHistoryResourceTypes are the audit resource types whose ids are unique
@@ -202,6 +262,11 @@ func (k HistoryKind) Validate() error {
 	}
 	if k.Global && k.GuestFromPath {
 		return fmt.Errorf("history kind %q is global, and a global kind has no guests", k.Name)
+	}
+	for _, t := range k.ObjectTypes {
+		if k.Global && !slices.Contains(globalHistoryResourceTypes, t) {
+			return fmt.Errorf("history kind %q is global and reads %q, whose ids are unique only within a cluster", k.Name, t)
+		}
 	}
 	if !slices.Contains(k.Categories, k.Default) {
 		return fmt.Errorf("history kind %q: Default %q is not one of its Categories", k.Name, k.Default)
@@ -425,9 +490,9 @@ func viewableGuests(guests []HistoryGuest, types []db.ListGuestTypesRow, viewabl
 // one's cutoff up by VMID, and would hold it to the first only, so that is
 // refused. So is a selection ListHistory would read wrong: an object that
 // names nothing, a ResourceID or list with no details key to go with it, and
-// a worker pattern Postgres refuses — and, for a global kind, which has no
-// cluster (clusterID is ignored), any guest and any object whose ids are
-// unique only within a cluster.
+// a worker pattern Postgres refuses, an object of a type the kind does not
+// declare — and, for a global kind, which has no cluster (clusterID is
+// ignored), any guest, and a details key with no parent id.
 func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.ListHistoryParams, error) {
 	if k.Global {
 		if len(sel.Guests)+len(sel.GuestWorkers) > 0 {
@@ -435,10 +500,6 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 				"which are a cluster's", k.Name)
 		}
 		for _, o := range sel.Objects {
-			if !slices.Contains(globalHistoryResourceTypes, o.ResourceType) {
-				return db.ListHistoryParams{}, fmt.Errorf("history kind %q is global and selected %q, "+
-					"whose ids are unique only within a cluster", k.Name, o.ResourceType)
-			}
 			// A details value — a datastore's name — repeats on every server:
 			// only its parent's id is unique across Nexara.
 			if o.DetailKey != "" && o.ResourceID == "" {
@@ -500,6 +561,10 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 	for _, o := range sel.Objects {
 		if o.ResourceType == "" || o.Value == "" {
 			return db.ListHistoryParams{}, fmt.Errorf("history object %+v names no resource type or value", o)
+		}
+		if !slices.Contains(k.ObjectTypes, o.ResourceType) {
+			return db.ListHistoryParams{}, fmt.Errorf("history kind %q selected %q, which its ObjectTypes do not declare",
+				k.Name, o.ResourceType)
 		}
 		if o.DetailKey == "" && (o.ResourceID != "" || o.InList) {
 			return db.ListHistoryParams{}, fmt.Errorf("history object %+v has a resource id or list but no details key", o)

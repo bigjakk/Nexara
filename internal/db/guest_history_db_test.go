@@ -469,9 +469,12 @@ func TestGuestHistory(t *testing.T) {
 		p.RowLimit = 50
 		return p
 	}
+	// The guest kind, reading the objects these cases name beside its guests.
+	withObjects := handlers.GuestHistory()
+	withObjects.ObjectTypes = []string{"vm", "ha_resource", "pbs_server", "ceph_osd", "pve_acl", "node", "network"}
 	selection := func(sel handlers.HistorySelection) gen.ListHistoryParams {
 		t.Helper()
-		p, err := handlers.GuestHistory().ListParams(historyClusterID, sel)
+		p, err := withObjects.ListParams(historyClusterID, sel)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -595,6 +598,7 @@ func TestGuestHistory(t *testing.T) {
 	audit(historyOtherID, minsAgo(2), "nexara", "node", "pve-01", "reboot", map[string]any{})
 	// Both rules match the apt update: the first one decides.
 	node := handlers.HistoryKind{Name: "node", Categories: []string{"updates", "tasks", "other"}, Default: "other",
+		ObjectTypes: []string{"node", "network", "vm"},
 		Rules: []handlers.HistoryRule{
 			{Category: "updates", Field: handlers.HistoryFieldAction, Equals: []string{"apt_update"}},
 			{Category: "tasks", Field: handlers.HistoryFieldWorker, Like: []string{"apt%"}},
@@ -690,7 +694,7 @@ func TestGuestHistory(t *testing.T) {
 
 	// …unless the kind's objects stand on their own (ObjectsIgnoreGuestCutoff):
 	// then the previous guest's create, start and destroy are the object's too.
-	standalone := handlers.GuestHistory()
+	standalone := withObjects
 	standalone.ObjectsIgnoreGuestCutoff = true
 	sp, err := standalone.ListParams(historyClusterID, handlers.HistorySelection{
 		Guests:       []handlers.HistoryGuest{{VMID: 100, After: pgtype.Timestamptz{Time: hoursAgo(7), Valid: true}, Inclusive: true}},
@@ -734,7 +738,7 @@ func TestGuestHistory(t *testing.T) {
 			{ResourceType: "pve_acl", DetailKey: "users", Value: "bob@pve", InList: true}}},
 	} {
 		for _, cluster := range []uuid.UUID{historyClusterID, historyOtherID} {
-			p, err := handlers.GuestHistory().ListParams(cluster, sel)
+			p, err := withObjects.ListParams(cluster, sel)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -763,7 +767,8 @@ func TestGuestHistory(t *testing.T) {
 	audit(uuid.Nil, minsAgo(5), "nexara", "firewall_template", historyTemplateID, "template_created", map[string]any{})
 	audit(historyOtherID, minsAgo(4), "nexara", "firewall_template", historyTemplateID, "template_applied", map[string]any{})
 	audit(historyClusterID, minsAgo(3), "nexara", "firewall_template", historyTemplateID, "template_applied", map[string]any{})
-	template := handlers.HistoryKind{Name: "template", Categories: []string{"other"}, Default: "other", Global: true}
+	template := handlers.HistoryKind{Name: "template", Categories: []string{"other"}, Default: "other", Global: true,
+		ObjectTypes: []string{"firewall_template"}}
 	tp, err := template.ListParams(uuid.Nil, handlers.HistorySelection{Objects: []handlers.HistoryObject{
 		{ResourceType: "firewall_template", Value: historyTemplateID}}})
 	if err != nil {

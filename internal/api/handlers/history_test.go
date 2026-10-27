@@ -131,8 +131,9 @@ func TestHistoryKindValidate(t *testing.T) {
 	valid := func() HistoryKind {
 		return HistoryKind{
 			Name: "pool", Categories: []string{"membership", "other"}, Default: "other",
-			Rules:  []HistoryRule{{Category: "membership", Field: HistoryFieldAction, Equals: []string{"set_pool"}}},
-			Select: SelectObjects("pool", HistoryObject{ResourceType: "pool"}),
+			Rules:       []HistoryRule{{Category: "membership", Field: HistoryFieldAction, Equals: []string{"set_pool"}}},
+			Select:      SelectObjects("pool", HistoryObject{ResourceType: "pool"}),
+			ObjectTypes: []string{"pool"},
 		}
 	}
 	if err := valid().Validate(); err != nil {
@@ -153,6 +154,7 @@ func TestHistoryKindValidate(t *testing.T) {
 		{"a category twice", func(k *HistoryKind) { k.Categories = append(k.Categories, "other") }, "twice"},
 		{"a default the filter refuses", func(k *HistoryKind) { k.Default = "misc" }, "Default"},
 		{"a global kind with a guest", func(k *HistoryKind) { k.Global, k.GuestFromPath = true, true }, "global"},
+		{"a global kind reading a cluster's type", func(k *HistoryKind) { k.Global = true }, "unique only within a cluster"},
 	} {
 		k := valid()
 		tt.mutate(&k)
@@ -182,7 +184,9 @@ func TestHistoryKindSQLRules(t *testing.T) {
 func TestHistoryKindListParams(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	p, err := GuestHistory().ListParams([16]byte{1}, HistorySelection{
+	k := GuestHistory()
+	k.ObjectTypes = []string{"vm_folder", "vm_folder_membership", "pool", "pbs_server", "pve_acl", "vm", "container"}
+	p, err := k.ListParams([16]byte{1}, HistorySelection{
 		Guests:  []HistoryGuest{{VMID: 100}, {VMID: 101, After: pgtype.Timestamptz{Time: at, Valid: true}, Inclusive: true}},
 		Objects: []HistoryObject{{ResourceType: "vm_folder", Value: "f1"}, {ResourceType: "vm_folder_membership", DetailKey: "folder_id", Value: "f1"}},
 	})
@@ -192,13 +196,13 @@ func TestHistoryKindListParams(t *testing.T) {
 		t.Errorf("ListParams = %+v, %v", p, err)
 	}
 	// Every arm reads from the earliest cutoff — none, above, when a guest has none.
-	if p, _ := GuestHistory().ListParams([16]byte{1}, HistorySelection{Guests: []HistoryGuest{
+	if p, _ := k.ListParams([16]byte{1}, HistorySelection{Guests: []HistoryGuest{
 		{VMID: 100, After: pgtype.Timestamptz{Time: at.Add(time.Hour), Valid: true}},
 		{VMID: 101, After: pgtype.Timestamptz{Time: at, Valid: true}}}}); !p.CutoffFloor.Valid || !p.CutoffFloor.Time.Equal(at) {
 		t.Errorf("cutoff floor = %+v, want the earlier cutoff %v", p.CutoffFloor, at)
 	}
 	// The same guest twice is one; twice with different cutoffs is refused.
-	if p, err := GuestHistory().ListParams([16]byte{1}, HistorySelection{Guests: []HistoryGuest{{VMID: 100}, {VMID: 100}}}); err != nil ||
+	if p, err := k.ListParams([16]byte{1}, HistorySelection{Guests: []HistoryGuest{{VMID: 100}, {VMID: 100}}}); err != nil ||
 		!slices.Equal(p.Vmids, []int32{100}) {
 		t.Errorf("the same guest twice: vmids %v, err %v; want one guest", p.Vmids, err)
 	}
@@ -211,14 +215,16 @@ func TestHistoryKindListParams(t *testing.T) {
 		"a lone-backslash worker":       {Guests: []HistoryGuest{{VMID: 100}}, GuestWorkers: []string{`ha\`}},
 		"a guest's object, not a guest": {Guests: []HistoryGuest{{VMID: 100}}, Objects: []HistoryObject{{ResourceType: "vm", Value: "101"}}},
 		"a guest's object by row id":    {Objects: []HistoryObject{{ResourceType: "container", Value: "d0000000-0000-4000-8000-000000000001"}}},
+		"an undeclared type":            {Objects: []HistoryObject{{ResourceType: "replication", Value: "job01"}}},
 	} {
-		if _, err := GuestHistory().ListParams([16]byte{1}, sel); err == nil {
+		if _, err := k.ListParams([16]byte{1}, sel); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
 	}
 	// A global kind reads every cluster: never a guest, nor an object whose id
 	// is unique only within one.
-	global := HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true}
+	global := HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true,
+		ObjectTypes: []string{"pbs_server"}}
 	if p, err := global.ListParams([16]byte{1}, HistorySelection{Objects: []HistoryObject{{ResourceType: "pbs_server", Value: "s1"}}}); err != nil ||
 		!p.Global || p.ClusterID != uuid.Nil {
 		t.Errorf("global ListParams: global %v, cluster %v, err %v; want every cluster", p.Global, p.ClusterID, err)
@@ -327,7 +333,7 @@ func TestHistoryListGlobalKindAsksNoCluster(t *testing.T) {
 	engine := &recordingEngine{actions: map[string]bool{"view": true}}
 	dbtx := &auditRowsDBTX{}
 	kind := HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true,
-		Select: SelectObjects("id", HistoryObject{ResourceType: "pbs_server"})}
+		Select: SelectObjects("id", HistoryObject{ResourceType: "pbs_server"}), ObjectTypes: []string{"pbs_server"}}
 	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 	app.Use(func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.New())

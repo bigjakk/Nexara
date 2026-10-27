@@ -76,6 +76,14 @@ func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 		panic(fmt.Sprintf("history route %s: set exactly one of Resource (the kind's own view permission) "+
 			"and AuditOnly (why view:audit alone is enough), and Resource for a global kind", r.Path))
 	}
+	// A change seen in Proxmox carries what its type's own view shows: a kind
+	// reads one only under that permission.
+	for _, t := range r.Kind.ObjectTypes {
+		if perm, observed := handlers.ObservedTypePermission(t); observed && perm != resource {
+			panic(fmt.Sprintf("history route %s: the kind reads %s, whose observed changes are view:%s's, "+
+				"under view:%q", r.Path, t, perm, resource))
+		}
+	}
 	audit := Check{Action: "view", Resource: "audit", Scope: scope}
 	perms := Permissions{Check: &audit}
 	if resource != "" {
