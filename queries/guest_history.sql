@@ -44,7 +44,8 @@
 -- on the node it ran on while it ran, as every job did before its log was
 -- read, and a real crash of another guest on that node in the window is
 -- hidden by it; up to when its log was read, though, not to its finished_at,
--- which PUT /api/v1/tasks/:upid lets a caller set to any time. Not read at
+-- which PUT /api/v1/tasks/:upid could set to any time before this release —
+-- such rows remain. Not read at
 -- all — its log gone, the read refused, a task Proxmox has no log for — it
 -- explains nothing, as nothing would without the job: the side this list
 -- errs on. A change on a listed node that a job with no mark yet might
@@ -142,7 +143,8 @@ WHERE sc.cluster_id = sqlc.arg('cluster_id')
 -- when the collector saw the job finish, or ingested it finished already,
 -- which for a job that ran while Nexara was down is once Nexara is back, so
 -- it gets its full time from then rather than none. Not finished_at, which
--- PUT /api/v1/tasks/:upid lets a caller set to any time. Past it, a job on a
+-- PUT /api/v1/tasks/:upid could set to any time before this release — such
+-- rows remain. Past it, a job on a
 -- listed node is read one last time and recorded with whatever its log gave
 -- (last_try); one whose node is not listed this pass is marked unread.
 --

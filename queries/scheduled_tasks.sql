@@ -127,9 +127,10 @@ WHERE id = $1;
 -- (classifyTaskExit in internal/collector, which applies proxmox.TaskSucceeded:
 -- '' / 'OK' / 'WARNINGS: N' are 'completed'), not a second reading of
 -- exit_status. Only 'completed' and 'failed' settle a run. Nothing else
--- finalizes a task any other way: 'stopped', or an empty status, comes only
--- from a hand-made PUT /api/v1/tasks/:upid, and a row whose task holds one
--- stays dispatched until the schedule's next run replaces it.
+-- finalizes a task any other way: 'stopped', or an empty status, came only
+-- from a hand-made PUT /api/v1/tasks/:upid, which could write one before this
+-- release — such rows remain — and a row whose task holds one stays
+-- dispatched until the schedule's next run replaces it.
 --
 -- The three last_status values are parameters so that the Go side names each
 -- one once: the scheduler writes dispatched_status through UpdateTaskLastRun

@@ -1207,9 +1207,9 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 			//     never RemoteMigrate, and creates no migration_jobs rows at
 			//     all — which also means neither guard above would cover it.
 			//     Pointing DRS at a remote target needs both.
-			//  6. PUT /api/v1/tasks/:upid (manage:task) — no status='running'
-			//     guard at all, but it writes the request body rather than
-			//     vendor text, so there is nothing there to scrub.
+			//  6. PUT /api/v1/tasks/:upid (manage:task) — it writes only a
+			//     running task Nexara recorded, from the request body rather
+			//     than vendor text, so there is nothing there to scrub.
 			//  7. executeBothMigration's SUCCESS write, 12 lines below its
 			//     failure sibling in 4 — a literal "OK".
 			//  8. abandonTaskRow, added by the same change as this comment —

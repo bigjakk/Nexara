@@ -193,7 +193,8 @@ type Querier interface {
 	// on the node it ran on while it ran, as every job did before its log was
 	// read, and a real crash of another guest on that node in the window is
 	// hidden by it; up to when its log was read, though, not to its finished_at,
-	// which PUT /api/v1/tasks/:upid lets a caller set to any time. Not read at
+	// which PUT /api/v1/tasks/:upid could set to any time before this release —
+	// such rows remain. Not read at
 	// all — its log gone, the read refused, a task Proxmox has no log for — it
 	// explains nothing, as nothing would without the job: the side this list
 	// errs on. A change on a listed node that a job with no mark yet might
@@ -598,8 +599,9 @@ type Querier interface {
 	// task log and the orchestrator's own (scrubbed) audit row still give. On
 	// 'failed' rather than "not completed": every writer of Proxmox's text stores
 	// 'failed' for a failure (classifyTaskExit, the orchestrator), while a raw
-	// 'stopped' row — only PUT /api/v1/tasks/:upid writes one, from its request
-	// body — needs its exit text to say whether it succeeded.
+	// 'stopped' row — only PUT /api/v1/tasks/:upid could write one, from its
+	// request body, before this release; such rows remain — needs its exit text to
+	// say whether it succeeded.
 	//
 	// The same sweep drops the guest status changes a task explained
 	// (ClassifyGuestStatusChanges): nothing reads them once classified — the task
@@ -2127,7 +2129,8 @@ type Querier interface {
 	// when the collector saw the job finish, or ingested it finished already,
 	// which for a job that ran while Nexara was down is once Nexara is back, so
 	// it gets its full time from then rather than none. Not finished_at, which
-	// PUT /api/v1/tasks/:upid lets a caller set to any time. Past it, a job on a
+	// PUT /api/v1/tasks/:upid could set to any time before this release — such
+	// rows remain. Past it, a job on a
 	// listed node is read one last time and recorded with whatever its log gave
 	// (last_try); one whose node is not listed this pass is marked unread.
 	//
@@ -2365,9 +2368,10 @@ type Querier interface {
 	// (classifyTaskExit in internal/collector, which applies proxmox.TaskSucceeded:
 	// '' / 'OK' / 'WARNINGS: N' are 'completed'), not a second reading of
 	// exit_status. Only 'completed' and 'failed' settle a run. Nothing else
-	// finalizes a task any other way: 'stopped', or an empty status, comes only
-	// from a hand-made PUT /api/v1/tasks/:upid, and a row whose task holds one
-	// stays dispatched until the schedule's next run replaces it.
+	// finalizes a task any other way: 'stopped', or an empty status, came only
+	// from a hand-made PUT /api/v1/tasks/:upid, which could write one before this
+	// release — such rows remain — and a row whose task holds one stays
+	// dispatched until the schedule's next run replaces it.
 	//
 	// The three last_status values are parameters so that the Go side names each
 	// one once: the scheduler writes dispatched_status through UpdateTaskLastRun

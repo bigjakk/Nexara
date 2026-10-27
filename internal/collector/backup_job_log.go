@@ -519,8 +519,9 @@ func (s *Syncer) backupLogTimedOut(upid string) bool {
 // the nodes this pass listed the tasks of (syncTasks), and records which
 // guests each backed up. A log with no TASK line yet is final only once
 // Proxmox calls the task stopped (finishStoppedLog): task_history can call a
-// task done that Proxmox is still writing — PUT /api/v1/tasks/:upid takes any
-// status. A read that fails is tried again next pass, and so is one that runs
+// task done that Proxmox is still writing — PUT /api/v1/tasks/:upid could set
+// any status before this release, and such rows remain. A read that fails is
+// tried again next pass, and so is one that runs
 // out its own time, until backupLogMaxTimeouts; one Proxmox refuses is
 // recorded as it stands; and anything is recorded on its last try, a day on —
 // except a read the pass's own time cut off, which is no fault of the job's:
@@ -603,8 +604,8 @@ func (s *Syncer) readBackupJobLogs(ctx context.Context, client ProxmoxClient, cl
 // list rather than taking a pass's read every pass.
 func (s *Syncer) recordBackupJobLog(ctx context.Context, cluster db.Cluster, job db.ListUnreadBackupJobsRow, l *backupJobLog, final bool, verdict string) {
 	// finished_at may narrow the window the guests' times are held in, never
-	// widen or invert it: PUT /api/v1/tasks/:upid writes it, and these rows
-	// are kept for good.
+	// widen or invert it: PUT /api/v1/tasks/:upid could write it before this
+	// release, such rows remain, and these are kept for good.
 	jobStart, jobEnd := job.StartedAt, time.Now()
 	if f := job.FinishedAt; f.Valid && !f.Time.Before(jobStart) && f.Time.Before(jobEnd) {
 		jobEnd = f.Time

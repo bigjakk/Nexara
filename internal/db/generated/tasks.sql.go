@@ -136,8 +136,9 @@ ON CONFLICT (upid) DO NOTHING
 // task log and the orchestrator's own (scrubbed) audit row still give. On
 // 'failed' rather than "not completed": every writer of Proxmox's text stores
 // 'failed' for a failure (classifyTaskExit, the orchestrator), while a raw
-// 'stopped' row — only PUT /api/v1/tasks/:upid writes one, from its request
-// body — needs its exit text to say whether it succeeded.
+// 'stopped' row — only PUT /api/v1/tasks/:upid could write one, from its
+// request body, before this release; such rows remain — needs its exit text to
+// say whether it succeeded.
 //
 // The same sweep drops the guest status changes a task explained
 // (ClassifyGuestStatusChanges): nothing reads them once classified — the task
