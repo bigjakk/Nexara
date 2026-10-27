@@ -34,6 +34,9 @@ VALUES (sqlc.arg('cluster_id'), sqlc.arg('resource_type'), sqlc.arg('resource_id
 -- cephcreateosd UPID names the device), so an OSD that appeared is also
 -- explained by an osd_create on its host.
 --
+-- The observer's rows (observed_by = 'observer') are not classified here: it
+-- decides them itself, with rules per kind of object.
+--
 -- "Settled" is the caller's settled_before: a change seen more recently stays
 -- unclassified, and hidden, until the collector has had time to ingest the
 -- Proxmox task that may explain it. A change on a node waits for that node's
@@ -56,6 +59,7 @@ SET explained = EXISTS (
 )
 WHERE c.cluster_id = sqlc.arg('cluster_id')
   AND c.explained IS NULL
+  AND c.observed_by <> 'observer'
   AND c.observed_at < sqlc.arg('settled_before')::timestamptz
   AND (c.node = ''
        OR c.node = ANY(sqlc.arg('listed_nodes')::text[])

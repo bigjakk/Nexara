@@ -255,6 +255,17 @@ func TestClusterObjectChanges(t *testing.T) {
 	}
 	exec("age the guest change", `UPDATE cluster_object_changes SET observed_at = $2
 		WHERE cluster_id = $1 AND resource_type = 'vm'`, objChangesCluster, ago(10))
+	guestChange := func() string {
+		var e pgtype.Bool
+		if err := pool.QueryRow(ctx, `SELECT explained FROM cluster_object_changes
+			WHERE cluster_id = $1 AND resource_type = 'vm'`, objChangesCluster).Scan(&e); err != nil {
+			t.Fatalf("read the guest change: %v", err)
+		}
+		if !e.Valid {
+			return "undecided"
+		}
+		return "decided"
+	}
 
 	classify := func(settledBefore time.Time) int64 {
 		t.Helper()
@@ -351,6 +362,13 @@ func TestClusterObjectChanges(t *testing.T) {
 		t.Errorf("list for one object = %+v (err %v), want OSD 10 alone", one, err)
 	}
 
+	// The observer decides its own rows: the classification leaves this one
+	// undecided, and the read shows it once the observer has said false.
+	if got := guestChange(); got != "undecided" {
+		t.Errorf("the observer's row after the classification passes is %s, want undecided", got)
+	}
+	exec("the observer decides", `UPDATE cluster_object_changes SET explained = false
+		WHERE cluster_id = $1 AND resource_type = 'vm'`, objChangesCluster)
 	guests, err := q.ListClusterObjectChanges(ctx, gen.ListClusterObjectChangesParams{
 		ClusterID: objChangesCluster, ResourceTypes: []string{"vm"}, RowLimit: 50,
 	})
