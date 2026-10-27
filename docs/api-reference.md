@@ -2056,7 +2056,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | DELETE | `/rbac/roles/:id` | Delete role |
 | GET | `/rbac/permissions` | List all permissions |
 | GET | `/rbac/users/:user_id/roles` | List user's roles |
-| POST | `/rbac/users/:user_id/roles` | Assign role to user |
+| POST | `/rbac/users/:user_id/roles` | Assign role to user. With `scope_type: "cluster"`, `scope_id` must name an existing cluster, or the answer is `400`; the assignment is deleted with that cluster |
 | DELETE | `/rbac/users/:user_id/roles/:id` | Revoke role from user |
 | GET | `/rbac/me/permissions` | List current user's permissions |
 

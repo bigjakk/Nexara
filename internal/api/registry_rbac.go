@@ -172,7 +172,8 @@ func registerRBACEndpoints(reg *Registry, h *handlers.RBACHandler) {
 		Method: fiber.MethodPost,
 		Path:   rbacScope + "/users/:user_id/roles",
 		Description: "Assign a role to a user, instance-wide or on one cluster. A cluster-scoped " +
-			"assignment needs scope_id; the system account cannot be assigned roles.",
+			"assignment needs scope_id, which must name an existing cluster (400 otherwise); it is deleted " +
+			"with that cluster. The system account cannot be assigned roles.",
 		Group:       "Roles & Permissions",
 		Permissions: roleManage(),
 		Parameters:  assignUserRoleParams(),
@@ -297,7 +298,7 @@ func assignUserRoleParams() apischema.Properties {
 			Optional:    true,
 			Format:      "uuid",
 			Typetext:    "<uuid>",
-			Description: "Cluster the grant applies to. Required when scope_type is \"cluster\", and meaningless otherwise.",
+			Description: "Cluster the grant applies to, an existing one. Required when scope_type is \"cluster\", and meaningless otherwise.",
 		},
 	}
 }

@@ -7,7 +7,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -382,6 +384,14 @@ func (h *RBACHandler) ListUserRoles(c fiber.Ctx, p *apischema.Params) error {
 	return RespondItems(c, resp)
 }
 
+// errScopeClusterMissing is the refusal of a cluster-scoped assignment whose
+// scope_id names no cluster, and scopeClusterKey the constraint (000123) that
+// refuses it in the database.
+const (
+	errScopeClusterMissing = "scope_id must name an existing cluster"
+	scopeClusterKey        = "user_roles_scope_id_fkey"
+)
+
 // AssignUserRole handles POST /api/v1/rbac/users/:user_id/roles.
 func (h *RBACHandler) AssignUserRole(c fiber.Ctx, p *apischema.Params) error {
 	userID, err := parseParamUUID(p.String("user_id"))
@@ -411,6 +421,16 @@ func (h *RBACHandler) AssignUserRole(c fiber.Ctx, p *apischema.Params) error {
 		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "scope_id is required for cluster scope")
 		}
+		// An assignment on a cluster that does not exist could never be removed with
+		// its cluster, and would grant whatever a removed cluster left readable. The
+		// foreign key on user_roles.scope_id refuses it too; this answers it as the
+		// caller's mistake, and the insert below answers the race the same way.
+		if _, lookupErr := h.queries.GetCluster(c.Context(), sid); lookupErr != nil {
+			if errors.Is(lookupErr, pgx.ErrNoRows) {
+				return fiber.NewError(fiber.StatusBadRequest, errScopeClusterMissing)
+			}
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to assign role")
+		}
 		scopeID = pgtype.UUID{Bytes: sid, Valid: true}
 	}
 
@@ -423,6 +443,11 @@ func (h *RBACHandler) AssignUserRole(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		if isDuplicateKeyError(err) {
 			return fiber.NewError(fiber.StatusConflict, "Role already assigned with this scope")
+		}
+		// The cluster was removed between the lookup above and the insert.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation && pgErr.ConstraintName == scopeClusterKey {
+			return fiber.NewError(fiber.StatusBadRequest, errScopeClusterMissing)
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to assign role")
 	}
