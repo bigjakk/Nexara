@@ -273,13 +273,13 @@ SELECT p.entry_id, p.kind, p.cluster_id, p.occurred_at, p.source, p.action, p.re
        '{}'::text[]                                           AS fields,
        COALESCE(u.email, '')::text                            AS user_email,
        COALESCE(u.display_name, '')::text                     AS user_display_name,
-       COALESCE(gb.status, th.status, ar.status, '')::text               AS task_status,
-       COALESCE(gb.exit_status, th.exit_status, ar.exit_status, '')::text AS task_exit_status,
-       COALESCE(th.description, ar.description, '')::text                AS task_description,
-       COALESCE(th.task_type, ar.task_type, '')::text                    AS task_type,
-       COALESCE(th.node, ar.node, '')::text                              AS task_node,
+       COALESCE(gb.status, ar.status, th.status, '')::text               AS task_status,
+       COALESCE(gb.exit_status, ar.exit_status, th.exit_status, '')::text AS task_exit_status,
+       COALESCE(ar.description, th.description, '')::text                AS task_description,
+       COALESCE(ar.task_type, th.task_type, '')::text                    AS task_type,
+       COALESCE(ar.node, th.node, '')::text                              AS task_node,
        th.progress                                                       AS task_progress,
-       COALESCE(th.finished_at, ar.finished_at)                          AS task_finished_at,
+       COALESCE(ar.finished_at, th.finished_at)                          AS task_finished_at,
        gb.finished_at                                                    AS backup_finished_at,
        COALESCE(gb.log_start, 0)::int                                    AS log_start,
        COALESCE(gb.log_end, 0)::int                                      AS log_end
@@ -509,7 +509,10 @@ type ListHistoryRow struct {
 // details, task outcome and user: a guest with ten thousand entries carries
 // ten thousand jsonb blobs through the sort otherwise. A backup entry's
 // outcome, end and log lines are the guest's own, from guest_backups; the
-// job's own task row, joined like any other, gives the rest. total is
+// job's own task row, joined like any other, gives the rest. A task's
+// outcome is the archive's before task_history's, as its cutoff is
+// (ListGuestLifecycleEvents): what the collector settled before the prune
+// moved it, not a row filed under its UPID since. total is
 // count(*) OVER the filtered set, computed before LIMIT — the Items and the
 // Total come from one query and so cannot be counted under different filters.
 func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]ListHistoryRow, error) {

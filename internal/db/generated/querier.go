@@ -1860,7 +1860,10 @@ type Querier interface {
 	// details, task outcome and user: a guest with ten thousand entries carries
 	// ten thousand jsonb blobs through the sort otherwise. A backup entry's
 	// outcome, end and log lines are the guest's own, from guest_backups; the
-	// job's own task row, joined like any other, gives the rest. total is
+	// job's own task row, joined like any other, gives the rest. A task's
+	// outcome is the archive's before task_history's, as its cutoff is
+	// (ListGuestLifecycleEvents): what the collector settled before the prune
+	// moved it, not a row filed under its UPID since. total is
 	// count(*) OVER the filtered set, computed before LIMIT — the Items and the
 	// Total come from one query and so cannot be counted under different filters.
 	ListHistory(ctx context.Context, arg ListHistoryParams) ([]ListHistoryRow, error)

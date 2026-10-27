@@ -478,6 +478,16 @@ func TestGuestHistory(t *testing.T) {
 	}); err != nil || len(created) != 1 || created[0].TaskStatus != "completed" {
 		t.Errorf("an archived create under a planted verdict: %+v (%v), want the archive's completed", created, err)
 	}
+	// …and so is the outcome the timeline shows.
+	p150, err := handlers.GuestHistory().ListParams(historyClusterID, handlers.HistorySelection{
+		Guests: []handlers.HistoryGuest{{VMID: 150}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p150.RowLimit = 50
+	if rows, err := q.ListHistory(ctx, p150); err != nil || len(rows) != 1 || rows[0].TaskStatus != "completed" {
+		t.Errorf("the timeline's outcome of an archived create under a planted verdict: %+v (%v), want completed", rows, err)
+	}
 	// POST /api/v1/tasks refuses a UPID on record: in an audit row of the
 	// cluster, or in the archive — not one only another cluster's rows name.
 	for upid, want := range map[string]bool{archivedCreate: true, historyUPID(45, "qmcreate", "151"): false,
