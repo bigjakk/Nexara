@@ -399,8 +399,9 @@ func TestObserverKinds(t *testing.T) {
 		{kind: "firewall_ipset_entry",
 			base: answers{"/cluster/firewall/ipset": `[{"name":"blocked","digest":"s1"}]`,
 				"/cluster/firewall/ipset/blocked": `[{"cidr":"192.0.2.0/24","digest":"e1"}]`},
-			edit: answers{"/cluster/firewall/ipset/blocked": `[{"cidr":"192.0.2.0/24","nomatch":1}]`},
-			want: "changed firewall_ipset_entry/blocked/192.0.2.0/24 [nomatch]", value: `"1"`},
+			noise: answers{"/cluster/firewall/ipset/blocked": `[{"cidr":"192.0.2.0/24","digest":"e2","errors":{"cidr":"x"}}]`},
+			edit:  answers{"/cluster/firewall/ipset/blocked": `[{"cidr":"192.0.2.0/24","nomatch":1}]`},
+			want:  "changed firewall_ipset_entry/blocked/192.0.2.0/24 [nomatch]", value: `"1"`},
 		{kind: "firewall_security_group_rule",
 			base: answers{"/cluster/firewall/groups": `[{"group":"web","digest":"g1"}]`,
 				"/cluster/firewall/groups/web": `[{"pos":0,"type":"in","action":"ACCEPT","dport":"443"}]`},
@@ -415,10 +416,13 @@ func TestObserverKinds(t *testing.T) {
 				`"tokens":[{"tokenid":"token01","expire":0,"privsep":1,"comment":"ci"}]}]`},
 			want: "changed pve_token/user01@pve!token01 [comment]", value: `"ci"`},
 		{kind: "pve_role",
-			base:  answers{"/access/roles": `[{"roleid":"Auditors","privs":"Sys.Audit,VM.Audit","special":0}]`},
-			noise: answers{"/access/roles": `[{"roleid":"Auditors","privs":"VM.Audit,Sys.Audit","special":0}]`},
-			edit:  answers{"/access/roles": `[{"roleid":"Auditors","privs":"VM.Audit,Sys.Audit,Datastore.Audit","special":0}]`},
-			want:  "changed pve_role/Auditors [privs]", value: "Datastore"},
+			base: answers{"/access/roles": `[{"roleid":"Auditors","privs":"Sys.Audit,VM.Audit","special":0},` +
+				`{"roleid":"PVEAuditor","privs":"Sys.Audit","special":1}]`},
+			noise: answers{"/access/roles": `[{"roleid":"Auditors","privs":"VM.Audit,Sys.Audit","special":0},` +
+				`{"roleid":"PVEAuditor","privs":"Sys.Audit,VM.Audit","special":1}]`},
+			edit: answers{"/access/roles": `[{"roleid":"Auditors","privs":"VM.Audit,Sys.Audit,Datastore.Audit","special":0},` +
+				`{"roleid":"PVEAuditor","privs":"Sys.Audit,VM.Audit","special":1}]`},
+			want: "changed pve_role/Auditors [privs]", value: "Datastore"},
 		{kind: "pve_acl",
 			base: answers{"/access/acl": `[{"path":"/vms/100","type":"user","ugid":"user01@pve","roleid":"PVEVMUser","propagate":1}]`},
 			edit: answers{"/access/acl": `[{"path":"/vms/100","type":"user","ugid":"user01@pve","roleid":"PVEVMUser","propagate":1},` +

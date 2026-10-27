@@ -96,7 +96,7 @@ var observeClusterKinds = []observeKind{
 	{kind: "firewall_security_group", read: readFirewallGroups},
 	{kind: "pve_user", read: readAccessUsers},
 	{kind: "pve_group", read: accessKind("pve_group", "groups", "groupid", accessGroupSpec)},
-	{kind: "pve_role", read: accessKind("pve_role", "roles", "roleid", accessRoleSpec)},
+	{kind: "pve_role", read: readAccessRoles},
 	{kind: "pve_acl", read: readAccessACL},
 	{kind: "acme_account", read: listKind("acme_account", proxmox.ObserveACMEAccounts(), "name", acmeAccountSpec)},
 	{kind: "acme_plugin", read: listKind("acme_plugin", proxmox.ObserveACMEPlugins(), "plugin", acmePluginSpec)},
@@ -169,6 +169,9 @@ var (
 	// pve-firewall Firewall.pm parse_alias: ipversion is derived from the cidr.
 	firewallAliasSpec = newFieldSpec([]string{"ipversion"}, nil)
 	firewallPlainSpec = newFieldSpec(nil, nil)
+	// An IP set entry's errors is the check of the moment against the aliases
+	// it names (pve-firewall IPSet.pm), derived like a rule's.
+	firewallIPSetEntrySpec = newFieldSpec([]string{"errors"}, nil)
 	// pve-access-control API2/User.pm index: realm-type is derived from
 	// domains.cfg, totp-locked and tfa-locked-until are TFA lockout state
 	// (priv/tfa.cfg), and tokens are their own objects. A user's groups, and
@@ -178,7 +181,7 @@ var (
 	accessTokenSpec = newFieldSpec(nil, nil)
 	accessGroupSpec = newFieldSpec(nil, nil).withMembers("users")
 	// API2/Role.pm index: special is derived (a built-in role).
-	accessRoleSpec  = newFieldSpec([]string{"special"}, []string{"privs"})
+	accessRoleSpec   = newFieldSpec([]string{"special"}, []string{"privs"})
 	acmeAccountSpec  = newFieldSpec(nil, nil)
 	metricServerSpec = newFieldSpec(nil, nil)
 	nodeConfigSpec   = newFieldSpec(nil, nil)
@@ -208,7 +211,7 @@ var observeKindSchemas = map[string]string{
 	"firewall_rule":                "rules: list; " + firewallRuleSpec.digest(),
 	"firewall_alias":               firewallAliasSpec.digest(),
 	"firewall_ipset":               firewallPlainSpec.digest(),
-	"firewall_ipset_entry":         firewallPlainSpec.digest(),
+	"firewall_ipset_entry":         firewallIPSetEntrySpec.digest(),
 	"firewall_security_group":      firewallPlainSpec.digest(),
 	"firewall_security_group_rule": "rules: list; " + firewallRuleSpec.digest(),
 	"pve_user":                     accessUserSpec.digest(),
@@ -688,7 +691,7 @@ func readFirewallIPSets(ctx context.Context, p *observePass) ([]kindReading, rea
 				continue
 			}
 			entries.objects = append(entries.objects, observedObject{
-				id: key, resourceType: "firewall_ipset_entry", resourceID: key, fields: firewallPlainSpec.canonicalFields(e),
+				id: key, resourceType: "firewall_ipset_entry", resourceID: key, fields: firewallIPSetEntrySpec.canonicalFields(e),
 			})
 		}
 	}
@@ -770,6 +773,29 @@ func readAccessUsers(ctx context.Context, p *observePass) ([]kindReading, readOu
 		}
 	}
 	return []kindReading{users, tokens}, readOK
+}
+
+// readAccessRoles reads the roles Proxmox does not build in: a built-in role
+// (special 1) changes its privileges only with a pve-access-control upgrade,
+// which is no edit (AccessControl.pm's predefined roles).
+func readAccessRoles(ctx context.Context, p *observePass) ([]kindReading, readOutcome) {
+	target, _ := proxmox.ObserveAccess("roles")
+	items, out := p.readList(ctx, target)
+	if out != readOK {
+		return nil, out
+	}
+	reading := kindReading{kind: "pve_role"}
+	for _, item := range items {
+		id := stringField(item, "roleid")
+		if special, _ := canonicalValue(item["special"]); special == "1" || !auditkey.ValidID(id) {
+			continue
+		}
+		fields, members := accessRoleSpec.split(item)
+		reading.objects = append(reading.objects, observedObject{
+			id: id, resourceType: "pve_role", resourceID: id, fields: fields, members: members,
+		})
+	}
+	return []kindReading{reading}, readOK
 }
 
 // accessKind reads one access list keyed by idField.
