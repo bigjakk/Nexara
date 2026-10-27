@@ -2,6 +2,8 @@ package migration
 
 import (
 	"testing"
+
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 func TestStatusConstants(t *testing.T) {
@@ -43,21 +45,6 @@ func TestVMTypeConstants(t *testing.T) {
 	}
 }
 
-func TestVolumeStorage(t *testing.T) {
-	cases := map[string]string{
-		"local-lvm:vm-100-disk-0,size=32G": "local-lvm",
-		"ceph:vm-101-disk-0":               "ceph",
-		"test:subvol-102-disk-0,size=8G":   "test",
-		"":                                 "",
-		"none,media=cdrom":                 "",
-	}
-	for in, want := range cases {
-		if got := volumeStorage(in); got != want {
-			t.Errorf("volumeStorage(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestResolveDiskTargets(t *testing.T) {
 	disks := []movableDisk{
 		{Key: "scsi0", Storage: "local-lvm"},
@@ -70,6 +57,13 @@ func TestResolveDiskTargets(t *testing.T) {
 		moves := resolveDiskTargets(disks, map[string]string{}, "ceph")
 		if len(moves) != 1 || moves[0].Disk != "scsi0" || moves[0].Target != "ceph" {
 			t.Fatalf("got %+v, want only scsi0 -> ceph", moves)
+		}
+		// The storage the disk leaves rides along to the audit row.
+		if moves[0].Source != "local-lvm" {
+			t.Errorf("source = %q, want local-lvm", moves[0].Source)
+		}
+		if got := diskMoveSpec(db.MigrationJob{}, moves[0]).FromStorage; got != "local-lvm" {
+			t.Errorf("the spec's FromStorage = %q, want local-lvm", got)
 		}
 	})
 

@@ -1,6 +1,11 @@
 package proxmox
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+)
 
 // ImageFormat values a disk move may request. An empty format means "let the
 // target storage decide", which is the only valid choice for block-backed
@@ -49,6 +54,11 @@ type DiskMoveSpec struct {
 	DeleteSource bool
 	// BWLimitKiB throttles the copy in KiB/s. 0 means the storage default.
 	BWLimitKiB int
+	// FromStorage is the storage the volume lives on now. It is never sent to
+	// Proxmox, which does not ask: it is for the audit row, so that a storage's
+	// History can show the disks that left it as well as the ones that arrived.
+	// Empty when it is not known.
+	FromStorage string
 }
 
 // Validate checks the spec against what Proxmox will accept. It deliberately
@@ -109,11 +119,66 @@ func (s DiskMoveSpec) Summary() string {
 // the same keys. These land in audit details, which every Viewer can read —
 // storage names and formats only, no credentials.
 func (s DiskMoveSpec) AuditExtra() map[string]any {
-	return map[string]any{
+	extra := map[string]any{
 		"disk":        s.Disk,
 		"storage":     s.TargetStorage,
 		"format":      s.Format,
 		"delete":      s.DeleteSource,
 		"bwlimit_kib": s.BWLimitKiB,
 	}
+	if s.FromStorage != "" {
+		extra["from_storage"] = s.FromStorage
+	}
+	return extra
+}
+
+// VolumeStorage returns the storage id of a disk or volume config value such as
+// "local-lvm:vm-100-disk-0,size=32G" — "local-lvm" — or "" when the value names
+// none: a bind mount ("/srv/data,mp=/data"), an empty drive ("none,media=cdrom").
+func VolumeStorage(val string) string {
+	first, _, _ := strings.Cut(val, ",")
+	storage, _, found := strings.Cut(first, ":")
+	if !found {
+		return ""
+	}
+	return storage
+}
+
+// diskStorageLookupTimeout bounds the config read VMDiskStorage and
+// CTVolumeStorage make before a move, so that a node slow to answer cannot hold
+// the move up behind a read whose only use is an audit row.
+const diskStorageLookupTimeout = 5 * time.Second
+
+// VMDiskStorage returns the storage a VM's disk lives on right now, as its
+// config says, or "" when that cannot be told: the VM has no such key, the key
+// holds no volume, or the config could not be read. Failing to read is not an
+// error to the caller on purpose. This feeds the audit row of a move, and a
+// move does not fail for it.
+func (c *Client) VMDiskStorage(ctx context.Context, node string, vmid int, disk string) string {
+	ctx, cancel := context.WithTimeout(ctx, diskStorageLookupTimeout)
+	defer cancel()
+	config, err := c.GetVMConfig(ctx, node, vmid)
+	if err != nil {
+		return ""
+	}
+	return configVolumeStorage(config, disk)
+}
+
+// CTVolumeStorage is VMDiskStorage for a container's volume ("rootfs", "mp0").
+func (c *Client) CTVolumeStorage(ctx context.Context, node string, vmid int, volume string) string {
+	ctx, cancel := context.WithTimeout(ctx, diskStorageLookupTimeout)
+	defer cancel()
+	config, err := c.GetCTConfig(ctx, node, vmid)
+	if err != nil {
+		return ""
+	}
+	return configVolumeStorage(config, volume)
+}
+
+func configVolumeStorage(config VMConfig, key string) string {
+	val, ok := config[key].(string)
+	if !ok {
+		return ""
+	}
+	return VolumeStorage(val)
 }

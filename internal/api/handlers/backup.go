@@ -1727,6 +1727,8 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
+	// storage is where the restored disks went and from_storage the PVE storage
+	// the archive was read from, so each storage's History can show the restore.
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
 		Node:         req.TargetNode,
@@ -1744,6 +1746,7 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 			"target_node":         req.TargetNode,
 			"vmid":                req.VMID,
 			"storage":             req.Storage,
+			"from_storage":        pveStorageName,
 			"force":               req.Force,
 			"unique":              req.Unique,
 			"start_after_restore": req.StartAfterRestore,

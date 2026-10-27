@@ -802,6 +802,9 @@ func (h *ContainerHandler) MoveVolume(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	// Where the volume is now, for the audit row (see MoveDisk).
+	spec.FromStorage = pxClient.CTVolumeStorage(c.Context(), node.Name, int(ct.Vmid), spec.Disk)
+
 	upid, err := pxClient.MoveCTVolume(c.Context(), node.Name, int(ct.Vmid), spec.CTParams())
 	if err != nil {
 		return mapProxmoxError(err)

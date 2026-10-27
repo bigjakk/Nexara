@@ -769,6 +769,11 @@ func (h *VMHandler) MoveDisk(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
+	// Where the disk is now, for the audit row. Read before the move, which
+	// changes the answer; best effort, bounded at a few seconds and never a
+	// reason to refuse the move.
+	spec.FromStorage = pxClient.VMDiskStorage(c.Context(), node.Name, int(vm.Vmid), spec.Disk)
+
 	upid, err := pxClient.MoveDisk(c.Context(), node.Name, int(vm.Vmid), spec.VMParams())
 	if err != nil {
 		return mapProxmoxError(err)

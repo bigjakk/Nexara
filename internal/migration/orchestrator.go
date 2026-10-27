@@ -722,19 +722,8 @@ type movableDisk struct {
 type diskMove struct {
 	Disk   string
 	Target string
-}
-
-// volumeStorage extracts the storage name from a disk/volume config value such
-// as "local-lvm:vm-100-disk-0,size=32G" -> "local-lvm".
-func volumeStorage(val string) string {
-	first := val
-	if i := strings.IndexByte(first, ','); i >= 0 {
-		first = first[:i]
-	}
-	if i := strings.IndexByte(first, ':'); i >= 0 {
-		return first[:i]
-	}
-	return ""
+	// Source is the storage the disk lives on before the move.
+	Source string
 }
 
 // diskMoveSpec turns one planned move into the same spec the per-disk API
@@ -749,6 +738,7 @@ func diskMoveSpec(job db.MigrationJob, m diskMove) proxmox.DiskMoveSpec {
 		Format:        job.DiskFormat,
 		DeleteSource:  job.DeleteSource,
 		BWLimitKiB:    int(job.BwlimitKib),
+		FromStorage:   m.Source,
 	}
 }
 
@@ -769,7 +759,7 @@ func resolveDiskTargets(disks []movableDisk, storageMap map[string]string, fallb
 		if target == "" || target == d.Storage {
 			continue
 		}
-		moves = append(moves, diskMove{Disk: d.Key, Target: target})
+		moves = append(moves, diskMove{Disk: d.Key, Target: target, Source: d.Storage})
 	}
 	return moves
 }
@@ -816,7 +806,7 @@ func discoverDisks(ctx context.Context, client *proxmox.Client, node string, vmi
 			if !strings.Contains(s, ":") {
 				continue
 			}
-			disks = append(disks, movableDisk{Key: key, Storage: volumeStorage(s)})
+			disks = append(disks, movableDisk{Key: key, Storage: proxmox.VolumeStorage(s)})
 		}
 	} else {
 		// LXC volumes: rootfs, mp0, mp1, etc.
@@ -829,7 +819,7 @@ func discoverDisks(ctx context.Context, client *proxmox.Client, node string, vmi
 				if !strings.Contains(s, ":") {
 					continue
 				}
-				disks = append(disks, movableDisk{Key: key, Storage: volumeStorage(s)})
+				disks = append(disks, movableDisk{Key: key, Storage: proxmox.VolumeStorage(s)})
 			}
 		}
 	}
@@ -1356,8 +1346,8 @@ func (o *Orchestrator) recordDiskMove(ctx context.Context, mc *migrationContext,
 	}
 
 	o.auditLog(ctx, mc, "disk_move_running",
-		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"disk":%q,"target_storage":%q,"format":%q,"delete_source":%t,"bwlimit_kib":%d,"disk_index":%d,"disk_total":%d}`,
-			upid, mc.job.Vmid, typeLabel, node, spec.Disk, spec.TargetStorage, spec.Format, spec.DeleteSource, spec.BWLimitKiB, index, total))
+		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"disk":%q,"target_storage":%q,"from_storage":%q,"format":%q,"delete_source":%t,"bwlimit_kib":%d,"disk_index":%d,"disk_total":%d}`,
+			upid, mc.job.Vmid, typeLabel, node, spec.Disk, spec.TargetStorage, spec.FromStorage, spec.Format, spec.DeleteSource, spec.BWLimitKiB, index, total))
 
 	description := fmt.Sprintf("Move disk %s (%s, %d/%d)", spec.Summary(), mc.vmLabel, index, total)
 	_, _ = o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
