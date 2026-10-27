@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -488,6 +489,15 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		}
 		if o.DetailKey == "" && (o.ResourceID != "" || o.InList) {
 			return db.ListHistoryParams{}, fmt.Errorf("history object %+v has a resource id or list but no details key", o)
+		}
+		// A guest's own rows are the guests family's, which the caller's view
+		// permission (viewableGuests) and the guest's cutoff hold to: a guest
+		// typed object reads them past both unless it is one of the guests.
+		if o.DetailKey == "" && (o.ResourceType == "vm" || o.ResourceType == "container") {
+			vmid, parseErr := strconv.ParseInt(o.Value, 10, 32)
+			if parseErr != nil || !slices.Contains(params.Vmids, int32(vmid)) {
+				return db.ListHistoryParams{}, fmt.Errorf("history object %+v is a guest the selection does not hold", o)
+			}
 		}
 		params.ObjectTypes = append(params.ObjectTypes, o.ResourceType)
 		params.ObjectResourceIds = append(params.ObjectResourceIds, o.ResourceID)
