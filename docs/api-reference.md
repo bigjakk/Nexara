@@ -1959,15 +1959,27 @@ Nexara keeps one inventory row per node for a shared storage and drops and
 re-creates it when a node is unseen for a few minutes, so an entry that
 recorded that row's id stopped resolving at an arbitrary later time.
 
-Entries written before v1.17.0 keep the identity they were written with, since
-an audit entry is never rewritten: a storage's `update`, `delete`, `upload`,
-`delete_content`, `pull_oci`, `download_url` and `download_appliance` entries are
-keyed by an inventory row id that may no longer resolve (`details.storage` names
-the storage on all but `update` and `delete`); a PBS datastore action is
-`resource_type` `backup`, keyed by the datastore's name, a snapshot's
-`store/type/id` or a job's id, with no server; and a backup job's
-`backup_job_created` entry is keyed `backup-job`; an upload, copy or download
-run outside Nexara is `storage`, keyed by the node's name or the file's.
+Nexara never changes who did something, when, or what an entry records. The
+v1.17.0 upgrade did re-file the entries it could resolve under the identity
+above: a new `resource_type` and `resource_id` (and, for a volume deleted outside
+Nexara, the action `delete_content`). An entry so re-filed keeps the type, id and
+action it was written with in `details.rekeyed_from`; where the object's name
+left `resource_id` it also gains the `details` keys a new entry carries
+(`storage`, `datastore`, `resource_name`, `job_id`). These were re-filed:
+
+- a storage entry keyed by an inventory row id that still existed, or whose
+  `details.storage` named the storage;
+- a virtio-win config saved with no storage chosen;
+- an upload, copy or download run outside Nexara (to the node), and a volume
+  deleted outside it (to the storage);
+- a PBS datastore action or job trigger whose cluster and datastore (or job)
+  picked exactly one PBS server that already existed.
+
+What stays unresolved keeps the identity it was written with: a storage's
+`update` or `delete` entry whose inventory row id no longer exists and whose
+details name no storage; a PBS action that no single server can claim; and a
+backup job's `backup_job_created` entry, keyed `backup-job`. Entries from before
+the upgrade also have no `from_storage` on a disk move or a restore.
 
 #### Export
 
