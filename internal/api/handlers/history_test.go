@@ -296,8 +296,10 @@ func TestHistoryListDropsGuestsTheCallerCannotOpen(t *testing.T) {
 	cluster := uuid.New()
 	dbtx := &auditRowsDBTX{rows: []any{db.ListGuestTypesRow{Vmid: 100, Type: "qemu"}, db.ListGuestTypesRow{Vmid: 101, Type: "lxc"}}}
 	kind := HistoryKind{Name: "folder", Categories: []string{"other"}, Default: "other",
+		ObjectTypes: []string{"vm", "container"},
 		Select: func(context.Context, HistoryRequest) (HistorySelection, error) {
-			return HistorySelection{Guests: []HistoryGuest{{VMID: 100}, {VMID: 101}}}, nil
+			return HistorySelection{Guests: []HistoryGuest{{VMID: 100}, {VMID: 101}},
+				Objects: []HistoryObject{{ResourceType: "vm", Value: "100"}, {ResourceType: "container", Value: "101"}}}, nil
 		}}
 	props := historyTestProps("cluster_id", apischema.StdOption("cluster-id"))
 	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
@@ -317,15 +319,24 @@ func TestHistoryListDropsGuestsTheCallerCannotOpen(t *testing.T) {
 		if !strings.Contains(call.sql, "name: ListHistory ") {
 			continue
 		}
+		// …and the container's own object goes with it, rather than the
+		// History failing over it.
+		saw := 0
 		for _, arg := range call.args {
 			if vmids, ok := arg.([]int32); ok {
+				saw++
 				if !slices.Equal(vmids, []int32{100}) {
 					t.Errorf("ListHistory was asked for guests %v, want only the VM [100]", vmids)
 				}
-				return
+			}
+			if values, ok := arg.([]string); ok && slices.Contains(values, "101") {
+				t.Errorf("ListHistory was asked for the dropped container's object: %v", values)
 			}
 		}
-		t.Fatalf("ListHistory ran with no guest list among %d arguments", len(call.args))
+		if saw != 1 {
+			t.Fatalf("ListHistory ran with %d guest lists among %d arguments, want one", saw, len(call.args))
+		}
+		return
 	}
 	t.Fatalf("ListHistory never ran: %d queries", len(dbtx.calls))
 }

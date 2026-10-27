@@ -689,6 +689,12 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to read the history")
 		}
 		sel.Guests = viewableGuests(sel.Guests, types, statusTypes)
+		// A guest dropped here takes its own objects with it, rather than
+		// leaving them for ListParams to refuse the whole History over.
+		sel.Objects = slices.DeleteFunc(sel.Objects, func(o HistoryObject) bool {
+			return o.DetailKey == "" && (o.ResourceType == "vm" || o.ResourceType == "container") &&
+				!slices.ContainsFunc(sel.Guests, func(g HistoryGuest) bool { return strconv.Itoa(int(g.VMID)) == o.Value })
+		})
 	}
 	params, err := r.kind.ListParams(clusterID, sel)
 	if err != nil {
