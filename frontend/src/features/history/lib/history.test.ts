@@ -138,6 +138,38 @@ describe("an observed change", () => {
   });
 });
 
+// A run is its row's event and how many times, from its first to its last,
+// with the last one's error.
+describe("a run", () => {
+  const kind = historyKind(
+    "probe",
+    { categories: { other: "Other" } },
+    { icons: {} },
+  );
+  const t = i18n.getFixedT("en", "history-probe");
+  const run = (count: number) =>
+    entry({
+      kind: "run",
+      action: "sync_failed",
+      run_count: count,
+      last_seen_at: "2026-03-02T10:05:00Z",
+      occurred_at: "2026-03-02T10:10:00Z",
+      details: '{"error":"connection refused"}',
+    });
+  it.each([
+    [1, "Sync Failed, once"],
+    [412, "Sync Failed, 412 times"],
+  ])("of %d reads %s", (count, want) => {
+    expect(historyEventLabel(kind, run(count), t)).toBe(want);
+  });
+  it("is placed between its first row and its last", () => {
+    const at = (iso: string) => formatTimestampShort(Date.parse(iso));
+    expect(historySummary(kind, run(2), t)).toBe(
+      `Between ${at("2026-03-02T10:05:00Z")} and ${at("2026-03-02T10:10:00Z")} · Error: connection refused`,
+    );
+  });
+});
+
 describe("historyExclusions", () => {
   const kind = { routine: ["updates", "hardware"] };
   it.each([

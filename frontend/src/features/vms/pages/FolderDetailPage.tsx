@@ -39,7 +39,7 @@ import {
 } from "@/features/vms/components/FolderSummaryTab";
 import { FolderHistoryTab } from "@/features/vms/components/FolderHistoryTab";
 import { FolderAlertsTab } from "@/features/vms/components/FolderAlertsTab";
-import type { HistoryGuestLink } from "@/features/history/types/history";
+import { guestLinksByVmid } from "@/features/vms/lib/guest-links";
 
 export function FolderDetailPage() {
   const { clusterId = "", folderId = "" } = useParams();
@@ -111,16 +111,10 @@ export function FolderDetailPage() {
 
   // Every guest of the cluster, not only the folder's: its History also names
   // the guests that have left it.
-  const guestLinks = useMemo(() => {
-    const map = new Map<number, HistoryGuestLink>();
-    for (const vm of vms ?? []) {
-      map.set(vm.vmid, {
-        name: vm.name,
-        path: `/inventory/${vm.type === "lxc" ? "lxc" : "qemu"}/${clusterId}/${vm.id}`,
-      });
-    }
-    return map;
-  }, [vms, clusterId]);
+  const guestLinks = useMemo(
+    () => guestLinksByVmid(vms, clusterId),
+    [vms, clusterId],
+  );
 
   const folderNames = useMemo(
     () => new Map((folderData?.folders ?? []).map((f) => [f.id, f.name])),

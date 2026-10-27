@@ -41,6 +41,7 @@ import { ClusterAccessTab } from "../components/ClusterAccessTab";
 import { ClusterReplicationTab } from "../components/ClusterReplicationTab";
 import { ClusterACMETab } from "../components/ClusterACMETab";
 import { ClusterMetricServersTab } from "../components/ClusterMetricServersTab";
+import { ClusterHistoryTab } from "../components/ClusterHistoryTab";
 
 export function ClusterDetailPage() {
   const { clusterId } = useParams<{ clusterId: string }>();
@@ -81,7 +82,11 @@ export function ClusterDetailPage() {
   );
   const nodes = nodesQuery.data ?? [];
 
-  const { canConsole } = usePermissions();
+  const { canConsole, hasPermission } = usePermissions();
+  // History is read from the audit log, and its rows open Proxmox task logs:
+  // without both grants the tab would be a table of refusals.
+  const canHistory =
+    hasPermission("view", "audit") && hasPermission("view", "task");
 
   const clusterMetrics = useClusterMetrics(clusterId ?? "");
 
@@ -189,6 +194,7 @@ export function ClusterDetailPage() {
               <TabsTrigger value="metric-servers">Metrics</TabsTrigger>
               <TabsTrigger value="drs">DRS</TabsTrigger>
               <TabsTrigger value="guest-tools">Guest Tools</TabsTrigger>
+              {canHistory && <TabsTrigger value="history">History</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="overview" className="space-y-4">
@@ -311,6 +317,12 @@ export function ClusterDetailPage() {
             <TabsContent value="ceph">
               <ClusterCephTab clusterId={clusterId ?? ""} />
             </TabsContent>
+
+            {canHistory && (
+              <TabsContent value="history">
+                <ClusterHistoryTab clusterId={clusterId ?? ""} />
+              </TabsContent>
+            )}
 
             <TabsContent value="networks">
               <ClusterNetworksTab clusterId={clusterId ?? ""} />

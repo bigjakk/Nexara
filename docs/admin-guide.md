@@ -1458,6 +1458,14 @@ A folder's page has a **History** tab, where its **Tasks** tab was: what happene
 - A guest that leaves the folder, and a subfolder that is moved out or deleted, show as leaving **for moves made from this release on**. Earlier ones were recorded without the folder they left, so the folder cannot find them.
 - The tab needs `view:audit` and `view:task`. Through the API (`GET /api/v1/clusters/{cluster_id}/vm-folders/{folder_id}/history`, `unassigned` for Discovered) it needs `view:audit` and `view:vm_folder`, and a guest is listed only to a caller who may open it — `view:vm` for a VM, `view:container` for a container — as on the guest's own History.
 
+### A Cluster's History
+
+A cluster's page has a **History** tab: everything that happened in the cluster, newest first — every action Nexara recorded in it, done in Nexara or in Proxmox, tasks with no audit entry, and its guests' status changes no task explains and parts of backup jobs — filterable by type (guests, nodes, storage, backup, Ceph, HA, network, access, certificates, replication, DRS, sync, options). A guest's row reads as it does on the guest's own History, and a **Guest** column links it. It opens on the last 7 days.
+
+- **Sync failures** are one entry per burst: an unreachable cluster files one every few minutes, so the History shows "Sync failed, 412 times" between the first and the last, with the last one's error. A quarter of an hour without one ends the run.
+- An unfiltered read holds the newest 2,000 entries of each source; past that the count reads **More than 2,000 entries**, and narrowing the time or the type reaches older ones. A filtered read is not capped.
+- The tab needs `view:audit` and `view:task`. Through the API (`GET /api/v1/clusters/{cluster_id}/history`) it needs `view:audit` and `view:cluster`; a guest's entries need `view:vm` or `view:container` by its type, as on the guest's own History.
+
 ### Changes Made Directly in Proxmox
 
 An edit made in the Proxmox GUI, its API or a node's shell often runs no task — a VM's memory, a container's options, a pool's members, a storage definition, a node's DNS — and so leaves no audit entry. Every `OBJECT_OBSERVE_INTERVAL` (default `5m`, between `1m` and `1h`; `0` stops these reads, though a Proxmox Backup Server's job edits are still recorded, as below) Nexara reads each cluster's objects and compares them with what it read last, and a History shows what changed as **Changed in Proxmox**, **Created in Proxmox** or **Removed in Proxmox**, between the two reads.

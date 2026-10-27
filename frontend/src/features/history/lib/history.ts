@@ -187,6 +187,12 @@ export function historyEventLabel(
   const own = kind.eventLabel?.(entry, t);
   if (own !== undefined) return own;
   if (entry.kind === "observed") return observedLabel(entry, t);
+  if (entry.kind === "run") {
+    return t("history:run.label", {
+      event: lookup(t, "actions", entry.action) ?? formatAction(entry.action),
+      count: entry.run_count ?? 0,
+    });
+  }
   if (entry.kind === "audit" && entry.source === "nexara") {
     return lookup(t, "actions", entry.action) ?? formatAction(entry.action);
   }
@@ -219,6 +225,13 @@ export function historySummary(
   if (own !== undefined) return own;
   if (entry.kind === "observed") return observedWindow(entry, t);
   const d = parseDetails(entry.details);
+  // A run: between its first row and its last, and the last one's error.
+  if (entry.kind === "run") {
+    const error = str(d, "error");
+    return [observedWindow(entry, t), error && `Error: ${error}`]
+      .filter(Boolean)
+      .join(" · ");
+  }
   const parts: string[] = [];
   const from = str(d, "source_node");
   const to = str(d, "target_node") || str(d, "target");

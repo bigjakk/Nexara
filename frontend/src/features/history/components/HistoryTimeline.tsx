@@ -341,7 +341,11 @@ export function HistoryTimeline({
   });
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE));
+  // A capped read's total is one past the cap: more than it, of which the
+  // cap's worth can be paged.
+  const capped = kind.rowCap !== undefined && total === kind.rowCap + 1;
+  const reachable = capped ? (kind.rowCap ?? 0) : total;
+  const totalPages = Math.max(1, Math.ceil(reachable / HISTORY_PAGE_SIZE));
 
   // Snap back when a refetch shrinks the result below the current page, but
   // not while the fetch is failing — see TaskHistoryTable for why.
@@ -502,7 +506,13 @@ export function HistoryTimeline({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-muted-foreground">
-              {error ? "" : shared("entries", { count: total })}
+              {error
+                ? ""
+                : capped
+                  ? shared("entriesMore", {
+                      count: (kind.rowCap ?? 0).toLocaleString(),
+                    })
+                  : shared("entries", { count: total })}
             </p>
             {totalPages > 1 && (
               <div className="flex items-center gap-2">

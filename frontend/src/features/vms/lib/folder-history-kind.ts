@@ -8,26 +8,14 @@
  */
 import { FolderOpen } from "lucide-react";
 import type { TFunction } from "i18next";
-import i18n from "@/lib/i18n";
 import strings from "@/locales/en/history-folder.json";
 import { parseDetails } from "@/components/layout/task-status";
-import {
-  historyEventLabel,
-  historyKind,
-  historyNamespace,
-  historyNote,
-  historySummary,
-} from "@/features/history/lib/history";
+import { historyKind } from "@/features/history/lib/history";
 import type {
   HistoryEntry,
   HistoryKind,
 } from "@/features/history/types/history";
-import { guestHistoryKind } from "./guest-history-kind";
-
-/** A guest's row, named as on its own page. */
-function guestT(): TFunction {
-  return i18n.getFixedT(null, historyNamespace(guestHistoryKind));
-}
+import { guestHistoryKind, guestRowNaming } from "./guest-history-kind";
 
 function isFolderRow(entry: HistoryEntry): boolean {
   return (
@@ -98,14 +86,10 @@ export function folderHistoryKind(
     eventLabel: (entry, t) =>
       isFolderRow(entry)
         ? eventLabel(entry, t)
-        : historyEventLabel(guestHistoryKind, entry, guestT()),
+        : guestRowNaming.eventLabel(entry),
     summary: (entry, t) =>
-      isFolderRow(entry)
-        ? summary(entry, t)
-        : historySummary(guestHistoryKind, entry, guestT()),
+      isFolderRow(entry) ? summary(entry, t) : guestRowNaming.summary(entry),
     note: (entry) =>
-      isFolderRow(entry)
-        ? undefined
-        : historyNote(guestHistoryKind, entry, guestT()),
+      isFolderRow(entry) ? undefined : guestRowNaming.note(entry),
   });
 }

@@ -34,9 +34,10 @@ export interface HistoryEntry {
    * a guest's part of a backup job — a vzdump of several guests, whose
    * Proxmox task names none of them — or an observed change: one Nexara saw
    * in Proxmox that nothing on record explains (action added, removed or
-   * changed).
+   * changed) — or a run: a burst of one repeated row, a cluster's sync
+   * failures, as one entry.
    */
-  kind: "audit" | "task" | "status" | "backup" | "observed";
+  kind: "audit" | "task" | "status" | "backup" | "observed" | "run";
   occurred_at: string;
   /** One of the kind's categories, derived on the server before the page is
    *  cut so the type filter applies to the whole history. */
@@ -76,6 +77,9 @@ export interface HistoryEntry {
    *  part, by Proxmox's line numbers. */
   log_start?: number;
   log_end?: number;
+  /** A run: how many rows it is, from last_seen_at (its first) to
+   *  occurred_at (its last); details are the last one's. */
+  run_count?: number;
 }
 
 /** The time filter: how far back to look, or "" for the whole history. */
@@ -107,6 +111,9 @@ export interface HistoryKind {
   /** Categories of routine checks (a node's daily updates), left out until
    *  the reader asks for them. */
   routine?: readonly string[];
+  /** The server's cap on an unfiltered read (HistoryKind.RowCap): a total of
+   *  rowCap + 1 means more than rowCap, of which rowCap can be paged. */
+  rowCap?: number;
 }
 
 /** A guest an entry names, as the page showing the History links it. */

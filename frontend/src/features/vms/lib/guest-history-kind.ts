@@ -19,8 +19,15 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { TFunction } from "i18next";
+import i18n from "@/lib/i18n";
 import strings from "@/locales/en/history-guest.json";
-import { historyKind } from "@/features/history/lib/history";
+import {
+  historyEventLabel,
+  historyKind,
+  historyNamespace,
+  historyNote,
+  historySummary,
+} from "@/features/history/lib/history";
 import type { HistoryEntry } from "@/features/history/types/history";
 
 type GuestHistoryCategory = keyof typeof strings.categories;
@@ -102,3 +109,20 @@ export const guestHistoryKind = historyKind("guest", strings, {
   summary,
   note,
 });
+
+/** The guest kind's strings, for a guest's row on another kind's History. */
+function guestT(): TFunction {
+  return i18n.getFixedT(null, historyNamespace(guestHistoryKind));
+}
+
+/**
+ * A guest's row as it reads on the guest's own History, for a kind that shows
+ * guests' rows among its own — a folder's, a cluster's.
+ */
+export const guestRowNaming = {
+  eventLabel: (entry: HistoryEntry) =>
+    historyEventLabel(guestHistoryKind, entry, guestT()),
+  summary: (entry: HistoryEntry) =>
+    historySummary(guestHistoryKind, entry, guestT()),
+  note: (entry: HistoryEntry) => historyNote(guestHistoryKind, entry, guestT()),
+};

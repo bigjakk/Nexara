@@ -50,4 +50,29 @@ describe("HistoryTimeline", () => {
     const last = new URL(String(mockedPage.mock.calls.at(-1)?.[0]), "http://x");
     expect(last.searchParams.get("exclude_category")).toBeNull();
   });
+
+  // A capped read's total is one past the cap: "more than" it, and only the
+  // cap's worth of pages.
+  it("reads a total one past the kind's cap as more than it", async () => {
+    mockedPage.mockReset();
+    mockedPage.mockResolvedValue({ items: [], total: 101 });
+    const kind = historyKind(
+      "probe",
+      { categories: { other: "Other" } },
+      { icons: {}, rowCap: 100 },
+    );
+    renderWithProviders(
+      <HistoryTimeline
+        kind={kind}
+        target={{
+          clusterId: "c1",
+          path: (query) => apiPath`/api/v1/probes/p1/history?${query}`,
+        }}
+      />,
+    );
+    expect(
+      await screen.findByText(/^More than 100 entries/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+  });
 });

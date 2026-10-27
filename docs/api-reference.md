@@ -736,6 +736,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | POST | `/clusters` | Add a cluster, with a pasted API token or a Nexara-minted one |
 | GET | `/clusters` | List all clusters |
 | GET | `/clusters/:id` | Get cluster details |
+| GET | `/clusters/:id/history` | A cluster's History: every action recorded in it, tasks with no audit entry, its guests' status changes and backup parts, newest first; sync failures as runs. An unfiltered read holds the newest 2,000 entries of each source (total stops at 2,001). Needs `view:audit` and `view:cluster`; a guest's entries `view:vm` or `view:container` |
 | PUT | `/clusters/:id` | Update cluster |
 | DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential). The cluster's audit entries are kept, still carrying its id and labelled `<name> (removed)`; only a holder of global `view:audit` reads them (see [Audit Log](#audit-log)). The role assignments scoped to the cluster are deleted with it, in the same statement, and the permission cache of the users who held them is cleared |
 | POST | `/clusters/fetch-fingerprint` | Fetch TLS fingerprint from a Proxmox URL |
