@@ -258,6 +258,16 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			forbidden:   "secret",
 		},
 		{
+			// A change seen in Proxmox is explained by an update that names its field.
+			name: "a replication update names the fields it set", method: fiber.MethodPut, path: replicationScope + "/:job_id",
+			target: "/replication/100-0", body: `{"schedule":"*/5","disable":1}`,
+			bind: func(q *db.Queries) Handler {
+				return handlers.NewReplicationHandler(q, haCreateEncKey, nil).UpdateJob
+			},
+			wantType: "replication", wantID: "100-0", wantAction: "updated",
+			wantDetails: map[string]any{"fields": []any{"schedule", "disable"}},
+		},
+		{
 			// schedule_now spawns no task and answers with nothing; tracking that
 			// would leave a task row with no UPID "running" for a day.
 			name: "a replication trigger Proxmox answers with no task is an audit row only", method: fiber.MethodPost, path: replicationScope + "/:job_id/trigger",

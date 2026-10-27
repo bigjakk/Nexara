@@ -129,7 +129,18 @@ func (h *ReplicationHandler) UpdateJob(c fiber.Ctx, p *apischema.Params) error {
 	if err := pxClient.UpdateReplicationJob(c.Context(), jobID, req); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"id": jobID})
+	// The fields the edit set, by name: the job's History explains a change seen in
+	// Proxmox by an update that names the field (ClassifyClusterObjectChanges).
+	fields := make([]string, 0, 4)
+	for _, set := range []struct {
+		name string
+		is   bool
+	}{{"schedule", req.Schedule != ""}, {"rate", req.Rate != ""}, {"comment", req.Comment != ""}, {"disable", req.Disable != nil}} {
+		if set.is {
+			fields = append(fields, set.name)
+		}
+	}
+	details, _ := json.Marshal(map[string]any{"id": jobID, "fields": fields})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "replication", jobID, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindReplicationChange, "replication", jobID, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
