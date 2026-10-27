@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -17,9 +18,10 @@ var (
 
 // An SDN apply reloads every node's network as a task of its own, which the
 // collector ingests as a node network apply. LinkSDNApplyNodeTasks annotates the
-// ones run by root@pam from the apply's start to its end with the apply's UPID,
-// once the apply has ended (or a quarter of an hour has passed), and changes
-// nothing else: not the row's action, another user's reload, another cluster's.
+// ones run by root@pam from the apply's start (its UPID's, not its audit row's) to
+// its end with the apply's UPID, once the apply has ended (or a quarter of an hour
+// has passed), and changes nothing else: not the row's action, another user's
+// reload, another cluster's.
 func TestLinkSDNApplyNodeTasks(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -48,8 +50,8 @@ func TestLinkSDNApplyNodeTasks(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	ago := func(d time.Duration) time.Time { return now.Add(-d) }
-	upid := func(n int, taskType, id, user string) string {
-		return "UPID:pve-01:0000A1B2:0000000" + string(rune('0'+n)) + ":6A8CE407:" + taskType + ":" + id + ":" + user + ":"
+	upid := func(n int, taskType, id, user string, start time.Time) string {
+		return fmt.Sprintf("UPID:pve-01:0000A1B2:%08X:%08X:%s:%s:%s:", n, start.Unix(), taskType, id, user)
 	}
 	apply := func(cluster uuid.UUID, source, upid string, at time.Time) {
 		t.Helper()
@@ -67,35 +69,43 @@ func TestLinkSDNApplyNodeTasks(t *testing.T) {
 		id := uuid.New()
 		exec("reload", `INSERT INTO audit_log (id, cluster_id, resource_type, resource_id, action, details, source, created_at)
 			VALUES ($1, $2, 'network', 'pve-02', 'network_applied', jsonb_build_object('upid', $3::text, 'task_type', 'srvreload'), $4, $5)`,
-			id, cluster, upid(9, "srvreload", "networking", user), source, at)
+			id, cluster, upid(9, "srvreload", "networking", user, at), source, at)
 		return id
 	}
 
-	// Nexara's apply, tracked and finished 9 minutes ago; one ingested from Proxmox
-	// whose task row is still running, and young; one whose row is gone and which
-	// started 40 minutes ago, so is taken to have ended after a quarter of an hour.
+	// Nexara's apply, tracked and finished 9 minutes ago, its audit row filed two
+	// seconds after Proxmox started it; one ingested from Proxmox whose task row is
+	// still running, and young; one whose row is gone and which started 40 minutes
+	// ago, so is taken to have ended after a quarter of an hour.
 	finished := ago(9 * time.Minute)
-	up1, up2, up3 := upid(1, "reloadnetworkall", "", "user@pam!token01"), upid(2, "reloadnetworkall", "", "root@pam"), upid(3, "reloadnetworkall", "", "root@pam")
+	started1 := ago(10*time.Minute + 2*time.Second)
+	up1 := upid(1, "reloadnetworkall", "", "user@pam!token01", started1)
+	up2 := upid(2, "reloadnetworkall", "", "root@pam", ago(2*time.Minute))
+	up3 := upid(3, "reloadnetworkall", "", "root@pam", ago(40*time.Minute))
 	apply(sdnLinkCluster, "nexara", up1, ago(10*time.Minute))
-	task(sdnLinkCluster, up1, ago(10*time.Minute), &finished)
+	task(sdnLinkCluster, up1, started1, &finished)
 	apply(sdnLinkCluster, "proxmox", up2, ago(2*time.Minute))
 	task(sdnLinkCluster, up2, ago(2*time.Minute), nil)
 	apply(sdnLinkCluster, "proxmox", up3, ago(40*time.Minute))
 
-	// An apply on another cluster is not this cluster's parent.
 	// Two applies at once: a reload in both belongs to the one that started last.
-	outer, inner := upid(6, "reloadnetworkall", "", "root@pam"), upid(7, "reloadnetworkall", "", "root@pam")
+	outer, inner := upid(6, "reloadnetworkall", "", "root@pam", ago(23*time.Minute)), upid(7, "reloadnetworkall", "", "root@pam", ago(21*time.Minute))
 	outerEnd, innerEnd := ago(13*time.Minute), ago(18*time.Minute)
 	apply(sdnLinkCluster, "proxmox", outer, ago(23*time.Minute))
 	task(sdnLinkCluster, outer, ago(23*time.Minute), &outerEnd)
 	apply(sdnLinkCluster, "proxmox", inner, ago(21*time.Minute))
 	task(sdnLinkCluster, inner, ago(21*time.Minute), &innerEnd)
 
-	// An apply from before the window, and a reload inside it from before the window's start.
-	apply(sdnLinkCluster, "proxmox", upid(5, "reloadnetworkall", "", "root@pam"), ago(65*time.Minute))
+	// An apply whose UPID carries no starttime is dated by its audit row.
+	noStart := "UPID:pve-01:0000A1B2:00000008:zzzzzzzz:reloadnetworkall::root@pam:"
+	apply(sdnLinkCluster, "proxmox", noStart, ago(35*time.Minute))
+
+	// An apply from before the window, and another cluster's during it.
+	apply(sdnLinkCluster, "proxmox", upid(5, "reloadnetworkall", "", "root@pam", ago(65*time.Minute)), ago(65*time.Minute))
 	otherEnd := ago(49 * time.Minute)
-	apply(sdnLinkOther, "proxmox", upid(4, "reloadnetworkall", "", "root@pam"), ago(50*time.Minute))
-	task(sdnLinkOther, upid(4, "reloadnetworkall", "", "root@pam"), ago(50*time.Minute), &otherEnd)
+	otherUPID := upid(4, "reloadnetworkall", "", "root@pam", ago(50*time.Minute))
+	apply(sdnLinkOther, "proxmox", otherUPID, ago(50*time.Minute))
+	task(sdnLinkOther, otherUPID, ago(50*time.Minute), &otherEnd)
 
 	cases := []struct {
 		name       string
@@ -105,12 +115,15 @@ func TestLinkSDNApplyNodeTasks(t *testing.T) {
 		{"root@pam's reload during the finished apply", reload(sdnLinkCluster, "proxmox", "root@pam", ago(10*time.Minute-30*time.Second)), up1},
 		{"one just after its end, inside the slack", reload(sdnLinkCluster, "proxmox", "root@pam", finished.Add(5*time.Second)), up1},
 		{"one a minute after its end", reload(sdnLinkCluster, "proxmox", "root@pam", finished.Add(time.Minute)), ""},
-		{"one just before it started", reload(sdnLinkCluster, "proxmox", "root@pam", ago(10*time.Minute+5*time.Second)), ""},
+		{"one just before it started", reload(sdnLinkCluster, "proxmox", "root@pam", started1.Add(-3*time.Second)), ""},
+		{"the first node's, dated before the audit row but after the UPID's start", reload(sdnLinkCluster, "proxmox", "root@pam", started1.Add(time.Second)), up1},
+		{"one two seconds before its start, inside the slack", reload(sdnLinkCluster, "proxmox", "root@pam", started1.Add(-2*time.Second)), up1},
 		{"a person's, in the same minute", reload(sdnLinkCluster, "proxmox", "admin@pam", ago(10*time.Minute-20*time.Second)), ""},
 		{"a token's, in the same minute", reload(sdnLinkCluster, "proxmox", "root@pam!tool", ago(10*time.Minute-20*time.Second)), ""},
 		{"Nexara's own network apply", reload(sdnLinkCluster, "nexara", "root@pam", ago(10*time.Minute-20*time.Second)), ""},
 		{"during an apply that is still running", reload(sdnLinkCluster, "proxmox", "root@pam", ago(time.Minute)), ""},
 		{"during an apply whose row is gone, past a quarter of an hour", reload(sdnLinkCluster, "proxmox", "root@pam", ago(38*time.Minute)), up3},
+		{"an apply whose UPID has no starttime is dated by its row", reload(sdnLinkCluster, "proxmox", "root@pam", ago(34*time.Minute)), noStart},
 		{"a reload in two overlapping applies", reload(sdnLinkCluster, "proxmox", "root@pam", ago(20*time.Minute)), inner},
 		{"a reload from before the window, though an apply covers it", reload(sdnLinkCluster, "proxmox", "root@pam", ago(61*time.Minute)), ""},
 		{"another cluster's reload during this cluster's apply", reload(sdnLinkOther, "proxmox", "root@pam", ago(10*time.Minute-30*time.Second)), ""},
@@ -124,8 +137,8 @@ func TestLinkSDNApplyNodeTasks(t *testing.T) {
 		}
 		return n
 	}
-	if n := link(); n != 4 {
-		t.Errorf("first pass annotated %d rows, want 4", n)
+	if n := link(); n != 7 {
+		t.Errorf("first pass annotated %d rows, want 7", n)
 	}
 	for _, tc := range cases {
 		var action string

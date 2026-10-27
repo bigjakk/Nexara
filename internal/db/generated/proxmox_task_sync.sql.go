@@ -25,22 +25,28 @@ func (q *Queries) GetTaskSyncState(ctx context.Context, clusterID uuid.UUID) (in
 
 const linkSDNApplyNodeTasks = `-- name: LinkSDNApplyNodeTasks :execrows
 WITH applies AS (
-    SELECT a.details->>'upid' AS upid,
-           a.created_at AS started_at,
-           COALESCE(th.finished_at, a.created_at + interval '15 minutes') AS ended_at
-    FROM audit_log a
-    LEFT JOIN task_history th ON th.cluster_id = a.cluster_id AND th.upid = a.details->>'upid'
-    WHERE a.cluster_id = $1::uuid
-      AND a.resource_type = 'sdn'
-      AND a.resource_id = 'cluster'
-      AND a.action = 'sdn_applied'
-      AND a.details->>'upid' IS NOT NULL
-      AND a.created_at > $2::timestamptz - interval '15 minutes'
-      AND (th.finished_at IS NOT NULL OR a.created_at < now() - interval '15 minutes')
+    SELECT u.upid, u.started_at,
+           COALESCE(th.finished_at, u.started_at + interval '15 minutes') AS ended_at
+    FROM (
+        SELECT a.cluster_id, a.details->>'upid' AS upid,
+               COALESCE(
+                   CASE WHEN a.details->>'upid' ~ '^UPID:[^:]*:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}:'
+                        THEN to_timestamp(('x' || split_part(a.details->>'upid', ':', 5))::bit(32)::bigint) END,
+                   a.created_at) AS started_at
+        FROM audit_log a
+        WHERE a.cluster_id = $1::uuid
+          AND a.resource_type = 'sdn'
+          AND a.resource_id = 'cluster'
+          AND a.action = 'sdn_applied'
+          AND a.details->>'upid' IS NOT NULL
+          AND a.created_at > $2::timestamptz - interval '15 minutes'
+    ) u
+    LEFT JOIN task_history th ON th.cluster_id = u.cluster_id AND th.upid = u.upid
+    WHERE th.finished_at IS NOT NULL OR u.started_at < now() - interval '15 minutes'
 ), parents AS (
     SELECT DISTINCT ON (c.id) c.id, p.upid
     FROM audit_log c
-    JOIN applies p ON c.created_at >= p.started_at AND c.created_at <= p.ended_at + interval '10 seconds'
+    JOIN applies p ON c.created_at >= p.started_at - interval '2 seconds' AND c.created_at <= p.ended_at + interval '10 seconds'
     WHERE c.cluster_id = $1::uuid
       AND c.resource_type = 'network'
       AND c.action = 'network_applied'
@@ -75,8 +81,14 @@ type LinkSDNApplyNodeTasksParams struct {
 // apply. So a reload is linked only if the user in its UPID is root@pam and it
 // started within the apply's run — from its start (the apply starts them, a
 // reload cannot come first) to its end, with 10 seconds' slack for the nodes'
-// clocks. A reload by a person, or by a token, in the same minute is a network
-// apply of its own and stays one.
+// clocks at the end. A reload by a person, or by a token, in the same minute is a
+// network apply of its own and stays one.
+//
+// The start is the one in the apply's UPID (its starttime, whole seconds on the
+// node), with 2 seconds' slack. The audit row's own time is not it: Nexara files
+// its row after Proxmox has answered, and the first node's reload is dated from
+// the node's clock to the second, so it can come before the row. A UPID that does
+// not carry a starttime falls back to the audit row's time.
 //
 // When. Only once the apply's end is known (its task row is finished) or a
 // quarter of an hour has passed since it started, when the end is taken to be

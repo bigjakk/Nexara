@@ -1238,8 +1238,14 @@ type Querier interface {
 	// apply. So a reload is linked only if the user in its UPID is root@pam and it
 	// started within the apply's run — from its start (the apply starts them, a
 	// reload cannot come first) to its end, with 10 seconds' slack for the nodes'
-	// clocks. A reload by a person, or by a token, in the same minute is a network
-	// apply of its own and stays one.
+	// clocks at the end. A reload by a person, or by a token, in the same minute is a
+	// network apply of its own and stays one.
+	//
+	// The start is the one in the apply's UPID (its starttime, whole seconds on the
+	// node), with 2 seconds' slack. The audit row's own time is not it: Nexara files
+	// its row after Proxmox has answered, and the first node's reload is dated from
+	// the node's clock to the second, so it can come before the row. A UPID that does
+	// not carry a starttime falls back to the audit row's time.
 	//
 	// When. Only once the apply's end is known (its task row is finished) or a
 	// quarter of an hour has passed since it started, when the end is taken to be
