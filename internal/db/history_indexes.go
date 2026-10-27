@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,14 +20,25 @@ import (
 //
 // They are built here, after startup, rather than in migration 000117: see
 // that migration's header. Infrastructure DDL like EnsureSchema's, so it is
-// written out rather than generated. def is exactly what pg_get_indexdef
-// renders for the index this code builds: an index of the same name that is
-// anything else is not ours, and is left alone.
-var historyIndexes = []struct{ name, columns, def string }{
-	{"idx_audit_log_resource_created", "(resource_type, resource_id, created_at)",
-		"CREATE INDEX idx_audit_log_resource_created ON public.audit_log USING btree (resource_type, resource_id, created_at)"},
-	{"idx_audit_log_details", "USING gin (details jsonb_path_ops)",
-		"CREATE INDEX idx_audit_log_details ON public.audit_log USING gin (details jsonb_path_ops)"},
+// written out rather than generated. An index of one of these names is ours
+// when it has the access method, the key columns — as pg_get_indexdef renders
+// each — the operator classes ("" for the type's default) and the predicate
+// declared here: anything else is not ours, and is left alone. Not the whole
+// rendered definition, which a reloption or a later Postgres's rendering
+// changes without changing what the index serves.
+var historyIndexes = []historyIndex{
+	{name: "idx_audit_log_resource_created", columns: "(resource_type, resource_id, created_at)",
+		method: "btree", keys: []string{"resource_type", "resource_id", "created_at"}, opclasses: []string{"", "", ""}},
+	{name: "idx_audit_log_details", columns: "USING gin (details jsonb_path_ops)",
+		method: "gin", keys: []string{"details"}, opclasses: []string{"jsonb_path_ops"}},
+}
+
+// historyIndex is one of historyIndexes: columns is what CREATE INDEX builds
+// it from, and the rest is what an index of its name must be to be it.
+type historyIndex struct {
+	name, columns, method string
+	keys, opclasses       []string
+	predicate             string
 }
 
 // historyIndexLock is the session advisory lock one replica holds while it
@@ -36,6 +48,14 @@ const historyIndexLock int64 = 0x4E58484953544958 // ASCII "NXHISTIX"
 // historyIndexLockTimeout bounds each wait a concurrent build makes for older
 // transactions: behind one left idle in a transaction it would otherwise hold
 // its lock on audit_log indefinitely. The build fails instead, and is retried.
+// A timeout at the last of those waits, after the whole build, leaves the
+// index INVALID, which the next attempt drops and builds in full again.
+//
+// A build outlives the process that started it — Postgres runs it to its end
+// — so a migration that locks audit_log, started within minutes of a previous
+// start and during its build, waits for it. Accepted rather than given a lock
+// timeout in the migrations: a migration that times out leaves the database
+// dirty, which no start gets past without an operator.
 const historyIndexLockTimeout = "1min"
 
 // BuildHistoryIndexes runs EnsureHistoryIndexes until it succeeds, waiting
@@ -105,13 +125,23 @@ func EnsureHistoryIndexes(ctx context.Context, pool *pgxpool.Pool, logger *slog.
 	}
 	for _, ix := range historyIndexes {
 		var (
-			def   string
-			valid bool
+			found     historyIndex
+			valid     bool
+			predicate string
 		)
-		err := conn.QueryRow(ctx, `SELECT pg_get_indexdef(i.indexrelid), i.indisvalid FROM pg_index i
+		err := conn.QueryRow(ctx, `SELECT am.amname,
+				array(SELECT pg_get_indexdef(i.indexrelid, k, true) FROM generate_series(1, i.indnkeyatts) AS k ORDER BY k),
+				array(SELECT CASE WHEN o.opcdefault THEN '' ELSE o.opcname END
+				      FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS c(opclass, n)
+				      JOIN pg_opclass o ON o.oid = c.opclass ORDER BY c.n),
+				COALESCE(pg_get_expr(i.indpred, i.indrelid, true), ''), i.indisvalid
+			FROM pg_index i
 			JOIN pg_class c ON c.oid = i.indexrelid
+			JOIN pg_am am ON am.oid = c.relam
 			WHERE c.relname = $1 AND c.relnamespace = 'public'::regnamespace
-			  AND i.indrelid = 'public.audit_log'::regclass`, ix.name).Scan(&def, &valid)
+			  AND i.indrelid = 'public.audit_log'::regclass`, ix.name).
+			Scan(&found.method, &found.keys, &found.opclasses, &predicate, &valid)
+		found.predicate = predicate
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			var taken bool
@@ -124,8 +154,9 @@ func EnsureHistoryIndexes(ctx context.Context, pool *pgxpool.Pool, logger *slog.
 			}
 		case err != nil:
 			return fmt.Errorf("look up the index %s: %w", ix.name, err)
-		case def != ix.def:
-			return fmt.Errorf("public.%s is %q, not the History's %q; leaving it alone", ix.name, def, ix.def)
+		case !found.is(ix):
+			return fmt.Errorf("public.%s is %s %v %v %q, not the History's %s %v %v %q; leaving it alone", ix.name,
+				found.method, found.keys, found.opclasses, found.predicate, ix.method, ix.keys, ix.opclasses, ix.predicate)
 		case valid:
 			continue
 		default:
@@ -143,4 +174,11 @@ func EnsureHistoryIndexes(ctx context.Context, pool *pgxpool.Pool, logger *slog.
 		logger.Info("history indexes: built", "index", ix.name, "took", time.Since(start).Round(time.Millisecond))
 	}
 	return nil
+}
+
+// is reports whether an index found under ix's name is ix: the same access
+// method, key columns, operator classes and predicate.
+func (f historyIndex) is(ix historyIndex) bool {
+	return f.method == ix.method && slices.Equal(f.keys, ix.keys) && slices.Equal(f.opclasses, ix.opclasses) &&
+		f.predicate == ix.predicate
 }

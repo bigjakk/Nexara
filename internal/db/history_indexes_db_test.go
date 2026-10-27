@@ -13,9 +13,9 @@ import (
 
 // The History's audit indexes are built once, after startup: a replica that
 // finds the lock taken builds nothing, an INVALID leftover of an interrupted
-// build is dropped and built again, and an index of their name that is not
-// theirs is refused. Not parallel: it builds indexes on the schema the
-// package's DB tests share.
+// build is dropped and built again, an index of their name that is not theirs
+// is refused, and one that is, with a storage option of its own, is kept. Not
+// parallel: it builds indexes on the schema the package's DB tests share.
 func TestEnsureHistoryIndexes(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -40,15 +40,37 @@ func TestEnsureHistoryIndexes(t *testing.T) {
 	for _, ix := range historyIndexes {
 		run("DROP INDEX IF EXISTS " + ix.name)
 	}
-	// Not the History's index, under one of its names: refused, and left.
-	run(`CREATE INDEX idx_audit_log_resource_created ON audit_log (action)`)
-	if err := EnsureHistoryIndexes(ctx, pool, logger); err == nil || !strings.Contains(err.Error(), "leaving it alone") {
-		t.Fatalf("a look-alike index: %v, want it refused", err)
+	// Not the History's index, under one of its names — other columns, or
+	// the other operator class — refused, and left.
+	dropAll := func() {
+		for _, ix := range historyIndexes {
+			run("DROP INDEX IF EXISTS " + ix.name)
+		}
 	}
-	if def, _ := indexDef("idx_audit_log_resource_created"); !strings.Contains(def, "(action)") {
-		t.Fatalf("the look-alike was replaced: %q", def)
+	for name, lookAlike := range map[string]string{
+		"idx_audit_log_resource_created": "(resource_type, action, created_at)",
+		"idx_audit_log_details":          "USING gin (details)",
+	} {
+		dropAll()
+		run("CREATE INDEX " + name + " ON audit_log " + lookAlike)
+		if err := EnsureHistoryIndexes(ctx, pool, logger); err == nil || !strings.Contains(err.Error(), "leaving it alone") {
+			t.Fatalf("a look-alike %s: %v, want it refused", lookAlike, err)
+		}
+		if def, _ := indexDef(name); !strings.HasSuffix(def, strings.TrimPrefix(lookAlike, "USING gin ")) {
+			t.Fatalf("the look-alike %s was replaced: %q", lookAlike, def)
+		}
 	}
-	run("DROP INDEX idx_audit_log_resource_created")
+	dropAll()
+	// The History's index with a fill factor: what it serves is the same.
+	run(`CREATE INDEX idx_audit_log_resource_created ON audit_log (resource_type, resource_id, created_at)
+		WITH (fillfactor = 90)`)
+	if err := EnsureHistoryIndexes(ctx, pool, logger); err != nil {
+		t.Fatalf("the History's index with a fill factor: %v, want it kept", err)
+	}
+	if def, _ := indexDef("idx_audit_log_resource_created"); !strings.Contains(def, "fillfactor") {
+		t.Fatalf("the index with a fill factor was rebuilt: %q", def)
+	}
+	dropAll()
 	// What an interrupted concurrent build leaves: the History's index,
 	// INVALID. Marking it so takes a superuser, which the test database's
 	// owner is (as POSTGRES_USER is in CI).
@@ -79,10 +101,13 @@ func TestEnsureHistoryIndexes(t *testing.T) {
 	stop()
 	BuildHistoryIndexes(stopped, pool, logger)
 	for _, ix := range historyIndexes {
-		def, valid := indexDef(ix.name)
-		if !valid || !strings.Contains(def, strings.Trim(ix.columns, "()")) {
-			t.Errorf("%s: %q (valid %v), want a valid index on %s", ix.name, def, valid, ix.columns)
+		if def, valid := indexDef(ix.name); !valid {
+			t.Errorf("%s: %q, want it valid", ix.name, def)
 		}
+	}
+	// …and each is the History's own: a second run finds nothing to refuse.
+	if err := EnsureHistoryIndexes(ctx, pool, logger); err != nil {
+		t.Errorf("the indexes it built: %v", err)
 	}
 }
 
