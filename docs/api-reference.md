@@ -736,7 +736,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | GET | `/clusters` | List all clusters |
 | GET | `/clusters/:id` | Get cluster details |
 | PUT | `/clusters/:id` | Update cluster |
-| DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential). The cluster's audit entries are kept with no cluster, so only a holder of global `view:audit` reads them |
+| DELETE | `/clusters/:id` | Remove cluster. Requires `?confirm=<the cluster's current name>`, exactly: without it `400`; with any other value `400`, or the `409` (a rolling update is running) or `403` (revoking without global `manage:cluster`) that applies first; nothing is deleted or revoked (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential). The cluster's audit entries are kept with no cluster, so only a holder of global `view:audit` reads them; each gains `details.detached_cluster` (`id` and `name` of the removed cluster) |
 | POST | `/clusters/fetch-fingerprint` | Fetch TLS fingerprint from a Proxmox URL |
 
 #### Onboarding a cluster without a pre-made token
@@ -2008,6 +2008,11 @@ What stays unresolved keeps the identity it was written with: a storage's
 details name no storage; a PBS action that no single server can claim; and a
 backup job's `backup_job_created` entry, keyed `backup-job`. Entries from before
 the upgrade also have no `from_storage` on a disk move or a restore.
+
+An entry of a cluster that is later removed is kept, with no cluster, and gains
+`details.detached_cluster`, the removed cluster's `id` and `name`; nothing else
+about it changes, and the stamp is what tells it from the entries of another
+removed cluster that held a node of the same name.
 
 #### Export
 

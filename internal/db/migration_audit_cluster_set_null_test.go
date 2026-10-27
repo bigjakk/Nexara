@@ -2,8 +2,10 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -17,9 +19,9 @@ func auditClusterNullID(n int) uuid.UUID {
 
 // Removing a cluster used to delete every audit entry recorded against it
 // (audit_log.cluster_id was ON DELETE CASCADE). The migration makes the entry
-// outlive the cluster, detached from it, with everything else it recorded; the
-// first half of the test is what the cascade did, so a fixture that never
-// exercised it cannot pass for the second.
+// outlive the cluster, detached from it and stamped with which cluster it was
+// (details.detached_cluster); the first half of the test is what the cascade
+// did, so a fixture that never exercised it cannot pass for the second.
 func TestMigrationAuditClusterSetNull_EntriesOutliveTheirCluster(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -30,15 +32,17 @@ func TestMigrationAuditClusterSetNull_EntriesOutliveTheirCluster(t *testing.T) {
 		user      = auditClusterNullID(1)
 		clusterA  = auditClusterNullID(2)
 		clusterB  = auditClusterNullID(3)
+		clusterC  = auditClusterNullID(4) // added under B's name once B is gone
 		rowA      = auditClusterNullID(10)
 		rowB      = auditClusterNullID(11)
 		rowGlobal = auditClusterNullID(12)
+		rowC      = auditClusterNullID(14)
 	)
 	purge := func() {
 		pctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE id::text LIKE '12200000-0000-4000-8000-%'`)
-		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{clusterA, clusterB})
+		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{clusterA, clusterB, clusterC})
 		_, _ = pool.Exec(pctx, `DELETE FROM users WHERE id = $1`, user)
 	}
 	purge()
@@ -58,11 +62,18 @@ func TestMigrationAuditClusterSetNull_EntriesOutliveTheirCluster(t *testing.T) {
 			t.Fatalf("%s: %v", what, err)
 		}
 	}
-	exists := func(id uuid.UUID) (found bool, cluster *uuid.UUID, details string) {
+	// read returns what is stored of an entry: whether it exists, its cluster and its details.
+	read := func(id uuid.UUID) (found bool, cluster *uuid.UUID, details map[string]any) {
 		t.Helper()
-		err := pool.QueryRow(ctx, `SELECT cluster_id, details::text FROM audit_log WHERE id = $1`, id).Scan(&cluster, &details)
+		var raw []byte
+		err := pool.QueryRow(ctx, `SELECT cluster_id, details FROM audit_log WHERE id = $1`, id).Scan(&cluster, &raw)
 		if err != nil && err.Error() != "no rows in result set" {
 			t.Fatalf("read %s: %v", id, err)
+		}
+		if err == nil {
+			if err := json.Unmarshal(raw, &details); err != nil {
+				t.Fatalf("details of %s: %v", id, err)
+			}
 		}
 		return err == nil, cluster, details
 	}
@@ -75,30 +86,41 @@ func TestMigrationAuditClusterSetNull_EntriesOutliveTheirCluster(t *testing.T) {
 		}
 		return rule
 	}
+	triggers := func() int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_trigger
+			WHERE tgname = 'trg_clusters_stamp_audit_detached' AND tgrelid = 'clusters'::regclass`).Scan(&n); err != nil {
+			t.Fatalf("read the triggers: %v", err)
+		}
+		return n
+	}
+	addCluster := func(id uuid.UUID, name string) {
+		exec("cluster", `INSERT INTO clusters (id, name, api_url, token_id, token_secret_encrypted)
+			VALUES ($1, $2, 'https://cluster.invalid:8006', 'test@pam!t', 'x')`, id, name)
+	}
+	addEntry := func(id uuid.UUID, cluster any) {
+		exec("audit row", `INSERT INTO audit_log (id, cluster_id, user_id, resource_type, resource_id, action, details)
+			VALUES ($1, $2, $3, 'storage', 'store01', 'update', '{"storage":"store01"}')`, id, cluster, user)
+	}
 
 	exec("user", `INSERT INTO users (id, email, password_hash, display_name) VALUES ($1, 'migration-audit-cluster@example.invalid', 'x', 'Audit cluster')`, user)
-	for _, c := range []struct {
-		id   uuid.UUID
-		name string
-	}{{clusterA, "cluster01"}, {clusterB, "cluster02"}} {
-		exec("cluster", `INSERT INTO clusters (id, name, api_url, token_id, token_secret_encrypted)
-			VALUES ($1, $2, 'https://cluster.invalid:8006', 'test@pam!t', 'x')`, c.id, c.name)
-	}
-	for _, r := range []struct {
-		id      uuid.UUID
-		cluster any
-	}{{rowA, clusterA}, {rowB, clusterB}, {rowGlobal, nil}} {
-		exec("audit row", `INSERT INTO audit_log (id, cluster_id, user_id, resource_type, resource_id, action, details)
-			VALUES ($1, $2, $3, 'storage', 'store01', 'update', '{"storage":"store01"}')`, r.id, r.cluster, user)
-	}
+	addCluster(clusterA, "cluster01")
+	addCluster(clusterB, "cluster02")
+	addEntry(rowA, clusterA)
+	addEntry(rowB, clusterB)
+	addEntry(rowGlobal, nil)
 
 	// Before: removing the cluster removes its entries.
 	exec("remove cluster A", `DELETE FROM clusters WHERE id = $1`, clusterA)
-	if found, _, _ := exists(rowA); found {
+	if found, _, _ := read(rowA); found {
 		t.Fatal("the entry of a removed cluster survived at the schema before the migration: the fixture is not exercising the cascade")
 	}
 	if got := deleteRule(); got != "c" {
 		t.Fatalf("delete rule before the migration = %q, want c (cascade)", got)
+	}
+	if triggers() != 0 {
+		t.Fatal("the stamping trigger exists before the migration")
 	}
 
 	if err := m.Migrate(version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
@@ -107,30 +129,58 @@ func TestMigrationAuditClusterSetNull_EntriesOutliveTheirCluster(t *testing.T) {
 	if got := deleteRule(); got != "n" {
 		t.Errorf("delete rule after the migration = %q, want n (set null)", got)
 	}
+	if triggers() != 1 {
+		t.Error("the stamping trigger is missing after the migration")
+	}
 
-	// After: the entry stays, detached; and the removal's own entry, which cannot
-	// name a cluster that no longer exists, is accepted beside it.
+	// After: the entry stays, detached and stamped with the cluster it was, and the
+	// removal's own entry, which cannot name a cluster that no longer exists, is
+	// accepted beside it.
 	exec("remove cluster B", `DELETE FROM clusters WHERE id = $1`, clusterB)
-	found, cluster, details := exists(rowB)
-	if !found || cluster != nil || details != `{"storage": "store01"}` {
-		t.Errorf("entry of a removed cluster: found=%v cluster=%v details=%s, want it kept, detached, unchanged", found, cluster, details)
+	stamp := func(id uuid.UUID, name string) map[string]any {
+		return map[string]any{"id": id.String(), "name": name}
+	}
+	found, cluster, details := read(rowB)
+	want := map[string]any{"storage": "store01", "detached_cluster": stamp(clusterB, "cluster02")}
+	if !found || cluster != nil || !reflect.DeepEqual(details, want) {
+		t.Errorf("entry of a removed cluster: found=%v cluster=%v details=%v, want it kept, detached, with %v", found, cluster, details, want)
 	}
 	exec("the removal's own entry", `INSERT INTO audit_log (id, cluster_id, user_id, resource_type, resource_id, action, details)
 		VALUES ($1, NULL, $2, 'cluster', $3, 'cluster_deleted', jsonb_build_object('cluster_id', $3::text))`,
 		auditClusterNullID(13), user, clusterB.String())
-	if found, _, _ := exists(rowGlobal); !found {
-		t.Error("an entry with no cluster was removed along with a cluster")
+	if found, _, details := read(rowGlobal); !found || details["detached_cluster"] != nil {
+		t.Errorf("an entry with no cluster was removed or stamped along with a cluster: found=%v details=%v", found, details)
 	}
 
-	// Down: the cascade is back; the detached entry stays, for a NULL violates no
-	// foreign key.
+	// A second removal, of a cluster added under the first one's name: its entry is
+	// stamped with its own id, and the first one's keeps the first's.
+	addCluster(clusterC, "cluster02")
+	addEntry(rowC, clusterC)
+	exec("remove cluster C", `DELETE FROM clusters WHERE id = $1`, clusterC)
+	if found, cluster, details := read(rowC); !found || cluster != nil ||
+		!reflect.DeepEqual(details["detached_cluster"], stamp(clusterC, "cluster02")) {
+		t.Errorf("entry of the second removed cluster: found=%v cluster=%v details=%v, want it stamped with its own id", found, cluster, details)
+	}
+	if _, _, details := read(rowB); !reflect.DeepEqual(details["detached_cluster"], stamp(clusterB, "cluster02")) {
+		t.Errorf("the first removed cluster's entry now says %v, want its own stamp unchanged", details["detached_cluster"])
+	}
+
+	// Down: the cascade is back and the trigger gone; the detached entries stay with
+	// their stamp, for a NULL violates no foreign key.
 	if err := m.Migrate(before); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		t.Fatalf("migrate back: %v", err)
 	}
 	if got := deleteRule(); got != "c" {
 		t.Errorf("delete rule after the down migration = %q, want c (cascade)", got)
 	}
-	if found, _, _ := exists(rowB); !found {
-		t.Error("the down migration removed an entry")
+	var funcs int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_proc WHERE proname = 'stamp_audit_detached_cluster'`).Scan(&funcs); err != nil {
+		t.Fatalf("read the functions: %v", err)
+	}
+	if triggers() != 0 || funcs != 0 {
+		t.Errorf("the down migration left %d triggers and %d functions behind", triggers(), funcs)
+	}
+	if found, _, details := read(rowB); !found || details["detached_cluster"] == nil {
+		t.Errorf("the down migration removed or changed a detached entry: found=%v details=%v", found, details)
 	}
 }

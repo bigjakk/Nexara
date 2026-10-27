@@ -1,5 +1,6 @@
 -- Automatic in-place upgrade — no manual steps, no operator action required.
--- Keeps an audit entry when the cluster it names is removed.
+-- Keeps an audit entry when the cluster it names is removed, and says which
+-- cluster that was.
 --
 -- audit_log.cluster_id was ON DELETE CASCADE, so removing a cluster deleted
 -- every entry ever recorded against it — the opposite of what an audit log is
@@ -9,13 +10,36 @@
 -- therefore stops seeing a removed cluster's entries, which is the safe side to
 -- err on: the cluster that scoped them no longer exists to scope them to.
 --
+-- A NULL cluster_id alone would lose WHERE the entry came from: two removed
+-- clusters' entries about the same node name could not be told apart. So a
+-- BEFORE DELETE trigger on clusters stamps each of the cluster's entries with
+-- details.detached_cluster {id, name} first, while they still name it. The key
+-- is added beside the existing details, which are never changed (an entry that
+-- already carried the key keeps it).
+--
 -- The column is already nullable (000014) and every existing value references a
--- cluster that exists, so no row changes and none can violate the new
--- constraint; only the constraint is replaced, in this one transaction. Entries
--- already deleted with a cluster are gone and cannot be recovered.
+-- cluster that exists, so no existing row changes and none can violate the new
+-- constraint; only the constraint is replaced and the trigger added, in this one
+-- transaction. Entries already deleted with a cluster are gone and cannot be
+-- recovered.
 
 ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_cluster_id_fkey;
 
 ALTER TABLE audit_log
     ADD CONSTRAINT audit_log_cluster_id_fkey
     FOREIGN KEY (cluster_id) REFERENCES clusters(id) ON DELETE SET NULL;
+
+CREATE OR REPLACE FUNCTION stamp_audit_detached_cluster() RETURNS trigger AS $$
+BEGIN
+    UPDATE audit_log
+    SET details = jsonb_build_object('detached_cluster', jsonb_build_object('id', OLD.id, 'name', OLD.name)) || details
+    WHERE cluster_id = OLD.id
+      AND jsonb_typeof(details) = 'object';
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_clusters_stamp_audit_detached ON clusters;
+CREATE TRIGGER trg_clusters_stamp_audit_detached
+    BEFORE DELETE ON clusters
+    FOR EACH ROW EXECUTE FUNCTION stamp_audit_detached_cluster();
