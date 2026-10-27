@@ -50,6 +50,22 @@ SELECT * FROM vms WHERE id = $1 AND type = 'lxc';
 -- name: UpdateVMStatus :exec
 UPDATE vms SET status = $2, updated_at = now() WHERE id = $1;
 
+-- UpdateUnreportedVM is the fast sync's UpsertVM for a guest /cluster/resources
+-- lists as "unknown": one pvestatd has not reported, as on a node that is down.
+-- That entry still carries the node, pool, tags and HA state, which Proxmox
+-- reads from the cluster's configuration, but no name, sizes, uptime or
+-- template flag, which come only from pvestatd's report (extract_vm_stats in
+-- PVE/API2Tools.pm). So the row keeps its name, sizes and template flag. Not
+-- its uptime: that is a reading, and it stops being true, so writing "unknown"
+-- clears it. A write that carries the row's own status (the fast sync keeps it
+-- while the listing repeats itself) keeps the uptime that went with it. Sets
+-- last_seen_at as UpsertVM does, and records the change in
+-- guest_status_changes too, by trigger.
+-- name: UpdateUnreportedVM :exec
+UPDATE vms SET node_id = $2, status = $3, tags = $4, ha_state = $5, pool = $6,
+    uptime = CASE WHEN $3 = 'unknown' THEN 0 ELSE uptime END, last_seen_at = now()
+WHERE id = $1;
+
 -- name: SetVMOSType :exec
 UPDATE vms SET ostype = $2, updated_at = now() WHERE id = $1;
 

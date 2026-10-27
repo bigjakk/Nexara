@@ -2341,6 +2341,18 @@ type Querier interface {
 	// UpdateTaskLastRun records how a run left the scheduler: 'dispatched' with the
 	// UPID in last_upid, or 'failed' with the reason in last_error and no UPID.
 	UpdateTaskLastRun(ctx context.Context, arg UpdateTaskLastRunParams) error
+	// UpdateUnreportedVM is the fast sync's UpsertVM for a guest /cluster/resources
+	// lists as "unknown": one pvestatd has not reported, as on a node that is down.
+	// That entry still carries the node, pool, tags and HA state, which Proxmox
+	// reads from the cluster's configuration, but no name, sizes, uptime or
+	// template flag, which come only from pvestatd's report (extract_vm_stats in
+	// PVE/API2Tools.pm). So the row keeps its name, sizes and template flag. Not
+	// its uptime: that is a reading, and it stops being true, so writing "unknown"
+	// clears it. A write that carries the row's own status (the fast sync keeps it
+	// while the listing repeats itself) keeps the uptime that went with it. Sets
+	// last_seen_at as UpsertVM does, and records the change in
+	// guest_status_changes too, by trigger.
+	UpdateUnreportedVM(ctx context.Context, arg UpdateUnreportedVMParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error)
 	// A PARTIAL update: a field the caller does not supply (NULL) is left as it is

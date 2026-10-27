@@ -183,6 +183,7 @@ type SyncQueries interface {
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.StoragePool, error)
 	// Fast resource sync
 	UpdateNodeStatusFast(ctx context.Context, arg db.UpdateNodeStatusFastParams) (int64, error)
+	UpdateUnreportedVM(ctx context.Context, arg db.UpdateUnreportedVMParams) error
 	DeleteVMsAbsentFromCluster(ctx context.Context, arg db.DeleteVMsAbsentFromClusterParams) (int64, error)
 	// PBS queries
 	ListActivePBSServers(ctx context.Context) ([]db.PbsServer, error)

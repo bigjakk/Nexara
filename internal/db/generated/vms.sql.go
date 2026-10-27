@@ -488,6 +488,44 @@ func (q *Queries) SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error 
 	return err
 }
 
+const updateUnreportedVM = `-- name: UpdateUnreportedVM :exec
+UPDATE vms SET node_id = $2, status = $3, tags = $4, ha_state = $5, pool = $6,
+    uptime = CASE WHEN $3 = 'unknown' THEN 0 ELSE uptime END, last_seen_at = now()
+WHERE id = $1
+`
+
+type UpdateUnreportedVMParams struct {
+	ID      uuid.UUID `json:"id"`
+	NodeID  uuid.UUID `json:"node_id"`
+	Status  string    `json:"status"`
+	Tags    string    `json:"tags"`
+	HaState string    `json:"ha_state"`
+	Pool    string    `json:"pool"`
+}
+
+// UpdateUnreportedVM is the fast sync's UpsertVM for a guest /cluster/resources
+// lists as "unknown": one pvestatd has not reported, as on a node that is down.
+// That entry still carries the node, pool, tags and HA state, which Proxmox
+// reads from the cluster's configuration, but no name, sizes, uptime or
+// template flag, which come only from pvestatd's report (extract_vm_stats in
+// PVE/API2Tools.pm). So the row keeps its name, sizes and template flag. Not
+// its uptime: that is a reading, and it stops being true, so writing "unknown"
+// clears it. A write that carries the row's own status (the fast sync keeps it
+// while the listing repeats itself) keeps the uptime that went with it. Sets
+// last_seen_at as UpsertVM does, and records the change in
+// guest_status_changes too, by trigger.
+func (q *Queries) UpdateUnreportedVM(ctx context.Context, arg UpdateUnreportedVMParams) error {
+	_, err := q.db.Exec(ctx, updateUnreportedVM,
+		arg.ID,
+		arg.NodeID,
+		arg.Status,
+		arg.Tags,
+		arg.HaState,
+		arg.Pool,
+	)
+	return err
+}
+
 const updateVMPool = `-- name: UpdateVMPool :exec
 UPDATE vms SET pool = $2 WHERE id = $1
 `

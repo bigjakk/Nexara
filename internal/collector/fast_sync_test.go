@@ -35,6 +35,7 @@ func seedFastSync(mq *mockQueries, cluster db.Cluster, nodeStatus, vmStatus, vmN
 	mq.vms[fmt.Sprintf("%s:%d", cluster.ID.String(), 100)] = db.Vm{
 		ID: uuid.New(), ClusterID: cluster.ID, NodeID: nodeID,
 		Vmid: 100, Name: vmName, Type: "qemu", Status: vmStatus,
+		CpuCount: 4, MemTotal: 4294967296,
 	}
 	return nodeID
 }
@@ -130,32 +131,51 @@ func TestSyncClusterResources(t *testing.T) {
 	// A guest pvestatd has not reported yet is listed "unknown" with no name,
 	// and so is every guest for a cycle after pve-cluster restarts: written,
 	// it recorded a false "Status unknown" in every new guest's History. One
-	// that stays unknown, or whose node is offline, is unknown for real.
-	t.Run("a guest pvestatd has not reported yet writes nothing", func(t *testing.T) {
+	// unknown for real (it stays so, or its node is offline) keeps its row's
+	// name and sizes, which the listing lacks, but not the uptime, a reading.
+	t.Run("a guest pvestatd has not reported writes nothing, or only what the listing still carries", func(t *testing.T) {
 		for _, tc := range []struct {
 			node       string
 			unknownFor time.Duration // already listed "unknown" for this long
-			upserts    int           // the one write is the "unknown"
-		}{{"online", 0, 0}, {"unknown", 0, 0}, {"online", 2 * unknownStatusGrace, 1}, {"offline", 0, 1}} {
+			writes     int           // the one write is the "unknown"
+			noRow      bool          // nothing to keep: inserted as listed
+		}{{"online", 0, 0, false}, {"unknown", 0, 0, false}, {"online", 2 * unknownStatusGrace, 1, false},
+			{"offline", 0, 1, false}, {"offline", 0, 1, true}} {
 			node := nodeOnline
 			node.Status = tc.node
 			srv := newResourceServer(t, []proxmox.ClusterResource{node,
-				{Type: "qemu", VMID: 100, Node: "pve1", Status: "unknown"}})
+				{Type: "qemu", VMID: 100, Node: "pve1", Status: "unknown", Pool: "pool01"}})
 			mq := newMockQueries()
 			s := newTestSyncer(mq)
 			cluster := makeCluster(t, srv.URL)
-			seedFastSync(mq, cluster, "online", "running", "web-server")
+			nodeID := seedFastSync(mq, cluster, "online", "stopped", "web-server")
+			key := fmt.Sprintf("%s:%d", cluster.ID, 100)
+			want := mq.vms[key]
+			want.Template, want.Uptime = true, 41*86400 // the listing lacks both
+			mq.vms[key] = want
+			if tc.noRow {
+				delete(mq.vms, key)
+				want = db.Vm{ClusterID: cluster.ID, NodeID: nodeID, Vmid: 100, Type: "qemu"}
+			}
+			if tc.writes == 1 {
+				want.Status, want.Pool, want.Uptime = "unknown", "pool01", 0
+			}
 			if tc.unknownFor > 0 {
 				s.resourceUnknownSince.Store(cluster.ID, map[int32]time.Time{100: time.Now().Add(-tc.unknownFor)})
 			}
 
-			if err := s.syncClusterResources(context.Background(), cluster); err != nil {
-				t.Fatalf("node %s: syncClusterResources: %v", tc.node, err)
+			for range 2 { // the second tick has nothing to write
+				if err := s.syncClusterResources(context.Background(), cluster); err != nil {
+					t.Fatalf("node %s: syncClusterResources: %v", tc.node, err)
+				}
 			}
 			srv.Close()
-			if len(mq.upsertVMCalls) != tc.upserts || tc.upserts == 1 && mq.upsertVMCalls[0].Status != "unknown" {
-				t.Errorf("node %s, unknown for %v: upserts %+v, want %d writing \"unknown\"",
-					tc.node, tc.unknownFor, mq.upsertVMCalls, tc.upserts)
+			if tc.noRow {
+				want.ID = mq.vms[key].ID // the insert's own
+			}
+			if writes := len(mq.upsertVMCalls) + len(mq.unreportedVMCalls); writes != tc.writes || mq.vms[key] != want {
+				t.Errorf("node %s, unknown for %v, no row %v: %d writes left %+v, want %d leaving %+v",
+					tc.node, tc.unknownFor, tc.noRow, writes, mq.vms[key], tc.writes, want)
 			}
 			// The first sighting is kept for the next tick, or the grace never ends.
 			kept, _ := s.resourceUnknownSince.Load(cluster.ID)

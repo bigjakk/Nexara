@@ -42,6 +42,7 @@ type mockQueries struct {
 	upsertNodeCalls               []db.UpsertNodeParams
 	upsertVMCalls                 []db.UpsertVMParams
 	upsertVMFailures              int // UpsertVM fails this many more calls, then succeeds
+	unreportedVMCalls             []db.UpdateUnreportedVMParams
 	upsertStorageCalls            []db.UpsertStoragePoolParams
 	replicationUpserts            []db.UpsertReplicationJobParams
 	deleteStaleReplicationCalls   int
@@ -206,6 +207,10 @@ func (m *mockQueries) UpsertVM(_ context.Context, arg db.UpsertVMParams) (db.Vm,
 		Name:      arg.Name,
 		Type:      arg.Type,
 		Status:    arg.Status,
+		CpuCount:  arg.CpuCount,
+		MemTotal:  arg.MemTotal,
+		DiskTotal: arg.DiskTotal,
+		Uptime:    arg.Uptime,
 		Template:  arg.Template,
 		Tags:      arg.Tags,
 		HaState:   arg.HaState,
@@ -309,6 +314,23 @@ func (m *mockQueries) UpdateNodeStatusFast(_ context.Context, arg db.UpdateNodeS
 	node.Status = arg.Status
 	m.nodes[key] = node
 	return 1, nil
+}
+
+// UpdateUnreportedVM sets only what the real UPDATE sets: the row keeps its
+// name, sizes and template flag, and its uptime unless "unknown" is written.
+func (m *mockQueries) UpdateUnreportedVM(_ context.Context, arg db.UpdateUnreportedVMParams) error {
+	m.unreportedVMCalls = append(m.unreportedVMCalls, arg)
+	for k, vm := range m.vms {
+		if vm.ID == arg.ID {
+			vm.NodeID, vm.Status, vm.Tags, vm.HaState, vm.Pool = arg.NodeID, arg.Status, arg.Tags, arg.HaState, arg.Pool
+			if arg.Status == "unknown" {
+				vm.Uptime = 0
+			}
+			m.vms[k] = vm
+			break
+		}
+	}
+	return nil
 }
 
 func (m *mockQueries) DeleteVMsAbsentFromCluster(_ context.Context, arg db.DeleteVMsAbsentFromClusterParams) (int64, error) {

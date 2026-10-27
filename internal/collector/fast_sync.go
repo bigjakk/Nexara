@@ -181,11 +181,11 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 		// restored or imported — is listed "unknown", with no name and no sizes
 		// (extract_vm_stats in PVE/API2Tools.pm), and so is every guest for a
 		// cycle after pve-cluster restarts on the node asked. Neither is a
-		// state of the guest's: written, it would blank the row and record a
-		// change to "unknown" and back that never happened. So "unknown" is
-		// written only once it has lasted unknownStatusGrace — when nothing has
-		// reported the guest for that long, which is the truth — or at once on
-		// a node the listing calls offline.
+		// state of the guest's: written, it would record a change to "unknown"
+		// and back that never happened. So "unknown" is written only once it
+		// has lasted unknownStatusGrace — when nothing has reported the guest
+		// for that long, which is the truth — or at once on a node the listing
+		// calls offline.
 		if status == "unknown" && nodeStatus[r.Node] != "offline" {
 			since, listed := prevUnknownSince[vmid]
 			if !listed {
@@ -203,14 +203,29 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 			continue
 		}
 		old, exists := known[vmid]
-		isTemplate := r.Template > 0
+		name, isTemplate := r.Name, r.Template > 0
+		// The "unknown" entry has no uptime or template flag either: all of
+		// that comes from pvestatd's report. Its node, pool, tags and HA state
+		// come from the cluster's configuration and stay right while the node
+		// is down, when an HA guest's state goes on to "fence" and "recovery".
+		// So a row keeps its name, sizes and template flag from its last
+		// report (UpdateUnreportedVM), though not its uptime, a reading that
+		// stops being true. The check below compares what that write leaves,
+		// or every tick would write the row again. A guest first listed this
+		// way has nothing to keep and is inserted as listed: it is in the
+		// cluster's configuration, and leaving it out would hide what a down
+		// node holds.
+		unreported := exists && listedStatus == "unknown"
+		if unreported {
+			name, isTemplate = old.Name, old.Template
+		}
 		if was, seen := prevStatus[vmid]; exists && seen && was == status {
 			status = old.Status
 		}
 		if exists &&
 			old.Status == status &&
 			old.NodeID == nodeID &&
-			old.Name == r.Name &&
+			old.Name == name &&
 			old.Template == isTemplate &&
 			old.Pool == r.Pool &&
 			old.HaState == r.HAState &&
@@ -218,24 +233,37 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 			seenStatus[vmid] = listedStatus
 			continue
 		}
-		if _, upErr := s.queries.UpsertVM(ctx, db.UpsertVMParams{
-			ClusterID: cluster.ID,
-			NodeID:    nodeID,
-			Vmid:      vmid,
-			Name:      r.Name,
-			Type:      r.Type,
-			Status:    status,
-			CpuCount:  safeconv.Int32(r.MaxCPU),
-			MemTotal:  r.MaxMem,
-			DiskTotal: r.MaxDisk,
-			Uptime:    r.Uptime,
-			Template:  isTemplate,
-			Tags:      r.Tags,
-			HaState:   r.HAState,
-			Pool:      r.Pool,
-		}); upErr != nil {
-			s.logger.Warn("fast sync: guest upsert failed",
-				"cluster_id", cluster.ID, "vmid", vmid, "error", upErr)
+		var writeErr error
+		if unreported {
+			writeErr = s.queries.UpdateUnreportedVM(ctx, db.UpdateUnreportedVMParams{
+				ID:      old.ID,
+				NodeID:  nodeID,
+				Status:  status,
+				Tags:    r.Tags,
+				HaState: r.HAState,
+				Pool:    r.Pool,
+			})
+		} else {
+			_, writeErr = s.queries.UpsertVM(ctx, db.UpsertVMParams{
+				ClusterID: cluster.ID,
+				NodeID:    nodeID,
+				Vmid:      vmid,
+				Name:      r.Name,
+				Type:      r.Type,
+				Status:    status,
+				CpuCount:  safeconv.Int32(r.MaxCPU),
+				MemTotal:  r.MaxMem,
+				DiskTotal: r.MaxDisk,
+				Uptime:    r.Uptime,
+				Template:  isTemplate,
+				Tags:      r.Tags,
+				HaState:   r.HAState,
+				Pool:      r.Pool,
+			})
+		}
+		if writeErr != nil {
+			s.logger.Warn("fast sync: guest write failed",
+				"cluster_id", cluster.ID, "vmid", vmid, "error", writeErr)
 			continue
 		}
 		seenStatus[vmid] = listedStatus
