@@ -46,8 +46,8 @@ var (
 //	{}   → no grant anywhere  → nothing
 //
 // An entry also outlives a removed cluster (000122), keeping an id that names no
-// clusters row. Only global view:audit reads it, labelled with the name kept for
-// it ("(removed cluster)" when none was: the id of a cluster that never was).
+// clusters row. Only global view:audit reads it, named by the name kept for it
+// (none for the id of a cluster that never was), with the removed flag set.
 // {A, R, U} is a scoped caller whose assignments for clusters that are gone were
 // not deleted with them: their ids are in the array, and their entries still
 // must not appear.
@@ -92,8 +92,8 @@ func TestAuditScope_NullClusterRowsAreGlobal(t *testing.T) {
 	// What each entry's cluster is called, and whether it is gone, to a reader that sees it.
 	labels := map[uuid.UUID]clusterLabel{
 		scopeTestRowA:       {"audit-scope-test-a", false},
-		scopeTestRowRemoved: {"audit-scope-test-r (removed)", true},
-		scopeTestRowUnknown: {"(removed cluster)", true},
+		scopeTestRowRemoved: {"audit-scope-test-r", true},
+		scopeTestRowUnknown: {"", true},
 		scopeTestRowGlobal:  {"", false},
 	}
 

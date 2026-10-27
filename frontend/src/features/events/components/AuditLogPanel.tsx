@@ -29,6 +29,7 @@ import {
 } from "../api/events-queries";
 import { SyslogConfigCard } from "./SyslogConfigCard";
 import { detailPairs } from "../lib/audit-details";
+import { auditClusterLabel } from "@/features/audit/lib/audit-cluster";
 
 const PAGE_SIZE = 25;
 
@@ -228,7 +229,7 @@ function EventRow({
           </div>
         </td>
         <td className="px-4 py-2">{severityBadge(severity)}</td>
-        <td className="px-4 py-2">{entry.cluster_name || "System"}</td>
+        <td className="px-4 py-2">{auditClusterLabel(entry, "System")}</td>
         <td className="px-4 py-2">
           <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
             {resourceTypeLabel(entry.resource_type)}
@@ -264,7 +265,7 @@ function EventRow({
               <span>{severityBadge(severity)}</span>
 
               <span className="text-muted-foreground">Cluster</span>
-              <span>{entry.cluster_name || "System"}</span>
+              <span>{auditClusterLabel(entry, "System")}</span>
 
               <span className="text-muted-foreground">Resource Type</span>
               <span>{resourceTypeLabel(entry.resource_type)}</span>

@@ -2026,10 +2026,12 @@ the upgrade also have no `from_storage` on a disk move or a restore.
 Removing a cluster does not delete or change its audit entries. An entry keeps
 the `cluster_id` it was written with, which no cluster has any more, and carries
 `cluster_removed: true`. Its `cluster_name` is the name the cluster had when it
-was removed, followed by ` (removed)`, or `(removed cluster)` when that name was
-not kept. Two removed clusters that shared a name are told apart by
-`cluster_id`, and a cluster added again has a new id, so its entries do not join
-the old ones. Earlier releases deleted the entries with the cluster.
+was removed (empty when that name was not kept), bare: the web UI writes
+"(removed)" beside it from the flag. The CSV and syslog exports have no flag, so
+they write `<name> (removed)`, or `(removed cluster)` when no name was kept. Two
+removed clusters that shared a name are told apart by `cluster_id`, and a cluster
+added again has a new id, so its entries do not join the old ones. Earlier
+releases deleted the entries with the cluster.
 
 Such an entry is read like one with no cluster: only by a holder of *global*
 `view:audit`, from `/audit-log`, `/audit-log/recent` and the export. The role

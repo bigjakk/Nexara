@@ -22,9 +22,13 @@ describe("TaskLogPanel", () => {
 
     fireEvent.click(await screen.findByText(/linux01/));
     expect(await screen.findByText("vm / r1")).toBeInTheDocument();
+    // The cluster is named in words in the column and in the row's details.
+    expect(screen.getAllByText("cluster01 (removed)")).toHaveLength(2);
 
     // The expanded row mounted its log query, and for a cluster that is gone it never ran.
-    const logs = queryClient.getQueryCache().findAll({ queryKey: ["task-log"] });
+    const logs = queryClient
+      .getQueryCache()
+      .findAll({ queryKey: ["task-log"] });
     expect(logs.length).toBeGreaterThan(0);
     for (const q of logs) {
       expect(q.state.fetchStatus).toBe("idle");

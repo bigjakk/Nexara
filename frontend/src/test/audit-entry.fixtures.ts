@@ -3,7 +3,7 @@ import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 /**
  * What the entry of a removed cluster looks like: it keeps the cluster id it
  * was written with, which no cluster has any more, and the name it carries is
- * the one kept for it.
+ * the one kept for it, bare: the "(removed)" is the client's to write.
  */
 export const removedClusterEntry: AuditLogEntry = {
   id: "e1",
@@ -19,7 +19,7 @@ export const removedClusterEntry: AuditLogEntry = {
   source: "nexara",
   user_email: "u@example.com",
   user_display_name: "U",
-  cluster_name: "cluster01 (removed)",
+  cluster_name: "cluster01",
   cluster_removed: true,
   resource_vmid: 100,
   resource_name: "linux01",

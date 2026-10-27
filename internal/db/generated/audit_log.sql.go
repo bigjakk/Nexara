@@ -179,8 +179,7 @@ SELECT
   a.source,
   u.email AS user_email,
   u.display_name AS user_display_name,
-  COALESCE(c.name, rc.name || ' (removed)',
-           CASE WHEN a.cluster_id IS NOT NULL THEN '(removed cluster)' ELSE '' END) AS cluster_name,
+  COALESCE(c.name, rc.name, '') AS cluster_name,
   (a.cluster_id IS NOT NULL AND c.id IS NULL)::boolean AS cluster_removed,
   COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
   COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name
@@ -255,12 +254,14 @@ type ListAuditLogAdvancedRow struct {
 // An entry outlives the cluster it was recorded against (000122 dropped the
 // foreign key): it keeps its cluster_id, which then names no clusters row. The
 // cluster's name was kept in removed_clusters by a trigger on its removal, and
-// cluster_name falls back to it as "<name> (removed)", with cluster_removed set;
-// "(removed cluster)" if even that is gone. Such an entry stays readable by a
-// holder of GLOBAL view:audit only, as one with no cluster is: the second
-// accessible_cluster_ids conjunct requires the cluster to exist, because a
-// role assignment scoped to a cluster is not deleted with it, and its id could
-// otherwise match `cluster_id = ANY(array)` for a caller who holds it. The
+// cluster_name falls back to it, with cluster_removed set; it is empty only for an
+// entry with no cluster, or whose cluster's name was not kept, and saying "removed"
+// is the reader's to write. Such an entry stays readable by a holder of GLOBAL
+// view:audit only, as one with no cluster is. A role assignment scoped to a cluster
+// is deleted with it (000123), so none names one that is gone; the second
+// accessible_cluster_ids conjunct requires the cluster to exist all the same, because
+// a cached permission set (the cache lives five minutes) still holds the grant after
+// its row is gone, and its id would otherwise match `cluster_id = ANY(array)`. The
 // conjunct is kept apart from the pinned clause above, which it must not change,
 // and TestAuditScope_NullClusterRowsAreGlobal holds it.
 //
@@ -387,8 +388,7 @@ SELECT
   a.source,
   u.email AS user_email,
   u.display_name AS user_display_name,
-  COALESCE(c.name, rc.name || ' (removed)',
-           CASE WHEN a.cluster_id IS NOT NULL THEN '(removed cluster)' ELSE '' END) AS cluster_name,
+  COALESCE(c.name, rc.name, '') AS cluster_name,
   (a.cluster_id IS NOT NULL AND c.id IS NULL)::boolean AS cluster_removed,
   COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
   COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name,

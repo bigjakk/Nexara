@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -182,4 +183,52 @@ func TestExportSyslogAppliesDetailRedaction(t *testing.T) {
 			t.Errorf("details were withheld from a caller who holds manage:audit: %s", lines[0])
 		}
 	})
+}
+
+// The text exports name an entry's cluster in words — the JSON forms carry the bare
+// name and the removed flag — and say so when the cluster is gone, or when no name was
+// kept; an entry with no cluster is the system's.
+func TestExportsNameAnEntrysClusterInWords(t *testing.T) {
+	t.Parallel()
+	gone := func(name string) db.ListAuditLogAdvancedRow {
+		r := auditRow("alice", name, "vm", "100", "vm_start", `{}`)
+		r.ClusterRemoved = true
+		return r
+	}
+	rows := []db.ListAuditLogAdvancedRow{
+		auditRow("alice", "cluster01", "vm", "100", "vm_start", `{}`),
+		gone("cluster01"),
+		gone(""),
+		auditRow("alice", "", "setting", "branding", "setting_updated", `{}`),
+	}
+	csvWant := []string{"cluster01", "cluster01 (removed)", "(removed cluster)", "System"}
+	syslogWant := []string{"cluster01", "cluster01 (removed)", "(removed cluster)", "system"}
+
+	h := NewAuditHandler(nil, nil)
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Get("/export", func(c fiber.Ctx) error { return h.exportCSV(c, rows, "20260731-120000", nil) })
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/export", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	records, err := csv.NewReader(resp.Body).ReadAll()
+	if err != nil || len(records) != len(rows)+1 {
+		t.Fatalf("csv: %d records (err %v), want a header and %d rows", len(records), err, len(rows))
+	}
+	for i, want := range csvWant {
+		if got := records[i+1][1]; got != want {
+			t.Errorf("csv row %d names the cluster %q, want %q", i, got, want)
+		}
+	}
+
+	lines := exportSyslogLines(t, rows, nil)
+	if len(lines) != len(rows) {
+		t.Fatalf("syslog: %d records, want %d", len(lines), len(rows))
+	}
+	for i, want := range syslogWant {
+		if !strings.Contains(lines[i], `cluster="`+want+`"`) {
+			t.Errorf("syslog record %d does not name the cluster %q: %s", i, want, lines[i])
+		}
+	}
 }

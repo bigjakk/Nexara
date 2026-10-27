@@ -529,13 +529,14 @@ func TestAuditExport_ScopeGatesBeforeDB(t *testing.T) {
 	})
 }
 
-// An entry of a removed cluster reaches the client as "<name> (removed)" with
-// cluster_removed set, from both reads that build a response. The frontend keys
-// on the flag to stop asking that cluster for the entry's task log.
+// An entry of a removed cluster reaches the client under the name it was removed
+// with and cluster_removed set, from both reads that build a response. The frontend
+// writes "(removed)" from the flag, and stops asking that cluster for the entry's
+// task log.
 func TestAuditResponses_CarryTheRemovedClusterFlag(t *testing.T) {
 	t.Parallel()
 
-	const label = "cluster01 (removed)"
+	const label = "cluster01"
 	responses := map[string]auditLogResponse{
 		"list": toAdvancedAuditResponse(db.ListAuditLogAdvancedRow{
 			ClusterName: label, ClusterRemoved: true, Details: json.RawMessage(`{}`),

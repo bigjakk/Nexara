@@ -17,6 +17,7 @@ import {
 import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
+import { auditClusterLabel } from "@/features/audit/lib/audit-cluster";
 import { formatRelativeTime } from "@/lib/format";
 import {
   activityLabel,
@@ -147,7 +148,7 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
     hideBelowMd: true,
     cell: (row) => (
       <span className="text-muted-foreground">
-        {row.entry.cluster_name || "—"}
+        {auditClusterLabel(row.entry, "—")}
       </span>
     ),
   },

@@ -58,11 +58,13 @@ type auditLogResponse struct {
 	Source          string     `json:"source"`
 	UserEmail       string     `json:"user_email"`
 	UserDisplayName string     `json:"user_display_name"`
-	// ClusterName is the cluster's name, "<name> (removed)" once the cluster is
-	// gone, and empty for an entry that has no cluster.
+	// ClusterName is the cluster's name: the one it had when it was removed, once
+	// the cluster is gone. Empty for an entry that has no cluster, or whose
+	// cluster's name was not kept.
 	ClusterName string `json:"cluster_name"`
 	// ClusterRemoved is true when the entry names a cluster that no longer
-	// exists. Its cluster_id is still the id the entry was written with.
+	// exists. Its cluster_id is still the id the entry was written with, and
+	// saying "removed" in words is the client's to write.
 	ClusterRemoved bool   `json:"cluster_removed"`
 	ResourceVMID   int32  `json:"resource_vmid"`
 	ResourceName   string `json:"resource_name"`
@@ -164,6 +166,20 @@ func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow, visible map[string]bo
 		resp.ClusterID = &s
 	}
 	return resp
+}
+
+// auditClusterLabel is how the text exports (CSV, syslog) name an entry's cluster:
+// the name, followed by "(removed)" once the cluster is gone, and "(removed cluster)"
+// when its name was not kept. The JSON forms carry the bare name and the flag, and the
+// client writes the words.
+func auditClusterLabel(name string, removed bool) string {
+	switch {
+	case !removed:
+		return name
+	case name == "":
+		return "(removed cluster)"
+	}
+	return name + " (removed)"
 }
 
 // parseAuditFilters extracts all filter params from the request query string
@@ -653,7 +669,7 @@ func (h *AuditHandler) exportCSV(c fiber.Ctx, items []db.ListAuditLogAdvancedRow
 	})
 
 	for _, a := range items {
-		clusterName := a.ClusterName
+		clusterName := auditClusterLabel(a.ClusterName, a.ClusterRemoved)
 		if clusterName == "" {
 			clusterName = "System"
 		}
@@ -714,7 +730,7 @@ func (h *AuditHandler) exportSyslog(c fiber.Ctx, items []db.ListAuditLogAdvanced
 			userName = "(deleted user)"
 		}
 
-		clusterName := a.ClusterName
+		clusterName := auditClusterLabel(a.ClusterName, a.ClusterRemoved)
 		if clusterName == "" {
 			clusterName = "system"
 		}

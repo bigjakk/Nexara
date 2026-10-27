@@ -19,6 +19,8 @@
   "totalEntries": "{{count}} total entries",
   "pageOfPages": "Page {{page}} of {{pages}}",
   "system": "System",
+  "clusterRemoved": "{{name}} (removed)",
+  "clusterRemovedUnnamed": "Removed cluster",
   "sourceNode": "Source Node",
   "targetNode": "Target Node",
   "migrationType": "Migration Type",

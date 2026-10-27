@@ -6,6 +6,7 @@ import {
   useRecentActivity,
   type AuditLogEntry,
 } from "@/features/audit/api/audit-queries";
+import { auditClusterLabel } from "@/features/audit/lib/audit-cluster";
 import { useTaskStatus, useTaskLog } from "@/features/tasks/api/tasks-queries";
 import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
@@ -131,7 +132,7 @@ function ActivityRow({
                 {entry.resource_type} / {entry.resource_id}
               </span>
               <span className="text-muted-foreground">Cluster</span>
-              <span>{entry.cluster_name || "—"}</span>
+              <span>{auditClusterLabel(entry, "—")}</span>
               <span className="text-muted-foreground">User</span>
               <span>{row.actorLabel || "—"}</span>
               <span className="text-muted-foreground">Time</span>
