@@ -156,10 +156,13 @@ var observedChangeRules = slices.Concat(
 	// disks, and Nexara's own untasked edits, each only the fields it names.
 	// qmconfig is the asynchronous config API, which can write any key, and
 	// its task names none: a GUI edit through it explains every field. A
-	// snapshot's delete drops the disks it alone held into unused<n>.
+	// snapshot's delete drops the disks it alone held into unused<n>. The
+	// target side of a remote migration (qmtunnel, vzmtunnel) names the guest
+	// it brings in; Nexara's clone names the clone in details.new_id.
 	[]explainRule{
 		{Kind: "vm", Change: "changed", MatchKey: "vmid",
-			WorkerRe: anyOf("qmconfig", "qmrollback", "qmtemplate", "qmcreate", "qmrestore", "qmdestroy")},
+			WorkerRe: anyOf("qmconfig", "qmrollback", "qmtemplate", "qmcreate", "qmrestore", "qmdestroy", "qmtunnel")},
+		{Kind: "vm", Change: "changed", AuditType: "vm", MatchKey: "details:new_id", ActionRe: `^clone$`},
 		{Kind: "vm", Change: "changed", MatchKey: "vmid",
 			WorkerRe: anyOf("qmmove", "resize", "qmigrate"), FieldRe: qemuDiskFields},
 		{Kind: "vm", Change: "changed", MatchKey: "vmid", WorkerRe: `^qmdelsnapshot$`, FieldRe: `^unused[0-9]+$`},
@@ -168,7 +171,8 @@ var observedChangeRules = slices.Concat(
 		{Kind: "vm", Change: "changed", AuditType: "vm", MatchKey: "vmid", Untasked: true,
 			ActionRe: anyOf(guestDiskActions...), FieldRe: qemuDiskFields},
 		{Kind: "container", Change: "changed", MatchKey: "vmid",
-			WorkerRe: anyOf("vzrollback", "vztemplate", "vzcreate", "vzrestore", "vzdestroy")},
+			WorkerRe: anyOf("vzrollback", "vztemplate", "vzcreate", "vzrestore", "vzdestroy", "vzmtunnel")},
+		{Kind: "container", Change: "changed", AuditType: "container", MatchKey: "details:new_id", ActionRe: `^clone$`},
 		{Kind: "container", Change: "changed", MatchKey: "vmid",
 			WorkerRe: anyOf("move_volume", "resize", "vzmigrate"), FieldRe: lxcDiskFields},
 		{Kind: "container", Change: "changed", MatchKey: "vmid", WorkerRe: `^vzdelsnapshot$`, FieldRe: `^unused[0-9]+$`},

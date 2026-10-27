@@ -600,6 +600,16 @@ func TestObserverOutcomes(t *testing.T) {
 		e.client.set("/nodes/pve-01/lxc/101/config", `{"hostname":"linux02","memory":1024,"lock":"backup"}`)
 		e.expect("edited", "changed container/101 [memory]")
 	})
+	t.Run("a guest read while a clone or a create still writes it is no baseline", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.client.set(pathGuest, `{"lock":"clone"}`)
+		e.expect("half a clone")
+		e.client.set(pathGuest, `{"name":"linux01","memory":"2048","cores":2}`)
+		e.expect("the clone made")
+		e.client.set(pathGuest, `{"name":"linux01","memory":"4096","cores":2}`)
+		e.expect("then an edit", "changed vm/100 [memory]")
+	})
 	t.Run("a NIC comes and goes silently, a bridge does not", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)

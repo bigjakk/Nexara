@@ -38,6 +38,7 @@ type observedObject struct {
 	lists        map[string][]string // field -> canonical items of an ordered list (a rule set)
 	members      map[string][]string // field -> the other objects' ids it lists, sorted (fieldSpec.withMembers)
 	hardware     bool                // a physical NIC: it comes and goes with nobody editing
+	unsettled    bool                // a guest still being made: its reading is no baseline (guestObject)
 }
 
 // kindReading is what one read of a kind produced. unread holds the objects it
@@ -808,9 +809,15 @@ func guestObject(guest db.Vm, node string, config map[string]json.RawMessage) ob
 		resourceType, spec = "container", lxcConfigSpec
 	}
 	id := strconv.Itoa(int(guest.Vmid))
+	lock, _ := canonicalValue(config["lock"])
 	return observedObject{
 		id: id, resourceType: resourceType, resourceID: id, vmid: guest.Vmid, node: node,
 		fields: spec.canonicalFields(config),
+		// A clone's config is written with lock clone and rewritten after each
+		// drive (qemu-server API2/Qemu.pm clone_vm), a container's made with
+		// lock create (pve-container create_and_lock_config): read then, it is
+		// half a guest, and the task names the clone's source, not it.
+		unsettled: lock == "clone" || lock == "create",
 	}
 }
 

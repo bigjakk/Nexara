@@ -71,6 +71,10 @@ const (
 	observeNoisyStreak = 12
 	observeNoisyEvery  = time.Hour
 
+	// observeUnsettled is the signature a guest still being made is stored
+	// under: no reading has it, so the next is a baseline.
+	observeUnsettled = "unsettled"
+
 	// observeStateVersion is in every signature: a release that stores a field
 	// another way (a member list kept as ids, not one tag) re-baselines once,
 	// rather than reading the new form against the old as a change.
@@ -710,6 +714,12 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 func (p *observePass) applyGuest(batch *recordBatch, kind string, obj observedObject, sig string, readAt, doneAt time.Time) {
 	tags, err := p.tagObject(kind, obj)
 	if err != nil {
+		return
+	}
+	if obj.unsettled {
+		// Stored under a signature no reading has, so the first read once it
+		// is made is its baseline.
+		batch.save(obj, tags, observeUnsettled, readAt)
 		return
 	}
 	old, existed := p.state[kind][obj.id]
