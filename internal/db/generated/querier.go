@@ -2687,12 +2687,14 @@ type Querier interface {
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	StartVMImportJob(ctx context.Context, id uuid.UUID) error
-	// TaskUPIDOnRecord says whether a UPID is already on record — an audit row of
-	// the cluster names it, or the archive holds it — for POST /api/v1/tasks,
+	// TaskUPIDOnRecord says whether a UPID is already on record — an audit row
+	// names it, or the archive holds it, in any cluster — for POST /api/v1/tasks,
 	// which files only a task Nexara has not seen: a row filed under a known UPID
 	// would stand beside, or over, the verdict the collector recorded, which is
-	// where a guest's History starts (ListGuestLifecycleEvents).
-	TaskUPIDOnRecord(ctx context.Context, arg TaskUPIDOnRecordParams) (bool, error)
+	// where a guest's History starts (ListGuestLifecycleEvents). Any cluster's,
+	// because a UPID names its node by name; the handler asks only of a UPID
+	// Proxmox has confirmed the caller's cluster runs.
+	TaskUPIDOnRecord(ctx context.Context, upid string) (bool, error)
 	TouchRollingUpdateNode(ctx context.Context, id uuid.UUID) error
 	TransitionAlertToFiring(ctx context.Context, id uuid.UUID) error
 	UnassignVMFromFolder(ctx context.Context, arg UnassignVMFromFolderParams) error

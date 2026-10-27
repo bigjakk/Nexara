@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
@@ -33,16 +35,44 @@ import (
 
 // TaskHandler handles task history CRUD operations.
 type TaskHandler struct {
-	queries   *db.Queries
-	eventPub  *events.Publisher
-	retention time.Duration
+	queries       *db.Queries
+	eventPub      *events.Publisher
+	retention     time.Duration
+	encryptionKey string
+	// taskStatus reads a task from its cluster's Proxmox, which Create
+	// confirms a task by before filing it: proxmoxTaskStatus, but in tests.
+	taskStatus func(c fiber.Ctx, clusterID uuid.UUID, node, upid string) (*proxmox.TaskStatus, error)
 }
 
 // NewTaskHandler creates a new TaskHandler. retention is the task-history
 // window (TASK_HISTORY_RETENTION) honored by ClearCompleted, matching the
 // automatic scheduler sweep.
 func NewTaskHandler(queries *db.Queries, eventPub *events.Publisher, retention time.Duration) *TaskHandler {
-	return &TaskHandler{queries: queries, eventPub: eventPub, retention: retention}
+	h := &TaskHandler{queries: queries, eventPub: eventPub, retention: retention}
+	h.taskStatus = h.proxmoxTaskStatus
+	return h
+}
+
+// WithEncryptionKey sets the key the handler reads a cluster's Proxmox token
+// with, where no client is cached.
+func (h *TaskHandler) WithEncryptionKey(key string) *TaskHandler {
+	h.encryptionKey = key
+	return h
+}
+
+// taskConfirmTimeout bounds Create's read of the task from Proxmox.
+const taskConfirmTimeout = 5 * time.Second
+
+// proxmoxTaskStatus reads a task's status from the node it runs on, through
+// its cluster's own Proxmox client.
+func (h *TaskHandler) proxmoxTaskStatus(c fiber.Ctx, clusterID uuid.UUID, node, upid string) (*proxmox.TaskStatus, error) {
+	client, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, taskConfirmTimeout)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), taskConfirmTimeout)
+	defer cancel()
+	return client.GetTaskStatus(ctx, node, upid)
 }
 
 type taskResponse struct {
@@ -323,11 +353,11 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	upid := p.String("upid")
 	upidNode := extractNodeFromUPID(upid)
 	node := p.String("node")
+	if upidNode == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "The UPID names no node")
+	}
 	if node != "" && upidNode != node {
 		return fiber.NewError(fiber.StatusBadRequest, "node does not match the node the UPID names")
-	}
-	if upidNode == "" {
-		return errNodeNotMember
 	}
 	if err := requireNodeInCluster(c, lookupOf(h.queries), clusterID, upidNode); err != nil {
 		return err
@@ -343,9 +373,27 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	if status != "running" {
 		return fiber.NewError(fiber.StatusBadRequest, "A task is recorded as running; how it ends is the collector's")
 	}
+	// The task must be one Proxmox runs on that node of the body's cluster: a
+	// UPID names its node by name, and clusters share names like pve-01, so
+	// another cluster's task would otherwise be filed here, and its own
+	// ingest then lose to this row. Its type is what Proxmox reports.
+	reported, err := h.taskStatus(c, clusterID, upidNode, upid)
+	if err != nil {
+		var fe *fiber.Error
+		if errors.As(err, &fe) {
+			return fe
+		}
+		var apiErr *proxmox.APIError
+		if errors.As(err, &apiErr) && apiErr.IsParameterRejection() || errors.Is(err, proxmox.ErrNotFound) ||
+			errors.Is(err, proxmox.ErrInvalidInput) {
+			return fiber.NewError(fiber.StatusBadRequest, "Proxmox has no such task on that node of the cluster")
+		}
+		return fiber.NewError(fiber.StatusBadGateway, "Could not read the task from Proxmox")
+	}
 	// Nor is a task filed twice: a row under a UPID already on record would
-	// stand beside, or over, the verdict the collector recorded for it.
-	onRecord, err := h.queries.TaskUPIDOnRecord(c.Context(), db.TaskUPIDOnRecordParams{Upid: upid, ClusterID: ClusterUUID(clusterID)})
+	// stand beside, or over, the verdict the collector recorded for it. On
+	// record anywhere: asked only of a UPID the body's cluster runs.
+	onRecord, err := h.queries.TaskUPIDOnRecord(c.Context(), upid)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create task record")
 	}
@@ -359,8 +407,8 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		Upid:        upid,
 		Description: p.String("description"),
 		Status:      status,
-		Node:        node,
-		TaskType:    p.String("task_type"),
+		Node:        upidNode,
+		TaskType:    reported.Type,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fiber.NewError(fiber.StatusConflict, "The task is already on record")
@@ -371,7 +419,7 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 
 	// Under recorded_upid, not upid: an audit row naming the task's UPID
 	// would itself count as the task — a guest's birth, for a create.
-	details, _ := json.Marshal(map[string]any{"recorded_upid": upid, "node": upidNode, "task_type": p.String("task_type")})
+	details, _ := json.Marshal(map[string]any{"recorded_upid": upid, "node": upidNode, "task_type": reported.Type})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "task", upid, "task_recorded", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindTaskCreated, "task", task.ID.String(), "create")
 

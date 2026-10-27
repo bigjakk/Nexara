@@ -57,7 +57,8 @@ var auditReadsExemptFromScope = map[string]string{
 	// POST /api/v1/tasks asks whether the UPID it was handed is on record, in
 	// the one cluster its manage:task check authorized: a yes or no about the
 	// caller's own value, never an entry.
-	"tasks.sql.TaskUPIDOnRecord": "a yes or no about the caller's own UPID, in the cluster its manage:task check authorized",
+	"tasks.sql.TaskUPIDOnRecord": "a yes or no about a UPID in any cluster, asked only once Proxmox has confirmed the " +
+		"caller's own cluster runs it",
 
 	// One object's History: both pin the cluster with a REQUIRED cluster_id
 	// argument, never a nullable filter, and the route's cluster-scoped

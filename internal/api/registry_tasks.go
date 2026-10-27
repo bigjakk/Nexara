@@ -174,8 +174,11 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 		Path:   taskHistoryScope,
 		Description: "Record a Proxmox task Nexara dispatched, so it appears in the activity feed and is " +
 			"reconciled by the collector. Requires manage:task on the cluster named in the body, and the " +
-			"node the UPID names must be one of that cluster's. The task is recorded running, and once: a " +
-			"UPID already on record — in the audit log or the task archive — is refused with 409.",
+			"node the UPID names must be one of that cluster's (400 for a UPID that names none), running " +
+			"the task: Proxmox is asked, through that cluster's own client, and a task it does not have " +
+			"there is refused with 400, a read that fails with 502. The task is recorded running, of the " +
+			"type Proxmox reports, and once: a UPID already on record — in the audit log or the task " +
+			"archive, of any cluster — is refused with 409.",
 		Group: "Tasks",
 		Permissions: Permissions{Deferred: "the cluster comes from the request BODY, since the path names " +
 			"none, so middleware cannot resolve which cluster to authorize; the handler parses it and then " +
@@ -330,7 +333,8 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 				Description: "Node the task runs on, as Proxmox names it. Empty or omitted files the row " +
 					"with no node, which the collector cannot then reconcile.",
 			},
-			"task_type": optString(128, "<type>", "Proxmox task type, e.g. qmstart."),
+			"task_type": optString(128, "<type>", "Proxmox task type, e.g. qmstart. Not what is recorded: "+
+				"that is the type Proxmox reports for the task."),
 		},
 		Handler: h.Create,
 	})

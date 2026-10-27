@@ -17,7 +17,14 @@ import (
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
+
+// runningTask answers the handler's read of a task from Proxmox: one the node
+// runs, of the type its UPID names.
+func runningTask(_ fiber.Ctx, _ uuid.UUID, node, upid string) (*proxmox.TaskStatus, error) {
+	return &proxmox.TaskStatus{Status: "running", Type: strings.Split(upid, ":")[5], UPID: upid, Node: node}, nil
+}
 
 // taskInsertDBTX answers InsertTaskHistory with a row and records the
 // arguments the insert was handed, and holds every node as a member — or, with
@@ -111,6 +118,8 @@ func TestTaskCreateFilesAnEmptyStatusAsRunning(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dbtx := &taskInsertDBTX{}
 			handler := NewTaskHandler(db.New(dbtx), nil, 0)
+			handler.taskStatus = runningTask
+			handler.taskStatus = runningTask
 			var seen *apischema.Params
 			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 			app.Use(func(c fiber.Ctx) error {
@@ -166,21 +175,40 @@ func TestTaskCreateRefusesWhatIsNotANewRunningTaskOfTheCluster(t *testing.T) {
 		"node":            {Type: apischema.String, Optional: true},
 		"task_type":       {Type: apischema.String, Optional: true},
 	})
+	noSuchTask := func(fiber.Ctx, uuid.UUID, string, string) (*proxmox.TaskStatus, error) {
+		return nil, &proxmox.APIError{StatusCode: http.StatusBadRequest, Fields: map[string]string{"upid": "no such task"}}
+	}
+	unreadable := func(fiber.Ctx, uuid.UUID, string, string) (*proxmox.TaskStatus, error) {
+		return nil, proxmox.ErrConnectionFailed
+	}
 	for _, tt := range []struct {
-		name   string
-		body   string
-		dbtx   taskInsertDBTX
-		want   int
-		audits int
+		name, upid, body string
+		dbtx             taskInsertDBTX
+		status           func(fiber.Ctx, uuid.UUID, string, string) (*proxmox.TaskStatus, error)
+		want, audits     int
 	}{
-		{"a new running task", `,"node":"pve-01"`, taskInsertDBTX{}, http.StatusCreated, 1},
-		{"a status but running", `,"status":"failed"`, taskInsertDBTX{}, http.StatusBadRequest, 0},
-		{"a UPID on record", ``, taskInsertDBTX{onRecord: true}, http.StatusConflict, 0},
-		{"a UPID already filed", ``, taskInsertDBTX{insertConflicts: true}, http.StatusConflict, 0},
-		{"another cluster's node, the body naming none", ``, taskInsertDBTX{members: []string{"pve-02"}}, http.StatusNotFound, 0},
+		{"a new running task", "", `,"node":"pve-01","task_type":"forged"`, taskInsertDBTX{}, nil, http.StatusCreated, 1},
+		{"a status but running", "", `,"status":"failed"`, taskInsertDBTX{}, nil, http.StatusBadRequest, 0},
+		{"a UPID on record", "", ``, taskInsertDBTX{onRecord: true}, nil, http.StatusConflict, 0},
+		{"a UPID already filed", "", ``, taskInsertDBTX{insertConflicts: true}, nil, http.StatusConflict, 0},
+		{"another cluster's node, the body naming none", "", ``, taskInsertDBTX{members: []string{"pve-02"}}, nil,
+			http.StatusNotFound, 0},
+		{"a UPID that names no node", "UPID::0000A:0001:66000001:qmcreate:105:root@pam:", ``, taskInsertDBTX{}, nil,
+			http.StatusBadRequest, 0},
+		// A node of the cluster's name, but another cluster's task.
+		{"a task Proxmox does not run there", "", ``, taskInsertDBTX{}, noSuchTask, http.StatusBadRequest, 0},
+		{"Proxmox unreadable", "", ``, taskInsertDBTX{}, unreadable, http.StatusBadGateway, 0},
 	} {
 		dbtx := tt.dbtx
 		handler := NewTaskHandler(db.New(&dbtx), nil, 0)
+		handler.taskStatus = runningTask
+		if tt.status != nil {
+			handler.taskStatus = tt.status
+		}
+		upid := "UPID:pve-01:0000A:0001:66000001:qmcreate:105:root@pam:"
+		if tt.upid != "" {
+			upid = tt.upid
+		}
 		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 		app.Use(func(c fiber.Ctx) error {
 			c.Locals("user_id", uuid.New())
@@ -189,7 +217,7 @@ func TestTaskCreateRefusesWhatIsNotANewRunningTaskOfTheCluster(t *testing.T) {
 		})
 		app.Post("/tasks", withRequestParams(t, mirror, nil, handler.Create))
 		req := httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{"cluster_id":"`+clusterID.String()+
-			`","upid":"UPID:pve-01:0000A:0001:66000001:qmcreate:105:root@pam:"`+tt.body+`}`))
+			`","upid":"`+upid+`"`+tt.body+`}`))
 		req.Header.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
 		resp, err := app.Test(req)
 		if err != nil {
@@ -198,6 +226,10 @@ func TestTaskCreateRefusesWhatIsNotANewRunningTaskOfTheCluster(t *testing.T) {
 		_ = resp.Body.Close()
 		if resp.StatusCode != tt.want || dbtx.audits != tt.audits {
 			t.Errorf("%s: status %d, %d audit rows; want %d, %d", tt.name, resp.StatusCode, dbtx.audits, tt.want, tt.audits)
+		}
+		// Filed with the type Proxmox reports, not the body's.
+		if tt.want == http.StatusCreated && (!slices.Contains(dbtx.args, any("qmcreate")) || slices.Contains(dbtx.args, any("forged"))) {
+			t.Errorf("%s: the insert was handed %v; want Proxmox's type, qmcreate", tt.name, dbtx.args)
 		}
 	}
 }
@@ -228,6 +260,7 @@ func TestTaskUpdateWritesOnlyARunningNexaraTask(t *testing.T) {
 	} {
 		dbtx := &taskInsertDBTX{task: &db.TaskHistory{ClusterID: clusterID, Status: tt.status, Source: tt.source}}
 		handler := NewTaskHandler(db.New(dbtx), nil, 0)
+		handler.taskStatus = runningTask
 		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 		app.Use(func(c fiber.Ctx) error {
 			c.Locals("user_id", uuid.New())

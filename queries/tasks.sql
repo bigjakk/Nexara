@@ -440,12 +440,13 @@ WHERE cluster_id = @cluster_id::uuid
 ORDER BY COALESCE(finished_at, started_at) DESC
 LIMIT @row_limit::int;
 
--- TaskUPIDOnRecord says whether a UPID is already on record — an audit row of
--- the cluster names it, or the archive holds it — for POST /api/v1/tasks,
+-- TaskUPIDOnRecord says whether a UPID is already on record — an audit row
+-- names it, or the archive holds it, in any cluster — for POST /api/v1/tasks,
 -- which files only a task Nexara has not seen: a row filed under a known UPID
 -- would stand beside, or over, the verdict the collector recorded, which is
--- where a guest's History starts (ListGuestLifecycleEvents).
+-- where a guest's History starts (ListGuestLifecycleEvents). Any cluster's,
+-- because a UPID names its node by name; the handler asks only of a UPID
+-- Proxmox has confirmed the caller's cluster runs.
 -- name: TaskUPIDOnRecord :one
-SELECT (EXISTS (SELECT 1 FROM audit_log a
-                WHERE a.details->>'upid' = sqlc.arg('upid')::text AND a.cluster_id = sqlc.arg('cluster_id'))
+SELECT (EXISTS (SELECT 1 FROM audit_log a WHERE a.details->>'upid' = sqlc.arg('upid')::text)
         OR EXISTS (SELECT 1 FROM task_history_archive r WHERE r.upid = sqlc.arg('upid')::text))::bool AS on_record;
