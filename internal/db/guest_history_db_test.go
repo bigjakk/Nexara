@@ -487,6 +487,15 @@ func TestGuestHistory(t *testing.T) {
 	if !slices.Equal(got, want) || total != int64(len(want)) {
 		t.Fatalf("timeline =\n\t%v (total %d)\nwant\n\t%v (total %d)", got, total, want, len(want))
 	}
+	// No cutoff — a guest older than the audit trail, whose birth was never
+	// recorded — is the whole history of the VMID, the previous guest's too.
+	whole, _ := list(withFilter(guest(false, handlers.HistoryGuest{VMID: 100}), func(p *gen.ListHistoryParams) {
+		p.IncludeTasks, p.StatusGuestTypes = true, []string{"qemu"}
+	}))
+	if i := slices.Index(whole, "audit clone clone "); i < 0 || len(whole) < i+4 || !slices.Equal(whole[i+1:i+4], []string{
+		"audit destroy lifecycle ", "audit start power ", "audit create lifecycle "}) {
+		t.Errorf("with no cutoff: %v, want the previous guest's destroy, start and create after the clone", whole)
+	}
 	// The backup entry's end, error and lines are VM 100's, not the job's.
 	backups, err := q.ListHistory(ctx, withFilter(full, func(p *gen.ListHistoryParams) {
 		p.Category = pgtype.Text{String: "backup", Valid: true}
