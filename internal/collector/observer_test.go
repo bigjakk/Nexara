@@ -74,6 +74,14 @@ func (m *mockQueries) RecordObservedObjects(_ context.Context, arg db.RecordObse
 	if err := json.Unmarshal(arg.States, &states); err != nil {
 		return err
 	}
+	written := map[string]bool{}
+	for _, st := range states {
+		if written[st.ObjectID] {
+			// As Postgres refuses one statement's upsert of a row twice.
+			return errors.New("ON CONFLICT DO UPDATE command cannot affect row a second time")
+		}
+		written[st.ObjectID] = true
+	}
 	s := &m.observed
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -642,6 +650,43 @@ func TestObserverOutcomes(t *testing.T) {
 		back.PveVersion, back.KernelVersion = "pve-manager/9.2.20/0000aaaa", "6.14.8-2-pve"
 		e.expect("and read", "changed node/pve-01 [dns1]")
 	})
+	t.Run("IP set entries as the set lists them, one each", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.client.set("/cluster/firewall/ipset", `[{"name":"blocked"}]`)
+		e.client.set("/cluster/firewall/ipset/blocked", `[{"cidr":"192.0.2.5/24"},{"cidr":"192.0.2.0/24"},{"cidr":"192.0.2.0/24"}]`)
+		e.expect("baseline")
+		e.client.set("/cluster/firewall/ipset/blocked", `[{"cidr":"192.0.2.5/24","comment":"x"},{"cidr":"192.0.2.0/24"}]`)
+		e.expect("an edit", "changed firewall_ipset_entry/blocked/192.0.2.5/24 [comment]")
+	})
+	t.Run("a Proxmox VE without the pool query skips the pools", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.client.set("/pools", `[{"poolid":"web"}]`)
+		e.client.fail("/pools?poolid=web", &proxmox.APIError{StatusCode: http.StatusBadRequest, Message: "poolid: property is not defined in schema"})
+		e.expect("refused")
+		e.expect("skipped")
+		if n := e.client.readsOf("/pools"); n != 1 {
+			t.Fatalf("pools listed %d times, want once", n)
+		}
+	})
+	t.Run("a node that left the cluster is forgotten", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.mq.nodesByCluster = append(e.mq.nodesByCluster, db.Node{ID: uuid.New(), ClusterID: e.cluster.ID,
+			Name: "pve-02", Status: "online", PveVersion: "pve-manager/9.2.20/0000aaaa", KernelVersion: "6.14.8-2-pve"})
+		e.client.set("/nodes/pve-02/network", `[{"iface":"vmbr0","type":"bridge","cidr":"192.0.2.12/24"}]`)
+		e.expect("baseline")
+		e.mq.nodesByCluster = e.mq.nodesByCluster[:1]
+		e.expect("the node gone")
+		e.mq.observed.mu.Lock()
+		defer e.mq.observed.mu.Unlock()
+		for key := range e.mq.observed.state {
+			if strings.Contains(key, "pve-02/") {
+				t.Fatalf("still stored: %s", key)
+			}
+		}
+	})
 	t.Run("a cluster that stops answering ends the pass", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
@@ -1065,7 +1110,7 @@ func auditSites(n ast.Node) []auditSite {
 		case *ast.SelectorExpr:
 			name = fn.Sel.Name
 		}
-		typeAt := map[string]int{"AuditLog": 4, "AuditLogAs": 5}[name]
+		typeAt := map[string]int{"AuditLog": 4, "AuditLogAs": 5, "auditObject": 3}[name]
 		if typeAt > 0 && len(x.Args) > typeAt+2 {
 			if kind, action := lit(x.Args[typeAt]), lit(x.Args[typeAt+2]); kind != "" && action != "" {
 				return []auditSite{{kind: kind, action: action}}

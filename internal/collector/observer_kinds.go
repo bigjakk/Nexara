@@ -3,7 +3,9 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -281,8 +283,14 @@ func readPools(ctx context.Context, p *observePass) ([]kindReading, readOutcome)
 		if err != nil {
 			continue
 		}
-		detail, out := p.readList(ctx, target)
-		if out != readOK || len(detail) != 1 {
+		raw, out, rerr := p.readWithError(ctx, target, p.o.gap)
+		if apiErr := (*proxmox.APIError)(nil); errors.As(rerr, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
+			// Before Proxmox VE 8.1 a pool is read at /pools/{poolid} only, and
+			// the query form is refused as an unknown parameter.
+			return nil, readUnsupported
+		}
+		detail, ok := decodeList(raw)
+		if out != readOK || !ok || len(detail) != 1 {
 			reading.unread[id] = true
 			continue
 		}
@@ -685,8 +693,12 @@ func readFirewallIPSets(ctx context.Context, p *observePass) ([]kindReading, rea
 			continue
 		}
 		for _, e := range list {
+			// Keyed as the set lists it (history-cluster's IPSetListed, how
+			// a delete names it): a hand-edited config keeps an entry's host
+			// bits, so 192.0.2.5/24 and 192.0.2.0/24 are two entries, which
+			// one normalised key would collide.
 			cidr := stringField(e, "cidr")
-			key := auditkey.IPSetEntry(name, cidr)
+			key := auditkey.FirewallName(name) + "/" + cidr
 			if cidr == "" || !auditkey.ValidID(key) {
 				continue
 			}

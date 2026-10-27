@@ -272,6 +272,7 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 	}
 
 	p.observeTokenPrivileges(ctx)
+	p.forgetDepartedNodes(ctx, nodes)
 	if versions, known := p.nodeVersions(ctx, nodes); known {
 		clusterSig := observeSignature("cluster", o.tags.keyID, observeStateVersion, versions)
 		// A new privilege can open a kind skipped as refused, so the skips go
@@ -508,6 +509,11 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 	var batch recordBatch
 	seen := make(map[string]bool, len(rd.objects))
 	for _, obj := range rd.objects {
+		if seen[obj.id] {
+			// A listing that names one object twice (a config edited by hand)
+			// is compared on its first: one statement may not write a row twice.
+			continue
+		}
 		tags, err := p.tagObject(rd.kind, obj)
 		if err != nil {
 			if rd.unread == nil {
@@ -1291,6 +1297,38 @@ func sumCounts(held, next map[string]any) map[string]any {
 	}
 	out["counts"] = sum
 	return out
+}
+
+// nodeKinds are the kinds whose objects belong to a node.
+var nodeKinds = []string{"network", "node_options", "acme_config", "node_dns", "node_time", "node_firewall"}
+
+// forgetDepartedNodes drops, recording nothing, what is stored of the objects
+// of nodes that have left the cluster: no reading would ever compare them again.
+func (p *observePass) forgetDepartedNodes(ctx context.Context, nodes []db.Node) {
+	member := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		member[n.Name] = true
+	}
+	for _, kind := range nodeKinds {
+		var gone []string
+		for id, s := range p.state[kind] {
+			if s.node != "" && !member[s.node] {
+				gone = append(gone, id)
+			}
+		}
+		if len(gone) == 0 {
+			continue
+		}
+		if err := p.o.queries.DeleteClusterObjectState(ctx, db.DeleteClusterObjectStateParams{
+			ClusterID: p.cluster.ID, Kind: kind, ObjectIds: gone,
+		}); err != nil {
+			p.o.logger.Debug("object observer: forget a departed node's objects", "cluster_id", p.cluster.ID, "error", err)
+			continue
+		}
+		for _, id := range gone {
+			delete(p.state[kind], id)
+		}
+	}
 }
 
 // nodeVersions is the Proxmox versions the cluster's nodes run, for its
