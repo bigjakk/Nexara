@@ -359,6 +359,7 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		ObjectKeys:      make([]string, 0, len(sel.Objects)),
 		ObjectValues:    make([]string, 0, len(sel.Objects)),
 	}
+	floorless := false
 	for _, g := range sel.Guests {
 		// The zero time is ListHistory's "no cutoff": everything is after it.
 		after := time.Time{}
@@ -374,6 +375,17 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 		params.Vmids = append(params.Vmids, g.VMID)
 		params.CutoffAfter = append(params.CutoffAfter, after)
 		params.CutoffInclusive = append(params.CutoffInclusive, g.Inclusive)
+		// No guest's row comes before the earliest cutoff, so every arm reads
+		// from it; none when any guest has none.
+		switch {
+		case !g.After.Valid:
+			floorless = true
+		case len(params.Vmids) == 1 || g.After.Time.Before(params.CutoffFloor.Time):
+			params.CutoffFloor = g.After
+		}
+	}
+	if floorless {
+		params.CutoffFloor = pgtype.Timestamptz{}
 	}
 	for _, o := range sel.Objects {
 		params.ObjectTypes = append(params.ObjectTypes, o.ResourceType)

@@ -1509,6 +1509,16 @@ type Querier interface {
 	// destroy, so the previous guest's last act is not this one's first. The zero
 	// time is no cutoff. An object's rows have no subject and no cutoff.
 	//
+	// since, and cutoff_floor — the earliest of the guests' cutoffs, which no
+	// guest's row comes before; NULL when a guest has none — are repeated in every
+	// arm: entries is read twice, so it is materialized, and a bound applied to it
+	// reaches no arm. A 24-hour window on the busiest guest on dev read all its
+	// rows otherwise. Both are written "IS NULL OR": a bare range on a parameter
+	// tempts a generic plan to AND the arm's index with the created_at index,
+	// which read all of dev's 32k audit rows for a 30-row guest. Each entry finds
+	// its guest's cutoff by joining guests on its subject, materialized so the
+	// plan does not rebuild the list for every row.
+	//
 	// category is derived HERE, once, so it can be filtered on before the page is
 	// cut. The rules are the kind's (HistoryKind.Rules), passed in order as
 	// parallel arrays: an entry takes the category of the first rule whose field

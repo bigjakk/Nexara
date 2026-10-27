@@ -80,6 +80,16 @@
 -- destroy, so the previous guest's last act is not this one's first. The zero
 -- time is no cutoff. An object's rows have no subject and no cutoff.
 --
+-- since, and cutoff_floor — the earliest of the guests' cutoffs, which no
+-- guest's row comes before; NULL when a guest has none — are repeated in every
+-- arm: entries is read twice, so it is materialized, and a bound applied to it
+-- reaches no arm. A 24-hour window on the busiest guest on dev read all its
+-- rows otherwise. Both are written "IS NULL OR": a bare range on a parameter
+-- tempts a generic plan to AND the arm's index with the created_at index,
+-- which read all of dev's 32k audit rows for a 30-row guest. Each entry finds
+-- its guest's cutoff by joining guests on its subject, materialized so the
+-- plan does not rebuild the list for every row.
+--
 -- category is derived HERE, once, so it can be filtered on before the page is
 -- cut. The rules are the kind's (HistoryKind.Rules), passed in order as
 -- parallel arrays: an entry takes the category of the first rule whose field
@@ -100,7 +110,12 @@
 -- count(*) OVER the filtered set, computed before LIMIT — the Items and the
 -- Total come from one query and so cannot be counted under different filters.
 -- name: ListHistory :many
-WITH objects AS (
+WITH guests AS MATERIALIZED (
+    SELECT v.vmid, a.after, i.inclusive
+    FROM unnest(sqlc.arg('vmids')::int[]) WITH ORDINALITY AS v(vmid, n)
+    JOIN unnest(sqlc.arg('cutoff_after')::timestamptz[]) WITH ORDINALITY AS a(after, n) ON a.n = v.n
+    JOIN unnest(sqlc.arg('cutoff_inclusive')::bool[]) WITH ORDINALITY AS i(inclusive, n) ON i.n = v.n
+), objects AS (
     SELECT t.resource_type, k.detail_key, v.value
     FROM unnest(sqlc.arg('object_types')::text[]) WITH ORDINALITY AS t(resource_type, n)
     JOIN unnest(sqlc.arg('object_keys')::text[]) WITH ORDINALITY AS k(detail_key, n) ON k.n = t.n
@@ -118,6 +133,8 @@ WITH objects AS (
     WHERE a.cluster_id = sqlc.arg('cluster_id')
       AND a.vmid IS NOT NULL
       AND a.vmid = ANY(sqlc.arg('vmids')::int[])
+      AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR a.created_at >= sqlc.narg('cutoff_floor')::timestamptz)
+      AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
     SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
@@ -127,6 +144,8 @@ WITH objects AS (
       AND a.cluster_id = sqlc.arg('cluster_id')
       AND NOT COALESCE(a.vmid = ANY(sqlc.arg('vmids')::int[]), false)
       AND a.details->>'new_id' = ANY(sqlc.arg('vmids')::int[]::text[])
+      AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR a.created_at >= sqlc.narg('cutoff_floor')::timestamptz)
+      AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
     SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
@@ -137,6 +156,8 @@ WITH objects AS (
       AND NOT COALESCE(a.vmid = ANY(sqlc.arg('vmids')::int[]), false)
       AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest(sqlc.arg('vmids')::int[]) AS v,
                                                      unnest('{vm:,ct:}'::text[]) AS p))
+      AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR a.created_at >= sqlc.narg('cutoff_floor')::timestamptz)
+      AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
     SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
@@ -154,6 +175,7 @@ WITH objects AS (
                   WHERE o.resource_type = a.resource_type
                     AND o.value = CASE WHEN o.detail_key = '' THEN a.resource_id
                                        ELSE a.details->>o.detail_key END)
+      AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
 ), entries AS (
     SELECT ('audit:' || s.id::text)::text           AS entry_id,
            'audit'::text                            AS kind,
@@ -184,6 +206,8 @@ WITH objects AS (
       AND t.vmid IS NOT NULL
       AND t.vmid = ANY(sqlc.arg('vmids')::int[])
       AND is_guest_upid(t.upid)
+      AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR t.started_at >= sqlc.narg('cutoff_floor')::timestamptz)
+      AND (sqlc.narg('since')::timestamptz IS NULL OR t.started_at >= sqlc.narg('since')::timestamptz)
       AND NOT EXISTS (SELECT 1 FROM audit_log a
                       WHERE a.details->>'upid' = t.upid AND a.cluster_id = t.cluster_id)
     UNION ALL
@@ -193,6 +217,8 @@ WITH objects AS (
     WHERE sqlc.arg('include_tasks')::bool
       AND r.cluster_id = sqlc.arg('cluster_id')
       AND r.vmid = ANY(sqlc.arg('vmids')::int[])
+      AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR r.started_at >= sqlc.narg('cutoff_floor')::timestamptz)
+      AND (sqlc.narg('since')::timestamptz IS NULL OR r.started_at >= sqlc.narg('since')::timestamptz)
       AND NOT EXISTS (SELECT 1 FROM audit_log a
                       WHERE a.details->>'upid' = r.upid AND a.cluster_id = r.cluster_id)
     UNION ALL
@@ -203,6 +229,8 @@ WITH objects AS (
       AND s.vmid = ANY(sqlc.arg('vmids')::int[])
       AND s.explained = false
       AND s.guest_type = ANY(sqlc.arg('status_guest_types')::text[])
+      AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR s.observed_at >= sqlc.narg('cutoff_floor')::timestamptz)
+      AND (sqlc.narg('since')::timestamptz IS NULL OR s.observed_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
     SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.started_at, b.source, 'vzdump',
            'backup', '', b.vmid, b.vmid, b.user_id, b.upid, b.node, '', '', '', NULL
@@ -210,6 +238,8 @@ WITH objects AS (
     WHERE sqlc.arg('include_tasks')::bool
       AND b.cluster_id = sqlc.arg('cluster_id')
       AND b.vmid = ANY(sqlc.arg('vmids')::int[])
+      AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR b.started_at >= sqlc.narg('cutoff_floor')::timestamptz)
+      AND (sqlc.narg('since')::timestamptz IS NULL OR b.started_at >= sqlc.narg('since')::timestamptz)
 ), category_map AS MATERIALIZED (
     SELECT jsonb_object_agg(
                k.kind || ':' || k.worker || ':' || length(k.resource_type) || ':' || k.resource_type
@@ -230,16 +260,13 @@ WITH objects AS (
     SELECT e.*,
            ((SELECT m.categories FROM category_map m)
                ->> (e.kind || ':' || split_part(e.upid, ':', 6) || ':' || length(e.resource_type) || ':'
-                    || e.resource_type || ':' || e.action))::text AS category,
-           array_position(sqlc.arg('vmids')::int[], e.subject) AS guest
+                    || e.resource_type || ':' || e.action))::text AS category
     FROM entries e
 ), page AS (
     SELECT c.*, count(*) OVER () AS total
     FROM categorized c
-    WHERE (c.guest IS NULL
-           OR c.occurred_at > (sqlc.arg('cutoff_after')::timestamptz[])[c.guest]
-           OR ((sqlc.arg('cutoff_inclusive')::bool[])[c.guest]
-               AND c.occurred_at = (sqlc.arg('cutoff_after')::timestamptz[])[c.guest]))
+    LEFT JOIN guests g ON g.vmid = c.subject
+    WHERE (g.vmid IS NULL OR c.occurred_at > g.after OR (g.inclusive AND c.occurred_at = g.after))
       AND (sqlc.narg('since')::timestamptz IS NULL OR c.occurred_at >= sqlc.narg('since')::timestamptz)
       AND (sqlc.narg('category')::text IS NULL OR c.category = sqlc.narg('category')::text)
       AND (sqlc.narg('source')::text IS NULL OR c.source = sqlc.narg('source')::text)

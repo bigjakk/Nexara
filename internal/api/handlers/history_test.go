@@ -181,10 +181,16 @@ func TestHistoryKindListParams(t *testing.T) {
 		Guests:  []HistoryGuest{{VMID: 100}, {VMID: 101, After: pgtype.Timestamptz{Time: at, Valid: true}, Inclusive: true}},
 		Objects: []HistoryObject{{ResourceType: "vm_folder", Value: "f1"}, {ResourceType: "vm_folder_membership", DetailKey: "folder_id", Value: "f1"}},
 	})
-	if err != nil || !slices.Equal(p.Vmids, []int32{100, 101}) ||
+	if err != nil || !slices.Equal(p.Vmids, []int32{100, 101}) || p.CutoffFloor.Valid ||
 		!slices.Equal(p.CutoffAfter, []time.Time{{}, at}) || !slices.Equal(p.CutoffInclusive, []bool{false, true}) ||
 		!slices.Equal(p.ObjectKeys, []string{"", "folder_id"}) {
 		t.Errorf("ListParams = %+v, %v", p, err)
+	}
+	// Every arm reads from the earliest cutoff — none, above, when a guest has none.
+	if p, _ := GuestHistory().ListParams([16]byte{1}, HistorySelection{Guests: []HistoryGuest{
+		{VMID: 100, After: pgtype.Timestamptz{Time: at.Add(time.Hour), Valid: true}},
+		{VMID: 101, After: pgtype.Timestamptz{Time: at, Valid: true}}}}); !p.CutoffFloor.Valid || !p.CutoffFloor.Time.Equal(at) {
+		t.Errorf("cutoff floor = %+v, want the earlier cutoff %v", p.CutoffFloor, at)
 	}
 	// The same guest twice is one; twice with different cutoffs is refused.
 	if p, err := GuestHistory().ListParams([16]byte{1}, HistorySelection{Guests: []HistoryGuest{{VMID: 100}, {VMID: 100}}}); err != nil ||
