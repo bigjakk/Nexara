@@ -283,3 +283,142 @@ func TestObservedChanges(t *testing.T) {
 		}
 	}
 }
+
+// Fixture ids for the global kinds' test.
+var (
+	observedPBS     = uuid.MustParse("128a0000-0000-4000-8000-0000000000a1")
+	observedPBSGone = uuid.MustParse("128a0000-0000-4000-8000-0000000000a2")
+)
+
+// TestObservedGlobalChanges runs migrations 000129 and 000130 against Postgres:
+// only a global kind's row may name no cluster, the PBS job triggers record an
+// edit, a job added after the server's jobs were read and a job removed — never
+// a server's own removal, nor the first read of its jobs — and the global
+// classification reads audit rows by type and id alone.
+//
+// Not parallel, for the reason TestObservedChanges gives.
+func TestObservedGlobalChanges(t *testing.T) {
+	env := setupMigration(t)
+	defer env.Cleanup()
+	ctx, pool := env.Ctx, env.Pool
+	migrateUp(t, env.Migrate)
+	q := gen.New(pool)
+
+	purge := func() {
+		pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		servers := []string{observedPBS.String(), observedPBSGone.String()}
+		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE resource_type = 'pbs_server' AND resource_id = ANY($1)`, servers)
+		_, _ = pool.Exec(pctx, `DELETE FROM pbs_servers WHERE id = ANY($1)`, []uuid.UUID{observedPBS, observedPBSGone})
+		_, _ = pool.Exec(pctx, `DELETE FROM cluster_object_changes WHERE cluster_id IS NULL
+			AND resource_id = ANY($1)`, servers)
+	}
+	purge()
+	defer purge()
+	exec := func(what, sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+	}
+	for _, id := range []uuid.UUID{observedPBS, observedPBSGone} {
+		exec("pbs server", `INSERT INTO pbs_servers (id, name, api_url, token_id, token_secret_encrypted)
+			VALUES ($1, 'pbs01', 'https://192.0.2.20:8007', 'tok', 'enc')`, id)
+	}
+
+	// Only a global kind may name no cluster.
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_object_changes (resource_type, resource_id, change, observed_by, last_seen_at)
+		VALUES ('storage', 'store01', 'changed', 'observer', now())`); err == nil {
+		t.Fatal("a storage change with no cluster was accepted")
+	}
+
+	type row struct {
+		Change string
+		Fields []string
+		Detail map[string]any
+	}
+	changes := func(server uuid.UUID) []row {
+		t.Helper()
+		rows, err := pool.Query(ctx, `SELECT change, fields, detail FROM cluster_object_changes
+			WHERE cluster_id IS NULL AND resource_type = 'pbs_server' AND resource_id = $1 ORDER BY observed_at, change`,
+			server.String())
+		if err != nil {
+			t.Fatalf("read changes: %v", err)
+		}
+		defer rows.Close()
+		var out []row
+		for rows.Next() {
+			var r row
+			var detail []byte
+			if err := rows.Scan(&r.Change, &r.Fields, &detail); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if err := json.Unmarshal(detail, &r.Detail); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, r)
+		}
+		return out
+	}
+	syncJob := func(server uuid.UUID, id, schedule, remoteStore, state string) {
+		t.Helper()
+		if _, err := q.UpsertPBSSyncJob(ctx, gen.UpsertPBSSyncJobParams{PbsServerID: server, JobID: id,
+			Store: "datastore01", Remote: "remote01", RemoteStore: remoteStore, Schedule: schedule,
+			LastRunState: state}); err != nil {
+			t.Fatalf("upsert sync job %s: %v", id, err)
+		}
+	}
+
+	syncJob(observedPBS, "s-01", "hourly", "datastore02", "OK")
+	syncJob(observedPBS, "s-01", "hourly", "datastore02", "ERROR") // run state only
+	if got := changes(observedPBS); len(got) != 0 {
+		t.Fatalf("the first read of a server's jobs recorded %+v", got)
+	}
+	if err := q.MarkPBSJobBaseline(ctx, gen.MarkPBSJobBaselineParams{PbsServerID: observedPBS, JobType: "sync"}); err != nil {
+		t.Fatal(err)
+	}
+	syncJob(observedPBS, "s-01", "daily", "datastore03", "OK")
+	syncJob(observedPBS, "s-02", "daily", "datastore02", "")
+	exec("prune", `DELETE FROM pbs_sync_jobs WHERE pbs_server_id = $1 AND job_id = 's-02'`, observedPBS)
+	got := changes(observedPBS)
+	if len(got) != 3 || got[0].Change != "changed" || fmt.Sprint(got[0].Fields) != "[remote-store schedule]" ||
+		got[0].Detail["job"] != "s-01" || got[0].Detail["job_type"] != "sync" || got[0].Detail["datastore"] != "datastore01" ||
+		got[1].Change != "added" || got[2].Change != "removed" {
+		t.Fatalf("recorded %+v, want s-01 changed (remote-store, schedule), s-02 added and removed", got)
+	}
+
+	// A server removed takes its jobs with it, and that is no job's removal.
+	if err := q.MarkPBSJobBaseline(ctx, gen.MarkPBSJobBaselineParams{PbsServerID: observedPBSGone, JobType: "sync"}); err != nil {
+		t.Fatal(err)
+	}
+	syncJob(observedPBSGone, "s-09", "daily", "datastore02", "")
+	exec("remove the server", `DELETE FROM pbs_servers WHERE id = $1`, observedPBSGone)
+	if got := changes(observedPBSGone); len(got) != 1 || got[0].Change != "added" {
+		t.Fatalf("a removed server's jobs recorded %+v, want only the add", got)
+	}
+
+	// The global classification: an audit row of the server, in any cluster or
+	// none, explains a change of it; with nothing on record it shows.
+	exec("settle", `UPDATE cluster_object_changes SET observed_at = now() - interval '1 hour',
+			last_seen_at = now() - interval '70 minutes'
+		WHERE cluster_id IS NULL AND resource_id = ANY($1)`, []string{observedPBS.String(), observedPBSGone.String()})
+	exec("audit", `INSERT INTO audit_log (user_id, resource_type, resource_id, action, created_at)
+		VALUES ($1, 'pbs_server', $2, 'pbs_updated', now() - interval '65 minutes')`, systemUserID, observedPBS.String())
+	rules, _ := json.Marshal([]map[string]any{{"kind": "pbs_server", "change": "", "audit_type": "pbs_server",
+		"match_key": "id", "untasked": false, "action_re": "", "except_re": "", "worker_re": "", "field_re": ""}})
+	if _, err := q.ClassifyGlobalObjectChanges(ctx, gen.ClassifyGlobalObjectChangesParams{
+		Rules: rules, SettledBefore: time.Now().Add(-5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("classify: %v", err)
+	}
+	var explained, shown int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE explained AND resource_id = $1),
+			count(*) FILTER (WHERE NOT explained AND resource_id = $2)
+		FROM cluster_object_changes WHERE cluster_id IS NULL`, observedPBS.String(), observedPBSGone.String()).
+		Scan(&explained, &shown); err != nil {
+		t.Fatal(err)
+	}
+	if explained != 3 || shown != 1 {
+		t.Fatalf("explained %d of the server's 3, shown %d of the other's 1", explained, shown)
+	}
+}

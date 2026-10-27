@@ -387,6 +387,26 @@ func (q *Queries) ListPBSVerifyJobsByServer(ctx context.Context, pbsServerID uui
 	return items, nil
 }
 
+const markPBSJobBaseline = `-- name: MarkPBSJobBaseline :exec
+INSERT INTO pbs_job_baselines (pbs_server_id, job_type, last_read_at)
+VALUES ($1, $2, now())
+ON CONFLICT (pbs_server_id, job_type) DO UPDATE SET last_read_at = now()
+`
+
+type MarkPBSJobBaselineParams struct {
+	PbsServerID uuid.UUID `json:"pbs_server_id"`
+	JobType     string    `json:"job_type"`
+}
+
+// MarkPBSJobBaseline says a server's jobs of one type were just listed and
+// written whole (migrations/000130): a job that appears after this is one made
+// on the PBS, and its window starts here. Only syncPBSServer calls it, after a
+// listing whose every row was written.
+func (q *Queries) MarkPBSJobBaseline(ctx context.Context, arg MarkPBSJobBaselineParams) error {
+	_, err := q.db.Exec(ctx, markPBSJobBaseline, arg.PbsServerID, arg.JobType)
+	return err
+}
+
 const upsertPBSSnapshot = `-- name: UpsertPBSSnapshot :one
 INSERT INTO pbs_snapshots (pbs_server_id, datastore, backup_type, backup_id, backup_time, size, verified, protected, comment, owner, last_seen_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())

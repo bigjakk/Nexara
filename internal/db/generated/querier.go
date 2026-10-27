@@ -136,6 +136,11 @@ type Querier interface {
 	// task list (listed_nodes) until give_up_before; an object no node owns has no
 	// list to wait for.
 	ClassifyClusterObjectChanges(ctx context.Context, arg ClassifyClusterObjectChangesParams) (int64, error)
+	// ClassifyGlobalObjectChanges is ClassifyObservedChanges for the rows of a
+	// global kind — a PBS server's jobs (000130), whoever recorded them — which
+	// belong to no cluster: their explaining rows are found by resource_type and
+	// resource_id alone ('id' rules only), and there is no node list to wait for.
+	ClassifyGlobalObjectChanges(ctx context.Context, arg ClassifyGlobalObjectChangesParams) (int64, error)
 	// The guest kind's own SQL: what only a guest's History needs beyond the
 	// shared timeline (queries/history.sql, ListHistory) — where its timeline
 	// starts (ListGuestLifecycleEvents), and the collector's two records of what
@@ -2231,6 +2236,11 @@ type Querier interface {
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	MarkNotificationDLQResolved(ctx context.Context, id uuid.UUID) error
+	// MarkPBSJobBaseline says a server's jobs of one type were just listed and
+	// written whole (migrations/000130): a job that appears after this is one made
+	// on the PBS, and its window starts here. Only syncPBSServer calls it, after a
+	// listing whose every row was written.
+	MarkPBSJobBaseline(ctx context.Context, arg MarkPBSJobBaselineParams) error
 	// Records that Nexara asked this session to stop.
 	//
 	// POST /sessions/{id}/stop answers 200 with an empty envelope — no session

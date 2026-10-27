@@ -113,8 +113,10 @@ type mockQueries struct {
 
 	// The observer's readings and what it filed (observer_test.go), and the
 	// classifications of its changes asked for.
-	observed         observeStore
-	classifyObserved []db.ClassifyObservedChangesParams
+	observed          observeStore
+	classifyObserved  []db.ClassifyObservedChangesParams
+	classifyGlobalObs int
+	pbsJobBaselines   []db.MarkPBSJobBaselineParams
 }
 
 func newMockQueries() *mockQueries {
@@ -543,6 +545,16 @@ func (m *mockQueries) ClassifyClusterObjectChanges(_ context.Context, arg db.Cla
 func (m *mockQueries) ClassifyObservedChanges(_ context.Context, arg db.ClassifyObservedChangesParams) (int64, error) {
 	m.classifyObserved = append(m.classifyObserved, arg)
 	return 0, nil
+}
+
+func (m *mockQueries) ClassifyGlobalObjectChanges(_ context.Context, _ db.ClassifyGlobalObjectChangesParams) (int64, error) {
+	m.classifyGlobalObs++
+	return 0, nil
+}
+
+func (m *mockQueries) MarkPBSJobBaseline(_ context.Context, arg db.MarkPBSJobBaselineParams) error {
+	m.pbsJobBaselines = append(m.pbsJobBaselines, arg)
+	return nil
 }
 
 func (m *mockQueries) ClassifyGuestStatusChanges(_ context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error) {

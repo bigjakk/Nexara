@@ -180,6 +180,7 @@ type SyncQueries interface {
 	ClassifyClusterObjectChanges(ctx context.Context, arg db.ClassifyClusterObjectChangesParams) (int64, error)
 	// Edits made directly in Proxmox, which the observer files (observer.go)
 	ClassifyObservedChanges(ctx context.Context, arg db.ClassifyObservedChangesParams) (int64, error)
+	ClassifyGlobalObjectChanges(ctx context.Context, arg db.ClassifyGlobalObjectChangesParams) (int64, error)
 	// Guest status changes and backup job logs (the History tab)
 	ClassifyGuestStatusChanges(ctx context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error)
 	AbandonUnreadBackupJobs(ctx context.Context, arg db.AbandonUnreadBackupJobsParams) (int64, error)
@@ -202,6 +203,7 @@ type SyncQueries interface {
 	DeleteStalePBSSnapshots(ctx context.Context, arg db.DeleteStalePBSSnapshotsParams) error
 	DeleteStalePBSSyncJobs(ctx context.Context, arg db.DeleteStalePBSSyncJobsParams) error
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg db.DeleteStalePBSVerifyJobsParams) error
+	MarkPBSJobBaseline(ctx context.Context, arg db.MarkPBSJobBaselineParams) error
 	// Guest snapshot inventory
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.Vm, error)
 	UpsertGuestSnapshot(ctx context.Context, arg db.UpsertGuestSnapshotParams) (db.GuestSnapshot, error)
@@ -1414,6 +1416,9 @@ func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 			results = append(results, result)
 		}
 	}
+	// The PBS jobs edited on the PBS itself, which the triggers on the job
+	// tables recorded as this pass wrote them (migrations/000130).
+	s.classifyGlobalObjectChanges(ctx)
 
 	return results
 }
@@ -1567,6 +1572,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 		}); err != nil {
 			s.logger.Warn("failed to prune stale PBS sync jobs", "pbs_id", server.ID, "error", err)
 		}
+		s.markPBSJobBaseline(ctx, server, "sync")
 	}
 	if verifyJobsWritten {
 		if err := s.queries.DeleteStalePBSVerifyJobs(ctx, db.DeleteStalePBSVerifyJobsParams{
@@ -1575,6 +1581,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 		}); err != nil {
 			s.logger.Warn("failed to prune stale PBS verify jobs", "pbs_id", server.ID, "error", err)
 		}
+		s.markPBSJobBaseline(ctx, server, "verify")
 	}
 
 	// Emit pbs_change event so frontend caches auto-refresh.
@@ -1583,6 +1590,17 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 	}
 
 	return result, nil
+}
+
+// markPBSJobBaseline records that a server's jobs of one type were just listed
+// and written whole: from the next listing on, a job that appears was made on
+// the PBS (the triggers of migrations/000130), and its window starts now.
+func (s *Syncer) markPBSJobBaseline(ctx context.Context, server db.PbsServer, jobType string) {
+	if err := s.queries.MarkPBSJobBaseline(ctx, db.MarkPBSJobBaselineParams{
+		PbsServerID: server.ID, JobType: jobType,
+	}); err != nil {
+		s.logger.Warn("failed to mark a PBS server's jobs as read", "pbs_id", server.ID, "job_type", jobType, "error", err)
+	}
 }
 
 // syncNodeAddresses fetches corosync cluster status and updates node IP addresses.

@@ -122,3 +122,12 @@ GROUP BY 1, pbs_server_id, datastore
 -- HashAggregate above leaves their relative order unspecified otherwise, so
 -- two identical requests could return rows in different orders.
 ORDER BY 1 ASC, datastore ASC;
+
+-- MarkPBSJobBaseline says a server's jobs of one type were just listed and
+-- written whole (migrations/000130): a job that appears after this is one made
+-- on the PBS, and its window starts here. Only syncPBSServer calls it, after a
+-- listing whose every row was written.
+-- name: MarkPBSJobBaseline :exec
+INSERT INTO pbs_job_baselines (pbs_server_id, job_type, last_read_at)
+VALUES (sqlc.arg('pbs_server_id'), sqlc.arg('job_type'), now())
+ON CONFLICT (pbs_server_id, job_type) DO UPDATE SET last_read_at = now();

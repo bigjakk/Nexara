@@ -626,7 +626,7 @@ func TestObserveTags(t *testing.T) {
 func TestObservedChangeRules(t *testing.T) {
 	t.Parallel()
 	keys := regexp.MustCompile(`^(id|node|vmid|sid|cluster|details:[a-z_]+)$`)
-	for _, r := range observedChangeRules {
+	for _, r := range slices.Concat(observedChangeRules, observedGlobalRules) {
 		if !keys.MatchString(r.MatchKey) || (r.AuditType == "" && !slices.Contains([]string{"vmid", "sid", "cluster"}, r.MatchKey)) {
 			t.Errorf("rule %+v: match key or audit type", r)
 		}

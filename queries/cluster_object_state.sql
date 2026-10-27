@@ -203,3 +203,53 @@ SET explained = NOT EXISTS (
           AND (c.change <> 'changed' OR h.field_re = '' OR f.name ~ h.field_re)))
 FROM pending p
 WHERE c.id = p.id;
+
+-- ClassifyGlobalObjectChanges is ClassifyObservedChanges for the rows of a
+-- global kind — a PBS server's jobs (000130), whoever recorded them — which
+-- belong to no cluster: their explaining rows are found by resource_type and
+-- resource_id alone ('id' rules only), and there is no node list to wait for.
+-- name: ClassifyGlobalObjectChanges :execrows
+WITH rules AS MATERIALIZED (
+    SELECT e.value->>'kind'                AS kind,
+           e.value->>'change'              AS change,
+           e.value->>'audit_type'          AS audit_type,
+           e.value->>'match_key'           AS match_key,
+           (e.value->>'untasked')::bool    AS untasked,
+           e.value->>'action_re'           AS action_re,
+           e.value->>'except_re'           AS except_re,
+           e.value->>'worker_re'           AS worker_re,
+           e.value->>'field_re'            AS field_re
+    FROM jsonb_array_elements(sqlc.arg('rules')::jsonb) AS e
+), pending AS MATERIALIZED (
+    SELECT c.id, c.resource_type, c.resource_id, c.change,
+           LEAST(c.last_seen_at, c.observed_at) - interval '2 minutes' AS win_from,
+           c.observed_at + interval '30 seconds'                       AS win_to
+    FROM cluster_object_changes c
+    WHERE c.cluster_id IS NULL
+      AND c.explained IS NULL
+      AND c.observed_at < sqlc.arg('settled_before')::timestamptz
+), hits AS (
+    SELECT p.id, r.field_re
+    FROM pending p
+    JOIN rules r ON r.kind = p.resource_type AND r.change IN ('', p.change) AND r.match_key = 'id'
+    JOIN audit_log a ON a.resource_type = r.audit_type AND a.resource_id = p.resource_id
+                    AND a.created_at BETWEEN p.win_from - interval '1 day' AND p.win_to + interval '10 minutes'
+    LEFT JOIN task_history th ON th.upid = a.details->>'upid'
+    WHERE (NOT r.untasked OR a.details->>'upid' IS NULL)
+      AND (r.action_re = '' OR a.action ~ r.action_re)
+      AND (r.except_re = '' OR a.action !~ r.except_re)
+      AND (r.worker_re = '' OR COALESCE(split_part(a.details->>'upid', ':', 6) ~ r.worker_re, false))
+      AND COALESCE(th.started_at, a.created_at) <= p.win_to
+      AND CASE WHEN th.upid IS NULL THEN a.created_at ELSE COALESCE(th.finished_at, now()) END >= p.win_from
+)
+UPDATE cluster_object_changes c
+SET explained = NOT EXISTS (
+    SELECT 1
+    FROM unnest(CASE WHEN c.change = 'changed' AND cardinality(c.fields) > 0 THEN c.fields ELSE ARRAY['']::text[] END)
+         AS f(name)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM hits h
+        WHERE h.id = c.id
+          AND (c.change <> 'changed' OR h.field_re = '' OR f.name ~ h.field_re)))
+FROM pending p
+WHERE c.id = p.id;

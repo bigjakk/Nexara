@@ -136,7 +136,16 @@ var observedChangeRules = []explainRule{
 		ActionRe: `^(create|update|delete)_firewall_rule$`, FieldRe: `^firewall_rules$`},
 }
 
-var observedChangeRulesJSON = mustRulesJSON(observedChangeRules)
+// observedGlobalRules is the rules for the global kinds' rows. A PBS sync or
+// verify job is never edited by Nexara — it only runs them — so nothing on
+// record explains one edited on the PBS, and a run or a garbage collection
+// Nexara started on the same server must not hide it.
+var observedGlobalRules = []explainRule{}
+
+var (
+	observedChangeRulesJSON = mustRulesJSON(observedChangeRules)
+	observedGlobalRulesJSON = mustRulesJSON(observedGlobalRules)
+)
 
 func mustRulesJSON(rules []explainRule) json.RawMessage {
 	b, err := json.Marshal(rules)
@@ -160,6 +169,17 @@ func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster
 		GiveUpBefore:   time.Now().Add(-statusChangeGiveUp),
 	}); err != nil {
 		s.logger.Warn("failed to classify observed object changes", "cluster_id", cluster.ID, "error", err)
+	}
+}
+
+// classifyGlobalObjectChanges decides the settled changes of the global kinds
+// (ClassifyGlobalObjectChanges), after each PBS pass.
+func (s *Syncer) classifyGlobalObjectChanges(ctx context.Context) {
+	if _, err := s.queries.ClassifyGlobalObjectChanges(ctx, db.ClassifyGlobalObjectChangesParams{
+		Rules:         observedGlobalRulesJSON,
+		SettledBefore: time.Now().Add(-statusChangeSettle),
+	}); err != nil {
+		s.logger.Warn("failed to classify global object changes", "error", err)
 	}
 }
 

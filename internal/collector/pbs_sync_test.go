@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -51,10 +52,11 @@ func TestSyncPBSServerPrunesJobsOnlyAfterAWholeListing(t *testing.T) {
 		syncErr, verifyErr     error
 		upsertErr              error
 		wantSyncs, wantVerifys int
+		wantMarks              string // the job types marked read whole (migrations/000130)
 	}{
-		{name: "both listed and written", wantSyncs: 1, wantVerifys: 1},
+		{name: "both listed and written", wantSyncs: 1, wantVerifys: 1, wantMarks: "sync verify"},
 		{name: "both listings failed", syncErr: failed, verifyErr: failed},
-		{name: "a sync job not written", upsertErr: failed, wantVerifys: 1},
+		{name: "a sync job not written", upsertErr: failed, wantVerifys: 1, wantMarks: "verify"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,6 +78,23 @@ func TestSyncPBSServerPrunesJobsOnlyAfterAWholeListing(t *testing.T) {
 				t.Fatalf("prunes: sync %d verify %d, want %d and %d",
 					mq.pbsSyncJobPrunes, mq.pbsVerifyJobPrunes, tc.wantSyncs, tc.wantVerifys)
 			}
+			var marks []string
+			for _, m := range mq.pbsJobBaselines {
+				marks = append(marks, m.JobType)
+			}
+			if strings.Join(marks, " ") != tc.wantMarks {
+				t.Fatalf("marked %v, want %q", marks, tc.wantMarks)
+			}
 		})
+	}
+}
+
+// The PBS pass decides the global kinds' settled changes once it has run.
+func TestSyncAllPBSClassifiesGlobalChanges(t *testing.T) {
+	t.Parallel()
+	mq := &mockQueries{}
+	(&Syncer{queries: mq, logger: testLogger()}).SyncAllPBS(context.Background())
+	if mq.classifyGlobalObs != 1 {
+		t.Fatalf("classified %d times, want once", mq.classifyGlobalObs)
 	}
 }

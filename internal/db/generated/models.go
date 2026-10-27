@@ -814,6 +814,12 @@ type PbsDatastoreMetrics5m struct {
 	Avail       int64       `json:"avail"`
 }
 
+type PbsJobBaseline struct {
+	PbsServerID uuid.UUID `json:"pbs_server_id"`
+	JobType     string    `json:"job_type"`
+	LastReadAt  time.Time `json:"last_read_at"`
+}
+
 type PbsServer struct {
 	ID                   uuid.UUID   `json:"id"`
 	Name                 string      `json:"name"`
