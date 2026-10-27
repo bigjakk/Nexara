@@ -30,6 +30,11 @@
 -- are decided by the observer, with rules per kind of object. Only a row
 -- classified false is shown; an explained one stays hidden and is KEPT, with the
 -- id of the row that explained it, for as long as an unexplained one is.
+--
+-- Nothing prunes this table, as nothing prunes audit_log (the audit log has no
+-- retention; the guest History keeps its rows as long as it does). What writes to it
+-- is bounded: the Ceph pass files at most 20 rows an hour for each field of each
+-- object, and a replication job adds a row per edit made to it.
 CREATE TABLE IF NOT EXISTS cluster_object_changes (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     cluster_id    UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
@@ -75,6 +80,12 @@ CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_object
 -- without this both would scan the whole table.
 CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_kind
     ON cluster_object_changes (resource_type, resource_id, observed_at);
+
+-- What a kind's History lists: the changes nothing explained, a small part of the
+-- table (ListClusterObjectChanges), newest first.
+CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_shown
+    ON cluster_object_changes (cluster_id, observed_at DESC)
+    WHERE explained = false;
 
 -- A guest's History, which survives its vms row being re-created.
 CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_guest
