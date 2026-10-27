@@ -50,6 +50,9 @@ import (
 const (
 	// ObjectObserveMinInterval is the floor under OBJECT_OBSERVE_INTERVAL.
 	ObjectObserveMinInterval = time.Minute
+	// ObjectObserveMaxInterval is its ceiling: the explanation look-back is
+	// three intervals (observedLookback), and stays bounded only if they are.
+	ObjectObserveMaxInterval = time.Hour
 
 	observeMaxInFlight = 2
 	observeMinGap      = 100 * time.Millisecond // at most ten reads started a second
@@ -127,6 +130,11 @@ func NewObserver(queries ObserverQueries, encryptionKey string, clients Observer
 	if err != nil {
 		return nil, err
 	}
+	if interval > ObjectObserveMaxInterval {
+		logger.Warn("OBJECT_OBSERVE_INTERVAL is longer than an hour; observing every hour",
+			"configured", interval)
+		interval = ObjectObserveMaxInterval
+	}
 	return &Observer{
 		queries:  queries,
 		clients:  clients,
@@ -143,7 +151,7 @@ func NewObserver(queries ObserverQueries, encryptionKey string, clients Observer
 	}, nil
 }
 
-// Interval is the cadence the loop should tick at, the floor applied.
+// Interval is the cadence the loop should tick at, the floor and ceiling applied.
 func (o *Observer) Interval() time.Duration { return o.interval }
 
 // ObserveAll starts a pass for every active cluster whose previous pass has

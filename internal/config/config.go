@@ -82,7 +82,8 @@ type Config struct {
 	// servers, options, nodes' settings) and files what changed since the last,
 	// field names only. One read per
 	// guest per pass, spread over the interval and never more than ten a second
-	// per cluster. Floored at 60s in the collector; 0 turns it off.
+	// per cluster. Held between 60s and 1h in the collector; 0 turns it off, and
+	// a negative value is refused (validate), as an unreadable one is.
 	ObjectObserveInterval time.Duration `envconfig:"OBJECT_OBSERVE_INTERVAL" default:"5m"`
 	// VeeamSyncInterval drives the Veeam inventory pass — repositories and
 	// their capacity sample, job states, backup objects and the restore
@@ -222,6 +223,11 @@ func (c *Config) validate() error {
 		slog.Warn("TASK_HISTORY_RETENTION must be positive — clamping to 168h to avoid purging all finished task history",
 			"configured", c.TaskHistoryRetention)
 		c.TaskHistoryRetention = defaultTaskHistoryRetention
+	}
+	// A negative interval would read as "off" to the loop's > 0 check, turning
+	// the observer off without a word. 0 is the off switch.
+	if c.ObjectObserveInterval < 0 {
+		return fmt.Errorf("OBJECT_OBSERVE_INTERVAL must not be negative (0 turns the observer off)")
 	}
 	switch strings.ToLower(strings.TrimSpace(c.SecureCookies)) {
 	case "auto", "always", "never":

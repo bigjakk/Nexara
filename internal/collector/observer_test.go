@@ -238,6 +238,23 @@ func newObserveEnv(t *testing.T) *observeEnv {
 	return &observeEnv{t: t, mq: mq, client: client, obs: obs, cluster: cluster, node: node}
 }
 
+// The interval is held between a minute and an hour: the look-back is three of
+// them, and must stay bounded.
+func TestObserverInterval(t *testing.T) {
+	t.Parallel()
+	for configured, want := range map[time.Duration]time.Duration{
+		30 * time.Second: time.Minute, 5 * time.Minute: 5 * time.Minute, 3 * time.Hour: time.Hour,
+	} {
+		obs, err := NewObserver(&mockQueries{}, testEncryptionKey, nil, configured, testLogger())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := obs.Interval(); got != want {
+			t.Errorf("%v: interval %v, want %v", configured, got, want)
+		}
+	}
+}
+
 // pass runs one pass and returns what it filed.
 func (e *observeEnv) pass() []string {
 	e.obs.ObserveAll(context.Background())

@@ -187,6 +187,21 @@ func TestLoad_TaskHistoryRetention(t *testing.T) {
 	}
 }
 
+// A negative OBJECT_OBSERVE_INTERVAL would turn the observer off without a word;
+// it stops startup, as an unreadable one does. 0 is the off switch. Not
+// parallel: t.Setenv.
+func TestLoad_ObjectObserveInterval(t *testing.T) {
+	for v, wantErr := range map[string]bool{"-1m": true, "0": false} {
+		t.Run(v, func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv("OBJECT_OBSERVE_INTERVAL", v)
+			if _, err := Load(); (err != nil) != wantErr {
+				t.Fatalf("Load() error = %v, want an error: %v", err, wantErr)
+			}
+		})
+	}
+}
+
 func TestLoad_SecureCookies(t *testing.T) {
 	t.Run("defaults to auto", func(t *testing.T) {
 		setRequiredEnv(t)
