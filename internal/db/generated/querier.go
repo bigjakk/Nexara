@@ -82,11 +82,22 @@ type Querier interface {
 	// cephcreateosd UPID names the device), so osd_create is matched by the host it
 	// ran on ("device"). A row that stands for a task must also have a UPID that names
 	// the object as Proxmox spells it for that task (osd.12, a pool's name), as its
-	// key does: a task of another object explains nothing. An OSD going down or
-	// coming up is also explained by a rolling update that was working on its host
-	// (the job's own audit row is then explained_by), counted from its reboot of the
-	// host, or from its drain before one, and only if that began no more than an hour
-	// before the window: a job that has stood on a host for hours explains nothing.
+	// key does: a task of another object explains nothing. A task that failed
+	// explains nothing either, where a failed task cannot have made the change: a stop
+	// that left the OSD running, a start or a restart that did not bring it up, a
+	// create (which is matched by host alone, and whose leftover — an OSD entry that is
+	// down and out — is what the History should show). It still explains where a failed
+	// task can leave a partial change: a restart that stopped the OSD and could not
+	// start it (down), a destroy that got part-way (down, out, gone), and a pool's
+	// create, update or delete, which Ceph applies in steps. A create explains an OSD
+	// only if the OSD is new, its add on record after the task began: an old OSD coming
+	// up while a create ran on its host is not that create's.
+	//
+	// An OSD going down or coming up is also explained by a rolling update that was
+	// working on its host (the job's own audit row is then explained_by), counted from
+	// its reboot of the host, or from its drain before one, and only if that began no
+	// more than an hour before the window: a job that has stood on a host for hours
+	// explains nothing.
 	//
 	// The window: the row was made no earlier than the object was last seen as it was
 	// (less 2 minutes for how stale that sighting can be) and no later than the

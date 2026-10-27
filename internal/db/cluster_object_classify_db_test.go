@@ -29,7 +29,16 @@ type classifyAudit struct {
 	action     string
 	details    map[string]any
 	taskID     string // the id field of the UPID of the task behind the row ({oid}: the case's object); none if empty
-	running    bool   // with a task row that has not finished
+	task       string // its task row: running, completed, failed or vanished (lost track of); none if empty
+}
+
+// classifyCompanion is another change to the case's object already on record, hidden
+// because it is explained.
+type classifyCompanion struct {
+	change string
+	fields []string
+	detail string
+	at     float64 // minutes ago
 }
 
 // ClassifyClusterObjectChanges explains a change only by an audit row whose action
@@ -72,22 +81,23 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 	osdDown := `{"up":{"from":true,"to":false}}`
 	osdUp := `{"up":{"from":false,"to":true}}`
 	cases := []struct {
-		name     string
-		rtype    string
-		change   string
-		fields   []string
-		detail   string  // JSON, default {}
-		node     bool    // the case owns a node (an OSD's host)
-		observed float64 // minutes ago, default 10
-		lastSeen float64 // minutes ago, default observed + 0.5
-		unlisted bool    // the node's task list was not read
-		observer bool    // filed by the observer, which decides its own rows
-		rolling  string  // a rolling update job working on the case's node ("host") or another ("other")
-		drained  float64 // minutes ago that job began draining it, default 13
-		rebooted float64 // and rebooting it, default 12
-		audits   []classifyAudit
-		want     string
-		wantBy   int // the audit that explains it, -1 for none
+		name       string
+		rtype      string
+		change     string
+		fields     []string
+		detail     string  // JSON, default {}
+		node       bool    // the case owns a node (an OSD's host)
+		observed   float64 // minutes ago, default 10
+		lastSeen   float64 // minutes ago, default observed + 0.5
+		unlisted   bool    // the node's task list was not read
+		observer   bool    // filed by the observer, which decides its own rows
+		rolling    string  // a rolling update job working on the case's node ("host") or another ("other")
+		drained    float64 // minutes ago that job began draining it, default 13
+		rebooted   float64 // and rebooting it, default 12
+		companions []classifyCompanion
+		audits     []classifyAudit
+		want       string
+		wantBy     int // the audit that explains it, -1 for none
 	}{
 		// An OSD going down or coming up, in or out, appearing or going.
 		{name: "down, stopped", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
@@ -124,13 +134,42 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 			rolling: "host", drained: 200, rebooted: 20,
 			audits: []classifyAudit{{at: 200, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: explained, wantBy: 0},
 		{name: "a new OSD, created on its host (keyed by the device); the task still runs", rtype: "ceph_osd", change: "added", node: true,
-			audits: []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev", action: "osd_create", taskID: "sdb", running: true}}, want: explained, wantBy: 0},
+			audits: []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev", action: "osd_create", taskID: "sdb", task: "running"}}, want: explained, wantBy: 0},
 		{name: "a new OSD, created on another host", rtype: "ceph_osd", change: "added", node: true,
 			audits: []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev-elsewhere", action: "osd_create"}}, want: shown, wantBy: -1},
 		{name: "an OSD gone, destroyed", rtype: "ceph_osd", change: "removed", node: true,
 			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_destroy"}}, want: explained, wantBy: 0},
 		{name: "an OSD gone, only stopped", rtype: "ceph_osd", change: "removed", node: true,
 			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_stop"}}, want: shown, wantBy: -1},
+
+		// A task that failed explains only where a failed task can leave a partial change.
+		{name: "down, the stop failed", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "failed"}}, want: shown, wantBy: -1},
+		{name: "down, the stop's task was lost track of", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "vanished"}}, want: explained, wantBy: 0},
+		{name: "up, the start failed", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_start", taskID: "osd.{oid}", task: "failed"}}, want: shown, wantBy: -1},
+		{name: "down, the restart failed after the stop", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_restart", taskID: "osd.{oid}", task: "failed"}}, want: explained, wantBy: 0},
+		{name: "up, the restart failed", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_restart", taskID: "osd.{oid}", task: "failed"}}, want: shown, wantBy: -1},
+		{name: "an OSD gone, the destroy failed part-way", rtype: "ceph_osd", change: "removed", node: true,
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_destroy", taskID: "osd.{oid}", task: "failed"}}, want: explained, wantBy: 0},
+		{name: "a pool resized, the update failed part-way", rtype: "ceph_pool", change: "changed", fields: []string{"size"},
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_pool", action: "update", taskID: "{oid}", task: "failed"}}, want: explained, wantBy: 0},
+		{name: "a new OSD, the create failed", rtype: "ceph_osd", change: "added", node: true,
+			audits: []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev", action: "osd_create", taskID: "sdb", task: "failed"}}, want: shown, wantBy: -1},
+		{name: "a new OSD, the create finished", rtype: "ceph_osd", change: "added", node: true,
+			audits: []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev", action: "osd_create", taskID: "sdb", task: "completed"}}, want: explained, wantBy: 0},
+		// A create explains a change to an OSD only if the OSD is new: its add is on record, after the create began.
+		{name: "up, an old OSD while a create ran on its host", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
+			audits: []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev", action: "osd_create", taskID: "sdb", task: "completed"}}, want: shown, wantBy: -1},
+		{name: "up, the new OSD whose add is on record", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
+			companions: []classifyCompanion{{change: "added", at: 12}},
+			audits:     []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev", action: "osd_create", taskID: "sdb", task: "completed"}}, want: explained, wantBy: 0},
+		{name: "up, an OSD added before the create began", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
+			companions: []classifyCompanion{{change: "added", at: 20}},
+			audits:     []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev", action: "osd_create", taskID: "sdb", task: "completed"}}, want: shown, wantBy: -1},
 
 		// A pool.
 		{name: "a pool resized, updated", rtype: "ceph_pool", change: "changed", fields: []string{"size"},
@@ -164,7 +203,7 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 		{name: "after an outage, a row inside the cap", rtype: "ceph_pool", change: "changed", fields: []string{"size"}, lastSeen: 300,
 			audits: []classifyAudit{{at: 25, rtype: "ceph_pool", action: "update"}}, want: explained, wantBy: 0},
 		{name: "a task that started hours ago and still runs", rtype: "ceph_pool", change: "changed", fields: []string{"size"},
-			audits: []classifyAudit{{at: 120, rtype: "ceph_pool", action: "update", taskID: "{oid}", running: true}}, want: shown, wantBy: -1},
+			audits: []classifyAudit{{at: 120, rtype: "ceph_pool", action: "update", taskID: "{oid}", task: "running"}}, want: shown, wantBy: -1},
 		{name: "a change that names no field", rtype: "ceph_pool", change: "changed", want: shown, wantBy: -1},
 		{name: "another cluster's row", rtype: "ceph_pool", change: "changed", fields: []string{"size"},
 			audits: []classifyAudit{{other: true, at: 10.3, rtype: "ceph_pool", action: "update"}}, want: shown, wantBy: -1},
@@ -180,6 +219,16 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 			observed: 26 * 60, lastSeen: 26*60 + 1, want: shown, wantBy: -1},
 	}
 
+	type taskState struct {
+		status, exit string
+		finished     bool
+	}
+	taskStates := map[string]taskState{
+		"running":   {"running", "", false},
+		"completed": {"completed", "OK", true},
+		"failed":    {"failed", "command failed", true},
+		"vanished":  {"failed", "vanished", true}, // lost track of: not known to have failed
+	}
 	type seeded struct {
 		id     uuid.UUID
 		audits []uuid.UUID
@@ -209,6 +258,12 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 			VALUES ($1, $2, $3, $4, $5, COALESCE($6::text[], '{}'), COALESCE(NULLIF($7, ''), '{}')::jsonb, $8, $11, $9, $10)`,
 			seededCases[i].id, classifyCluster, tc.rtype, oid, tc.change, tc.fields, tc.detail, node, ago(lastSeen), ago(observed),
 			map[bool]string{false: "ceph", true: "observer"}[tc.observer])
+		for _, cm := range tc.companions {
+			exec("companion", `INSERT INTO cluster_object_changes
+				(cluster_id, resource_type, resource_id, change, fields, detail, node, observed_by, last_seen_at, observed_at, explained)
+				VALUES ($1, $2, $3, $4, COALESCE($5::text[], '{}'), COALESCE(NULLIF($6, ''), '{}')::jsonb, $7, 'ceph', $8, $8, true)`,
+				classifyCluster, tc.rtype, oid, cm.change, cm.fields, cm.detail, node, ago(cm.at))
+		}
 		jobID := uuid.New()
 		if tc.rolling != "" {
 			worked := node
@@ -248,16 +303,21 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 					details["node"] = "pve-98"
 				}
 			}
-			if a.running && a.taskID == "" {
-				t.Fatalf("%s: a running task needs a taskID", tc.name)
+			if a.task != "" && a.taskID == "" {
+				t.Fatalf("%s: a task row needs a taskID", tc.name)
 			}
 			if a.taskID != "" {
 				upidSeq++
 				upid := fmt.Sprintf("UPID:%s:%08X:00000001:6A8CE407:task:%s:root@pam:", node, upidSeq, strings.ReplaceAll(a.taskID, "{oid}", oid))
 				details["upid"] = upid
-				if a.running {
-					exec("running task", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, started_at, source)
-						VALUES ($1, $2, $3, 'running', $4, 'task', $5, 'proxmox')`, cluster, systemUserID, upid, node, ago(a.at))
+				if a.task != "" {
+					st := taskStates[a.task]
+					var finished any // NULL while the task runs; else it ends after the change was seen
+					if st.finished {
+						finished = ago(a.at - 6)
+					}
+					exec("task", `INSERT INTO task_history (cluster_id, user_id, upid, status, exit_status, node, task_type, started_at, finished_at, source)
+						VALUES ($1, $2, $3, $4, $5, $6, 'task', $7, $8, 'proxmox')`, cluster, systemUserID, upid, st.status, st.exit, node, ago(a.at), finished)
 				}
 			}
 			raw, _ := json.Marshal(details)
