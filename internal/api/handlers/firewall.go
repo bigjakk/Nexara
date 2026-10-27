@@ -581,7 +581,7 @@ func (h *NetworkHandler) CreateFirewallIPSet(c fiber.Ctx, p *apischema.Params) e
 		return mapDuplicateNameError("An IP set with that name already exists", err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset", name, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset", auditkey.FirewallName(name), "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -600,7 +600,7 @@ func (h *NetworkHandler) DeleteFirewallIPSet(c fiber.Ctx, p *apischema.Params) e
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset", name, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset", auditkey.FirewallName(name), "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -644,7 +644,7 @@ func (h *NetworkHandler) AddFirewallIPSetEntry(c fiber.Ctx, p *apischema.Params)
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"set": name, "cidr": req.CIDR})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", name+"/"+req.CIDR, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", auditkey.IPSetEntry(name, req.CIDR), "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -674,7 +674,7 @@ func (h *NetworkHandler) DeleteFirewallIPSetEntry(c fiber.Ctx, p *apischema.Para
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"set": name, "cidr": cidr})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", name+"/"+cidr, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", auditkey.IPSetEntry(name, cidr), "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -715,7 +715,7 @@ func (h *NetworkHandler) CreateSecurityGroup(c fiber.Ctx, p *apischema.Params) e
 		return mapDuplicateNameError("A security group with that name already exists", err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": req.Group})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group", req.Group, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group", auditkey.FirewallName(req.Group), "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -734,7 +734,7 @@ func (h *NetworkHandler) DeleteSecurityGroup(c fiber.Ctx, p *apischema.Params) e
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group", group, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group", auditkey.FirewallName(group), "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -774,7 +774,7 @@ func (h *NetworkHandler) CreateSecurityGroupRule(c fiber.Ctx, p *apischema.Param
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "action": req.Action})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", group, "rule_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", auditkey.FirewallName(group), "rule_created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -795,7 +795,7 @@ func (h *NetworkHandler) UpdateSecurityGroupRule(c fiber.Ctx, p *apischema.Param
 		return mapFirewallRuleError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "pos": strconv.Itoa(pos)})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", group, "rule_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", auditkey.FirewallName(group), "rule_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -815,7 +815,7 @@ func (h *NetworkHandler) DeleteSecurityGroupRule(c fiber.Ctx, p *apischema.Param
 		return mapFirewallRuleError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "pos": strconv.Itoa(pos)})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", group, "rule_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", auditkey.FirewallName(group), "rule_deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

@@ -34,20 +34,27 @@ import (
 // know it by, within the cluster. An object's History reads its rows by that
 // pair, so one object files under ONE pair whichever route changed it, and the
 // collector files a task done outside Nexara under the same pair (task_mapping.go).
-// For the objects of the cluster page the keys are:
+// The spellings Proxmox applies to a name live in internal/auditkey. For the
+// objects of the cluster page the keys are:
 //
 //	ha_resource   the sid as Proxmox spells it, vm:100 or ct:100 — never a bare VMID
 //	ha_group, ha_rule, pool, acme_account, acme_plugin, metric_server, pve_group, pve_role,
-//	firewall_ipset, firewall_security_group, usb_mapping, pci_mapping, sdn_zone, sdn_vnet,
-//	sdn_controller, sdn_ipam, sdn_dns      the name or id
-//	firewall_alias       the name, lower case (Proxmox folds it)
+//	usb_mapping, pci_mapping, sdn_zone, sdn_vnet, sdn_controller, sdn_ipam, sdn_dns
+//	                     the name or id
+//	firewall_alias, firewall_ipset, firewall_security_group
+//	                     the name, lower case: Proxmox folds it when it parses the config. The
+//	                     alias listing keeps the case it was typed in (name: MyNet), so a
+//	                     reader of this key lower-cases a listed name before looking it up
+//	firewall_ipset_entry <set>/<entry>, the entry as the set stores it — a network with its host
+//	                     bits cleared, a single host without /32 or /128; an alias as sent
+//	firewall_security_group_rule   the group, lower case
 //	sdn_subnet           <vnet>/<subnet id>, the id Proxmox derives (zone-ip-mask), not the CIDR
 //	ceph_pool            the pool name;  ceph_osd, ceph_mon, ceph_mgr, ceph_mds  the number or name
 //	pve_user user@realm; pve_token user@realm!tokenid; pve_acl the normalised path
 //	certificate, acme_config   the node;  replication  the job id (100-0);  drs_rule  the rule's uuid
 //	firewall_rule, firewall_options   the scope — cluster, or vm/<vmid> — since a rule has no id
 //	                                  of its own and its position moves; the position is a detail
-//	firewall_ipset_entry <set>/<cidr>; firewall_security_group_rule the group; firewall_template its uuid
+//	firewall_template    its uuid
 //	network  <node>/<iface>, or the node;  cluster_options, ha  the cluster's uuid;  drs  its config's
 //	sdn  "cluster", for the apply
 func AuditLog(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clusterID pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage) {

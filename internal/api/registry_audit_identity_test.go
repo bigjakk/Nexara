@@ -150,6 +150,32 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			wantType: "firewall_alias", wantID: "mynet", wantAction: "updated", wantDetails: map[string]any{"rename": "other"},
 		},
 		{
+			// IP sets and security groups are folded to lower case too, and an
+			// entry is stored as the set cleaned it: host bits cleared.
+			name: "an IP set files under its lower-case name", method: fiber.MethodPost, path: firewallScope + "/ipset",
+			target: "/firewall/ipset", body: `{"name":"MySet"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).CreateFirewallIPSet },
+			wantType: "firewall_ipset", wantID: "myset", wantAction: "created",
+		},
+		{
+			name: "and its entry under the set and the cleaned network", method: fiber.MethodPost, path: firewallScope + "/ipset/:name/entries",
+			target: "/firewall/ipset/MySet/entries", body: `{"cidr":"192.0.2.5/24"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).AddFirewallIPSetEntry },
+			wantType: "firewall_ipset_entry", wantID: "myset/192.0.2.0/24", wantAction: "created",
+		},
+		{
+			name: "a security group files under its lower-case name", method: fiber.MethodPost, path: firewallScope + "/groups",
+			target: "/firewall/groups", body: `{"group":"Web01"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).CreateSecurityGroup },
+			wantType: "firewall_security_group", wantID: "web01", wantAction: "created",
+		},
+		{
+			name: "and so do its rules", method: fiber.MethodPost, path: firewallScope + "/groups/:group/rules",
+			target: "/firewall/groups/Web01/rules", body: `{"type":"in","action":"ACCEPT"}`,
+			bind:     func(q *db.Queries) Handler { return net(q).CreateSecurityGroupRule },
+			wantType: "firewall_security_group_rule", wantID: "web01", wantAction: "rule_created",
+		},
+		{
 			// A rule's position moves with every insert above it, so the row files
 			// under the rule set it belongs to and the position is a detail.
 			name: "a firewall rule files under its scope, not its position", method: fiber.MethodPut, path: firewallScope + "/rules/:pos",

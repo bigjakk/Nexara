@@ -144,6 +144,20 @@ var clusterObjectAudits = map[string][]string{
 	"ClusterOptionsHandler.UpdateTags":        {"cluster_options"},
 }
 
+// clusterObjectIDKeys is the auditkey function each name-spelled kind's id must
+// be built with: Proxmox spells these names its own way (lower case, a normalised
+// path, the id it derived), and a handler that audits what was typed files one
+// object under as many keys as it has spellings.
+var clusterObjectIDKeys = map[string]string{
+	"firewall_alias":               "FirewallName",
+	"firewall_ipset":               "FirewallName",
+	"firewall_ipset_entry":         "IPSetEntry",
+	"firewall_security_group":      "FirewallName",
+	"firewall_security_group_rule": "FirewallName",
+	"pve_acl":                      "ACLPath",
+	"sdn_subnet":                   "SDNSubnet",
+}
+
 // clusterObjectLegacyHandlers are the cluster page's mutating routes still wired
 // by hand in router.go (legacy_route_ratchet_test.go): the registry walk cannot
 // see them, so the guard reads them by name.
@@ -165,7 +179,25 @@ var clusterObjectRoute = regexp.MustCompile(`^/api/v1/(` +
 type auditCall struct {
 	resourceType string // "" when the argument is not a string literal
 	idMissing    bool   // the resource id is an empty literal
+	idFunc       string // the auditkey function the id is built with, "" if it is not a call to one
 	pos          token.Pos
+}
+
+// auditkeyCall is the name of the auditkey function e calls, "" if it is not a
+// call to one.
+func auditkeyCall(e ast.Expr) string {
+	call, ok := e.(*ast.CallExpr)
+	if !ok {
+		return ""
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "auditkey" {
+		return ""
+	}
+	return sel.Sel.Name
 }
 
 // auditCallsIn collects every AuditLog and TrackTask call reachable from fd
@@ -192,6 +224,7 @@ func auditCallsIn(fd *ast.FuncDecl, decls map[string]*ast.FuncDecl, seen map[str
 				out = append(out, auditCall{
 					resourceType: stringLiteral(call.Args[4]),
 					idMissing:    stringLiteral(call.Args[5]) == "" && isStringLiteral(call.Args[5]),
+					idFunc:       auditkeyCall(call.Args[5]),
 					pos:          call.Pos(),
 				})
 			}
@@ -211,6 +244,7 @@ func auditCallsIn(fd *ast.FuncDecl, decls map[string]*ast.FuncDecl, seen map[str
 							ac.resourceType = stringLiteral(kv.Value)
 						case key != nil && key.Name == "ResourceID":
 							ac.idMissing = isStringLiteral(kv.Value) && stringLiteral(kv.Value) == ""
+							ac.idFunc = auditkeyCall(kv.Value)
 						}
 					}
 				}
@@ -291,6 +325,9 @@ func TestGuard_ClusterObjectMutationsFileUnderTheirKind(t *testing.T) {
 			}
 			if c.idMissing {
 				t.Errorf("%s files an audit row with an empty resource_id", key)
+			}
+			if want, named := clusterObjectIDKeys[c.resourceType]; named && c.idFunc != want {
+				t.Errorf("%s files a %s row whose id is not built with auditkey.%s", key, c.resourceType, want)
 			}
 			filed[c.resourceType] = true
 		}

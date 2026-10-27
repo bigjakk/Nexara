@@ -9,6 +9,7 @@
 package auditkey
 
 import (
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -50,13 +51,52 @@ func ACLPath(path string) string {
 	return key
 }
 
-// FirewallName is the name a firewall alias is stored and listed under. Proxmox
-// folds alias names to lower case on every route (pve-firewall,
-// PVE/API2/Firewall/Aliases.pm: lc($param->{name}), and lc($rename)), so "MyNet"
-// is created, updated and deleted as "mynet". Audited as typed, the same alias
-// would file under as many keys as the spellings its callers used.
+// FirewallName is the name a firewall alias, IP set or security group is stored
+// and listed under. Proxmox folds the names to lower case when it parses the
+// config (pve-firewall, Firewall.pm generic_fw_config_parser: lc($1) for [group
+// ...] and [ipset ...]) and on every alias route (Aliases.pm: lc($param->{name}),
+// and lc($rename)), so "MyNet" is created, updated and deleted as "mynet".
+// Audited as typed, the same object would file under as many keys as the
+// spellings its callers used.
 func FirewallName(name string) string {
 	return strings.ToLower(name)
+}
+
+// IPSetCIDR is the entry an IP set stores, and so lists and addresses a delete
+// by. For an address or a network, create_ip (IPSet.pm) runs clean_cidr, which
+// clears the host bits of a network ("192.0.2.5/24" is "192.0.2.0/24") and
+// compresses its address, and parse_ip_or_cidr, which drops the prefix of a
+// single host (/32, /128). An alias reference ("dc/web", "guest/db01") is stored
+// as sent, and so is anything else this cannot read as an address: Proxmox
+// refused it or never took it, and there is nothing to normalise.
+func IPSetCIDR(entry string) string {
+	ip, length, hasPrefix := strings.Cut(entry, "/")
+	// clean_cidr leaves an entry with no prefix, or a zero one, as it is.
+	if !hasPrefix || length == "" || length == "0" {
+		return entry
+	}
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || addr.Zone() != "" {
+		return entry
+	}
+	bits, err := strconv.Atoi(length)
+	if err != nil || bits < 0 || bits > addr.BitLen() {
+		return entry
+	}
+	prefix, err := addr.Prefix(bits)
+	if err != nil {
+		return entry
+	}
+	if bits == addr.BitLen() {
+		return prefix.Addr().String()
+	}
+	return prefix.Addr().String() + "/" + length
+}
+
+// IPSetEntry is the key of an IP set entry: its set, then the entry as the set
+// stores it.
+func IPSetEntry(set, entry string) string {
+	return FirewallName(set) + "/" + IPSetCIDR(entry)
 }
 
 // BareVMID reports the VMID a bare HA sid names ("109"). A sid with a type

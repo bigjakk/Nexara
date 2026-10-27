@@ -48,6 +48,37 @@ func TestFirewallName(t *testing.T) {
 	}
 }
 
+// IPSetCIDR is what create_ip stores: clean_cidr's host bits cleared and address
+// compressed, the prefix of a single host dropped, and an alias reference or
+// anything unreadable left as sent.
+func TestIPSetCIDR(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"192.0.2.5/24":            "192.0.2.0/24",
+		"192.0.2.0/24":            "192.0.2.0/24",
+		"192.0.2.5":               "192.0.2.5",
+		"192.0.2.5/32":            "192.0.2.5",
+		"2001:db8::1/128":         "2001:db8::1",
+		"2001:DB8:0:0:0:0:0:5/64": "2001:db8::/64",
+		"2001:db8::/64":           "2001:db8::/64",
+		"dc/MyNet":                "dc/MyNet",
+		"guest/web-01":            "guest/web-01",
+		"MyNet":                   "MyNet",
+		"10.0.0.0/0":              "10.0.0.0/0",
+		"192.0.2.5/33":            "192.0.2.5/33",
+		"not an address/24":       "not an address/24",
+		"192.0.2.5/":              "192.0.2.5/",
+		"fe80::1%eth0/64":         "fe80::1%eth0/64",
+	} {
+		if got := IPSetCIDR(in); got != want {
+			t.Errorf("IPSetCIDR(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := IPSetEntry("MySet", "192.0.2.5/24"); got != "myset/192.0.2.0/24" {
+		t.Errorf("IPSetEntry = %q, want the lower-cased set and the cleaned entry", got)
+	}
+}
+
 // The HA sid of a bare VMID: only the canonical digits of a VMID name a guest, a
 // guest's type picks vm: or ct:, and Proxmox's own answer is taken only as this
 // VMID under one of the two.
