@@ -127,8 +127,8 @@ func TestTaskStatusVocabulary(t *testing.T) {
 		{fiber.MethodGet, taskHistoryScope, true, all, "?status= has always meant every state"},
 		{fiber.MethodPost, taskHistoryScope, true, []string{"running"}, "the create files an empty status as " +
 			"running, the one state a task is recorded in: how it ends is the collector's"},
-		{fiber.MethodPut, taskHistoryScope + "/:upid", false, all, "the update wrote whatever status it was " +
-			"given straight into the row, so \"\" was never a sentinel there"},
+		{fiber.MethodPut, taskHistoryScope + "/:upid", false, []string{"running"}, "the update reports a " +
+			"running task's progress and keeps it running; \"\" was never a sentinel there"},
 	} {
 		declared := declaredEndpoint(t, tt.method, tt.path).Parameters["status"].Enum
 		if slices.Contains(declared, "") != tt.empty {
@@ -260,10 +260,10 @@ func TestTaskListBoundsArePinned(t *testing.T) {
 // TestTaskUpdateKeepsNullMeaningAbsent is the compatibility assertion this
 // domain needed.
 //
-// The SPA sends progress and finished_at UNCONDITIONALLY, as an explicit null
-// when it has nothing to say. apischema reads an explicit null as absent, which
-// is exactly how the handler already read its *float64 and *string — so the two
-// agree, and the "stopped with no finished_at stamps now" branch still fires.
+// A client sends progress and finished_at UNCONDITIONALLY, as an explicit null
+// when it has nothing to say, as the SPA once did. apischema reads an explicit
+// null as absent, which is how the handler reads its *float64 and *string — so
+// a null finished_at is not refused as a finish time.
 func TestTaskUpdateKeepsNullMeaningAbsent(t *testing.T) {
 	const path = taskHistoryScope + "/:upid"
 	cap := &capture{}
@@ -273,16 +273,16 @@ func TestTaskUpdateKeepsNullMeaningAbsent(t *testing.T) {
 	app := newRegistryApp(t, noAuth(), e)
 
 	target := strings.ReplaceAll(path, ":upid", "UPID%3Apve-01%3A0000A%3Aqmstart%3A%3Aroot%40pam%3A")
-	body := `{"status":"stopped","exit_status":"","progress":null,"finished_at":null}`
+	body := `{"status":"running","exit_status":"","progress":null,"finished_at":null}`
 	if status, env := send(t, app, jsonRequest(http.MethodPut, target, body)); status != fiber.StatusNoContent {
-		t.Fatalf("status = %d (%q), want 204 — this is the body the SPA sends", status, env.Message)
+		t.Fatalf("status = %d (%q), want 204 — a body of nulls", status, env.Message)
 	}
 	if _, supplied := cap.params.OptFloat("progress"); supplied {
 		t.Error("an explicit null progress reads as supplied; the handler would store 0 where it stores NULL " +
 			"for an unknown progress")
 	}
 	if _, supplied := cap.params.OptString("finished_at"); supplied {
-		t.Error("an explicit null finished_at reads as supplied; the \"stopped stamps now\" branch would never fire")
+		t.Error("an explicit null finished_at reads as supplied; the handler would refuse it as a finish time")
 	}
 	// The percent-encoded UPID survives the path parameter intact — the handler
 	// unescapes it, and a pattern written against either form would break one

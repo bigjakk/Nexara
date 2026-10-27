@@ -405,24 +405,21 @@ func (h *TaskHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusConflict, "Only a running task that Nexara recorded can be updated")
 	}
 
+	// The task stays running: how it ends is the collector's too.
 	status := p.String("status")
+	if status == "" {
+		status = "running"
+	}
+	if _, finished := p.OptString("finished_at"); status != "running" || finished {
+		return fiber.NewError(fiber.StatusBadRequest, "A task stays running here; how it ends is the collector's")
+	}
 	params := db.UpdateTaskHistoryParams{
 		Upid:       upid,
 		Status:     status,
 		ExitStatus: p.String("exit_status"),
 	}
-
 	if progress, supplied := p.OptFloat("progress"); supplied {
 		params.Progress = pgtype.Float8{Float64: progress, Valid: true}
-	}
-
-	if finishedAt, supplied := p.OptString("finished_at"); supplied {
-		t, parseErr := time.Parse(time.RFC3339, finishedAt)
-		if parseErr == nil {
-			params.FinishedAt = pgtype.Timestamptz{Time: t, Valid: true}
-		}
-	} else if status == "stopped" {
-		params.FinishedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	}
 
 	updated, err := h.queries.UpdateTaskHistory(c.Context(), params)

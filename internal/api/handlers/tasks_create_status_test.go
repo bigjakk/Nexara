@@ -204,7 +204,8 @@ func TestTaskCreateRefusesWhatIsNotANewRunningTaskOfTheCluster(t *testing.T) {
 
 // A finished task's outcome, and a task the collector recorded from Proxmox,
 // are the collector's: a guest's History starts where its lifecycle tasks say,
-// so PUT /api/v1/tasks/:upid may rewrite only a running task Nexara recorded.
+// so PUT /api/v1/tasks/:upid may only report a running task Nexara recorded
+// still running — its progress — and never its end.
 func TestTaskUpdateWritesOnlyARunningNexaraTask(t *testing.T) {
 	t.Parallel()
 	clusterID := uuid.New()
@@ -216,12 +217,14 @@ func TestTaskUpdateWritesOnlyARunningNexaraTask(t *testing.T) {
 		"finished_at": {Type: apischema.String, Optional: true},
 	})
 	for _, tt := range []struct {
-		status, source string
-		want           int
+		status, source, body string
+		want                 int
 	}{
-		{"running", "nexara", http.StatusOK},
-		{"completed", "nexara", http.StatusConflict},
-		{"running", "proxmox", http.StatusConflict},
+		{"running", "nexara", `{"progress":40}`, http.StatusOK},
+		{"completed", "nexara", `{"progress":40}`, http.StatusConflict},
+		{"running", "proxmox", `{"progress":40}`, http.StatusConflict},
+		{"running", "nexara", `{"status":"failed"}`, http.StatusBadRequest},
+		{"running", "nexara", `{"finished_at":"2026-01-01T00:00:00Z"}`, http.StatusBadRequest},
 	} {
 		dbtx := &taskInsertDBTX{task: &db.TaskHistory{ClusterID: clusterID, Status: tt.status, Source: tt.source}}
 		handler := NewTaskHandler(db.New(dbtx), nil, 0)
@@ -233,7 +236,7 @@ func TestTaskUpdateWritesOnlyARunningNexaraTask(t *testing.T) {
 		})
 		app.Put("/tasks/:upid", withRequestParams(t, mirror, []string{"upid"}, handler.Update))
 		req := httptest.NewRequest(http.MethodPut, "/tasks/UPID:pve-01:0000A:qmcreate:100:root@pam:",
-			strings.NewReader(`{"status":"failed"}`))
+			strings.NewReader(tt.body))
 		req.Header.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
 		resp, err := app.Test(req)
 		if err != nil {
@@ -241,7 +244,8 @@ func TestTaskUpdateWritesOnlyARunningNexaraTask(t *testing.T) {
 		}
 		_ = resp.Body.Close()
 		if resp.StatusCode != tt.want || (dbtx.updates == 1) != (tt.want == http.StatusOK) {
-			t.Errorf("a %s %s task: status %d after %d writes, want %d", tt.status, tt.source, resp.StatusCode, dbtx.updates, tt.want)
+			t.Errorf("a %s %s task, %s: status %d after %d writes, want %d", tt.status, tt.source, tt.body,
+				resp.StatusCode, dbtx.updates, tt.want)
 		}
 	}
 }

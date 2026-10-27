@@ -337,11 +337,12 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPut,
 		Path:   taskHistoryScope + "/:upid",
-		Description: "Update a recorded task's state and progress. Requires manage:task on the CLUSTER the " +
-			"recorded task belongs to, which is read from the row rather than supplied. Not a partial " +
-			"update: every field is written on every call, so one left out is cleared rather than kept. " +
-			"Only a running task Nexara recorded is written: one that has finished, or that was recorded " +
-			"from Proxmox, is refused with 409, its outcome being the collector's.",
+		Description: "Update a running task's progress. Requires manage:task on the CLUSTER the recorded " +
+			"task belongs to, which is read from the row rather than supplied. Not a partial update: every " +
+			"field is written on every call, so one left out is cleared rather than kept. Only a running " +
+			"task Nexara recorded is written, and it stays running: how a task ends is the collector's, " +
+			"read from Proxmox, so a task that has finished or was recorded from Proxmox is refused with " +
+			"409, and a status other than running or a finish time with 400.",
 		Group: "Tasks",
 		Permissions: Permissions{Deferred: "the cluster is read from the task ROW the :upid resolves to, " +
 			"not from the request, so middleware has nothing to resolve; the handler loads the row and then " +
@@ -354,12 +355,11 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 			// finished_at on every call, and the handler passes an empty
 			// string or NULL for each one the caller left out.
 			"status": {
-				Type:     apischema.String,
-				Optional: true,
-				Enum:     []string{"running", "completed", "failed", "stopped"},
-				Typetext: "<running|completed|failed|stopped>",
-				Description: "New state. Omitted, the row is left with an empty state. \"stopped\" with no " +
-					"finished_at stamps the finish time as now.",
+				Type:        apischema.String,
+				Optional:    true,
+				Enum:        []string{"running"},
+				Typetext:    "<running>",
+				Description: "The task's state: running, the only one an update may write. Omitted, it is running.",
 			},
 			"exit_status": optString(512, "<string>", "Proxmox's exit status string for the task. Omitted, "+
 				"it is stored empty."),
@@ -382,9 +382,8 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 				Optional:  true,
 				MaxLength: apischema.Ptr(64),
 				Typetext:  "<RFC3339 timestamp>",
-				Description: "When the task finished. Omitted, or sent as null, the finish time is cleared — " +
-					"unless status is \"stopped\", which stamps it as now. A value that is not RFC 3339 " +
-					"clears it too, whatever the status.",
+				Description: "Refused with 400: a running task has not finished, and when one does is the " +
+					"collector's. Omitted, or sent as null, it stays unset.",
 			},
 		},
 		Handler: h.Update,
