@@ -54,6 +54,10 @@ var auditReadsExemptFromScope = map[string]string{
 	// only UPIDs the caller supplied, runs on the background sync path with no
 	// user in scope, and there is no RBAC context to apply.
 	"proxmox_task_sync.sql.ListExistingAuditLogUPIDs": "collector-internal dedup; echoes back caller-supplied UPIDs, no user context",
+	// POST /api/v1/tasks asks whether the UPID it was handed is on record, in
+	// the one cluster its manage:task check authorized: a yes or no about the
+	// caller's own value, never an entry.
+	"tasks.sql.TaskUPIDOnRecord": "a yes or no about the caller's own UPID, in the cluster its manage:task check authorized",
 
 	// One object's History: both pin the cluster with a REQUIRED cluster_id
 	// argument, never a nullable filter, and the route's cluster-scoped

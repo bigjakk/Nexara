@@ -856,6 +856,29 @@ func (q *Queries) ReconcileTaskHistory(ctx context.Context, arg ReconcileTaskHis
 	return result.RowsAffected(), nil
 }
 
+const taskUPIDOnRecord = `-- name: TaskUPIDOnRecord :one
+SELECT (EXISTS (SELECT 1 FROM audit_log a
+                WHERE a.details->>'upid' = $1::text AND a.cluster_id = $2)
+        OR EXISTS (SELECT 1 FROM task_history_archive r WHERE r.upid = $1::text))::bool AS on_record
+`
+
+type TaskUPIDOnRecordParams struct {
+	Upid      string      `json:"upid"`
+	ClusterID pgtype.UUID `json:"cluster_id"`
+}
+
+// TaskUPIDOnRecord says whether a UPID is already on record — an audit row of
+// the cluster names it, or the archive holds it — for POST /api/v1/tasks,
+// which files only a task Nexara has not seen: a row filed under a known UPID
+// would stand beside, or over, the verdict the collector recorded, which is
+// where a guest's History starts (ListGuestLifecycleEvents).
+func (q *Queries) TaskUPIDOnRecord(ctx context.Context, arg TaskUPIDOnRecordParams) (bool, error) {
+	row := q.db.QueryRow(ctx, taskUPIDOnRecord, arg.Upid, arg.ClusterID)
+	var on_record bool
+	err := row.Scan(&on_record)
+	return on_record, err
+}
+
 const updateTaskHistory = `-- name: UpdateTaskHistory :execrows
 UPDATE task_history
 SET status = $2, exit_status = $3, progress = $4, finished_at = $5

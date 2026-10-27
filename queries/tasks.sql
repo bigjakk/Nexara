@@ -438,3 +438,13 @@ WHERE cluster_id = @cluster_id::uuid
   AND COALESCE(finished_at, started_at) < @until::timestamptz
 ORDER BY COALESCE(finished_at, started_at) DESC
 LIMIT @row_limit::int;
+
+-- TaskUPIDOnRecord says whether a UPID is already on record — an audit row of
+-- the cluster names it, or the archive holds it — for POST /api/v1/tasks,
+-- which files only a task Nexara has not seen: a row filed under a known UPID
+-- would stand beside, or over, the verdict the collector recorded, which is
+-- where a guest's History starts (ListGuestLifecycleEvents).
+-- name: TaskUPIDOnRecord :one
+SELECT (EXISTS (SELECT 1 FROM audit_log a
+                WHERE a.details->>'upid' = sqlc.arg('upid')::text AND a.cluster_id = sqlc.arg('cluster_id'))
+        OR EXISTS (SELECT 1 FROM task_history_archive r WHERE r.upid = sqlc.arg('upid')::text))::bool AS on_record;

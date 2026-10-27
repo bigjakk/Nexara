@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/url"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -314,35 +317,62 @@ func (h *TaskHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	// answer for. Checked here, after the permission check, rather than by
 	// the registry (Endpoint.NodesCheckedByHandler): the cluster is in the
 	// body.
+	// The UPID's own node is checked whether or not the body names one:
+	// task_history.upid is unique across clusters, so a running task of
+	// another cluster filed here first would never be recorded there.
+	upid := p.String("upid")
+	upidNode := extractNodeFromUPID(upid)
 	node := p.String("node")
-	if node != "" && extractNodeFromUPID(p.String("upid")) != node {
+	if node != "" && upidNode != node {
 		return fiber.NewError(fiber.StatusBadRequest, "node does not match the node the UPID names")
 	}
-	if err := requireNodeInCluster(c, lookupOf(h.queries), clusterID, node); err != nil {
+	if upidNode == "" {
+		return errNodeNotMember
+	}
+	if err := requireNodeInCluster(c, lookupOf(h.queries), clusterID, upidNode); err != nil {
 		return err
 	}
 
-	// The declaration's Default covers an omitted status. An EMPTY one meant
-	// running as well before the registry — this handler substituted it — so
-	// it still does, rather than filing a row with no state at all.
+	// A task is filed running; how it ended is the collector's, read from
+	// Proxmox (ReconcileTaskHistory). The declaration's Default covers an
+	// omitted status, and an EMPTY one means running too, as it always has.
 	status := p.String("status")
 	if status == "" {
 		status = "running"
+	}
+	if status != "running" {
+		return fiber.NewError(fiber.StatusBadRequest, "A task is recorded as running; how it ends is the collector's")
+	}
+	// Nor is a task filed twice: a row under a UPID already on record would
+	// stand beside, or over, the verdict the collector recorded for it.
+	onRecord, err := h.queries.TaskUPIDOnRecord(c.Context(), db.TaskUPIDOnRecordParams{Upid: upid, ClusterID: ClusterUUID(clusterID)})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create task record")
+	}
+	if onRecord {
+		return fiber.NewError(fiber.StatusConflict, "The task is already on record")
 	}
 
 	task, err := h.queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
 		ClusterID:   clusterID,
 		UserID:      uid,
-		Upid:        p.String("upid"),
+		Upid:        upid,
 		Description: p.String("description"),
 		Status:      status,
 		Node:        node,
 		TaskType:    p.String("task_type"),
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fiber.NewError(fiber.StatusConflict, "The task is already on record")
+	}
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create task record")
 	}
 
+	// Under recorded_upid, not upid: an audit row naming the task's UPID
+	// would itself count as the task — a guest's birth, for a create.
+	details, _ := json.Marshal(map[string]any{"recorded_upid": upid, "node": upidNode, "task_type": p.String("task_type")})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "task", upid, "task_recorded", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindTaskCreated, "task", task.ID.String(), "create")
 
 	return c.Status(fiber.StatusCreated).JSON(mapTaskHistory(task))

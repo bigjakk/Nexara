@@ -173,7 +173,9 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 		Method: fiber.MethodPost,
 		Path:   taskHistoryScope,
 		Description: "Record a Proxmox task Nexara dispatched, so it appears in the activity feed and is " +
-			"reconciled by the collector. Requires manage:task on the cluster named in the body.",
+			"reconciled by the collector. Requires manage:task on the cluster named in the body, and the " +
+			"node the UPID names must be one of that cluster's. The task is recorded running, and once: a " +
+			"UPID already on record — in the audit log or the task archive — is refused with 409.",
 		Group: "Tasks",
 		Permissions: Permissions{Deferred: "the cluster comes from the request BODY, since the path names " +
 			"none, so middleware cannot resolve which cluster to authorize; the handler parses it and then " +
@@ -272,9 +274,10 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 				Type:        apischema.String,
 				Optional:    true,
 				Default:     "running",
-				Enum:        []string{"", "running", "completed", "failed", "stopped"},
-				Typetext:    "<running|completed|failed|stopped>",
-				Description: "Initial state. Empty or omitted files the row as running, which is what a just-dispatched task is.",
+				Enum:        []string{"", "running"},
+				Typetext:    "<running>",
+				Description: "Initial state: running, the only one, which is what a just-dispatched task is; how " +
+					"it ends is the collector's, read from Proxmox. Empty or omitted is running too.",
 			},
 			// Not a bare optString, unlike its neighbours: this value does
 			// not stay in the row. reconcileRunningTasks

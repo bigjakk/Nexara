@@ -116,16 +116,18 @@ func TestTaskSortVocabulary(t *testing.T) {
 // it before the registry, so it is set aside before the comparison. The update
 // never gave it a meaning. Each case says which.
 func TestTaskStatusVocabulary(t *testing.T) {
-	want := handlers.TaskStatusKeys()
+	all := handlers.TaskStatusKeys()
 	for _, tt := range []struct {
 		method string
 		path   string
 		empty  bool
+		want   []string
 		why    string
 	}{
-		{fiber.MethodGet, taskHistoryScope, true, "?status= has always meant every state"},
-		{fiber.MethodPost, taskHistoryScope, true, "the create has always filed an empty status as running"},
-		{fiber.MethodPut, taskHistoryScope + "/:upid", false, "the update wrote whatever status it was " +
+		{fiber.MethodGet, taskHistoryScope, true, all, "?status= has always meant every state"},
+		{fiber.MethodPost, taskHistoryScope, true, []string{"running"}, "the create files an empty status as " +
+			"running, the one state a task is recorded in: how it ends is the collector's"},
+		{fiber.MethodPut, taskHistoryScope + "/:upid", false, all, "the update wrote whatever status it was " +
 			"given straight into the row, so \"\" was never a sentinel there"},
 	} {
 		declared := declaredEndpoint(t, tt.method, tt.path).Parameters["status"].Enum
@@ -135,8 +137,8 @@ func TestTaskStatusVocabulary(t *testing.T) {
 		}
 		got := slices.DeleteFunc(slices.Clone(declared), func(s string) bool { return s == "" })
 		slices.Sort(got)
-		if !slices.Equal(got, want) {
-			t.Errorf("%s %s declares the status enum %v but the handler accepts %v", tt.method, tt.path, got, want)
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("%s %s declares the status enum %v, want %v — %s", tt.method, tt.path, got, tt.want, tt.why)
 		}
 	}
 }

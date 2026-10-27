@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,19 +20,29 @@ import (
 )
 
 // taskInsertDBTX answers InsertTaskHistory with a row and records the
-// arguments the insert was handed, and holds every node as a member. With
-// task set it is that task's row too: GetTaskByUpid answers it, and
-// UpdateTaskHistory counts its writes and updates one row.
+// arguments the insert was handed, and holds every node as a member — or, with
+// members set, those alone. onRecord answers TaskUPIDOnRecord, and
+// insertConflicts makes the insert find its UPID taken. With task set it is
+// that task's row too: GetTaskByUpid answers it, and UpdateTaskHistory counts
+// its writes and updates one row. audits counts the audit rows written.
 type taskInsertDBTX struct {
-	args    []any
-	task    *db.TaskHistory
-	updates int
+	args            []any
+	task            *db.TaskHistory
+	updates         int
+	members         []string
+	onRecord        bool
+	insertConflicts bool
+	audits          int
 }
 
 func (d *taskInsertDBTX) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	if d.task != nil && strings.Contains(sql, "-- name: UpdateTaskHistory :execrows") {
 		d.updates++
 		return pgconn.NewCommandTag("UPDATE 1"), nil
+	}
+	if strings.Contains(sql, "-- name: InsertAuditLog :exec") {
+		d.audits++
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
 	}
 	return pgconn.CommandTag{}, errCaptured
 }
@@ -46,10 +57,19 @@ func (d *taskInsertDBTX) QueryRow(_ context.Context, sql string, args ...any) pg
 	}
 	if strings.Contains(sql, "-- name: GetNodeByClusterAndName :one") {
 		// The node is one of the cluster's; Create checks before it inserts.
+		if d.members != nil && !slices.Contains(d.members, fmt.Sprint(args[1])) {
+			return failRow{err: pgx.ErrNoRows}
+		}
 		return replayRow{row: db.Node{Name: "pve-01"}}
+	}
+	if strings.Contains(sql, "-- name: TaskUPIDOnRecord :one") {
+		return replayRow{row: struct{ OnRecord bool }{d.onRecord}}
 	}
 	if !strings.Contains(sql, "-- name: InsertTaskHistory :one") {
 		return failRow{err: errCaptured}
+	}
+	if d.insertConflicts {
+		return failRow{err: pgx.ErrNoRows}
 	}
 	d.args = args
 	return replayRow{row: db.TaskHistory{ID: uuid.New()}}
@@ -72,8 +92,7 @@ func TestTaskCreateFilesAnEmptyStatusAsRunning(t *testing.T) {
 		"task_cluster_id": {Type: apischema.String, Alias: "cluster_id", Format: "uuid"},
 		"upid":            {Type: apischema.String, MaxLength: apischema.Ptr(512)},
 		"description":     {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(512)},
-		"status": {Type: apischema.String, Optional: true, Default: "running",
-			Enum: []string{"", "running", "completed", "failed", "stopped"}},
+		"status":          {Type: apischema.String, Optional: true, Default: "running", Enum: []string{"", "running"}},
 		"node": {Type: apischema.String, Optional: true, Pattern: apischema.Rule("node-name-or-empty"),
 			MaxLength: apischema.Ptr(63)},
 		"task_type": {Type: apischema.String, Optional: true, MaxLength: apischema.Ptr(128)},
@@ -87,7 +106,7 @@ func TestTaskCreateFilesAnEmptyStatusAsRunning(t *testing.T) {
 	}{
 		{"omitted", ``, "running"},
 		{"empty", `,"status":""`, "running"},
-		{"set", `,"status":"completed"`, "completed"},
+		{"set", `,"status":"running"`, "running"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			dbtx := &taskInsertDBTX{}
@@ -131,6 +150,55 @@ func TestTaskCreateFilesAnEmptyStatusAsRunning(t *testing.T) {
 				t.Errorf("the insert was handed %v; want the state %q and no empty string", dbtx.args, tt.want)
 			}
 		})
+	}
+}
+
+// A task is filed once, running, under a node of the body's cluster — the
+// UPID's own, whether the body names one or not — and the filing is audited.
+func TestTaskCreateRefusesWhatIsNotANewRunningTaskOfTheCluster(t *testing.T) {
+	t.Parallel()
+	clusterID := uuid.New()
+	mirror := compiledMirror(t, apischema.Properties{
+		"task_cluster_id": {Type: apischema.String, Alias: "cluster_id", Format: "uuid"},
+		"upid":            {Type: apischema.String},
+		"description":     {Type: apischema.String, Optional: true},
+		"status":          {Type: apischema.String, Optional: true},
+		"node":            {Type: apischema.String, Optional: true},
+		"task_type":       {Type: apischema.String, Optional: true},
+	})
+	for _, tt := range []struct {
+		name   string
+		body   string
+		dbtx   taskInsertDBTX
+		want   int
+		audits int
+	}{
+		{"a new running task", `,"node":"pve-01"`, taskInsertDBTX{}, http.StatusCreated, 1},
+		{"a status but running", `,"status":"failed"`, taskInsertDBTX{}, http.StatusBadRequest, 0},
+		{"a UPID on record", ``, taskInsertDBTX{onRecord: true}, http.StatusConflict, 0},
+		{"a UPID already filed", ``, taskInsertDBTX{insertConflicts: true}, http.StatusConflict, 0},
+		{"another cluster's node, the body naming none", ``, taskInsertDBTX{members: []string{"pve-02"}}, http.StatusNotFound, 0},
+	} {
+		dbtx := tt.dbtx
+		handler := NewTaskHandler(db.New(&dbtx), nil, 0)
+		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+		app.Use(func(c fiber.Ctx) error {
+			c.Locals("user_id", uuid.New())
+			c.Locals("rbac_engine", clusterGrantEngine{"manage", "task", clusterID})
+			return c.Next()
+		})
+		app.Post("/tasks", withRequestParams(t, mirror, nil, handler.Create))
+		req := httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{"cluster_id":"`+clusterID.String()+
+			`","upid":"UPID:pve-01:0000A:0001:66000001:qmcreate:105:root@pam:"`+tt.body+`}`))
+		req.Header.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != tt.want || dbtx.audits != tt.audits {
+			t.Errorf("%s: status %d, %d audit rows; want %d, %d", tt.name, resp.StatusCode, dbtx.audits, tt.want, tt.audits)
+		}
 	}
 }
 
