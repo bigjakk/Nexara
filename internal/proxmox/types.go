@@ -107,6 +107,22 @@ func (f FlexString) String() string {
 	return string(f)
 }
 
+// optionalUPID reads the data of a request that starts a task: the task's UPID,
+// a JSON string. Anything else (null, an object, a number) is "no UPID" and not
+// an error: by the time the reply is read the change has been made, so failing
+// the call would report a failure for work that was done and leave it unaudited.
+type optionalUPID string
+
+// UnmarshalJSON implements json.Unmarshaler for optionalUPID.
+func (u *optionalUPID) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		s = ""
+	}
+	*u = optionalUPID(s)
+	return nil
+}
+
 // NodeDisk represents a physical disk from GET /nodes/{node}/disks/list.
 type NodeDisk struct {
 	DevPath string     `json:"devpath"`

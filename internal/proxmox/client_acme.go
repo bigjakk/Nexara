@@ -50,22 +50,22 @@ func (c *Client) UpdateACMEAccount(ctx context.Context, name string, params Upda
 		form.Set("contact", params.Contact)
 	}
 	path := "/cluster/acme/account/" + url.PathEscape(name)
-	var upid string
+	var upid optionalUPID
 	if err := c.doPut(ctx, path, form, &upid); err != nil {
 		return "", fmt.Errorf("update ACME account %s: %w", name, err)
 	}
-	return upid, nil
+	return string(upid), nil
 }
 
 // DeleteACMEAccount deactivates an account with the CA. Proxmox does it in a
 // task (acmedeactivate) and returns its UPID.
 func (c *Client) DeleteACMEAccount(ctx context.Context, name string) (string, error) {
 	path := "/cluster/acme/account/" + url.PathEscape(name)
-	var upid string
+	var upid optionalUPID
 	if err := c.doDelete(ctx, path, &upid); err != nil {
 		return "", fmt.Errorf("delete ACME account %s: %w", name, err)
 	}
-	return upid, nil
+	return string(upid), nil
 }
 func (c *Client) GetACMEPlugins(ctx context.Context) ([]ACMEPlugin, error) {
 	var plugins []ACMEPlugin

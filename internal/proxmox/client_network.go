@@ -127,11 +127,11 @@ func (c *Client) DeleteSDNSubnet(ctx context.Context, vnet string, subnet string
 // ApplySDN applies the pending SDN configuration. Proxmox does it in a
 // reloadnetworkall task and returns its UPID.
 func (c *Client) ApplySDN(ctx context.Context) (string, error) {
-	var upid string
+	var upid optionalUPID
 	if err := c.doPut(ctx, "/cluster/sdn", nil, &upid); err != nil {
 		return "", fmt.Errorf("apply SDN config: %w", err)
 	}
-	return upid, nil
+	return string(upid), nil
 }
 func (c *Client) GetSDNControllers(ctx context.Context) ([]SDNController, error) {
 	var controllers []SDNController
@@ -452,11 +452,11 @@ func (c *Client) ApplyNetworkConfig(ctx context.Context, node string) (string, e
 		return "", err
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/network"
-	var upid string
+	var upid optionalUPID
 	if err := c.doPut(ctx, path, nil, &upid); err != nil {
 		return "", fmt.Errorf("apply network config on %s: %w", node, err)
 	}
-	return upid, nil
+	return string(upid), nil
 }
 func (c *Client) RevertNetworkConfig(ctx context.Context, node string) error {
 	if err := validateNodeName(node); err != nil {
