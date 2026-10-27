@@ -435,7 +435,11 @@ func TestGuestHistory(t *testing.T) {
 		}
 	}
 
-	// ── Where the timeline starts.
+	// ── Where the timeline starts. A finished task's outcome is the
+	// collector's, and PUT /api/v1/tasks/:upid cannot rewrite it after the fact.
+	if n, err := q.UpdateTaskHistory(ctx, gen.UpdateTaskHistoryParams{Upid: startUPID, Status: "failed"}); err != nil || n != 0 {
+		t.Errorf("rewriting a finished task: %d rows (%v), want none", n, err)
+	}
 	events, err := q.ListGuestLifecycleEvents(ctx, gen.ListGuestLifecycleEventsParams{
 		ClusterID: pgtype.UUID{Bytes: historyClusterID, Valid: true}, Vmid: 100,
 	})

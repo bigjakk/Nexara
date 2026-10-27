@@ -19,12 +19,20 @@ import (
 )
 
 // taskInsertDBTX answers InsertTaskHistory with a row and records the
-// arguments the insert was handed, and holds every node as a member.
+// arguments the insert was handed, and holds every node as a member. With
+// task set it is that task's row too: GetTaskByUpid answers it, and
+// UpdateTaskHistory counts its writes and updates one row.
 type taskInsertDBTX struct {
-	args []any
+	args    []any
+	task    *db.TaskHistory
+	updates int
 }
 
-func (*taskInsertDBTX) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (d *taskInsertDBTX) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+	if d.task != nil && strings.Contains(sql, "-- name: UpdateTaskHistory :execrows") {
+		d.updates++
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	}
 	return pgconn.CommandTag{}, errCaptured
 }
 
@@ -33,6 +41,9 @@ func (*taskInsertDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) 
 }
 
 func (d *taskInsertDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	if d.task != nil && strings.Contains(sql, "-- name: GetTaskByUpid :one") {
+		return replayRow{row: *d.task}
+	}
 	if strings.Contains(sql, "-- name: GetNodeByClusterAndName :one") {
 		// The node is one of the cluster's; Create checks before it inserts.
 		return replayRow{row: db.Node{Name: "pve-01"}}
@@ -120,5 +131,49 @@ func TestTaskCreateFilesAnEmptyStatusAsRunning(t *testing.T) {
 				t.Errorf("the insert was handed %v; want the state %q and no empty string", dbtx.args, tt.want)
 			}
 		})
+	}
+}
+
+// A finished task's outcome, and a task the collector recorded from Proxmox,
+// are the collector's: a guest's History starts where its lifecycle tasks say,
+// so PUT /api/v1/tasks/:upid may rewrite only a running task Nexara recorded.
+func TestTaskUpdateWritesOnlyARunningNexaraTask(t *testing.T) {
+	t.Parallel()
+	clusterID := uuid.New()
+	mirror := compiledMirror(t, apischema.Properties{
+		"upid":        {Type: apischema.String, MaxLength: apischema.Ptr(512)},
+		"status":      {Type: apischema.String, Optional: true},
+		"exit_status": {Type: apischema.String, Optional: true},
+		"progress":    {Type: apischema.Number, Optional: true},
+		"finished_at": {Type: apischema.String, Optional: true},
+	})
+	for _, tt := range []struct {
+		status, source string
+		want           int
+	}{
+		{"running", "nexara", http.StatusOK},
+		{"completed", "nexara", http.StatusConflict},
+		{"running", "proxmox", http.StatusConflict},
+	} {
+		dbtx := &taskInsertDBTX{task: &db.TaskHistory{ClusterID: clusterID, Status: tt.status, Source: tt.source}}
+		handler := NewTaskHandler(db.New(dbtx), nil, 0)
+		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+		app.Use(func(c fiber.Ctx) error {
+			c.Locals("user_id", uuid.New())
+			c.Locals("rbac_engine", clusterGrantEngine{"manage", "task", clusterID})
+			return c.Next()
+		})
+		app.Put("/tasks/:upid", withRequestParams(t, mirror, []string{"upid"}, handler.Update))
+		req := httptest.NewRequest(http.MethodPut, "/tasks/UPID:pve-01:0000A:qmcreate:100:root@pam:",
+			strings.NewReader(`{"status":"failed"}`))
+		req.Header.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != tt.want || (dbtx.updates == 1) != (tt.want == http.StatusOK) {
+			t.Errorf("a %s %s task: status %d after %d writes, want %d", tt.status, tt.source, resp.StatusCode, dbtx.updates, tt.want)
+		}
 	}
 }

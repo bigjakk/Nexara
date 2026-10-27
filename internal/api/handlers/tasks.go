@@ -369,6 +369,11 @@ func (h *TaskHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	if err := requireClusterPerm(c, "manage", "task", task.ClusterID); err != nil {
 		return err
 	}
+	// A finished task's verdict, and a task the collector recorded from
+	// Proxmox, are the collector's: see UpdateTaskHistory.
+	if task.Status != "running" || task.Source == "proxmox" {
+		return fiber.NewError(fiber.StatusConflict, "Only a running task that Nexara recorded can be updated")
+	}
 
 	status := p.String("status")
 	params := db.UpdateTaskHistoryParams{
@@ -390,8 +395,12 @@ func (h *TaskHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		params.FinishedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	}
 
-	if err := h.queries.UpdateTaskHistory(c.Context(), params); err != nil {
+	updated, err := h.queries.UpdateTaskHistory(c.Context(), params)
+	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update task")
+	}
+	if updated == 0 {
+		return fiber.NewError(fiber.StatusConflict, "The task finished before it could be updated")
 	}
 	h.eventPub.SystemEvent(c.Context(), events.KindTaskUpdate, status)
 

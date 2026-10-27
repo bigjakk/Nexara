@@ -2425,7 +2425,14 @@ type Querier interface {
 	// check is ever dropped, the write still cannot happen AND the caller is told,
 	// rather than the endpoint reporting success for a row it never touched.
 	UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) (int64, error)
-	UpdateTaskHistory(ctx context.Context, arg UpdateTaskHistoryParams) error
+	// UpdateTaskHistory backs PUT /api/v1/tasks/:upid. It writes only a task
+	// Nexara recorded that is still running: a finished task's verdict, and every
+	// row the collector ingested from Proxmox, are the collector's
+	// (ReconcileTaskHistory, InsertExternalTaskHistory). A guest's History decides
+	// where it starts on them (ListGuestLifecycleEvents), so manage:task cannot
+	// rewrite one after the fact. :execrows: 0 is a task that finished, or is
+	// Proxmox's, in between the handler's read and this write.
+	UpdateTaskHistory(ctx context.Context, arg UpdateTaskHistoryParams) (int64, error)
 	// UpdateTaskLastRun records how a run left the scheduler: 'dispatched' with the
 	// UPID in last_upid, or 'failed' with the reason in last_error and no UPID.
 	UpdateTaskLastRun(ctx context.Context, arg UpdateTaskLastRunParams) error

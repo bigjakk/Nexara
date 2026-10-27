@@ -525,7 +525,7 @@ func (s *schedFixtures) task(cluster uuid.UUID, upid, status, exitStatus string)
 func (s *schedFixtures) handMadeTask(upid, status, exitStatus string) {
 	s.t.Helper()
 	s.task(schedReconcileCluster, upid, "running", "")
-	if err := s.q.UpdateTaskHistory(s.ctx, gen.UpdateTaskHistoryParams{
+	if _, err := s.q.UpdateTaskHistory(s.ctx, gen.UpdateTaskHistoryParams{
 		Upid:       upid,
 		Status:     status,
 		ExitStatus: exitStatus,

@@ -27,10 +27,17 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'proxmox',
          THEN split_part($3, ':', 7)::int END)
 ON CONFLICT (upid) DO NOTHING;
 
--- name: UpdateTaskHistory :exec
+-- UpdateTaskHistory backs PUT /api/v1/tasks/:upid. It writes only a task
+-- Nexara recorded that is still running: a finished task's verdict, and every
+-- row the collector ingested from Proxmox, are the collector's
+-- (ReconcileTaskHistory, InsertExternalTaskHistory). A guest's History decides
+-- where it starts on them (ListGuestLifecycleEvents), so manage:task cannot
+-- rewrite one after the fact. :execrows: 0 is a task that finished, or is
+-- Proxmox's, in between the handler's read and this write.
+-- name: UpdateTaskHistory :execrows
 UPDATE task_history
 SET status = $2, exit_status = $3, progress = $4, finished_at = $5
-WHERE upid = $1;
+WHERE upid = $1 AND status = 'running' AND source <> 'proxmox';
 
 -- name: GetTaskByUpid :one
 SELECT * FROM task_history
