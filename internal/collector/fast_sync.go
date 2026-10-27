@@ -19,6 +19,11 @@ import (
 // connection can't pin the goroutine across many ticks.
 const fastSyncTimeout = 30 * time.Second
 
+// unknownStatusGrace is how long a guest must be listed "unknown", on a node
+// that is not offline, before the fast sync writes it (see
+// syncClusterResources): a few of pvestatd's 10-second cycles.
+const unknownStatusGrace = time.Minute
+
 // SyncAllResources runs one lightweight inventory pass over every active
 // cluster: a single GET /cluster/resources per cluster, diffed against the
 // DB, with the same events the full sync publishes. It is the fast half of
@@ -158,6 +163,11 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 	prevStatus, _ := lastStatus.(map[int32]string)
 	seenStatus := make(map[int32]string, len(guests))
 	defer s.resourceStatus.Store(cluster.ID, seenStatus)
+	lastUnknown, _ := s.resourceUnknownSince.Load(cluster.ID)
+	prevUnknownSince, _ := lastUnknown.(map[int32]time.Time)
+	unknownSince := make(map[int32]time.Time)
+	defer s.resourceUnknownSince.Store(cluster.ID, unknownSince)
+	now := time.Now()
 
 	for vmid, r := range guests {
 		status := r.GuestStatus()
@@ -166,6 +176,25 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 		listedStatus := status
 		if was, seen := prevStatus[vmid]; seen {
 			seenStatus[vmid] = was
+		}
+		// A guest pvestatd has not reported yet — one just created, cloned,
+		// restored or imported — is listed "unknown", with no name and no sizes
+		// (extract_vm_stats in PVE/API2Tools.pm), and so is every guest for a
+		// cycle after pve-cluster restarts on the node asked. Neither is a
+		// state of the guest's: written, it would blank the row and record a
+		// change to "unknown" and back that never happened. So "unknown" is
+		// written only once it has lasted unknownStatusGrace — when nothing has
+		// reported the guest for that long, which is the truth — or at once on
+		// a node the listing calls offline.
+		if status == "unknown" && nodeStatus[r.Node] != "offline" {
+			since, listed := prevUnknownSince[vmid]
+			if !listed {
+				since = now
+			}
+			unknownSince[vmid] = since
+			if now.Sub(since) < unknownStatusGrace {
+				continue
+			}
 		}
 		nodeID, nodeKnown := nodeIDByName[r.Node]
 		if !nodeKnown {

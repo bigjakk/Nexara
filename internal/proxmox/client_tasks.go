@@ -83,6 +83,11 @@ func (c *Client) GetTaskStatus(ctx context.Context, node string, upid string) (*
 	}
 	return &status, nil
 }
+
+// TaskLogPageLines is the most lines one GetTaskLog call returns. A reader
+// that pages through a log knows it has reached the end by a shorter page.
+const TaskLogPageLines = 5000
+
 func (c *Client) GetTaskLog(ctx context.Context, node string, upid string, start int) ([]TaskLogEntry, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err
@@ -90,7 +95,8 @@ func (c *Client) GetTaskLog(ctx context.Context, node string, upid string, start
 	if err := validateTaskUPID(upid); err != nil {
 		return nil, err
 	}
-	path := "/nodes/" + url.PathEscape(node) + "/tasks/" + url.PathEscape(upid) + "/log?start=" + strconv.Itoa(start) + "&limit=5000"
+	path := "/nodes/" + url.PathEscape(node) + "/tasks/" + url.PathEscape(upid) + "/log?start=" + strconv.Itoa(start) +
+		"&limit=" + strconv.Itoa(TaskLogPageLines)
 	var entries []TaskLogEntry
 	if err := c.do(ctx, path, &entries); err != nil {
 		return nil, fmt.Errorf("get task log on %s: %w", node, err)

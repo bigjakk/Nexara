@@ -14,6 +14,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const abandonUnreadBackupJobs = `-- name: AbandonUnreadBackupJobs :execrows
+INSERT INTO backup_job_logs (upid, log_read)
+SELECT th.upid, 'none'
+FROM task_history th
+WHERE th.cluster_id = $1
+  AND th.vmid IS NULL
+  AND split_part(th.upid, ':', 6) = 'vzdump'
+  AND th.status <> 'running'
+  AND th.updated_at < $2::timestamptz
+  AND NOT (th.node = split_part(th.upid, ':', 2) AND th.node = ANY($3::text[]))
+  AND NOT EXISTS (SELECT 1 FROM backup_job_logs l WHERE l.upid = th.upid)
+ON CONFLICT (upid) DO NOTHING
+`
+
+type AbandonUnreadBackupJobsParams struct {
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	GiveUpBefore time.Time `json:"give_up_before"`
+	ListedNodes  []string  `json:"listed_nodes"`
+}
+
+func (q *Queries) AbandonUnreadBackupJobs(ctx context.Context, arg AbandonUnreadBackupJobsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, abandonUnreadBackupJobs, arg.ClusterID, arg.GiveUpBefore, arg.ListedNodes)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const classifyGuestStatusChanges = `-- name: ClassifyGuestStatusChanges :execrows
 
 UPDATE guest_status_changes sc
@@ -43,28 +71,45 @@ SET explained = EXISTS (
                  OR (sc.to_status NOT IN ('running', 'stopped')
                      AND split_part(t.upid, ':', 6) IN ('qmsuspend', 'qmpause', 'vzsuspend'))
             ))
-         OR (t.vmid IS NULL AND split_part(t.upid, ':', 6) = 'vzdump' AND t.node = sc.node)
+         OR (t.vmid IS NULL AND split_part(t.upid, ':', 6) = 'vzdump' AND t.node = sc.node
+             AND EXISTS (SELECT 1 FROM backup_job_logs l
+                         WHERE l.upid = t.upid AND l.log_read = 'partial'
+                           AND l.recorded_at >= LEAST(sc.last_seen_at, sc.observed_at) - interval '2 minutes'))
       )
+) OR EXISTS (
+    SELECT 1
+    FROM guest_backups gb
+    WHERE gb.cluster_id = sc.cluster_id AND gb.vmid = sc.vmid
+      AND gb.started_at <= sc.observed_at + interval '30 seconds'
+      AND gb.finished_at >= LEAST(sc.last_seen_at, sc.observed_at) - interval '2 minutes'
 )
 WHERE sc.cluster_id = $1
   AND sc.explained IS NULL
   AND sc.observed_at < $2::timestamptz
-  AND (sc.node = ANY($3::text[])
+  AND (sc.observed_at < $3::timestamptz
        OR (sc.node = ANY($4::text[]) AND 'unknown' IN (sc.from_status, sc.to_status))
-       OR sc.observed_at < $5::timestamptz)
+       OR (sc.node = ANY($5::text[])
+           AND NOT EXISTS (
+               SELECT 1
+               FROM task_history j
+               WHERE j.cluster_id = sc.cluster_id
+                 AND j.vmid IS NULL AND split_part(j.upid, ':', 6) = 'vzdump' AND j.node = sc.node
+                 AND j.started_at <= sc.observed_at + interval '30 seconds'
+                 AND COALESCE(j.finished_at, now()) >= LEAST(sc.last_seen_at, sc.observed_at) - interval '2 minutes'
+                 AND NOT EXISTS (SELECT 1 FROM backup_job_logs l WHERE l.upid = j.upid))))
 `
 
 type ClassifyGuestStatusChangesParams struct {
 	ClusterID     uuid.UUID `json:"cluster_id"`
 	SettledBefore time.Time `json:"settled_before"`
-	ListedNodes   []string  `json:"listed_nodes"`
-	OfflineNodes  []string  `json:"offline_nodes"`
 	GiveUpBefore  time.Time `json:"give_up_before"`
+	OfflineNodes  []string  `json:"offline_nodes"`
+	ListedNodes   []string  `json:"listed_nodes"`
 }
 
 // A guest's History tab: everything that happened to one guest, newest first.
 // Served by GET /api/v1/clusters/:cluster_id/guests/:vmid/history
-// (internal/api/handlers/guest_history.go), from three stores:
+// (internal/api/handlers/guest_history.go), from four stores:
 //
 //	audit_log            every action Nexara recorded about the guest — its own
 //	                     tasks, Proxmox's (ingested by the collector), DRS, the
@@ -72,6 +117,9 @@ type ClassifyGuestStatusChangesParams struct {
 //	task_history (+ the  how each task ended. task_history_archive holds the
 //	_archive)            guest tasks task_history has pruned (000115).
 //	guest_status_changes run-state changes no task explains (000115).
+//	guest_backups        the guest's part of each backup JOB — a vzdump of
+//	                     several guests, whose task names none — read from the
+//	                     job's log by the collector (000116).
 //
 // A guest is (cluster_id, vmid), never a vms.id: the collector re-issues those
 // (000068/000084), and a VMID is only unique within its cluster — the other
@@ -102,10 +150,23 @@ type ClassifyGuestStatusChangesParams struct {
 // stops, and a container's suspend checkpoints it and stops it, after the task
 // watcher's predicted "suspended".
 //
-// The last arm is a backup JOB: a vzdump that backs up several guests carries
-// no VMID (UPID worker id empty), so it explains the changes on the node it
-// ran on while it ran. A real crash of another guest on that node during the
-// backup window is hidden by it; that is the trade.
+// The last arms are a backup JOB: a vzdump that backs up several guests
+// carries no VMID (UPID worker id empty), so which guests it touched is known
+// only once the collector has read its log (backup_job_logs, 000116). Read in
+// full, a job explains a change only on a guest it backed up, while that
+// guest's own backup ran (guest_backups, a stop or suspend mode backup's stop
+// and start among them). Read only in part — its log too long or too slow to
+// read, or never finished in the day it is given — it explains every change
+// on the node it ran on while it ran, as every job did before its log was
+// read, and a real crash of another guest on that node in the window is
+// hidden by it; up to when its log was read, though, not to its finished_at,
+// which PUT /api/v1/tasks/:upid lets a caller set to any time. Not read at
+// all — its log gone, the read refused, a task Proxmox has no log for — it
+// explains nothing, as nothing would without the job: the side this list
+// errs on. A change on a listed node that a job with no mark yet might
+// explain is not decided until the job has one — a running job's guests are
+// not known until it ends — or until give_up_before, and an unmarked job
+// explains nothing then either.
 //
 // Only the changes on listed_nodes — the nodes whose tasks this pass's ingest
 // listed (syncTasks) — are decided; one whose node could not list waits, and
@@ -114,24 +175,24 @@ type ClassifyGuestStatusChangesParams struct {
 // from 'unknown' is decided — no task explains one — while its others wait
 // for the tasks it has not handed over (a node rebooting shuts its guests down
 // just before it goes). The archive holds guest tasks only, so a backup JOB
-// (below) explains nothing once pruned. A change older than give_up_before
-// is decided whatever its node: a node the cluster calls online whose task list
-// never loads would otherwise hide its guests' changes for good, and deciding
-// without its tasks errs on the side this list exists for — the change shows.
-// Once made, the decision is stored and does not depend on the task rows
-// surviving.
+// explains nothing once pruned but through guest_backups, which is kept. A
+// change older than give_up_before is decided whatever its node: a node the
+// cluster calls online whose task list never loads would otherwise hide its
+// guests' changes for good, and deciding without its tasks errs on the side
+// this list exists for — the change shows. Once made, the decision is stored
+// and does not depend on the task rows surviving.
 //
-// The archive branch is bounded to the guest and to tasks that finished after
-// the window opened, which (cluster_id, vmid, finished_at) serves: everything
-// in the archive is older than the retention, so a recent change reads none
-// of it.
+// The archive and guest_backups branches are bounded to the guest and to
+// tasks that finished after the window opened, which (cluster_id, vmid,
+// finished_at) serves on both: everything in the archive is older than the
+// retention, so a recent change reads none of it.
 func (q *Queries) ClassifyGuestStatusChanges(ctx context.Context, arg ClassifyGuestStatusChangesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, classifyGuestStatusChanges,
 		arg.ClusterID,
 		arg.SettledBefore,
-		arg.ListedNodes,
-		arg.OfflineNodes,
 		arg.GiveUpBefore,
+		arg.OfflineNodes,
+		arg.ListedNodes,
 	)
 	if err != nil {
 		return 0, err
@@ -213,6 +274,13 @@ WITH guest_audit AS (
       AND s.vmid = $2::int
       AND s.explained = false
       AND s.guest_type = ANY($4::text[])
+    UNION ALL
+    SELECT ('backup:' || b.upid)::text, 'backup', NULL::uuid, b.started_at, b.source, 'vzdump',
+           'backup', '', b.vmid, b.user_id, b.upid, b.node, '', '', '', NULL
+    FROM guest_backups b
+    WHERE $3::bool
+      AND b.cluster_id = $1
+      AND b.vmid = $2::int
 ), categorized AS (
     SELECT e.entry_id, e.kind, e.ref_id, e.occurred_at, e.source, e.action, e.resource_type, e.resource_id, e.vmid, e.user_id, e.upid, e.node, e.recorded_status, e.from_status, e.to_status, e.last_seen_at,
            CASE
@@ -263,13 +331,16 @@ SELECT p.entry_id, p.kind, p.occurred_at, p.source, p.action, p.resource_type, p
        COALESCE(ad.details, '{}'::jsonb)                      AS details,
        COALESCE(u.email, '')::text                            AS user_email,
        COALESCE(u.display_name, '')::text                     AS user_display_name,
-       COALESCE(th.status, ar.status, '')::text               AS task_status,
-       COALESCE(th.exit_status, ar.exit_status, '')::text     AS task_exit_status,
-       COALESCE(th.description, ar.description, '')::text     AS task_description,
-       COALESCE(th.task_type, ar.task_type, '')::text         AS task_type,
-       COALESCE(th.node, ar.node, '')::text                   AS task_node,
-       th.progress                                            AS task_progress,
-       COALESCE(th.finished_at, ar.finished_at)               AS task_finished_at
+       COALESCE(gb.status, th.status, ar.status, '')::text               AS task_status,
+       COALESCE(gb.exit_status, th.exit_status, ar.exit_status, '')::text AS task_exit_status,
+       COALESCE(th.description, ar.description, '')::text                AS task_description,
+       COALESCE(th.task_type, ar.task_type, '')::text                    AS task_type,
+       COALESCE(th.node, ar.node, '')::text                              AS task_node,
+       th.progress                                                       AS task_progress,
+       COALESCE(th.finished_at, ar.finished_at)                          AS task_finished_at,
+       gb.finished_at                                                    AS backup_finished_at,
+       COALESCE(gb.log_start, 0)::int                                    AS log_start,
+       COALESCE(gb.log_end, 0)::int                                      AS log_end
 FROM page p
 LEFT JOIN audit_log ad
        ON p.kind = 'audit' AND ad.id = p.ref_id
@@ -277,6 +348,9 @@ LEFT JOIN task_history th
        ON p.upid <> '' AND th.upid = p.upid AND th.cluster_id = $1
 LEFT JOIN task_history_archive ar
        ON p.upid <> '' AND ar.upid = p.upid AND ar.cluster_id = $1
+LEFT JOIN guest_backups gb
+       ON p.kind = 'backup' AND gb.upid = p.upid AND gb.vmid = p.vmid
+          AND gb.cluster_id = $1
 LEFT JOIN users u ON u.id = p.user_id
 ORDER BY p.occurred_at DESC, p.entry_id DESC
 `
@@ -296,33 +370,36 @@ type ListGuestHistoryParams struct {
 }
 
 type ListGuestHistoryRow struct {
-	EntryID         string             `json:"entry_id"`
-	Kind            string             `json:"kind"`
-	OccurredAt      time.Time          `json:"occurred_at"`
-	Source          string             `json:"source"`
-	Action          string             `json:"action"`
-	ResourceType    string             `json:"resource_type"`
-	ResourceID      string             `json:"resource_id"`
-	Vmid            int32              `json:"vmid"`
-	UserID          pgtype.UUID        `json:"user_id"`
-	Upid            string             `json:"upid"`
-	Node            string             `json:"node"`
-	RecordedStatus  string             `json:"recorded_status"`
-	FromStatus      string             `json:"from_status"`
-	ToStatus        string             `json:"to_status"`
-	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
-	Category        string             `json:"category"`
-	Total           int64              `json:"total"`
-	Details         json.RawMessage    `json:"details"`
-	UserEmail       string             `json:"user_email"`
-	UserDisplayName string             `json:"user_display_name"`
-	TaskStatus      string             `json:"task_status"`
-	TaskExitStatus  string             `json:"task_exit_status"`
-	TaskDescription string             `json:"task_description"`
-	TaskType        string             `json:"task_type"`
-	TaskNode        string             `json:"task_node"`
-	TaskProgress    pgtype.Float8      `json:"task_progress"`
-	TaskFinishedAt  pgtype.Timestamptz `json:"task_finished_at"`
+	EntryID          string             `json:"entry_id"`
+	Kind             string             `json:"kind"`
+	OccurredAt       time.Time          `json:"occurred_at"`
+	Source           string             `json:"source"`
+	Action           string             `json:"action"`
+	ResourceType     string             `json:"resource_type"`
+	ResourceID       string             `json:"resource_id"`
+	Vmid             int32              `json:"vmid"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	Upid             string             `json:"upid"`
+	Node             string             `json:"node"`
+	RecordedStatus   string             `json:"recorded_status"`
+	FromStatus       string             `json:"from_status"`
+	ToStatus         string             `json:"to_status"`
+	LastSeenAt       pgtype.Timestamptz `json:"last_seen_at"`
+	Category         string             `json:"category"`
+	Total            int64              `json:"total"`
+	Details          json.RawMessage    `json:"details"`
+	UserEmail        string             `json:"user_email"`
+	UserDisplayName  string             `json:"user_display_name"`
+	TaskStatus       string             `json:"task_status"`
+	TaskExitStatus   string             `json:"task_exit_status"`
+	TaskDescription  string             `json:"task_description"`
+	TaskType         string             `json:"task_type"`
+	TaskNode         string             `json:"task_node"`
+	TaskProgress     pgtype.Float8      `json:"task_progress"`
+	TaskFinishedAt   pgtype.Timestamptz `json:"task_finished_at"`
+	BackupFinishedAt pgtype.Timestamptz `json:"backup_finished_at"`
+	LogStart         int32              `json:"log_start"`
+	LogEnd           int32              `json:"log_end"`
 }
 
 // ListGuestHistory is the timeline: one page of a guest's entries, newest
@@ -346,6 +423,11 @@ type ListGuestHistoryRow struct {
 //	         for the guest types in status_guest_types — the run state is
 //	         inventory data, which the handler reads under view:vm for a VM and
 //	         view:container for a container.
+//	backup   the guest's part of a backup JOB (guest_backups), with the
+//	         guest's own outcome and times rather than the job's — only when
+//	         include_tasks, since all of it is read from the job's task log.
+//	         A job's own audit row names no guest, so it is never a second
+//	         entry; nor is its task row, whose vmid is NULL.
 //
 // Guest tasks only: is_guest_upid, never vmid alone, because InsertTaskHistory
 // stamps a vmid on any numeric worker id — cephdestroyosd's is an OSD number,
@@ -377,9 +459,11 @@ type ListGuestHistoryRow struct {
 //
 // The page is cut on narrow rows, and only its rows are joined to their audit
 // details, task outcome and user: a guest with ten thousand entries carries
-// ten thousand jsonb blobs through the sort otherwise. total is count(*) OVER
-// the filtered set, computed before LIMIT — the Items and the Total come from
-// one query and so cannot be counted under different filters.
+// ten thousand jsonb blobs through the sort otherwise. A backup entry's
+// outcome, end and log lines are the guest's own, from guest_backups; the
+// job's own task row, joined like any other, gives the rest. total is
+// count(*) OVER the filtered set, computed before LIMIT — the Items and the
+// Total come from one query and so cannot be counted under different filters.
 func (q *Queries) ListGuestHistory(ctx context.Context, arg ListGuestHistoryParams) ([]ListGuestHistoryRow, error) {
 	rows, err := q.db.Query(ctx, listGuestHistory,
 		arg.ClusterID,
@@ -429,6 +513,9 @@ func (q *Queries) ListGuestHistory(ctx context.Context, arg ListGuestHistoryPara
 			&i.TaskNode,
 			&i.TaskProgress,
 			&i.TaskFinishedAt,
+			&i.BackupFinishedAt,
+			&i.LogStart,
+			&i.LogEnd,
 		); err != nil {
 			return nil, err
 		}
@@ -521,4 +608,137 @@ func (q *Queries) ListGuestLifecycleEvents(ctx context.Context, arg ListGuestLif
 		return nil, err
 	}
 	return items, nil
+}
+
+const listUnreadBackupJobs = `-- name: ListUnreadBackupJobs :many
+SELECT th.upid, th.node, th.started_at, th.finished_at,
+       COALESCE(n.timezone, '')::text AS timezone,
+       (th.updated_at < $1::timestamptz)::bool AS last_try
+FROM task_history th
+LEFT JOIN nodes n ON n.cluster_id = th.cluster_id AND n.name = th.node
+WHERE th.cluster_id = $2
+  AND th.vmid IS NULL
+  AND split_part(th.upid, ':', 6) = 'vzdump'
+  AND th.status <> 'running'
+  AND th.node = split_part(th.upid, ':', 2)
+  AND th.node = ANY($3::text[])
+  AND NOT EXISTS (SELECT 1 FROM backup_job_logs l WHERE l.upid = th.upid)
+ORDER BY last_try DESC, th.started_at DESC
+LIMIT $4::int
+`
+
+type ListUnreadBackupJobsParams struct {
+	GiveUpBefore time.Time `json:"give_up_before"`
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	ListedNodes  []string  `json:"listed_nodes"`
+	MaxJobs      int32     `json:"max_jobs"`
+}
+
+type ListUnreadBackupJobsRow struct {
+	Upid       string             `json:"upid"`
+	Node       string             `json:"node"`
+	StartedAt  time.Time          `json:"started_at"`
+	FinishedAt pgtype.Timestamptz `json:"finished_at"`
+	Timezone   string             `json:"timezone"`
+	LastTry    bool               `json:"last_try"`
+}
+
+// The collector's reading of backup JOB logs (internal/collector/
+// backup_job_log.go): the finished jobs still to read, the ones it can no
+// longer read, and the write of one job's result.
+//
+// A job is a finished vzdump in task_history whose UPID names no guest (vmid
+// NULL) and that has no backup_job_logs mark yet. Its log is on the node its
+// UPID names, and only a row filed under that node is read: the collector
+// asks the row's node, as the reconciler does. Every writer files a task under
+// the node its UPID names — POST /api/v1/tasks refuses any other, though it
+// takes no node at all — so a row that does not is never read, only
+// abandoned.
+//
+// give_up_before bounds how long a job is tried for, counted from when its
+// row last changed: updated_at, which the row's trigger sets on every write —
+// when the collector saw the job finish, or ingested it finished already,
+// which for a job that ran while Nexara was down is once Nexara is back, so
+// it gets its full time from then rather than none. Not finished_at, which
+// PUT /api/v1/tasks/:upid lets a caller set to any time. Past it, a job on a
+// listed node is read one last time and recorded with whatever its log gave
+// (last_try); one whose node is not listed this pass is marked unread.
+//
+// Last tries come first, so they cannot be starved by newer jobs whose reads
+// keep failing; then newest first, so a job that just ended is read in the
+// pass after it ends.
+func (q *Queries) ListUnreadBackupJobs(ctx context.Context, arg ListUnreadBackupJobsParams) ([]ListUnreadBackupJobsRow, error) {
+	rows, err := q.db.Query(ctx, listUnreadBackupJobs,
+		arg.GiveUpBefore,
+		arg.ClusterID,
+		arg.ListedNodes,
+		arg.MaxJobs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUnreadBackupJobsRow{}
+	for rows.Next() {
+		var i ListUnreadBackupJobsRow
+		if err := rows.Scan(
+			&i.Upid,
+			&i.Node,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Timezone,
+			&i.LastTry,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recordBackupJobLog = `-- name: RecordBackupJobLog :exec
+WITH job AS (
+    SELECT th.upid, th.cluster_id, th.node, th.source, th.user_id
+    FROM task_history th
+    WHERE th.upid = $2 AND th.cluster_id = $3
+), guests AS (
+    INSERT INTO guest_backups (upid, vmid, cluster_id, node, source, user_id, status, exit_status,
+                               started_at, finished_at, log_start, log_end)
+    SELECT job.upid, g.vmid, job.cluster_id, job.node, job.source, job.user_id, g.status,
+           g.exit_status, g.started_at, g.finished_at, g.log_start, g.log_end
+    FROM job
+    CROSS JOIN jsonb_to_recordset($4::jsonb) AS g(
+        vmid int, status text, exit_status text, started_at timestamptz,
+        finished_at timestamptz, log_start int, log_end int)
+    ON CONFLICT (cluster_id, upid, vmid) DO NOTHING
+)
+INSERT INTO backup_job_logs (upid, log_read)
+SELECT job.upid, $1::text
+FROM job
+ON CONFLICT (upid) DO NOTHING
+`
+
+type RecordBackupJobLogParams struct {
+	LogRead   string          `json:"log_read"`
+	Upid      string          `json:"upid"`
+	ClusterID uuid.UUID       `json:"cluster_id"`
+	Guests    json.RawMessage `json:"guests"`
+}
+
+// RecordBackupJobLog writes one job's guests and its mark in one statement,
+// so a job is never marked without its guests, nor its guests written and the
+// job left to be read again. Each guest's node, source and user are the job's
+// own, from its task row, which the cluster_id must match: the write lands
+// only on the cluster whose collector read the log.
+func (q *Queries) RecordBackupJobLog(ctx context.Context, arg RecordBackupJobLogParams) error {
+	_, err := q.db.Exec(ctx, recordBackupJobLog,
+		arg.LogRead,
+		arg.Upid,
+		arg.ClusterID,
+		arg.Guests,
+	)
+	return err
 }

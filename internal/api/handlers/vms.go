@@ -691,7 +691,7 @@ func (h *VMHandler) GetTaskLog(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	entries, err := pxClient.GetTaskLog(c.Context(), nodeName, upid, 0)
+	entries, err := pxClient.GetTaskLog(c.Context(), nodeName, upid, int(p.Int("start")))
 	if err != nil {
 		return mapProxmoxError(err)
 	}

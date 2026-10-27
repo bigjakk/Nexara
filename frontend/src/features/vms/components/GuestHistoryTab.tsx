@@ -80,11 +80,24 @@ function HistoryRow({
   const summary = historySummary(entry, vmid);
   const actor = historyActor(entry);
 
+  // A backup entry's task is the whole job: read from where the guest's part
+  // begins, and show it to where it ends.
+  const isBackup = entry.kind === "backup";
   const {
-    data: logLines,
+    data: jobLogLines,
     isLoading: logLoading,
     isError: logError,
-  } = useTaskLog(clusterId, hasTask ? entry.upid : null, expanded && hasTask);
+  } = useTaskLog(
+    clusterId,
+    hasTask ? entry.upid : null,
+    expanded && hasTask,
+    isBackup ? Math.max(0, (entry.log_start ?? 1) - 1) : 0,
+  );
+  const logEnd = entry.log_end ?? 0;
+  const logLines =
+    isBackup && logEnd > 0
+      ? jobLogLines?.filter((line) => line.n <= logEnd)
+      : jobLogLines;
   const details = expanded ? detailPairs(entry.details) : null;
   const exitText = entry.exit_status || live?.exit_status || "";
 
@@ -182,6 +195,14 @@ function HistoryRow({
               <p className="mt-2 text-xs text-muted-foreground">
                 Nexara saw this change, and no task of this guest that could
                 make it ran in between — in Nexara or in Proxmox.
+              </p>
+            )}
+
+            {isBackup && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                This guest&apos;s part of a backup job that covered several
+                guests: its outcome and times are this guest&apos;s own, and the
+                log is its part of the job&apos;s.
               </p>
             )}
 
@@ -324,9 +345,8 @@ export function GuestHistoryTab({
 
       {category === "backup" && (
         <p className="text-xs text-muted-foreground">
-          A backup job that covers several guests is not listed here: its
-          Proxmox task names no guest. The Backups tab has this guest&apos;s
-          backups.
+          A backup job that covers several guests is listed here once it has
+          finished and Nexara has read its log.
         </p>
       )}
 

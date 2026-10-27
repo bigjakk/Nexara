@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -123,6 +124,44 @@ func TestSyncClusterResources(t *testing.T) {
 		tick()
 		if got := mq.vms[key].Status; got != "stopped" {
 			t.Fatalf("a failed write was never retried: the row says %q", got)
+		}
+	})
+
+	// A guest pvestatd has not reported yet is listed "unknown" with no name,
+	// and so is every guest for a cycle after pve-cluster restarts: written,
+	// it recorded a false "Status unknown" in every new guest's History. One
+	// that stays unknown, or whose node is offline, is unknown for real.
+	t.Run("a guest pvestatd has not reported yet writes nothing", func(t *testing.T) {
+		for _, tc := range []struct {
+			node       string
+			unknownFor time.Duration // already listed "unknown" for this long
+			upserts    int           // the one write is the "unknown"
+		}{{"online", 0, 0}, {"unknown", 0, 0}, {"online", 2 * unknownStatusGrace, 1}, {"offline", 0, 1}} {
+			node := nodeOnline
+			node.Status = tc.node
+			srv := newResourceServer(t, []proxmox.ClusterResource{node,
+				{Type: "qemu", VMID: 100, Node: "pve1", Status: "unknown"}})
+			mq := newMockQueries()
+			s := newTestSyncer(mq)
+			cluster := makeCluster(t, srv.URL)
+			seedFastSync(mq, cluster, "online", "running", "web-server")
+			if tc.unknownFor > 0 {
+				s.resourceUnknownSince.Store(cluster.ID, map[int32]time.Time{100: time.Now().Add(-tc.unknownFor)})
+			}
+
+			if err := s.syncClusterResources(context.Background(), cluster); err != nil {
+				t.Fatalf("node %s: syncClusterResources: %v", tc.node, err)
+			}
+			srv.Close()
+			if len(mq.upsertVMCalls) != tc.upserts || tc.upserts == 1 && mq.upsertVMCalls[0].Status != "unknown" {
+				t.Errorf("node %s, unknown for %v: upserts %+v, want %d writing \"unknown\"",
+					tc.node, tc.unknownFor, mq.upsertVMCalls, tc.upserts)
+			}
+			// The first sighting is kept for the next tick, or the grace never ends.
+			kept, _ := s.resourceUnknownSince.Load(cluster.ID)
+			if since, _ := kept.(map[int32]time.Time); tc.node != "offline" && since[100].IsZero() {
+				t.Errorf("node %s: the first sighting of \"unknown\" was not kept for the next tick", tc.node)
+			}
 		}
 	})
 

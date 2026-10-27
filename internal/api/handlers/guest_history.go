@@ -45,8 +45,8 @@ type guestHistoryEntry struct {
 	Category   string `json:"category"`
 	Source     string `json:"source"`
 	Action     string `json:"action"`
-	// ResourceType is the audit row's, for an audit entry; "task" or "status"
-	// otherwise.
+	// ResourceType is the audit row's, for an audit entry; "task", "status"
+	// or "backup" otherwise.
 	ResourceType string `json:"resource_type"`
 	// VMID is the guest the row itself names. It differs from the path's only
 	// on a clone INTO this guest, which names its source.
@@ -68,6 +68,10 @@ type guestHistoryEntry struct {
 	// LastSeenAt is, for a status change, when the guest was last seen in
 	// FromStatus: the change happened after it and by OccurredAt.
 	LastSeenAt *string `json:"last_seen_at,omitempty"`
+	// LogStart and LogEnd are, for a backup entry, the lines of the job's
+	// task log that are this guest's part, by Proxmox's line numbers.
+	LogStart int32 `json:"log_start,omitempty"`
+	LogEnd   int32 `json:"log_end,omitempty"`
 }
 
 // guestTaskOutcome is how a task ended, from the task row when there is one
@@ -143,8 +147,8 @@ const guestHistoryQueryTimeout = 15 * time.Second
 // gated, so a caller is shown what they may see instead of being refused the
 // rest:
 //
-//   - a task with no audit row comes from task_history alone, which is
-//     view:task's;
+//   - a task with no audit row comes from task_history alone, and a guest's
+//     part of a backup job from the job's task log — both view:task's;
 //   - a status change is the inventory's run state, which is view:vm's for a
 //     VM (qemu) and view:container's for a container (lxc).
 //
@@ -265,6 +269,8 @@ func toGuestHistoryEntry(r db.ListGuestHistoryRow, visible map[string]bool, show
 		TaskType:    r.TaskType,
 		FromStatus:  r.FromStatus,
 		ToStatus:    r.ToStatus,
+		LogStart:    r.LogStart,
+		LogEnd:      r.LogEnd,
 	}
 	if r.UserID.Valid {
 		e.UserID = uuid.UUID(r.UserID.Bytes).String()
@@ -286,8 +292,13 @@ func toGuestHistoryEntry(r db.ListGuestHistoryRow, visible map[string]bool, show
 		v := r.TaskProgress.Float64
 		e.Progress = &v
 	}
-	if r.TaskFinishedAt.Valid {
-		s := r.TaskFinishedAt.Time.Format(time.RFC3339Nano)
+	// A backup entry ended when the guest's own backup did, not the job.
+	finished := r.TaskFinishedAt
+	if r.BackupFinishedAt.Valid {
+		finished = r.BackupFinishedAt
+	}
+	if finished.Valid {
+		s := finished.Time.Format(time.RFC3339Nano)
 		e.FinishedAt = &s
 	}
 	if r.LastSeenAt.Valid {

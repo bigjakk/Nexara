@@ -13,6 +13,7 @@ import (
 )
 
 type Querier interface {
+	AbandonUnreadBackupJobs(ctx context.Context, arg AbandonUnreadBackupJobsParams) (int64, error)
 	AcknowledgeAlert(ctx context.Context, arg AcknowledgeAlertParams) error
 	AddFavorite(ctx context.Context, arg AddFavoriteParams) error
 	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
@@ -64,7 +65,7 @@ type Querier interface {
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
 	// A guest's History tab: everything that happened to one guest, newest first.
 	// Served by GET /api/v1/clusters/:cluster_id/guests/:vmid/history
-	// (internal/api/handlers/guest_history.go), from three stores:
+	// (internal/api/handlers/guest_history.go), from four stores:
 	//
 	//   audit_log            every action Nexara recorded about the guest — its own
 	//                        tasks, Proxmox's (ingested by the collector), DRS, the
@@ -72,6 +73,9 @@ type Querier interface {
 	//   task_history (+ the  how each task ended. task_history_archive holds the
 	//   _archive)            guest tasks task_history has pruned (000115).
 	//   guest_status_changes run-state changes no task explains (000115).
+	//   guest_backups        the guest's part of each backup JOB — a vzdump of
+	//                        several guests, whose task names none — read from the
+	//                        job's log by the collector (000116).
 	//
 	// A guest is (cluster_id, vmid), never a vms.id: the collector re-issues those
 	// (000068/000084), and a VMID is only unique within its cluster — the other
@@ -102,10 +106,23 @@ type Querier interface {
 	// stops, and a container's suspend checkpoints it and stops it, after the task
 	// watcher's predicted "suspended".
 	//
-	// The last arm is a backup JOB: a vzdump that backs up several guests carries
-	// no VMID (UPID worker id empty), so it explains the changes on the node it
-	// ran on while it ran. A real crash of another guest on that node during the
-	// backup window is hidden by it; that is the trade.
+	// The last arms are a backup JOB: a vzdump that backs up several guests
+	// carries no VMID (UPID worker id empty), so which guests it touched is known
+	// only once the collector has read its log (backup_job_logs, 000116). Read in
+	// full, a job explains a change only on a guest it backed up, while that
+	// guest's own backup ran (guest_backups, a stop or suspend mode backup's stop
+	// and start among them). Read only in part — its log too long or too slow to
+	// read, or never finished in the day it is given — it explains every change
+	// on the node it ran on while it ran, as every job did before its log was
+	// read, and a real crash of another guest on that node in the window is
+	// hidden by it; up to when its log was read, though, not to its finished_at,
+	// which PUT /api/v1/tasks/:upid lets a caller set to any time. Not read at
+	// all — its log gone, the read refused, a task Proxmox has no log for — it
+	// explains nothing, as nothing would without the job: the side this list
+	// errs on. A change on a listed node that a job with no mark yet might
+	// explain is not decided until the job has one — a running job's guests are
+	// not known until it ends — or until give_up_before, and an unmarked job
+	// explains nothing then either.
 	//
 	// Only the changes on listed_nodes — the nodes whose tasks this pass's ingest
 	// listed (syncTasks) — are decided; one whose node could not list waits, and
@@ -114,17 +131,17 @@ type Querier interface {
 	// from 'unknown' is decided — no task explains one — while its others wait
 	// for the tasks it has not handed over (a node rebooting shuts its guests down
 	// just before it goes). The archive holds guest tasks only, so a backup JOB
-	// (below) explains nothing once pruned. A change older than give_up_before
-	// is decided whatever its node: a node the cluster calls online whose task list
-	// never loads would otherwise hide its guests' changes for good, and deciding
-	// without its tasks errs on the side this list exists for — the change shows.
-	// Once made, the decision is stored and does not depend on the task rows
-	// surviving.
+	// explains nothing once pruned but through guest_backups, which is kept. A
+	// change older than give_up_before is decided whatever its node: a node the
+	// cluster calls online whose task list never loads would otherwise hide its
+	// guests' changes for good, and deciding without its tasks errs on the side
+	// this list exists for — the change shows. Once made, the decision is stored
+	// and does not depend on the task rows surviving.
 	//
-	// The archive branch is bounded to the guest and to tasks that finished after
-	// the window opened, which (cluster_id, vmid, finished_at) serves: everything
-	// in the archive is older than the retention, so a recent change reads none
-	// of it.
+	// The archive and guest_backups branches are bounded to the guest and to
+	// tasks that finished after the window opened, which (cluster_id, vmid,
+	// finished_at) serves on both: everything in the archive is older than the
+	// retention, so a recent change reads none of it.
 	ClassifyGuestStatusChanges(ctx context.Context, arg ClassifyGuestStatusChangesParams) (int64, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
@@ -1393,6 +1410,11 @@ type Querier interface {
 	//            for the guest types in status_guest_types — the run state is
 	//            inventory data, which the handler reads under view:vm for a VM and
 	//            view:container for a container.
+	//   backup   the guest's part of a backup JOB (guest_backups), with the
+	//            guest's own outcome and times rather than the job's — only when
+	//            include_tasks, since all of it is read from the job's task log.
+	//            A job's own audit row names no guest, so it is never a second
+	//            entry; nor is its task row, whose vmid is NULL.
 	//
 	// Guest tasks only: is_guest_upid, never vmid alone, because InsertTaskHistory
 	// stamps a vmid on any numeric worker id — cephdestroyosd's is an OSD number,
@@ -1424,9 +1446,11 @@ type Querier interface {
 	//
 	// The page is cut on narrow rows, and only its rows are joined to their audit
 	// details, task outcome and user: a guest with ten thousand entries carries
-	// ten thousand jsonb blobs through the sort otherwise. total is count(*) OVER
-	// the filtered set, computed before LIMIT — the Items and the Total come from
-	// one query and so cannot be counted under different filters.
+	// ten thousand jsonb blobs through the sort otherwise. A backup entry's
+	// outcome, end and log lines are the guest's own, from guest_backups; the
+	// job's own task row, joined like any other, gives the rest. total is
+	// count(*) OVER the filtered set, computed before LIMIT — the Items and the
+	// Total come from one query and so cannot be counted under different filters.
 	ListGuestHistory(ctx context.Context, arg ListGuestHistoryParams) ([]ListGuestHistoryRow, error)
 	// ListGuestLifecycleEvents returns the audit rows that begin or end a guest's
 	// occupancy of a VMID, newest first, for the handler to pick where the
@@ -1714,6 +1738,31 @@ type Querier interface {
 	// ListTopAlertRulesInWindow lists the rules that fired most in the period,
 	// for the digest's "noisiest rules" table.
 	ListTopAlertRulesInWindow(ctx context.Context, arg ListTopAlertRulesInWindowParams) ([]ListTopAlertRulesInWindowRow, error)
+	// The collector's reading of backup JOB logs (internal/collector/
+	// backup_job_log.go): the finished jobs still to read, the ones it can no
+	// longer read, and the write of one job's result.
+	//
+	// A job is a finished vzdump in task_history whose UPID names no guest (vmid
+	// NULL) and that has no backup_job_logs mark yet. Its log is on the node its
+	// UPID names, and only a row filed under that node is read: the collector
+	// asks the row's node, as the reconciler does. Every writer files a task under
+	// the node its UPID names — POST /api/v1/tasks refuses any other, though it
+	// takes no node at all — so a row that does not is never read, only
+	// abandoned.
+	//
+	// give_up_before bounds how long a job is tried for, counted from when its
+	// row last changed: updated_at, which the row's trigger sets on every write —
+	// when the collector saw the job finish, or ingested it finished already,
+	// which for a job that ran while Nexara was down is once Nexara is back, so
+	// it gets its full time from then rather than none. Not finished_at, which
+	// PUT /api/v1/tasks/:upid lets a caller set to any time. Past it, a job on a
+	// listed node is read one last time and recorded with whatever its log gave
+	// (last_try); one whose node is not listed this pass is marked unread.
+	//
+	// Last tries come first, so they cannot be starved by newer jobs whose reads
+	// keep failing; then newest first, so a job that just ended is read in the
+	// pass after it ends.
+	ListUnreadBackupJobs(ctx context.Context, arg ListUnreadBackupJobsParams) ([]ListUnreadBackupJobsRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
@@ -1985,6 +2034,12 @@ type Querier interface {
 	// exit_status out of the column is the job of the caller's read
 	// (ListRunningTaskHistoryByCluster above), not of this predicate.
 	ReconcileTaskHistory(ctx context.Context, arg ReconcileTaskHistoryParams) (int64, error)
+	// RecordBackupJobLog writes one job's guests and its mark in one statement,
+	// so a job is never marked without its guests, nor its guests written and the
+	// job left to be read again. Each guest's node, source and user are the job's
+	// own, from its task row, which the cluster_id must match: the write lands
+	// only on the cluster whose collector read the log.
+	RecordBackupJobLog(ctx context.Context, arg RecordBackupJobLogParams) error
 	// A failed read records why and when, and keeps the last good read.
 	RecordNodeMemoryFailure(ctx context.Context, arg RecordNodeMemoryFailureParams) error
 	RemoveFavorite(ctx context.Context, arg RemoveFavoriteParams) error

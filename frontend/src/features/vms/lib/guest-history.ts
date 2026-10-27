@@ -180,6 +180,7 @@ export function historyEventLabel(
   if (entry.kind === "status") {
     return statusChangeLabel(entry.from_status ?? "", entry.to_status ?? "");
   }
+  if (entry.kind === "backup") return "Back up (job)";
   // A clone INTO this guest names its source: it is this guest's birth.
   if (entry.category === "clone" && entry.vmid !== pageVmid) {
     return `Cloned from VM ${String(entry.vmid)}`;
@@ -229,6 +230,10 @@ export function historySummary(
         ? ": a shutdown or crash inside the guest, or the host"
         : "";
     return `${from} → ${to}${where}. No task explains it${why}.`;
+  }
+  // Nexara's own description names the job it ran; Proxmox's says "backup".
+  if (entry.kind === "backup") {
+    return entry.source === "nexara" ? entry.description : "";
   }
   const d = parseDetails(entry.details);
   const parts: string[] = [];

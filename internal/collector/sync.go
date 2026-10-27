@@ -171,8 +171,11 @@ type SyncQueries interface {
 	// Task reconcile
 	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.TaskHistory, error)
 	ReconcileTaskHistory(ctx context.Context, arg db.ReconcileTaskHistoryParams) (int64, error)
-	// Guest status changes (the History tab)
+	// Guest status changes and backup job logs (the History tab)
 	ClassifyGuestStatusChanges(ctx context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error)
+	AbandonUnreadBackupJobs(ctx context.Context, arg db.AbandonUnreadBackupJobsParams) (int64, error)
+	ListUnreadBackupJobs(ctx context.Context, arg db.ListUnreadBackupJobsParams) ([]db.ListUnreadBackupJobsRow, error)
+	RecordBackupJobLog(ctx context.Context, arg db.RecordBackupJobLogParams) error
 	GetVMByClusterAndVmid(ctx context.Context, arg db.GetVMByClusterAndVmidParams) (db.Vm, error)
 	// Node queries
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.Node, error)
@@ -236,6 +239,7 @@ type ProxmoxClient interface {
 	GetClusterResources(ctx context.Context, resourceType string) ([]proxmox.ClusterResource, error)
 	GetNodeTasks(ctx context.Context, node string, since int64, limit int) ([]proxmox.NodeTask, error)
 	GetTaskStatus(ctx context.Context, node string, upid string) (*proxmox.TaskStatus, error)
+	GetTaskLog(ctx context.Context, node string, upid string, start int) ([]proxmox.TaskLogEntry, error)
 	GetVersion(ctx context.Context) (*proxmox.Version, error)
 	GetHAManagerStatus(ctx context.Context) (map[string]json.RawMessage, error)
 	ListVMSnapshots(ctx context.Context, node string, vmid int) ([]proxmox.Snapshot, error)
@@ -307,6 +311,9 @@ type Syncer struct {
 	nodePressureInFlight atomic.Bool             // re-entrancy guard for SyncAllNodePressure
 	disk                 diskCarry               // VMs' last reported disk counters
 	resourceStatus       sync.Map                // cluster ID → map[int32]string: each guest's status at the last fast tick
+	resourceUnknownSince sync.Map                // cluster ID → map[int32]time.Time: since when each guest is listed "unknown"
+	backupLogJobBudget   time.Duration           // one backup job's log read; zero is backupLogJobBudget, which tests shorten
+	backupLogTimeouts    sync.Map                // backup job UPID → reads of its log that ran out their own time
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.
@@ -777,7 +784,12 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// task after it finishes (watermark blind spot).
 	s.reconcileRunningTasks(ctx, client, cluster)
 
-	// Decide which settled guest status changes a task explains. After the two
+	// Read the logs of the backup jobs that have finished, for which guests
+	// each backed up. Before classifying on purpose: a change a job may have
+	// made waits for the job's log (see ClassifyGuestStatusChanges).
+	s.readBackupJobLogs(ctx, client, cluster, listedNodes)
+
+	// Decide which settled guest status changes a task explains. After the
 	// passes above on purpose: the task that explains a change made in the
 	// Proxmox GUI reaches task_history in this pass's ingest — so the changes
 	// on nodes that ingest listed (see syncTasks), and those that have waited

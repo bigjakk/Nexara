@@ -86,6 +86,12 @@ type AuditLog struct {
 	Vmid         pgtype.Int4     `json:"vmid"`
 }
 
+type BackupJobLog struct {
+	Upid       string    `json:"upid"`
+	LogRead    string    `json:"log_read"`
+	RecordedAt time.Time `json:"recorded_at"`
+}
+
 type CephClusterMetric struct {
 	Time          time.Time `json:"time"`
 	ClusterID     uuid.UUID `json:"cluster_id"`
@@ -352,6 +358,21 @@ type FirewallTemplate struct {
 	Rules       json.RawMessage `json:"rules"`
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type GuestBackup struct {
+	ClusterID  uuid.UUID   `json:"cluster_id"`
+	Upid       string      `json:"upid"`
+	Vmid       int32       `json:"vmid"`
+	Node       string      `json:"node"`
+	Source     string      `json:"source"`
+	UserID     pgtype.UUID `json:"user_id"`
+	Status     string      `json:"status"`
+	ExitStatus string      `json:"exit_status"`
+	StartedAt  time.Time   `json:"started_at"`
+	FinishedAt time.Time   `json:"finished_at"`
+	LogStart   int32       `json:"log_start"`
+	LogEnd     int32       `json:"log_end"`
 }
 
 // Cache of each QEMU guest's smbios1 uuid, which is the deterministic join key between Nexara's inventory and a Veeam backup object. Populated only for clusters with a linked Veeam platform — no Veeam, no per-guest config fetch

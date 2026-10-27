@@ -937,11 +937,23 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler, mappingUsageLimit
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,
 		Path:        clusterScope + "/tasks/:upid/log",
-		Description: "Read a Proxmox task's log lines.",
+		Description: "Read a Proxmox task's log: at most 5000 lines, from line start+1.",
 		Group:       "Tasks",
 		Permissions: clusterCheck("view", "task"),
-		Parameters:  clusterParams(apischema.Properties{"upid": upidParam}),
-		Handler:     h.GetTaskLog,
+		Parameters: clusterParams(apischema.Properties{
+			"upid": upidParam,
+			// A guest's History reads its own part of a backup job's log from
+			// here: a job of many guests runs past the first 5000 lines.
+			"start": {
+				Type:        apischema.Integer,
+				Optional:    true,
+				Default:     0,
+				Minimum:     apischema.Ptr(0.0),
+				Typetext:    "<integer>",
+				Description: "Lines to skip, as Proxmox's own start: the first line returned is line start+1.",
+			},
+		}),
+		Handler: h.GetTaskLog,
 	})
 
 	// ── Node hardware and inventory, for the VM dialogs ───────────────

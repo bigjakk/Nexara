@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func historyUPID(seq int, workerType, id string) string {
 }
 
 // TestGuestHistory runs the History tab's SQL (queries/guest_history.sql,
-// migrations/000115) against Postgres: which rows make one guest's timeline,
+// migrations/000115 and 000116) against Postgres: which rows make one guest's timeline,
 // how a status change is classified, and what the prune keeps. Each fixture
 // row is in or out of the timeline for exactly one reason, named beside it.
 //
@@ -184,9 +185,61 @@ func TestGuestHistory(t *testing.T) {
 	audit(historyClusterID, minsAgo(20).Add(10*time.Second), "proxmox", "vm", "100", "start", map[string]any{"upid": restartUPID, "status": "OK"})
 	task(restartUPID, "completed", 100, minsAgo(20).Add(10*time.Second), minsAgo(20).Add(15*time.Second))
 	statusChange("restart", "running", minsAgo(20).Add(15*time.Second)) // explained by that start
-	// A backup job on the node: its vzdump carries no VMID.
-	task(historyUPID(13, "vzdump", ""), "completed", nil, minsAgo(16), minsAgo(10))
-	statusChange("backup", "stopped", minsAgo(15)) // explained by the job on its node
+	// Backup jobs on the node, whose vzdumps carry no VMID. One whose log was
+	// read in full explains only its own guests' changes, each while its own
+	// backup ran; one read in part, every change on the node while it ran, up
+	// to when its log was read; one not read at all, none; one with no mark
+	// yet, finished or running, holds the node's changes back. Off VM 100, the
+	// changes on other guests stay out of its timeline.
+	type guestPart struct {
+		VMID       int32     `json:"vmid"`
+		Status     string    `json:"status"`
+		ExitStatus string    `json:"exit_status"`
+		StartedAt  time.Time `json:"started_at"`
+		FinishedAt time.Time `json:"finished_at"`
+		LogStart   int       `json:"log_start"`
+		LogEnd     int       `json:"log_end"`
+	}
+	recordJob := func(cluster uuid.UUID, upid, logRead string, parts ...guestPart) {
+		t.Helper()
+		raw, _ := json.Marshal(append([]guestPart{}, parts...))
+		if err := q.RecordBackupJobLog(ctx, gen.RecordBackupJobLogParams{
+			Upid: upid, ClusterID: cluster, Guests: raw, LogRead: logRead,
+		}); err != nil {
+			t.Fatalf("record job %s: %v", upid, err)
+		}
+	}
+	otherGuestChange := func(name string, vmid int32, at time.Time) {
+		exec("status change "+name, `INSERT INTO guest_status_changes (id, cluster_id, vmid, guest_type, node, from_status,
+				to_status, last_seen_at, observed_at)
+			VALUES ($1, $2, $3, 'qemu', 'pve-01', 'running', 'stopped', $4, $5)`,
+			uuid.NewSHA1(uuid.Nil, []byte(name)), historyClusterID, vmid, at.Add(-30*time.Second), at)
+	}
+	jobUPID := historyUPID(13, "vzdump", "")
+	task(jobUPID, "completed", nil, minsAgo(16), minsAgo(10))
+	recordJob(historyClusterID, jobUPID, "full",
+		guestPart{100, "failed", "storage gone", minsAgo(15.5), minsAgo(14.5), 41, 60},
+		guestPart{101, "completed", "OK", minsAgo(14.5), minsAgo(11), 61, 90})
+	// The write is pinned to the job's own cluster.
+	recordJob(historyOtherID, jobUPID, "full", guestPart{999, "completed", "OK", minsAgo(15), minsAgo(14), 1, 2})
+	statusChange("backup", "stopped", minsAgo(15))        // explained by VM 100's own backup
+	otherGuestChange("job-other-guest", 103, minsAgo(12)) // NOT: VM 103 was not in the job
+	// Its finished_at set far ahead, as PUT /api/v1/tasks/:upid can: the
+	// crash and VM 103's stop after its log was read stay unexplained.
+	partReadUPID := historyUPID(18, "vzdump", "")
+	task(partReadUPID, "completed", nil, minsAgo(28), now.AddDate(100, 0, 0))
+	recordJob(historyClusterID, partReadUPID, "partial")
+	exec("job read in part", `UPDATE backup_job_logs SET recorded_at = $1 WHERE upid = $2`, minsAgo(26), partReadUPID)
+	otherGuestChange("job-read-in-part", 104, minsAgo(27)) // explained by the job on its node
+	unreadableUPID := historyUPID(21, "vzdump", "")
+	task(unreadableUPID, "completed", nil, minsAgo(35), minsAgo(33))
+	recordJob(historyClusterID, unreadableUPID, "none")
+	otherGuestChange("job-not-read", 104, minsAgo(34)) // NOT: nothing says the job touched it
+	pendingUPID := historyUPID(19, "vzdump", "")
+	task(pendingUPID, "completed", nil, minsAgo(9.5), minsAgo(9))
+	otherGuestChange("job-unread", 103, minsAgo(9.25)) // waits for the job's log
+	task(historyUPID(22, "vzdump", ""), "running", nil, minsAgo(5.4), nil)
+	otherGuestChange("job-running", 104, minsAgo(5.2)) // waits for the job to end
 	// A container's suspend checkpoints and stops it. Clear of the backup
 	// job's window, which would explain it whatever the suspend's type.
 	task(historyUPID(16, "vzsuspend", "100"), "completed", 100, minsAgo(7), minsAgo(6).Add(5*time.Second))
@@ -214,11 +267,17 @@ func TestGuestHistory(t *testing.T) {
 			VALUES ($1, $2, 102, 'qemu', 'pve-03', 'running', $3, $4, $4)`,
 			uuid.NewSHA1(uuid.Nil, []byte(c.name)), historyClusterID, c.to, minsAgo(20))
 	}
-	// A day on a node whose list never loads: decided anyway, and shown.
+	// A day on a node whose list never loads: decided anyway, and shown —
+	// though a job on that node, its log never read, overlaps it.
 	exec("stale change", `INSERT INTO guest_status_changes (id, cluster_id, vmid, guest_type, node, from_status,
 			to_status, last_seen_at, observed_at)
 		VALUES ($1, $2, 100, 'qemu', 'pve-02', 'running', 'stopped', $3, $3)`,
 		uuid.NewSHA1(uuid.Nil, []byte("stale")), historyClusterID, hoursAgo(30))
+	staleJobUPID := strings.Replace(historyUPID(24, "vzdump", ""), "pve-01", "pve-02", 1)
+	exec("stale change's job", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type,
+			started_at, finished_at, source)
+		VALUES ($1, $2, $3, 'completed', 'pve-02', 'vzdump', $4, $5, 'proxmox')`,
+		historyClusterID, systemUserID, staleJobUPID, hoursAgo(30.1), hoursAgo(29.9))
 	// Nexara was down from 50 to 40 minutes ago; a stop made in that gap is
 	// first seen when it is back, and the task that made it ended long before.
 	gapUPID := historyUPID(15, "qmstop", "100")
@@ -238,6 +297,8 @@ func TestGuestHistory(t *testing.T) {
 		"gap": {Bool: true, Valid: true}, "suspend": {Bool: true, Valid: true},
 		"unlisted": {}, "archived": {Bool: true, Valid: true}, "stale": {Bool: false, Valid: true},
 		"offline-unknown": {Bool: false, Valid: true}, "offline-stop": {},
+		"job-other-guest": {Bool: false, Valid: true}, "job-read-in-part": {Bool: true, Valid: true}, "job-unread": {},
+		"job-not-read": {Bool: false, Valid: true}, "job-running": {},
 	} {
 		var got pgtype.Bool
 		if err := pool.QueryRow(ctx, `SELECT explained FROM guest_status_changes WHERE id = $1`,
@@ -246,6 +307,51 @@ func TestGuestHistory(t *testing.T) {
 		}
 		if got != want {
 			t.Errorf("status change %q: explained = %+v, want %+v", name, got, want)
+		}
+	}
+
+	var foreign int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM guest_backups WHERE vmid = 999`).Scan(&foreign); err != nil || foreign != 0 {
+		t.Errorf("a job's guests written through another cluster: %d rows (err %v)", foreign, err)
+	}
+
+	// ── The jobs the collector still reads: those with no mark on a listed
+	// node, the ones on their last try first. Past the give-up — a day from
+	// when the row last changed — one whose node is not listed is marked
+	// unread, and that mark goes with the job's row when the prune takes it,
+	// while the guests' own record stays.
+	lastTryUPID := historyUPID(23, "vzdump", "")
+	exec("job on its last try", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type,
+			started_at, finished_at, source, updated_at)
+		VALUES ($1, $2, $3, 'completed', 'pve-01', 'vzdump', $4, $5, 'proxmox', $6)`,
+		historyClusterID, systemUserID, lastTryUPID, minsAgo(50), minsAgo(49), hoursAgo(30))
+	unlistedJobUPID := strings.Replace(historyUPID(20, "vzdump", ""), "pve-01", "pve-02", 1)
+	exec("unlisted job", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, started_at,
+			finished_at, source)
+		VALUES ($1, $2, $3, 'completed', 'pve-02', 'vzdump', $4, $5, 'proxmox')`,
+		historyClusterID, systemUserID, unlistedJobUPID, hoursAgo(26), hoursAgo(25.9))
+	exec("unlisted job's guest", `INSERT INTO guest_backups (upid, vmid, cluster_id, node, source, status,
+			started_at, finished_at, log_start, log_end)
+		VALUES ($1, 101, $2, 'pve-02', 'proxmox', 'completed', $3, $3, 1, 2)`, unlistedJobUPID, historyClusterID, hoursAgo(26))
+	unread, err := q.ListUnreadBackupJobs(ctx, gen.ListUnreadBackupJobsParams{
+		ClusterID: historyClusterID, ListedNodes: []string{"pve-01"}, GiveUpBefore: hoursAgo(24), MaxJobs: 4,
+	})
+	if err != nil {
+		t.Fatalf("list unread jobs: %v", err)
+	}
+	if len(unread) != 2 || unread[0].Upid != lastTryUPID || !unread[0].LastTry ||
+		unread[1].Upid != pendingUPID || unread[1].LastTry {
+		t.Errorf("unread jobs = %+v, want %s on its last try, then %s", unread, lastTryUPID, pendingUPID)
+	}
+	for _, tc := range []struct {
+		giveUpBefore time.Time
+		want         int64
+	}{{hoursAgo(24), 0}, {now.Add(time.Minute), 2}} {
+		if n, err := q.AbandonUnreadBackupJobs(ctx, gen.AbandonUnreadBackupJobsParams{
+			ClusterID: historyClusterID, ListedNodes: []string{"pve-01"}, GiveUpBefore: tc.giveUpBefore,
+		}); err != nil || n != tc.want {
+			t.Errorf("giving up before %v abandoned %d jobs (err %v), want %d: only the unlisted node's, and only "+
+				"a day after their rows last changed", tc.giveUpBefore, n, err, tc.want)
 		}
 	}
 
@@ -273,6 +379,14 @@ func TestGuestHistory(t *testing.T) {
 	}
 	if !slices.Equal(keptExplained, []bool{false}) {
 		t.Errorf("old status changes kept by the prune = %v, want only the unexplained one", keptExplained)
+	}
+	var marks, parts int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM backup_job_logs WHERE upid = $1),
+			(SELECT count(*) FROM guest_backups WHERE upid = $1)`, unlistedJobUPID).Scan(&marks, &parts); err != nil {
+		t.Fatal(err)
+	}
+	if marks != 0 || parts != 1 {
+		t.Errorf("after the prune took the job: %d marks (want 0), %d guest rows (want 1)", marks, parts)
 	}
 	var live, archived, osdArchived int
 	if err := pool.QueryRow(ctx, `SELECT
@@ -343,6 +457,7 @@ func TestGuestHistory(t *testing.T) {
 	got, total := list(full)
 	want := []string{
 		"task vzsuspend power completed",  // task-only, live; it explained its status change
+		"backup vzdump backup failed",     // VM 100's part of the job, with its own outcome
 		"audit start power completed",     // the restart, which explained its status change
 		"status status_change power ",     // the crash no task explains
 		"audit shutdown power completed",  // explained its status change
@@ -358,6 +473,19 @@ func TestGuestHistory(t *testing.T) {
 	if !slices.Equal(got, want) || total != int64(len(want)) {
 		t.Fatalf("timeline =\n\t%v (total %d)\nwant\n\t%v (total %d)", got, total, want, len(want))
 	}
+	// The backup entry's end, error and lines are VM 100's, not the job's.
+	backups, err := q.ListGuestHistory(ctx, withFilter(full, func(p *gen.ListGuestHistoryParams) {
+		p.ClusterID, p.Vmid, p.RowLimit = historyClusterID, 100, 50
+		p.Category = pgtype.Text{String: "backup", Valid: true}
+	}))
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("backup entries: %d (err %v), want 1", len(backups), err)
+	}
+	if b := backups[0]; b.TaskExitStatus != "storage gone" || !b.BackupFinishedAt.Time.Equal(minsAgo(14.5)) ||
+		b.LogStart != 41 || b.LogEnd != 60 {
+		t.Errorf("backup entry: exit %q, finished %v, lines %d-%d; want VM 100's own",
+			b.TaskExitStatus, b.BackupFinishedAt.Time, b.LogStart, b.LogEnd)
+	}
 
 	for _, tt := range []struct {
 		name      string
@@ -366,12 +494,12 @@ func TestGuestHistory(t *testing.T) {
 		wantFirst string
 	}{
 		{"without view:task the task-only rows go", gen.ListGuestHistoryParams{AfterInclusive: true, StatusGuestTypes: []string{"qemu"}}, 9, ""},
-		{"without view:vm the status change goes", gen.ListGuestHistoryParams{IncludeTasks: true, AfterInclusive: true, StatusGuestTypes: []string{"lxc"}}, 11, ""},
-		{"exclusive after a destroy drops the event itself", gen.ListGuestHistoryParams{IncludeTasks: true, StatusGuestTypes: []string{"qemu"}}, 11, ""},
+		{"without view:vm the status change goes", gen.ListGuestHistoryParams{IncludeTasks: true, AfterInclusive: true, StatusGuestTypes: []string{"lxc"}}, 12, ""},
+		{"exclusive after a destroy drops the event itself", gen.ListGuestHistoryParams{IncludeTasks: true, StatusGuestTypes: []string{"qemu"}}, 12, ""},
 		{"category", withFilter(full, func(p *gen.ListGuestHistoryParams) { p.Category = pgtype.Text{String: "power", Valid: true} }), 6, ""},
 		{"source", withFilter(full, func(p *gen.ListGuestHistoryParams) { p.Source = pgtype.Text{String: "detected", Valid: true} }), 1, "status status_change power "},
-		{"since", withFilter(full, func(p *gen.ListGuestHistoryParams) { p.Since = pgtype.Timestamptz{Time: hoursAgo(3.25), Valid: true} }), 7, ""},
-		{"a page", withFilter(full, func(p *gen.ListGuestHistoryParams) { p.RowLimit, p.RowOffset = 3, 3 }), 12, "audit shutdown power completed"},
+		{"since", withFilter(full, func(p *gen.ListGuestHistoryParams) { p.Since = pgtype.Timestamptz{Time: hoursAgo(3.25), Valid: true} }), 8, ""},
+		{"a page", withFilter(full, func(p *gen.ListGuestHistoryParams) { p.RowLimit, p.RowOffset = 3, 3 }), 13, "status status_change power "},
 	} {
 		got, total := list(tt.p)
 		if total != tt.wantTotal || (tt.wantFirst != "" && (len(got) == 0 || got[0] != tt.wantFirst)) {

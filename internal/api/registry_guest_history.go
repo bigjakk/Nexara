@@ -37,9 +37,11 @@ func registerGuestHistoryEndpoints(reg *Registry, h *handlers.GuestHistoryHandle
 			"task's outcome, and the status changes no task explains, such as a shutdown or crash inside " +
 			"the guest. Starts after the latest create, clone or restore of the VMID, or the destroy of the " +
 			"guest that held it before, so a reused VMID does not inherit the previous guest's history. A " +
-			"backup job that covers several guests is not listed: its Proxmox task names no guest. " +
-			"Requires view:audit, which shows each task's outcome; a task's exit text, and tasks recorded " +
-			"only in the task history, need view:task too, and status changes view:vm or view:container.",
+			"backup job that covers several guests, whose Proxmox task names none, is listed for each guest " +
+			"it backed up, with that guest's own outcome and times, once the job has finished. Requires " +
+			"view:audit, which shows each task's outcome; a task's exit text, tasks recorded only in the " +
+			"task history and backup-job entries need view:task too, and status changes view:vm or " +
+			"view:container.",
 		Group:       "Audit Log",
 		Permissions: clusterCheck("view", "audit"),
 		Parameters: guestVMIDParams(apischema.Properties{

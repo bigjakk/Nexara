@@ -3,6 +3,15 @@ import { useTranslation } from "react-i18next";
 import type { TaskLogLine } from "@/features/vms/api/vm-queries";
 
 /**
+ * Proxmox answers a log it can no longer open — rotated away — with this one
+ * line rather than an error (PVE::Tools::dump_logfile), whatever start asked.
+ */
+function isMissingLog(lines: TaskLogLine[] | undefined): boolean {
+  const only = lines?.length === 1 ? lines[0] : undefined;
+  return only?.n === 1 && only.t.startsWith("unable to open file - ");
+}
+
+/**
  * The Log block under an expanded task: the heading, the spinner, the output,
  * and the distinct "Proxmox reported none" case.
  *
@@ -28,6 +37,7 @@ export function TaskLogSection({
   isError?: boolean;
 }) {
   const { t } = useTranslation("common");
+  const missing = isMissingLog(lines);
   return (
     <div className="mt-2 border-t pt-2">
       <span className="text-xs font-medium text-muted-foreground">
@@ -39,7 +49,7 @@ export function TaskLogSection({
           {t("loadingLog")}
         </div>
       )}
-      {lines && lines.length > 0 && (
+      {lines && lines.length > 0 && !missing && (
         <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap">
           {lines.map((line) => line.t).join("\n")}
         </pre>
@@ -49,7 +59,7 @@ export function TaskLogSection({
           {t("noLogOutput")}
         </div>
       )}
-      {isError && !isLoading && !lines && (
+      {(missing || (isError && !isLoading && !lines)) && (
         <div className="mt-1 text-xs text-muted-foreground">
           {t("logUnavailable")}
         </div>

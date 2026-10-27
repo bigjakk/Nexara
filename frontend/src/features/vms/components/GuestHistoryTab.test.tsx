@@ -112,4 +112,57 @@ describe("GuestHistoryTab", () => {
       `/api/v1/clusters/c1/tasks/${encodeURIComponent(MIGRATE_UPID)}/log`,
     );
   });
+
+  // A backup job's task is the whole job: the entry reads from where the
+  // guest's part begins, and shows it to where it ends.
+  it("shows a backup job entry's own part of the job's log", async () => {
+    const user = userEvent.setup({ delay: null });
+    const jobUPID = "UPID:pve-01:00001A2B:00003344:5F2E1A00:vzdump::root@pam:";
+    const backup: GuestHistoryEntry = {
+      id: `backup:${jobUPID}`,
+      kind: "backup",
+      occurred_at: "2026-01-03T00:00:00Z",
+      category: "backup",
+      source: "proxmox",
+      action: "vzdump",
+      resource_type: "backup",
+      vmid: 100,
+      user_id: "00000000-0000-0000-0000-000000000001",
+      user_email: "",
+      user_display_name: "",
+      details: "{}",
+      upid: jobUPID,
+      node: "pve-01",
+      description: "backup",
+      task_type: "vzdump",
+      outcome: "ok",
+      exit_status: "OK",
+      finished_at: "2026-01-03T00:00:12Z",
+      log_start: 41,
+      log_end: 42,
+    };
+    mockedPage.mockResolvedValue({ items: [backup], total: 1 });
+    mockedList.mockResolvedValue([
+      { n: 41, t: "INFO: Starting Backup of VM 100 (qemu)" },
+      { n: 42, t: "INFO: Finished Backup of VM 100 (00:00:12)" },
+      { n: 43, t: "INFO: Starting Backup of VM 101 (lxc)" },
+    ]);
+    renderWithProviders(
+      <GuestHistoryTab
+        clusterId="c1"
+        vmId="v1"
+        vmid={100}
+        showBlockJobs={false}
+      />,
+    );
+
+    await user.click(await screen.findByText("Back up (job)"));
+    expect(
+      await screen.findByText(/Finished Backup of VM 100/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/VM 101/)).not.toBeInTheDocument();
+    expect(String(mockedList.mock.calls[0]?.[0])).toBe(
+      `/api/v1/clusters/c1/tasks/${encodeURIComponent(jobUPID)}/log?start=40`,
+    );
+  });
 });

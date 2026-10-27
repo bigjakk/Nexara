@@ -31,8 +31,12 @@ export type GuestHistoryOutcome = "" | "running" | "ok" | "failed";
 /** One entry of GET /api/v1/clusters/:cluster_id/guests/:vmid/history. */
 export interface GuestHistoryEntry {
   id: string;
-  /** An audit row, a task with no audit row, or a status change no task explains. */
-  kind: "audit" | "task" | "status";
+  /**
+   * An audit row, a task with no audit row, a status change no task explains,
+   * or the guest's part of a backup job — a vzdump of several guests, whose
+   * Proxmox task names none of them.
+   */
+  kind: "audit" | "task" | "status" | "backup";
   occurred_at: string;
   category: GuestHistoryCategory;
   source: GuestHistorySource;
@@ -60,6 +64,10 @@ export interface GuestHistoryEntry {
    *  happened after this and by occurred_at — minutes apart, unless Nexara or
    *  the node was unreachable in between. */
   last_seen_at?: string;
+  /** A backup entry: the lines of the job's task log that are this guest's
+   *  part, by Proxmox's line numbers. */
+  log_start?: number;
+  log_end?: number;
 }
 
 /** The time filter: how far back to look, or "" for the whole history. */

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
@@ -122,6 +124,17 @@ func TestToGuestHistoryEntry(t *testing.T) {
 			t.Errorf("exit text shown=%v: outcome %q, exit %q; want %q, %q",
 				tt.showExit, e.Outcome, e.ExitStatus, guestOutcomeFailed, tt.wantExit)
 		}
+	}
+
+	// A backup entry ends when the guest's own backup did, not the job.
+	jobEnd, guestEnd := time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC), time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
+	backup := row
+	backup.Kind, backup.LogStart, backup.LogEnd = "backup", 41, 60
+	backup.TaskFinishedAt = pgtype.Timestamptz{Time: jobEnd, Valid: true}
+	backup.BackupFinishedAt = pgtype.Timestamptz{Time: guestEnd, Valid: true}
+	if e := toGuestHistoryEntry(backup, nil, true); e.FinishedAt == nil ||
+		*e.FinishedAt != guestEnd.Format(time.RFC3339Nano) || e.LogStart != 41 || e.LogEnd != 60 {
+		t.Errorf("backup entry: finished %v, lines %d-%d; want %s, 41-60", e.FinishedAt, e.LogStart, e.LogEnd, guestEnd)
 	}
 
 	// One reserved key proves the rule; they all share it.

@@ -92,6 +92,8 @@ describe("historyEventLabel", () => {
       { kind: "status" as const, from_status: "unknown", to_status: "running" },
       "Reported running again",
     ],
+    // A guest's part of a backup job, whose UPID names no guest.
+    [{ kind: "backup" as const, upid: upid("vzdump") }, "Back up (job)"],
   ])("labels %o as %s", (over, want) => {
     expect(historyEventLabel(entry(over), 100)).toBe(want);
   });
@@ -136,6 +138,22 @@ describe("historySummary", () => {
         description: "DRS Migrate qemu 100: pve-01 → pve-02",
       },
       "DRS Migrate qemu 100: pve-01 → pve-02",
+    ],
+    // Nexara's description names the job it ran; Proxmox's says only "backup".
+    [
+      {
+        kind: "backup" as const,
+        description: "Run backup job backup-01 on pve-01",
+      },
+      "Run backup job backup-01 on pve-01",
+    ],
+    [
+      {
+        kind: "backup" as const,
+        source: "proxmox" as const,
+        description: "backup",
+      },
+      "",
     ],
   ])("summarises %o", (over, want) => {
     expect(historySummary(entry(over), 100)).toBe(want);

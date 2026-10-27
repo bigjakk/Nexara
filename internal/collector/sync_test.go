@@ -54,6 +54,14 @@ type mockQueries struct {
 	reconcileCalls []db.ReconcileTaskHistoryParams
 	classifyCalls  []db.ClassifyGuestStatusChangesParams
 
+	// Backup job logs: the jobs ListUnreadBackupJobs answers, and what was
+	// asked and written.
+	unreadBackupJobs   []db.ListUnreadBackupJobsRow
+	abandonBackupCalls []db.AbandonUnreadBackupJobsParams
+	listBackupCalls    []db.ListUnreadBackupJobsParams
+	backupJobRecords   []db.RecordBackupJobLogParams
+	backupRecordFails  int // RecordBackupJobLog fails this many more calls, then succeeds
+
 	existingTaskUPIDs   map[string]bool // ListExistingTaskHistoryUPIDs echoes these back
 	existingAuditUPIDs  map[string]bool // ListExistingAuditLogUPIDs echoes these back
 	crossClusterUPIDs   map[string]bool // ListCrossClusterMigrationUPIDs echoes these back
@@ -447,6 +455,25 @@ func (m *mockQueries) ReconcileTaskHistory(_ context.Context, arg db.ReconcileTa
 func (m *mockQueries) ClassifyGuestStatusChanges(_ context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error) {
 	m.classifyCalls = append(m.classifyCalls, arg)
 	return 0, nil
+}
+
+func (m *mockQueries) AbandonUnreadBackupJobs(_ context.Context, arg db.AbandonUnreadBackupJobsParams) (int64, error) {
+	m.abandonBackupCalls = append(m.abandonBackupCalls, arg)
+	return 0, nil
+}
+
+func (m *mockQueries) ListUnreadBackupJobs(_ context.Context, arg db.ListUnreadBackupJobsParams) ([]db.ListUnreadBackupJobsRow, error) {
+	m.listBackupCalls = append(m.listBackupCalls, arg)
+	return m.unreadBackupJobs, nil
+}
+
+func (m *mockQueries) RecordBackupJobLog(_ context.Context, arg db.RecordBackupJobLogParams) error {
+	m.backupJobRecords = append(m.backupJobRecords, arg)
+	if m.backupRecordFails > 0 {
+		m.backupRecordFails--
+		return fmt.Errorf("record backup job log: injected failure")
+	}
+	return nil
 }
 
 func (m *mockQueries) GetVMByClusterAndVmid(_ context.Context, _ db.GetVMByClusterAndVmidParams) (db.Vm, error) {

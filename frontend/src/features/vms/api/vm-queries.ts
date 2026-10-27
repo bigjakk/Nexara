@@ -1181,17 +1181,26 @@ export interface TaskLogLine {
   t: string;
 }
 
+/**
+ * A task's log, 5000 lines at most. start skips that many lines first, as
+ * Proxmox's own start does: a guest's History reads its part of a backup job's
+ * log, which can begin past the first 5000.
+ */
 export function useTaskLog(
   clusterId: string | null,
   upid: string | null,
   enabled: boolean,
+  start = 0,
 ): UseQueryResult<TaskLogLine[]> {
   return useQuery({
-    queryKey: ["task-log", clusterId, upid],
-    queryFn: () =>
-      apiClient.list<TaskLogLine>(
-        apiPath`/api/v1/clusters/${clusterId ?? ""}/tasks/${upid ?? ""}/log`,
-      ),
+    queryKey: ["task-log", clusterId, upid, start],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (start > 0) params.set("start", String(start));
+      return apiClient.list<TaskLogLine>(
+        apiPath`/api/v1/clusters/${clusterId ?? ""}/tasks/${upid ?? ""}/log?${params}`,
+      );
+    },
     enabled: enabled && !!clusterId && !!upid,
     staleTime: 60_000,
   });
