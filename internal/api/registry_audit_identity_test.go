@@ -21,6 +21,7 @@ import (
 // the real declarations and handlers, with the HA create harness's stand-ins for
 // Proxmox and the database, and read the row each one leaves.
 func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
+	t.Parallel()
 	// A UPID as Proxmox answers a task-starting request: the JSON string.
 	taskUPID := func(taskType, id string) string {
 		return "UPID:pve-01:00001A2B:00C0FFEE:6540A1B2:" + taskType + ":" + id + ":root@pam:"
@@ -205,6 +206,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			wantType: "acme_account", wantID: "default", wantAction: "updated",
 			wantDetails: map[string]any{"upid": taskUPID("acmeupdate", "")},
 			wantTask:    true,
+			forbidden:   "admin@",
 		},
 		{
 			name: "and so is its deactivation", method: fiber.MethodDelete, path: acmeScope + "/accounts/:name",

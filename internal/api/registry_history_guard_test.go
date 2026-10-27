@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"slices"
 	"sort"
-	"strconv"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -222,8 +221,8 @@ func auditCallsIn(fd *ast.FuncDecl, decls map[string]*ast.FuncDecl, seen map[str
 			// AuditLog(c, queries, pub, clusterID, resourceType, resourceID, action, details)
 			if len(call.Args) >= 8 {
 				out = append(out, auditCall{
-					resourceType: stringLiteral(call.Args[4]),
-					idMissing:    stringLiteral(call.Args[5]) == "" && isStringLiteral(call.Args[5]),
+					resourceType: foldedLiteral(call.Args[4]),
+					idMissing:    emptyLiteral(call.Args[5]),
 					idFunc:       auditkeyCall(call.Args[5]),
 					pos:          call.Pos(),
 				})
@@ -241,9 +240,9 @@ func auditCallsIn(fd *ast.FuncDecl, decls map[string]*ast.FuncDecl, seen map[str
 						key, _ := kv.Key.(*ast.Ident)
 						switch {
 						case key != nil && key.Name == "ResourceType":
-							ac.resourceType = stringLiteral(kv.Value)
+							ac.resourceType = foldedLiteral(kv.Value)
 						case key != nil && key.Name == "ResourceID":
-							ac.idMissing = isStringLiteral(kv.Value) && stringLiteral(kv.Value) == ""
+							ac.idMissing = emptyLiteral(kv.Value)
 							ac.idFunc = auditkeyCall(kv.Value)
 						}
 					}
@@ -275,31 +274,26 @@ func calleeName(call *ast.CallExpr) string {
 	return ""
 }
 
-func isStringLiteral(e ast.Expr) bool {
-	lit, ok := e.(*ast.BasicLit)
-	return ok && lit.Kind == token.STRING
-}
-
-// stringLiteral is the value of a string literal, "" for anything else.
-func stringLiteral(e ast.Expr) string {
-	if !isStringLiteral(e) {
-		return ""
-	}
-	v, err := strconv.Unquote(e.(*ast.BasicLit).Value)
-	if err != nil {
-		return ""
-	}
+// foldedLiteral is the value of an argument written out as a string literal, ""
+// for anything else.
+func foldedLiteral(e ast.Expr) string {
+	v, _ := foldStringLiterals(e)
 	return v
 }
 
+// emptyLiteral reports whether e is written out as the empty string.
+func emptyLiteral(e ast.Expr) bool {
+	v, ok := foldStringLiterals(e)
+	return ok && v == ""
+}
+
 // TestGuard_ClusterObjectMutationsFileUnderTheirKind fails a mutating route on
-// one of the cluster page's objects whose handler files no audit row, files it
-// under a kind other than clusterObjectAudits names, or files it with an
-// unreadable type or an empty id — and a route, or a table row, with no
-// counterpart. Static, as TestGuard_AuditCallsCarryResourceCluster is: handlers
-// hold a concrete *db.Queries, so the row a handler writes can only be read in
-// the source.
+// one of the cluster page's objects that files no audit row, files it under a
+// kind clusterObjectAudits does not name, or with an unreadable type or empty id
+// — and a route or table row with no counterpart. Static: handlers hold a
+// concrete *db.Queries, so the row they write can only be read in the source.
 func TestGuard_ClusterObjectMutationsFileUnderTheirKind(t *testing.T) {
+	t.Parallel()
 	routed := map[string]bool{}
 	check := func(route, key string, fd *ast.FuncDecl, decls map[string]*ast.FuncDecl) {
 		routed[key] = true

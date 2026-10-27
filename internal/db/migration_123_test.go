@@ -20,13 +20,10 @@ var (
 	m123Other   = uuid.MustParse("12300000-0000-4000-8000-000000000003")
 )
 
-// The back-fill that moves existing audit rows to the key an object of the
-// cluster page is filed under from now on. Each row is an old shape that must
-// move, or a shape that must not. Every row that moves records its first original
-// in details.rekeyed_from; a second run changes nothing; the down restores the
-// originals. The statements run against a head-schema database, not through the
-// migrator, so a renumbering cannot break it; the chain test proves they apply in
-// order.
+// The back-fill that re-files old audit rows under the key objects of the cluster
+// page now file under. Each row is an old shape that must move or one that must
+// not; a mover records its first original in details.rekeyed_from, a second run
+// changes nothing, and the down restores the originals.
 func TestMigrationClusterObjectAuditKeys_RefilesOldShapesOnly(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
