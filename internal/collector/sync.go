@@ -1321,7 +1321,7 @@ func (s *Syncer) syncCeph(ctx context.Context, client ProxmoxClient, clusterID u
 		s.logger.Warn("failed to get ceph osds", "cluster_id", clusterID, "error", err)
 	} else {
 		result.CephOSDs = flattenOSDs(clusterID, &osdResp.Root)
-		s.observeCephOSDs(ctx, clusterID, result.CephOSDs)
+		s.observeCephOSDs(ctx, clusterID, result.CephOSDs, osdResp.HasFlag("noout"))
 	}
 
 	// Collect pool metrics.

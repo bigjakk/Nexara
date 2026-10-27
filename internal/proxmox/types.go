@@ -1074,6 +1074,21 @@ func (n *CephOSDTreeNode) IsIn() bool {
 // CephOSDResponse wraps the response from GET /nodes/{node}/ceph/osd.
 type CephOSDResponse struct {
 	Root CephOSDTreeNode `json:"root"`
+	// Flags are the cluster's OSD map flags, comma-joined ("noout,sortbitwise").
+	// Proxmox puts them here for the GUI's noout warning and leaves the key out
+	// when none is set. A flag set on one OSD (ceph osd add-noout) is not among
+	// them: the API does not report it.
+	Flags string `json:"flags,omitempty"`
+}
+
+// HasFlag reports whether the cluster has the named OSD map flag set.
+func (r *CephOSDResponse) HasFlag(name string) bool {
+	for _, f := range strings.Split(r.Flags, ",") {
+		if strings.TrimSpace(f) == name {
+			return true
+		}
+	}
+	return false
 }
 
 // CephPool represents a Ceph pool from GET /nodes/{node}/ceph/pool.

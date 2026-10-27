@@ -107,8 +107,11 @@ type Querier interface {
 	// minutes before the change was seen: an OSD comes back up minutes after the reboot
 	// that took it down, and Ceph marks a down OSD out once it has been down for
 	// mon_osd_down_out_interval (600 s by default). That is the only way a stop or a
-	// reboot explains an OSD going out — it must have been down for at least 9
-	// minutes, as an earlier change on record says, and not up since — and the only
+	// reboot explains an OSD going out — it must have been down for 9 to 15 minutes,
+	// as an earlier change on record says, not up since, and the cluster not under
+	// noout when it went out (the change says: the collector reads the flag with the
+	// OSDs; a noout set on one OSD alone is not reported by Proxmox, so is not seen) —
+	// and the only
 	// way a start, a restart or a reboot explains its going back in: as it came up. An
 	// OSD marked out by someone while it was up, or in again while it stayed up, is not
 	// explained by the stop or the start beside it. A replication job's removal is

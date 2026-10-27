@@ -70,6 +70,7 @@ type cephSeen struct {
 	osds  readings[int, cephOSDMetricSnapshot]
 	pools readings[string, cephPoolMetricSnapshot]
 	rows  map[string]*changeWindow // the rows each object's fields have added this hour
+	noout bool                     // whether the cluster had the noout flag at the last OSD reading
 }
 
 // changeWindow is what one field of one object has added to the History since start.
@@ -214,11 +215,11 @@ func (s *Syncer) cephState(clusterID uuid.UUID) *cephSeen {
 // observeCephOSDs diffs a successful reading of the cluster's OSDs against the
 // last one and records what differs. The caller must not call it for a read
 // that failed: a failed read is "could not look", never "every OSD is gone".
-func (s *Syncer) observeCephOSDs(ctx context.Context, clusterID uuid.UUID, osds []cephOSDMetricSnapshot) {
-	s.observeCephOSDsAt(ctx, clusterID, osds, time.Now())
+func (s *Syncer) observeCephOSDs(ctx context.Context, clusterID uuid.UUID, osds []cephOSDMetricSnapshot, noout bool) {
+	s.observeCephOSDsAt(ctx, clusterID, osds, noout, time.Now())
 }
 
-func (s *Syncer) observeCephOSDsAt(ctx context.Context, clusterID uuid.UUID, osds []cephOSDMetricSnapshot, now time.Time) {
+func (s *Syncer) observeCephOSDsAt(ctx context.Context, clusterID uuid.UUID, osds []cephOSDMetricSnapshot, noout bool, now time.Time) {
 	cur := make(map[int]cephOSDMetricSnapshot, len(osds))
 	for _, o := range osds {
 		cur[o.OSDID] = o
@@ -228,10 +229,13 @@ func (s *Syncer) observeCephOSDsAt(ctx context.Context, clusterID uuid.UUID, osd
 	prev, prevAt, ok := st.osds.advance(cur, now)
 	var kept []objectChange
 	if ok {
+		changes := diffCephOSDs(prev, cur)
+		markNoout(changes, noout || st.noout)
 		var frozen map[string]map[string]bool
-		kept, frozen = s.capObjectChanges(st, clusterID, "ceph_osd", diffCephOSDs(prev, cur), prevAt, now)
+		kept, frozen = s.capObjectChanges(st, clusterID, "ceph_osd", changes, prevAt, now)
 		freezeOSDs(cur, prev, frozen)
 	}
+	st.noout = noout
 	s.cephMu.Unlock()
 	s.recordObjectChanges(ctx, clusterID, "ceph_osd", kept, prevAt)
 }
@@ -259,6 +263,19 @@ func (s *Syncer) observeCephPoolsAt(ctx context.Context, clusterID uuid.UUID, po
 	}
 	s.cephMu.Unlock()
 	s.recordObjectChanges(ctx, clusterID, "ceph_pool", kept, prevAt)
+}
+
+// markNoout says, on each OSD that went out, whether the cluster had the noout flag
+// when it did — at this reading or the one before: Ceph marks a down OSD out by
+// itself only while noout is off, so an out seen with it set is somebody's.
+// The classifier (queries/cluster_object_changes.sql) explains an out as Ceph's own
+// only when this is recorded as false.
+func markNoout(changes []objectChange, noout bool) {
+	for _, ch := range changes {
+		if in, ok := ch.detail["in"].(map[string]any); ok && ch.change == "changed" && in["to"] == false {
+			in["noout"] = noout
+		}
+	}
 }
 
 // freezeOSDs puts back, in the baseline the next pass diffs against, what the cap

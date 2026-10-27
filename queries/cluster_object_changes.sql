@@ -67,8 +67,11 @@ VALUES (sqlc.arg('cluster_id'), sqlc.arg('resource_type'), sqlc.arg('resource_id
 -- minutes before the change was seen: an OSD comes back up minutes after the reboot
 -- that took it down, and Ceph marks a down OSD out once it has been down for
 -- mon_osd_down_out_interval (600 s by default). That is the only way a stop or a
--- reboot explains an OSD going out — it must have been down for at least 9
--- minutes, as an earlier change on record says, and not up since — and the only
+-- reboot explains an OSD going out — it must have been down for 9 to 15 minutes,
+-- as an earlier change on record says, not up since, and the cluster not under
+-- noout when it went out (the change says: the collector reads the flag with the
+-- OSDs; a noout set on one OSD alone is not reported by Proxmox, so is not seen) —
+-- and the only
 -- way a start, a restart or a reboot explains its going back in: as it came up. An
 -- OSD marked out by someone while it was up, or in again while it stayed up, is not
 -- explained by the stop or the start beside it. A replication job's removal is
@@ -137,16 +140,19 @@ WITH rules(resource_type, change, field, direction, audit_type, action, match, n
            p.field,
            CASE WHEN p.field IN ('up', 'in') THEN c.detail->p.field->>'to' ELSE '' END AS direction,
            -- Ceph's own marking out: the OSD went out after it had been down for the
-           -- auto-out interval (600 s by default, less a minute for the passes), and
-           -- was not up in between.
+           -- auto-out interval (600 s by default: a recorded down 9 to 15 minutes
+           -- before, allowing a minute for the passes and some for a slower setting),
+           -- was not up in between, and the cluster did not have noout set, which
+           -- stops Ceph marking anything out and which operators set for maintenance.
            (c.resource_type = 'ceph_osd' AND p.field = 'in' AND c.detail->'in'->>'to' = 'false'
+            AND c.detail->'in'->>'noout' = 'false'
             AND EXISTS (SELECT 1 FROM cluster_object_changes d
                         WHERE d.cluster_id = c.cluster_id
                           AND d.resource_type = c.resource_type
                           AND d.resource_id = c.resource_id
                           AND d.change = 'changed'
                           AND d.detail->'up'->>'to' = 'false'
-                          AND d.observed_at BETWEEN c.observed_at - interval '30 minutes' AND c.observed_at - interval '9 minutes'
+                          AND d.observed_at BETWEEN c.observed_at - interval '15 minutes' AND c.observed_at - interval '9 minutes'
                           AND NOT EXISTS (SELECT 1 FROM cluster_object_changes u
                                           WHERE u.cluster_id = d.cluster_id
                                             AND u.resource_type = d.resource_type

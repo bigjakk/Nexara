@@ -82,7 +82,7 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 	)
 	osdDown := `{"up":{"from":true,"to":false}}`
 	osdUp := `{"up":{"from":false,"to":true}}`
-	osdOut := `{"in":{"from":true,"to":false}}`
+	osdOut := `{"in":{"from":true,"to":false,"noout":false}}` // the cluster did not have noout when it went out
 	osdBackIn := `{"in":{"from":false,"to":true}}`
 	osdUpAndIn := `{"up":{"from":false,"to":true},"in":{"from":false,"to":true}}`
 	stopped := classifyCompanion{change: "changed", fields: []string{"up"}, detail: osdDown, at: 20}
@@ -185,6 +185,20 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 		{name: "out, the stop that was to have taken it down failed", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
 			companions: []classifyCompanion{stopped},
 			audits:     []classifyAudit{{at: 21, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "failed"}}, want: shown, wantBy: -1},
+		{name: "out while the cluster had noout set, a stop on record", rtype: "ceph_osd", change: "changed", fields: []string{"in"},
+			detail: `{"in":{"from":true,"to":false,"noout":true}}`, node: true,
+			companions: []classifyCompanion{stopped},
+			audits:     []classifyAudit{{at: 21, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "completed"}}, want: shown, wantBy: -1},
+		{name: "out with the cluster's noout not recorded", rtype: "ceph_osd", change: "changed", fields: []string{"in"},
+			detail: `{"in":{"from":true,"to":false}}`, node: true,
+			companions: []classifyCompanion{stopped},
+			audits:     []classifyAudit{{at: 21, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "completed"}}, want: shown, wantBy: -1},
+		{name: "out fourteen minutes after the stop: still Ceph's", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			companions: []classifyCompanion{{change: "changed", fields: []string{"up"}, detail: osdDown, at: 24}},
+			audits:     []classifyAudit{{at: 25, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "completed"}}, want: explained, wantBy: 0},
+		{name: "out seventeen minutes after the stop: later than Ceph's", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			companions: []classifyCompanion{{change: "changed", fields: []string{"up"}, detail: osdDown, at: 27}},
+			audits:     []classifyAudit{{at: 28, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "completed"}}, want: shown, wantBy: -1},
 		{name: "out, after its host shut down and it stayed down", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
 			companions: []classifyCompanion{stopped},
 			audits:     []classifyAudit{{at: 22, rtype: "node", rid: "node", action: "shutdown"}}, want: explained, wantBy: 0},

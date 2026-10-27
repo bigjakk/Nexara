@@ -234,6 +234,49 @@ func TestSyncCephRecordsWhatChanged(t *testing.T) {
 	expect("the OSD back up, against the last good reading", pass(), "ceph_osd/1 changed pve-01")
 }
 
+// An OSD that went out is recorded with whether the cluster had noout when it did, at
+// that reading or the one before: Ceph marks a down OSD out by itself only while noout
+// is off, so the classifier explains an out as Ceph's own only when it is recorded off.
+func TestSyncCephRecordsTheNooutFlagOnAnOSDThatWentOut(t *testing.T) {
+	t.Parallel()
+	mq := newMockQueries()
+	s := &Syncer{queries: mq, logger: testLogger()}
+	client := &cephFakeClient{pools: cephPools(3)}
+	clusterID := uuid.New()
+	pass := func(osd1In bool, flags string) {
+		tree := cephTree()
+		in := proxmox.FlexBool(osd1In)
+		tree.Root.Children[0].Children[1].In = &in
+		tree.Flags = flags
+		client.osds = tree
+		s.syncCeph(context.Background(), client, clusterID, "pve-01")
+	}
+	noout := func(row int) any {
+		var detail map[string]map[string]any
+		if err := json.Unmarshal(mq.objectChanges[row].Detail, &detail); err != nil {
+			t.Fatalf("detail: %v", err)
+		}
+		return detail["in"]["noout"]
+	}
+	pass(true, "")                   // the baseline
+	pass(false, "noout,sortbitwise") // out with noout set
+	pass(true, "sortbitwise")        // back in (a change to in, which carries no noout)
+	pass(false, "sortbitwise")       // out, neither reading had noout
+	pass(true, "noout")
+	pass(false, "sortbitwise") // out, the reading before had noout
+	if len(mq.objectChanges) != 5 {
+		t.Fatalf("%d rows recorded, want the five ins and outs", len(mq.objectChanges))
+	}
+	for row, want := range map[int]any{0: true, 2: false, 4: true} {
+		if got := noout(row); got != want {
+			t.Errorf("out #%d: noout = %v, want %v", row/2+1, got, want)
+		}
+	}
+	if got := noout(1); got != nil {
+		t.Errorf("an OSD that came back in carries noout = %v: only an out does", got)
+	}
+}
+
 // syncReplication marks a cluster's replication as read at the end of every pass
 // that wrote the listing whole — after the first the triggers record a job
 // appearing, and the latest dates it — and not for a pass that failed to write a
@@ -319,7 +362,7 @@ func TestObjectChangeCapIsPerFieldAndHoldsBackNothingForGood(t *testing.T) {
 		mq, cluster := newMockQueries(), uuid.New()
 		s := &Syncer{queries: mq, logger: testLogger()}
 		pass := func(at int, osds ...cephOSDMetricSnapshot) {
-			s.observeCephOSDsAt(context.Background(), cluster, osds, minute(at))
+			s.observeCephOSDsAt(context.Background(), cluster, osds, false, minute(at))
 		}
 		pass(0, osd(1, true, true), osd(2, true, true))
 		for i := 1; i <= 25; i++ { // osd.1's up flaps each minute; osd.2 goes down once
@@ -357,12 +400,12 @@ func TestObjectChangeCapIsPerFieldAndHoldsBackNothingForGood(t *testing.T) {
 		t.Parallel()
 		mq, cluster := newMockQueries(), uuid.New()
 		s := &Syncer{queries: mq, logger: testLogger()}
-		s.observeCephOSDsAt(context.Background(), cluster, []cephOSDMetricSnapshot{osd(1, true, true)}, minute(0))
+		s.observeCephOSDsAt(context.Background(), cluster, []cephOSDMetricSnapshot{osd(1, true, true)}, false, minute(0))
 		for i := 1; i <= 24; i++ {
-			s.observeCephOSDsAt(context.Background(), cluster, []cephOSDMetricSnapshot{osd(1, i%2 == 0, true)}, minute(i))
+			s.observeCephOSDsAt(context.Background(), cluster, []cephOSDMetricSnapshot{osd(1, i%2 == 0, true)}, false, minute(i))
 		}
 		for _, at := range []int{61, 62} {
-			s.observeCephOSDsAt(context.Background(), cluster, []cephOSDMetricSnapshot{osd(1, true, true)}, minute(at))
+			s.observeCephOSDsAt(context.Background(), cluster, []cephOSDMetricSnapshot{osd(1, true, true)}, false, minute(at))
 		}
 		if n := len(mq.objectChanges); n != maxObjectChangesPerHour {
 			t.Errorf("%d rows filed, want only the %d of the storm", n, maxObjectChangesPerHour)
@@ -381,7 +424,7 @@ func TestObjectChangeCapIsPerFieldAndHoldsBackNothingForGood(t *testing.T) {
 			if withThree {
 				osds = append(osds, osd(3, true, true))
 			}
-			s.observeCephOSDsAt(context.Background(), cluster, osds, minute(at))
+			s.observeCephOSDsAt(context.Background(), cluster, osds, false, minute(at))
 		}
 		pass(0, true)
 		for i := 1; i <= 21; i++ { // gone at 1, back at 2 ... gone at 21: the 21st is held

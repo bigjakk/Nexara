@@ -205,3 +205,31 @@ func TestVirtualMachineGuestReportsMemory(t *testing.T) {
 		})
 	}
 }
+
+// The OSD tree answer carries the cluster's OSD flags beside the tree, comma-joined
+// and left out when none is set (PVE::API2::Ceph::OSD, "we want this for the noout
+// flag"); a flag is a whole name, not a part of one.
+func TestCephOSDResponseReportsClusterFlags(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, payload string
+		want          bool
+	}{
+		{"noout among others", `{"root":{"type":"root"},"flags":"noout,sortbitwise,recovery_deletes"}`, true},
+		{"noout alone", `{"root":{"type":"root"},"flags":"noout"}`, true},
+		{"other flags", `{"root":{"type":"root"},"flags":"sortbitwise,noup,nodown"}`, false},
+		{"a longer name that contains it", `{"root":{"type":"root"},"flags":"nooutrecover"}`, false},
+		{"none set, the key left out", `{"root":{"type":"root"}}`, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var resp CephOSDResponse
+			if err := json.Unmarshal([]byte(tt.payload), &resp); err != nil {
+				t.Fatalf("decoding the OSD answer: %v", err)
+			}
+			if got := resp.HasFlag("noout"); got != tt.want {
+				t.Errorf("HasFlag(noout) = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
