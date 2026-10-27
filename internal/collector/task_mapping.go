@@ -33,6 +33,12 @@ type taskMapping struct {
 	// would be had nothing mapped it — never under an empty or invented id.
 	Object    bool
 	IDPattern *regexp.Regexp
+	// StorageID files the task under the storage its UPID's id ends in:
+	// "<owner vmid>@<storage>" for a volume that had an owner, "<storage>" for
+	// one that had none (pve-storage API2/Storage/Content.pm, imgdel). A task
+	// without a name there is the node's. Used with Object, so the name is held
+	// to the hygiene of every id read from a node.
+	StorageID bool
 }
 
 // The shapes Proxmox gives the ids of the Ceph objects a task names, transcribed
@@ -90,9 +96,14 @@ var proxmoxTaskMap = map[string]taskMapping{
 	"stopall":   {ResourceType: "node", Action: "stop_all"},
 	"aptupdate": {ResourceType: "node", Action: "apt_update"},
 
-	// Storage
-	"download": {ResourceType: "storage", Action: "download"},
-	"imgcopy":  {ResourceType: "storage", Action: "image_copy"},
+	// Storage. Only imgdel names its storage. imgcopy is the worker Proxmox runs
+	// for an upload and for a volume copy alike, and has no id at all; download's
+	// is the encoded file name. Neither says which storage, so both are the
+	// node's: keyed on either, a storage row would carry a node's name or a
+	// file's for a storage's.
+	"imgdel":   {ResourceType: "storage", Action: "delete_content", StorageID: true, Object: true},
+	"download": {ResourceType: "node", Action: "download", OnNode: true},
+	"imgcopy":  {ResourceType: "node", Action: "image_copy", OnNode: true},
 
 	// Network / service management
 	"srvreload": {ResourceType: "node", Action: "service_reload"},
@@ -183,6 +194,17 @@ func mapTask(taskType, taskID, node string) (mapping taskMapping, resourceID str
 		resourceID = mapping.Fixed
 	case mapping.OnNode:
 		resourceID = node
+	case mapping.StorageID:
+		resourceID = taskID
+		if i := strings.LastIndexByte(resourceID, '@'); i >= 0 {
+			resourceID = resourceID[i+1:]
+		}
+		if resourceID == "" {
+			// Proxmox always writes one; a task without is filed as the node's
+			// rather than as a storage row with a blank for a name.
+			mapping.ResourceType, mapping.Object = "node", false
+			resourceID = node
+		}
 	case taskID == "" && !mapping.Object:
 		resourceID = node
 	default:

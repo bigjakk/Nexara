@@ -349,6 +349,54 @@ func TestIngestTask_FlagsATaskDisagreeingWithItsUPID(t *testing.T) {
 	}
 }
 
+// An ingested task's audit row is filed under what its UPID's id field names,
+// so that a storage's History can find it. imgdel's id ends in the storage;
+// imgcopy (an upload or a volume copy) has none, and download's is an encoded
+// file name, so those are the node's — keyed on either, a storage row would
+// name a node or a file for a storage.
+func TestIngestTask_AuditRowIdentity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, taskType, id            string
+		wantType, wantID, wantStorage string
+	}{
+		{"imgdel of a volume with an owner", "imgdel", "105@store02", "storage", "store02", "store02"},
+		{"imgdel of a volume without one", "imgdel", "store02", "storage", "store02", "store02"},
+		{"imgcopy has no id", "imgcopy", "", "node", "pve-01", ""},
+		{"download's id is a file name", "download", "linux01\\x2diso", "node", "pve-01", ""},
+		{"an unmapped task keeps its id", "srvstart", "pveproxy", "proxmox_task", "pveproxy", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			q := newMockQueries()
+			s := &Syncer{queries: q, logger: testLogger()}
+			task := proxmox.NodeTask{
+				UPID: "UPID:pve-01:" + tt.taskType, Type: tt.taskType, ID: tt.id,
+				Status: "OK", StartTime: 1, EndTime: 2,
+			}
+			if err := s.ingestTask(context.Background(), db.Cluster{ID: uuid.New()}, "pve-01", task, nil); err != nil {
+				t.Fatalf("ingestTask: %v", err)
+			}
+			if len(q.auditWithSourceCalls) != 1 {
+				t.Fatalf("wrote %d audit rows, want 1", len(q.auditWithSourceCalls))
+			}
+			got := q.auditWithSourceCalls[0]
+			if got.ResourceType != tt.wantType || got.ResourceID != tt.wantID {
+				t.Errorf("row is filed under (%s, %q), want (%s, %q)", got.ResourceType, got.ResourceID, tt.wantType, tt.wantID)
+			}
+			var details map[string]any
+			if err := json.Unmarshal(got.Details, &details); err != nil {
+				t.Fatalf("details: %v", err)
+			}
+			if storage, _ := details["storage"].(string); storage != tt.wantStorage {
+				t.Errorf("details.storage = %q, want %q", storage, tt.wantStorage)
+			}
+		})
+	}
+}
+
 // ingestSyncFakeClient implements just the two ProxmoxClient methods syncTasks
 // touches (GetNodes, GetNodeTasks); the embedded interface stubs the rest.
 type ingestSyncFakeClient struct {

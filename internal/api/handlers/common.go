@@ -220,8 +220,8 @@ const maxAuditResourceNameLen = 128
 type TrackTaskParams struct {
 	ClusterID    uuid.UUID
 	Node         string
-	ResourceType string         // "vm", "container", "node", "storage", "pbs", ...
-	ResourceID   string         // internal resource id (or vmid as string)
+	ResourceType string         // "vm", "container", "node", "storage", "pbs_server", ...
+	ResourceID   string         // internal resource id (or vmid as string); a storage's NAME, a PBS server's id
 	ResourceName string         // optional display name
 	Action       string         // audit action, e.g. "disk_move", "migrate", "backup"
 	UPID         string         // Proxmox task UPID

@@ -278,7 +278,15 @@ func (h *VirtioWinHandler) UpdateConfig(c fiber.Ctx, p *apischema.Params) error 
 		"check_schedule": cfg.CheckSchedule,
 		"check_timezone": cfg.CheckTimezone,
 	})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", cfg.Storage, "virtio_win_config_update", details)
+	// A disabled config may name no storage, and a storage row with no storage
+	// to name would carry an empty identity no History could match. That save
+	// is the cluster's alone, so it is filed under the cluster, as the
+	// guest-tools config is.
+	if cfg.Storage == "" {
+		AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster", clusterID.String(), "virtio_win_config_update", details)
+	} else {
+		AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", cfg.Storage, "virtio_win_config_update", details)
+	}
 
 	return c.JSON(h.toVirtioWinConfigResponse(c, cfg))
 }

@@ -320,6 +320,11 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		detailMap["reported_type"] = cleanTaskText(reportedType)
 		detailMap["reported_id"] = cleanTaskText(reportedID)
 	}
+	if mapping.ResourceType == "storage" {
+		// A storage row's resource_id is the storage's name. The key a
+		// Nexara-dispatched storage task carries too, so one reader finds both.
+		detailMap["storage"] = resourceID
+	}
 	details, _ := json.Marshal(detailMap)
 
 	if err := s.queries.InsertAuditLogWithSource(ctx, db.InsertAuditLogWithSourceParams{

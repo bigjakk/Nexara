@@ -27,6 +27,17 @@ import (
 )
 
 // StorageHandler handles storage pool read endpoints.
+//
+// Every audit row a storage action writes — here, in storage_templates.go,
+// virtio_win.go and vm_import.go — names the storage by its Proxmox id:
+// resource_id and details.storage hold the name, and details.node says which
+// node a node-scoped action ran on. Never by the storage_pools row the request
+// addressed. That row is one node's view of the storage, and the collector
+// prunes and re-inserts it (DeleteStaleStoragePools drops a node's rows once it
+// has been unseen for the grace window), so the UUID an audit row recorded
+// resolves until it doesn't — the vms.id trap again — while the storage id is
+// what Proxmox calls the storage on every node. audit_identity_guard_test.go
+// fails a storage row keyed any other way.
 type StorageHandler struct {
 	queries       *db.Queries
 	encryptionKey string
@@ -312,7 +323,7 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 				ClusterID:    pool.ClusterID,
 				Node:         node.Name,
 				ResourceType: "storage",
-				ResourceID:   pool.ID.String(),
+				ResourceID:   pool.Storage,
 				Action:       "upload",
 				UPID:         upid,
 				Description:  "Upload " + filename,
@@ -376,7 +387,7 @@ func (h *StorageHandler) DeleteContent(c fiber.Ctx) error {
 		ClusterID:    pool.ClusterID,
 		Node:         node.Name,
 		ResourceType: "storage",
-		ResourceID:   pool.ID.String(),
+		ResourceID:   pool.Storage,
 		Action:       "delete_content",
 		UPID:         upid,
 		Description:  "Delete " + volume,
@@ -670,11 +681,12 @@ func (h *StorageHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	var details json.RawMessage
+	audit := map[string]string{"storage": pool.Storage}
 	if change := encryptionKeyChange(pool.Type, form, deleteOptions); change != "" {
-		details, _ = json.Marshal(map[string]string{"encryption_key": change})
+		audit["encryption_key"] = change
 	}
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(pool.ClusterID), "storage", pool.ID.String(), "update", details)
+	details, _ := json.Marshal(audit)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(pool.ClusterID), "storage", pool.Storage, "update", details)
 
 	return respondStorageWrite(c, fiber.StatusOK, storageWriteResponse{
 		Status:                 "updated",
@@ -701,7 +713,10 @@ func (h *StorageHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 		Storage:   pool.Storage,
 	})
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(pool.ClusterID), "storage", pool.ID.String(), "delete", nil)
+	// The type is recorded because nothing else will say what this was once the
+	// storage and its pool rows are gone.
+	details, _ := json.Marshal(map[string]string{"storage": pool.Storage, "type": pool.Type})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(pool.ClusterID), "storage", pool.Storage, "delete", details)
 
 	return c.JSON(fiber.Map{
 		"status":  "deleted",

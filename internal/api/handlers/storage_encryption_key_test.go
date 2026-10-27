@@ -364,6 +364,8 @@ func newStorageKeyHarnessFor(t *testing.T, poolType string) *storageKeyHarness {
 		withRequestParams(t, storageCreateMirror(t), []string{"cluster_id"}, handler.Create))
 	app.Put("/api/v1/clusters/:cluster_id/storage/:storage_id",
 		withRequestParams(t, storageUpdateMirror(t), []string{"cluster_id", "storage_id"}, handler.Update))
+	app.Delete("/api/v1/clusters/:cluster_id/storage/:storage_id",
+		withRequestParams(t, storageUpdateMirror(t), []string{"cluster_id", "storage_id"}, handler.Delete))
 
 	return &storageKeyHarness{
 		app: app, clusterID: clusterID, poolID: pool.ID,
@@ -390,7 +392,7 @@ func (h *storageKeyHarness) do(t *testing.T, method, body string) storageKeyExch
 	t.Helper()
 
 	target := "/api/v1/clusters/" + h.clusterID.String() + "/storage"
-	if method == http.MethodPut {
+	if method == http.MethodPut || method == http.MethodDelete {
 		target += "/" + h.poolID.String()
 	}
 	pxBefore, dbBefore, logBefore := h.px.count(), h.dbtx.count(), len(h.logs.String())
