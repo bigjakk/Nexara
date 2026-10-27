@@ -58,9 +58,13 @@ var auditReadsExemptFromScope = map[string]string{
 	// One object's History: both pin the cluster with a REQUIRED cluster_id
 	// argument, never a nullable filter, and the route's cluster-scoped
 	// view:audit gate (registry_history.go) authorized exactly that cluster
-	// before either runs — the scope is the path, not a set to stamp.
+	// before either runs — the scope is the path, not a set to stamp. A
+	// global kind's objects (HistoryKind.Global) are read in every cluster,
+	// behind a gate that is all GLOBAL view:audit and the kind's own view
+	// permission; TestGuestHistory holds every other arm to the cluster.
 	"guest_history.sql.ListGuestLifecycleEvents": "one cluster, a required arg the route's cluster-scoped view:audit Check authorized",
-	"history.sql.ListHistory":                    "one cluster, a required arg the route's cluster-scoped view:audit gate authorized",
+	"history.sql.ListHistory": "one cluster, a required arg the route's cluster-scoped view:audit gate authorized; " +
+		"a global kind's objects every cluster, behind an all-GLOBAL view:audit gate",
 }
 
 // readsAuditLogRe identifies a query that reads audit_log, through FROM or a

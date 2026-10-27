@@ -33,8 +33,13 @@
 --                           details key (an ACL's users). Read by resource
 --                           type alone, so for a type with few rows.
 --
--- The cluster is a REQUIRED argument on every branch: the route's
--- cluster-scoped gate authorized exactly that cluster.
+-- Every branch reads one cluster, a REQUIRED argument: the route's, which its
+-- cluster-scoped gate authorized. The one exception is a global kind's objects
+-- (global, HistoryKind.Global): read in every cluster and in none, because
+-- their ids are unique across Nexara — a PBS server's, Veeam's, a firewall
+-- template's — and their route's gate is all GLOBAL. A global kind has no
+-- guests. Each entry carries its own cluster_id, which its task outcome is
+-- joined on.
 
 -- ListHistory is the timeline.
 --
@@ -144,35 +149,35 @@ WITH guests AS MATERIALIZED (
     JOIN unnest(sqlc.arg('rule_fields')::text[]) WITH ORDINALITY AS f(field, n) ON f.n = c.n
     JOIN unnest(sqlc.arg('rule_patterns')::text[]) WITH ORDINALITY AS p(pattern, n) ON p.n = c.n
 ), audit AS (
-    SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
+    SELECT a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid' AS upid, a.details->>'node' AS node, a.details->>'status' AS recorded_status,
            a.vmid AS subject
     FROM audit_log a
-    WHERE a.cluster_id = sqlc.arg('cluster_id')
+    WHERE a.cluster_id = sqlc.arg('cluster_id')::uuid
       AND a.vmid IS NOT NULL
       AND a.vmid = ANY(sqlc.arg('vmids')::int[])
       AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR a.created_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
-    SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
+    SELECT a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
            (a.details->>'new_id')::int
     FROM audit_log a
     WHERE a.action IN ('clone', 'clone-to-template')
-      AND a.cluster_id = sqlc.arg('cluster_id')
+      AND a.cluster_id = sqlc.arg('cluster_id')::uuid
       AND NOT COALESCE(a.vmid = ANY(sqlc.arg('vmids')::int[]), false)
       AND a.details->>'new_id' = ANY(sqlc.arg('vmids')::int[]::text[])
       AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR a.created_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
-    SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
+    SELECT a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
            split_part(a.resource_id, ':', 2)::int
     FROM audit_log a
     WHERE a.resource_type = 'ha_resource'
-      AND a.cluster_id = sqlc.arg('cluster_id')
+      AND a.cluster_id = sqlc.arg('cluster_id')::uuid
       AND NOT COALESCE(a.vmid = ANY(sqlc.arg('vmids')::int[]), false)
       AND a.resource_id = ANY(ARRAY(SELECT p || v FROM unnest(sqlc.arg('vmids')::int[]) AS v,
                                                      unnest('{vm:,ct:}'::text[]) AS p))
@@ -180,7 +185,7 @@ WITH guests AS MATERIALIZED (
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR a.created_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR a.created_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
-    SELECT a.id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
+    SELECT a.id, a.cluster_id, a.created_at, a.source, a.action, a.resource_type, a.resource_id, a.vmid, a.user_id,
            a.details->>'upid', a.details->>'node', a.details->>'status',
            CASE WHEN a.vmid = ANY(sqlc.arg('vmids')::int[]) THEN a.vmid
                 WHEN a.action IN ('clone', 'clone-to-template')
@@ -200,7 +205,7 @@ WITH guests AS MATERIALIZED (
               SELECT b.id FROM audit_log b
               WHERE o.detail_key = ''
                 AND b.resource_type = o.resource_type AND b.resource_id = o.value
-                AND b.cluster_id = sqlc.arg('cluster_id')
+                AND (sqlc.arg('global')::bool OR b.cluster_id = sqlc.arg('cluster_id')::uuid)
               UNION ALL
               SELECT b.id FROM audit_log b
               WHERE o.detail_key <> '' AND NOT o.in_list
@@ -210,14 +215,14 @@ WITH guests AS MATERIALIZED (
                 AND b.details->>o.detail_key = o.value
                 AND b.resource_type = o.resource_type
                 AND (o.resource_id = '' OR b.resource_id = o.resource_id)
-                AND b.cluster_id = sqlc.arg('cluster_id')
+                AND (sqlc.arg('global')::bool OR b.cluster_id = sqlc.arg('cluster_id')::uuid)
               UNION ALL
               SELECT b.id FROM audit_log b
               WHERE o.in_list
                 AND b.resource_type = o.resource_type
                 AND (o.resource_id = '' OR b.resource_id = o.resource_id)
                 AND o.value = ANY(regexp_split_to_array(btrim(b.details->>o.detail_key), '\s*,\s*'))
-                AND b.cluster_id = sqlc.arg('cluster_id')
+                AND (sqlc.arg('global')::bool OR b.cluster_id = sqlc.arg('cluster_id')::uuid)
           ) m)
       AND NOT COALESCE(a.vmid = ANY(sqlc.arg('vmids')::int[])
                        AND history_worker_ok(a.details->>'upid', sqlc.arg('guest_workers')::text[]), false)
@@ -233,6 +238,7 @@ WITH guests AS MATERIALIZED (
     SELECT ('audit:' || s.id::text)::text           AS entry_id,
            'audit'::text                            AS kind,
            s.id                                     AS ref_id,
+           s.cluster_id                             AS cluster_id,
            s.created_at                             AS occurred_at,
            s.source                                 AS source,
            s.action                                 AS action,
@@ -251,11 +257,11 @@ WITH guests AS MATERIALIZED (
     WHERE NOT (s.source = 'proxmox' AND s.upid IS NOT NULL AND EXISTS (
             SELECT 1 FROM audit b WHERE b.source <> 'proxmox' AND b.upid = s.upid))
     UNION ALL
-    SELECT ('task:' || t.upid)::text, 'task', NULL::uuid, t.started_at, t.source, t.task_type,
+    SELECT ('task:' || t.upid)::text, 'task', NULL::uuid, t.cluster_id, t.started_at, t.source, t.task_type,
            'task', '', t.vmid, t.vmid, t.user_id, t.upid, t.node, '', '', '', NULL
     FROM task_history t
     WHERE sqlc.arg('include_tasks')::bool
-      AND t.cluster_id = sqlc.arg('cluster_id')
+      AND t.cluster_id = sqlc.arg('cluster_id')::uuid
       AND t.vmid IS NOT NULL
       AND t.vmid = ANY(sqlc.arg('vmids')::int[])
       AND is_guest_upid(t.upid)
@@ -265,11 +271,11 @@ WITH guests AS MATERIALIZED (
       AND NOT EXISTS (SELECT 1 FROM audit_log a
                       WHERE a.details->>'upid' = t.upid AND a.cluster_id = t.cluster_id)
     UNION ALL
-    SELECT ('task:' || r.upid)::text, 'task', NULL::uuid, r.started_at, r.source, r.task_type,
+    SELECT ('task:' || r.upid)::text, 'task', NULL::uuid, r.cluster_id, r.started_at, r.source, r.task_type,
            'task', '', r.vmid, r.vmid, r.user_id, r.upid, r.node, '', '', '', NULL
     FROM task_history_archive r
     WHERE sqlc.arg('include_tasks')::bool
-      AND r.cluster_id = sqlc.arg('cluster_id')
+      AND r.cluster_id = sqlc.arg('cluster_id')::uuid
       AND r.vmid = ANY(sqlc.arg('vmids')::int[])
       AND history_worker_ok(r.upid, sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR r.started_at >= sqlc.narg('cutoff_floor')::timestamptz)
@@ -277,10 +283,10 @@ WITH guests AS MATERIALIZED (
       AND NOT EXISTS (SELECT 1 FROM audit_log a
                       WHERE a.details->>'upid' = r.upid AND a.cluster_id = r.cluster_id)
     UNION ALL
-    SELECT ('status:' || s.id::text)::text, 'status', s.id, s.observed_at, 'detected', 'status_change',
+    SELECT ('status:' || s.id::text)::text, 'status', s.id, s.cluster_id, s.observed_at, 'detected', 'status_change',
            'status', '', s.vmid, s.vmid, NULL::uuid, '', s.node, '', s.from_status, s.to_status, s.last_seen_at
     FROM guest_status_changes s
-    WHERE s.cluster_id = sqlc.arg('cluster_id')
+    WHERE s.cluster_id = sqlc.arg('cluster_id')::uuid
       AND s.vmid = ANY(sqlc.arg('vmids')::int[])
       AND s.explained = false
       AND s.guest_type = ANY(sqlc.arg('status_guest_types')::text[])
@@ -288,11 +294,11 @@ WITH guests AS MATERIALIZED (
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR s.observed_at >= sqlc.narg('cutoff_floor')::timestamptz)
       AND (sqlc.narg('since')::timestamptz IS NULL OR s.observed_at >= sqlc.narg('since')::timestamptz)
     UNION ALL
-    SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.started_at, b.source, 'vzdump',
+    SELECT ('backup:' || b.upid || ':' || b.vmid::text)::text, 'backup', NULL::uuid, b.cluster_id, b.started_at, b.source, 'vzdump',
            'backup', '', b.vmid, b.vmid, b.user_id, b.upid, b.node, '', '', '', NULL
     FROM guest_backups b
     WHERE sqlc.arg('include_tasks')::bool
-      AND b.cluster_id = sqlc.arg('cluster_id')
+      AND b.cluster_id = sqlc.arg('cluster_id')::uuid
       AND b.vmid = ANY(sqlc.arg('vmids')::int[])
       AND history_worker_ok(b.upid, sqlc.arg('guest_workers')::text[])
       AND (sqlc.narg('cutoff_floor')::timestamptz IS NULL OR b.started_at >= sqlc.narg('cutoff_floor')::timestamptz)
@@ -330,7 +336,7 @@ WITH guests AS MATERIALIZED (
     ORDER BY c.occurred_at DESC, c.entry_id DESC
     LIMIT sqlc.arg('row_limit')::int OFFSET sqlc.arg('row_offset')::int
 )
-SELECT p.entry_id, p.kind, p.occurred_at, p.source, p.action, p.resource_type, p.resource_id, p.vmid,
+SELECT p.entry_id, p.kind, p.cluster_id, p.occurred_at, p.source, p.action, p.resource_type, p.resource_id, p.vmid,
        COALESCE(p.subject, 0)::int AS subject_vmid,
        p.user_id, p.upid, p.node, p.recorded_status, p.from_status, p.to_status, p.last_seen_at,
        p.category, p.total,
@@ -351,12 +357,12 @@ FROM page p
 LEFT JOIN audit_log ad
        ON p.kind = 'audit' AND ad.id = p.ref_id
 LEFT JOIN task_history th
-       ON p.upid <> '' AND th.upid = p.upid AND th.cluster_id = sqlc.arg('cluster_id')
+       ON p.upid <> '' AND th.upid = p.upid AND th.cluster_id = p.cluster_id
 LEFT JOIN task_history_archive ar
-       ON p.upid <> '' AND ar.upid = p.upid AND ar.cluster_id = sqlc.arg('cluster_id')
+       ON p.upid <> '' AND ar.upid = p.upid AND ar.cluster_id = p.cluster_id
 LEFT JOIN guest_backups gb
        ON p.kind = 'backup' AND gb.upid = p.upid AND gb.vmid = p.vmid
-          AND gb.cluster_id = sqlc.arg('cluster_id')
+          AND gb.cluster_id = p.cluster_id
 LEFT JOIN users u ON u.id = p.user_id
 ORDER BY p.occurred_at DESC, p.entry_id DESC;
 

@@ -152,6 +152,7 @@ func TestHistoryKindValidate(t *testing.T) {
 		{"a category nothing produces", func(k *HistoryKind) { k.Categories = append(k.Categories, "ha") }, "no rule produces"},
 		{"a category twice", func(k *HistoryKind) { k.Categories = append(k.Categories, "other") }, "twice"},
 		{"a default the filter refuses", func(k *HistoryKind) { k.Default = "misc" }, "Default"},
+		{"a global kind with a guest", func(k *HistoryKind) { k.Global, k.GuestFromPath = true, true }, "global"},
 	} {
 		k := valid()
 		tt.mutate(&k)
@@ -213,6 +214,22 @@ func TestHistoryKindListParams(t *testing.T) {
 			t.Errorf("%s was accepted", name)
 		}
 	}
+	// A global kind reads every cluster: never a guest, nor an object whose id
+	// is unique only within one.
+	global := HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true}
+	if p, err := global.ListParams([16]byte{1}, HistorySelection{Objects: []HistoryObject{{ResourceType: "pbs_server", Value: "s1"}}}); err != nil ||
+		!p.Global || p.ClusterID != uuid.Nil {
+		t.Errorf("global ListParams: global %v, cluster %v, err %v; want every cluster", p.Global, p.ClusterID, err)
+	}
+	for name, sel := range map[string]HistorySelection{
+		"a guest":           {Guests: []HistoryGuest{{VMID: 100}}},
+		"a node, by name":   {Objects: []HistoryObject{{ResourceType: "node", Value: "pve-01"}}},
+		"a guest's workers": {GuestWorkers: []string{"ha%"}},
+	} {
+		if _, err := global.ListParams([16]byte{1}, sel); err == nil {
+			t.Errorf("a global kind selecting %s was accepted", name)
+		}
+	}
 }
 
 // The generic selector names each object by the value of its path parameter.
@@ -269,14 +286,7 @@ func TestHistoryListDropsGuestsTheCallerCannotOpen(t *testing.T) {
 		Select: func(context.Context, HistoryRequest) (HistorySelection, error) {
 			return HistorySelection{Guests: []HistoryGuest{{VMID: 100}, {VMID: 101}}}, nil
 		}}
-	props := apischema.Properties{
-		"cluster_id": apischema.StdOption("cluster-id"),
-		"limit":      {Type: apischema.Integer, Optional: true, Default: 50},
-		"offset":     {Type: apischema.Integer, Optional: true, Default: 0},
-		"start_time": {Type: apischema.String, Optional: true},
-		"category":   {Type: apischema.String, Optional: true},
-		"source":     {Type: apischema.String, Optional: true},
-	}
+	props := historyTestProps("cluster_id", apischema.StdOption("cluster-id"))
 	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
 	app.Use(func(c fiber.Ctx) error {
 		c.Locals("user_id", uuid.New())
@@ -302,4 +312,43 @@ func TestHistoryListDropsGuestsTheCallerCannotOpen(t *testing.T) {
 		return
 	}
 	t.Fatalf("ListHistory never ran: %d queries", len(dbtx.calls))
+}
+
+// A global kind's scope is global, as its gate is: it names no cluster, and
+// asks no permission of one.
+func TestHistoryListGlobalKindAsksNoCluster(t *testing.T) {
+	t.Parallel()
+	engine := &recordingEngine{actions: map[string]bool{"view": true}}
+	dbtx := &auditRowsDBTX{}
+	kind := HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true,
+		Select: SelectObjects("id", HistoryObject{ResourceType: "pbs_server"})}
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		c.Locals("rbac_engine", engine)
+		return c.Next()
+	})
+	app.Get("/probes/:id/history", withRequestParams(t, historyTestProps("id", apischema.Property{Type: apischema.String}),
+		[]string{"id"}, NewHistoryHandler(db.New(dbtx)).Route(kind).List))
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/probes/"+uuid.NewString()+"/history", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(dbtx.calls) != 1 || len(engine.checks) != 0 {
+		t.Errorf("status %d, %d queries, cluster checks %v; want 200, ListHistory, none", resp.StatusCode, len(dbtx.calls), engine.checks)
+	}
+}
+
+// historyTestProps mirrors the History route's parameters: the path's own
+// one, and the filters every History takes.
+func historyTestProps(name string, path apischema.Property) apischema.Properties {
+	return apischema.Properties{
+		name:         path,
+		"limit":      {Type: apischema.Integer, Optional: true, Default: 50},
+		"offset":     {Type: apischema.Integer, Optional: true, Default: 0},
+		"start_time": {Type: apischema.String, Optional: true},
+		"category":   {Type: apischema.String, Optional: true},
+		"source":     {Type: apischema.String, Optional: true},
+	}
 }

@@ -1468,8 +1468,13 @@ type Querier interface {
 	//                           details key (an ACL's users). Read by resource
 	//                           type alone, so for a type with few rows.
 	//
-	// The cluster is a REQUIRED argument on every branch: the route's
-	// cluster-scoped gate authorized exactly that cluster.
+	// Every branch reads one cluster, a REQUIRED argument: the route's, which its
+	// cluster-scoped gate authorized. The one exception is a global kind's objects
+	// (global, HistoryKind.Global): read in every cluster and in none, because
+	// their ids are unique across Nexara — a PBS server's, Veeam's, a firewall
+	// template's — and their route's gate is all GLOBAL. A global kind has no
+	// guests. Each entry carries its own cluster_id, which its task outcome is
+	// joined on.
 	// ListHistory is the timeline.
 	//
 	// Entries, one per thing that happened:

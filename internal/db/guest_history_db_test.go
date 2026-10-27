@@ -23,7 +23,9 @@ var (
 	historyOtherID   = uuid.MustParse("115a0000-0000-4000-8000-00000000000b")
 	historyUserID    = uuid.MustParse("115a0000-0000-4000-8000-000000000001")
 	historyNodeID    = uuid.MustParse("115a0000-0000-4000-8000-0000000000d1")
-	systemUserID     = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	// A firewall template's audit rows outlive any cluster: no cluster_id.
+	historyTemplateID = "115a0000-0000-4000-8000-0000000000f1"
+	systemUserID      = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 )
 
 func historyUPID(seq int, workerType, id string) string {
@@ -52,6 +54,7 @@ func TestGuestHistory(t *testing.T) {
 		// Every fixture table cascades from clusters.
 		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = ANY($1)`, []uuid.UUID{historyClusterID, historyOtherID})
 		_, _ = pool.Exec(pctx, `DELETE FROM users WHERE id = $1`, historyUserID)
+		_, _ = pool.Exec(pctx, `DELETE FROM audit_log WHERE resource_type = 'firewall_template' AND resource_id = $1`, historyTemplateID)
 	}
 	purge()
 	defer purge()
@@ -84,7 +87,7 @@ func TestGuestHistory(t *testing.T) {
 			user = systemUserID
 		}
 		if err := q.InsertAuditLogWithSource(ctx, gen.InsertAuditLogWithSourceParams{
-			ClusterID: pgtype.UUID{Bytes: cluster, Valid: true}, UserID: pgtype.UUID{Bytes: user, Valid: true},
+			ClusterID: pgtype.UUID{Bytes: cluster, Valid: cluster != uuid.Nil}, UserID: pgtype.UUID{Bytes: user, Valid: true},
 			ResourceType: resourceType, ResourceID: resourceID, Action: action, Details: raw,
 			Source: source, CreatedAt: at,
 		}); err != nil {
@@ -671,6 +674,86 @@ func TestGuestHistory(t *testing.T) {
 		if !slices.Equal(got, tt.want) {
 			t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
 		}
+	}
+
+	// ── Every arm reads the route's cluster alone: audit keys are unique only
+	// within one. The other cluster holds, for each arm, a row its selector
+	// would take but for that — none may come back here, and each must in the
+	// other cluster's own History, or the guard reads nothing.
+	otherUPID := func(seq int, workerType, id string) string {
+		return fmt.Sprintf("UPID:pve-02:%08X:00000001:66000001:%s:%s:root@pam:", seq, workerType, id)
+	}
+	audit(historyOtherID, minsAgo(5), "nexara", "vm", uuid.NewString(), "clone", map[string]any{"upid": otherUPID(1, "qmclone", "60"), "vmid": 60, "new_id": 100})
+	audit(historyOtherID, minsAgo(5), "nexara", "ha_resource", "vm:100", "created", map[string]any{"state": "started"})
+	audit(historyOtherID, minsAgo(5), "nexara", "network", "vmbr0", "interface_updated", map[string]any{"node": "pve-01"})
+	audit(historyOtherID, minsAgo(5), "nexara", "pbs_server", "srv-a", "datastore_update", map[string]any{"datastore": "datastore01"})
+	audit(historyOtherID, minsAgo(5), "nexara", "ceph_osd", "osd.12", "osd_restart", map[string]any{"osd_id": 12})
+	audit(historyOtherID, minsAgo(5), "nexara", "pve_acl", "/vms/100", "updated", map[string]any{"users": "bob@pve"})
+	exec("other task", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, vmid, started_at, source)
+		VALUES ($1, $2, $3, 'completed', 'pve-02', 'qmstart', 100, $4, 'proxmox')`, historyOtherID, systemUserID, otherUPID(2, "qmstart", "100"), minsAgo(5))
+	exec("other archive", `INSERT INTO task_history_archive (upid, cluster_id, vmid, status, started_at)
+		VALUES ($1, $2, 100, 'completed', $3)`, otherUPID(3, "qmigrate", "100"), historyOtherID, minsAgo(5))
+	exec("other status", `INSERT INTO guest_status_changes (cluster_id, vmid, guest_type, from_status, to_status, last_seen_at, observed_at, explained)
+		VALUES ($1, 100, 'qemu', 'running', 'stopped', $2, $2, false)`, historyOtherID, minsAgo(5))
+	exec("other backup", `INSERT INTO guest_backups (cluster_id, upid, vmid, node, source, status, started_at, finished_at, log_start, log_end)
+		VALUES ($1, $2, 100, 'pve-02', 'proxmox', 'completed', $3, $3, 1, 2)`, historyOtherID, otherUPID(4, "vzdump", ""), minsAgo(5))
+	ownRows := 0
+	for _, sel := range []handlers.HistorySelection{
+		{Guests: []handlers.HistoryGuest{{VMID: 100}}},
+		{Objects: []handlers.HistoryObject{{ResourceType: "node", Value: "pve-01"},
+			{ResourceType: "network", DetailKey: "node", Value: "pve-01"},
+			{ResourceType: "pbs_server", ResourceID: "srv-a", DetailKey: "datastore", Value: "datastore01"},
+			{ResourceType: "ceph_osd", DetailKey: "osd_id", Value: "12"},
+			{ResourceType: "pve_acl", DetailKey: "users", Value: "bob@pve", InList: true}}},
+	} {
+		for _, cluster := range []uuid.UUID{historyClusterID, historyOtherID} {
+			p, err := handlers.GuestHistory().ListParams(cluster, sel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.RowLimit, p.IncludeTasks, p.StatusGuestTypes = 200, true, []string{"qemu"}
+			rows, err := q.ListHistory(ctx, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, r := range rows {
+				if uuid.UUID(r.ClusterID.Bytes) != cluster {
+					t.Errorf("cluster %s's History holds %s %s %s of cluster %s", cluster, r.Kind, r.Action, r.ResourceID, uuid.UUID(r.ClusterID.Bytes))
+				}
+				if cluster == historyOtherID {
+					ownRows++
+				}
+			}
+		}
+	}
+	// The vmid arm's start, the clone, HA, task, archive, status and backup;
+	// the node's reboot and the four other object shapes.
+	if ownRows != 12 {
+		t.Errorf("the other cluster's own History holds %d of its 12 rows", ownRows)
+	}
+
+	// ── A global kind's objects are read in every cluster, and in none.
+	audit(uuid.Nil, minsAgo(5), "nexara", "firewall_template", historyTemplateID, "template_created", map[string]any{})
+	audit(historyOtherID, minsAgo(4), "nexara", "firewall_template", historyTemplateID, "template_applied", map[string]any{})
+	audit(historyClusterID, minsAgo(3), "nexara", "firewall_template", historyTemplateID, "template_applied", map[string]any{})
+	template := handlers.HistoryKind{Name: "template", Categories: []string{"other"}, Default: "other", Global: true}
+	tp, err := template.ListParams(uuid.Nil, handlers.HistorySelection{Objects: []handlers.HistoryObject{
+		{ResourceType: "firewall_template", Value: historyTemplateID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tp.RowLimit = 50
+	templateRows, err := q.ListHistory(ctx, tp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clusters := make([]string, 0, len(templateRows))
+	for _, r := range templateRows {
+		clusters = append(clusters, r.Action+" "+map[bool]string{true: uuid.UUID(r.ClusterID.Bytes).String(), false: "none"}[r.ClusterID.Valid])
+	}
+	if want := []string{"template_applied " + historyClusterID.String(), "template_applied " + historyOtherID.String(),
+		"template_created none"}; !slices.Equal(clusters, want) {
+		t.Errorf("a global kind's History = %v, want %v", clusters, want)
 	}
 }
 

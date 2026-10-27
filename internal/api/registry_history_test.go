@@ -49,21 +49,59 @@ func TestHistoryRefusesABadStartTimeFirst(t *testing.T) {
 	}
 }
 
+// A global kind reads every cluster's rows, so each permission its gate holds
+// is GLOBAL — a grant on one cluster must not open it — and every other
+// kind's is the path's cluster's. The probe is a global kind, which no route
+// is yet.
+func TestHistoryGateScope(t *testing.T) {
+	t.Parallel()
+	probe := historyRoute{
+		Kind: handlers.HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true,
+			Select: handlers.SelectObjects("id", handlers.HistoryObject{ResourceType: "pbs_server"})},
+		Path: pathPrefix + "probes/:id/history", Resource: "pbs",
+		Parameters: apischema.Properties{"id": {Type: apischema.String}},
+	}
+	for _, r := range append(historyRoutes(), probe) {
+		want := ScopeCluster
+		if r.Kind.Global {
+			want = ScopeGlobal
+		}
+		perms := historyEndpoint(&handlers.HistoryHandler{}, r).Permissions
+		checks := perms.AllOf
+		if perms.Check != nil {
+			checks = append(checks, *perms.Check)
+		}
+		for _, c := range checks {
+			if c.Scope != want {
+				t.Errorf("%s: %s is %s-scoped, want %s", r.Path, c, c.Scope, want)
+			}
+		}
+	}
+}
+
 // A route's gate is decided at registration: neither or both of Resource and
-// AuditOnly is refused, so no kind can fall back to view:audit alone.
+// AuditOnly is refused, so no kind can fall back to view:audit alone; so is a
+// global kind on view:audit alone, or at a cluster's path, where its gate
+// would be one cluster's.
 func TestHistoryEndpointRefusesAnUndecidedGate(t *testing.T) {
 	t.Parallel()
+	global := handlers.HistoryKind{Name: "probe", Categories: []string{"other"}, Default: "other", Global: true,
+		Select: handlers.SelectObjects("vmid", handlers.HistoryObject{ResourceType: "pbs_server"})}
 	for name, r := range map[string]historyRoute{
-		"neither": {},
-		"both":    {Resource: "node", AuditOnly: "because"},
+		"neither":                {Kind: handlers.GuestHistory()},
+		"both":                   {Kind: handlers.GuestHistory(), Resource: "node", AuditOnly: "because"},
+		"global on audit alone":  {Kind: global, Path: pathPrefix + "probes/:vmid/history", AuditOnly: "because"},
+		"global at a cluster's":  {Kind: global, Resource: "pbs"},
+		"a cluster's kind above": {Kind: handlers.GuestHistory(), Path: pathPrefix + "probes/:vmid/history", Resource: "vm"},
 	} {
-		r.Kind = handlers.GuestHistory()
-		r.Path = clusterScope + "/probe/:vmid/history"
+		if r.Path == "" {
+			r.Path = clusterScope + "/probe/:vmid/history"
+		}
 		r.Parameters = apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")}
 		func() {
 			defer func() {
-				if msg, _ := recover().(string); !strings.Contains(msg, "exactly one of Resource") {
-					t.Errorf("%s: historyEndpoint = %q, want it refused for an undecided gate", name, msg)
+				if msg, _ := recover().(string); !strings.Contains(msg, "history route "+r.Path) {
+					t.Errorf("%s: historyEndpoint = %q, want it refused", name, msg)
 				}
 			}()
 			historyEndpoint(&handlers.HistoryHandler{}, r)

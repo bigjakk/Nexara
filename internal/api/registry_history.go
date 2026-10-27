@@ -26,7 +26,9 @@ type historyRoute struct {
 	Path        string
 	Description string
 	// Resource is the kind's own view permission, held with view:audit on
-	// the path's cluster. Exactly one of Resource and AuditOnly is set.
+	// the path's cluster — or globally, for a global kind (HistoryKind.Global).
+	// Exactly one of Resource and AuditOnly is set; a global kind sets
+	// Resource.
 	Resource string
 	// AuditOnly is why the gate is view:audit alone: the guest, whose own
 	// permission depends on its type (view:vm or view:container) and so
@@ -54,23 +56,30 @@ func registerHistoryEndpoints(reg *Registry, h *handlers.HistoryHandler) {
 
 // historyEndpoint builds one kind's route, refusing at startup a kind whose
 // type filter could not work (HistoryKind.Validate), a route that is not a
-// cluster's, and a gate left undecided: exactly one of Resource and AuditOnly.
+// cluster's — or, for a global kind, one that is — and a gate left undecided:
+// exactly one of Resource and AuditOnly, and Resource for a global kind. A
+// global kind's gate is all GLOBAL, since it reads every cluster's rows.
 func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 	if err := r.Kind.Validate(); err != nil {
 		panic(fmt.Sprintf("history route %s: %v", r.Path, err))
 	}
-	if !strings.HasPrefix(r.Path, clusterScope+"/") || !strings.HasSuffix(r.Path, "/history") {
-		panic(fmt.Sprintf("history route %s: a History route is %s/…/history", r.Path, clusterScope))
+	scope, inCluster := ScopeCluster, strings.HasPrefix(r.Path, clusterScope+"/")
+	if r.Kind.Global {
+		scope = ScopeGlobal
+	}
+	if inCluster == r.Kind.Global || !strings.HasPrefix(r.Path, pathPrefix) || !strings.HasSuffix(r.Path, "/history") {
+		panic(fmt.Sprintf("history route %s: a History route is %s/…/history, and a global kind's is "+
+			"%s…/history outside it", r.Path, clusterScope, pathPrefix))
 	}
 	resource, auditOnly := strings.TrimSpace(r.Resource), strings.TrimSpace(r.AuditOnly)
-	if (resource == "") == (auditOnly == "") {
+	if (resource == "") == (auditOnly == "") || r.Kind.Global && auditOnly != "" {
 		panic(fmt.Sprintf("history route %s: set exactly one of Resource (the kind's own view permission) "+
-			"and AuditOnly (why view:audit alone is enough)", r.Path))
+			"and AuditOnly (why view:audit alone is enough), and Resource for a global kind", r.Path))
 	}
-	audit := Check{Action: "view", Resource: "audit", Scope: ScopeCluster}
+	audit := Check{Action: "view", Resource: "audit", Scope: scope}
 	perms := Permissions{Check: &audit}
 	if resource != "" {
-		perms = Permissions{AllOf: []Check{audit, {Action: "view", Resource: resource, Scope: ScopeCluster}}}
+		perms = Permissions{AllOf: []Check{audit, {Action: "view", Resource: resource, Scope: scope}}}
 	}
 	return Endpoint{
 		Method:      fiber.MethodGet,

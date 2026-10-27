@@ -1,14 +1,15 @@
 package handlers
 
-// How to add a kind of object with a History (the guest is guest_history.go):
-//  1. Declare its HistoryKind in handlers/history_<kind>.go: Name, Categories in filter order,
-//     the Rules that derive them (first match wins, else Default), and Select — which rows are
-//     the object's. SelectObjects is the generic selector: audit rows by resource_type + id.
-//  2. Declare its historyRoute in internal/api/registry_history_<kind>.go — path, description,
-//     its own view permission — and add one line for it to historyRoutes() (registry_history.go).
-//  3. Frontend: locales/en/history-<Name>.json with the same categories in the same order, a
-//     HistoryKind in your feature's lib/ (see features/history/types/history.ts), and a
-//     <HistoryTimeline> or <HistoryDrawer>. TestHistoryCategoryVocabulary holds the two together.
+// How to add a kind of object with a History (the guest's: guest_history.go, registry_guest_history.go):
+//  1. handlers/<kind>_history.go: its HistoryKind — Name, Categories in filter order, the Rules that
+//     derive them (first match wins, else Default), and Select: which rows are the object's.
+//     SelectObjects(param, …) reads audit rows by resource_type and id, or a DetailKey; param must be a
+//     declared String path parameter (a node's: StdOption("node-name"), which 404s a non-member). Global
+//     only for ids unique across Nexara (globalHistoryResourceTypes): it reads every cluster's rows.
+//  2. api/registry_<kind>_history.go: its historyRoute (path, description, its own view permission) and
+//     one line in historyRoutes(). 3. Frontend: locales/en/history-<Name>.json, the same categories in
+//     the same order (TestHistoryCategoryVocabulary); a HistoryKind in your feature's lib/ (see
+//     features/history/types/history.ts); a <HistoryTimeline> or <HistoryButton>.
 
 import (
 	"context"
@@ -64,7 +65,22 @@ type HistoryKind struct {
 	// other kind's guests — a folder's members, a node's guests — are kept
 	// only where the caller may open them (viewableGuests).
 	GuestFromPath bool
+	// Global reads the kind's objects in every cluster and in none, for an
+	// object that belongs to no one cluster: its route sits outside
+	// /clusters/:cluster_id and is gated on view:audit and its own view
+	// permission, both GLOBAL. Only for ids unique across Nexara — the
+	// resource types in globalHistoryResourceTypes, which ListParams holds a
+	// global kind to — since audit keys are unique only within a cluster.
+	// A global kind has no guests.
+	Global bool
 }
+
+// globalHistoryResourceTypes are the audit resource types whose ids are unique
+// across Nexara, so a global kind may select them in every cluster: a PBS
+// server's and a firewall template's uuid, and Veeam's own ids. Any other
+// type's id is unique only within its cluster — node pve-01, VM 100 — and
+// read in every cluster would mix the objects of the same name.
+var globalHistoryResourceTypes = []string{"pbs_server", "veeam_server", "veeam_job", "veeam_session", "firewall_template"}
 
 // HistoryField is what a HistoryRule matches on.
 type HistoryField string
@@ -174,6 +190,9 @@ func (k HistoryKind) Validate() error {
 	if k.Select == nil {
 		return fmt.Errorf("history kind %q has no Select", k.Name)
 	}
+	if k.Global && k.GuestFromPath {
+		return fmt.Errorf("history kind %q is global, and a global kind has no guests", k.Name)
+	}
 	if !slices.Contains(k.Categories, k.Default) {
 		return fmt.Errorf("history kind %q: Default %q is not one of its Categories", k.Name, k.Default)
 	}
@@ -249,8 +268,11 @@ const (
 )
 
 type historyEntry struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// ClusterID is the entry's own cluster: the path's on a cluster's
+	// History; on a global kind's, the row's, or none.
+	ClusterID  string `json:"cluster_id,omitempty"`
 	OccurredAt string `json:"occurred_at"`
 	Category   string `json:"category"`
 	Source     string `json:"source"`
@@ -388,11 +410,27 @@ func viewableGuests(guests []HistoryGuest, types []db.ListGuestTypesRow, viewabl
 // one's cutoff up by VMID, and would hold it to the first only, so that is
 // refused. So is a selection ListHistory would read wrong: an object that
 // names nothing, a ResourceID or list with no details key to go with it, and
-// a worker pattern Postgres refuses.
+// a worker pattern Postgres refuses — and, for a global kind, which has no
+// cluster (clusterID is ignored), any guest and any object whose ids are
+// unique only within a cluster.
 func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.ListHistoryParams, error) {
+	if k.Global {
+		if len(sel.Guests)+len(sel.GuestWorkers) > 0 {
+			return db.ListHistoryParams{}, fmt.Errorf("history kind %q is global and selected guests, "+
+				"which are a cluster's", k.Name)
+		}
+		for _, o := range sel.Objects {
+			if !slices.Contains(globalHistoryResourceTypes, o.ResourceType) {
+				return db.ListHistoryParams{}, fmt.Errorf("history kind %q is global and selected %q, "+
+					"whose ids are unique only within a cluster", k.Name, o.ResourceType)
+			}
+		}
+		clusterID = uuid.Nil
+	}
 	params := db.ListHistoryParams{
 		DefaultCategory:   k.Default,
 		ClusterID:         clusterID,
+		Global:            k.Global,
 		Vmids:             make([]int32, 0, len(sel.Guests)),
 		CutoffAfter:       make([]time.Time, 0, len(sel.Guests)),
 		CutoffInclusive:   make([]bool, 0, len(sel.Guests)),
@@ -480,13 +518,19 @@ func (h *HistoryHandler) Route(kind HistoryKind) *HistoryRoute {
 // in registry_paramkey_guard_test.go cannot follow through a function value;
 // the route sweep dispatches every History route, selector included.
 func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
-	clusterID, err := parseParamUUID(p.String("cluster_id"))
-	if err != nil {
-		return err
+	// A global kind's scope is global, as its gate is; every other kind's is
+	// the path's cluster.
+	clusterID := uuid.Nil
+	can := func(action, resource string) (bool, error) { return hasGlobalPerm(c, action, resource) }
+	if !r.kind.Global {
+		id, err := parseParamUUID(p.String("cluster_id"))
+		if err != nil {
+			return err
+		}
+		clusterID = id
+		can = func(action, resource string) (bool, error) { return hasClusterPerm(c, action, resource, clusterID) }
 	}
-	includeTasks, statusTypes, err := historyScope(func(action, resource string) (bool, error) {
-		return hasClusterPerm(c, action, resource, clusterID)
-	})
+	includeTasks, statusTypes, err := historyScope(can)
 	if err != nil {
 		return err
 	}
@@ -583,6 +627,9 @@ func toHistoryEntry(r db.ListHistoryRow, visible map[string]bool, showExitText b
 		ToStatus:    r.ToStatus,
 		LogStart:    r.LogStart,
 		LogEnd:      r.LogEnd,
+	}
+	if r.ClusterID.Valid {
+		e.ClusterID = uuid.UUID(r.ClusterID.Bytes).String()
 	}
 	if r.UserID.Valid {
 		e.UserID = uuid.UUID(r.UserID.Bytes).String()
