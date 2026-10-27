@@ -512,6 +512,9 @@ var sweepValueOverrides = map[string]any{
 	"channel_ids": []any{},
 	// virtiowin/version.go's versionPattern: `^\d+(?:\.\d+)*(?:-\d+)?$`.
 	"target_version": "0.1.262-1",
+	// registry_history.go's exclude_category: a comma list of the kind's own
+	// categories, closed by a Pattern — every kind has "other".
+	"exclude_category": "other",
 	// vm_import_helpers.go enforces Proxmox's real floor (100), tighter
 	// than the schema's declared Minimum(1) — see registry_vm_import.go's
 	// bounds comment for why the schema itself stays at the wider PVE
