@@ -98,8 +98,21 @@ type Querier interface {
 	// reboot's start, which must be no more than an hour before the window, to the
 	// health check that ends it plus 5 minutes for OSDs to start. Draining and
 	// upgrading do not take an OSD down, and the restore that follows is hours of VM
-	// moves in which an OSD crash is no part of the update; neither explains one. Only
-	// up: a node that reboots does not mark its OSDs out.
+	// moves in which an OSD crash is no part of the update; neither explains one. Up
+	// and down only, and in and out only as Ceph's own (below): a reboot does not mark
+	// an OSD out, an admin does.
+	//
+	// A consequence can come long after its cause, so a rule marked lagged does not ask
+	// the cause to reach the object's last sighting, only to have begun within the 30
+	// minutes before the change was seen: an OSD comes back up minutes after the reboot
+	// that took it down, and Ceph marks a down OSD out once it has been down for
+	// mon_osd_down_out_interval (600 s by default). That is the only way a stop or a
+	// reboot explains an OSD going out — it must have been down for at least 9
+	// minutes, as an earlier change on record says, and not up since — and the only
+	// way a start, a restart or a reboot explains its going back in: as it came up. An
+	// OSD marked out by someone while it was up, or in again while it stayed up, is not
+	// explained by the stop or the start beside it. A replication job's removal is
+	// lagged too: Proxmox holds a deleted job until it has cleaned up its replicas.
 	//
 	// The window: the row was made no earlier than the object was last seen as it was
 	// (less 2 minutes for how stale that sighting can be) and no later than the

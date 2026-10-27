@@ -80,6 +80,10 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 	)
 	osdDown := `{"up":{"from":true,"to":false}}`
 	osdUp := `{"up":{"from":false,"to":true}}`
+	osdOut := `{"in":{"from":true,"to":false}}`
+	osdBackIn := `{"in":{"from":false,"to":true}}`
+	osdUpAndIn := `{"up":{"from":false,"to":true},"in":{"from":false,"to":true}}`
+	stopped := classifyCompanion{change: "changed", fields: []string{"up"}, detail: osdDown, at: 20}
 	cases := []struct {
 		name       string
 		rtype      string
@@ -155,6 +159,55 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_destroy"}}, want: explained, wantBy: 0},
 		{name: "an OSD gone, only stopped", rtype: "ceph_osd", change: "removed", node: true,
 			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_stop"}}, want: shown, wantBy: -1},
+
+		// A consequence comes after its cause: an OSD back up minutes after its host's reboot, and out
+		// (Ceph's own, once it has been down for the auto-out interval) or back in only as that.
+		{name: "up, its host rebooted minutes before it came back", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
+			audits: []classifyAudit{{at: 17, rtype: "node", rid: "node", action: "reboot"}}, want: explained, wantBy: 0},
+		{name: "up, its host rebooted more than half an hour before", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
+			audits: []classifyAudit{{at: 41, rtype: "node", rid: "node", action: "reboot"}}, want: shown, wantBy: -1},
+		{name: "out, ten minutes after the stop that took it down: Ceph's own", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			companions: []classifyCompanion{stopped},
+			audits:     []classifyAudit{{at: 21, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "completed"}}, want: explained, wantBy: 0},
+		{name: "out, after its host rebooted and it stayed down", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			companions: []classifyCompanion{stopped},
+			audits:     []classifyAudit{{at: 22, rtype: "node", rid: "node", action: "reboot"}}, want: explained, wantBy: 0},
+		{name: "out, though it was up again after the stop", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			companions: []classifyCompanion{{change: "changed", fields: []string{"up"}, detail: osdDown, at: 25}, {change: "changed", fields: []string{"up"}, detail: osdUp, at: 15}},
+			audits:     []classifyAudit{{at: 26, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "completed"}}, want: shown, wantBy: -1},
+		{name: "out, five minutes after the stop: sooner than Ceph's own", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			companions: []classifyCompanion{{change: "changed", fields: []string{"up"}, detail: osdDown, at: 15}},
+			audits:     []classifyAudit{{at: 16, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "completed"}}, want: shown, wantBy: -1},
+		{name: "out of an OSD never seen down, a stop on record", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			audits: []classifyAudit{{at: 21, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "completed"}}, want: shown, wantBy: -1},
+		{name: "out, the stop that was to have taken it down failed", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			companions: []classifyCompanion{stopped},
+			audits:     []classifyAudit{{at: 21, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "failed"}}, want: shown, wantBy: -1},
+		{name: "out, after its host shut down and it stayed down", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			companions: []classifyCompanion{stopped},
+			audits:     []classifyAudit{{at: 22, rtype: "node", rid: "node", action: "shutdown"}}, want: explained, wantBy: 0},
+		{name: "out, after a restart that failed to start it again", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			companions: []classifyCompanion{stopped},
+			audits:     []classifyAudit{{at: 21, rtype: "ceph_osd", action: "osd_restart", taskID: "osd.{oid}", task: "failed"}}, want: explained, wantBy: 0},
+		{name: "out of an OSD that had been down for hours, a stop beside it", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			companions: []classifyCompanion{{change: "changed", fields: []string{"up"}, detail: osdDown, at: 120}},
+			audits:     []classifyAudit{{at: 21, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}", task: "completed"}}, want: shown, wantBy: -1},
+		{name: "back in as it came up: restarted", rtype: "ceph_osd", change: "changed", fields: []string{"in", "up"}, detail: osdUpAndIn, node: true,
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_restart", taskID: "osd.{oid}", task: "completed"}}, want: explained, wantBy: 0},
+		{name: "out after a rolling reboot that outlasted Ceph's wait", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdOut, node: true,
+			rolling: "host", drained: 40, rebooted: 25, companions: []classifyCompanion{stopped},
+			audits: []classifyAudit{{at: 40, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: explained, wantBy: 0},
+		{name: "back in as it came up: started", rtype: "ceph_osd", change: "changed", fields: []string{"in", "up"}, detail: osdUpAndIn, node: true,
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_start", taskID: "osd.{oid}", task: "completed"}}, want: explained, wantBy: 0},
+		{name: "back in while it stayed up, a start beside it", rtype: "ceph_osd", change: "changed", fields: []string{"in"}, detail: osdBackIn, node: true,
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_start", taskID: "osd.{oid}", task: "completed"}}, want: shown, wantBy: -1},
+		{name: "back in as it came up, its host rebooted minutes before", rtype: "ceph_osd", change: "changed", fields: []string{"in", "up"}, detail: osdUpAndIn, node: true,
+			audits: []classifyAudit{{at: 17, rtype: "node", rid: "node", action: "reboot"}}, want: explained, wantBy: 0},
+		{name: "back in as it came up after a rolling reboot", rtype: "ceph_osd", change: "changed", fields: []string{"in", "up"}, detail: osdUpAndIn, node: true,
+			rolling: "host", drained: 30, rebooted: 25,
+			audits: []classifyAudit{{at: 30, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: explained, wantBy: 0},
+		{name: "a job gone twenty minutes after it was deleted: Proxmox held it until its replicas were cleaned up", rtype: "replication", change: "removed",
+			audits: []classifyAudit{{at: 20, rtype: "replication", action: "deleted"}}, want: explained, wantBy: 0},
 
 		// A task that failed explains only where a failed task can leave a partial change.
 		{name: "down, the stop failed", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
