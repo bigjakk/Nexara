@@ -6,10 +6,53 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/api/handlers"
 )
+
+const historyRouteCount = 1
+
+// The guest is the one kind gated on view:audit alone; any other kind that
+// reaches this list forgot its own view permission.
+func TestHistoryAuditOnlyIsTheGuestAlone(t *testing.T) {
+	t.Parallel()
+	var auditOnly []string
+	for _, r := range historyRoutes() {
+		if r.AuditOnly != "" {
+			auditOnly = append(auditOnly, r.Kind.Name)
+		}
+	}
+	if !slices.Equal(auditOnly, []string{"guest"}) {
+		t.Errorf("kinds gated on view:audit alone: %v, want [guest]", auditOnly)
+	}
+}
+
+// A route's gate is decided at registration: neither or both of Resource and
+// AuditOnly is refused, so no kind can fall back to view:audit alone.
+func TestHistoryEndpointRefusesAnUndecidedGate(t *testing.T) {
+	t.Parallel()
+	for name, r := range map[string]historyRoute{
+		"neither": {},
+		"both":    {Resource: "node", AuditOnly: "because"},
+	} {
+		r.Kind = handlers.GuestHistory()
+		r.Path = clusterScope + "/probe/:vmid/history"
+		r.Parameters = apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")}
+		func() {
+			defer func() {
+				if msg, _ := recover().(string); !strings.Contains(msg, "exactly one of Resource") {
+					t.Errorf("%s: historyEndpoint = %q, want it refused for an undecided gate", name, msg)
+				}
+			}()
+			historyEndpoint(&handlers.HistoryHandler{}, r)
+		}()
+	}
+}
 
 // TestHistoryCategoryVocabulary holds each kind's type filter to its labels:
 // the categories the route declares (which HistoryKind.Validate holds to the

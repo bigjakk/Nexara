@@ -26,10 +26,13 @@ type historyRoute struct {
 	Path        string
 	Description string
 	// Resource is the kind's own view permission, held with view:audit on
-	// the path's cluster. Empty gates on view:audit alone — the guest, whose
-	// own permission depends on its type (view:vm or view:container), filters
-	// what is the inventory's on it instead.
+	// the path's cluster. Exactly one of Resource and AuditOnly is set.
 	Resource string
+	// AuditOnly is why the gate is view:audit alone: the guest, whose own
+	// permission depends on its type (view:vm or view:container) and so
+	// filters what is the inventory's instead. A route that forgets Resource
+	// is refused, never quietly gated on view:audit alone.
+	AuditOnly string
 	// Parameters are the path's own; the filters every History takes are
 	// added.
 	Parameters apischema.Properties
@@ -42,11 +45,6 @@ func historyRoutes() []historyRoute {
 	}
 }
 
-// historyRouteCount is not a hand-kept number like the other domains': each
-// route is one line of historyRoutes, which is what registerHistoryEndpoints
-// registers.
-var historyRouteCount = len(historyRoutes())
-
 // registerHistoryEndpoints declares every kind's History route.
 func registerHistoryEndpoints(reg *Registry, h *handlers.HistoryHandler) {
 	for _, r := range historyRoutes() {
@@ -55,8 +53,8 @@ func registerHistoryEndpoints(reg *Registry, h *handlers.HistoryHandler) {
 }
 
 // historyEndpoint builds one kind's route, refusing at startup a kind whose
-// type filter could not work (HistoryKind.Validate) or a route that is not a
-// cluster's.
+// type filter could not work (HistoryKind.Validate), a route that is not a
+// cluster's, and a gate left undecided: exactly one of Resource and AuditOnly.
 func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 	if err := r.Kind.Validate(); err != nil {
 		panic(fmt.Sprintf("history route %s: %v", r.Path, err))
@@ -64,10 +62,15 @@ func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 	if !strings.HasPrefix(r.Path, clusterScope+"/") || !strings.HasSuffix(r.Path, "/history") {
 		panic(fmt.Sprintf("history route %s: a History route is %s/…/history", r.Path, clusterScope))
 	}
+	resource, auditOnly := strings.TrimSpace(r.Resource), strings.TrimSpace(r.AuditOnly)
+	if (resource == "") == (auditOnly == "") {
+		panic(fmt.Sprintf("history route %s: set exactly one of Resource (the kind's own view permission) "+
+			"and AuditOnly (why view:audit alone is enough)", r.Path))
+	}
 	audit := Check{Action: "view", Resource: "audit", Scope: ScopeCluster}
 	perms := Permissions{Check: &audit}
-	if r.Resource != "" {
-		perms = Permissions{AllOf: []Check{audit, {Action: "view", Resource: r.Resource, Scope: ScopeCluster}}}
+	if resource != "" {
+		perms = Permissions{AllOf: []Check{audit, {Action: "view", Resource: resource, Scope: ScopeCluster}}}
 	}
 	return Endpoint{
 		Method:      fiber.MethodGet,
