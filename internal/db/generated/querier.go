@@ -80,9 +80,13 @@ type Querier interface {
 	// while it runs: its audit row is made at the start, and an OSD takes minutes to
 	// appear. A new OSD cannot be keyed by its number in the task that made it (the
 	// cephcreateosd UPID names the device), so osd_create is matched by the host it
-	// ran on ("device"). An OSD going down or coming up is also explained by a
-	// rolling update that was working on its host (the job's own audit row is then
-	// explained_by).
+	// ran on ("device"). A row that stands for a task must also have a UPID that names
+	// the object as Proxmox spells it for that task (osd.12, a pool's name), as its
+	// key does: a task of another object explains nothing. An OSD going down or
+	// coming up is also explained by a rolling update that was working on its host
+	// (the job's own audit row is then explained_by), counted from its reboot of the
+	// host, or from its drain before one, and only if that began no more than an hour
+	// before the window: a job that has stood on a host for hours explains nothing.
 	//
 	// The window: the row was made no earlier than the object was last seen as it was
 	// (less 2 minutes for how stale that sighting can be) and no later than the

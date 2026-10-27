@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +28,8 @@ type classifyAudit struct {
 	rtype, rid string
 	action     string
 	details    map[string]any
-	running    bool // with a task row that has not finished
+	taskID     string // the id field of the UPID of the task behind the row ({oid}: the case's object); none if empty
+	running    bool   // with a task row that has not finished
 }
 
 // ClassifyClusterObjectChanges explains a change only by an audit row whose action
@@ -81,13 +83,17 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 		unlisted bool    // the node's task list was not read
 		observer bool    // filed by the observer, which decides its own rows
 		rolling  string  // a rolling update job working on the case's node ("host") or another ("other")
+		drained  float64 // minutes ago that job began draining it, default 13
+		rebooted float64 // and rebooting it, default 12
 		audits   []classifyAudit
 		want     string
 		wantBy   int // the audit that explains it, -1 for none
 	}{
 		// An OSD going down or coming up, in or out, appearing or going.
 		{name: "down, stopped", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
-			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_stop"}}, want: explained, wantBy: 0},
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.{oid}"}}, want: explained, wantBy: 0},
+		{name: "down, the stop's task was another OSD's", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_stop", taskID: "osd.999"}}, want: shown, wantBy: -1},
 		{name: "down after an osd_in, which explains nothing", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
 			audits: []classifyAudit{{at: 10.3, rtype: "ceph_osd", action: "osd_in"}}, want: shown, wantBy: -1},
 		{name: "up, though the row says it was stopped", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdUp, node: true,
@@ -111,8 +117,14 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 			audits: []classifyAudit{{at: 15, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: explained, wantBy: 0},
 		{name: "down, a rolling update was working on another host", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true, rolling: "other",
 			audits: []classifyAudit{{at: 15, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: shown, wantBy: -1},
+		{name: "down, a rolling update began rebooting its host hours ago and has not finished", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
+			rolling: "host", drained: 310, rebooted: 300,
+			audits: []classifyAudit{{at: 310, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: shown, wantBy: -1},
+		{name: "down, a rolling update that drained its host for hours rebooted it minutes ago", rtype: "ceph_osd", change: "changed", fields: []string{"up"}, detail: osdDown, node: true,
+			rolling: "host", drained: 200, rebooted: 20,
+			audits: []classifyAudit{{at: 200, rtype: "rolling_update", rid: "job", action: "rolling_update_started"}}, want: explained, wantBy: 0},
 		{name: "a new OSD, created on its host (keyed by the device); the task still runs", rtype: "ceph_osd", change: "added", node: true,
-			audits: []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev", action: "osd_create", running: true}}, want: explained, wantBy: 0},
+			audits: []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev", action: "osd_create", taskID: "sdb", running: true}}, want: explained, wantBy: 0},
 		{name: "a new OSD, created on another host", rtype: "ceph_osd", change: "added", node: true,
 			audits: []classifyAudit{{at: 14, rtype: "ceph_osd", rid: "dev-elsewhere", action: "osd_create"}}, want: shown, wantBy: -1},
 		{name: "an OSD gone, destroyed", rtype: "ceph_osd", change: "removed", node: true,
@@ -122,7 +134,9 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 
 		// A pool.
 		{name: "a pool resized, updated", rtype: "ceph_pool", change: "changed", fields: []string{"size"},
-			audits: []classifyAudit{{at: 10.3, rtype: "ceph_pool", action: "update"}}, want: explained, wantBy: 0},
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_pool", action: "update", taskID: "{oid}"}}, want: explained, wantBy: 0},
+		{name: "a pool resized, the update's task was another pool's", rtype: "ceph_pool", change: "changed", fields: []string{"size"},
+			audits: []classifyAudit{{at: 10.3, rtype: "ceph_pool", action: "update", taskID: "pool-elsewhere"}}, want: shown, wantBy: -1},
 		{name: "a pool resized, only created", rtype: "ceph_pool", change: "changed", fields: []string{"size"},
 			audits: []classifyAudit{{at: 10.3, rtype: "ceph_pool", action: "create"}}, want: shown, wantBy: -1},
 		{name: "a pool gone, deleted", rtype: "ceph_pool", change: "removed",
@@ -150,7 +164,7 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 		{name: "after an outage, a row inside the cap", rtype: "ceph_pool", change: "changed", fields: []string{"size"}, lastSeen: 300,
 			audits: []classifyAudit{{at: 25, rtype: "ceph_pool", action: "update"}}, want: explained, wantBy: 0},
 		{name: "a task that started hours ago and still runs", rtype: "ceph_pool", change: "changed", fields: []string{"size"},
-			audits: []classifyAudit{{at: 120, rtype: "ceph_pool", action: "update", running: true}}, want: shown, wantBy: -1},
+			audits: []classifyAudit{{at: 120, rtype: "ceph_pool", action: "update", taskID: "{oid}", running: true}}, want: shown, wantBy: -1},
 		{name: "a change that names no field", rtype: "ceph_pool", change: "changed", want: shown, wantBy: -1},
 		{name: "another cluster's row", rtype: "ceph_pool", change: "changed", fields: []string{"size"},
 			audits: []classifyAudit{{other: true, at: 10.3, rtype: "ceph_pool", action: "update"}}, want: shown, wantBy: -1},
@@ -172,6 +186,7 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 	}
 	seededCases := make([]seeded, len(cases))
 	var listed []string
+	upidSeq := 0
 	for i, tc := range cases {
 		oid := fmt.Sprintf("%d", 300+i)
 		node := ""
@@ -201,8 +216,12 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 				worked = "pve-97"
 			}
 			exec("rolling job", `INSERT INTO rolling_update_jobs (id, cluster_id, created_by) VALUES ($1, $2, $3)`, jobID, classifyCluster, systemUserID)
+			drained, rebooted := tc.drained, tc.rebooted
+			if drained == 0 {
+				drained, rebooted = 13, 12
+			}
 			exec("rolling node", `INSERT INTO rolling_update_nodes (job_id, node_name, drain_started_at, reboot_started_at) VALUES ($1, $2, $3, $4)`,
-				jobID, worked, ago(13), ago(12))
+				jobID, worked, ago(drained), ago(rebooted))
 		}
 		for _, a := range tc.audits {
 			auditID := uuid.New()
@@ -229,11 +248,17 @@ func TestClassifyClusterObjectChanges(t *testing.T) {
 					details["node"] = "pve-98"
 				}
 			}
-			if a.running {
-				upid := "UPID:" + node + ":" + auditID.String()
+			if a.running && a.taskID == "" {
+				t.Fatalf("%s: a running task needs a taskID", tc.name)
+			}
+			if a.taskID != "" {
+				upidSeq++
+				upid := fmt.Sprintf("UPID:%s:%08X:00000001:6A8CE407:task:%s:root@pam:", node, upidSeq, strings.ReplaceAll(a.taskID, "{oid}", oid))
 				details["upid"] = upid
-				exec("running task", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, started_at, source)
-					VALUES ($1, $2, $3, 'running', $4, 'cephcreateosd', $5, 'proxmox')`, cluster, systemUserID, upid, node, ago(a.at))
+				if a.running {
+					exec("running task", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, started_at, source)
+						VALUES ($1, $2, $3, 'running', $4, 'task', $5, 'proxmox')`, cluster, systemUserID, upid, node, ago(a.at))
+				}
 			}
 			raw, _ := json.Marshal(details)
 			exec("audit "+a.action, `INSERT INTO audit_log (id, cluster_id, resource_type, resource_id, action, details, source, created_at)

@@ -40,9 +40,13 @@ VALUES (sqlc.arg('cluster_id'), sqlc.arg('resource_type'), sqlc.arg('resource_id
 -- while it runs: its audit row is made at the start, and an OSD takes minutes to
 -- appear. A new OSD cannot be keyed by its number in the task that made it (the
 -- cephcreateosd UPID names the device), so osd_create is matched by the host it
--- ran on ("device"). An OSD going down or coming up is also explained by a
--- rolling update that was working on its host (the job's own audit row is then
--- explained_by).
+-- ran on ("device"). A row that stands for a task must also have a UPID that names
+-- the object as Proxmox spells it for that task (osd.12, a pool's name), as its
+-- key does: a task of another object explains nothing. An OSD going down or
+-- coming up is also explained by a rolling update that was working on its host
+-- (the job's own audit row is then explained_by), counted from its reboot of the
+-- host, or from its drain before one, and only if that began no more than an hour
+-- before the window: a job that has stood on a host for hours explains nothing.
 --
 -- The window: the row was made no earlier than the object was last seen as it was
 -- (less 2 minutes for how stale that sighting can be) and no later than the
@@ -62,35 +66,35 @@ VALUES (sqlc.arg('cluster_id'), sqlc.arg('resource_type'), sqlc.arg('resource_id
 -- task list (listed_nodes) until give_up_before; an object no node owns has no
 -- list to wait for.
 -- name: ClassifyClusterObjectChanges :execrows
-WITH rules(resource_type, change, field, direction, audit_type, action, match, names_field) AS (VALUES
-    ('ceph_osd',    'changed', 'up',       'false', 'ceph_osd',    'osd_stop',     'object', false),
-    ('ceph_osd',    'changed', 'up',       'false', 'ceph_osd',    'osd_restart',  'object', false),
-    ('ceph_osd',    'changed', 'up',       'false', 'ceph_osd',    'osd_destroy',  'object', false),
-    ('ceph_osd',    'changed', 'up',       'false', 'node',        'reboot',       'host',   false),
-    ('ceph_osd',    'changed', 'up',       'false', 'node',        'shutdown',     'host',   false),
-    ('ceph_osd',    'changed', 'up',       'true',  'ceph_osd',    'osd_start',    'object', false),
-    ('ceph_osd',    'changed', 'up',       'true',  'ceph_osd',    'osd_restart',  'object', false),
-    ('ceph_osd',    'changed', 'up',       'true',  'ceph_osd',    'osd_create',   'device', false),
-    ('ceph_osd',    'changed', 'up',       'true',  'node',        'reboot',       'host',   false),
-    ('ceph_osd',    'changed', 'in',       'false', 'ceph_osd',    'osd_out',      'object', false),
-    ('ceph_osd',    'changed', 'in',       'false', 'ceph_osd',    'osd_destroy',  'object', false),
-    ('ceph_osd',    'changed', 'in',       'true',  'ceph_osd',    'osd_in',       'object', false),
-    ('ceph_osd',    'changed', 'in',       'true',  'ceph_osd',    'osd_create',   'device', false),
-    ('ceph_osd',    'added',   '',         '',      'ceph_osd',    'osd_create',   'device', false),
-    ('ceph_osd',    'removed', '',         '',      'ceph_osd',    'osd_destroy',  'object', false),
-    ('ceph_pool',   'changed', 'size',              '', 'ceph_pool', 'update', 'object', false),
-    ('ceph_pool',   'changed', 'min_size',          '', 'ceph_pool', 'update', 'object', false),
-    ('ceph_pool',   'changed', 'pg_num',            '', 'ceph_pool', 'update', 'object', false),
-    ('ceph_pool',   'changed', 'pg_num_min',        '', 'ceph_pool', 'update', 'object', false),
-    ('ceph_pool',   'changed', 'pg_autoscale_mode', '', 'ceph_pool', 'update', 'object', false),
-    ('ceph_pool',   'added',   '',         '',      'ceph_pool',   'create',       'object', false),
-    ('ceph_pool',   'removed', '',         '',      'ceph_pool',   'delete',       'object', false),
-    ('replication', 'added',   '',         '',      'replication', 'created',      'object', false),
-    ('replication', 'removed', '',         '',      'replication', 'deleted',      'object', false),
-    ('replication', 'changed', 'schedule', '',      'replication', 'updated',      'object', true),
-    ('replication', 'changed', 'rate',     '',      'replication', 'updated',      'object', true),
-    ('replication', 'changed', 'disable',  '',      'replication', 'updated',      'object', true),
-    ('replication', 'changed', 'comment',  '',      'replication', 'updated',      'object', true)
+WITH rules(resource_type, change, field, direction, audit_type, action, match, names_field, upid_id) AS (VALUES
+    ('ceph_osd',    'changed', 'up',       'false', 'ceph_osd',    'osd_stop',     'object', false, 'osd.%s'),
+    ('ceph_osd',    'changed', 'up',       'false', 'ceph_osd',    'osd_restart',  'object', false, 'osd.%s'),
+    ('ceph_osd',    'changed', 'up',       'false', 'ceph_osd',    'osd_destroy',  'object', false, 'osd.%s'),
+    ('ceph_osd',    'changed', 'up',       'false', 'node',        'reboot',       'host',   false, ''),
+    ('ceph_osd',    'changed', 'up',       'false', 'node',        'shutdown',     'host',   false, ''),
+    ('ceph_osd',    'changed', 'up',       'true',  'ceph_osd',    'osd_start',    'object', false, 'osd.%s'),
+    ('ceph_osd',    'changed', 'up',       'true',  'ceph_osd',    'osd_restart',  'object', false, 'osd.%s'),
+    ('ceph_osd',    'changed', 'up',       'true',  'ceph_osd',    'osd_create',   'device', false, ''),
+    ('ceph_osd',    'changed', 'up',       'true',  'node',        'reboot',       'host',   false, ''),
+    ('ceph_osd',    'changed', 'in',       'false', 'ceph_osd',    'osd_out',      'object', false, ''),
+    ('ceph_osd',    'changed', 'in',       'false', 'ceph_osd',    'osd_destroy',  'object', false, 'osd.%s'),
+    ('ceph_osd',    'changed', 'in',       'true',  'ceph_osd',    'osd_in',       'object', false, ''),
+    ('ceph_osd',    'changed', 'in',       'true',  'ceph_osd',    'osd_create',   'device', false, ''),
+    ('ceph_osd',    'added',   '',         '',      'ceph_osd',    'osd_create',   'device', false, ''),
+    ('ceph_osd',    'removed', '',         '',      'ceph_osd',    'osd_destroy',  'object', false, 'osd.%s'),
+    ('ceph_pool',   'changed', 'size',              '', 'ceph_pool', 'update', 'object', false, '%s'),
+    ('ceph_pool',   'changed', 'min_size',          '', 'ceph_pool', 'update', 'object', false, '%s'),
+    ('ceph_pool',   'changed', 'pg_num',            '', 'ceph_pool', 'update', 'object', false, '%s'),
+    ('ceph_pool',   'changed', 'pg_num_min',        '', 'ceph_pool', 'update', 'object', false, '%s'),
+    ('ceph_pool',   'changed', 'pg_autoscale_mode', '', 'ceph_pool', 'update', 'object', false, '%s'),
+    ('ceph_pool',   'added',   '',         '',      'ceph_pool',   'create',       'object', false, '%s'),
+    ('ceph_pool',   'removed', '',         '',      'ceph_pool',   'delete',       'object', false, '%s'),
+    ('replication', 'added',   '',         '',      'replication', 'created',      'object', false, ''),
+    ('replication', 'removed', '',         '',      'replication', 'deleted',      'object', false, ''),
+    ('replication', 'changed', 'schedule', '',      'replication', 'updated',      'object', true,  ''),
+    ('replication', 'changed', 'rate',     '',      'replication', 'updated',      'object', true,  ''),
+    ('replication', 'changed', 'disable',  '',      'replication', 'updated',      'object', true,  ''),
+    ('replication', 'changed', 'comment',  '',      'replication', 'updated',      'object', true,  '')
 ), todo AS (
     -- What each pending change needs explained: each field that changed, or the
     -- change itself; an up or in field also by the way it went.
@@ -132,6 +136,8 @@ WITH rules(resource_type, change, field, direction, audit_type, action, match, n
                    WHEN 'device' THEN t.node <> '' AND a.details->>'node' = t.node
                END)
           AND (NOT r.names_field OR a.details->'fields' ? t.field)
+          AND (r.upid_id = '' OR a.details->>'upid' IS NULL
+               OR split_part(a.details->>'upid', ':', 7) = format(r.upid_id, t.resource_id))
           AND COALESCE(th.started_at, a.created_at)
               BETWEEN t.observed_at - interval '30 minutes' AND t.observed_at + interval '30 seconds'
           AND CASE WHEN th.upid IS NULL THEN a.created_at ELSE COALESCE(th.finished_at, now()) END >= t.since
@@ -152,6 +158,7 @@ WITH rules(resource_type, change, field, direction, audit_type, action, match, n
           AND t.change = 'changed'
           AND t.field IN ('up', 'in')
           AND COALESCE(n.drain_started_at, n.reboot_started_at) <= t.observed_at + interval '30 seconds'
+          AND COALESCE(n.reboot_started_at, n.drain_started_at) >= t.since - interval '1 hour'
           AND COALESCE(n.restore_completed_at, n.health_check_at, n.reboot_completed_at, now()) >= t.since
         ORDER BY a2.created_at
         LIMIT 1
