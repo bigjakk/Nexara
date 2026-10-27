@@ -96,6 +96,8 @@ import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
  *                          open on it, which AppShell renders from the store.
  *   create-resource-store  the open create dialog and the cluster it targets,
  *                          rendered the same way.
+ *   history-drawer-store   the History drawer open and the object it is of —
+ *                          its cluster, route and name — drawn by AppShell.
  *
  *   kept (the browser's)   why
  *   theme-store, sidebar-store (layout; its expanded keys are opaque ids),
