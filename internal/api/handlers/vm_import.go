@@ -778,7 +778,7 @@ func (h *VMImportHandler) RegisterEsxiSource(c fiber.Ctx, p *apischema.Params) e
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]any{"storage": req.Storage, "server": req.Server, "type": "esxi"})
+	details, _ := json.Marshal(map[string]any{"storage": req.Storage, "resource_name": req.Storage, "server": req.Server, "type": "esxi"})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", req.Storage, "create_import_source", details)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "storage", req.Storage, "create")
 
@@ -814,7 +814,7 @@ func (h *VMImportHandler) DeleteImportSource(c fiber.Ctx, p *apischema.Params) e
 	if err := pxClient.DeleteStorage(c.Context(), storageName); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"storage": storageName})
+	details, _ := json.Marshal(map[string]any{"storage": storageName, "resource_name": storageName})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", storageName, "delete_import_source", details)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "storage", storageName, "delete")
 	return c.JSON(fiber.Map{"status": "deleted", "storage": storageName})
@@ -854,7 +854,7 @@ func (h *VMImportHandler) EnableImportContent(c fiber.Ctx, p *apischema.Params) 
 	if _, err := pxClient.UpdateStorage(c.Context(), storage, form, nil); err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"storage": storage, "content": merged})
+	details, _ := json.Marshal(map[string]any{"storage": storage, "resource_name": storage, "content": merged})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", storage, "enable_import_content", details)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "storage", storage, "update")
 	return c.JSON(fiber.Map{"status": "updated", "storage": storage, "content": merged})

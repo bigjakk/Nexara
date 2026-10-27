@@ -26,9 +26,9 @@ func TestStorageAuditRowsNameTheirStorageNotThePoolRow(t *testing.T) {
 		details            map[string]any
 	}{
 		{"update", http.MethodPut, `{"params":{"content":"backup"}}`, "update",
-			map[string]any{"storage": "store01"}},
+			map[string]any{"storage": "store01", "resource_name": "store01"}},
 		{"delete", http.MethodDelete, "", "delete",
-			map[string]any{"storage": "store01", "type": "pbs"}},
+			map[string]any{"storage": "store01", "resource_name": "store01", "type": "pbs"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

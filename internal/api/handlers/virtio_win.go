@@ -269,7 +269,7 @@ func (h *VirtioWinHandler) UpdateConfig(c fiber.Ctx, p *apischema.Params) error 
 		}
 	}
 
-	details, _ := json.Marshal(map[string]any{
+	audit := map[string]any{
 		"enabled":        cfg.Enabled,
 		"storage":        cfg.Storage,
 		"node":           cfg.Node,
@@ -277,7 +277,11 @@ func (h *VirtioWinHandler) UpdateConfig(c fiber.Ctx, p *apischema.Params) error 
 		"prune_enabled":  cfg.PruneEnabled,
 		"check_schedule": cfg.CheckSchedule,
 		"check_timezone": cfg.CheckTimezone,
-	})
+	}
+	if cfg.Storage != "" {
+		audit["resource_name"] = cfg.Storage
+	}
+	details, _ := json.Marshal(audit)
 	resourceType, resourceID := virtioWinAuditResource(clusterID, cfg.Storage)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, "virtio_win_config_update", details)
 

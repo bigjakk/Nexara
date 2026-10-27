@@ -324,6 +324,7 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx, p *apischema.Params) error {
 				Node:         node.Name,
 				ResourceType: "storage",
 				ResourceID:   pool.Storage,
+				ResourceName: pool.Storage,
 				Action:       "upload",
 				UPID:         upid,
 				Description:  "Upload " + filename,
@@ -388,6 +389,7 @@ func (h *StorageHandler) DeleteContent(c fiber.Ctx) error {
 		Node:         node.Name,
 		ResourceType: "storage",
 		ResourceID:   pool.Storage,
+		ResourceName: pool.Storage,
 		Action:       "delete_content",
 		UPID:         upid,
 		Description:  "Delete " + volume,
@@ -645,7 +647,7 @@ func (h *StorageHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	audit := map[string]string{"storage": storage, "type": storageType}
+	audit := map[string]string{"storage": storage, "resource_name": storage, "type": storageType}
 	if change := encryptionKeyChange(storageType, form, nil); change != "" {
 		audit["encryption_key"] = change
 	}
@@ -681,7 +683,7 @@ func (h *StorageHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
-	audit := map[string]string{"storage": pool.Storage}
+	audit := map[string]string{"storage": pool.Storage, "resource_name": pool.Storage}
 	if change := encryptionKeyChange(pool.Type, form, deleteOptions); change != "" {
 		audit["encryption_key"] = change
 	}
@@ -715,7 +717,7 @@ func (h *StorageHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 
 	// The type is recorded because nothing else will say what this was once the
 	// storage and its pool rows are gone.
-	details, _ := json.Marshal(map[string]string{"storage": pool.Storage, "type": pool.Type})
+	details, _ := json.Marshal(map[string]string{"storage": pool.Storage, "resource_name": pool.Storage, "type": pool.Type})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(pool.ClusterID), "storage", pool.Storage, "delete", details)
 
 	return c.JSON(fiber.Map{
