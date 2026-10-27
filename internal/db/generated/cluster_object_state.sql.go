@@ -34,6 +34,8 @@ WITH rules AS MATERIALIZED (
     WHERE c.cluster_id IS NULL
       AND c.explained IS NULL
       AND c.observed_at < $3::timestamptz
+    ORDER BY c.observed_at, c.id
+    LIMIT $4::int
 ), hits AS (
     SELECT p.id, r.field_re
     FROM pending p
@@ -65,6 +67,7 @@ type ClassifyGlobalObjectChangesParams struct {
 	Rules           json.RawMessage `json:"rules"`
 	LookbackSeconds int32           `json:"lookback_seconds"`
 	SettledBefore   time.Time       `json:"settled_before"`
+	MaxRows         int32           `json:"max_rows"`
 }
 
 // ClassifyGlobalObjectChanges is ClassifyObservedChanges for the rows of a
@@ -73,7 +76,12 @@ type ClassifyGlobalObjectChangesParams struct {
 // resource_id alone ('id' rules only, without detail_key or upid_object), and
 // there is no node list to wait for.
 func (q *Queries) ClassifyGlobalObjectChanges(ctx context.Context, arg ClassifyGlobalObjectChangesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, classifyGlobalObjectChanges, arg.Rules, arg.LookbackSeconds, arg.SettledBefore)
+	result, err := q.db.Exec(ctx, classifyGlobalObjectChanges,
+		arg.Rules,
+		arg.LookbackSeconds,
+		arg.SettledBefore,
+		arg.MaxRows,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -111,6 +119,8 @@ WITH rules AS MATERIALIZED (
       AND c.explained IS NULL
       AND c.observed_at < $4::timestamptz
       AND ($5::bool OR c.observed_at < $6::timestamptz)
+    ORDER BY c.observed_at, c.id
+    LIMIT $7::int
 ), candidates AS (
     -- One arm per match_key, so each reads audit_log through the index its key
     -- can use.
@@ -333,6 +343,7 @@ type ClassifyObservedChangesParams struct {
 	SettledBefore   time.Time       `json:"settled_before"`
 	AllNodesListed  bool            `json:"all_nodes_listed"`
 	GiveUpBefore    time.Time       `json:"give_up_before"`
+	MaxRows         int32           `json:"max_rows"`
 }
 
 // ClassifyObservedChanges decides, once, whether something already on record
@@ -388,6 +399,8 @@ type ClassifyObservedChangesParams struct {
 // online (all_nodes_listed), since the task that explains it may have run on
 // any of them — a migration on its source, a destroy on the guest's node — or
 // until give_up_before. Until then, and until it settles, it is not shown.
+// One call decides at most max_rows changes, the oldest first; the caller
+// repeats it while it decides that many (classifyObservedChanges).
 func (q *Queries) ClassifyObservedChanges(ctx context.Context, arg ClassifyObservedChangesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, classifyObservedChanges,
 		arg.Rules,
@@ -396,6 +409,7 @@ func (q *Queries) ClassifyObservedChanges(ctx context.Context, arg ClassifyObser
 		arg.SettledBefore,
 		arg.AllNodesListed,
 		arg.GiveUpBefore,
+		arg.MaxRows,
 	)
 	if err != nil {
 		return 0, err
@@ -586,4 +600,24 @@ func (q *Queries) RecordObservedObjects(ctx context.Context, arg RecordObservedO
 		arg.Baseline,
 	)
 	return err
+}
+
+const showUnclassifiedObservedChanges = `-- name: ShowUnclassifiedObservedChanges :execrows
+UPDATE cluster_object_changes
+SET explained = false
+WHERE explained IS NULL
+  AND (observed_by = 'observer' OR cluster_id IS NULL)
+  AND observed_at < $1::timestamptz
+`
+
+// ShowUnclassifiedObservedChanges shows what could not be classified: a change
+// the observer filed, or a global kind's, still undecided after before — its
+// cluster's ingest never ran, the classification kept failing — is shown, not
+// hidden for good. Nothing explains it, as far as Nexara could tell.
+func (q *Queries) ShowUnclassifiedObservedChanges(ctx context.Context, before time.Time) (int64, error) {
+	result, err := q.db.Exec(ctx, showUnclassifiedObservedChanges, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

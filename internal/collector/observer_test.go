@@ -132,6 +132,7 @@ type observeFakeClient struct {
 	answers map[string]observeAnswer
 	reads   map[string]int
 	block   chan struct{} // when set, every read waits for it to close
+	failAll error         // when set, every read but the probe fails with it
 }
 
 type observeAnswer struct {
@@ -153,6 +154,9 @@ func (f *observeFakeClient) ObserveRead(ctx context.Context, t proxmox.ObserveTa
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads[t.String()]++
+	if f.failAll != nil && t.String() != pathPerms {
+		return nil, f.failAll
+	}
 	a, ok := f.answers[t.String()]
 	if !ok {
 		return nil, &proxmox.APIError{StatusCode: http.StatusNotImplemented, Message: "Method not implemented"}
@@ -253,6 +257,39 @@ func TestObserverInterval(t *testing.T) {
 			t.Errorf("%v: interval %v, want %v", configured, got, want)
 		}
 	}
+}
+
+// The limiter spaces the starts of a pass's reads and caps how many are in
+// flight: together they bound what a pass costs a cluster.
+func TestObserveLimiter(t *testing.T) {
+	t.Parallel()
+	const gap = 20 * time.Millisecond
+	spaced := newObserveLimiter(observeMaxInFlight)
+	start := time.Now()
+	for range 4 {
+		release, err := spaced.acquire(context.Background(), gap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		release()
+	}
+	if elapsed := time.Since(start); elapsed < 3*gap {
+		t.Errorf("four starts in %v, want each %v after the last", elapsed, gap)
+	}
+	held := newObserveLimiter(2)
+	first, _ := held.acquire(context.Background(), 0)
+	_, _ = held.acquire(context.Background(), 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := held.acquire(ctx, 0); err == nil {
+		t.Error("a third read started with two in flight")
+	}
+	first()
+	release, err := held.acquire(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
 }
 
 // pass runs one pass and returns what it filed.
@@ -605,6 +642,41 @@ func TestObserverOutcomes(t *testing.T) {
 		back.PveVersion, back.KernelVersion = "pve-manager/9.2.20/0000aaaa", "6.14.8-2-pve"
 		e.expect("and read", "changed node/pve-01 [dns1]")
 	})
+	t.Run("a cluster that stops answering ends the pass", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		e.client.failAll = fmt.Errorf("read response body: %w", context.DeadlineExceeded)
+		e.pass()
+		e.client.mu.Lock()
+		reads := 0
+		for _, n := range e.client.reads {
+			reads += n
+		}
+		e.client.mu.Unlock()
+		if reads > 1+observeAbortAfter+observeMaxInFlight {
+			t.Fatalf("%d reads of a cluster that answers none", reads)
+		}
+	})
+	t.Run("more objects than are compared, or more changes than are filed one by one", func(t *testing.T) {
+		t.Parallel()
+		e := newObserveEnv(t)
+		storages := func(n int, nodes string) string {
+			items := make([]string, n)
+			for i := range items {
+				items[i] = fmt.Sprintf(`{"storage":"store%02d","type":"dir","nodes":"%s"}`, i, nodes)
+			}
+			return "[" + strings.Join(items, ",") + "]"
+		}
+		e.client.set(pathStorage, storages(observeMaxChanges+1, "pve-01"))
+		e.expect("baseline")
+		e.client.set(pathStorage, storages(observeMaxChanges+1, "pve-02"))
+		e.expect("each one edited", "changed cluster/"+e.cluster.ID.String()+" [storage]")
+		e.client.set(pathStorage, storages(observeMaxObjects+1, "pve-03"))
+		e.expect("too many")
+		if e.pass(); e.client.readsOf(pathStorage) != 3 {
+			t.Fatalf("read %d times, want the kind skipped after its cap", e.client.readsOf(pathStorage))
+		}
+	})
 	t.Run("a guest is only ever changed", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
@@ -798,9 +870,10 @@ func TestObserveCanonicalForms(t *testing.T) {
 // of the kind as changed.
 func TestObserveKindSchemas(t *testing.T) {
 	t.Parallel()
-	kinds := []string{"ha_resource", "ha_rule", "ha_group", "sdn_subnet", "firewall_ipset_entry",
+	kinds := make([]string, 0, 15+len(observeClusterKinds))
+	kinds = append(kinds, "ha_resource", "ha_rule", "ha_group", "sdn_subnet", "firewall_ipset_entry",
 		"firewall_security_group_rule", "pve_token", "network", "node_options", "acme_config", "node_dns",
-		"node_time", "node_firewall", "vm", "container"}
+		"node_time", "node_firewall", "vm", "container")
 	for _, k := range observeClusterKinds {
 		kinds = append(kinds, k.kind)
 	}

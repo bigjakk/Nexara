@@ -267,6 +267,8 @@ type Querier interface {
 	// online (all_nodes_listed), since the task that explains it may have run on
 	// any of them — a migration on its source, a destroy on the guest's node — or
 	// until give_up_before. Until then, and until it settles, it is not shown.
+	// One call decides at most max_rows changes, the oldest first; the caller
+	// repeats it while it decides that many (classifyObservedChanges).
 	ClassifyObservedChanges(ctx context.Context, arg ClassifyObservedChangesParams) (int64, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
@@ -2610,6 +2612,11 @@ type Querier interface {
 	// index on unfinished (cluster, storage, version) can reject a concurrent
 	// duplicate; the UPID only exists after that call returns.
 	SetVirtioWinDownloadUPID(ctx context.Context, arg SetVirtioWinDownloadUPIDParams) error
+	// ShowUnclassifiedObservedChanges shows what could not be classified: a change
+	// the observer filed, or a global kind's, still undecided after before — its
+	// cluster's ingest never ran, the classification kept failing — is shown, not
+	// hidden for good. Nothing explains it, as far as Nexara could tell.
+	ShowUnclassifiedObservedChanges(ctx context.Context, before time.Time) (int64, error)
 	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) (int64, error)
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error

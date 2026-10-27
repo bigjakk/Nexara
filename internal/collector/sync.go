@@ -181,6 +181,7 @@ type SyncQueries interface {
 	// Edits made directly in Proxmox, which the observer files (observer.go)
 	ClassifyObservedChanges(ctx context.Context, arg db.ClassifyObservedChangesParams) (int64, error)
 	ClassifyGlobalObjectChanges(ctx context.Context, arg db.ClassifyGlobalObjectChangesParams) (int64, error)
+	ShowUnclassifiedObservedChanges(ctx context.Context, before time.Time) (int64, error)
 	// Guest status changes and backup job logs (the History tab)
 	ClassifyGuestStatusChanges(ctx context.Context, arg db.ClassifyGuestStatusChangesParams) (int64, error)
 	AbandonUnreadBackupJobs(ctx context.Context, arg db.AbandonUnreadBackupJobsParams) (int64, error)

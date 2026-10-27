@@ -558,6 +558,10 @@ func (m *mockQueries) ClassifyGlobalObjectChanges(_ context.Context, _ db.Classi
 	return 0, nil
 }
 
+func (m *mockQueries) ShowUnclassifiedObservedChanges(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
+
 func (m *mockQueries) MarkPBSJobBaseline(_ context.Context, arg db.MarkPBSJobBaselineParams) error {
 	m.pbsJobBaselines = append(m.pbsJobBaselines, arg)
 	return nil

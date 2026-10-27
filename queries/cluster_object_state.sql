@@ -134,6 +134,8 @@ WHERE cluster_id = sqlc.arg('cluster_id')
 -- online (all_nodes_listed), since the task that explains it may have run on
 -- any of them — a migration on its source, a destroy on the guest's node — or
 -- until give_up_before. Until then, and until it settles, it is not shown.
+-- One call decides at most max_rows changes, the oldest first; the caller
+-- repeats it while it decides that many (classifyObservedChanges).
 -- name: ClassifyObservedChanges :execrows
 WITH rules AS MATERIALIZED (
     SELECT e.value->>'kind'                AS kind,
@@ -165,6 +167,8 @@ WITH rules AS MATERIALIZED (
       AND c.explained IS NULL
       AND c.observed_at < sqlc.arg('settled_before')::timestamptz
       AND (sqlc.arg('all_nodes_listed')::bool OR c.observed_at < sqlc.arg('give_up_before')::timestamptz)
+    ORDER BY c.observed_at, c.id
+    LIMIT sqlc.arg('max_rows')::int
 ), candidates AS (
     -- One arm per match_key, so each reads audit_log through the index its key
     -- can use.
@@ -405,6 +409,8 @@ WITH rules AS MATERIALIZED (
     WHERE c.cluster_id IS NULL
       AND c.explained IS NULL
       AND c.observed_at < sqlc.arg('settled_before')::timestamptz
+    ORDER BY c.observed_at, c.id
+    LIMIT sqlc.arg('max_rows')::int
 ), hits AS (
     SELECT p.id, r.field_re
     FROM pending p
@@ -430,3 +436,14 @@ SET explained = NOT EXISTS (
           AND (c.change <> 'changed' OR h.field_re = '' OR f.name ~ h.field_re)))
 FROM pending p
 WHERE c.id = p.id;
+
+-- ShowUnclassifiedObservedChanges shows what could not be classified: a change
+-- the observer filed, or a global kind's, still undecided after before — its
+-- cluster's ingest never ran, the classification kept failing — is shown, not
+-- hidden for good. Nothing explains it, as far as Nexara could tell.
+-- name: ShowUnclassifiedObservedChanges :execrows
+UPDATE cluster_object_changes
+SET explained = false
+WHERE explained IS NULL
+  AND (observed_by = 'observer' OR cluster_id IS NULL)
+  AND observed_at < sqlc.arg('before')::timestamptz;

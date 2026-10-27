@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"slices"
 	"sort"
 	"strings"
@@ -63,7 +64,14 @@ const (
 	observeGuestShare  = 0.8 // the share of the interval the guest reads are spread over
 	observeSkipFor     = 24 * time.Hour
 	observeGuestBatch  = 100
-	observeAbortAfter  = 5 // consecutive connection failures that end a pass
+	observeAbortAfter  = 5 // consecutive reads unanswered — refused connections, timeouts — that end a pass
+
+	// What one reading may cost: a kind listing more objects than this is not
+	// compared, for a day, with a warning; a reading that finds more changes
+	// than observeMaxChanges in one kind files them as one change of the
+	// cluster (collapse), so a mass rewrite cannot bury a History.
+	observeMaxObjects = 10000
+	observeMaxChanges = 50
 
 	// An object read changed in this many passes running is noisy — something
 	// automated writes it — and from then on is recorded at most once an hour
@@ -111,6 +119,7 @@ type ObserverQueries interface {
 	ListClusterObjectBaselines(ctx context.Context, clusterID uuid.UUID) ([]db.ListClusterObjectBaselinesRow, error)
 	RecordObservedObjects(ctx context.Context, arg db.RecordObservedObjectsParams) error
 	DeleteClusterObjectState(ctx context.Context, arg db.DeleteClusterObjectStateParams) error
+	ShowUnclassifiedObservedChanges(ctx context.Context, before time.Time) (int64, error)
 }
 
 // Observer is the loop's state between passes: what is skipped, what is held,
@@ -177,6 +186,7 @@ func (o *Observer) ObserveAll(ctx context.Context) {
 		return
 	}
 	o.forgetQuietObjects(time.Now())
+	showUnclassified(ctx, o.queries, o.logger)
 	for _, cluster := range clusters {
 		if _, busy := o.inflight.LoadOrStore(cluster.ID, struct{}{}); busy {
 			continue
@@ -335,7 +345,8 @@ var observeGates = map[string][]string{
 // kindSig is sig for one kind: with how the kind's fields are read
 // (observeKindSchemas), and the privileges that gate it.
 func (p *observePass) kindSig(kind, sig string) string {
-	parts := []string{sig, observeKindSchemas[kind]}
+	parts := make([]string, 0, 2+len(observeGates[kind]))
+	parts = append(parts, sig, observeKindSchemas[kind])
 	for _, priv := range observeGates[kind] {
 		v, ok := p.privs[priv]
 		if !ok {
@@ -456,6 +467,12 @@ func (p *observePass) skipKey(kind, node string) string {
 // cluster's reading all of them.
 func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig string, readAt, doneAt time.Time) {
 	sig = p.kindSig(rd.kind, sig)
+	if len(rd.objects) > observeMaxObjects {
+		p.o.logger.Warn("object observer: a kind lists more objects than are compared; not comparing it for a day",
+			"cluster_id", p.cluster.ID, "kind", rd.kind, "node", node, "objects", len(rd.objects), "cap", observeMaxObjects)
+		p.o.skipSilently(p.skipKey(rd.kind, node))
+		return
+	}
 	prev := map[string]storedObject{}
 	for id, s := range p.state[rd.kind] {
 		if node == "" || s.node == node {
@@ -544,9 +561,36 @@ func (p *observePass) apply(ctx context.Context, rd kindReading, node, sig strin
 	if node == "" && len(rd.unread) == 0 {
 		mark = sig
 	}
+	batch.changes = p.collapse(rd.kind, batch.changes)
 	if p.write(ctx, rd.kind, batch, readAt, mark) && mark != "" {
 		p.baselines[rd.kind] = storedBaseline{signature: mark, lastRead: readAt}
 	}
+}
+
+// collapse files a reading's changes of one kind one by one up to
+// observeMaxChanges, and beyond that as one change of the cluster naming the
+// kind, with how many there were: something rewrote the lot, and the History
+// says so once.
+func (p *observePass) collapse(kind string, rows []observedChangeRow) []observedChangeRow {
+	if len(rows) <= observeMaxChanges {
+		return rows
+	}
+	first, last := rows[0].LastSeenAt, rows[0].ObservedAt
+	for _, r := range rows {
+		if r.LastSeenAt.Before(first) {
+			first = r.LastSeenAt
+		}
+		if r.ObservedAt.After(last) {
+			last = r.ObservedAt
+		}
+	}
+	p.o.logger.Warn("object observer: more changes of a kind in one reading than are filed one by one; filed as one",
+		"cluster_id", p.cluster.ID, "kind", kind, "changes", len(rows))
+	id := p.cluster.ID.String()
+	row := changeRow(observedObject{id: id, resourceType: "cluster", resourceID: id}, "changed",
+		tagDiff{fields: []string{kind}}, first, last)
+	row.Detail["collapsed"] = len(rows)
+	return []observedChangeRow{row}
 }
 
 // tagObject tags each of an object's fields.
@@ -615,6 +659,14 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 	guests, err := p.o.queries.ListVMsByCluster(ctx, p.cluster.ID)
 	if err != nil {
 		p.o.logger.Debug("object observer: list guests", "cluster_id", p.cluster.ID, "error", err)
+		return
+	}
+	if key := p.skipKey("guests", ""); p.o.skipped(key) {
+		return
+	} else if len(guests) > observeMaxObjects {
+		p.o.logger.Warn("object observer: more guests than are compared; not comparing them for a day",
+			"cluster_id", p.cluster.ID, "guests", len(guests), "cap", observeMaxObjects)
+		p.o.skipSilently(key)
 		return
 	}
 	nodeByID := make(map[uuid.UUID]string, len(online))
@@ -696,12 +748,14 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 		p.applyGuest(batches[kind], kind, guestObject(r.guest, r.node, r.config), p.kindSig(kind, sig), r.readAt, r.doneAt)
 		pending[kind]++
 		if pending[kind] >= observeGuestBatch {
+			batches[kind].changes = p.collapse(kind, batches[kind].changes)
 			p.write(ctx, kind, *batches[kind], time.Now(), "")
 			batches[kind], pending[kind] = &recordBatch{}, 0
 		}
 	}
 	for kind, b := range batches {
 		if pending[kind] > 0 {
+			b.changes = p.collapse(kind, b.changes)
 			p.write(ctx, kind, *b, time.Now(), "")
 		}
 	}
@@ -797,6 +851,14 @@ func observeOutcomeOf(err error) readOutcome {
 	}
 }
 
+// observeUnanswered is a read the cluster did not answer: a connection
+// refused or dropped, or a timeout — of the dial, the headers or the body.
+func observeUnanswered(err error) bool {
+	var ne net.Error
+	return errors.Is(err, proxmox.ErrConnectionFailed) || errors.Is(err, context.DeadlineExceeded) ||
+		(errors.As(err, &ne) && ne.Timeout())
+}
+
 func (p *observePass) read(ctx context.Context, target proxmox.ObserveTarget, gap time.Duration) (json.RawMessage, readOutcome) {
 	raw, out, _ := p.readWithError(ctx, target, gap)
 	return raw, out
@@ -816,7 +878,7 @@ func (p *observePass) readWithError(ctx context.Context, target proxmox.ObserveT
 	defer cancel()
 	p.calls.Add(1)
 	raw, err := p.client.ObserveRead(callCtx, target)
-	if errors.Is(err, proxmox.ErrConnectionFailed) {
+	if observeUnanswered(err) && ctx.Err() == nil {
 		if p.connFails.Add(1) >= observeAbortAfter && p.aborted.CompareAndSwap(false, true) {
 			p.o.logger.Debug("object observer: cluster stopped answering, pass ended",
 				"cluster_id", p.cluster.ID)

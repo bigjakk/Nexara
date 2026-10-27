@@ -358,14 +358,16 @@ func TestObservedChanges(t *testing.T) {
 			"member_of", "details.new_id:vms:%s"),
 		rule("network", "", "network", "node", false, "^network_reverted$", "", "", ""),
 	})
-	classify := func(allListed bool) {
+	classify := func(allListed bool, maxRows int32) int64 {
 		t.Helper()
-		if _, err := q.ClassifyObservedChanges(ctx, gen.ClassifyObservedChangesParams{
+		n, err := q.ClassifyObservedChanges(ctx, gen.ClassifyObservedChangesParams{
 			Rules: rules, LookbackSeconds: 3600, ClusterID: observedCluster, SettledBefore: ago(5),
-			AllNodesListed: allListed, GiveUpBefore: now.Add(-24 * time.Hour),
-		}); err != nil {
+			AllNodesListed: allListed, GiveUpBefore: now.Add(-24 * time.Hour), MaxRows: maxRows,
+		})
+		if err != nil {
 			t.Fatalf("classify: %v", err)
 		}
+		return n
 	}
 	explained := func(id uuid.UUID) string {
 		t.Helper()
@@ -382,14 +384,19 @@ func TestObservedChanges(t *testing.T) {
 		return "shown"
 	}
 
-	classify(false) // a node's task list unread: only what has waited past the give-up is decided
+	// A node's task list unread: only what has waited past the give-up is
+	// decided, at most max_rows a call.
+	if n := classify(false, 1); n != 1 {
+		t.Fatalf("one call decided %d, want its one", n)
+	}
+	classify(false, 1000)
 	for name, id := range map[string]uuid.UUID{"recent, nodes unlisted": byOwnRow, "past the give-up": gaveUp} {
 		want := map[bool]string{true: "shown", false: "waiting"}[id == gaveUp]
 		if got := explained(id); got != want {
 			t.Errorf("%s: %s, want %s", name, got, want)
 		}
 	}
-	classify(true)
+	classify(true, 1000)
 	for _, tc := range []struct {
 		name string
 		id   uuid.UUID
@@ -452,6 +459,21 @@ func TestObservedChanges(t *testing.T) {
 	} {
 		if got := explained(tc.id); got != tc.want {
 			t.Errorf("%s: %s, want %s", tc.name, got, tc.want)
+		}
+	}
+
+	// What nothing could classify in a day and an hour is shown; another
+	// writer's rows and what is merely recent are left alone.
+	stuck := seed(observedCluster, "storage", "store12", 0, "changed", "", []string{"nodes"}, now.Add(-30*time.Hour))
+	if _, err := q.ShowUnclassifiedObservedChanges(ctx, now.Add(-25*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		id   uuid.UUID
+		want string
+	}{"stuck": {stuck, "shown"}, "recent": {fresh, "waiting"}, "another writer's": {notMine, "waiting"}} {
+		if got := explained(tc.id); got != tc.want {
+			t.Errorf("%s: %s, want %s", name, got, tc.want)
 		}
 	}
 }
@@ -580,7 +602,7 @@ func TestObservedGlobalChanges(t *testing.T) {
 	rules, _ := json.Marshal([]map[string]any{{"kind": "pbs_server", "change": "", "audit_type": "pbs_server",
 		"match_key": "id", "untasked": false, "action_re": "", "except_re": "", "worker_re": "", "field_re": "^schedule$"}})
 	if _, err := q.ClassifyGlobalObjectChanges(ctx, gen.ClassifyGlobalObjectChangesParams{
-		Rules: rules, LookbackSeconds: 3600, SettledBefore: time.Now().Add(-5 * time.Minute),
+		Rules: rules, LookbackSeconds: 3600, SettledBefore: time.Now().Add(-5 * time.Minute), MaxRows: 1000,
 	}); err != nil {
 		t.Fatalf("classify: %v", err)
 	}

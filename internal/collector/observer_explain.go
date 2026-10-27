@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -584,27 +585,71 @@ func observedLookback(interval time.Duration) time.Duration {
 // a change waits for a pass whose ingest listed every online node, the day at
 // most. A failure is only logged: the changes stay unclassified, and hidden.
 func (s *Syncer) classifyObservedChanges(ctx context.Context, cluster db.Cluster, allNodesListed bool) {
-	if _, err := s.queries.ClassifyObservedChanges(ctx, db.ClassifyObservedChangesParams{
-		Rules:           observedChangeRulesJSON,
-		LookbackSeconds: int32(observedLookback(s.objectObserveInterval).Seconds()),
-		ClusterID:       cluster.ID,
-		SettledBefore:   time.Now().Add(-statusChangeSettle),
-		AllNodesListed:  allNodesListed,
-		GiveUpBefore:    time.Now().Add(-statusChangeGiveUp),
-	}); err != nil {
-		s.logger.Warn("failed to classify observed object changes", "cluster_id", cluster.ID, "error", err)
+	ctx, cancel := context.WithTimeout(ctx, observeClassifyTimeout)
+	defer cancel()
+	for ctx.Err() == nil {
+		n, err := s.queries.ClassifyObservedChanges(ctx, db.ClassifyObservedChangesParams{
+			Rules:           observedChangeRulesJSON,
+			LookbackSeconds: int32(observedLookback(s.objectObserveInterval).Seconds()),
+			ClusterID:       cluster.ID,
+			SettledBefore:   time.Now().Add(-statusChangeSettle),
+			AllNodesListed:  allNodesListed,
+			GiveUpBefore:    time.Now().Add(-statusChangeGiveUp),
+			MaxRows:         observeClassifyBatch,
+		})
+		if err != nil {
+			s.logger.Warn("failed to classify observed object changes", "cluster_id", cluster.ID, "error", err)
+			return
+		}
+		if n < observeClassifyBatch {
+			return
+		}
 	}
 }
+
+// The classification's bounds: it decides at most observeClassifyBatch changes
+// a statement, the oldest first, and gives a pass observeClassifyTimeout; what
+// is left waits for the next pass, and what waits past the give-up is shown
+// (ShowUnclassifiedObservedChanges).
+const (
+	observeClassifyBatch   = 500
+	observeClassifyTimeout = 30 * time.Second
+)
 
 // classifyGlobalObjectChanges decides the settled changes of the global kinds
 // (ClassifyGlobalObjectChanges), after each PBS pass.
 func (s *Syncer) classifyGlobalObjectChanges(ctx context.Context) {
-	if _, err := s.queries.ClassifyGlobalObjectChanges(ctx, db.ClassifyGlobalObjectChangesParams{
-		Rules:           observedGlobalRulesJSON,
-		LookbackSeconds: int32(observedLookback(s.objectObserveInterval).Seconds()),
-		SettledBefore:   time.Now().Add(-statusChangeSettle),
-	}); err != nil {
-		s.logger.Warn("failed to classify global object changes", "error", err)
+	ctx, cancel := context.WithTimeout(ctx, observeClassifyTimeout)
+	defer cancel()
+	for ctx.Err() == nil {
+		n, err := s.queries.ClassifyGlobalObjectChanges(ctx, db.ClassifyGlobalObjectChangesParams{
+			Rules:           observedGlobalRulesJSON,
+			LookbackSeconds: int32(observedLookback(s.objectObserveInterval).Seconds()),
+			SettledBefore:   time.Now().Add(-statusChangeSettle),
+			MaxRows:         observeClassifyBatch,
+		})
+		if err != nil {
+			s.logger.Warn("failed to classify global object changes", "error", err)
+			break
+		}
+		if n < observeClassifyBatch {
+			break
+		}
+	}
+	// A PBS's rows are classified here even with the observer off.
+	showUnclassified(ctx, s.queries, s.logger)
+}
+
+// showUnclassified shows the changes no classification decided in a day and
+// an hour: the classifier's own give-up is a day, so this finds only what it
+// could not reach.
+func showUnclassified(ctx context.Context, q interface {
+	ShowUnclassifiedObservedChanges(ctx context.Context, before time.Time) (int64, error)
+}, logger *slog.Logger) {
+	if n, err := q.ShowUnclassifiedObservedChanges(ctx, time.Now().Add(-statusChangeGiveUp-time.Hour)); err != nil {
+		logger.Warn("failed to show the observed changes nothing classified", "error", err)
+	} else if n > 0 {
+		logger.Info("observed changes nothing could classify are shown", "changes", n)
 	}
 }
 
