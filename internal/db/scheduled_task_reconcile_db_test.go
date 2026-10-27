@@ -525,13 +525,13 @@ func (s *schedFixtures) task(cluster uuid.UUID, upid, status, exitStatus string)
 func (s *schedFixtures) handMadeTask(upid, status, exitStatus string) {
 	s.t.Helper()
 	s.task(schedReconcileCluster, upid, "running", "")
-	if _, err := s.q.UpdateTaskHistory(s.ctx, gen.UpdateTaskHistoryParams{
+	if n, err := s.q.UpdateTaskHistory(s.ctx, gen.UpdateTaskHistoryParams{
 		Upid:       upid,
 		Status:     status,
 		ExitStatus: exitStatus,
 		FinishedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-	}); err != nil {
-		s.t.Fatalf("UpdateTaskHistory %s: %v", upid, err)
+	}); err != nil || n != 1 {
+		s.t.Fatalf("UpdateTaskHistory %s: %d rows, err %v", upid, n, err)
 	}
 }
 

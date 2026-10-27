@@ -1900,8 +1900,8 @@ Every schedule carries `run_as`: the user whose grants its runs read under, stam
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/tasks` | List tracked tasks |
-| POST | `/tasks` | Create a task entry |
-| PUT | `/tasks/:upid` | Update task status |
+| POST | `/tasks` | Record a task Nexara dispatched, as running: how it ends is the collector's, read from Proxmox. The node its UPID names must be one of the body's cluster's (404 otherwise), and a UPID already on record — in the audit log or the task archive — is refused with 409 |
+| PUT | `/tasks/:upid` | Report a running task's progress; it stays running. A task that has finished, or that was recorded from Proxmox, is refused with 409, and a status other than `running` or a `finished_at` with 400 |
 | DELETE | `/tasks` | Clear completed tasks |
 | GET | `/clusters/:id/tasks/:upid` | Get Proxmox task status; 404 when the UPID's node is not one of the cluster's (see [Nodes](#nodes)) |
 | GET | `/clusters/:id/tasks/:upid/log` | Get Proxmox task log; 404 when the UPID's node is not one of the cluster's |
