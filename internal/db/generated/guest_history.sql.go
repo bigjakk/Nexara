@@ -195,8 +195,8 @@ func (q *Queries) ClassifyGuestStatusChanges(ctx context.Context, arg ClassifyGu
 const listGuestLifecycleEvents = `-- name: ListGuestLifecycleEvents :many
 SELECT a.created_at,
        COALESCE(split_part(a.details->>'upid', ':', 6) IN ('qmdestroy', 'vzdestroy'), false)::bool AS is_destroy,
-       COALESCE(th.status, ar.status, '')::text                                   AS task_status,
-       COALESCE(th.exit_status, ar.exit_status, '')::text                         AS task_exit_status,
+       COALESCE(ar.status, th.status, '')::text                                   AS task_status,
+       COALESCE(ar.exit_status, th.exit_status, '')::text                         AS task_exit_status,
        COALESCE(a.details->>'status', '')::text                                   AS recorded_status
 FROM audit_log a
 LEFT JOIN task_history th
@@ -245,7 +245,11 @@ type ListGuestLifecycleEventsRow struct {
 // failed destroy ended no guest, a failed create, restore or clone made none.
 // The handler decides with proxmox.TaskSucceeded rather than a SQL copy of
 // that rule. recorded_status is the status the collector stored when it
-// ingested a task, for a task whose row has since been pruned.
+// ingested a task, for a task whose row has since been pruned. The archive's
+// verdict comes first: it is what the collector settled before the prune
+// moved the task, and a task_history row of the same UPID filed since then is
+// not (POST /api/v1/tasks refuses a UPID on record; this holds a row that
+// predates that).
 //
 // Bounded: the handler only needs the newest birth and the newest destroy that
 // did not fail, and a guest restored nightly would otherwise drag in a year of

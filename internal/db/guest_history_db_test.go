@@ -465,6 +465,19 @@ func TestGuestHistory(t *testing.T) {
 		}
 		shapes = append(shapes, shape)
 	}
+	// A lifecycle task's verdict is the archive's once the prune has moved it,
+	// whatever a task_history row filed under its UPID since says.
+	archivedCreate := historyUPID(44, "qmcreate", "150")
+	audit(historyClusterID, hoursAgo(1), "proxmox", "vm", "150", "create", map[string]any{"upid": archivedCreate, "status": "OK"})
+	exec("archived create", `INSERT INTO task_history_archive (upid, cluster_id, vmid, status, started_at)
+		VALUES ($1, $2, 150, 'completed', $3)`, archivedCreate, historyClusterID, hoursAgo(1))
+	exec("planted verdict", `INSERT INTO task_history (cluster_id, user_id, upid, status, node, task_type, vmid, source)
+		VALUES ($1, $2, $3, 'failed', 'pve-01', 'qmcreate', 150, 'nexara')`, historyClusterID, historyUserID, archivedCreate)
+	if created, err := q.ListGuestLifecycleEvents(ctx, gen.ListGuestLifecycleEventsParams{
+		ClusterID: pgtype.UUID{Bytes: historyClusterID, Valid: true}, Vmid: 150,
+	}); err != nil || len(created) != 1 || created[0].TaskStatus != "completed" {
+		t.Errorf("an archived create under a planted verdict: %+v (%v), want the archive's completed", created, err)
+	}
 	if want := []string{"birth", "destroy OK", "birth", "birth"}; !slices.Equal(shapes, want) {
 		t.Fatalf("lifecycle events = %v, want %v (the clone, the old guest's destroy, its create, an older clone)", shapes, want)
 	}

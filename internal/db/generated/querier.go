@@ -1670,7 +1670,11 @@ type Querier interface {
 	// failed destroy ended no guest, a failed create, restore or clone made none.
 	// The handler decides with proxmox.TaskSucceeded rather than a SQL copy of
 	// that rule. recorded_status is the status the collector stored when it
-	// ingested a task, for a task whose row has since been pruned.
+	// ingested a task, for a task whose row has since been pruned. The archive's
+	// verdict comes first: it is what the collector settled before the prune
+	// moved the task, and a task_history row of the same UPID filed since then is
+	// not (POST /api/v1/tasks refuses a UPID on record; this holds a row that
+	// predates that).
 	//
 	// Bounded: the handler only needs the newest birth and the newest destroy that
 	// did not fail, and a guest restored nightly would otherwise drag in a year of
