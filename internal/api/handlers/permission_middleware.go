@@ -138,8 +138,12 @@ func RequireAnyPermission(refs ...PermissionRef) fiber.Handler {
 // cluster once, up front; an engine that cannot answer is the error it
 // returns rather than a 403; and the refusal names every requirement, not
 // only the first one missing, so a role builder sees the whole of what the
-// route needs.
+// route needs. It panics on no refs: every one of none holds, so it would
+// admit everyone.
 func RequireAllPermissions(refs ...PermissionRef) fiber.Handler {
+	if len(refs) == 0 {
+		panic("handlers: RequireAllPermissions needs at least one permission; with none it admits everyone")
+	}
 	wantsCluster := slices.ContainsFunc(refs, func(r PermissionRef) bool { return r.ClusterScoped })
 	return func(c fiber.Ctx) error {
 		var clusterID uuid.UUID

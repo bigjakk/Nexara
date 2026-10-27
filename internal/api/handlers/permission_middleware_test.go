@@ -154,6 +154,18 @@ func TestRequireClusterPermissionRejectsAMalformedClusterID(t *testing.T) {
 	}
 }
 
+// An all-of with nothing in it would hold for everyone: it is refused at
+// construction, before any route can mount it.
+func TestRequireAllPermissionsRefusesNoRefs(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if recover() == nil {
+			t.Error("RequireAllPermissions() with no permissions was built")
+		}
+	}()
+	RequireAllPermissions()
+}
+
 // TestRequireAnyPermissionNamesEveryAlternative keeps the 403 body
 // useful: an operator building a role has to be told which grants would
 // have worked, not merely that something was missing.
