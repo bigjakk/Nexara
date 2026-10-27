@@ -10,9 +10,9 @@
 -- and keyed the way audit_log is — cluster_id, resource_type, resource_id,
 -- spelled exactly as the audit rows for the same object spell them
 -- (replication / <job id>, ceph_osd / <osd number>, ceph_pool / <name>; a guest
--- is vm / <vms.id> with vmid beside it, as audit_log.vmid is, because vms.id
--- changes when a guest's row is re-created) — so a History reads both with one
--- selector.
+-- is vm / <its VMID as text> with vmid beside it as a number, because vms.id is
+-- re-issued whenever a guest's row is re-created and cannot key a record that
+-- has to outlive it) — so a History reads both with one selector.
 --
 -- Three writers file into it, told apart by observed_by: 'trigger' (the trigger
 -- on replication_jobs, 000125), 'ceph' (the collector's Ceph pass, which diffs
@@ -25,14 +25,18 @@
 -- time to ingest the task that may explain the change, then true or false, once
 -- (ClassifyClusterObjectChanges, queries/cluster_object_changes.sql): a change is
 -- explained when an audit row for the same (cluster, resource_type, resource_id)
--- lies in its window. Only a row classified false is shown; the explained ones
--- are dropped by the task-history sweep (DeleteCompletedTasks), the others stay.
+-- lies in its window; the observer's rows are decided by the observer, with
+-- rules per kind of object. Only a row classified false is shown; the explained
+-- ones are dropped by the task-history sweep (DeleteCompletedTasks), the others
+-- stay.
 CREATE TABLE IF NOT EXISTS cluster_object_changes (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     cluster_id    UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
     resource_type TEXT NOT NULL,
     resource_id   TEXT NOT NULL,
-    -- A guest's vmid, as audit_log.vmid (000084); NULL for every other object.
+    -- A guest's VMID as a number, beside its resource_id (the same VMID as
+    -- text); NULL for every other object. audit_log.vmid (000084) is the same
+    -- denormalisation of the same fact.
     vmid          INTEGER,
     change        TEXT NOT NULL CHECK (change IN ('added', 'removed', 'changed')),
     -- changed: the names of the fields that differ. added / removed: empty.

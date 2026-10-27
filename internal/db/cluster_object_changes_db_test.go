@@ -247,7 +247,7 @@ func TestClusterObjectChanges(t *testing.T) {
 	// The observer's path: a guest's configuration edited in Proxmox, named by
 	// field, with the vmid beside the audit identity.
 	if err := q.InsertClusterObjectChange(ctx, gen.InsertClusterObjectChangeParams{
-		ClusterID: objChangesCluster, ResourceType: "vm", ResourceID: uuid.NewString(),
+		ClusterID: objChangesCluster, ResourceType: "vm", ResourceID: "100",
 		Vmid: pgtype.Int4{Int32: 100, Valid: true}, Change: "changed", Fields: []string{"memory", "net0"},
 		Detail: json.RawMessage(`{}`), ObservedBy: "observer", LastSeenAt: ago(10.5),
 	}); err != nil {
