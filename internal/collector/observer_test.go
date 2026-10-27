@@ -546,9 +546,16 @@ func TestObserverOutcomes(t *testing.T) {
 			t.Fatalf("read the options %d times", n)
 		}
 	})
-	t.Run("an upgrade or a privilege change re-baselines", func(t *testing.T) {
+	t.Run("an upgrade re-baselines; a privilege change is filed, and re-baselines only the kind it gates", func(t *testing.T) {
 		t.Parallel()
 		e := newObserveEnv(t)
+		plugins := func(data string) {
+			e.client.set("/cluster/acme/plugins", `[{"plugin":"dns01","type":"dns","api":"cf","data":"`+data+`"}]`)
+		}
+		perms := func(extra string) {
+			e.client.set(pathPerms, `{"/":{"Sys.Audit":1,"VM.Audit":1,"Datastore.Audit":1,"Pool.Audit":1,"Mapping.Audit":1`+extra+`}}`)
+		}
+		plugins("QUJD")
 		e.expect("baseline")
 		e.mq.nodesByCluster[0].PveVersion = "pve-manager/9.2.21/0000bbbb"
 		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","nodes":"pve-01"}]`)
@@ -556,12 +563,15 @@ func TestObserverOutcomes(t *testing.T) {
 		// A guest's configuration is its raw file, so the version is not in its
 		// signature: its edit in the same pass is still recorded.
 		e.expect("upgraded", "changed vm/100 [cores memory]")
-		e.client.set(pathPerms, `{"/":{"Sys.Audit":1,"VM.Audit":1}}`)
+		token := "changed cluster/" + e.cluster.ID.String() + " [token_privileges]"
+		perms(`,"Sys.PowerMgmt":1`)
 		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","nodes":"pve-02"}]`)
-		e.client.set(pathGuest, `{"name":"linux01","memory":"8192"}`)
-		e.expect("privileges changed")
-		e.client.set(pathStorage, `[{"storage":"store01","type":"dir","nodes":"pve-03"}]`)
-		e.expect("then an edit", "changed storage/store01 [nodes]")
+		e.expect("a privilege granted", token, "changed storage/store01 [nodes]")
+		perms(`,"Sys.PowerMgmt":1,"Sys.Modify":1`)
+		plugins("WllY")
+		e.expect("the privilege the plugins need granted", token)
+		plugins("Q0RF")
+		e.expect("then an edit", "changed acme_plugin/dns01 [data]")
 	})
 	t.Run("a guest is only ever changed", func(t *testing.T) {
 		t.Parallel()

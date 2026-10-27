@@ -40,8 +40,11 @@ import (
 //     one pass: an empty answer is read as "every object deleted" only twice.
 //   - First sight is a baseline. A kind never read whole, a node's objects
 //     never read, a guest never read, or anything read last under another
-//     signature — the key, the Proxmox versions, the token's privileges —
-//     records nothing.
+//     signature — the key, the Proxmox versions, and for the few kinds whose
+//     answer a privilege shapes, that privilege (observeGates) — records
+//     nothing. The token's privileges are no part of any other signature: a
+//     change to them is filed as a change of its own (observeTokenPrivileges),
+//     and the objects are compared as ever.
 //   - Bounded. One pass per cluster at a time; at most two reads in flight and
 //     ten starts a second; every read with its own timeout; guests spread over
 //     the interval, the least recently read first, so a pass cut short resumes
@@ -192,8 +195,9 @@ type observePass struct {
 	cluster  db.Cluster
 	client   ObserverClient
 	lim      *observeLimiter
-	sysAudit bool   // the token holds Sys.Audit on "/"
-	privFP   string // the token's privileges on "/", condensed
+	sysAudit bool              // the token holds Sys.Audit on "/"
+	privFP   string            // the token's privileges on "/", condensed
+	privs    map[string]string // the token's privileges on "/": privilege -> propagate
 
 	state     map[string]map[string]storedObject // kind -> object id -> stored reading
 	baselines map[string]storedBaseline          // kind -> its mark
@@ -248,19 +252,22 @@ func (o *Observer) observeCluster(ctx context.Context, cluster db.Cluster) {
 		return
 	}
 
-	clusterSig := observeSignature("cluster", o.tags.keyID, p.privFP, clusterVersions(nodes))
-	o.noticeSignature(cluster.ID, clusterSig)
+	clusterSig := observeSignature("cluster", o.tags.keyID, clusterVersions(nodes))
+	// A new privilege can open a kind skipped as refused, so the skips go when
+	// the privileges move too.
+	o.noticeSignature(cluster.ID, observeSignature(clusterSig, p.privFP))
+	p.observeTokenPrivileges(ctx)
 	p.observeHA(ctx, clusterSig)
 	for _, k := range observeClusterKinds {
-		p.observeClusterKind(ctx, k, clusterSig)
+		p.observeClusterKind(ctx, k, p.gated(k.kind, clusterSig))
 	}
 	for _, n := range online {
-		nodeSig := observeSignature("node", o.tags.keyID, p.privFP, n.PveVersion, n.KernelVersion)
+		nodeSig := observeSignature("node", o.tags.keyID, n.PveVersion, n.KernelVersion)
 		for _, k := range observeNodeKinds {
 			p.observeNodeKind(ctx, k, n, nodeSig)
 		}
 	}
-	p.observeGuests(ctx, online, observeSignature("guest", o.tags.keyID, p.privFP))
+	p.observeGuests(ctx, online, observeSignature("guest", o.tags.keyID))
 
 	o.logger.Debug("object observer pass",
 		"cluster_id", cluster.ID,
@@ -284,14 +291,71 @@ func (p *observePass) probe(ctx context.Context) bool {
 	}
 	root := perms["/"]
 	privs := make([]string, 0, len(root))
+	p.privs = make(map[string]string, len(root))
 	for priv, propagate := range root {
 		v, _ := canonicalValue(propagate)
 		privs = append(privs, priv+"="+v)
+		p.privs[priv] = v
 	}
 	slices.Sort(privs)
 	_, p.sysAudit = root["Sys.Audit"]
 	p.privFP = observeSignature(privs...)
 	return true
+}
+
+// observeGates names, for the kinds whose answer a privilege on "/" shapes
+// rather than merely allows, that privilege: the ACME plugins are read only
+// with Sys.Modify (pve-manager API2/ACMEPlugin.pm), and a container's env is
+// returned only with VM.Config.Options (pve-container LXC.pm
+// delete_read_restricted_options). Such a kind's signature carries the
+// privilege, so its coming or going re-baselines that kind alone. A privilege
+// granted below "/" is not seen here; that is a known edge.
+var observeGates = map[string][]string{
+	"acme_plugin": {"Sys.Modify"},
+	"container":   {"VM.Config.Options"},
+}
+
+// gated is sig for a kind, with the privileges that gate it.
+func (p *observePass) gated(kind, sig string) string {
+	gates := observeGates[kind]
+	if len(gates) == 0 {
+		return sig
+	}
+	parts := []string{sig}
+	for _, priv := range gates {
+		v, ok := p.privs[priv]
+		if !ok {
+			v = "-"
+		}
+		parts = append(parts, priv+"="+v)
+	}
+	return observeSignature(parts...)
+}
+
+// observeTokenPrivileges files a change when the cluster token's privileges on
+// "/" are not what they were the pass before, and warns: a privilege granted or
+// taken away changes what Proxmox shows the observer — a filtered list gains or
+// loses objects — so the History says when that happened, under the cluster.
+// The first reading is a baseline. The mark is kept with the kinds'
+// (cluster_object_baselines), so a restart does not take a fresh one.
+func (p *observePass) observeTokenPrivileges(ctx context.Context) {
+	const kind = "token_privileges"
+	mark, known := p.baselines[kind]
+	if known && mark.signature == p.privFP {
+		return
+	}
+	var batch recordBatch
+	if known && mark.signature != "" {
+		p.o.logger.Warn("object observer: the cluster token's privileges on / changed; objects a filtered list shows may come and go",
+			"cluster_id", p.cluster.ID)
+		id := p.cluster.ID.String()
+		batch.record([]observedChangeRow{changeRow(observedObject{id: id, resourceType: "cluster", resourceID: id},
+			"changed", []string{kind}, nil, mark.lastRead, time.Now())})
+	}
+	readAt := time.Now()
+	if p.write(ctx, kind, batch, readAt, p.privFP) {
+		p.baselines[kind] = storedBaseline{signature: p.privFP, lastRead: readAt}
+	}
 }
 
 // load reads what the cluster's objects were last read as.
@@ -607,7 +671,7 @@ func (p *observePass) observeGuests(ctx context.Context, online []db.Node, sig s
 		default:
 			continue
 		}
-		p.applyGuest(batches[kind], kind, guestObject(r.guest, r.node, r.config), sig, r.readAt, r.doneAt)
+		p.applyGuest(batches[kind], kind, guestObject(r.guest, r.node, r.config), p.gated(kind, sig), r.readAt, r.doneAt)
 		pending[kind]++
 		if pending[kind] >= observeGuestBatch {
 			p.write(ctx, kind, *batches[kind], time.Now(), "")
