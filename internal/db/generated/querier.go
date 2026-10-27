@@ -2110,7 +2110,9 @@ type Querier interface {
 	// pool whose size was changed there. Keyed as audit_log is — cluster_id,
 	// resource_type, resource_id — so a History reads both with one selector.
 	// MarkClusterObjectBaseline says a cluster's objects of one kind have been read
-	// at least once; the replication trigger records an object appearing only after.
+	// at least once, and when the last pass finished reading them: the replication
+	// trigger records an object appearing only after the first, and dates it from
+	// the last. Called at the end of every pass that wrote them all.
 	MarkClusterObjectBaseline(ctx context.Context, arg MarkClusterObjectBaselineParams) error
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error

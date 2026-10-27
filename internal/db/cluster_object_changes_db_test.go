@@ -132,8 +132,23 @@ func TestClusterObjectChanges(t *testing.T) {
 	base.node, base.target = "pve-01", "pve-02"
 	upsert(objChangesCluster, base)
 
+	// A job that appears was absent when the last pass finished reading: that is
+	// when it was last seen as it was, and each pass moves it on.
+	exec("the last read", `UPDATE cluster_object_baselines SET last_read_at = now() - interval '2 minutes'
+		WHERE cluster_id = $1 AND resource_type = 'replication'`, objChangesCluster)
 	upsert(objChangesCluster, job{id: "102-0", target: "pve-02", schedule: "hourly"})
 	got := expectN("a job appears after the baseline", objChangesCluster, 1)
+	if age := time.Since(got[0].LastSeenAt); age < time.Minute+50*time.Second || age > 3*time.Minute {
+		t.Errorf("the added job's last_seen_at is %v ago, want the previous read, 2 minutes ago", age)
+	}
+	var movedOn bool
+	if err := q.MarkClusterObjectBaseline(ctx, gen.MarkClusterObjectBaselineParams{ClusterID: objChangesCluster, ResourceType: "replication"}); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT last_read_at > now() - interval '1 minute' FROM cluster_object_baselines
+		WHERE cluster_id = $1 AND resource_type = 'replication'`, objChangesCluster).Scan(&movedOn); err != nil || !movedOn {
+		t.Errorf("a pass that wrote the listing whole leaves last_read_at at %v (err %v), want now", movedOn, err)
+	}
 	if c := got[0]; c.ResourceType != "replication" || c.ResourceID != "102-0" || c.Change != "added" ||
 		detail(c)["target"] != "pve-02" || c.Explained.Valid || c.ObservedBy != "trigger" || len(c.Fields) != 0 {
 		t.Errorf("added row = %+v (%s), want replication/102-0 added, unclassified", c, c.Detail)

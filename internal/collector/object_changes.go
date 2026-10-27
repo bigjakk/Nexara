@@ -50,23 +50,17 @@ func (s *Syncer) classifyObjectChanges(ctx context.Context, cluster db.Cluster, 
 	}
 }
 
-// markObjectBaseline records that a cluster's objects of one kind have been read
-// once, after which the triggers record an object appearing. Marked once per
-// process; the insert ignores a mark already there.
+// markObjectBaseline records that a cluster's objects of one kind have been read,
+// at the end of a pass that wrote them all: from the first mark the triggers record
+// an object appearing, and the latest says when it was last absent.
 func (s *Syncer) markObjectBaseline(ctx context.Context, clusterID uuid.UUID, resourceType string) {
-	key := clusterID.String() + "/" + resourceType
-	if _, done := s.objectBaselines.Load(key); done {
-		return
-	}
 	if err := s.queries.MarkClusterObjectBaseline(ctx, db.MarkClusterObjectBaselineParams{
 		ClusterID:    clusterID,
 		ResourceType: resourceType,
 	}); err != nil {
 		s.logger.Warn("failed to mark a cluster's objects as read",
 			"cluster_id", clusterID, "resource_type", resourceType, "error", err)
-		return
 	}
-	s.objectBaselines.Store(key, true)
 }
 
 // cephSeen is what the last Ceph pass read of one cluster, kept in memory: the

@@ -69,6 +69,13 @@ CREATE TABLE IF NOT EXISTS cluster_object_changes (
 CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_object
     ON cluster_object_changes (cluster_id, resource_type, resource_id, observed_at);
 
+-- A kind's or an object's changes across clusters. The index above leads with
+-- cluster_id, which a generic plan cannot use under ($global OR cluster_id = $c)
+-- and a global kind has no predicate for at all; unexplained rows are kept, so
+-- without this both would scan the whole table.
+CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_kind
+    ON cluster_object_changes (resource_type, resource_id, observed_at);
+
 -- A guest's History, which survives its vms row being re-created.
 CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_guest
     ON cluster_object_changes (cluster_id, vmid, observed_at)
@@ -85,9 +92,12 @@ CREATE INDEX IF NOT EXISTS idx_cluster_object_changes_unclassified
 -- the first read of a cluster just added lists everything that was always
 -- there, and none of it is a change. (The Ceph pass keeps its baseline in
 -- memory instead, because the previous sample is what it diffs against.)
+-- last_read_at is when the last pass finished reading them: an object that
+-- appears now was absent then, so it is the change's last_seen_at.
 CREATE TABLE IF NOT EXISTS cluster_object_baselines (
     cluster_id    UUID NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
     resource_type TEXT NOT NULL,
     baselined_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_read_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (cluster_id, resource_type)
 );

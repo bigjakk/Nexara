@@ -313,7 +313,7 @@ const markClusterObjectBaseline = `-- name: MarkClusterObjectBaseline :exec
 
 INSERT INTO cluster_object_baselines (cluster_id, resource_type)
 VALUES ($1, $2)
-ON CONFLICT (cluster_id, resource_type) DO NOTHING
+ON CONFLICT (cluster_id, resource_type) DO UPDATE SET last_read_at = now()
 `
 
 type MarkClusterObjectBaselineParams struct {
@@ -326,7 +326,9 @@ type MarkClusterObjectBaselineParams struct {
 // pool whose size was changed there. Keyed as audit_log is — cluster_id,
 // resource_type, resource_id — so a History reads both with one selector.
 // MarkClusterObjectBaseline says a cluster's objects of one kind have been read
-// at least once; the replication trigger records an object appearing only after.
+// at least once, and when the last pass finished reading them: the replication
+// trigger records an object appearing only after the first, and dates it from
+// the last. Called at the end of every pass that wrote them all.
 func (q *Queries) MarkClusterObjectBaseline(ctx context.Context, arg MarkClusterObjectBaselineParams) error {
 	_, err := q.db.Exec(ctx, markClusterObjectBaseline, arg.ClusterID, arg.ResourceType)
 	return err

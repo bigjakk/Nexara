@@ -38,8 +38,9 @@ ALTER TABLE replication_jobs
 CREATE OR REPLACE FUNCTION record_replication_job_change()
 RETURNS TRIGGER AS $$
 DECLARE
-    detail  jsonb  := '{}'::jsonb;
-    changed text[] := '{}';
+    detail    jsonb  := '{}'::jsonb;
+    changed   text[] := '{}';
+    prev_read timestamptz;
 BEGIN
     IF TG_OP = 'UPDATE' THEN
         IF OLD.schedule IS NOT NULL AND OLD.schedule IS DISTINCT FROM NEW.schedule THEN
@@ -66,10 +67,13 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    IF NOT EXISTS (
-        SELECT 1 FROM cluster_object_baselines b
-        WHERE b.cluster_id = COALESCE(NEW.cluster_id, OLD.cluster_id) AND b.resource_type = 'replication'
-    ) THEN
+    -- No baseline, no change. The baseline's last_read_at is the end of the last
+    -- pass, which has not yet written this one's rows: when a job appeared, it was
+    -- absent then.
+    SELECT b.last_read_at INTO prev_read
+    FROM cluster_object_baselines b
+    WHERE b.cluster_id = COALESCE(NEW.cluster_id, OLD.cluster_id) AND b.resource_type = 'replication';
+    IF NOT FOUND THEN
         RETURN NULL;
     END IF;
 
@@ -78,7 +82,7 @@ BEGIN
         VALUES (NEW.cluster_id, 'replication', NEW.job_id, 'added',
                 jsonb_build_object('guest', NEW.guest, 'target', NEW.target, 'schedule', NEW.schedule,
                                    'rate', NEW.rate, 'disable', NEW.disable, 'comment', left(NEW.comment, 200)),
-                'trigger', now());
+                'trigger', prev_read);
     ELSE
         INSERT INTO cluster_object_changes (cluster_id, resource_type, resource_id, change, detail, observed_by, last_seen_at)
         VALUES (OLD.cluster_id, 'replication', OLD.job_id, 'removed',

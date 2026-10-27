@@ -232,10 +232,11 @@ func TestSyncCephRecordsWhatChanged(t *testing.T) {
 	expect("the OSD back up, against the last good reading", pass(), "ceph_osd/1 changed pve-01")
 }
 
-// syncReplication marks a cluster's replication as read once the listing was
-// written whole — after which the triggers record a job appearing — and not for
-// a pass that failed to write a job, which would then land as new.
-func TestSyncReplicationMarksTheBaselineOnceWritten(t *testing.T) {
+// syncReplication marks a cluster's replication as read at the end of every pass
+// that wrote the listing whole — after the first the triggers record a job
+// appearing, and the latest dates it — and not for a pass that failed to write a
+// job, which would then land as new.
+func TestSyncReplicationMarksTheBaselineAfterEveryWholePass(t *testing.T) {
 	t.Parallel()
 	clusterID := uuid.New()
 	client := &replFakeClient{jobs: []proxmox.ReplicationJob{
@@ -248,8 +249,8 @@ func TestSyncReplicationMarksTheBaselineOnceWritten(t *testing.T) {
 		s := &Syncer{queries: mq, logger: testLogger()}
 		s.syncReplication(context.Background(), client, clusterID)
 		s.syncReplication(context.Background(), client, clusterID)
-		if len(mq.baselineMarks) != 1 || mq.baselineMarks[0].ClusterID != clusterID || mq.baselineMarks[0].ResourceType != "replication" {
-			t.Errorf("baseline marks = %+v, want one for this cluster's replication", mq.baselineMarks)
+		if len(mq.baselineMarks) != 2 || mq.baselineMarks[1].ClusterID != clusterID || mq.baselineMarks[1].ResourceType != "replication" {
+			t.Errorf("baseline marks = %+v, want one per pass for this cluster's replication", mq.baselineMarks)
 		}
 		if got := mq.replicationUpserts[0]; got.Schedule != "*/15" || got.Rate != "10" || got.Disable != 1 || got.Comment != "nightly" {
 			t.Errorf("the job's configuration did not reach the upsert: %+v", got)

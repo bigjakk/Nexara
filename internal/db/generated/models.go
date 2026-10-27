@@ -196,6 +196,7 @@ type ClusterObjectBaseline struct {
 	ClusterID    uuid.UUID `json:"cluster_id"`
 	ResourceType string    `json:"resource_type"`
 	BaselinedAt  time.Time `json:"baselined_at"`
+	LastReadAt   time.Time `json:"last_read_at"`
 }
 
 type ClusterObjectChange struct {

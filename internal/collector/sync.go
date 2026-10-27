@@ -320,7 +320,6 @@ type Syncer struct {
 	resourceUnknownSince sync.Map                // cluster ID → map[int32]time.Time: since when each guest is listed "unknown"
 	backupLogJobBudget   time.Duration           // one backup job's log read; zero is backupLogJobBudget, which tests shorten
 	backupLogTimeouts    sync.Map                // backup job UPID → reads of its log that ran out their own time
-	objectBaselines      sync.Map                // "cluster ID/resource type" → true once cluster_object_baselines holds it
 	cephMu               sync.Mutex              // guards cephSeen
 	cephSeen             map[uuid.UUID]*cephSeen // each cluster's last Ceph reading, for the change diff
 }
