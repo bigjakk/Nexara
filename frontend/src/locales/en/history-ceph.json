@@ -1,0 +1,38 @@
+{
+  "categories": {
+    "osds": "OSDs",
+    "pools": "Pools",
+    "monitors": "Monitors / managers",
+    "filesystems": "Metadata servers / CephFS",
+    "other": "Other"
+  },
+  "types": {
+    "ceph_osd": "OSD",
+    "ceph_pool": "Pool",
+    "ceph_mon": "Monitor",
+    "ceph_mgr": "Manager",
+    "ceph_mds": "Metadata server",
+    "ceph_fs": "CephFS"
+  },
+  "actions": {
+    "osd_in": "OSD marked in",
+    "osd_out": "OSD marked out",
+    "osd_start": "OSD started",
+    "osd_stop": "OSD stopped",
+    "osd_restart": "OSD restarted",
+    "osd_create": "OSD created",
+    "osd_destroy": "OSD destroyed",
+    "create": "Pool created",
+    "update": "Pool changed",
+    "delete": "Pool deleted",
+    "mon_create": "Monitor created",
+    "mon_destroy": "Monitor destroyed",
+    "mgr_create": "Manager created",
+    "mgr_destroy": "Manager destroyed",
+    "mds_create": "Metadata server created",
+    "mds_destroy": "Metadata server destroyed",
+    "fs_create": "CephFS created",
+    "fs_destroy": "CephFS destroyed"
+  },
+  "empty": "Nothing has been recorded for this cluster's Ceph yet."
+}

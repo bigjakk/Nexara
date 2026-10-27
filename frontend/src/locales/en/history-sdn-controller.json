@@ -1,0 +1,13 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "other": "Other"
+  },
+  "actions": {
+    "sdn_controller_created": "Created",
+    "sdn_controller_updated": "Changed",
+    "sdn_controller_deleted": "Deleted"
+  },
+  "empty": "Nothing has been recorded for this controller yet."
+}

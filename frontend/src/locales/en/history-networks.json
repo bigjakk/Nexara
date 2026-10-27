@@ -1,0 +1,40 @@
+{
+  "categories": {
+    "interfaces": "Interfaces",
+    "applied": "Applied / reverted",
+    "zones": "Zones",
+    "vnets": "VNets",
+    "subnets": "Subnets",
+    "controllers": "Controllers",
+    "ipams": "IPAMs",
+    "dns": "DNS",
+    "other": "Other"
+  },
+  "actions": {
+    "interface_created": "Interface created",
+    "interface_updated": "Interface changed",
+    "interface_deleted": "Interface deleted",
+    "network_applied": "Network configuration applied",
+    "network_reverted": "Network configuration reverted",
+    "sdn_applied": "SDN applied",
+    "sdn_zone_created": "SDN zone created",
+    "sdn_zone_updated": "SDN zone changed",
+    "sdn_zone_deleted": "SDN zone deleted",
+    "sdn_vnet_created": "SDN VNet created",
+    "sdn_vnet_updated": "SDN VNet changed",
+    "sdn_vnet_deleted": "SDN VNet deleted",
+    "sdn_subnet_created": "SDN subnet created",
+    "sdn_subnet_updated": "SDN subnet changed",
+    "sdn_subnet_deleted": "SDN subnet deleted",
+    "sdn_controller_created": "SDN controller created",
+    "sdn_controller_updated": "SDN controller changed",
+    "sdn_controller_deleted": "SDN controller deleted",
+    "sdn_ipam_created": "SDN IPAM created",
+    "sdn_ipam_updated": "SDN IPAM changed",
+    "sdn_ipam_deleted": "SDN IPAM deleted",
+    "sdn_dns_created": "SDN DNS plugin created",
+    "sdn_dns_updated": "SDN DNS plugin changed",
+    "sdn_dns_deleted": "SDN DNS plugin deleted"
+  },
+  "empty": "Nothing has been recorded for this cluster's networks yet."
+}

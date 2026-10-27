@@ -1,0 +1,13 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "permissions": "Permissions",
+    "other": "Other"
+  },
+  "types": {
+    "pve_role": "Role",
+    "pve_acl": "Permission"
+  },
+  "empty": "Nothing has been recorded for this role yet."
+}

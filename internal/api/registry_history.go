@@ -42,12 +42,12 @@ type historyRoute struct {
 
 // historyRoutes is every History route. A new kind adds its one line here.
 func historyRoutes() []historyRoute {
-	return []historyRoute{
+	return append([]historyRoute{
 		guestHistoryRoute(),
 		folderHistoryRoute(),
 		clusterHistoryRoute(),
 		nodeHistoryRoute(),
-	}
+	}, clusterPageHistoryRoutes()...)
 }
 
 // registerHistoryEndpoints declares every kind's History route.
@@ -71,9 +71,23 @@ func historyEndpoint(h *handlers.HistoryHandler, r historyRoute) Endpoint {
 	if r.Kind.Global {
 		scope = ScopeGlobal
 	}
-	if inCluster == r.Kind.Global || !strings.HasPrefix(r.Path, pathPrefix) || !strings.HasSuffix(r.Path, "/history") {
-		panic(fmt.Sprintf("history route %s: a History route is %s/…/history, and a global kind's is "+
-			"%s…/history outside it", r.Path, clusterScope, pathPrefix))
+	// An object's History ends in /history, or is one of a namespace of them:
+	// the cluster's History narrowed to a tab or an object of it
+	// (/clusters/:cluster_id/history/…, registry_cluster_page_history.go), and a
+	// global kind's likewise (/api/v1/history/…).
+	home := clusterScope
+	if r.Kind.Global {
+		home = strings.TrimSuffix(pathPrefix, "/")
+	}
+	if inCluster == r.Kind.Global || !strings.HasPrefix(r.Path, pathPrefix) ||
+		!strings.HasSuffix(r.Path, "/history") && !strings.HasPrefix(r.Path, home+"/history/") {
+		panic(fmt.Sprintf("history route %s: a History route is %s/…/history or under %s/history/, and a global "+
+			"kind's is %s…/history or under %shistory/ outside it", r.Path, clusterScope, clusterScope, pathPrefix,
+			pathPrefix))
+	}
+	if _, declared := r.Parameters[handlers.HistoryClusterParam]; declared == r.Kind.Global {
+		panic(fmt.Sprintf("history route %s: a cluster's kind declares the path parameter %q and a global kind "+
+			"does not", r.Path, handlers.HistoryClusterParam))
 	}
 	if g := r.Kind.GuestFromPath; g != "" &&
 		(r.Parameters[g].Type != apischema.Integer || !strings.Contains(r.Path+"/", "/:"+g+"/")) {

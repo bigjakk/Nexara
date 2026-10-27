@@ -1,0 +1,8 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "other": "Other"
+  },
+  "empty": "Nothing has been recorded for this alias yet."
+}

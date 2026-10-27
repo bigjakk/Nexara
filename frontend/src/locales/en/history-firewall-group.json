@@ -1,0 +1,13 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "rules": "Rules",
+    "other": "Other"
+  },
+  "actions": {
+    "rule_created": "Rule created",
+    "rule_updated": "Rule changed",
+    "rule_deleted": "Rule deleted"
+  },
+  "empty": "Nothing has been recorded for this security group yet."
+}

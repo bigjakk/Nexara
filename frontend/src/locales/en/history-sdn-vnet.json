@@ -1,0 +1,21 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "subnets": "Subnets",
+    "other": "Other"
+  },
+  "types": {
+    "sdn_vnet": "VNet",
+    "sdn_subnet": "Subnet"
+  },
+  "actions": {
+    "sdn_vnet_created": "VNet created",
+    "sdn_vnet_updated": "VNet changed",
+    "sdn_vnet_deleted": "VNet deleted",
+    "sdn_subnet_created": "Subnet created",
+    "sdn_subnet_updated": "Subnet changed",
+    "sdn_subnet_deleted": "Subnet deleted"
+  },
+  "empty": "Nothing has been recorded for this VNet yet."
+}

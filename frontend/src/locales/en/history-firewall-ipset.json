@@ -1,0 +1,12 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "entries": "Entries",
+    "other": "Other"
+  },
+  "types": {
+    "firewall_ipset": "IP set",
+    "firewall_ipset_entry": "Entry"
+  },
+  "empty": "Nothing has been recorded for this IP set yet."
+}

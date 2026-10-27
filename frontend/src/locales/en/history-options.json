@@ -1,0 +1,17 @@
+{
+  "categories": {
+    "options": "Options",
+    "notes": "Notes",
+    "tags": "Tags",
+    "other": "Other"
+  },
+  "actions": {
+    "updated": "Options changed",
+    "description_updated": "Notes changed",
+    "tags_updated": "Tags changed"
+  },
+  "categoryNotes": {
+    "options": "Only the names of the options changed are recorded, never their values."
+  },
+  "empty": "No option, note or tag has been changed yet."
+}

@@ -1,0 +1,15 @@
+{
+  "categories": {
+    "accounts": "Accounts",
+    "plugins": "Plugins",
+    "nodes": "Node certificates",
+    "other": "Other"
+  },
+  "types": {
+    "acme_account": "ACME account",
+    "acme_plugin": "ACME plugin",
+    "acme_config": "ACME settings",
+    "certificate": "Certificate"
+  },
+  "empty": "Nothing has been recorded for this cluster's certificates yet."
+}

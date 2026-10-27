@@ -1,0 +1,19 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "applied": "Applied / reverted",
+    "other": "Other"
+  },
+  "actions": {
+    "interface_created": "Created",
+    "interface_updated": "Changed",
+    "interface_deleted": "Deleted",
+    "network_applied": "Node network configuration applied",
+    "network_reverted": "Node network configuration reverted"
+  },
+  "categoryNotes": {
+    "applied": "Applying or reverting a node's network configuration takes effect on every interface of the node."
+  },
+  "empty": "Nothing has been recorded for this interface yet."
+}

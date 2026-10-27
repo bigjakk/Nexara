@@ -1,0 +1,11 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "other": "Other"
+  },
+  "actions": {
+    "rule_created": "Created",
+    "rule_deleted": "Deleted"
+  },
+  "empty": "Nothing has been recorded for this DRS rule yet."
+}

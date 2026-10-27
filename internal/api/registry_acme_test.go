@@ -80,7 +80,7 @@ func declaredACMEEndpoints(t *testing.T) map[string]Endpoint {
 	t.Helper()
 	return declaredEndpointsWhere(t, func(e Endpoint) bool {
 		return strings.HasPrefix(e.Path, acmeScope+"/") ||
-			strings.Contains(e.Permissions.Describe(), acmeCertificateResource)
+			strings.Contains(e.Permissions.Describe(), acmeCertificateResource) && !isClusterPageHistoryRoute(e)
 	})
 }
 

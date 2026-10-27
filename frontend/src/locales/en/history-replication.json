@@ -1,0 +1,12 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "sync": "Run now",
+    "other": "Other"
+  },
+  "actions": {
+    "triggered": "Run now"
+  },
+  "empty": "No replication job has been created, changed, deleted or run yet."
+}

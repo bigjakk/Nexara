@@ -1,0 +1,12 @@
+{
+  "categories": {
+    "usb": "USB",
+    "pci": "PCI",
+    "other": "Other"
+  },
+  "types": {
+    "usb_mapping": "USB mapping",
+    "pci_mapping": "PCI mapping"
+  },
+  "empty": "No resource mapping has been created, changed or deleted yet."
+}

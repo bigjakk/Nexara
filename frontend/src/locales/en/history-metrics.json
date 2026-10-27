@@ -1,0 +1,8 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "other": "Other"
+  },
+  "empty": "No metric server has been created, changed or deleted yet."
+}

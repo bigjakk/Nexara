@@ -1,0 +1,18 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "tasks": "HA tasks",
+    "other": "Other"
+  },
+  "taskTypes": {
+    "hastart": "Start (HA)",
+    "hastop": "Stop (HA)",
+    "hamigrate": "Migrate (HA)",
+    "harelocate": "Relocate (HA)"
+  },
+  "categoryNotes": {
+    "tasks": "What the HA manager did to the guest: shown to those who may open the guest."
+  },
+  "empty": "Nothing has been recorded for this HA resource yet."
+}

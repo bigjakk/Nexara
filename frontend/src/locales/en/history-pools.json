@@ -1,0 +1,8 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "other": "Other"
+  },
+  "empty": "No resource pool has been created, changed or deleted yet."
+}

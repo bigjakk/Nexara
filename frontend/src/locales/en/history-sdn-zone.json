@@ -1,0 +1,13 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "other": "Other"
+  },
+  "actions": {
+    "sdn_zone_created": "Created",
+    "sdn_zone_updated": "Changed",
+    "sdn_zone_deleted": "Deleted"
+  },
+  "empty": "Nothing has been recorded for this zone yet."
+}

@@ -1,0 +1,32 @@
+{
+  "categories": {
+    "rules": "Rules",
+    "options": "Options",
+    "aliases": "Aliases",
+    "ipsets": "IP sets",
+    "groups": "Security groups",
+    "templates": "Templates",
+    "other": "Other"
+  },
+  "types": {
+    "firewall_alias": "Alias",
+    "firewall_ipset": "IP set",
+    "firewall_ipset_entry": "IP set entry",
+    "firewall_security_group": "Security group",
+    "firewall_security_group_rule": "Security group rule"
+  },
+  "actions": {
+    "firewall_rule_created": "Rule created",
+    "firewall_rule_updated": "Rule changed",
+    "firewall_rule_deleted": "Rule deleted",
+    "firewall_options_updated": "Options changed",
+    "rule_created": "Security group rule created",
+    "rule_updated": "Security group rule changed",
+    "rule_deleted": "Security group rule deleted",
+    "template_applied": "Template applied"
+  },
+  "categoryNotes": {
+    "templates": "A template's creation, change and removal belong to no cluster: they are in the template's own History."
+  },
+  "empty": "Nothing has been recorded for this cluster's firewall yet."
+}

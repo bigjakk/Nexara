@@ -1,0 +1,24 @@
+{
+  "categories": {
+    "config": "Configuration",
+    "evaluations": "Evaluations",
+    "rules": "DRS rules",
+    "ha_rules": "HA rules",
+    "other": "Other"
+  },
+  "types": {
+    "drs_rule": "DRS rule",
+    "ha_rule": "HA rule"
+  },
+  "actions": {
+    "config_update": "Configuration changed",
+    "evaluate_triggered": "Evaluation triggered",
+    "evaluate_blocked_native_crs": "Evaluation blocked by native CRS",
+    "rule_created": "DRS rule created",
+    "rule_deleted": "DRS rule deleted"
+  },
+  "categoryNotes": {
+    "evaluations": "The moves DRS made are on the Migrations tab."
+  },
+  "empty": "Nothing has been recorded for this cluster's DRS yet."
+}

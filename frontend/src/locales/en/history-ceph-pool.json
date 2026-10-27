@@ -1,0 +1,13 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "other": "Other"
+  },
+  "actions": {
+    "create": "Created",
+    "update": "Changed",
+    "delete": "Deleted"
+  },
+  "empty": "Nothing has been recorded for this pool yet."
+}

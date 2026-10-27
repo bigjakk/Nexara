@@ -1,0 +1,19 @@
+{
+  "categories": {
+    "resources": "Resources",
+    "groups": "Groups",
+    "rules": "Rules",
+    "arming": "Arm / disarm",
+    "other": "Other"
+  },
+  "types": {
+    "ha_resource": "HA resource",
+    "ha_group": "HA group",
+    "ha_rule": "HA rule"
+  },
+  "actions": {
+    "arm_ha": "HA armed",
+    "disarm_ha": "HA disarmed"
+  },
+  "empty": "Nothing has been recorded for this cluster's HA configuration yet."
+}

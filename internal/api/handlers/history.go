@@ -844,6 +844,13 @@ func (k HistoryKind) ListParams(clusterID uuid.UUID, sel HistorySelection) (db.L
 	return params, nil
 }
 
+// HistoryClusterParam is the path parameter that names the cluster of a
+// cluster-scoped History. List reads it by this name so that a global kind's
+// route, which declares no cluster, does not trip the guard that holds every
+// literal parameter key to the route's declaration (registry_paramkey_guard_test.go):
+// the registry checks the declaration itself, for the kind it belongs to.
+const HistoryClusterParam = "cluster_id"
+
 // HistoryRoute is the handler bound to one kind: its List serves that kind's
 // route. A bound method rather than a closure, so the guards that walk a
 // handler's declaration can find this one.
@@ -875,7 +882,7 @@ func (r *HistoryRoute) List(c fiber.Ctx, p *apischema.Params) error {
 	clusterID := uuid.Nil
 	can := func(action, resource string) (bool, error) { return hasGlobalPerm(c, action, resource) }
 	if !r.kind.Global {
-		id, err := parseParamUUID(p.String("cluster_id"))
+		id, err := parseParamUUID(p.String(HistoryClusterParam))
 		if err != nil {
 			return err
 		}

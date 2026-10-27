@@ -17,7 +17,7 @@ import (
 	"github.com/bigjakk/nexara/internal/api/handlers"
 )
 
-const historyRouteCount = 4
+const historyRouteCount = 45
 
 // historyRoutesOutsideTheClusterCheckShape are the History routes gated on
 // AllOf view:audit and the kind's own view permission (historyRoute.Resource).

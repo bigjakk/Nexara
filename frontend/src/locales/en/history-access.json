@@ -1,0 +1,18 @@
+{
+  "categories": {
+    "users": "Users",
+    "tokens": "API tokens",
+    "groups": "Groups",
+    "roles": "Roles",
+    "permissions": "Permissions",
+    "other": "Other"
+  },
+  "types": {
+    "pve_user": "User",
+    "pve_token": "API token",
+    "pve_group": "Group",
+    "pve_role": "Role",
+    "pve_acl": "Permission"
+  },
+  "empty": "Nothing has been recorded for this cluster's access control yet."
+}

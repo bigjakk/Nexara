@@ -1,0 +1,15 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "applied": "Applied",
+    "other": "Other"
+  },
+  "actions": {
+    "template_created": "Created",
+    "template_updated": "Changed",
+    "template_deleted": "Deleted",
+    "template_applied": "Applied to a cluster"
+  },
+  "empty": "Nothing has been recorded for this template yet."
+}

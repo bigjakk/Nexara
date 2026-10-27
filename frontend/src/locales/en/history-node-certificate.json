@@ -1,0 +1,14 @@
+{
+  "categories": {
+    "certificate": "Certificate",
+    "config": "ACME settings",
+    "other": "Other"
+  },
+  "actions": {
+    "ordered": "Certificate ordered",
+    "renewed": "Certificate renewed",
+    "revoked": "Certificate revoked",
+    "updated": "ACME settings changed"
+  },
+  "empty": "Nothing has been recorded for this node's certificate yet."
+}

@@ -1,0 +1,18 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "tokens": "API tokens",
+    "permissions": "Permissions",
+    "other": "Other"
+  },
+  "types": {
+    "pve_user": "User",
+    "pve_token": "API token",
+    "pve_acl": "Permission"
+  },
+  "categoryNotes": {
+    "permissions": "Permissions granted to or revoked from the user itself: those through a group or a token are theirs."
+  },
+  "empty": "Nothing has been recorded for this user yet."
+}

@@ -1,0 +1,15 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "members": "Members",
+    "other": "Other"
+  },
+  "actions": {
+    "set_pool": "Guest moved"
+  },
+  "categoryNotes": {
+    "members": "Guests moved into or out of the pool from their own pages: shown to those who may open the guest."
+  },
+  "empty": "Nothing has been recorded for this pool yet."
+}

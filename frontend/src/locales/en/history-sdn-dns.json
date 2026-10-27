@@ -1,0 +1,13 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "other": "Other"
+  },
+  "actions": {
+    "sdn_dns_created": "Created",
+    "sdn_dns_updated": "Changed",
+    "sdn_dns_deleted": "Deleted"
+  },
+  "empty": "Nothing has been recorded for this DNS plugin yet."
+}

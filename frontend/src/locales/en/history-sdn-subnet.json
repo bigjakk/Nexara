@@ -1,0 +1,13 @@
+{
+  "categories": {
+    "lifecycle": "Create / delete",
+    "config": "Configuration",
+    "other": "Other"
+  },
+  "actions": {
+    "sdn_subnet_created": "Created",
+    "sdn_subnet_updated": "Changed",
+    "sdn_subnet_deleted": "Deleted"
+  },
+  "empty": "Nothing has been recorded for this subnet yet."
+}

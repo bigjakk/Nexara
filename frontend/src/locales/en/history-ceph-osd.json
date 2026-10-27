@@ -1,0 +1,19 @@
+{
+  "categories": {
+    "lifecycle": "Create / destroy",
+    "state": "State",
+    "other": "Other"
+  },
+  "actions": {
+    "osd_in": "Marked in",
+    "osd_out": "Marked out",
+    "osd_start": "Started",
+    "osd_stop": "Stopped",
+    "osd_restart": "Restarted",
+    "osd_destroy": "Destroyed"
+  },
+  "categoryNotes": {
+    "lifecycle": "An OSD created on a node is recorded under the device it was made on, since it has no number until the task ends."
+  },
+  "empty": "Nothing has been recorded for this OSD yet."
+}
